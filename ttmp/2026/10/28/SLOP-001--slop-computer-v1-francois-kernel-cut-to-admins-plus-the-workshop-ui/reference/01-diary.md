@@ -600,3 +600,58 @@ All tests (store kernel, broker, API integration with SSE ordering, comments wai
 ### Technical details
 - Limits: 25 MB per file, 200 MB per version, 2000 files; paths ≤ 512 chars, no leading `/`, no `..`, no `\`, `_slop/` reserved.
 - SSE: `id: <seq>` per stored event, `event: <type>`, `data: <Event JSON>`; a `ready` event marks the end of the replay; `: ping` every 25 s.
+
+## Step 13: Phase 3 — routing, records, rendering, site and sandbox hosts
+
+This step makes pushed versions visible. Site hosts (`site.localhost:<port>` in local mode) answer every path through the route table. The sandbox domain serves one version per host label as a Workshop preview. Both inject the boot data and `runtime.js`, which defines `window.slop`; previews also get the preview bridge, which talks only to the Workshop's origin.
+
+I changed two things from the guide: preview access uses unguessable per-version host labels instead of signed cookies, and assets of routed pages are found via the resolved page, the Referer's page, or `/_v/…`.
+
+### Prompt Context
+**User prompt (verbatim):** see Step 9
+**Assistant interpretation:** Phase 3 of the guide.
+**Inferred user intent:** Pages pushed by agents can be seen, on the site and in previews.
+**Commit (code):** dcb7c1a — "SLOP-001 phase 3: routing, records, rendering, site and sandbox hosts"
+
+### What I did
+- `pkg/routing`: `Match`, `Specificity`, `Resolve` (port of `sources/workshop/api.js:105-144`), tested with every route of `seed.js:553-570`.
+- `pkg/records`: `FrontMatter`, `Markdown` (goldmark + GFM), `Parse`, `FromFiles`, `Tokens.CSS` (names/values with `< ; { }` skipped).
+- `pkg/render`: `Inject` (boot JSON with `<` escaped, runtime, bridge in preview/thumb, tokens style before `</head>`), `assets/runtime.js`, `assets/bridge.js` (port of `render.js:80-193`; posts only to `parentOrigin`, accepts messages only from it; adds the element box to picks).
+- Migration `003_sandbox.sql`: `server_keys`, `sandbox_labels`; store `ServerKey`, `SandboxLabel` (`"s"` + 20 hex of HMAC(key, artifact‖n)), `SandboxTarget`.
+- `pkg/server/serve.go`: record cache for immutable data versions, `bindings`, `renderPage`, `serveSite`, `serveSandbox`; `preview.go`: `GET /api/sandbox-url`, `/api/resolve`, `…/versions/{n}/records`; host dispatch in `Handler`; `serve --site-host`, `--sandbox-domain` with local defaults; `/api/config` reports them.
+- `pkg/server/serve_test.go`.
+
+### Why
+- **Labels instead of signed cookies (deviation from §6.7):** the Workshop frames previews from another site; cookies there are third-party and increasingly blocked by browsers. An unguessable host label is a capability URL that needs no cookie, and still gives each version its own origin.
+- **Asset lookup (answers open question 6 for v1):** a page routed at `/pricing` that links `style.css` makes the browser ask for `/style.css`, which no route serves. The server tries the file in the page the path resolves to (works for `/journal/style.css` under `/journal/:slug`), then in the page the `Referer` resolves to, and `/_v/<artifact>/<n>/<file>` always works. A `<base>` element was rejected because it breaks `#fragment` links.
+- Admins-only routes are invisible on site hosts (no viewer sessions there in v1), including through `/_v/`.
+
+### What worked
+- `go test -count=1 ./...` and with `TEST_DATABASE_URL` → all `ok`.
+- `TestServeSiteAndSandbox`: record/params/data/tokens in the boot data; `/journal/style.css` and `/style.css` with Referer served; `/_v/journal-post/1/style.css` 200, `/_v/secret/1/index.html` 404; admins-only and unrouted paths 404; unknown host 421; sandbox URL host ends in `.sandbox.test` and renders with the bridge, the parent origin and the route context; unknown label 404.
+
+### What didn't work
+- Compile error in my first `render.go`: `tail = strings.ReplaceAll(tail, "&#34;", …).ReplaceAll(…)` (no such method on string) — and HTML-escaping CSS inside `<style>` was wrong in the first place (style content is raw text). Removed; `Tokens.CSS` already rejects dangerous characters.
+- `TestServeSiteAndSandbox` first failed on my own assertion: I expected `<strong>table`, but Go's JSON encoder escapes `>` too (`<strong>table`). The output was right; fixed the test.
+
+### What I learned
+- `encoding/json` HTML-escapes `<`, `>` and `&` by default, so the boot JSON was already safe; the extra `<` replacement in `Inject` is belt and braces.
+
+### What was tricky to build
+- Route context for previews: a preview of `journal-post` at `/journal/other?host=site.test` resolves that host's route for the path to get params, record and route bindings, while the page itself is the sandbox's version, not the route's.
+- `frame-ancestors` lists every main-host origin (public URL, 127.0.0.1 spelling, dev origins), since the Workshop may run on any of them.
+
+### What warrants a second pair of eyes
+- Previews are capability URLs: anyone with a sandbox URL can see that version (they do not expire). Acceptable for two admins; revisit if drafts become sensitive.
+- The Referer fallback trusts the Referer only to pick which routed page's files to look in; it cannot reach unrouted artifacts.
+
+### What should be done in the future
+- Update the guide's §6.7 with the label scheme and the asset rule (done in a later doc pass).
+
+### Code review instructions
+- `pkg/server/serve.go` (`serveSite`, `serveSandbox`, `renderPage`), `pkg/render/render.go`, `pkg/render/assets/bridge.js`, `pkg/store/sandbox.go`.
+- `go test ./pkg/server -run TestServeSiteAndSandbox -v`.
+
+### Technical details
+- Sandbox URL: `<scheme>://s<20 hex>.<sandbox domain>/<path>?parent=<main origin>&mode=preview|thumb&host=<site host>`.
+- Site responses: `Content-Security-Policy: frame-ancestors 'self' <main origins>`, `Cache-Control: no-store`; blobs: `ETag "<sha256>"`, `immutable`.

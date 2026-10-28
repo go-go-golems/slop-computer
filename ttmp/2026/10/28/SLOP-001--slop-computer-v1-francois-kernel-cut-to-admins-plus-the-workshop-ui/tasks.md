@@ -12,7 +12,7 @@
 - [ ] Phase 0 — deploy/compose with postgres + zitadel (deferred until production config is tested)
 - [x] Phase 1 — store on database/sql (Postgres + SQLite), auth carve-out, guard, local mode, CLI auth, /device (2c6ff88)
 - [x] Phase 2 — kernel storage + API: projects, artifacts, versions, blobs, refs, routes, threads, events broker, SSE, comments wait
-- [ ] Phase 3 — routing, records, rendering, site + sandbox hosts
+- [x] Phase 3 — routing, records, rendering, site + sandbox hosts
 - [ ] Phase 4 — CLI push/pull/route/comments, dev seed
 - [ ] Phase 5 — Workshop in React + RTK Query, embedded; Vite dev proxy; safe mode /_/; push --watch
 - [ ] Phase 6 — Tools: manifests, grants, CORS, ToolScreen, release board example

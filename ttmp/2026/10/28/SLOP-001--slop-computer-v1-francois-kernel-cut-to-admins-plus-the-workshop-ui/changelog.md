@@ -39,3 +39,7 @@ Phase 0 (ca57479) and Phase 1 (2c6ff88): module skeleton; store on database/sql 
 ## 2026-10-28
 
 Phase 2 (82dd101): kernel store, blobs, events broker, SSE, comments wait
+
+## 2026-10-28
+
+Phase 3 (dcb7c1a): routing, records, rendering, site + sandbox hosts
