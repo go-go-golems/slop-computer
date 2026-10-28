@@ -26,12 +26,12 @@ const (
 )
 
 // Topic returns a topic's title and Markdown body (front matter removed).
-func Topic(slug string) (title, body string, ok bool) {
+func Topic(slug string) (string, string, bool) {
 	raw, err := fs.ReadFile(topics, "topics/"+slug+".md")
 	if err != nil {
 		return "", "", false
 	}
-	text := string(raw)
+	text, title := string(raw), ""
 	if strings.HasPrefix(text, "---\n") {
 		if end := strings.Index(text[4:], "\n---\n"); end >= 0 {
 			for _, line := range strings.Split(text[4:4+end], "\n") {
