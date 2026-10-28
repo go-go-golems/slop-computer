@@ -11,14 +11,20 @@ DocType: reference
 Intent: long-term
 Owners: []
 RelatedFiles:
+    - Path: repo://Dockerfile
+      Note: Step 19 image
     - Path: repo://cmd/slop/cmds/devseed.go
       Note: Step 14 seed
     - Path: repo://cmd/slop/cmds/push.go
       Note: Step 14 push/watch
     - Path: repo://cmd/slop/cmds/routes.go
       Note: Step 14 routes and comments wait
+    - Path: repo://doc/production.md
+      Note: Step 19 production doc
     - Path: repo://examples/tools/board/index.html
       Note: Step 18 release board
+    - Path: repo://pkg/blobs/blobs.go
+      Note: Step 19 blob GC
     - Path: repo://pkg/render/assets/tool.js
       Note: Step 17 tool client
     - Path: repo://pkg/server/safe.go
@@ -982,3 +988,59 @@ This step finishes Phase 6: the Workshop can list, try, enable, open and disable
 
 ### Technical details
 - Screenshots: `various/screenshots/p6-01…06-*.png`.
+
+## Step 19: Phase 7 — hardening, blob GC, Dockerfile, production doc
+
+This step makes slop deployable: a garbage collector for unreferenced blobs, the remaining security headers (HSTS, a CSP for the Workshop page), server limits, a Docker image with the Workshop embedded, and an operator's guide. The image was built from a clean checkout and run against Postgres, which caught one real bug the local builds had hidden.
+
+### Prompt Context
+**User prompt (verbatim):** see Step 9
+**Assistant interpretation:** Phase 7 of the guide (§ Phase 7: rate limits, size limits, headers per host class, HSTS, blob GC, readyz/healthz, Dockerfile, production doc with wildcard TLS).
+**Inferred user intent:** Be able to put slop.computer on a server.
+**Commit (code):** 45c3e18 — "SLOP-001 phase 7: hardening, blob GC, Dockerfile, production doc"
+
+### What I did
+- `pkg/blobs.Collect(referenced, before, dryRun)`: walks the blob tree, removes (or lists) blobs not in `referenced` and older than `before`; `store.BlobSums` (`SELECT DISTINCT sha256 FROM version_files`); `slop db gc-blobs` (`--blobs`, `--grace 24h`, `--dry-run`, the usual `--database-url[-file]`); `blobs_test.go`.
+- Headers: `Strict-Transport-Security: max-age=31536000` on every host when the public URL is https (no `includeSubDomains`: site hosts may be other people's domains); the Workshop's `index.html` gets `default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data:; connect-src 'self'; frame-src <scheme>://*.<sandbox>; frame-ancestors 'none'; base-uri 'none'; form-action 'self'; object-src 'none'` (test added).
+- `http.Server`: `IdleTimeout 2m`, `MaxHeaderBytes 64 KB` (no `WriteTimeout`: SSE and long-polls). Existing: `ReadHeaderTimeout`, per-handler body limits (JSON 4 KB–1 MB, files 25 MB), the device-authorize rate limiter from Phase 1, `/healthz`, `/readyz`.
+- `Dockerfile` (node 24 + pnpm 10.15.1 → `pnpm build`; golang 1.26.10, `GOWORK=off CGO_ENABLED=0 go build -tags embed`; debian bookworm-slim, uid 10001, `/var/lib/slop`, HEALTHCHECK on `/healthz`), `.dockerignore`.
+- `doc/production.md`: the three host classes, why the sandbox must be a separate registrable domain, wildcard DNS + DNS-01 certificate, Caddy config (`flush_interval -1` for streams), OIDC registration, bootstrapping the first admin, flags, Docker run, health, headers, backups/upgrades, GC, safe mode, agents.
+
+### Why
+- **Grace period in GC:** a push uploads blobs first and stores the version afterwards; without a grace a GC between the two would delete blobs the version is about to reference.
+- **`'unsafe-inline'` for styles only:** React writes inline `style` attributes (device sizing, widths); scripts stay `'self'`.
+- **No `WriteTimeout`:** `/api/events` and `comments wait` hold responses open for minutes.
+
+### What worked
+- `go test ./...` (SQLite) green; `make lint` 0 issues; `TestCollect`: dry run lists only the old orphan; the real run removes it and keeps the referenced and the young orphan.
+- `slop db gc-blobs` against the live local server: an orphan uploaded with `PUT /api/blobs/469ffa…` → with `--grace 0s --dry-run` "would remove"; with the default grace nothing; `--grace 0s` → "removed", file gone.
+- Watch under the new CSP: previews, thumbnails and SSE work; console: 0 errors, 0 warnings (`p7-01`).
+- `docker build -t slop:dev .` → 128 MB image. `docker run --network host slop:dev serve --local --listen 127.0.0.1:18090 --database-url postgres://…/slop_docker` → "Applied migration migration=004_tools.sql", `/healthz` ok, `/readyz` ready; `slop dev seed` from the host → "seeded 41 versions, 10 routes on site.localhost:18090, 6 threads"; the embedded Workshop from the image works on Postgres (`p7-02`).
+
+### What didn't work
+- First image build: `vite.config.ts(9,16): error TS2591: Cannot find name 'process'`. Locally `tsc` had found `@types/node` somewhere outside the project; a clean install doesn't have it. Pinned `@types/node@24.19.2` and added `"node"` to `types`.
+- My first orphan-blob attempt wrote the file to `/tmp/claude-1000/orph` (an `a || b` that never reached `b`) and `sha256sum` failed on the other path; reran with one path.
+- `--output-format` is not a flag of these commands; used the default table.
+- The container's HEALTHCHECK stayed "starting" in the test run because I moved the listen port off 8080 for local mode; in the default configuration it checks the right port.
+
+### What I learned
+- A clean-room build (the Dockerfile) is the only reliable check that the frontend's dependencies are declared; worth running in CI.
+
+### What was tricky to build
+- Local mode inside a container: it must listen on loopback, so the test used `--network host`; production uses OIDC and `0.0.0.0`.
+
+### What warrants a second pair of eyes
+- HSTS without `includeSubDomains` and the CSP's `frame-src` wildcard; both are in `pkg/server/server.go` / `workshop.go`.
+- GC runs against a live database: it only removes blobs older than the grace that no version references at the moment it reads `version_files`.
+
+### What should be done in the future
+- CI: build the Docker image (it would have caught the `@types/node` gap).
+- Phase 0 leftover: deploy/compose with Postgres + ZITADEL, now that the image exists.
+- Phase 8 (optional): MCP tools.
+
+### Code review instructions
+- `pkg/blobs/blobs.go` (`Collect`), `cmd/slop/cmds/db.go` (`gcBlobsCmd`), `pkg/server/workshop.go` (`workshopCSP`), `Dockerfile`, `doc/production.md`.
+- `docker build -t slop:dev . && docker run --rm --network host slop:dev serve --local --listen 127.0.0.1:18090`.
+
+### Technical details
+- Image layers: node:24-bookworm-slim (web), golang:1.26.10 (server), debian:bookworm-slim (runtime, ca-certificates + curl).

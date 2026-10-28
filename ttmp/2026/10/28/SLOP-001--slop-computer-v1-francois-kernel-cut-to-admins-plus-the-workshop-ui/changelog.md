@@ -70,3 +70,12 @@ Phase 6: tools (manifests, grants, permissions, CORS, tool.js, Tools menu, ToolS
 
 - /home/manuel/workspaces/2026-10-28/slop-computer/slop-computer/pkg/server/tools.go — tools API
 - /home/manuel/workspaces/2026-10-28/slop-computer/slop-computer/web/workshop/src/screens/ToolScreen.tsx — ToolScreen
+
+## 2026-10-28
+
+Phase 7: blob GC, HSTS + Workshop CSP, server limits, Dockerfile (tested on Postgres), doc/production.md (45c3e18)
+
+### Related Files
+
+- /home/manuel/workspaces/2026-10-28/slop-computer/slop-computer/Dockerfile — image
+- /home/manuel/workspaces/2026-10-28/slop-computer/slop-computer/doc/production.md — operator guide

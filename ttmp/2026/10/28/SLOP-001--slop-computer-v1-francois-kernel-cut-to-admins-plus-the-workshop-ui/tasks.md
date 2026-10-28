@@ -16,5 +16,5 @@
 - [x] Phase 4 — CLI push/pull/route/comments, dev seed
 - [x] Phase 5 — Workshop in React + RTK Query, embedded; Vite dev proxy; safe mode /_/; push --watch
 - [x] Phase 6 — Tools: manifests, grants, CORS, ToolScreen, release board example
-- [ ] Phase 7 — Hardening, Dockerfile, production doc
+- [x] Phase 7 — Hardening, Dockerfile, production doc
 - [ ] Phase 8 (optional) — MCP tools
