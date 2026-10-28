@@ -61,3 +61,12 @@ Phase 5: Workshop (React + RTK Query) embedded, safe mode /_/, via=agent; exit c
 
 - /home/manuel/workspaces/2026-10-28/slop-computer/slop-computer/pkg/server/safe.go — safe mode
 - /home/manuel/workspaces/2026-10-28/slop-computer/slop-computer/web/workshop/src/api/slopApi.ts — Workshop API
+
+## 2026-10-28
+
+Phase 6: tools (manifests, grants, permissions, CORS, tool.js, Tools menu, ToolScreen), release board example; exit check passed (f631ded, 2c87ccf)
+
+### Related Files
+
+- /home/manuel/workspaces/2026-10-28/slop-computer/slop-computer/pkg/server/tools.go — tools API
+- /home/manuel/workspaces/2026-10-28/slop-computer/slop-computer/web/workshop/src/screens/ToolScreen.tsx — ToolScreen

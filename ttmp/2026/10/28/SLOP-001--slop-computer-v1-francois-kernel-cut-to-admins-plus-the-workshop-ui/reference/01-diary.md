@@ -17,10 +17,18 @@ RelatedFiles:
       Note: Step 14 push/watch
     - Path: repo://cmd/slop/cmds/routes.go
       Note: Step 14 routes and comments wait
+    - Path: repo://examples/tools/board/index.html
+      Note: Step 18 release board
+    - Path: repo://pkg/render/assets/tool.js
+      Note: Step 17 tool client
     - Path: repo://pkg/server/safe.go
       Note: Step 16 safe mode
+    - Path: repo://pkg/server/tools.go
+      Note: Step 17 tools API
     - Path: repo://pkg/server/workshop.go
       Note: Step 15 workshop serving
+    - Path: repo://web/workshop/src/screens/ToolScreen.tsx
+      Note: Step 18 ToolScreen
     - Path: repo://web/workshop/src/screens/WatchScreen.tsx
       Note: Step 15 Watch screen
 ExternalSources: []
@@ -916,3 +924,61 @@ This step lets a pushed page become a **tool**: a screen that runs inside the Wo
 
 ### Technical details
 - Grant response: `{grant: "slg_…", expiresAt, permissions, n, try, user: {id, name}}`; messages: tool → Workshop `{slop:1, type:'tool-hello', version}`, Workshop → tool `{slop:1, type:'grant', grant, expiresAt, permissions, user}` (sent again on renewal).
+
+## Step 18: Phase 6, Workshop half and exit check — Ramon's release board as a tool
+
+This step finishes Phase 6: the Workshop can list, try, enable, open and disable tools, and the release board from §6.13 exists as `examples/tools/board`. The exit check ran in one browser with two identities: Ramon's agent identity pushed the board, Ramon tried and enabled it on `127.0.0.1`, Manuel opened it from his Tools menu on `localhost` and shipped /pricing with it; the route log records `via: tool board@1`; the board got 403 for anything outside its grant; disabling removed it.
+
+### Prompt Context
+**User prompt (verbatim):** see Step 17
+**Assistant interpretation:** Workshop side of §6.13 plus the Phase 6 exit check.
+**Inferred user intent:** Ramon can ship a screen without a deploy, and Manuel can use it safely.
+**Commit (code):** 2c87ccf — "SLOP-001 phase 6: tools in the Workshop, release board example"
+
+### What I did
+- `api/types.ts` (`Tool`, `ToolView`, `ToolList`, `ToolGrant`), `slopApi.ts` (`tools`, `enableTool`, `disableTool`, `grantTool`; `sandboxUrl` takes `mode: 'tool'`), `events.ts` (`tool.enabled|disabled` → `Tool`, console lines; `version.created` also refreshes `Tool`).
+- `router.ts`: `/tools/<id>[?try=n]` (`toolPath`); `App.tsx` routes it to `ToolScreen`.
+- `TopBar`: `ToolsButton` (count of new/updated tools) and `ToolsMenu` (enabled tools with icon, version, permissions; "New and updated" with what they add).
+- `screens/ToolScreen.tsx`: chrome (tags "enabled v1" / "not enabled" / "trying v1 · only you", Try vN, Back to vN, Enable/Update…, Disable, Watch the code), `ToolFrame` (sandbox URL `mode=tool`; on `tool-hello` from its own iframe and sandbox origin → `POST /api/tools/{id}/grant` → `postMessage` grant to that exact origin; renewal every 45 min), `EnableToolDialog`.
+- `runtime.js`: `slop.tool` stub that rejects with "This is a tool: open it from the Workshop’s Tools menu (/tools/<id>)." so tools don't crash in previews, thumbnails or on the site.
+- Watch toolbar: "Open as tool" when the version's manifest has a tool section.
+- `examples/tools/board/` (`slop.json` with `tool: {title, icon: ship, permissions: [routes:read, routes:write, versions:read, events:read]}`, `index.html`, `boutique.css`): routes per host with served vs newest version, "only routes with something to ship", Ship (PUT /routes with a note), live reload on `route.set`/`version.created` via `api.on`.
+
+### Why
+- **Grant only after `tool-hello` from the frame's own window and origin:** the Workshop never volunteers a grant to whatever is in an iframe; a tool that navigated elsewhere would not get one.
+- **Disable unmounts the frame:** the enabled version is gone, so the screen shows the not-enabled state; the server has already revoked every grant (Step 17), so a copy of the tool open elsewhere fails on its next call.
+
+### What worked
+- `SLOP_VIA=agent slop push … -a board` as claude-ramon → `pushed board v1 (new artifact) · 2 files · 34 KB`.
+- Ramon (127.0.0.1): Tools menu "new · board v1 · not enabled · try it" (`p6-01`); `/tools/board?try=1` renders the board "as ramon · routes:read routes:write versions:read events:read", only /pricing shippable (v5 pinned, v15 newest) (`p6-02`); Enable dialog lists the four permissions in words (`p6-03`); enabled.
+- Manuel (localhost): Tools menu lists "Release board v1" (`p6-04`); Ship v15 → "/pricing now serves pricing v15." (`p6-05`); route log: `tool board@1  shipped v15 from the release board  to v15`.
+- Inside the board's frame (Playwright `frame.evaluate`): `routes: ok 12 rows`, `tokens: 403 grant_not_allowed`, `users: 403 grant_not_allowed`, `threads: 403 grant_permission`, `push: 403 grant_permission`; `fetch('http://localhost:18080/api/me', {credentials: 'include'})` → `blocked: Failed to fetch` (no Allow-Credentials).
+- Disable → frame removed, "not enabled" chrome with Try v1 / Enable v1… (`p6-06`). Grant revocation itself is covered by `TestToolsGrantsAndCORS` (401 after disable).
+
+### What didn't work
+- The board's preview and thumbnail on Watch threw `TypeError: Cannot read properties of undefined (reading 'ready')` (no `slop.tool` outside tool mode; `p6-01` still shows it) → the runtime stub.
+- My in-frame "next call after disable" probe could not run: `frame.evaluate: Target page, context or browser has been closed` — the Workshop had already unmounted the frame. The 401 is shown by the Go test instead.
+- `/api/audit` with my CLI token → an error object (the token has no `admin` scope); used the route log, which carries the same `via`.
+- First ToolScreen screenshot was blank: taken before the iframe painted; the snapshot showed the board was already loaded.
+- After a disable the chrome said "Nobody enabled this tool yet" — reworded to "This tool is not enabled."
+
+### What I learned
+- Running the tool's own client from the test (`frame.evaluate(() => slop.tool.ready())`) is the most direct way to check grant enforcement end to end: it exercises postMessage, CORS, the bearer and the guard together.
+
+### What was tricky to build
+- Keeping the grant handshake inside one effect keyed by the sandbox URL: the message listener, the first grant and the renewal timer must all be torn down when the version (and therefore the origin) changes.
+
+### What warrants a second pair of eyes
+- `ToolFrame` posts the grant with `targetOrigin = sb.origin` (the exact sandbox origin); `tool.js` accepts it only from `PARENT` and `window.parent`.
+- Seeded agent comments now read "manuel’s agent" (fallback name) instead of "Claude Code (manuel’s)": the comment has no `via`; only a live waiter's name can say which agent it was.
+
+### What should be done in the future
+- Let pi build a second tool from AGENTS.md + tool.js docs (a real "Ramon's agent makes the board" run).
+- Phase 7: hardening, Dockerfile, production doc, blob GC.
+
+### Code review instructions
+- `web/workshop/src/screens/ToolScreen.tsx`, `components/organisms/TopBar.tsx` (ToolsMenu), `examples/tools/board/index.html`, `pkg/render/assets/runtime.js`.
+- Try it: `slop push examples/tools/board -a board`, then Tools → board v1 → Enable.
+
+### Technical details
+- Screenshots: `various/screenshots/p6-01…06-*.png`.
