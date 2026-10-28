@@ -539,3 +539,64 @@ An end-to-end run in tmux and Go tests (guard matrix, local tokens, device appro
 ### Technical details
 - Cookies: `__Host-slop_session` on HTTPS, `slop_session_dev` otherwise; flow cookie likewise.
 - Local tokens default to `read,write` for 30 days; admin-scoped tokens must expire within 1–90 days.
+
+## Step 12: Phase 2 — artifact kernel, blobs, events, SSE and comments wait
+
+This step built the core of slop: artifacts with versions stored as file trees, the `main` ref with compare-and-set, routes with history and undo, comment threads, and an event log written in the same transaction as every change. On the server side there is a content-addressed blob store, the kernel API, a server-sent event stream with replay, and `GET /api/comments/wait`, the long-poll Claude Code blocks on.
+
+All tests (store kernel, broker, API integration with SSE ordering, comments wait) pass on SQLite and Postgres at the first full run, after one compile error.
+
+### Prompt Context
+**User prompt (verbatim):** see Step 9 (and the follow-up quoted there)
+**Assistant interpretation:** Phase 2 of the guide.
+**Inferred user intent:** A working backend for the Workshop and the agent loop.
+**Commit (code):** 82dd101 — "SLOP-001 phase 2: artifact kernel, blobs, events, SSE and comments wait"
+
+### What I did
+- `pkg/blobs` (adapted from francois `releases.Blobs`: key = sha256; `PutReader` verifies an expected hash; `Stat`, `Missing`, `Open`, `Read`).
+- Migrations `002_kernel.sql` (both dialects): `projects`, `artifacts`, `versions`, `version_files`, `refs`, `routes`, `route_log`, `threads`, `comments`, `events`.
+- `pkg/store`: `events.go` (`appendEvent` inside transactions, `EventsAfter`, `LastSeq`, ephemeral seq-0 events), `projects.go`, `artifacts.go` (`Push` with row lock / CAS → `MainMovedError`, `SetRef`, `Versions` with trees), `routes.go` (`SetRoute`, `RemoveRoute`, `RouteLog`, `UndoRoute`, path validation), `threads.go` (`CreateThread`, `Reply`, `ResolveThread`, `Threads`), `InvalidError` for validation failures.
+- `pkg/events/broker.go`: in-process fan-out; a subscriber that falls 256 events behind is dropped (its channel closed) and replays from the store.
+- `pkg/server/kernel.go` (all §6.4 kernel endpoints except records/resolve/sandbox-url), `stream.go` (`/api/events`, `/api/comments/wait`, `/api/agents`, waiter registry), events for user-role and token changes; `serve --blobs` (default `./var/blobs`).
+- Tests: `pkg/store/kernel_test.go`, `pkg/events/broker_test.go`, `pkg/server/kernel_test.go` (`TestKernelAPI`, `TestCommentsWait`).
+
+### Why
+- Events in the same transaction as the change (D: §6.6) so replay after reconnect is exact; publishing only after commit so subscribers never see rolled-back changes.
+- Subscribe-then-replay ordering in both SSE and wait so an event committed between the two is not lost; duplicates are skipped by seq.
+- `comments wait` ignores comments written with the caller's own token, not the caller's user: in production Claude Code uses Manuel's token and must still see Manuel's browser comments. A browser caller ignores its own user.
+- A comment or thread made with a token is marked `agent: true`.
+- The server, not the client, decides `via`: `browser` for sessions, `cli` or `claude` (if the CLI says so) for tokens.
+- Typed `InvalidError` instead of matching error strings (I first wrote a string-sniffing `badRequest` helper and replaced it before committing).
+
+### What worked
+- `go test -count=1 ./...` and with `TEST_DATABASE_URL=postgres://…:55432/…` → all `ok` (server package ~2.1–2.6 s because of the 1 s wait timeouts).
+- `TestKernelAPI` observes `project.updated, artifact.created, version.created ×2, route.set, thread.created, comment.created` in order over SSE; path traversal `../x` → 400; push without base after v1 → 409 `main_moved`; push with an unuploaded blob → 409 `missing_blobs` with the list; served file has `ETag: "<sha256>"`.
+- `TestCommentsWait`: 204 on timeout; the waiter appears in `/api/agents`; a browser comment wakes the agent with the full thread; the agent's own reply does not; the owner's later reply is found by replay with `after=<seq>`.
+
+### What didn't work
+- Compile error: `pkg/store/artifacts.go:392:22: invalid operation: cannot call reply (variable of type string): string is not a function` — a local variable `reply` in `Push` shadowed the `reply` function; renamed to `replyThread`.
+- First draft of the HTTP error mapping guessed validation errors from message text (`strings.Contains(msg, "constraint")`); replaced by `store.InvalidError` + `invalidf` in `artifacts.go`, `routes.go`, `threads.go`.
+
+### What I learned
+- SQLite's `RETURNING` and `ON CONFLICT … DO UPDATE … excluded.x` behave like Postgres for everything used here.
+
+### What was tricky to build
+- Payload shape for comment events: `thread.created` carries the whole thread under `thread`, `comment.created` carries the thread ID under `thread` plus `comment`. `commentMatches` handles both; the wait answer always re-reads the full thread. Consistent shapes would be nicer (see future).
+- The broker drops slow subscribers instead of blocking `Publish` (which runs on request goroutines). SSE clients reconnect with `Last-Event-ID`; a dropped wait answers 204 and the CLI retries from its cursor.
+
+### What warrants a second pair of eyes
+- `Push` reads blob sizes from disk outside the transaction; a blob GC running concurrently could remove a blob between the check and the commit (no GC exists yet).
+- `SetRoute` on Postgres locks the route row with `FOR UPDATE` inside `getRoute`, and `getRoute` is reused after the upsert; harmless but worth knowing.
+- Events table grows without bound; fine for two people.
+
+### What should be done in the future
+- Make `comment.created` payload carry `artifact`, `thread` (ID) and `comment` consistently with a `threadId` field on `thread.created`.
+- Blob GC (phase 7).
+
+### Code review instructions
+- `pkg/store/artifacts.go` `Push`, `pkg/store/routes.go` `setRoute`/`UndoRoute`, `pkg/server/stream.go` `eventStream`/`waitComments`, `pkg/server/kernel.go` `push`.
+- `go test ./pkg/server -run 'TestKernelAPI|TestCommentsWait' -v`.
+
+### Technical details
+- Limits: 25 MB per file, 200 MB per version, 2000 files; paths ≤ 512 chars, no leading `/`, no `..`, no `\`, `_slop/` reserved.
+- SSE: `id: <seq>` per stored event, `event: <type>`, `data: <Event JSON>`; a `ready` event marks the end of the replay; `: ping` every 25 s.

@@ -35,3 +35,7 @@ Added tools (§6.13, D9): pushed screens with admin-approved, permission-limited
 ## 2026-10-28
 
 Phase 0 (ca57479) and Phase 1 (2c6ff88): module skeleton; store on database/sql for Postgres+SQLite; auth carve-out; local mode; auth CLI
+
+## 2026-10-28
+
+Phase 2 (82dd101): kernel store, blobs, events broker, SSE, comments wait
