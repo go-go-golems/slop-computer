@@ -481,3 +481,109 @@ This step tests the deployment and the importer against things that look like pr
 
 ### Technical details
 - Container run: `docker run -d --network host -v …/img-secrets:/run/secrets/slop:ro slop:slop002 serve --listen=0.0.0.0:8080 …` (the Deployment's args).
+
+## Step 8: The remote deployment, live
+
+The user chose "do it all", and slop now runs on the cluster at https://slop.yolo.scapegoat.dev with TLS, signing in through ZITADEL. On the way, two problems in my own manifests and one in the Terraform provider domain blocked it, and they were fixed in order. Using the deployment immediately turned up a real sign-out bug. Pushing the real data hit the 200 MB version limit, which led to media shards.
+
+### Prompt Context
+**User prompts (verbatim):**
+- "what about the remote deploy?"
+- Then, to a choice of how far to go: "do it all actually".
+- Mid-turn: "we need TLScertificate, maybe it's some special waves login ? See ~/code/wesen/go-go-golems/go-go-parc/Research/playbooks/infra I think."
+- "I can't properly sign out and https://slop.yolo.scapegoat.dev/ just gets me back to \"an admin has to let you tin\"".
+- "k, merged 1 2" and "merged #398".
+
+**Assistant interpretation:** Carry out the operator steps too: merge, apply, seed, sync, first admins, push the data. Then fix what breaks.
+**Inferred user intent:** A working test deployment with real data today.
+**Commit (code):**
+- slop: `9776e4e` (workflow permissions); `cb68898` (merge of PR #1); PR #2: `18f8617` (sign-out, `--email`), `1d06618` (media shards).
+- hetzner-k3s: PR #397 → `47830b9` (package and image `sha-cb68898`); PR #398 (VaultAuth audiences).
+- terraform: PR #38 (`envs/slop`, applied).
+
+### What I did
+1. **Image.** `gh run list` showed every publish-image run with `startup_failure`.
+   - The reusable `infra-tooling/.github/workflows/publish-ghcr-image.yml` declares `permissions: contents read, packages write, pull-requests write, id-token write`, and my caller lacked `pull-requests: write`. Fixed in `9776e4e`; the PR run passed (`release / publish success`).
+   - Merged PR #1 (`cb68898`). The main build published `ghcr.io/go-go-golems/slop-computer:sha-cb68898` (tags `latest`, `main`, `sha-cb68898`; package public).
+2. **Terraform.** No default AWS credentials; `AWS_PROFILE=manuel` (per the terraform README) → `arn:aws:iam::745667007186:user/manuel`.
+   - First `terraform apply` failed creating `zitadel_project_v2.slop`. `curl` showed `zitadel.yolo.scapegoat.dev` answers `/management/v1/projects/_search` with `404 page not found`, while `auth.slop.boutique` answers 200.
+   - A search of the organization's projects found only `francois` and `francois-sandbox`, so nothing half-created. Provider domain → `auth.slop.boutique`, then plan: "2 to add, 0 to change, 0 to destroy", then `Apply complete! Resources: 2 added`. Client ID `397165131227726018`.
+   - PR wesen/terraform#38. My `gh pr merge` was denied by the permission classifier ("Merge Without Review"); the user merged.
+3. **Vault.**
+   - `vault policy write` and `vault write auth/kubernetes/role/<name> @file` for `slop-test` and `slop-test-db-bootstrap` only, the same commands as `bootstrap-vault-kubernetes-auth.sh` uses, without reapplying every app.
+   - `bootstrap-slop-secrets.sh` first stopped: `missing required environment variable: VAULT_TOKEN` (the CLI keeps it in `~/.vault-token`). Rerun with it inline → `Seeded kv/apps/slop/test/runtime (database slop, role slop_app)`, version 1.
+4. **gitops.**
+   - Rebased `slop/test-deployment` on `origin/main`, set the image to `sha-cb68898`, validator PASS, PR #397.
+   - Argo has no app-of-apps, and `demo-apps` was applied by hand (it has `last-applied-configuration`). So I ran `kubectl apply -f gitops/projects/demo-apps.yaml -f gitops/applications/slop.yaml` before the merge: Application status "app path does not exist" until the merge.
+5. **After the merge (47830b9).**
+   - Sync stuck: `waiting for completion of hook batch/Job/slop-db-bootstrap`; the pod showed `CreateContainerConfigError … secret "slop-postgres-admin" not found`.
+   - VaultStaticSecret events: `Failed to get Vault auth login … PUT …/v1/auth/kubernetes/login Code: 403`.
+   - Cause: my roles copy francois-sandbox's (`"audience": "vault"`) but my VaultAuths copy francois prod's (no `audiences`). Fix: `audiences: [vault]` in both, PR #398.
+   - The user asked about TLS and sync waves. The Certificate (wave 2) waited behind the bootstrap hook (wave 1), which waited on the secrets.
+   - After the merge I server-side-applied the two VaultAuths from `origin/main` (`--field-manager=argocd-controller`), the same content Argo would apply.
+   - Within 25 s: both VaultStaticSecrets synced, `job.batch/slop-db-bootstrap Complete 1/1`, the pod Running, `slop-tls` Ready, PVC Bound, Application `Synced Healthy`.
+   - `https://slop.yolo.scapegoat.dev/healthz` → 200, `ssl_verify_result=0`. `/auth/login` → 303 to `https://auth.slop.boutique/oauth/v2/authorize?client_id=397165131227726018…`: the Traefik hairpin egress rule works.
+6. **Admins.** `kubectl -n postgres port-forward svc/postgres 15432:5432`; the database URL from Vault rewritten to 127.0.0.1:15432, written to a mode-600 file in the scratchpad.
+   - `slop db import-francois-admins --dry-run` listed Ramon, Manuel and "E2E Admin" (`e2e-admin@francois.test`, a test account).
+   - Added `--email` and ran it with Manuel and Ramon only: Ramon `created`, Manuel `promoted` (he had signed in once and was pending).
+7. **Sign-out bug** (user report).
+   - `logout` in `pkg/server/auth.go` revoked the slop session, but a form post (pending screen, safe mode) redirected to `/` rather than to the provider logout. ZITADEL's live session then signed the person straight back in.
+   - Fix: form posts redirect to the `end_session` URL. `TestFormLogoutEndsProviderSession` uses a fake issuer serving a discovery document. It passes with the fix, and with the fix stashed it fails as in production: `form logout: 303 /`.
+   - PR #2.
+8. **Real data to the cluster.**
+   - Device login (`slop auth login --server https://slop.yolo.scapegoat.dev --scopes read,write,admin --days 7 --no-browser`), approved by the user → token `tok_81f…` (admin, read write admin).
+   - `slop import francois push --dir fr-api` started uploading. Then the numbers: referenced media are 322.1 MB in one data version, against `maxVersionSize` 200 MB, so the push would have ended in 413 after all uploads.
+   - Added media shards (`MediaShardBytes`, default 150 MiB): `francois-media`, `francois-media-2`, `francois-media-3` (151, 148, 8 MiB). Each file's `src` points at its shard. Test: two fixture images, 11-byte shards → two artifacts.
+   - Re-extract from the cache: 24.5 s, against about 50 min the first time. Stopped the old push (anchored `pkill -f "^./slop import francois push"`), with 115 MB already uploaded and kept, and started the sharded push.
+9. **Local push** of the same directory: `pushed 118 versions; 0 unchanged, 0 already imported` in 3 s. The storefront agent (pi, deepseek-4.1-flash, thinking medium) started in tmux window `slop:storefront` with the brief in `various/agent-import/`.
+
+### Why
+- Applying the VaultAuths by hand instead of waiting: Argo's running operation was blocked on a hook that could not finish with the old manifests. The applied objects were byte-for-byte `origin/main`'s, so self-heal had nothing to undo.
+- Admins by email: francois has an E2E test admin, and making it a slop admin would hand the Workshop to whoever holds that test account.
+
+### What worked
+- The real census (`fr-api2/census.md`):
+  - 104 catalog artifacts (103 with releases); 113 releases (110 published, 3 withdrawn); 96 free samples; 95 releases with their HTML (74.9 MB), 18 placeholders.
+  - Buckets: `static` 83, `static+downloads` 12, `needs-runtime:db,user` 7, `needs-runtime:db,room,user` 5, `needs-runtime:db` 4, `needs-runtime:room` 2.
+  - Gaps: G10 external scripts 32 releases; G5 runtime 18 (db 16, user 12, room 7); G9 placeholder HTML 18; G3 access tiers 15; G4 withdrawn 3.
+  - Storefront: listed 100, hidden 4, featured 5, demo 21, early access still running 81. Media 689 of 745 copied (322 MB); attachments 18 (63.8 MB); 89 instances not imported.
+
+### What didn't work
+- Exact diagnostics, in order:
+  1. `startup_failure` (workflow permissions).
+  2. Terraform `zitadel_project_v2.slop` create error on the dead domain (`404 page not found`).
+  3. `missing required environment variable: VAULT_TOKEN`.
+  4. VSO `Code: 403` at `auth/kubernetes/login` (audience), hence `secret "slop-postgres-admin" not found`.
+  5. Sign-out returning to the pending screen (`303 /`).
+  6. 322 MB media version against the 200 MB limit (caught before the 413).
+- Smaller slips:
+  - `slop db import-francois-admins --fields …`: `unknown flag: --fields`.
+  - `--output json` printed a table; I read the table.
+  - A `sleep 45; …` chain was blocked by the harness; I used an until-loop on the certificate's Ready condition instead.
+
+### What I learned
+- The terraform repo's `envs/prod` still defaults `zitadel_domain` to `zitadel.yolo.scapegoat.dev`, which now 404s for management calls. Its next plan will likely fail the same way.
+- In the census, the 18 paid releases are exactly the 18 that need the runtime. Paid content and runtime-dependent content are the same set today.
+- 81 of 104 artifacts are in early access, so access tiers (G3) matter more than the release count suggests.
+
+### What was tricky to build
+- Reading "no TLS" correctly. The certificate was not failing: it had never been created, because Argo waves stop at the first unhealthy hook. The real fault was three steps upstream, at Vault login.
+
+### What warrants a second pair of eyes
+- Media shards: when a re-import adds or reorders media, a file can move to another shard. `/_d/<shard>/main/` links in Markdown written earlier would then 404. Records are rewritten on each import, so only copies outside the import are affected.
+- The admin import ran through a port-forward with the app role's credentials, from a laptop.
+
+### What should be done in the future
+- Merge PR #2, then bump the gitops image tag (a third gitops PR) so sign-out is fixed on the cluster.
+- The census has an empty "posts:" line when there are no posts; to fix.
+
+### Code review instructions
+- `pkg/server/auth.go` `logout`, plus `pkg/server/logout_test.go`.
+- `pkg/francois/extract.go` `shardMedia`, `mediaSrc`, `writeMedia(shard, dir)`.
+- hetzner-k3s `gitops/kustomize/slop/{vault-auth,db-bootstrap-vault-auth}.yaml`.
+
+### Technical details
+```
+kubectl -n slop get certificate,ingress,pvc   → slop-tls True; ingress 91.98.46.169 80,443; slop-data Bound 5Gi
+kubectl -n argocd get application slop        → Synced Healthy
+```
