@@ -96,6 +96,11 @@ func Register(root *cobra.Command) error {
 	}
 	dbGroup := &cobra.Command{Use: "db", Short: "Direct database operations for operators"}
 	dbGroup.AddCommand(usersGroup)
+	gc, err := cli.BuildCobraCommandFromCommand(newGCBlobs())
+	if err != nil {
+		return err
+	}
+	dbGroup.AddCommand(gc)
 	root.AddCommand(auth, dbGroup)
 	for _, c := range []glazed.Command{newPush(), newPull()} {
 		cmd, err := cli.BuildCobraCommandFromCommand(c)

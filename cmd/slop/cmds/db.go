@@ -2,12 +2,14 @@ package cmds
 
 import (
 	"context"
+	"time"
 
 	glazed "github.com/go-go-golems/glazed/pkg/cmds"
 	"github.com/go-go-golems/glazed/pkg/cmds/fields"
 	"github.com/go-go-golems/glazed/pkg/cmds/values"
 	"github.com/go-go-golems/glazed/pkg/middlewares"
 	"github.com/go-go-golems/glazed/pkg/types"
+	"github.com/go-go-golems/slop-computer/pkg/blobs"
 	"github.com/go-go-golems/slop-computer/pkg/store"
 	"github.com/pkg/errors"
 )
@@ -128,4 +130,63 @@ func dbCommands() ([]glazed.Command, []glazed.Command) {
 		&usersCmd{glazed.NewCommandDescription("pending", glazed.WithShort("Set a user back to pending"), dbFlags(who...)), "pending"},
 	}
 	return top, users
+}
+
+// gcBlobsCmd removes blobs no version references. It reads the database and
+// the blob directory the server uses; run it with the same flags.
+type gcBlobsCmd struct{ *glazed.CommandDescription }
+
+var _ glazed.GlazeCommand = (*gcBlobsCmd)(nil)
+
+func newGCBlobs() *gcBlobsCmd {
+	return &gcBlobsCmd{glazed.NewCommandDescription("gc-blobs",
+		glazed.WithShort("Remove blobs that no version references"),
+		glazed.WithLong("Lists (with --dry-run) or removes blob files that no version references and that are older than --grace. "+
+			"Young unreferenced blobs are kept, because a push uploads its blobs before it stores the version."),
+		dbFlags(
+			flagDefault("blobs", "./var/blobs", "Blob directory (the server's --blobs)"),
+			flagDefault("grace", "24h", "Keep unreferenced blobs younger than this"),
+			boolean("dry-run", "Only list what would be removed"),
+		))}
+}
+
+func (c *gcBlobsCmd) RunIntoGlazeProcessor(ctx context.Context, v *values.Values, out middlewares.Processor) error {
+	a := in{v}
+	grace, err := time.ParseDuration(a.S("grace"))
+	if err != nil || grace < 0 {
+		return errors.Errorf("--grace %q is not a duration such as 24h", a.S("grace"))
+	}
+	u, err := dbURL(a)
+	if err != nil {
+		return err
+	}
+	st, err := openStore(ctx, u, false)
+	if err != nil {
+		return err
+	}
+	defer func() { _ = st.Close() }()
+	bl, err := blobs.Open(a.S("blobs"))
+	if err != nil {
+		return err
+	}
+	refs, err := st.BlobSums(ctx)
+	if err != nil {
+		return err
+	}
+	dry := a.B("dry-run")
+	gone, err := bl.Collect(refs, time.Now().Add(-grace), dry)
+	if err != nil {
+		return err
+	}
+	action := "removed"
+	if dry {
+		action = "would remove"
+	}
+	for _, g := range gone {
+		if err = out.AddRow(ctx, types.NewRow(types.MRP("sha256", g.SHA256), types.MRP("size", g.Size),
+			types.MRP("modified", g.ModTime.Format(time.RFC3339)), types.MRP("action", action))); err != nil {
+			return err
+		}
+	}
+	return nil
 }

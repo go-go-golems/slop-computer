@@ -488,6 +488,20 @@ func (s *Store) ReferencedBlobs(ctx context.Context, sum string) (bool, error) {
 	return n > 0, err
 }
 
+// BlobSums lists every blob hash a version references (for blob GC).
+func (s *Store) BlobSums(ctx context.Context) (map[string]bool, error) {
+	rows, err := s.db().query(ctx, `SELECT DISTINCT sha256 FROM version_files`)
+	sums, err := scanAll(rows, err, func(r *sql.Rows) (string, error) {
+		var sum string
+		return sum, r.Scan(&sum)
+	})
+	out := make(map[string]bool, len(sums))
+	for _, sum := range sums {
+		out[sum] = true
+	}
+	return out, err
+}
+
 // ManifestOf decodes a version's manifest into dst.
 func ManifestOf(v Version, dst any) error {
 	if len(v.Manifest) == 0 {

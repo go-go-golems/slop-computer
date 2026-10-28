@@ -168,7 +168,9 @@ func (c *serveCmd) Run(ctx context.Context, v *values.Values) error {
 		return err
 	}
 	srv := server.New(cfg, st, bl)
-	hs := &http.Server{Addr: listen, Handler: srv.Handler(), ReadHeaderTimeout: 10 * time.Second}
+	// No WriteTimeout: /api/events and comments wait hold responses open.
+	// Request bodies are bounded per handler (JSON 64 KB–1 MB, files 25 MB).
+	hs := &http.Server{Addr: listen, Handler: srv.Handler(), ReadHeaderTimeout: 10 * time.Second, IdleTimeout: 2 * time.Minute, MaxHeaderBytes: 64 << 10}
 	if local {
 		log.Warn().Msg("LOCAL MODE: no authentication; listening on loopback only")
 	}

@@ -137,6 +137,12 @@ func (s *Server) isMainHost(host string) bool {
 func (s *Server) Handler() http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("X-Content-Type-Options", "nosniff")
+		if s.Config.Secure() {
+			// Main host and site hosts are HTTPS-only in production. Not
+			// includeSubDomains: the sandbox domain is separate and site hosts
+			// may be other people's domains.
+			w.Header().Set("Strict-Transport-Security", "max-age=31536000")
+		}
 		if s.Config.Local != nil {
 			w.Header().Set("X-Slop-Mode", "local")
 		}

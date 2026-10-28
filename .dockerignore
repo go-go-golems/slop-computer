@@ -1,0 +1,10 @@
+.git
+.playwright-mcp
+ttmp
+var
+dist
+**/node_modules
+web/workshop/dist
+pkg/web/workshop
+*.test
+slop

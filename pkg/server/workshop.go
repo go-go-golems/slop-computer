@@ -40,6 +40,7 @@ func (s *Server) workshopPage(w http.ResponseWriter, r *http.Request) {
 	}
 	w.Header().Set("Content-Type", "text/html; charset=utf-8")
 	w.Header().Set("Cache-Control", "no-store")
+	w.Header().Set("Content-Security-Policy", s.workshopCSP())
 	_, _ = w.Write(b)
 }
 
@@ -54,4 +55,16 @@ func (s *Server) workshopFile(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Cache-Control", "public, max-age=31536000, immutable")
 	}
 	http.ServeFileFS(w, r, s.Config.Workshop, p)
+}
+
+// workshopCSP keeps the Workshop to its own scripts and API, and lets it
+// frame only preview origins (s<label>.<sandbox domain>). React sets inline
+// style attributes, hence 'unsafe-inline' for styles only.
+func (s *Server) workshopCSP() string {
+	frames := "'none'"
+	if s.Config.SandboxDomain != "" {
+		frames = s.Config.PublicURL.Scheme + "://*." + s.Config.SandboxDomain
+	}
+	return "default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data:; connect-src 'self'; " +
+		"frame-src " + frames + "; frame-ancestors 'none'; base-uri 'none'; form-action 'self'; object-src 'none'"
 }

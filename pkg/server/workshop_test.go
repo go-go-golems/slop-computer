@@ -33,6 +33,9 @@ func TestWorkshopAndResolvedRoutes(t *testing.T) {
 		if resp.StatusCode != 200 || !strings.Contains(string(b), "id=root") {
 			t.Fatalf("%s: %d %s", p, resp.StatusCode, b)
 		}
+		if csp := resp.Header.Get("Content-Security-Policy"); !strings.Contains(csp, "frame-src http://*.sandbox.test;") || !strings.Contains(csp, "script-src 'self';") {
+			t.Fatalf("%s csp: %q", p, csp)
+		}
 	}
 	resp, err = manuel.c.Get(h.ts.URL + "/static/workshop/assets/app-1.js")
 	if err != nil || resp.StatusCode != 200 || !strings.Contains(resp.Header.Get("Cache-Control"), "immutable") {

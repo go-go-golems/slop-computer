@@ -7,9 +7,11 @@ import (
 	"crypto/sha256"
 	"encoding/hex"
 	"io"
+	"io/fs"
 	"os"
 	"path/filepath"
 	"regexp"
+	"time"
 
 	"github.com/pkg/errors"
 )
@@ -150,4 +152,43 @@ func (b *Blobs) Read(sum string) ([]byte, error) {
 		return nil, ErrHashMismatch
 	}
 	return data, nil
+}
+
+// Collected is a blob GC removed (or, in a dry run, would remove).
+type Collected struct {
+	SHA256  string
+	Size    int64
+	ModTime time.Time
+}
+
+// Collect removes blobs that no version references and that are older than
+// before. Young unreferenced blobs are kept: a push uploads its blobs before
+// it stores the version that references them. With dryRun nothing is
+// removed.
+func (b *Blobs) Collect(referenced map[string]bool, before time.Time, dryRun bool) ([]Collected, error) {
+	var out []Collected
+	err := filepath.WalkDir(filepath.Join(b.Root, "blobs"), func(p string, d fs.DirEntry, err error) error {
+		if err != nil || d.IsDir() {
+			return err
+		}
+		sum := d.Name()
+		if !ValidSum(sum) || referenced[sum] {
+			return nil
+		}
+		info, err := d.Info()
+		if err != nil {
+			return err
+		}
+		if !info.ModTime().Before(before) {
+			return nil
+		}
+		if !dryRun {
+			if err := os.Remove(p); err != nil {
+				return errors.Wrap(err, "remove blob")
+			}
+		}
+		out = append(out, Collected{SHA256: sum, Size: info.Size(), ModTime: info.ModTime()})
+		return nil
+	})
+	return out, err
 }
