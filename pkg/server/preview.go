@@ -12,8 +12,8 @@ import (
 
 func (s *Server) previewRoutes(m *http.ServeMux) {
 	m.HandleFunc("GET /api/sandbox-url", s.guard(admin, scopeRW, s.sandboxURL))
-	m.HandleFunc("GET /api/resolve", s.guard(admin, scopeRW, s.resolveRoute))
-	m.HandleFunc("GET /api/artifacts/{id}/versions/{n}/records", s.guard(admin, scopeRW, s.versionRecords))
+	m.HandleFunc("GET /api/resolve", s.guardPerm(admin, scopeRW, "routes:read", s.resolveRoute))
+	m.HandleFunc("GET /api/artifacts/{id}/versions/{n}/records", s.guardPerm(admin, scopeRW, "versions:read", s.versionRecords))
 }
 
 // sandboxURL mints the preview URL of a version: its own origin under the

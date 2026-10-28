@@ -21,6 +21,7 @@ const (
 	ModeSite    = "site"    // a visitor on a site host
 	ModePreview = "preview" // a Workshop preview: bridge for picking and pins
 	ModeThumb   = "thumb"   // a Workshop thumbnail: bridge, no clicks, slowed timers
+	ModeTool    = "tool"    // a tool open in the Workshop: tool.js, API calls with a grant
 )
 
 // Boot is what a page reads as window.slop.
@@ -61,8 +62,11 @@ func Inject(page []byte, boot Boot) []byte {
 	head.WriteString(`<script type="application/json" id="slop-boot">`)
 	head.Write(raw)
 	head.WriteString(`</script><script src="/_slop/runtime.js"></script>`)
-	if boot.Mode == ModePreview || boot.Mode == ModeThumb {
+	switch boot.Mode {
+	case ModePreview, ModeThumb:
 		head.WriteString(`<script src="/_slop/bridge.js"></script>`)
+	case ModeTool:
+		head.WriteString(`<script src="/_slop/tool.js"></script>`)
 	}
 	tail := ""
 	if boot.Tokens != nil {

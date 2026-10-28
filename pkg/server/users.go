@@ -54,6 +54,10 @@ func (s *Server) patchUser(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	_ = s.Store.Audit(r.Context(), actor(r), "user.role", id, map[string]any{"name": u.DisplayName, "from": before.Role, "to": u.Role})
+	if u.Role != before.Role {
+		// Grants act as their user: a changed role ends them.
+		_ = s.Store.RevokeGrants(r.Context(), "", u.ID)
+	}
 	s.event(r, store.EvUserRole, map[string]any{"user": u, "from": before.Role})
 	httpx.OK(w, u)
 }

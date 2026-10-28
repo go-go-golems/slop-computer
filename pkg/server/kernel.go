@@ -23,29 +23,29 @@ const (
 )
 
 func (s *Server) kernelRoutes(m *http.ServeMux) {
-	m.HandleFunc("GET /api/projects", s.guard(admin, scopeRW, s.listProjects))
-	m.HandleFunc("GET /api/projects/{id}", s.guard(admin, scopeRW, s.getProject))
+	m.HandleFunc("GET /api/projects", s.guardPerm(admin, scopeRW, "artifacts:read", s.listProjects))
+	m.HandleFunc("GET /api/projects/{id}", s.guardPerm(admin, scopeRW, "artifacts:read", s.getProject))
 	m.HandleFunc("PUT /api/projects/{id}", s.guard(admin, scopeRW, s.putProject))
-	m.HandleFunc("GET /api/artifacts", s.guard(admin, scopeRW, s.listArtifacts))
-	m.HandleFunc("POST /api/artifacts", s.guard(admin, scopeRW, s.createArtifact))
-	m.HandleFunc("GET /api/artifacts/{id}", s.guard(admin, scopeRW, s.getArtifact))
+	m.HandleFunc("GET /api/artifacts", s.guardPerm(admin, scopeRW, "artifacts:read", s.listArtifacts))
+	m.HandleFunc("POST /api/artifacts", s.guardPerm(admin, scopeRW, "versions:push", s.createArtifact))
+	m.HandleFunc("GET /api/artifacts/{id}", s.guardPerm(admin, scopeRW, "artifacts:read", s.getArtifact))
 	m.HandleFunc("PATCH /api/artifacts/{id}", s.guard(admin, scopeRW, s.patchArtifact))
-	m.HandleFunc("GET /api/artifacts/{id}/versions", s.guard(admin, scopeRW, s.listVersions))
-	m.HandleFunc("POST /api/artifacts/{id}/versions", s.guard(admin, scopeRW, s.push))
-	m.HandleFunc("GET /api/artifacts/{id}/versions/{n}", s.guard(admin, scopeRW, s.getVersion))
-	m.HandleFunc("GET /api/artifacts/{id}/versions/{n}/files/{path...}", s.guard(admin, scopeRW, s.getFile))
-	m.HandleFunc("PUT /api/artifacts/{id}/refs/{name}", s.guard(admin, scopeRW, s.putRef))
-	m.HandleFunc("POST /api/blobs/missing", s.guard(admin, scopeRW, s.missingBlobs))
-	m.HandleFunc("PUT /api/blobs/{sha}", s.guard(admin, scopeRW, s.putBlob))
-	m.HandleFunc("GET /api/routes", s.guard(admin, scopeRW, s.listRoutes))
-	m.HandleFunc("PUT /api/routes", s.guard(admin, scopeRW, s.putRoute))
-	m.HandleFunc("DELETE /api/routes", s.guard(admin, scopeRW, s.deleteRoute))
-	m.HandleFunc("GET /api/routes/log", s.guard(admin, scopeRW, s.routeLog))
-	m.HandleFunc("POST /api/routes/undo", s.guard(admin, scopeRW, s.undoRoute))
-	m.HandleFunc("GET /api/threads", s.guard(admin, scopeRW, s.listThreads))
-	m.HandleFunc("POST /api/artifacts/{id}/threads", s.guard(admin, scopeRW, s.createThread))
-	m.HandleFunc("POST /api/threads/{id}/replies", s.guard(admin, scopeRW, s.replyThread))
-	m.HandleFunc("POST /api/threads/{id}/resolve", s.guard(admin, scopeRW, s.resolveThread))
+	m.HandleFunc("GET /api/artifacts/{id}/versions", s.guardPerm(admin, scopeRW, "versions:read", s.listVersions))
+	m.HandleFunc("POST /api/artifacts/{id}/versions", s.guardPerm(admin, scopeRW, "versions:push", s.push))
+	m.HandleFunc("GET /api/artifacts/{id}/versions/{n}", s.guardPerm(admin, scopeRW, "versions:read", s.getVersion))
+	m.HandleFunc("GET /api/artifacts/{id}/versions/{n}/files/{path...}", s.guardPerm(admin, scopeRW, "versions:read", s.getFile))
+	m.HandleFunc("PUT /api/artifacts/{id}/refs/{name}", s.guardPerm(admin, scopeRW, "versions:push", s.putRef))
+	m.HandleFunc("POST /api/blobs/missing", s.guardPerm(admin, scopeRW, "versions:push", s.missingBlobs))
+	m.HandleFunc("PUT /api/blobs/{sha}", s.guardPerm(admin, scopeRW, "versions:push", s.putBlob))
+	m.HandleFunc("GET /api/routes", s.guardPerm(admin, scopeRW, "routes:read", s.listRoutes))
+	m.HandleFunc("PUT /api/routes", s.guardPerm(admin, scopeRW, "routes:write", s.putRoute))
+	m.HandleFunc("DELETE /api/routes", s.guardPerm(admin, scopeRW, "routes:write", s.deleteRoute))
+	m.HandleFunc("GET /api/routes/log", s.guardPerm(admin, scopeRW, "routes:read", s.routeLog))
+	m.HandleFunc("POST /api/routes/undo", s.guardPerm(admin, scopeRW, "routes:write", s.undoRoute))
+	m.HandleFunc("GET /api/threads", s.guardPerm(admin, scopeRW, "threads:read", s.listThreads))
+	m.HandleFunc("POST /api/artifacts/{id}/threads", s.guardPerm(admin, scopeRW, "threads:write", s.createThread))
+	m.HandleFunc("POST /api/threads/{id}/replies", s.guardPerm(admin, scopeRW, "threads:write", s.replyThread))
+	m.HandleFunc("POST /api/threads/{id}/resolve", s.guardPerm(admin, scopeRW, "threads:write", s.resolveThread))
 }
 
 // storeFail maps store errors to HTTP answers.
@@ -382,10 +382,16 @@ func (s *Server) push(w http.ResponseWriter, r *http.Request) {
 			if a, err := s.Store.Artifact(r.Context(), m.Tokens); err != nil || a.Type != "tokens" {
 				warnings = append(warnings, "tokens: "+m.Tokens+" is not a tokens data artifact (yet)")
 			}
+		}		// A tool section must be valid when it is pushed, not when it is enabled.
+		if _, err := store.ToolManifestOf(store.Version{Manifest: manifest}); err != nil {
+			s.fail(w, err)
+			return
 		}
 	}
 	via := "browser"
-	if p := principal(r.Context()); p.Token != nil {
+	if p := principal(r.Context()); p.Grant != nil {
+		via = "tool"
+	} else if p.Token != nil {
 		via = "cli"
 		if in.Via == "claude" || in.Via == "agent" {
 			via = in.Via

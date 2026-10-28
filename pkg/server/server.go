@@ -157,6 +157,9 @@ func (s *Server) Handler() http.Handler {
 		}
 		w.Header().Set("X-Frame-Options", "DENY")
 		w.Header().Set("Referrer-Policy", "same-origin")
+		if s.cors(w, r) {
+			return
+		}
 		s.mux.ServeHTTP(w, r)
 	})
 }
@@ -183,6 +186,7 @@ func (s *Server) routes() *http.ServeMux {
 	m.HandleFunc("/api/", func(w http.ResponseWriter, r *http.Request) { httpx.Fail(w, 404, "not_found", "Unknown API route") })
 	s.workshopRoutes(m)
 	s.safeRoutes(m)
+	s.toolRoutes(m)
 	m.HandleFunc("GET /static/", s.staticFile)
 	return m
 }

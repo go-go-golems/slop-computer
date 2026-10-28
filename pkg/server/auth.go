@@ -6,6 +6,7 @@ import (
 	"net/http"
 	"net/url"
 	"slices"
+	"strconv"
 	"strings"
 	"time"
 
@@ -22,6 +23,8 @@ type Principal struct {
 	Session store.Session
 	User    store.User
 	Token   *store.APIToken
+	// Grant is set when a tool calls with a grant (slg_…).
+	Grant *store.Grant
 }
 
 type principalKey struct{}
@@ -108,6 +111,13 @@ func (sc scope) required(method string) string {
 // guard enforces authentication, role and CSRF + Origin for browser
 // mutations. Hiding UI elements is never the authorization.
 func (s *Server) guard(level int, sc scope, h http.HandlerFunc) http.HandlerFunc {
+	return s.guardPerm(level, sc, "", h)
+}
+
+// guardPerm is guard for a route a tool may call with a grant carrying
+// permission perm (store.ToolPermissions). Routes guarded without a
+// permission never accept grants.
+func (s *Server) guardPerm(level int, sc scope, perm string, h http.HandlerFunc) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		p, err := s.resolve(r)
 		if err != nil {
@@ -116,6 +126,24 @@ func (s *Server) guard(level int, sc scope, h http.HandlerFunc) http.HandlerFunc
 			return
 		}
 		ctx := store.WithAuditVia(r.Context(), "browser")
+		// A tool grant reaches only routes that name a permission it carries.
+		if bearer := r.Header.Get("Authorization"); p == nil && strings.HasPrefix(bearer, "Bearer "+store.GrantPrefix) {
+			if perm == "" {
+				httpx.Fail(w, 403, "grant_not_allowed", "Tools cannot call this endpoint")
+				return
+			}
+			g, u, err := s.Store.ResolveGrant(ctx, strings.TrimPrefix(bearer, "Bearer "))
+			if err != nil {
+				httpx.Fail(w, 401, "grant_invalid", "The tool grant is invalid, expired or revoked")
+				return
+			}
+			if !g.Has(perm) {
+				httpx.Fail(w, 403, "grant_permission", "This tool was not granted "+perm)
+				return
+			}
+			p = &Principal{User: u, Grant: &g}
+			ctx = store.WithAuditVia(ctx, "tool "+g.Artifact+"@"+strconv.Itoa(g.Version))
+		}
 		// A personal API token reaches only routes whose scope it carries. The
 		// scope is a ceiling: the role check below still applies.
 		if bearer := r.Header.Get("Authorization"); p == nil && strings.HasPrefix(bearer, "Bearer "+store.TokenPrefix) {
@@ -145,7 +173,7 @@ func (s *Server) guard(level int, sc scope, h http.HandlerFunc) http.HandlerFunc
 		}
 		// A bearer token is not an ambient browser credential: no Origin or
 		// CSRF check applies to it.
-		if r.Method != http.MethodGet && r.Method != http.MethodHead && p != nil && p.Token == nil {
+		if r.Method != http.MethodGet && r.Method != http.MethodHead && p != nil && p.Token == nil && p.Grant == nil {
 			if !s.sameOrigin(r) {
 				httpx.Fail(w, 403, "invalid_origin", "Cross-origin request rejected")
 				return

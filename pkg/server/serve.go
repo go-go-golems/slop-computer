@@ -348,8 +348,8 @@ func (s *Server) serveSandbox(w http.ResponseWriter, r *http.Request, label stri
 	}
 	q := r.URL.Query()
 	mode := render.ModePreview
-	if q.Get("mode") == render.ModeThumb {
-		mode = render.ModeThumb
+	if m := q.Get("mode"); m == render.ModeThumb || m == render.ModeTool {
+		mode = m
 	}
 	parent := q.Get("parent")
 	if !slicesContains(s.origins(), parent) {

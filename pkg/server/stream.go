@@ -14,7 +14,7 @@ import (
 )
 
 func (s *Server) streamRoutes(m *http.ServeMux) {
-	m.HandleFunc("GET /api/events", s.guard(admin, scopeRW, s.eventStream))
+	m.HandleFunc("GET /api/events", s.guardPerm(admin, scopeRW, "events:read", s.eventStream))
 	m.HandleFunc("GET /api/comments/wait", s.guard(admin, scopeRW, s.waitComments))
 	m.HandleFunc("GET /api/agents", s.guard(admin, scopeRW, s.listAgents))
 }
