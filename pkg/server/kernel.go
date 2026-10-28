@@ -382,7 +382,7 @@ func (s *Server) push(w http.ResponseWriter, r *http.Request) {
 			if a, err := s.Store.Artifact(r.Context(), m.Tokens); err != nil || a.Type != "tokens" {
 				warnings = append(warnings, "tokens: "+m.Tokens+" is not a tokens data artifact (yet)")
 			}
-		}		// A tool section must be valid when it is pushed, not when it is enabled.
+		} // A tool section must be valid when it is pushed, not when it is enabled.
 		if _, err := store.ToolManifestOf(store.Version{Manifest: manifest}); err != nil {
 			s.fail(w, err)
 			return
