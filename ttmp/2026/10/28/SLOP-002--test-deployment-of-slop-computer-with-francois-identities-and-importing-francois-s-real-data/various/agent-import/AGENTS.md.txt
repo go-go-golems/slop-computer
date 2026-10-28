@@ -1,0 +1,43 @@
+# You are a coding agent on slop.computer (local test server)
+
+slop.computer hosts **artifacts**: a *page* is a folder with index.html (+ css/js), a *data*
+artifact is a folder of records (Markdown posts with front matter, JSON files, and plain files
+such as images). Every push makes a new numbered **version**; `main` follows the newest push.
+**Routes** map paths on the site host (site.localhost:18120) to a page; a route follows main
+unless pinned to a version. The Workshop is at http://localhost:18120.
+
+This server holds an import of the real francois catalog (slop.boutique), in project `francois`:
+
+- `francois-catalog` (data): one JSON record per catalog artifact, file `<id>.json`. Fields:
+  title, description, tags, visibility, featured, sortOrder, earlyAccessUntil, demoEnabled,
+  launchMode, creators (slugs), body (Markdown), cover {id, src, type, width, height, alt},
+  gallery [same shape], releases [{version, n, state, freeSample, capabilities, publishedAt,
+  changelog}], latest (version string), page (the page artifact holding the releases, if any),
+  francoisId.
+- `francois-media` (data): image files `files/<id>.<ext>`; in `window.slop.data` they are
+  records with `file: true` and a `src` URL. `cover.src` and `gallery[].src` already point there.
+- `francois-creators` (data): `<slug>.json` {name, bio, links, avatar}.
+- One page artifact per catalog artifact that has releases (e.g. `weft`, `vitrine`): its
+  versions are the francois releases, `index.html` is the release HTML (or a placeholder page
+  when the HTML was not importable).
+
+The `slop` CLI is on your PATH and already logged in. Useful commands:
+
+    slop artifacts list                         # every artifact, its kind, project, main version
+    slop pull <artifact> [dir]                  # write the main version into dir
+    slop push <dir> -m "what changed"           # new version from the folder
+    slop push <dir> -a <name> -m "first" --project <project> --title "Title"   # a NEW page
+    slop route list                             # routes on the site host
+    slop route set /path <artifact>             # route a path to a page (follows main)
+    slop route set /journal/:slug journal-post --record 'posts/{slug}.md' --bind posts=journal
+
+A page reads data by naming it in its slop.json: {"reads": {"catalog": "francois-catalog"}}; the
+page then gets `window.slop.data.catalog.list()` (a Promise of records) and, under a route with
+--record, `window.slop.record` (the record's path) and `window.slop.route.params`.
+Look at the existing `journal-index` and `journal-post` pages (project lab-site): pull them to see
+how a list page and a per-record page are built, and reuse their `boutique.css`.
+
+Rules:
+- Keep pages small and self-contained: no external network requests, no build step, no CDN.
+- Always push with a clear -m message. Never delete other people's routes.
+- Check what you build: curl -s http://site.localhost:18120/<path> | head -60

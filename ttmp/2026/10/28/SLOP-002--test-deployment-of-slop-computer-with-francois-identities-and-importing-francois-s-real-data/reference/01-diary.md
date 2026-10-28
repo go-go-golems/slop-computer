@@ -414,3 +414,70 @@ Deployment args: serve --listen=0.0.0.0:8080 --blobs=/var/lib/slop/blobs --datab
   --oidc-issuer=https://auth.slop.boutique --oidc-client-id-file=/run/secrets/slop/oidc-client-id
   --oidc-scope=urn:zitadel:iam:org:id:$(SLOP_ZITADEL_ORG_ID) --trust-proxy-headers
 ```
+
+## Step 7: The image under production flags, the API source under test, a slow real extract
+
+This step tests the deployment and the importer against things that look like production. The image was run with exactly the Deployment's flags. Its own HEALTHCHECK passes now, and sign-in goes to the real issuer with the client ID from the file. The studio API source got a test against a fake francois. The first real extract died on a slow download; after the fix, it is running.
+
+### Prompt Context
+**User prompt (verbatim):** see Step 3
+**Assistant interpretation:** Validate what was built at its integration boundaries.
+**Inferred user intent:** Confidence that the operator steps will work the first time.
+**Commit (code):**
+- `35a62f8`: download robustness.
+- `3637b17`: "francois: test the studio API source against a fake francois".
+- `894ab1f`: lint fix.
+
+### What I did
+- Rebuilt the image: `docker build -q -t slop:slop002 .`.
+- Ran it with the Deployment's arguments:
+  - `--database-url-file`, `--oidc-client-id-file` (`000000000000000000@slop`).
+  - `--public-url=https://slop.yolo.scapegoat.dev`, the site and sandbox hosts.
+  - `--oidc-issuer=https://auth.slop.boutique`, `--oidc-scope=urn:zitadel:iam:org:id:394966170567966836`, `--trust-proxy-headers`.
+  - `--network host`, because the test Postgres listens only on 127.0.0.1:55432. Database `slop_img`.
+- `pkg/francois/api_test.go` `TestImportFromAPI`: a fake francois on `httptest`.
+  - Studio routes behind a bearer token. The release download refuses tokens and serves only the free sample.
+  - `/api/admin/users` returns 403, as for a studio-only token.
+  - `/media/{id}` is public, and any non-GET counts as a failure.
+  - Asserts releases come out oldest first and only the free sample is public; placeholder versus original HTML; census counts.
+  - Asserts that a second extract succeeds from the cache after the fake server is closed.
+- Live extract, second run: `./slop import francois extract --out …/fr-api --cache …/fr-cache` in the background. The log is in `fr-api.log`.
+
+### Why
+- The image is what the cluster runs, so this was the cheapest end-to-end check of the probe fix and the flag set before an operator applies anything.
+
+### What worked
+- `health: healthy`, from the image's own `HEALTHCHECK` (curl on 127.0.0.1:8080).
+- Log: `Applied migration migration=004_tools.sql`, then `slop serving … public=https://slop.yolo.scapegoat.dev sandbox=sbx.slop.yolo.scapegoat.dev`.
+- With `Host: slop.yolo.scapegoat.dev`, `/` → 303 (sign-in). With `Host: other.example`, `/` → 421. With `Host: 10.42.0.9:8080`, `/readyz` → `{"status":"ready"}`.
+- `/auth/login` → 303 to `https://auth.slop.boutique/oauth/v2/authorize?client_id=000000000000000000%40slop&code_challenge=…&code_challenge_method=S256&nonce=…`. OIDC discovery against the real issuer worked (a public GET), and the client ID came from the file.
+- `go test ./pkg/francois/ -run TestImportFromAPI` → ok.
+- The second extract is past 375 of 689 media at about 3 MB/min, with no retries logged.
+
+### What didn't work
+- **First real extract.** `./slop import francois extract --out …/fr-api` died after 4:59 with `francois-media: med_16355b78a6562f1c5093012b.png: context deadline exceeded (Client.Timeout or context cancellation while reading body)`.
+  - That file is 16,977,574 bytes (a 3720×2702 PNG).
+  - `curl -r 0-999999` against `/media/med_6431e…` measured `538163B/s`, so 17 MB takes at least 30 s, more when shared with other downloads.
+  - The 2-minute `http.Client.Timeout` covered the whole body, and one failure aborted the run.
+  - Fixed in `35a62f8`: downloads use a client with only `ResponseHeaderTimeout: 1m`, three tries per file, four media workers, and a sha256 cache (`--cache`, by default the user cache directory `slop/francois`).
+- **First container run.** It used the bridge network and `host.docker.internal` and failed with `dial tcp 10.10.0.1:55432: connect: connection refused`: the test Postgres publishes on 127.0.0.1 only. Rerun with `--network host`.
+- **Lint slip.** I committed `3637b17` with `make lint 2>&1 | grep -v "^level" | tail -3; git add … && git commit`. The pipe ended in `tail`, so the 4 staticcheck ST1013 findings (`http.Error(w, "no", 401)` and three more) did not stop the commit. Fixed in `894ab1f` (`http.StatusUnauthorized`, `http.StatusForbidden`). Lint is now run on its own before committing.
+- **Wait loop.** A wait loop with `pgrep -f "import francois extract --out …"` matched its own shell, the same mistake as in step 5, and ran until its 100 s cap. The watcher now waits on the log file instead.
+
+### What I learned
+- Production media are big: 745 files, 361 MB, with single PNGs up to 17 MB. Galleries reference 689 of the 745, so "referenced only" saves little. A width-limited variant (`/media/<id>?w=1600`, which francois supports) would make imports much smaller, but loses the sha256 check.
+
+### What was tricky to build
+- The cache had to be safe with concurrent workers. Files are written to the output first, verified, then hard-linked into the cache (falling back to a copy). A partial download never lands in the cache.
+
+### What warrants a second pair of eyes
+- `linkOrCopy` treats `os.IsExist` on `Link` as success. If a cache entry existed but was corrupt, it would never be replaced. The entries are verified when written, so corruption would need disk damage.
+
+### What should be done in the future
+- An optional `--media-width` for smaller imports (no sha256 check, recorded in the census).
+
+### Code review instructions
+- `pkg/francois/extract.go`: `copyFile`, `download`, `cached`, `remember`, `writeMedia` (the worker pool). `pkg/francois/api.go`: `NewAPI` (two clients).
+
+### Technical details
+- Container run: `docker run -d --network host -v …/img-secrets:/run/secrets/slop:ro slop:slop002 serve --listen=0.0.0.0:8080 …` (the Deployment's args).
