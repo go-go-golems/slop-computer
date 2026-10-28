@@ -16,9 +16,12 @@ on:
       - "doc/**"
   workflow_dispatch:
 
+# The reusable workflow declares these four; a caller that grants less gets
+# a startup_failure.
 permissions:
   contents: read
   packages: write
+  pull-requests: write
   id-token: write
 
 concurrency:
