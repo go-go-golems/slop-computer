@@ -101,7 +101,18 @@ func Register(root *cobra.Command) error {
 		return err
 	}
 	dbGroup.AddCommand(gc)
-	root.AddCommand(auth, dbGroup)
+	admins, err := cli.BuildCobraCommandFromCommand(newImportAdmins())
+	if err != nil {
+		return err
+	}
+	dbGroup.AddCommand(admins)
+	importFrancois, err := group("francois", "Import a francois catalog", newImportExtract(), newImportPush())
+	if err != nil {
+		return err
+	}
+	importGroup := &cobra.Command{Use: "import", Short: "Import content from other systems"}
+	importGroup.AddCommand(importFrancois)
+	root.AddCommand(auth, dbGroup, importGroup)
 	for _, c := range []glazed.Command{newPush(), newPull()} {
 		cmd, err := cli.BuildCobraCommandFromCommand(c)
 		if err != nil {

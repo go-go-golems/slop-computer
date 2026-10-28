@@ -54,6 +54,20 @@ func Sum(data []byte) string {
 	return hex.EncodeToString(h[:])
 }
 
+// SumFile is the hex sha256 of a file's content, read in a stream.
+func SumFile(path string) (string, error) {
+	f, err := os.Open(path) // #nosec G304 -- caller-chosen file
+	if err != nil {
+		return "", err
+	}
+	defer func() { _ = f.Close() }()
+	h := sha256.New()
+	if _, err = io.Copy(h, f); err != nil {
+		return "", err
+	}
+	return hex.EncodeToString(h.Sum(nil)), nil
+}
+
 // Put stores data and returns its sha256. Existing blobs are reused.
 func (b *Blobs) Put(data []byte) (string, error) {
 	sum, _, err := b.PutReader(bytesReader(data), int64(len(data)), "")

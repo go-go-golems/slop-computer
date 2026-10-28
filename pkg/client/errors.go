@@ -32,6 +32,12 @@ func IsCode(err error, code string) bool {
 	return errors.As(err, &e) && e.Code == code
 }
 
+// IsNotFound reports whether err is an API 404.
+func IsNotFound(err error) bool {
+	var e *Error
+	return errors.As(err, &e) && e.Status == 404
+}
+
 func decodeError(status int, raw []byte) error {
 	var f struct {
 		Error struct {

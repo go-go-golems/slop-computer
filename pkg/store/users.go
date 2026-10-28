@@ -120,6 +120,28 @@ func (s *Store) SetUserRole(ctx context.Context, id, role string) (User, error) 
 	return out, err
 }
 
+// ImportAdmin makes the person with this identity an admin before (or
+// after) their first sign-in, for importing another app's admins. A pending
+// user is promoted; a disabled one is left alone. It returns the user and
+// what happened: "created", "promoted", "unchanged" or "disabled".
+func (s *Store) ImportAdmin(ctx context.Context, id Identity) (User, string, error) {
+	u, err := s.UserByIdentity(ctx, id.Issuer, id.Subject)
+	switch {
+	case errors.Is(err, ErrNotFound):
+		u, err = scanUser(s.db().row(ctx, `INSERT INTO users(id,issuer,subject,email,email_verified,display_name,role,created_at)
+VALUES(?,?,?,?,?,?,?,?) RETURNING `+userColumns, NewID("usr_"), id.Issuer, id.Subject, id.Email, id.EmailVerified, id.Name, RoleAdmin, s.Now()))
+		return u, "created", err
+	case err != nil:
+		return u, "", err
+	case u.Role == RoleAdmin:
+		return u, "unchanged", nil
+	case u.Role == RoleDisabled:
+		return u, "disabled", nil
+	}
+	u, err = s.SetUserRole(ctx, u.ID, RoleAdmin)
+	return u, "promoted", err
+}
+
 // touchUser records activity at most once a minute.
 func touchUser(ctx context.Context, d db, id string, now time.Time) {
 	_, _ = d.exec(ctx, `UPDATE users SET last_seen_at=? WHERE id=? AND (last_seen_at IS NULL OR last_seen_at < ?)`, now, id, now.Add(-time.Minute))
