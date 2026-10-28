@@ -482,3 +482,60 @@ The one real bug was time handling in SQLite: times written with a local offset 
 
 ### Technical details
 - SQLite DSN: `file:<path>?_pragma=journal_mode(WAL)&_pragma=busy_timeout(5000)&_pragma=foreign_keys(1)&_txlock=immediate&_time_format=sqlite&_texttotime=1`.
+
+## Step 11: Phase 1b — server, local mode and auth CLI
+
+I built the HTTP server on top of the ported store: francois's request guard reduced to three levels (public, session, admin) and three token scopes (read, write, admin), OIDC sign-in copied as is, nickname sign-in for local mode, tokens, device login with a server-rendered approval page, and the users/audit API. The CLI gained `serve --local`, `migrate`, `db users list|promote|disable|pending` and francois's `auth login|status|token|logout` with a new `--as <nickname>` for local servers.
+
+An end-to-end run in tmux and Go tests (guard matrix, local tokens, device approval through the form, local-mode guard rails) pass on SQLite and Postgres.
+
+### Prompt Context
+**User prompt (verbatim):** see Step 9
+**Assistant interpretation:** Finish Phase 1 (auth carve-out + local mode) and commit.
+**Inferred user intent:** Sign in locally with nicknames, give agents distinct tokens, and keep production auth intact.
+**Commit (code):** 2c6ff88 — "SLOP-001 phase 1: auth carve-out from francois, local mode, SQLite"
+
+### What I did
+- `pkg/httpx`, `pkg/credentials` (env `SLOP_TOKEN`, `SLOP_SERVER`, `SLOP_CONFIG_DIR`, dir `~/.config/slop`), `pkg/client/{client,errors}.go` copied from francois with a `// Copied from …@106776a` header; francois's Studio/Admin/Account services and multipart upload removed; `pkg/client/auth.go` new (Me, Config, DeviceAuthorize, DevicePoll, LocalToken, RevokeSelf).
+- `pkg/identity/oidc.go` copied; `pkg/identity/local.go` new (`LocalIdentity`, `IsLoopbackHost`, `CheckLocalSafe`).
+- `pkg/server`: `server.go` (Config, Validate, origins incl. extra/dev origins, Handler, routes), `auth.go` (Principal, `guard`, scopes, OIDC login/callback/logout, `signIn`), `local.go` (`POST /auth/local`, `POST /api/local/token`, login page), `tokens.go` (`/api/me`, `/api/config`, token CRUD, `tokenGrant`), `device.go` (JSON endpoints + `GET/POST /device` form), `users.go` (`/api/users`, PATCH role with self-lockout, revoke-sessions, `/api/audit`), `limiter.go` (francois's), `pages.go` + `templates/*.tmpl` + `static/pages.css`.
+- `cmd/slop/cmds`: `serve.go`, `db.go`, `auth.go` (ported), `common.go`; `Register` wires them.
+- Tests: `pkg/server/harness_test.go` (httptest server in local mode, cookie-jar "browsers", store-minted tokens), `pkg/server/auth_test.go`.
+
+### Why
+- Kept the guard's shape so francois reviewers recognise it; levels collapse because roles are only admin/pending/disabled (D7).
+- Separate `Config.OIDC` and `Config.Local` fields instead of the `identity.Provider` interface sketched in §6.12: only the login page and the callback differ, and an interface would have wrapped two methods for one caller. Recorded as a deviation from the guide.
+- The device approval page is server-rendered (francois's was React) so phase 1 has no frontend dependency.
+- `revokeToken` lets an admin revoke anyone's token, because the Admin screen lists every token (`GET /api/tokens?all=1`).
+
+### What worked
+- Manual run: `slop serve --local --listen 127.0.0.1:18080`; `curl` sign-in as manuel → 303 and `/api/me` with role admin; cross-origin `POST /auth/local` → 403; invalid nickname → form problem; `slop auth login --server http://localhost:18080 --as claude-manuel` → token with `read write`; rw token: `/api/users` 200, `/api/audit` 403 `token_scope`, `/api/tokens` 401 `token_not_allowed`; cookie POST without CSRF → 403 `csrf_failed`; self-demotion → 409 `self_lockout`; `slop auth logout` → `revoked`.
+- Guard rails: `--local --listen 0.0.0.0:18081` → `local mode (no authentication) only listens on a loopback address`; `--public-url https://slop.computer` → `local mode needs an http://localhost or http://127.0.0.1 public URL`.
+- `go test ./...` and the same with `TEST_DATABASE_URL=postgres://…:55432/…` → all `ok`.
+
+### What didn't work
+- `slop auth login … --output json` → `unknown flag: --output` (glazed's flag is `--output-format`); reran without it.
+- The Postgres test container exited by itself (`Exited (255)`, logs show only normal checkpoints); `docker start slop-test-pg` fixed it.
+- `golangci-lint run` reports 10 `unused` findings for helpers the API commands of phases 2/4 will use (`apiClient`, `serverFlags`, `arg`, `optArg`, `integer`, `esc`, `itoa`, `download`); the multipart upload was removed instead. Lint is therefore not clean at this commit.
+
+### What I learned
+- In local mode both `localhost:PORT` and `127.0.0.1:PORT` are main-host origins; each gets its own cookie, so one browser can hold two identities.
+
+### What was tricky to build
+- The local sign-in form posts before any session (so no CSRF token) — it checks `Origin` against the main-host origins instead, the same rule francois applied to its public demo endpoint.
+- Server-rendered forms send the CSRF token as a `csrf` form field; the guard accepts `X-CSRF-Token` or that field. `logout` redirects for form posts and answers JSON for the Workshop.
+
+### What warrants a second pair of eyes
+- `guard` lets a pending user's session reach `session`-level routes (`/api/me`, logout, `GET /device` renders a refusal). Kernel routes will all be `admin` level.
+- `POST /device` is admin-only; francois also allowed non-admin approvals because subscribers could hold tokens. Here only admins can mint tokens at all.
+
+### What should be done in the future
+- Phase 7: rate-limit `/auth/local` too (it is loopback-only, so low priority).
+
+### Code review instructions
+- Start with `pkg/server/auth.go` (`guard`), then `local.go`, `device.go`, `tokens.go`.
+- `go test ./pkg/server/ -run TestGuardMatrix -v`; manual: `go run ./cmd/slop serve --local`, open http://localhost:8080.
+
+### Technical details
+- Cookies: `__Host-slop_session` on HTTPS, `slop_session_dev` otherwise; flow cookie likewise.
+- Local tokens default to `read,write` for 30 days; admin-scoped tokens must expire within 1–90 days.
