@@ -52,3 +52,12 @@ Phase 4: agent CLI (push/pull/route/comments/projects, push --watch), dev seed f
 
 - /home/manuel/workspaces/2026-10-28/slop-computer/slop-computer/cmd/slop/cmds/devseed.go — dev seed
 - /home/manuel/workspaces/2026-10-28/slop-computer/slop-computer/cmd/slop/cmds/push.go — push, pull, watch
+
+## 2026-10-28
+
+Phase 5: Workshop (React + RTK Query) embedded, safe mode /_/, via=agent; exit check with two pi agents (b7b8bd6, aaa76f6, 8f17564)
+
+### Related Files
+
+- /home/manuel/workspaces/2026-10-28/slop-computer/slop-computer/pkg/server/safe.go — safe mode
+- /home/manuel/workspaces/2026-10-28/slop-computer/slop-computer/web/workshop/src/api/slopApi.ts — Workshop API

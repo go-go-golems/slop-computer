@@ -17,6 +17,12 @@ RelatedFiles:
       Note: Step 14 push/watch
     - Path: repo://cmd/slop/cmds/routes.go
       Note: Step 14 routes and comments wait
+    - Path: repo://pkg/server/safe.go
+      Note: Step 16 safe mode
+    - Path: repo://pkg/server/workshop.go
+      Note: Step 15 workshop serving
+    - Path: repo://web/workshop/src/screens/WatchScreen.tsx
+      Note: Step 15 Watch screen
 ExternalSources: []
 Summary: 'Chronological implementation diary for SLOP-001: analysis, design revisions with the owner, and phase-by-phase implementation of slop.computer v1.'
 LastUpdated: 2026-10-28T16:30:00-04:00
@@ -760,7 +766,7 @@ Everything that changes on the server reaches the UI the same way: `/api/events`
 
 ### What worked
 - `pnpm check` and `pnpm build` clean on the first run; `go test ./...` on SQLite and Postgres; `make lint` 0 issues.
-- Browser walkthrough (Playwright, local server with `slop dev seed`, signed in as manuel via the nickname page, which returned to `/watch/pricing`): screenshots in `various/screenshots/ws-*.png`.
+- Browser walkthrough (Playwright, local server with `slop dev seed`, signed in as manuel via the nickname page, which returned to `/watch/pricing`): screenshots in `various/screenshots/p5-01…06-*.png`.
   - Watch: threads with agent replies, pins drawn in the sandbox preview, "/pricing serves v5, pinned · Point /pricing at v15", filmstrip thumbnails.
   - C → click the headline → composer "On v15 of pricing · h1.sb-h1" → ⌘↩ → thread 4 appears through SSE, pin 4 outlined on the heading.
   - Routes: resolved bindings (`experiments@main journal@main`), "v15 newer" on the pinned route, preview, binding selects, history.
@@ -796,3 +802,64 @@ Everything that changes on the server reaches the UI the same way: `/api/events`
 ### Technical details
 - Event → invalidation table: `version.created` → `Version:<artifact>`, `Artifact:LIST`, `Route:LIST`, `Audit`; `route.set|removed` → `Route:LIST`, `RouteLog`; `thread.*|comment.created` → `Thread:<artifact>`, `Thread:ALL`; `agent.waiting|left` → `Agent`; `user.role` → `User`; `token.*` → `Token`.
 - Bundle: 375 KB JS (116 KB gzip), 22.5 KB CSS.
+
+## Step 16: Phase 5 exit check — two real coding agents, safe mode, agent attribution
+
+This step closes Phase 5 with the test the owner asked for: real coding agents, one per person, working against the Workshop. Two pi agents (`lunaroute/deepseek-4.1-flash`, thinking medium) ran in tmux windows as `claude-manuel` (project lab-site) and `claude-ramon` (project play). Each built a new page from a short brief, routed it, then blocked on `slop comments wait`. I commented as Manuel (on `localhost`) and as Ramon (on `127.0.0.1`, so the same browser holds a second identity); each agent answered every comment with a new version and a reply in the thread. Safe mode `/_/` was built while they worked.
+
+### Prompt Context
+**User prompt (verbatim):** see Step 15 (pi agents; "you can actually run multiple coding agents (simulating ramon or manuel) in tmux tabs."), and mid-step: "keep screenshots for the diary and for the report writeup once we are done"
+**Assistant interpretation:** Run two independent agents as the two people's agents, drive them only through the Workshop and the CLI, keep every screenshot and the agents' transcripts in the ticket.
+**Inferred user intent:** Evidence that the agent loop works with agents other than Claude Code, and material for a later report.
+**Commit (code):** aaa76f6 — "SLOP-001 phase 5: safe mode /_/, via=agent for coding agents"; 8f17564 — "SLOP-001: thumbnails in route context; guide 6.7 as built (sandbox labels, asset lookup)"
+
+### What I did
+- `SLOP_VIA=agent|claude` (CLI) and `via: "agent"` (server) mark pushes from any coding agent; the Workshop shows "claude-manuel’s agent" (`isAgent()` in `format.ts`, used by avatars, toasts, console, cards).
+- Agent workspaces in the scratchpad: `agents/<who>/{AGENTS.md, prompt.txt, cfg/ (own login via slop auth login --as claude-<who>), bin/slop}`; started with `pi -p --model lunaroute/deepseek-4.1-flash --thinking medium --session-dir …` in tmux windows `manuel` and `ramon` (env `PATH`, `SLOP_CONFIG_DIR`, `SLOP_VIA=agent`).
+- Round 1 through the Workshop UI (C → click → comment): Manuel on colophon's `p.line-label` ("Way too much space between each section title and its text…"), Ramon on release-board's `#rb-planned` ("…the three columns should sit side by side…").
+- Round 2 through the browser session's API (same calls the UI makes): Manuel asked for a "last pushed" line, Ramon for per-column counts.
+- Safe mode `/_/` (`pkg/server/safe.go`, `templates/safe.tmpl`): routes per host with a version select + Point, Undo last change, token revoke; forms with the `csrf` field, same guard, store calls and events as the API; `safe_test.go`.
+- Thumbnails get the route context (host + sample path) like the Watch preview, so `:param` pages show a record (`PageShot`, `Filmstrip ctx`).
+- Guide §6.7 updated to the as-built sandbox labels and asset lookup (open item from Step 13).
+- Screenshots renamed into `various/screenshots/p5-*.png`; agent evidence in `various/agent-test/<who>/` (brief, prompt, final report `pi.log`, full `session.jsonl`, the agents' own screenshots).
+
+### Why
+- **`via=agent`** instead of pretending to be Claude Code (`CLAUDECODE=1`): attribution in the audit log, the thread and the version list should say what actually pushed.
+- **Two origins for two people:** local mode already adds the 127.0.0.1 spelling as an extra origin; cookies are per host, so one browser holds Manuel and Ramon at once — no second browser profile needed.
+
+### What worked
+- Agents, from the transcripts: Manuel's agent 63 tool calls in 4m53s (24 bash; slop: push ×4, pull, route set, comments wait ×2); Ramon's 38 tool calls in 4m31s (22 bash; slop: pull ×3, push ×3, route set, comments wait ×2). Both used only the commands in AGENTS.md.
+- Task 1: `colophon` v1 (lab-site, /colophon) and `release-board` v1 (play, /play/releases, 36.9 KB, 12 cards) built on the site's look by pulling `about` / `orbits` and reusing `boutique.css`; `/api/agents` then listed both waiters (`project: lab-site`, `project: play`).
+- Round 1: replies "Fixed. The space came from the default top/bottom margins on the label and on the first paragraph…" (colophon v2) and "Columns now sit side by side on any screen wider than 700px…" (release-board v2), each a push with `--reply`; the Workshop showed them live (`p5-09`, `p5-10`).
+- Round 2: Manuel's agent was not waiting when the comment was made; its next `comments wait` still returned it (the cursor replays from the last seen event) → colophon v4 with "Last pushed 28 October 2026 · v4"; release-board v3 with the tally "3 planned · 3 in review · 6 out".
+- `go test ./...` (SQLite) green, `make lint` 0 issues; `TestSafeMode`: point → pinned v1, undo → follows main, POST without CSRF → 403, revoked token → 401.
+
+### What didn't work
+- The agents found and used the Playwright MCP browser — the *same* browser I was driving. My viewport changed under me (resized to ~711 px; `p5-08` is the stacked layout) and Ramon's agent reported "Browser is already in use" and fell back to curl checks. Next run: give agents their own browser profile or no browser tools.
+- `button:has-text("ramon")` matched both `ramon` and `claude-ramon` on the sign-in page (strict mode violation); used the snapshot ref.
+- A first screenshot of Artifacts after a restart showed every card "not routed" / "0 records" — taken before the queries returned; retaken 3 s later.
+- My first sentence on the top-bar pill read "No agent · waiting on comments" (ambiguous); now "listening for comments".
+
+### What I learned
+- An agent without any slop-specific training can do the whole loop from a 30-line AGENTS.md: the `comments wait` output (selector, computed styles, the exact reply command) is enough context.
+- Agents do not resolve threads (correct: the person who asked resolves), so open-thread counts stay up until a human looks — the Workshop shows the agent reply right under the request.
+
+### What was tricky to build
+- Telling when "the agent has answered": polling `/api/threads` for an `agent: true` comment per thread, not `/api/agents` (a waiter disappears while the agent works and reappears after the push).
+
+### What warrants a second pair of eyes
+- `via` comes from the client: a person can push with `SLOP_VIA=agent`. It is attribution, not a permission — the token's owner and scopes are what count.
+- Safe mode's Point keeps the route's page, bindings and access and only changes the version; it cannot create routes or change pages (by design: it is the fuse box, not a second Workshop).
+
+### What should be done in the future
+- Isolate agents' browsers (or drop browser tools from their tool list) in the multi-agent test.
+- Manuel's agent flagged that its "last pushed" line is static text: the runtime could expose the version number and push time (`window.slop.version`) so pages can show it without editing.
+- Phase 6: tools (Ramon's release board as a *tool* with API grants rather than a page with an embedded JSON array).
+
+### Code review instructions
+- `pkg/server/safe.go`, `pkg/server/templates/safe.tmpl`, `pkg/server/safe_test.go`; `cmd/slop/cmds/push.go` (`via`), `pkg/server/kernel.go` (push `via`).
+- Re-run the agent test: see `various/agent-test/<who>/prompt.txt` and the tmux command in this step.
+
+### Technical details
+- Agent start: `PATH=$A/bin:$PATH SLOP_CONFIG_DIR=$A/cfg SLOP_VIA=agent pi -p --model lunaroute/deepseek-4.1-flash --thinking medium --session-dir $A/sessions "$(cat prompt.txt)"`.
+- Threads after the test: colophon `th_73d40cc8…` (v1 → v2/v3), `th_10e853e0…` (v2 → v4); release-board `th_31fe97…` (v1 → v2), `th_f5a5c7…` (v2 → v3).

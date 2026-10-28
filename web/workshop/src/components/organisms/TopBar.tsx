@@ -51,7 +51,7 @@ export function TopBar({ loc, artifact, onScreen }: { loc: Location; artifact?: 
       <span className="pill" id="agentPill" title={live ? 'Live: changes from others show up as they happen.' : 'Reconnecting to the event stream…'}>
         <span className={cx('live-dot', live && 'on')} />
         <b>{agents.length ? plural(agents.length, 'agent') : 'No agent'}</b>
-        <span>{agents.length ? 'listening' : 'waiting on comments'}</span>
+        <span>{agents.length ? 'listening' : 'listening for comments'}</span>
       </span>
       <div className="proj">
         <button type="button" className="projbtn" aria-haspopup="true" onClick={toggle('more')} title="Signed in as">
