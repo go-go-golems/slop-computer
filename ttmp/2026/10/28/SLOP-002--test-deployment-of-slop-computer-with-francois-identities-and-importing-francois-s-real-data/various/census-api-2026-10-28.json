@@ -1,0 +1,249 @@
+{
+  "source": "api https://slop.boutique",
+  "takenAt": "2026-10-28T22:45:03.492813214Z",
+  "imported": "2026-10-28T22:45:28.082199083Z",
+  "artifacts": 104,
+  "artifactsWithReleases": 103,
+  "releases": 113,
+  "releaseStates": {
+    "published": 110,
+    "withdrawn": 3
+  },
+  "freeSamples": 96,
+  "htmlOriginal": 95,
+  "htmlPlaceholder": 18,
+  "htmlBytes": 74858748,
+  "runtimeMarker": 0,
+  "runtimeMarkerUnknown": 18,
+  "capabilities": {
+    "db": 16,
+    "downloads": 24,
+    "room": 7,
+    "sample": 113,
+    "user": 12
+  },
+  "buckets": [
+    {
+      "name": "static",
+      "releases": 83,
+      "artifacts": [
+        "weft",
+        "vitrine",
+        "type-studio",
+        "pointfield-cad",
+        "loom-pitch",
+        "shop",
+        "port-wright",
+        "lumen-studio",
+        "kinescope",
+        "fringe-studio",
+        "form-skate-workbench",
+        "claude-computer",
+        "shop-next",
+        "takt",
+        "thought-machines",
+        "beton-brut-studio",
+        "exposure-studio",
+        "plenum-studio",
+        "brand-crystal",
+        "plads",
+        "on-twos",
+        "shop-strata",
+        "no-shade",
+        "kustenlinie",
+        "wend",
+        "lastwork-foundry",
+        "pre-textile-atelier",
+        "blueprint-house",
+        "blueprint-mech",
+        "blueprint-physics-kit",
+        "loom-wilds",
+        "possie-toybox",
+        "visiting-hours",
+        "derived-not-fixed",
+        "machine-zone",
+        "loom-city",
+        "loom-playtime",
+        "loom-hours",
+        "slopster",
+        "wildforge",
+        "metropolis",
+        "splice-console",
+        "fluchtlinie",
+        "loom-worlds",
+        "roomba-rooms",
+        "loom-brawl",
+        "vigil",
+        "station-point",
+        "note-g",
+        "mossbloom",
+        "porous-forge",
+        "patent-drawer",
+        "overshoot",
+        "mossbrook",
+        "no-dom-the-interface-is-a-projection",
+        "blockout-studio",
+        "loom-humanoids-in-the-factory",
+        "tinker",
+        "lattice-rift",
+        "lattice-phantasmagoria",
+        "ds-shader-sketchbook",
+        "so3-playground",
+        "lie-group-ik-playground",
+        "kiln-studio",
+        "stackchan-pet-studio",
+        "dockermetrics-ide",
+        "live-embedding-viewer",
+        "graveler-lab",
+        "takt-workbench",
+        "stamen-studio",
+        "octavo-ide",
+        "xenoform-studio",
+        "lattice-arcade",
+        "brickwork",
+        "uncommon-math",
+        "twin-render-playground",
+        "millwright",
+        "lowpoly-fx",
+        "halo-field",
+        "polis"
+      ]
+    },
+    {
+      "name": "static+downloads",
+      "releases": 12,
+      "artifacts": [
+        "octavo-lab",
+        "kiln-workbench",
+        "craftkit-studio",
+        "tabula-workbench",
+        "sonnet-new-roman-modular",
+        "nerve-workbench",
+        "lantern-slide-studio",
+        "bench-twin",
+        "twin-motion-ide",
+        "craftkit-workbench"
+      ]
+    },
+    {
+      "name": "needs-runtime:db,user",
+      "releases": 7,
+      "artifacts": [
+        "rag-workbench",
+        "lattice-arena",
+        "transcript-hub",
+        "lattice-arena-ds"
+      ]
+    },
+    {
+      "name": "needs-runtime:db,room,user",
+      "releases": 5,
+      "artifacts": [
+        "living-comic-studio",
+        "hypercore-studio",
+        "lattice-deck"
+      ]
+    },
+    {
+      "name": "needs-runtime:db",
+      "releases": 4,
+      "artifacts": [
+        "agent-gym-works",
+        "tilth-garden",
+        "lab-104-factory-twin",
+        "diary-workbench"
+      ]
+    },
+    {
+      "name": "needs-runtime:room",
+      "releases": 2,
+      "artifacts": [
+        "mimeo",
+        "mimeo-studio"
+      ]
+    }
+  ],
+  "externalScriptHosts": {
+    "cdn.jsdelivr.net": 12,
+    "cdnjs.cloudflare.com": 30
+  },
+  "attachments": 18,
+  "attachmentsCopied": 18,
+  "attachmentBytes": 63806193,
+  "storefront": {
+    "Listed": 100,
+    "Hidden": 4,
+    "Featured": 5,
+    "Drafts": 0,
+    "Demo": 21,
+    "earlyAccessFuture": 81,
+    "LaunchModes": {
+      "tab": 104
+    },
+    "WithCreators": 3
+  },
+  "media": {
+    "Library": 745,
+    "Copied": 689,
+    "Unavailable": 0,
+    "LibraryBytes": 361163809,
+    "CopiedBytes": 322147668,
+    "Dangling": null
+  },
+  "posts": {},
+  "creators": 2,
+  "admins": 3,
+  "notImported": {
+    "instances": 89
+  },
+  "gaps": [
+    {
+      "id": "G10",
+      "title": "Scripts from other hosts (CSP and offline use)",
+      "releases": 32,
+      "artifacts": 32
+    },
+    {
+      "id": "G5",
+      "title": "Page runtime capabilities (any of db, user, room, comments, assets, artifact, files)",
+      "releases": 18,
+      "artifacts": 13
+    },
+    {
+      "id": "G9",
+      "title": "Release HTML not readable by this source (placeholder pages)",
+      "releases": 18,
+      "artifacts": 13
+    },
+    {
+      "id": "G5:db",
+      "title": "Page runtime capability db",
+      "releases": 16,
+      "artifacts": 11
+    },
+    {
+      "id": "G3",
+      "title": "Access tiers: paid and early-access releases are public on slop",
+      "releases": 15,
+      "artifacts": 12
+    },
+    {
+      "id": "G5:user",
+      "title": "Page runtime capability user",
+      "releases": 12,
+      "artifacts": 7
+    },
+    {
+      "id": "G5:room",
+      "title": "Page runtime capability room",
+      "releases": 7,
+      "artifacts": 5
+    },
+    {
+      "id": "G4",
+      "title": "Withdrawn and draft releases: kept as non-main versions",
+      "releases": 3,
+      "artifacts": 1
+    }
+  ]
+}

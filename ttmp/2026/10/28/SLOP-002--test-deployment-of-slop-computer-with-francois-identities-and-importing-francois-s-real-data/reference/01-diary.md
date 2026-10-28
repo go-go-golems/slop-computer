@@ -587,3 +587,74 @@ The user chose "do it all", and slop now runs on the cluster at https://slop.yol
 kubectl -n slop get certificate,ingress,pvc   → slop-tls True; ingress 91.98.46.169 80,443; slop-data Bound 5Gi
 kubectl -n argocd get application slop        → Synced Healthy
 ```
+
+## Step 9: Real data on the cluster, a storefront built by an agent, and what slop is missing
+
+The real francois catalog is on the test deployment, and anyone can browse it at https://site.slop.yolo.scapegoat.dev/. The storefront pages were written by a pi agent working on the same data locally. The agent's NOTES are the most direct answer yet to "what support would we add". Its notes also caught an importer bug, absolute media links, which is fixed and was re-imported. The re-import ran idempotently on real data.
+
+### Prompt Context
+**User prompt (verbatim):** see Step 8, plus: "I don't see any on slop.yolo.scapegoat.dev though, right? Also never forget the diary, it's MANDATORY."
+**Assistant interpretation:** Get the imported data visibly onto the cluster and keep the diary current at every milestone.
+**Inferred user intent:** See real francois content on the new deployment, with the reasoning recorded.
+**Commit (code):** `d1c670f` (census "posts: none"); `47bf7a7` (absolute media links). Evidence is committed with this entry.
+
+### What I did
+- **Cluster push.** `slop import francois push --dir fr-api2` with the device-login token → `pushed 118 versions; 0 unchanged, 0 already imported`. The cluster now has 108 artifacts in `francois`: 103 pages plus `francois-catalog`, `francois-creators` and `francois-media`, `-2`, `-3`. Versions are `by usr_8a5…` (Manuel, the token's owner; the API source has no authors) and `via import`.
+- **Smoke test.** `slop route set /weft weft` on `site.slop.yolo.scapegoat.dev` → `site /weft 200 1043130 bytes`. Later removed (`route rm /weft`) in favour of `/r/weft`.
+- **Local storefront agent.** pi, `lunaroute/deepseek-4.1-flash`, thinking medium, `SLOP_VIA=agent`, its own `claude-manuel` login. Brief: `various/agent-import/{AGENTS.md.txt,prompt.txt}`. It built `storefront` (v2) at `/` and `storefront-entry` (v2) at `/apps/:id --record '{id}.json' --bind catalog=francois-catalog`, plus 100 `/r/<page>` routes pinned to each record's latest release. It wrote `NOTES.md`: 16 findings, all saved.
+- **Importer fix** from NOTES §11. Catalogue bodies link `https://slop.boutique/media/<id>`, and `mediaRef` only matched the path, so 124 links became `https://slop.boutique/_d/francois-media…`. The regex now swallows an optional `https?://host` origin; the fixture has an absolute link. Re-extract from the cache → `absolute _d links: 0`.
+- **Re-push to both servers** → `pushed 1 versions; 4 unchanged, 113 already imported` (`francois-catalog` v2 only).
+- **Moved the storefront to the cluster.**
+  - `slop pull storefront|storefront-entry|lab-tokens` from local, then `slop push` to the cluster. `lab-tokens` lost its `lab-site` project, which doesn't exist there.
+  - Routes `/`, `/apps/:id` (same record and bind), and the 100 lines of `release-routes.tsv`.
+  - Checks: `/ 200 670476`, `/apps/weft 200 676481`, `/r/weft 200 1043132`, `/r/lattice-deck 200 426291`, `/_d/francois-media/main/index.json 200`, a cover `/_d/francois-media-3/main/files/med_fc42….webp 200 image/webp`.
+- **Screenshots** (`various/screenshots/`):
+  - `s2-01-remote-storefront.png`: the catalogue, 100 apps.
+  - `s2-02-remote-entry-weft.png`: the entry page with "Open release · v1.0.0".
+  - `s2-03-remote-release-type-studio.png`: an imported release running.
+  - `s2-04-remote-workshop-signin.png`: the Workshop sends you to ZITADEL login with `organization=394966170567966836`.
+- **Saved evidence:** `various/agent-import/{NOTES.md.txt, pi.log, session.jsonl, release-routes.tsv}`, plus `various/census-api-2026-10-28.{md.txt,json}`. The agent's local `slp_` token appeared twice in `session.jsonl` and was redacted to `slp_REDACTED` before committing. The census contains no email addresses (`grep -c @` → 0).
+
+### Why
+- Building the pages locally first kept the agent's 100 probe routes and throwaway artifacts (`probe-media`, `/probe`) off the shared deployment.
+- Copying the pages rather than letting the agent push to the cluster: the agent has no cluster login, and a second device approval just to copy two folders wasn't worth the user's time.
+
+### What worked
+- The import's design held on real data: idempotent re-runs, sharded media, `/_d/` serving gated by `reads`, release HTML served unmodified.
+- The agent built a working storefront for 100 apps in one session. Badges: early access 79, `needs db|user|room` 23. Covers come from `/_d/`, and there's a monogram fallback for 6 records without a cover.
+
+### What didn't work
+- **Wiped search path.** While creating cluster routes, `while IFS=$'\t' read -r path target` in zsh assigned `path`, which zsh ties to `$PATH`. The following `curl` calls failed with `command not found: curl`. The routes were unaffected (the binary was called by absolute path), and the checks reran in a fresh shell.
+- **Screenshot read.** `Read` of the second screenshot reported "File does not exist" right after Playwright saved it, while it was still being written. A `find /` I started to look for it overran its timeout and was killed.
+
+### What I learned (the agent's findings, ranked)
+1. **Gating of data files** (NOTES §1, §3): `/_d/` files are public only if some routed page `reads` the artifact. The agent found this only by probing; `src` values look broken until then. This is my G2 design working as intended, but it's undocumented and surprising.
+2. **Boot payload** (§2): `reads` is page-wide, so every page ships the whole catalogue and all media records, 667 KB of `#slop-boot` on `/apps/weft`. A per-route projection, or loading records on demand, would fix it.
+3. **No route by record** (§6, §14): a route can't choose its page from a parameter, hence 100 pinned routes that go stale when a release is added. This is the biggest missing feature for a catalogue.
+4. **Silent route shadowing** (§7): `/apps/:id` shadowed the existing `/apps/:slug` with no warning. **Silent `/` replacement** (§8): same problem.
+5. **Asset paths** (§4, §5): `/_v/` is undocumented, numeric versions only. Relative assets resolve from the route's prefix, so files must sit flat at the page root.
+6. **No structured CLI output** (§9): `--output json` is not available on `artifacts list` or `route list`. No preview without a route (§10). No artifact delete. `route rm` has no `--note`.
+7. **No server-rendered Markdown for JSON records** (§11): only `.md` records get `html`.
+8. **Imported releases make external requests** (§15): Google Fonts and cdnjs. That matches census G10 (32 releases).
+
+### What was tricky to build
+- Choosing what to fix now. Only the importer bug was mine to fix in this step. The rest are product decisions for slop (route by record, data projections, documenting `/_v/`/`/_d/`), recorded as next tasks rather than built ad hoc.
+
+### What warrants a second pair of eyes
+- The cluster's public site now serves 100 imported francois releases. 15 of them are paid releases on francois (census G3), but they came over as placeholders, so no paid HTML is exposed. The free samples are public on francois too. Still, someone who owns the francois catalogue should be told it is mirrored on a second host.
+- The storefront pages copy `lab-tokens` and `boutique.css` from the dev seed's lab-site.
+
+### What should be done in the future
+- Product, in order of what blocks a real catalogue: route-by-record (`/r/:page → {page}`, or a page binding taken from the record); per-route data projections; route conflict warnings; `--output json` on list commands; documenting `/_d/` and `/_v/`.
+- Deploy PR #2 (sign-out fix, media shards, absolute-link fix) and bump the gitops image tag.
+- Upload the updated guide and diary to reMarkable.
+
+### Code review instructions
+- `pkg/francois/extract.go` `mediaRef`; `pkg/francois/francois_test.go` (the absolute link case).
+- Read `various/agent-import/NOTES.md.txt` in full. It is the input for the next slop ticket.
+
+### Technical details
+```
+cluster routes on site.slop.yolo.scapegoat.dev: / → storefront, /apps/:id → storefront-entry {id}.json (bind catalog=francois-catalog), /r/<page> → <page>@<n> ×100
+census (api, 2026-10-28): 113 releases; static 83, static+downloads 12, needs-runtime 18 (db 16, user 12, room 7); external scripts 32; early access running 81
+```

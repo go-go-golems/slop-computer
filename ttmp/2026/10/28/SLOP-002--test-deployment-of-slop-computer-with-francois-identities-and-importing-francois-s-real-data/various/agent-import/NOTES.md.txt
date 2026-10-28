@@ -1,0 +1,355 @@
+# Storefront on slop — what was hard
+
+Working directory: `.../scratchpad/agents-import/manuel/work`
+Artifacts: `storefront` (v2), `storefront-entry` (v2), project `francois`.
+
+Routes I ended up with:
+
+```
+/                    storefront        main
+/apps/:id            storefront-entry  main   --record '{id}.json' --bind catalog=francois-catalog
+/r/<page>            <page>@<n>        pinned to the record's latest release   (100 routes)
+/lab-home            front-page        (old "/" kept reachable)
+/experiments/:slug   app-page          (old /apps/:slug kept reachable)
+```
+
+Everything below is something slop did that cost time, forced a workaround, or made
+the obvious solution impossible.
+
+---
+
+## 1. Data-file URLs are dead until a routed page `reads` the artifact
+
+`francois-catalog` gives every cover/gallery/body image a URL like
+
+```
+/_d/francois-media/main/files/med_4947accd98487d2a911d34a6.png
+```
+
+and `window.slop.data.media` records carry `src: "/_d/francois-media/1/files/…"`.
+Both returned **404 `Nothing is routed here.`** at the start of the session. I tried
+`/_d/`, `/_v/`, `/_f/`, `/files/`, `/_slop/d/…`, the sandbox host, `Host:` overrides,
+`Referer`/`Origin` headers — all 404.
+
+What actually enabled them was unrelated: I pushed a throwaway page `probe-media` with
+
+```json
+{"reads": {"media": "francois-media", "catalog": "francois-catalog"}}
+```
+
+and routed it at `/probe`. Immediately after that, the same URLs were 200:
+
+```
+/_d/francois-media/main/index.json                       404 -> 200 (80179 B)
+/_d/francois-catalog/main/aasd.json                      404 -> 200
+/_d/francois-media-2/main/files/med_907a9d9b….png         404 (still)
+```
+
+Adding `francois-media-2`, `-3` and `francois-creators` to the same `reads` map made
+those reachable too. So: **a data artifact's files are only served publicly if some
+routed page declares the read.** Nothing in `slop --help`, `slop help push`, or the
+route table says this; the generated `src` values are lies until then.
+
+What I did instead: both pages declare all three media artifacts (`media`, `media2`,
+`media3`) even though they only need the URLs, and I never call
+`slop.data.media.list()`. Practical consequence: every page now carries the 692 media
+records in its boot payload (see §2).
+
+## 2. `reads` is page-wide, so an entry page ships the whole catalogue
+
+`GET /apps/weft` is **679 KB**, of which **667 KB** is the injected
+`#slop-boot` JSON:
+
+```
+catalog: 104 records (full Markdown bodies, galleries, release arrays)
+media: 304   media2: 360   media3: 28   (file records)
+```
+
+There is no per-route or per-record projection, no field selection, and no server-side
+filtering: `slop.data.catalog.list()` returns every record including 5 `hidden` ones and
+I filter `visibility === "listed"` in JS. The list page needs titles and covers, but
+gets all bodies. The record page needs one record, but gets 105, plus three media
+indexes because of §1.
+
+What I did instead: nothing clever — accepted the payload, because the alternative
+(duplicating the images into the page artifact) is worse; see §3.
+
+## 3. There is no way to expose a folder of data files except via `reads`
+
+The obvious fix for §1 would be to serve `francois-media` from a route. Routes refuse:
+
+```
+$ slop route set /media francois-media
+invalid_request: francois-media is a data artifact; routes serve pages
+```
+
+Copying the images into the page artifact is the only route-free option. Covers alone
+are **77 MB** across 96 files; the three media artifacts are **310 MB** of galleries and
+screenshots. A push that size is not a working loop, and `slop push` has no partial
+upload for a page.
+
+What I did instead: declared the `reads` (§1), used `cover.src` verbatim, rewrote only
+the absolute origin (`https://slop.boutique/_d/…` → `/_d/…`) so no request leaves the
+host, and added a monogram fallback for the 6 listed records with no cover
+(`blockout-studio`, `brand-crystal`, `loom-hours`, `note-g`, `plenum-studio`,
+`porous-forge`).
+
+## 4. Page assets live at an undocumented `/_v/` path with different rules
+
+`boutique.css` is a file inside the page artifact. To find how it is served I had to
+guess: `/_d/about/3/boutique.css` → 404; `/_v/about/3/boutique.css` → **200**.
+
+Rules I inferred by probing:
+
+| URL | result |
+| --- | --- |
+| `/_v/about/3/boutique.css` | 200 |
+| `/_v/about/main/boutique.css` | 404 (numeric version only) |
+| `/_v/weft/1/index.html` before `weft` was routed | 404 |
+| `/_v/weft/1/index.html` after `slop route set /r/weft weft` | 200 |
+| `/_v/francois-media/1/files/x.png` (data artifact) | 404 |
+| `/_v/about/3/slop.json` | 404 (config is private) |
+
+So `/_v/` is for **routed page artifacts only**, numeric versions only. Nothing in the
+docs mentions `/_v/`; the only reason I found it is that `/_d/` was failing and I
+brute-forced path prefixes.
+
+What I did instead: used relative `<link rel="stylesheet" href="boutique.css">`, which
+works (see §5), and copied `boutique.css` into both page folders.
+
+## 5. Relative assets resolve exactly one path segment “up”, not from the page root
+
+From `/apps/weft`, `href="boutique.css"` becomes `/apps/boutique.css`:
+
+```
+/apps/boutique.css          200 text/css  (the /apps/* route's page)
+/apps/weft/boutique.css     404
+/nope/boutique.css          404
+```
+
+The server evidently treats the route *prefix* as the asset base, so the page's files
+must sit flat at the artifact root. A page that wrote `css/boutique.css`, or a route one
+segment deeper (`/apps/:id/detail`), would get an unstyled page with no hint why.
+(All copies of `boutique.css` are byte-identical, so I could not tell from the response
+which of the two `/apps/*` pages served it.)
+
+What I did instead: kept every file at the page root and referenced it without a
+directory. This also means I cannot share a `css/` or `img/` folder between pages; each
+page carries its own 29 KB copy of `boutique.css`.
+
+## 6. Task 3 cannot be one route: routes cannot choose a page artifact by parameter
+
+The entry page knows `record.page` (e.g. `"weft"`), but a route's target page is fixed
+at configuration time. `/apps/:id` can pick a **data record** by `:id`, but there is no
+equivalent for “serve page artifact `:page` at version `:n`”. A generic
+`/release/:id → <page>` route is impossible, and a page cannot fetch another page's
+HTML (no API from a public page, and `/_v/.../index.html` is 404 until routed).
+
+What I did: generated **100 routes**, one per record with a `page`, pinned to the latest
+release's artifact version:
+
+```
+/r/weft             weft@1        (release 1.0.0)
+/r/lattice-deck     lattice-deck@3 (release 0.1.2)
+…
+```
+
+`slop route set /r/x x@3` works and prints `→ x v3`. There is no bulk import, no
+declarative route file, and no `route apply`; this is 100 sequential CLI calls
+(~30 s). It also bloats the shared route table from 10 to 111 rows, with no prefix
+filter in `slop route list` to see the rest.
+
+Trade-off I had to choose blindly: `main` follows new pushes (and the site's own idiom
+is “routes follow main”), but the record's `latest` is a specific release, so I pinned
+to `n`. If a new release is pushed, the entry page still links to the old pinned page
+until the route script is rerun. Nothing exposes the fact that a pinned route may be
+stale relative to the record.
+
+## 7. Two route patterns of the same shape coexist silently; one wins
+
+There was already `site.localhost:18120 /apps/:slug → app-page` (lab-site experiments).
+Task 2 asks for `/apps/:id`. slop accepted both:
+
+```
+site.localhost:18120 /apps/:id    storefront-entry   {id}.json
+site.localhost:18120 /apps/:slug  app-page           experiments/{slug}.json
+```
+
+`slop route set /apps/:id …` printed `(none) → storefront-entry@main`, which reads as
+“no conflict”, but every `/apps/*` request now resolves to `storefront-entry`:
+
+```
+/apps/weft    -> storefront-entry, params {"id":"weft"}
+/apps/orbits  -> storefront-entry, params {"id":"orbits"}   (catalogue miss)
+```
+
+There is no warning, no ordering rule in the docs, and no way to say “defer to the other
+pattern when my record is missing”.
+
+What I did instead: added `/experiments/:slug  app-page  --record 'experiments/{slug}.json'`
+so the experiments still have a working URL, and made the catalogue's not-found message
+link there. But pages I did not write (e.g. `app-page`'s own “More like this”) still link
+to `/apps/<experiment>`, which now lands on the catalogue's “No app called …”. I did not
+edit someone else's page to fix its links.
+
+## 8. Replacing `/` is a silent one-way door
+
+`slop route set / storefront` replaced `front-page` at `/`:
+
+```
+site.localhost:18120/  front-page@main → storefront@main  (slop route undo / goes back)
+```
+
+There is no prompt, no alias, no redirect. The old page is still an artifact, but no
+longer reachable from the site. I added `/lab-home → front-page` first, so nothing was
+lost, and noted it in the route note. A route is 1:1; there is no way to make `/` show
+the old page to someone else, or to serve both behind a query.
+
+## 9. `slop artifacts list` has no structured output
+
+`slop artifacts list --output json` → `unknown flag: --output`. The Glazed flags I know
+(`--print-schema`, `--print-yaml`) describe the command, not the rows. `slop route list`
+is also a human table only. To build the 100 route commands I pulled the data artifact
+and parsed JSON locally, and for artifact/version checks I used the API with the stored
+token:
+
+```
+curl -H "Authorization: Bearer $(…) /api/artifacts/francois-media/versions/1/files/files/…"
+```
+
+That API path (`GET /api/artifacts/{id}/versions/{n}/files/{path...}`) is also not in
+`slop --help`; I got it from strings in the binary.
+
+## 10. Checking a push requires making it public
+
+There is no “preview this version at a URL” command. `slop push` prints
+`http://127.0.0.1:18120/watch/<artifact>/<n>`, which redirects to the Workshop login
+(`/auth/login`); I have a CLI token, not a browser session. So the only quick iteration
+loop is to add a route — which puts a temporary entry in the shared table. I used
+`/probe` while discovering §1 and removed it (`slop route rm /probe`); the `probe-media`
+artifact itself is still there because there is no artifact-delete command at all.
+
+`slop route rm` also has no `--note`, unlike `route set`:
+
+```
+$ slop route rm /probe --note "probe done"
+unknown flag: --note
+```
+
+## 11. JSON records never get server-rendered HTML
+
+Journal posts are `type: post` and arrive with an `html` field rendered by the server
+(`<p>…</p><ul>…`). Catalogue records are plain JSON; `body` stays Markdown, and
+`window.slop.data.catalog.get(id)` has no `html`. So the entry page had to ship a
+Markdown renderer. Mine handles headings, paragraphs, emphasis, links, images, ordered
+and unordered lists, inline code, fenced code, blockquotes and rules, and escapes all
+HTML before parsing (tested with `<script>` input).
+
+Two import artifacts made this harder than a Markdown library:
+
+- bodies contain HTML comments (`<!-- dispatch:additional-media -->`) which would have
+  shown as literal text;
+- bodies contain absolute `https://slop.boutique/_d/…` images and links to `/apps/<id>`,
+  which must be rewritten to same-host paths to honour “no external network requests”.
+
+What I did: stripped comments, rewrote the origin, and kept the renderer small
+(~60 lines) instead of pulling a library (no CDN allowed anyway).
+
+## 12. `bind` + `record` is only documented by one example
+
+The journal route uses `--record 'posts/{slug}.md'` with no `--bind`; the experiments
+route uses `--record 'experiments/{slug}.json'` and declares `reads` in the page. I
+ended up with both:
+
+```
+--record '{id}.json' --bind catalog=francois-catalog
+```
+
+and the route table shows `{"catalog":{"artifact":"francois-catalog","version":null}}`.
+But `--bind` turned out to be **redundant** when `slop.json` already reads the same
+artifact — a probe route with no `--bind` still produced `record: "weft.json"` and
+`data.catalog` with 104 rows:
+
+```
+$ slop route set '/probe3/:id' probe-media --record '{id}.json'
+$ curl /probe3/weft   ->  record='weft.json'  params={'id':'weft'}  catalog=104
+```
+
+What is *not* silent is a parameter name mismatch. A route with no `:id` segment and
+`--record '{id}.json'` injects `record: ".json"` and an empty `params: {}` — no error,
+no missing-record warning:
+
+```
+$ slop route set /probe2 probe-media --record '{slug}.json'
+$ curl /probe2   ->  record='.json'  params={}
+```
+
+Also: `window.slop.record` is set to the **relative** record path (`weft.json`), not an
+absolute one, while `slop.data.catalog` is a full list. I ignore `slop.record` and use
+`slop.route.params.id` + `catalog.list()`.
+
+## 13. Version tokens are inconsistent across surfaces
+
+Four spellings for the same idea:
+
+- routes: `main` (follow) or `v3` / `3` (pinned) in `route list`;
+- data files: `/_d/<artifact>/main/…` (the catalog's `src`) **or**
+  `/_d/<artifact>/1/…` (the boot data's `src`) — both work;
+- page files: `/_v/<artifact>/3/…` only (numeric; `main` 404s);
+- API: `/api/artifacts/<id>/versions/1/files/…` (`main` also accepted).
+
+There is also no way to ask “what URL should this file have?” — the conclusion is
+different for data (`/_d/`) and pages (`/_v/`), and neither is documented.
+
+## 14. The route table is the only index, and it has no grouping
+
+After this work the site has 111 route rows, 100 of which are `/r/<page>` with the same
+note. There is no namespace, tag, owner, or list filter, so a human reading
+`slop route list` sees the catalogue sprinkled between `/about` and `/pricing`. There is
+also no way to distinguish “route I added for a derived link” from “route that is a real
+page” except the note string.
+
+## 15. Imported release pages break the “no external requests” rule
+
+The release pages are the original francois HTML. Loading `/r/mimeo-studio` requested:
+
+```
+https://fonts.googleapis.com/css2?family=Anton&…
+https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js
+https://fonts.gstatic.com/s/imfellenglish/…
+```
+
+My pages (`/`, `/apps/:id`) make no external requests — only same-origin `/_d/` images
+and the runtime — but the storefront now leads to pages that do. I did not modify the
+imported release HTML (it is the artifact's content, not mine), and there is no
+per-artifact CSP or “self-contained” check in slop that would flag it.
+
+## 16. Smaller things
+
+- `slop pull` of a data artifact is the only way to see `cover → file` mapping; the CLI
+  has no `slop file`/`slop assets` command. I mapped `cover.id` to
+  `files/<id>.<ext>` by hand across three artifacts.
+- `_d` `index.json` works for `francois-media` but 404s for `francois-catalog` — because
+  the catalog has no `index.json`. It cost a minute to realize this was not another
+  gating rule.
+- `gallery` entries in some records carry `width: 0, height: 0` (e.g. `lattice-deck`), so
+  aspect-ratio-based thumbnails collapse. I used a fixed 160 px `object-fit: contain`
+  tile instead.
+- `slop push <dir> -a <name>` creates on first push and updates without `-a` on later
+  pushes; the artifact/kind/project are read from `slop.json`, so a wrong `slop.json`
+  is only caught at push time.
+- `tokens: "lab-tokens"` (a lab-site artifact) works from a francois project page; that
+  was the one cross-project thing that just worked.
+
+---
+
+## What worked well
+
+- `slop route set /apps/:id storefront-entry --record '{id}.json'` gave every one of the
+  100 records a working page with no per-record pages.
+- `route set /r/<page> page@n` served the 1 MB standalone release HTML unmodified, with
+  its embedded fonts and assets intact.
+- The boot-data runtime (`slop.data.catalog.list()`, `slop.tokens`, inline records) meant
+  the pages needed no build step, no fetch layer and no external requests.
+- `route undo` and the route log made the destructive `/` and `/apps/:id` changes
+  reversible; I used the note field to explain each one.

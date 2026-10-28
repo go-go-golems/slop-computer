@@ -19,3 +19,8 @@
 - [ ] Phase B [operator]: push/merge the two branches, terraform apply, bootstrap secrets + Vault roles, set image tag, apply Argo app, first admin
 - [ ] Phase C [operator]: rehearse francois restore (db + blobs); DB-source import (real HTML for paid releases)
 - [ ] Phase E [operator]: slop blobs in backups; decide on teardown
+- [x] Remote deploy: image sha-cb68898, ZITADEL slop-web (terraform #38), Vault, gitops #397/#398, Argo app — live at https://slop.yolo.scapegoat.dev
+- [x] francois admins (Manuel, Ramon) imported as slop admins; E2E test admin left out
+- [x] Real import on the cluster (108 artifacts) and the agent storefront at https://site.slop.yolo.scapegoat.dev/
+- [ ] Merge PR #2, then bump the gitops image tag (sign-out fix on the cluster)
+- [ ] Next ticket from the agent NOTES: route-by-record, per-route data projections, route conflict warnings, --output json, document /_d/ and /_v/

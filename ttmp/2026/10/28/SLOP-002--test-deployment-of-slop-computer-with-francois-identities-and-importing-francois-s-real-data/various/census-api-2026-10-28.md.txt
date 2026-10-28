@@ -1,0 +1,66 @@
+# francois → slop census
+
+Source: api https://slop.boutique, read 2026-10-28T22:45:03Z. Imported 2026-10-28T22:45:28Z.
+
+104 catalog artifacts (103 with releases), 113 releases (110 published, 3 withdrawn), 96 free samples.
+Release HTML: 95 copied (74.9 MB), 18 placeholders.
+
+## What the releases need
+
+| bucket | releases | artifacts |
+| --- | ---: | --- |
+| static | 83 | weft, vitrine, type-studio, pointfield-cad, loom-pitch, shop … (+74) |
+| static+downloads | 12 | octavo-lab, kiln-workbench, craftkit-studio, tabula-workbench, sonnet-new-roman-modular, nerve-workbench … (+4) |
+| needs-runtime:db,user | 7 | rag-workbench, lattice-arena, transcript-hub, lattice-arena-ds |
+| needs-runtime:db,room,user | 5 | living-comic-studio, hypercore-studio, lattice-deck |
+| needs-runtime:db | 4 | agent-gym-works, tilth-garden, lab-104-factory-twin, diary-workbench |
+| needs-runtime:room | 2 | mimeo, mimeo-studio |
+
+18 releases have no HTML here, so whether they boot francois's runtime without declaring capabilities is unknown; they are bucketed by manifest only.
+
+## Gaps, by how much imported content each blocks
+
+| gap | releases | artifacts | what |
+| --- | ---: | ---: | --- |
+| G10 | 32 | 32 | Scripts from other hosts (CSP and offline use) |
+| G5 | 18 | 13 | Page runtime capabilities (any of db, user, room, comments, assets, artifact, files) |
+| G9 | 18 | 13 | Release HTML not readable by this source (placeholder pages) |
+| G5:db | 16 | 11 | Page runtime capability db |
+| G3 | 15 | 12 | Access tiers: paid and early-access releases are public on slop |
+| G5:user | 12 | 7 | Page runtime capability user |
+| G5:room | 7 | 5 | Page runtime capability room |
+| G4 | 3 | 1 | Withdrawn and draft releases: kept as non-main versions |
+
+## Manifest capabilities
+
+| capability | releases |
+| --- | ---: |
+| db | 16 |
+| downloads | 24 |
+| room | 7 |
+| sample | 113 |
+| user | 12 |
+
+## Scripts from other hosts
+
+| host | releases |
+| --- | ---: |
+| cdn.jsdelivr.net | 12 |
+| cdnjs.cloudflare.com | 30 |
+
+## Storefront fields (now data in francois-catalog)
+
+- listed 100, hidden 4, featured 5, demo enabled 21, with credited creators 3
+- early access still running: 81; unpublished page drafts: 0
+- launch modes: tab 104
+
+## Media, posts, creators
+
+- media library: 745 files (361.2 MB); copied 689 (322.1 MB) that pages, posts or creators reference
+- dangling media references: 0
+- attachments: 18 (63.8 MB), 18 copied
+- posts: none; creators: 2; francois admins: 3
+
+## Not imported (row counts)
+
+- instances: 89
