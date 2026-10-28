@@ -23,6 +23,15 @@ func TestParse(t *testing.T) {
 	if bad := Parse("x/bad.json", []byte(`{`)); bad["error"] == nil {
 		t.Fatal("bad JSON must be marked")
 	}
+	img := Parse("files/med_1.png", []byte("\x89PNG"))
+	if img["file"] != true || img["id"] != "med_1" || img["text"] != nil {
+		t.Fatalf("file record %v", img)
+	}
+	read := 0
+	rs, err := FromFiles([]string{"b.md", "a.webp"}, func(string) ([]byte, error) { read++; return []byte("x"), nil })
+	if err != nil || len(rs) != 2 || read != 1 || rs[0]["file"] != true {
+		t.Fatalf("FromFiles read binary content: %v %d", rs, read)
+	}
 	if meta, body := FrontMatter("no front matter"); len(meta) != 0 || body != "no front matter" {
 		t.Fatal("plain text")
 	}

@@ -1,6 +1,7 @@
 // Package records turns the files of a data version into the records pages
 // read through window.slop.data: Markdown with front matter, JSON, CSV or
-// text. It ports the Workshop prototype's parser (sources/workshop/render.js
+// text. Other files (images, video, fonts) become file records without
+// their content; the server gives them a src URL. It ports the Workshop prototype's parser (sources/workshop/render.js
 // frontMatter/records/tokensCSS) and renders Markdown with goldmark.
 package records
 
@@ -68,10 +69,22 @@ func Markdown(src string) string {
 
 func base(p string) string { b := path.Base(p); return strings.TrimSuffix(b, path.Ext(b)) }
 
+// textExt are the extensions whose content becomes part of a record.
+var textExt = map[string]bool{"": true, ".md": true, ".json": true, ".csv": true, ".txt": true, ".tsv": true, ".yaml": true, ".yml": true}
+
+// IsText reports whether a file's content is parsed into its record; other
+// files become file records ({id, path, file: true}).
+func IsText(p string) bool { return textExt[strings.ToLower(path.Ext(p))] }
+
 // Parse turns one file into a record.
 func Parse(p string, content []byte) Record {
 	r := Record{}
-	switch path.Ext(p) {
+	if !IsText(p) {
+		r["file"] = true
+		r["id"], r["path"] = base(p), p
+		return r
+	}
+	switch strings.ToLower(path.Ext(p)) {
 	case ".md":
 		meta, body := FrontMatter(string(content))
 		r["tags"] = []string{}
@@ -105,6 +118,10 @@ func FromFiles(paths []string, read func(string) ([]byte, error)) ([]Record, err
 	sort.Strings(paths)
 	out := []Record{}
 	for _, p := range paths {
+		if !IsText(p) {
+			out = append(out, Parse(p, nil))
+			continue
+		}
 		b, err := read(p)
 		if err != nil {
 			return nil, err

@@ -320,6 +320,9 @@ type pushRequest struct {
 	Create   *store.ArtifactInput `json:"create"`
 	MoveMain *bool                `json:"moveMain"`
 	Force    bool                 `json:"force"`
+	// Author pushes on behalf of another user (imports). Only a signed-in
+	// admin or a token with the admin scope may set it; it is audited.
+	Author string `json:"author"`
 }
 
 // push stores a new version from a complete tree of already uploaded blobs.
@@ -388,22 +391,40 @@ func (s *Server) push(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 	}
+	p := principal(r.Context())
 	via := "browser"
-	if p := principal(r.Context()); p.Grant != nil {
+	if p.Grant != nil {
 		via = "tool"
 	} else if p.Token != nil {
 		via = "cli"
-		if in.Via == "claude" || in.Via == "agent" {
+		if in.Via == "claude" || in.Via == "agent" || in.Via == "import" {
 			via = in.Via
 		}
+	}
+	author := actor(r)
+	if in.Author != "" && in.Author != author {
+		if p.Grant != nil || (p.Token != nil && !p.Token.Allows(store.ScopeAdmin)) {
+			httpx.Fail(w, 403, "author_not_allowed", "Pushing on behalf of someone else needs the admin scope")
+			return
+		}
+		u, err := s.Store.User(r.Context(), in.Author)
+		if err != nil || u.Role == store.RoleDisabled {
+			httpx.Fail(w, 400, "invalid_author", "author must be an existing, enabled user")
+			return
+		}
+		author = u.ID
 	}
 	moveMain := in.MoveMain == nil || *in.MoveMain
 	res, err := s.Store.Push(r.Context(), store.PushInput{Artifact: r.PathValue("id"), Base: in.Base, Tree: tree, Manifest: manifest,
 		Message: strings.TrimSpace(in.Message), Via: via, Session: in.Session, Reply: in.Reply, Create: in.Create,
-		MoveMain: moveMain, Force: in.Force, Actor: actor(r), TokenID: tokenID(r)})
+		MoveMain: moveMain, Force: in.Force, Actor: author, TokenID: tokenID(r)})
 	if err != nil {
 		s.fail(w, err)
 		return
+	}
+	if author != actor(r) && !res.Unchanged {
+		_ = s.Store.Audit(r.Context(), actor(r), "version.push_as", res.Artifact.ID,
+			map[string]any{"author": author, "n": res.Version.N, "via": via})
 	}
 	s.publish(res.Events)
 	code := 201

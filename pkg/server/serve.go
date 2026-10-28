@@ -66,6 +66,15 @@ func (s *Server) records(ctx context.Context, artifact string, n int) ([]records
 	if err != nil {
 		return nil, v, err
 	}
+	// File records point at their bytes; the URL names the version, so it
+	// can be cached for good.
+	for _, rec := range out {
+		if rec["file"] == true {
+			p, _ := rec["path"].(string)
+			rec["src"] = "/_d/" + artifact + "/" + strconv.Itoa(v.N) + "/" + p
+			rec["type"], rec["size"] = v.Files[p].Type, v.Files[p].Size
+		}
+	}
 	s.recCache.put(key, out)
 	return out, v, nil
 }
@@ -201,6 +210,48 @@ func notFoundPage(w http.ResponseWriter) {
 
 var versionPath = regexp.MustCompile(`^/_v/([a-z0-9][a-z0-9-]{0,62})/([0-9]+)/(.+)$`)
 
+// dataPath is /_d/<artifact>/<n or main>/<file>: a file of a data artifact
+// that a page reads (records give image files a src there).
+var dataPath = regexp.MustCompile(`^/_d/([a-z0-9][a-z0-9-]{0,62})/(main|[0-9]+)/(.+)$`)
+
+// serveData serves a file of a data version. Numbered versions never change;
+// main may move, so it is revalidated (by ETag) on every use.
+func (s *Server) serveData(w http.ResponseWriter, r *http.Request, m []string) {
+	n := 0
+	if m[2] != "main" {
+		n, _ = strconv.Atoi(m[2])
+	}
+	v, err := s.Store.Version(r.Context(), m[1], n)
+	f, ok := v.Files[m[3]]
+	if err != nil || !ok || m[3] == "slop.json" {
+		notFoundPage(w)
+		return
+	}
+	if n == 0 {
+		w.Header().Set("Cache-Control", "no-cache")
+		file, err := s.Blobs.Open(f.SHA256)
+		if err != nil {
+			unavailable(w, err)
+			return
+		}
+		defer func() { _ = file.Close() }()
+		w.Header().Set("Content-Type", f.Type)
+		w.Header().Set("ETag", `"`+f.SHA256+`"`)
+		http.ServeContent(w, r, "", zeroTime, file)
+		return
+	}
+	s.serveBlob(w, r, f)
+}
+
+// reads lists the data artifacts a page version reads under a route.
+func (s *Server) reads(ctx context.Context, v store.Version, route *store.Route) map[string]bool {
+	out := map[string]bool{}
+	for _, b := range s.bindings(ctx, v, route) {
+		out[b.Artifact] = true
+	}
+	return out
+}
+
 // serveSite answers a site host through its route table.
 func (s *Server) serveSite(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodGet && r.Method != http.MethodHead {
@@ -232,6 +283,21 @@ func (s *Server) serveSite(w http.ResponseWriter, r *http.Request) {
 			}
 		}
 		return false
+	}
+	// /_d/<artifact>/<n>/<file>: a file of data some routed page reads.
+	if m := dataPath.FindStringSubmatch(r.URL.Path); m != nil {
+		for _, rt := range public {
+			n := 0
+			if rt.Version != nil {
+				n = *rt.Version
+			}
+			if v, err := s.Store.Version(ctx, rt.Page, n); err == nil && s.reads(ctx, v, &rt)[m[1]] {
+				s.serveData(w, r, m)
+				return
+			}
+		}
+		notFoundPage(w)
+		return
 	}
 	// /_v/<artifact>/<n>/<file>: an explicit file of a routed page's version.
 	if m := versionPath.FindStringSubmatch(r.URL.Path); m != nil {
@@ -335,6 +401,28 @@ func (s *Server) serveSandbox(w http.ResponseWriter, r *http.Request, label stri
 	}
 	v, err := s.Store.Version(ctx, artifact, n)
 	if err != nil {
+		notFoundPage(w)
+		return
+	}
+	// Data files the previewed version reads, by its manifest or through a
+	// route to it on any site host.
+	if m := dataPath.FindStringSubmatch(r.URL.Path); m != nil {
+		if s.reads(ctx, v, nil)[m[1]] {
+			s.serveData(w, r, m)
+			return
+		}
+		for _, host := range s.Config.SiteHosts {
+			routes, err := s.Store.Routes(ctx, host)
+			if err != nil {
+				continue
+			}
+			for _, rt := range routes {
+				if rt.Page == v.Artifact && s.reads(ctx, v, &rt)[m[1]] {
+					s.serveData(w, r, m)
+					return
+				}
+			}
+		}
 		notFoundPage(w)
 		return
 	}

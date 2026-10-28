@@ -110,6 +110,8 @@ type PushRequest struct {
 	Create   *CreateArtifact   `json:"create,omitempty"`
 	MoveMain *bool             `json:"moveMain,omitempty"`
 	Force    bool              `json:"force,omitempty"`
+	// Author pushes on behalf of another user; needs the admin scope.
+	Author string `json:"author,omitempty"`
 }
 
 type PushResult struct {
@@ -190,6 +192,21 @@ func (c *Client) MissingBlobs(ctx context.Context, sums []string) ([]string, err
 
 func (c *Client) PutBlob(ctx context.Context, sum string, data []byte) error {
 	return c.do(ctx, request{method: http.MethodPut, path: "/api/blobs/" + sum, bodyReader: bytes.NewReader(data), contentType: "application/octet-stream"}, nil)
+}
+
+// User is an account as GET /api/users lists it.
+type User struct {
+	ID      string `json:"id"`
+	Issuer  string `json:"issuer"`
+	Subject string `json:"subject"`
+	Email   string `json:"email"`
+	Name    string `json:"name"`
+	Role    string `json:"role"`
+}
+
+func (c *Client) Users(ctx context.Context) ([]User, error) {
+	var out []User
+	return out, c.get(ctx, "/api/users", nil, &out)
 }
 
 func (c *Client) Push(ctx context.Context, id string, in PushRequest) (PushResult, error) {
