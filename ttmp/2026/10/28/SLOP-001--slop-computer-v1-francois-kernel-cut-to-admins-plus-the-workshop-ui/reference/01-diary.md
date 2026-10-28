@@ -727,3 +727,72 @@ I ran the "contact sheet" round end to end against a local server with two ident
 ### Technical details
 - Push request: `{"tree":{path:sha},"manifest":{…},"message","via","session","base":n,"reply":{"thread","text"},"create":{title,kind,type,project},"moveMain":bool,"force":bool}` → `201 {artifact,version,created,unchanged:false,warnings}` or `200 {…,unchanged:true}`; `409 main_moved`.
 - Cursor file: `$SLOP_CONFIG_DIR/cursors.json`, keyed by server + scope (`project:<id>` / `artifact:<id>` / `all`).
+
+## Step 15: Phase 5 — the Workshop in React + RTK Query, embedded
+
+This step replaces the server's placeholder home page with the Workshop: the prototype's five screens (Watch, Routes, Artifacts, Site, Admin) rebuilt in React 19 + Redux Toolkit Query against the real API, built by Vite, and embedded in the binary. The prototype's `style.css` is used unchanged, so the screens look like the prototype; the code is new.
+
+Everything that changes on the server reaches the UI the same way: `/api/events` (SSE) → `api/events.ts` → `invalidateTags`. Mutations never invalidate anything themselves, so a comment from Ramon's browser, a push from an agent and your own click all refresh the cache through one code path.
+
+### Prompt Context
+**User prompt (verbatim):** see Step 9 (and, mid-step: "to test the coding agent interactino with the API, yu can run pi agent with deepsee-4.1-flash thinking medium to create a few pages, and potentially add a set of artifacts if necessary with real data (or get real data from https://slop.computer/, with the francois CLI)" and "you can actually run multiple coding agents (simulating ramon or manuel) in tmux tabs.")
+**Assistant interpretation:** Phase 5 of the guide; the two mid-step messages define the exit check: real coding agents (pi) as Manuel's and Ramon's agents, in tmux windows, driven by comments made in the Workshop.
+**Inferred user intent:** A Workshop that two people and their agents can actually use together, tested with real agents rather than scripted ones.
+**Commit (code):** b7b8bd6 — "SLOP-001 phase 5: Workshop in React + RTK Query, embedded in the binary"
+
+### What I did
+- `web/workshop/` (pnpm, Vite 8.3.5, @vitejs/plugin-react 6.1.2, React 19.3.1, RTK 2.13.0, react-redux 9.3.1, TypeScript 5.9.3; versions pinned exactly):
+  - `src/api/types.ts` (hand-written to match the Go JSON), `slopApi.ts` (every endpoint; `push` is a `queryFn` mutation: SHA-256 via `crypto.subtle`, `blobs/missing`, `PUT` missing blobs, `POST versions`, carrying unchanged files over as `keep`), `events.ts` (event → tags table, console lines, "Claude Code pushed …" toasts).
+  - `src/app/`: `boot.ts` (`/api/me` + `/api/config`, CSRF token), `store.ts`, `ui.ts` (toasts, console, live flag — the only non-RTKQ state), `router.ts` (path router via `useSyncExternalStore`: `/watch/<artifact>/<n>`, `/routes`, …), `hooks.ts`, `format.ts`, `App.tsx` (+ `PendingScreen`).
+  - `src/components/atoms` (Button, Tag, Count, Avatar, Select, Seg, Toggle, Tabs, …), `molecules` (ThreadItem + ReplyBox, Composer, VersionRow, FilmFrame), `organisms` (PreviewStage + Thumb, CommentsPane, VersionsPane, ConsolePane, PageToolbar, VisitLine, Filmstrip, FilesPane, RecordsPane + RecordForm, TokensEditor, TopBar, ToastHost), `screens` (Watch, Routes, Artifacts + PushDialog, Site, Admin).
+  - `src/preview/bridge-protocol.ts`: the message types `pkg/render/assets/bridge.js` speaks.
+- `pkg/web`: `go generate ./pkg/web` runs `pnpm install --frozen-lockfile && pnpm build` and copies `dist/` (without source maps) to `pkg/web/workshop/` (git-ignored); `embed.go` (`-tags embed`) embeds it, `embed_none.go` reads it from disk (found via go.mod) or leaves `Workshop` nil.
+- `pkg/server/workshop.go`: `index.html` for `/`, `/watch[/…]`, `/routes`, `/artifacts`, `/site`, `/admin` (signed out → `/auth/login?return=…`; no build → the old placeholder with a hint); `/static/workshop/{path...}` with `immutable` caching for `assets/`. `Config.Workshop fs.FS`.
+- `GET /api/routes?resolve=1`: each route plus `n` (served version) and `data` (resolved bindings), so Routes, Watch and Artifacts don't each resolve bindings client-side.
+- Makefile: `generate`/`web`, `build` (embedded binary `./slop`), `dev-backend` (`serve --local --dev-origin http://localhost:5173`), `dev-frontend` (`pnpm dev`, proxying `/api /auth /device /_/ /_slop /static`).
+- `pkg/server/workshop_test.go`: sign-in redirect with return path, index on every client path, immutable assets, `?resolve=1`.
+
+### Why
+- **Path router, no react-router:** five screens and one parameterised path; 40 lines with `useSyncExternalStore` keep the dependency list to React + RTK.
+- **`?resolve=1` on the server:** the prototype's `bindingsFor` needed every page version's manifest on the client; the server already has `bindings()` for rendering, so it answers it once per route.
+- **Dev base `/`, build base `/static/workshop/`:** Vite's SPA fallback in dev serves `/watch/...` directly; in production the server owns those paths and serves assets under `/static/` (AGENT.md web guideline).
+- **iframe `sandbox="allow-scripts allow-same-origin …"`:** previews are on their own sandbox origin, so `allow-same-origin` gives them *their* origin (needed for `e.origin` checks and the page's own storage), never the Workshop's.
+
+### What worked
+- `pnpm check` and `pnpm build` clean on the first run; `go test ./...` on SQLite and Postgres; `make lint` 0 issues.
+- Browser walkthrough (Playwright, local server with `slop dev seed`, signed in as manuel via the nickname page, which returned to `/watch/pricing`): screenshots in `various/screenshots/ws-*.png`.
+  - Watch: threads with agent replies, pins drawn in the sandbox preview, "/pricing serves v5, pinned · Point /pricing at v15", filmstrip thumbnails.
+  - C → click the headline → composer "On v15 of pricing · h1.sb-h1" → ⌘↩ → thread 4 appears through SSE, pin 4 outlined on the heading.
+  - Routes: resolved bindings (`experiments@main journal@main`), "v15 newer" on the pinned route, preview, binding selects, history.
+  - Artifacts: grouped by project with live thumbnails and record summaries; Site: following "Journal" inside the frame navigates the Site screen (`/journal → journal-index v6 (main) · posts = journal v3 · tokens v2`); Admin: people with role selects.
+
+### What didn't work
+- Playwright could not click inside the preview at Desktop width: `<p class="tier-price">… subtree intercepts pointer events` — its hit-testing does not account for the CSS `transform: scale()` on the device box. Switching to Fit (scale 1) made the click land. A real mouse is not affected.
+- Console warning `Failed to execute 'postMessage' on 'DOMWindow': The target origin provided ('http://s8e76….sandbox.localhost:18080') does not match the recipient window's origin ('http://localhost:18080')`: pins were posted before the iframe left `about:blank`. Now nothing is sent until the bridge's `ready`, and `ready` resets when the URL changes.
+- `#root` had no height, so the layout did not fill the window in the first screenshot; added `#root { height:100% }` (`styles/react.css`).
+- The running server embeds the build, so UI changes need regenerate + rebuild + restart; scripted in the scratchpad (`restart.sh`).
+- `ERR_INCOMPLETE_CHUNKED_ENCODING` on `/api/events` after a restart: the stream was cut; EventSource reconnects by itself (expected).
+
+### What I learned
+- Thumbnails need a route context too: pages behind `:param` routes (app-page, journal-post) show their "No post called …" state in thumbnails because a thumb has no path.
+
+### What was tricky to build
+- Keeping one event path: the push mutation, thread mutations and route mutations return data but invalidate nothing; the UI updates when the server's own event comes back over SSE. That means a slow or broken stream shows stale data — the TopBar's live dot (green when `ready` was received) makes that visible.
+- The Watch screen's state (picking, pending anchor, focus, scroll-to-pin requests, missing pins) has to survive version changes but reset on artifact changes: the screen is keyed by artifact id in `App`.
+
+### What warrants a second pair of eyes
+- `PreviewStage` origin checks: messages are accepted only if `e.source` is our iframe's window *and* `e.origin` ends with `.` + sandbox domain; messages are sent with the sandbox URL's exact origin as target.
+- The browser push keeps every unchanged file of the version it edits (`keep`) and sends `base`; a stale base is refused (`main_moved`) and the form says to open the newest version.
+
+### What should be done in the future
+- Thumbnails for `:param` routes: pass a sample path (the Watch toolbar already computes one).
+- Safe mode `/_/` (Phase 5 task, next step).
+- Design-token drafts can't be previewed before saving (the prototype injected them; the sandbox serves stored versions) — a bridge message to set CSS variables would bring it back.
+
+### Code review instructions
+- Start at `web/workshop/src/api/slopApi.ts` and `api/events.ts`, then `components/organisms/PreviewStage.tsx`, `screens/WatchScreen.tsx`; server side `pkg/server/workshop.go`, `pkg/web/*`.
+- Validate: `make build && ./slop serve --local` (then `slop dev seed`), open http://localhost:8080; or `make dev-backend` + `make dev-frontend` and open http://localhost:5173.
+
+### Technical details
+- Event → invalidation table: `version.created` → `Version:<artifact>`, `Artifact:LIST`, `Route:LIST`, `Audit`; `route.set|removed` → `Route:LIST`, `RouteLog`; `thread.*|comment.created` → `Thread:<artifact>`, `Thread:ALL`; `agent.waiting|left` → `Agent`; `user.role` → `User`; `token.*` → `Token`.
+- Bundle: 375 KB JS (116 KB gzip), 22.5 KB CSS.
