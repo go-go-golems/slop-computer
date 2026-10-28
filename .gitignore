@@ -9,3 +9,8 @@ coverage/
 deploy/compose/.env
 web/workshop/dist/
 .playwright-mcp/
+
+# Workshop build (go generate ./pkg/web)
+/pkg/web/workshop/
+/web/workshop/node_modules/
+/web/workshop/dist/

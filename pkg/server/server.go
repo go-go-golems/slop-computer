@@ -7,6 +7,7 @@ package server
 
 import (
 	"context"
+	"io/fs"
 	"net"
 	"net/http"
 	"net/url"
@@ -46,6 +47,8 @@ type Config struct {
 	SandboxDomain string
 	// TrustProxyHeaders takes the client address from X-Real-Ip / X-Forwarded-For.
 	TrustProxyHeaders bool
+	// Workshop is the Workshop's build (pkg/web); nil shows a placeholder.
+	Workshop fs.FS
 }
 
 func (c Config) Secure() bool { return c.PublicURL.Scheme == "https" }
@@ -178,8 +181,8 @@ func (s *Server) routes() *http.ServeMux {
 	s.previewRoutes(m)
 	s.streamRoutes(m)
 	m.HandleFunc("/api/", func(w http.ResponseWriter, r *http.Request) { httpx.Fail(w, 404, "not_found", "Unknown API route") })
+	s.workshopRoutes(m)
 	m.HandleFunc("GET /static/", s.staticFile)
-	m.HandleFunc("GET /{$}", s.guard(public, noToken, s.homePage))
 	return m
 }
 

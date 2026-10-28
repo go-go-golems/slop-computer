@@ -15,6 +15,7 @@ import (
 	"github.com/go-go-golems/slop-computer/pkg/identity"
 	"github.com/go-go-golems/slop-computer/pkg/server"
 	"github.com/go-go-golems/slop-computer/pkg/store"
+	"github.com/go-go-golems/slop-computer/pkg/web"
 	"github.com/pkg/errors"
 	"github.com/rs/zerolog/log"
 	"golang.org/x/sync/errgroup"
@@ -141,6 +142,7 @@ func (c *serveCmd) Run(ctx context.Context, v *values.Values) error {
 		}
 	}
 	cfg.ExtraOrigins = extra
+	cfg.Workshop = web.Workshop
 	if !local {
 		secret, err := readSecret(a.S("oidc-client-secret-file"))
 		if err != nil {

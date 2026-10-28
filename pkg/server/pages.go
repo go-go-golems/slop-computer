@@ -54,13 +54,3 @@ func urlQueryEscape(s string) string { return url.QueryEscape(s) }
 func (s *Server) staticFile(w http.ResponseWriter, r *http.Request) {
 	http.StripPrefix("/static/", http.FileServerFS(mustSub(staticFiles, "static"))).ServeHTTP(w, r)
 }
-
-// homePage is a placeholder until the Workshop is embedded (phase 5).
-func (s *Server) homePage(w http.ResponseWriter, r *http.Request) {
-	p := principal(r.Context())
-	if p == nil {
-		http.Redirect(w, r, "/auth/login", http.StatusSeeOther)
-		return
-	}
-	s.render(w, http.StatusOK, "home", map[string]any{"Me": p.User, "CSRF": p.Session.CSRF})
-}

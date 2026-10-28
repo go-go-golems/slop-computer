@@ -1,0 +1,163 @@
+import { useMemo, useState } from 'react'
+import { errorText, useArtifactsQuery, useProjectsQuery, usePushMutation, useRecordsQuery, useThreadsQuery, useVersionsQuery } from '../api/slopApi'
+import type { Artifact, Version } from '../api/types'
+import { ago, plural } from '../app/format'
+import { useReaders, useRoutesUsing } from '../app/hooks'
+import { navigate, watchPath } from '../app/router'
+import { toast } from '../app/store'
+import { Button, Count, IconButton, Seg, Select, Tag } from '../components/atoms'
+import { Thumb } from '../components/organisms/PreviewStage'
+
+type Kind = 'all' | 'page' | 'data'
+
+// ArtifactsScreen is every artifact by project (prototype app.js renderArtifacts).
+export function ArtifactsScreen() {
+  const { data: arts = [] } = useArtifactsQuery()
+  const { data: projects = [] } = useProjectsQuery()
+  const [q, setQ] = useState('')
+  const [kind, setKind] = useState<Kind>('all')
+  const [pushing, setPushing] = useState(false)
+  const groups = useMemo(() => {
+    const ids = [...projects.map(p => p.id), null]
+    return ids.map(id => ({
+      id,
+      project: projects.find(p => p.id === id),
+      items: arts.filter(a => a.project === id && (kind === 'all' || a.kind === kind) && (!q.trim() || (a.id + ' ' + a.title).toLowerCase().includes(q.trim().toLowerCase()))),
+    })).filter(g => g.items.length)
+  }, [arts, projects, q, kind])
+  return (
+    <div className="split">
+      <section className="tile main">
+        <div className="toolbar">
+          <input className="filter" type="search" placeholder="Find an artifact" aria-label="Find an artifact" value={q} onChange={e => setQ(e.target.value)} />
+          <Seg label="Kind" value={kind} onChange={setKind} options={[['all', 'All'], ['page', 'Pages'], ['data', 'Data']]} />
+          <span className="sp" />
+          <Button variant="primary" onClick={() => setPushing(true)}>Push a file…</Button>
+        </div>
+        <div className="tilebody"><div className="scroll" id="agrid">
+          <div className="agrid">
+            {groups.map(g => [
+              <div key={'h' + g.id} className="grp-h"><b>{g.project?.name ?? 'No project'}</b><span>{plural(g.items.length, 'artifact') + (g.project?.brief ? ' · ' + g.project.brief : '')}</span></div>,
+              ...g.items.map(a => <ArtifactCard key={a.id} a={a} />),
+            ])}
+          </div>
+        </div></div>
+      </section>
+      {pushing ? <PushDialog onClose={() => setPushing(false)} /> : null}
+    </div>
+  )
+}
+
+function ArtifactCard({ a }: { a: Artifact }) {
+  const using = useRoutesUsing(a.id)
+  const readers = useReaders(a.id)
+  const { data: threads = [] } = useThreadsQuery() // one request for all cards
+  const routes = a.kind === 'data' ? readers : using
+  const open = threads.filter(t => t.artifact === a.id && !t.resolved).length
+  return (
+    <button type="button" className="acard" onClick={() => navigate(watchPath(a.id))}>
+      <div className="shot">{a.kind === 'data' ? <DataShot a={a} /> : a.main ? <Thumb artifact={a.id} n={a.main} /> : null}</div>
+      <div className="ab">
+        <div className="t"><b>{a.id}</b><Tag>{a.kind === 'data' ? a.type || 'data' : 'page'}</Tag>{open ? <Count n={open} bad title="open threads" /> : null}</div>
+        <LatestLine a={a} />
+        <span className="tags">{routes.length ? routes.slice(0, 3).map(r => <Tag key={r.host + r.path}>{r.path}</Tag>) : <Tag tone="red">{a.kind === 'data' ? 'read by no route' : 'not routed'}</Tag>}</span>
+      </div>
+    </button>
+  )
+}
+
+function LatestLine({ a }: { a: Artifact }) {
+  const { data: versions = [] } = useVersionsQuery(a.id)
+  const v: Version | undefined = versions[versions.length - 1]
+  if (!v) return <small>{`v${a.latest}`}</small>
+  return <><small>{`v${v.n} · ${ago(v.at)}${v.via === 'claude' ? ' · Claude Code' : ''}`}</small><small>{v.message}</small></>
+}
+
+function DataShot({ a }: { a: Artifact }) {
+  const { data: recs = [] } = useRecordsQuery({ id: a.id, n: a.main }, { skip: !a.main || a.type === 'tokens' })
+  return (
+    <div className="dsum">
+      <b>{a.type === 'tokens' ? 'tokens.json' : plural(recs.length, a.type === 'post' ? 'post' : 'record')}</b>
+      {recs.slice().sort((x, y) => String(y.date ?? '').localeCompare(String(x.date ?? ''))).slice(0, 5).map(r => <span key={r.path}>{(r.date ? r.date + '  ' : '') + (r.title ?? r.id)}</span>)}
+    </div>
+  )
+}
+
+// PushDialog pushes files picked or pasted in the browser as a new version
+// (or a new artifact). Files not chosen are kept from the current version.
+function PushDialog({ onClose }: { onClose: () => void }) {
+  const { data: arts = [] } = useArtifactsQuery()
+  const { data: projects = [] } = useProjectsQuery()
+  const [target, setTarget] = useState(arts[0]?.id ?? '__new')
+  const [newId, setNewId] = useState('')
+  const [kind, setKind] = useState('page')
+  const [project, setProject] = useState(projects[0]?.id ?? '')
+  const [files, setFiles] = useState<FileList | null>(null)
+  const [paste, setPaste] = useState('')
+  const [msg, setMsg] = useState('')
+  const [err, setErr] = useState('')
+  const isNew = target === '__new'
+  const a = arts.find(x => x.id === target)
+  const { data: versions = [] } = useVersionsQuery(target, { skip: isNew })
+  const [push, { isLoading }] = usePushMutation()
+  const isPage = isNew ? kind === 'page' : a?.kind === 'page'
+  const id = isNew ? newId.trim().toLowerCase().replace(/[^a-z0-9-]+/g, '-').replace(/^-|-$/g, '') : target
+
+  const doPush = async () => {
+    setErr('')
+    if (!id) return setErr('Give the new artifact a name.')
+    if (isNew && arts.some(x => x.id === id)) return setErr(`${id} exists already. Pick it in the list to push a new version.`)
+    const out: Record<string, string> = {}
+    const list = Array.from(files ?? [])
+    const dir = kind === 'post' ? 'posts/' : kind === 'records' ? 'records/' : ''
+    const htmlCount = list.filter(f => /\.html?$/i.test(f.name)).length
+    for (const f of list) {
+      let name = f.name
+      if (isPage && /\.html?$/i.test(name) && htmlCount === 1) name = 'index.html'
+      out[(isNew && !isPage ? dir : '') + name] = await f.text()
+    }
+    if (paste.trim() && isPage) out['index.html'] = paste
+    if (!Object.keys(out).length) return setErr('Choose a file, or paste a page.')
+    if (isPage && isNew && !out['index.html']) return setErr('A new page needs an index.html.')
+    const base = versions[versions.length - 1]
+    const keep = base ? Object.fromEntries(Object.entries(base.files).filter(([p]) => !out[p]).map(([p, f]) => [p, f.sha256])) : {}
+    const message = msg.trim() || (isNew ? 'First version' : Object.keys(out).join(', '))
+    try {
+      const res = await push({
+        id, files: out, keep, message, base: a?.main || undefined, manifest: base?.manifest,
+        create: isNew ? { title: id, kind: isPage ? 'page' : 'data', type: isPage ? undefined : kind, project: project || null } : undefined,
+      }).unwrap()
+      toast(res.unchanged ? `${id}: nothing changed.` : `Pushed ${id} v${res.version.n}.`)
+      onClose()
+      navigate(watchPath(id))
+    } catch (e) { setErr(errorText(e)) }
+  }
+
+  return (
+    <div className="modal" onClick={e => { if (e.target === e.currentTarget) onClose() }}>
+      <div className="dialog" role="dialog" aria-label="Push a version">
+        <header><h2>Push a version</h2><IconButton aria-label="Close" onClick={onClose}>×</IconButton></header>
+        <div className="form">
+          <div className="kv"><span>Artifact</span>
+            <Select id="pushTarget" aria-label="Artifact" value={target} onChange={setTarget}
+              options={[...arts.map(x => ({ value: x.id, label: `${x.id} · ${x.kind === 'data' ? x.type || 'data' : 'page'} · v${x.main}` })), { value: '__new', label: 'A new artifact…' }]} />
+          </div>
+          {isNew ? (
+            <div className="kv">
+              <span>Name</span><input className="inp" id="pushNew" placeholder="name, e.g. colophon" value={newId} onChange={e => setNewId(e.target.value)} />
+              <span>Kind</span><Select id="pushKind" aria-label="Kind" value={kind} onChange={setKind} options={[{ value: 'page', label: 'Page: HTML, CSS, JS' }, { value: 'post', label: 'Data: Markdown posts' }, { value: 'records', label: 'Data: JSON records' }]} />
+              <span>Project</span><Select id="pushProj" aria-label="Project" value={project} onChange={setProject} options={[...projects.map(p => ({ value: p.id, label: p.name })), { value: '', label: 'No project' }]} />
+            </div>
+          ) : null}
+          <label>Files: .html .css .js for a page, .md or .json for data<input type="file" id="pushFiles" multiple accept=".html,.htm,.css,.js,.md,.json,.csv,.txt,.svg" onChange={e => setFiles(e.target.files)} /></label>
+          {isPage ? <textarea className="inp" id="pushPaste" rows={6} placeholder="Or paste a whole HTML page here" style={{ font: '400 11px/1.5 var(--code)' }} value={paste} onChange={e => setPaste(e.target.value)} /> : null}
+          <label>Message<input className="inp" id="pushMsg" placeholder="What changed" value={msg} onChange={e => setMsg(e.target.value)} /></label>
+          <span className="muted" style={{ fontSize: 'var(--fs-xs)' }}>From a terminal this is</span>
+          <code style={{ wordBreak: 'break-all' }}>{`slop push ./${id || 'folder'} -a ${id || 'name'} -m "${msg || '…'}"`}</code>
+          <span style={{ color: 'var(--accent)', fontSize: 'var(--fs-xs)' }}>{err}</span>
+        </div>
+        <footer><Button onClick={onClose}>Cancel</Button><Button variant="primary" disabled={isLoading} onClick={doPush}>Push</Button></footer>
+      </div>
+    </div>
+  )
+}

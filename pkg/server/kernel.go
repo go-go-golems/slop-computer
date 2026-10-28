@@ -429,13 +429,37 @@ func (s *Server) putRef(w http.ResponseWriter, r *http.Request) {
 	httpx.OK(w, a)
 }
 
+// routeView is a route with what it serves now: the page version (n) and its
+// data bindings resolved (data), for ?resolve=1.
+type routeView struct {
+	store.Route
+	N    int                        `json:"n"`
+	Data map[string]ResolvedBinding `json:"data"`
+}
+
 func (s *Server) listRoutes(w http.ResponseWriter, r *http.Request) {
 	rs, err := s.Store.Routes(r.Context(), r.URL.Query().Get("host"))
 	if err != nil {
 		unavailable(w, err)
 		return
 	}
-	httpx.OK(w, rs)
+	if r.URL.Query().Get("resolve") != "1" {
+		httpx.OK(w, rs)
+		return
+	}
+	out := make([]routeView, 0, len(rs))
+	for i := range rs {
+		rv := routeView{Route: rs[i], Data: map[string]ResolvedBinding{}}
+		n := 0
+		if rs[i].Version != nil {
+			n = *rs[i].Version
+		}
+		if v, err := s.Store.Version(r.Context(), rs[i].Page, n); err == nil {
+			rv.N, rv.Data = v.N, s.bindings(r.Context(), v, &rs[i])
+		}
+		out = append(out, rv)
+	}
+	httpx.OK(w, out)
 }
 
 func (s *Server) putRoute(w http.ResponseWriter, r *http.Request) {
