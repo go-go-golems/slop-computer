@@ -124,7 +124,7 @@ port (francois's policy allows Traefik on 8443 for this hairpin).
 
 ## Health
 
-- `GET /healthz` — the process is up.
+- `GET /healthz` — the process is up. Health checks answer on any host the server does not serve (a pod or container address), so probes need no Host header.
 - `GET /readyz` — the database answers (503 otherwise).
 
 ## What the server sends

@@ -23,11 +23,17 @@ import (
 type APISource struct {
 	base, token string
 	http        *http.Client
+	// dl fetches file bodies: large media take minutes over a slow link, so
+	// only the wait for headers is bounded.
+	dl *http.Client
 }
 
 // NewAPI returns a source for server (e.g. https://slop.boutique).
 func NewAPI(server, token string) *APISource {
-	return &APISource{base: strings.TrimRight(server, "/"), token: token, http: &http.Client{Timeout: 2 * time.Minute}}
+	tr := http.DefaultTransport.(*http.Transport).Clone()
+	tr.ResponseHeaderTimeout = time.Minute
+	return &APISource{base: strings.TrimRight(server, "/"), token: token,
+		http: &http.Client{Timeout: 2 * time.Minute}, dl: &http.Client{Transport: tr}}
 }
 
 func (s *APISource) Close() error { return nil }
@@ -115,7 +121,7 @@ func (s *APISource) Open(ctx context.Context, f File) (io.ReadCloser, error) {
 	if auth {
 		req.Header.Set("Authorization", "Bearer "+s.token)
 	}
-	resp, err := s.http.Do(req)
+	resp, err := s.dl.Do(req)
 	if err != nil {
 		return nil, err
 	}

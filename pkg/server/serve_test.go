@@ -89,6 +89,12 @@ func TestServeSiteAndSandbox(t *testing.T) {
 	if code, _, _ = h.get("other.test", "/", ""); code != http.StatusMisdirectedRequest {
 		t.Fatalf("unknown host %d", code)
 	}
+	// Probes address the pod (10.42.0.7:8080), not a configured host.
+	for _, p := range []string{"/healthz", "/readyz"} {
+		if code, _, _ = h.get("10.42.0.7:8080", p, ""); code != 200 {
+			t.Fatalf("probe %s on an unknown host: %d", p, code)
+		}
+	}
 
 	// Previews: an unguessable origin per version.
 	var su map[string]any

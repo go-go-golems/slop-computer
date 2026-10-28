@@ -3,6 +3,8 @@ package cmds
 import (
 	"context"
 	"fmt"
+	"os"
+	"path/filepath"
 
 	glazed "github.com/go-go-golems/glazed/pkg/cmds"
 	"github.com/go-go-golems/glazed/pkg/cmds/fields"
@@ -67,6 +69,7 @@ func newImportExtract() *importExtractCmd {
 		glazed.WithFlags(append(francoisFlags(),
 			fields.New("out", fields.TypeString, fields.WithRequired(true), fields.WithHelp("New directory for the seed and census")),
 			boolean("all-media", "Copy the whole media library, not only referenced media"),
+			flag("cache", "Download cache by sha256, so repeated extracts fetch each file once (default: the user cache dir, slop/francois)"),
 		)...))}
 }
 
@@ -82,7 +85,13 @@ func (c *importExtractCmd) Run(ctx context.Context, v *values.Values) error {
 		return err
 	}
 	fmt.Printf("read %d artifacts, %d posts, %d creators, %d media from %s\n", len(snap.Artifacts), len(snap.Posts), len(snap.Creators), len(snap.Media), snap.Source)
-	census, err := francois.Extract(ctx, src, snap, a.S("out"), francois.Options{AllMedia: a.B("all-media"),
+	cache := a.S("cache")
+	if cache == "" {
+		if dir, err := os.UserCacheDir(); err == nil {
+			cache = filepath.Join(dir, "slop", "francois")
+		}
+	}
+	census, err := francois.Extract(ctx, src, snap, a.S("out"), francois.Options{AllMedia: a.B("all-media"), Cache: cache,
 		Log: func(format string, args ...any) { fmt.Printf(format, args...) }})
 	if err != nil {
 		return err

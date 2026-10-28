@@ -15,6 +15,8 @@ import (
 	"regexp"
 	"sort"
 	"strings"
+	"sync"
+	"sync/atomic"
 
 	"github.com/go-go-golems/slop-computer/pkg/client"
 	"github.com/go-go-golems/slop-computer/pkg/seed"
@@ -35,6 +37,11 @@ type Options struct {
 	// AllMedia copies the whole media library, not only what pages, posts
 	// and creators reference.
 	AllMedia bool
+	// Cache is a directory of downloaded files by sha256 (<aa>/<sha256>),
+	// so repeated extracts read each file once; empty disables it.
+	Cache string
+	// Workers download media in parallel (default 4).
+	Workers int
 	// Log reports progress; nil is silent.
 	Log func(format string, args ...any)
 }
@@ -247,12 +254,38 @@ func writeJSON(path string, v any) error {
 	return writeFile(path, append(raw, '\n'))
 }
 
-// copyFile copies f from the source to path, checking its sha256. It
-// returns false when the source cannot reach the file.
+// copyFile copies f from the source (or the cache) to path, checking its
+// sha256, with up to three tries. It returns false when the source cannot
+// reach the file.
 func (x *extractor) copyFile(f File, path string) (bool, error) {
 	if !f.Public {
 		return false, nil
 	}
+	if err := os.MkdirAll(filepath.Dir(path), 0o750); err != nil {
+		return false, err
+	}
+	if cached := x.cached(f); cached != "" {
+		return true, linkOrCopy(cached, path)
+	}
+	var err error
+	for try := 1; try <= 3; try++ {
+		var ok bool
+		if ok, err = x.download(f, path); err == nil {
+			if ok {
+				x.remember(f, path)
+			}
+			return ok, nil
+		}
+		_ = os.Remove(path)
+		if x.ctx.Err() != nil {
+			break
+		}
+		x.logf("%s: try %d: %v\n", f.Name, try, err)
+	}
+	return false, err
+}
+
+func (x *extractor) download(f File, path string) (bool, error) {
 	r, err := x.src.Open(x.ctx, f)
 	if errors.Is(err, ErrUnavailable) {
 		return false, nil
@@ -261,10 +294,7 @@ func (x *extractor) copyFile(f File, path string) (bool, error) {
 		return false, errors.Wrap(err, f.Name)
 	}
 	defer func() { _ = r.Close() }()
-	if err = os.MkdirAll(filepath.Dir(path), 0o750); err != nil {
-		return false, err
-	}
-	w, err := os.OpenFile(path, os.O_CREATE|os.O_EXCL|os.O_WRONLY, 0o600) // #nosec G304 -- path inside the output directory
+	w, err := os.OpenFile(path, os.O_CREATE|os.O_TRUNC|os.O_WRONLY, 0o600) // #nosec G304 -- path inside the output directory
 	if err != nil {
 		return false, err
 	}
@@ -282,22 +312,100 @@ func (x *extractor) copyFile(f File, path string) (bool, error) {
 	return true, nil
 }
 
+var sha256Hex = regexp.MustCompile(`^[0-9a-f]{64}$`)
+
+func (x *extractor) cachePath(f File) string {
+	if x.opts.Cache == "" || !sha256Hex.MatchString(f.SHA256) {
+		return ""
+	}
+	return filepath.Join(x.opts.Cache, f.SHA256[:2], f.SHA256)
+}
+
+func (x *extractor) cached(f File) string {
+	p := x.cachePath(f)
+	if p == "" {
+		return ""
+	}
+	if st, err := os.Stat(p); err == nil && st.Mode().IsRegular() {
+		return p
+	}
+	return ""
+}
+
+func (x *extractor) remember(f File, path string) {
+	if p := x.cachePath(f); p != "" && os.MkdirAll(filepath.Dir(p), 0o750) == nil {
+		_ = linkOrCopy(path, p)
+	}
+}
+
+// linkOrCopy hard-links src to dst, copying when they are on different
+// file systems.
+func linkOrCopy(src, dst string) error {
+	if err := os.Link(src, dst); err == nil || os.IsExist(err) {
+		return nil
+	}
+	in, err := os.Open(src) // #nosec G304 -- cache or output file
+	if err != nil {
+		return err
+	}
+	defer func() { _ = in.Close() }()
+	out, err := os.OpenFile(dst, os.O_CREATE|os.O_TRUNC|os.O_WRONLY, 0o600) // #nosec G304 -- cache or output file
+	if err != nil {
+		return err
+	}
+	_, err = io.Copy(out, in)
+	if cerr := out.Close(); err == nil {
+		err = cerr
+	}
+	return err
+}
+
 func (x *extractor) writeMedia(dir string) (int, error) {
-	index := map[string]any{}
 	ids := make([]string, 0, len(x.copy))
 	for id := range x.copy {
 		ids = append(ids, id)
 	}
 	sort.Strings(ids)
+	workers := x.opts.Workers
+	if workers <= 0 {
+		workers = 4
+	}
+	type result struct {
+		ok  bool
+		err error
+	}
+	results := make([]result, len(ids))
+	jobs := make(chan int)
+	var wg sync.WaitGroup
+	var done atomic.Int64
+	for w := 0; w < workers; w++ {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			for i := range jobs {
+				m := x.media[ids[i]]
+				ok, err := x.copyFile(m.File, filepath.Join(dir, "files", m.File.Name))
+				results[i] = result{ok, err}
+				if n := done.Add(1); n%25 == 0 {
+					x.logf("media: %d/%d\n", n, len(ids))
+				}
+			}
+		}()
+	}
+	for i := range ids {
+		jobs <- i
+	}
+	close(jobs)
+	wg.Wait()
+	index := map[string]any{}
 	n := 0
-	for _, id := range ids {
-		m := x.media[id]
-		ok, err := x.copyFile(m.File, filepath.Join(dir, "files", m.File.Name))
-		if err != nil {
-			return 0, err
+	for i, id := range ids {
+		if results[i].err != nil {
+			return 0, results[i].err
 		}
-		x.census.media(m, ok)
-		if !ok {
+		m := x.media[id]
+		x.census.media(m, results[i].ok)
+		if !results[i].ok {
 			delete(x.copy, id)
 			continue
 		}

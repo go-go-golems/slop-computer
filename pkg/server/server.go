@@ -158,6 +158,12 @@ func (s *Server) Handler() http.Handler {
 					return
 				}
 			}
+			// Probes (kubelet, Docker HEALTHCHECK) address the pod or
+			// container, not a configured host.
+			if r.URL.Path == "/healthz" || r.URL.Path == "/readyz" {
+				s.mux.ServeHTTP(w, r)
+				return
+			}
 			http.Error(w, "unknown host", http.StatusMisdirectedRequest)
 			return
 		}
