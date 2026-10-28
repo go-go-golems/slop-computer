@@ -52,7 +52,13 @@ func newPush() *pushCmd {
 }
 
 // via is "claude" when Claude Code runs the command.
+// via says what pushed: SLOP_VIA=agent|claude for coding agents (Claude
+// Code sets CLAUDECODE=1 itself), else a person at the CLI.
 func via() string {
+	switch v := os.Getenv("SLOP_VIA"); v {
+	case "agent", "claude":
+		return v
+	}
 	if os.Getenv("CLAUDECODE") == "1" {
 		return "claude"
 	}

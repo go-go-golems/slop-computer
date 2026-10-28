@@ -22,3 +22,6 @@ export const clock = (t: string) => new Date(t).toLocaleTimeString('en-GB', { ho
 export const plural = (n: number, w: string) => n + ' ' + w + (n === 1 ? '' : 's')
 export const kb = (n: number) => (n / 1024).toFixed(1) + ' KB'
 export const cx = (...c: (string | false | null | undefined)[]) => c.filter(Boolean).join(' ')
+
+// isAgent: the version or comment came from a coding agent.
+export const isAgent = (via: unknown) => via === 'claude' || via === 'agent'

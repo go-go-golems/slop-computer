@@ -16,3 +16,13 @@ button.primary{background:var(--ink);color:#fff}
 fieldset{border:1px solid var(--line);margin:12px 0}
 label{display:block;margin:6px 0}
 code.code{font-size:18px;letter-spacing:.1em}
+.card.wide{max-width:960px}
+h2{font-size:16px;margin:24px 0 8px}
+table{border-collapse:collapse;width:100%;font-size:14px}
+th,td{text-align:left;padding:6px 8px;border-bottom:1px solid var(--line);vertical-align:middle}
+th{color:var(--muted);font-weight:400}
+form.inline{display:flex;gap:6px;margin:0}
+form.inline button{padding:4px 10px}
+select{font:inherit;padding:4px}
+.ok{border-left:3px solid var(--ink);padding:6px 10px;background:var(--wall)}
+.err{border-left:3px solid var(--red);padding:6px 10px;color:var(--red)}

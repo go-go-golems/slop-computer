@@ -1,12 +1,12 @@
 import { useEffect, useRef, useState, type ReactNode } from 'react'
 import type { Agent, Thread, Version } from '../../api/types'
-import { ago, cx, plural } from '../../app/format'
+import { ago, cx, isAgent, plural } from '../../app/format'
 import { Avatar, Button, LinkButton, Tag } from '../atoms'
 
 // Molecules render one slop object from props; they do not fetch.
 
 export function VersionAvatar({ v, by, large }: { v: Pick<Version, 'by' | 'via'>; by: string; large?: boolean }) {
-  return <Avatar name={by} agent={v.via === 'claude'} large={large} title={by} />
+  return <Avatar name={by} agent={isAgent(v.via)} large={large} title={by} />
 }
 
 // ThreadItem is one comment thread with its replies and actions.
@@ -60,7 +60,7 @@ export function ThreadItem(props: {
 }
 
 const agentName = (agents: Agent[], by: string, name: (id: string) => string) =>
-  agents.find(a => a.user === by)?.name ?? `Claude Code (${name(by)}’s)`
+  agents.find(a => a.user === by)?.name ?? `${name(by)}’s agent`
 
 function ReplyBox({ onSend, onCancel }: { onSend: (text: string) => void; onCancel: () => void }) {
   const [text, setText] = useState('')

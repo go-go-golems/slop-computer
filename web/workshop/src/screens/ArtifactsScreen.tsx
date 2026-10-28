@@ -1,8 +1,8 @@
 import { useMemo, useState } from 'react'
 import { errorText, useArtifactsQuery, useProjectsQuery, usePushMutation, useRecordsQuery, useThreadsQuery, useVersionsQuery } from '../api/slopApi'
 import type { Artifact, Version } from '../api/types'
-import { ago, plural } from '../app/format'
-import { useReaders, useRoutesUsing } from '../app/hooks'
+import { ago, isAgent, plural } from '../app/format'
+import { useReaders, useRoutesUsing, useVersionBy } from '../app/hooks'
 import { navigate, watchPath } from '../app/router'
 import { toast } from '../app/store'
 import { Button, Count, IconButton, Seg, Select, Tag } from '../components/atoms'
@@ -68,9 +68,10 @@ function ArtifactCard({ a }: { a: Artifact }) {
 
 function LatestLine({ a }: { a: Artifact }) {
   const { data: versions = [] } = useVersionsQuery(a.id)
+  const by = useVersionBy()
   const v: Version | undefined = versions[versions.length - 1]
   if (!v) return <small>{`v${a.latest}`}</small>
-  return <><small>{`v${v.n} · ${ago(v.at)}${v.via === 'claude' ? ' · Claude Code' : ''}`}</small><small>{v.message}</small></>
+  return <><small>{`v${v.n} · ${ago(v.at)}${isAgent(v.via) ? ' · ' + by(v) : ''}`}</small><small>{v.message}</small></>
 }
 
 function DataShot({ a }: { a: Artifact }) {

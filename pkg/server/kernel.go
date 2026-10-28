@@ -387,8 +387,8 @@ func (s *Server) push(w http.ResponseWriter, r *http.Request) {
 	via := "browser"
 	if p := principal(r.Context()); p.Token != nil {
 		via = "cli"
-		if in.Via == "claude" {
-			via = "claude"
+		if in.Via == "claude" || in.Via == "agent" {
+			via = in.Via
 		}
 	}
 	moveMain := in.MoveMain == nil || *in.MoveMain

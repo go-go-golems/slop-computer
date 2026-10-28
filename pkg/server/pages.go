@@ -28,6 +28,12 @@ var pages = template.Must(template.New("").Funcs(template.FuncMap{
 		return false
 	},
 	"upper": strings.ToUpper,
+	"deref": func(p *int) int {
+		if p == nil {
+			return 0
+		}
+		return *p
+	},
 }).ParseFS(templateFiles, "templates/*.tmpl"))
 
 // render writes a server-rendered page. Data maps gain Local (local mode).

@@ -1,0 +1,32 @@
+{{define "safe"}}{{template "head" "Safe mode"}}{{template "banner" .}}
+<main class="card wide">
+<h1>Safe mode</h1>
+<p class="note">The fuse box: point routes at other versions, undo route changes and revoke tokens without the Workshop. Signed in as <b>{{.Me.DisplayName}}</b>. <a href="/">Back to the Workshop</a></p>
+{{with .Done}}<p class="ok">{{.}}</p>{{end}}{{with .Error}}<p class="err">{{.}}</p>{{end}}
+{{range .Hosts}}
+<h2 id="{{.Host}}">{{.Host}}</h2>
+{{if not .Routes}}<p class="note">No routes.</p>{{end}}
+<table>
+<thead><tr><th>Path</th><th>Page</th><th>Serves</th><th>Point at</th><th></th></tr></thead>
+<tbody>
+{{range .Routes}}{{$r := .}}
+<tr>
+<td><code>{{.Path}}</code></td><td>{{.Page}}</td>
+<td>{{if .Version}}v{{.Version}} pinned{{else}}main → v{{.Main}}{{end}}</td>
+<td><form method="post" action="/_/route" class="inline">
+<input type="hidden" name="csrf" value="{{$.CSRF}}"><input type="hidden" name="host" value="{{.Host}}"><input type="hidden" name="path" value="{{.Path}}">
+<select name="version"><option value="main"{{if not .Version}} selected{{end}}>follow main</option>{{range .Versions}}<option value="{{.}}"{{if and $r.Version (eq . (deref $r.Version))}} selected{{end}}>v{{.}}</option>{{end}}</select>
+<button>Point</button></form></td>
+<td><form method="post" action="/_/undo" class="inline"><input type="hidden" name="csrf" value="{{$.CSRF}}"><input type="hidden" name="host" value="{{.Host}}"><input type="hidden" name="path" value="{{.Path}}"><button>Undo last change</button></form></td>
+</tr>
+{{end}}
+</tbody></table>
+{{end}}
+<h2>Tokens</h2>
+<table>
+<thead><tr><th>Name</th><th>Scopes</th><th>Last used</th><th></th></tr></thead>
+<tbody>
+{{range .Tokens}}<tr><td>{{.Name}}</td><td>{{join .Scopes " "}}</td><td>{{if .LastUsedAt}}{{.LastUsedAt.Format "2006-01-02 15:04"}}{{else}}never{{end}}</td>
+<td>{{if .RevokedAt}}revoked{{else}}<form method="post" action="/_/revoke" class="inline"><input type="hidden" name="csrf" value="{{$.CSRF}}"><input type="hidden" name="id" value="{{.ID}}"><button>Revoke</button></form>{{end}}</td></tr>{{end}}
+</tbody></table>
+</main>{{template "foot"}}{{end}}

@@ -4,6 +4,7 @@ import type { Artifact } from '../api/types'
 import { navigate, watchPath } from '../app/router'
 import { toast } from '../app/store'
 import { usePref, useRoutesUsing, useVersionBy } from '../app/hooks'
+import { isAgent } from '../app/format'
 import { Avatar, Empty, Tabs } from '../components/atoms'
 import { PreviewStage, type Device } from '../components/organisms/PreviewStage'
 import { RecordsPane, TokensEditor } from '../components/organisms/DataPanes'
@@ -156,7 +157,7 @@ export function WatchScreen({ a, n, onOpenSite, onAddRoute }: Props) {
       const xv = versions.find(q => q.n === x)
       return (
         <div key={x}>
-          <div className="cmphead">{xv ? <Avatar name={by(xv)} agent={xv.via === 'claude'} /> : null}<b>{`v${x}`}</b><span className="muted" style={{ whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>{xv?.message}</span></div>
+          <div className="cmphead">{xv ? <Avatar name={by(xv)} agent={isAgent(xv.via)} /> : null}<b>{`v${x}`}</b><span className="muted" style={{ whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>{xv?.message}</span></div>
           <div className="cmpstage"><PreviewStage artifact={a.id} n={x} host={ctx.host} path={ctx.path} device={device} className="cmp-inner" /></div>
         </div>
       )

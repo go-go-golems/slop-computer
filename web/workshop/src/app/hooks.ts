@@ -17,6 +17,7 @@ export function useVersionBy() {
   const name = useNames()
   return useCallback((v: Pick<Version, 'by' | 'via'>) => {
     if (v.via === 'claude') return `Claude Code (${name(v.by)}’s)`
+    if (v.via === 'agent') return `${name(v.by)}’s agent`
     if (v.via === 'browser') return `${name(v.by)}, in the browser`
     return `${name(v.by)}, slop push`
   }, [name])

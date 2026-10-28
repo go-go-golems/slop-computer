@@ -3,6 +3,7 @@ import type { AppStore } from '../app/store'
 import { toast } from '../app/store'
 import { consoleAdded, liveChanged } from '../app/ui'
 import { slopApi } from './slopApi'
+import { isAgent } from '../app/format'
 import type { SlopEvent } from './types'
 
 type Tag = TagDescription<'User' | 'Token' | 'Audit' | 'Project' | 'Artifact' | 'Version' | 'Route' | 'RouteLog' | 'Thread' | 'Agent' | 'Records'>
@@ -60,8 +61,8 @@ export function startEvents(store: AppStore, nameOf: (id: string) => string) {
       const p = e.payload as Payload
       const who = e.type.startsWith('agent.') ? String(p.name ?? '') : nameOf(e.actor ?? '')
       const text = describe(e)
-      if (text) store.dispatch(consoleAdded({ at: e.at, who, kind: p.via === 'claude' || e.type.startsWith('agent.') ? 'agent' : 'ui', text }))
-      if (e.type === 'version.created' && p.via === 'claude') toast(`Claude Code (${who}’s) pushed ${p.artifact} v${p.n}.`)
+      if (text) store.dispatch(consoleAdded({ at: e.at, who, kind: isAgent(p.via) || e.type.startsWith('agent.') ? 'agent' : 'ui', text }))
+      if (e.type === 'version.created' && isAgent(p.via)) toast(`${p.via === 'claude' ? `Claude Code (${who}’s)` : `${who}’s agent`} pushed ${p.artifact} v${p.n}.`)
     })
   }
   return () => es.close()
