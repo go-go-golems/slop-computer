@@ -1,0 +1,7 @@
+{{define "help"}}{{template "head" .Title}}{{template "banner" .}}
+<main class="card wide doc">
+<p class="note"><a href="/">← Workshop</a> · <a href="/help/{{.Slug}}.md">as Markdown</a> · in a terminal: <code>slop help {{.Slug}}</code></p>
+<h1>{{.Title}}</h1>
+{{.HTML}}
+</main>
+{{template "foot"}}{{end}}

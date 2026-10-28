@@ -198,6 +198,7 @@ func (s *Server) routes() *http.ServeMux {
 	m.HandleFunc("/api/", func(w http.ResponseWriter, r *http.Request) { httpx.Fail(w, 404, "not_found", "Unknown API route") })
 	s.workshopRoutes(m)
 	s.safeRoutes(m)
+	s.helpRoutes(m)
 	s.toolRoutes(m)
 	m.HandleFunc("GET /static/", s.staticFile)
 	return m
