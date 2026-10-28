@@ -10,12 +10,18 @@ Topics:
 DocType: reference
 Intent: long-term
 Owners: []
-RelatedFiles: []
+RelatedFiles:
+    - Path: repo://cmd/slop/cmds/devseed.go
+      Note: Step 14 seed
+    - Path: repo://cmd/slop/cmds/push.go
+      Note: Step 14 push/watch
+    - Path: repo://cmd/slop/cmds/routes.go
+      Note: Step 14 routes and comments wait
 ExternalSources: []
-Summary: "Chronological implementation diary for SLOP-001: analysis, design revisions with the owner, and phase-by-phase implementation of slop.computer v1."
+Summary: 'Chronological implementation diary for SLOP-001: analysis, design revisions with the owner, and phase-by-phase implementation of slop.computer v1.'
 LastUpdated: 2026-10-28T16:30:00-04:00
-WhatFor: "Tracing how the v1 design was derived and how each phase was implemented and validated."
-WhenToUse: "When resuming SLOP-001, reviewing a commit, or questioning a decision in the design doc."
+WhatFor: Tracing how the v1 design was derived and how each phase was implemented and validated.
+WhenToUse: When resuming SLOP-001, reviewing a commit, or questioning a decision in the design doc.
 ---
 
 # Diary
@@ -655,3 +661,69 @@ I changed two things from the guide: preview access uses unguessable per-version
 ### Technical details
 - Sandbox URL: `<scheme>://s<20 hex>.<sandbox domain>/<path>?parent=<main origin>&mode=preview|thumb&host=<site host>`.
 - Site responses: `Content-Security-Policy: frame-ancestors 'self' <main origins>`, `Cache-Control: no-store`; blobs: `ETag "<sha256>"`, `immutable`.
+
+## Step 14: Phase 4 — agent CLI and dev seed
+
+This step gives the agent its side of the loop from the Directions doc: pull a page, edit the folder, push it as a new version (optionally replying on the thread that asked for it), move routes, and block on `slop comments wait` until a human comments. `slop dev seed` loads the prototype's whole lab site into a local server, so later phases (Workshop UI) have realistic data from the first minute.
+
+I ran the "contact sheet" round end to end against a local server with two identities: Ramon commented on `section.tiers` from a browser session, the waiting `claude-manuel` token woke up with the anchor and computed styles, edited the folder, pushed v8 with `--reply`, and moved/undid `/pricing`.
+
+### Prompt Context
+**User prompt (verbatim):** see Step 9 (and "make sure to write a diary at frequent intervals and MANDATORY: follow diary skill format")
+**Assistant interpretation:** Phase 4 of the guide (agent CLI + seed), with the exit check run for real, then commit and record.
+**Inferred user intent:** An agent in a terminal can iterate on live pages with humans commenting in the browser, locally, before the Workshop UI exists.
+**Commit (code):** bfc8a96 — "SLOP-001 phase 4: agent CLI (push/pull/route/comments/projects), dev seed"
+
+### What I did
+- `pkg/client/kernel.go`: typed calls for projects, artifacts, versions, files, blobs (`MissingBlobs`, `PutBlob`), `Push`, routes (set/rm/undo), threads (create/reply/resolve), `WaitComments`, `SandboxURL`, `PatchArtifact`.
+- `cmd/slop/cmds/folder.go`: `readFolder` (skips dotfiles, `.slop/`, `node_modules`; `slop.json` becomes the manifest), `.slop/artifact.json` state (server, artifact, base).
+- `cmd/slop/cmds/push.go`: `push` (hash → `blobs/missing` → parallel `PUT` (4) → `versions`; base from state or main; `--reply`, `--reply-text`, `--no-main`, `--force`, `--session`/`SLOP_SESSION`; `via=claude` when `CLAUDECODE=1`), `push --watch` (fsnotify on every non-skipped dir, re-adds dirs on Create, 300 ms debounce), `pull [--version]`, `artifacts list`.
+- `cmd/slop/cmds/routes.go`: `route list/set/undo/rm` (`--host` is the site host, default the server's first site host from `/api/config`; the Host-header override became `--host-header`), `comments wait/reply/list` (wait keeps a cursor per scope in `cursors.json`, `--from-now`), `projects list/put`.
+- `cmd/slop/cmds/devseed.go` + `scripts/export-seed.mjs` → `examples/seed/` (seed.json + `artifacts/<id>/v<n>/` trees): 14 artifacts, 41 versions, 10 routes, 6 threads. In local mode each version is pushed as its author via `/api/local/token`.
+- Store: a push whose tree and manifest equal main's stores nothing and returns `unchanged` (HTTP 200 instead of 201); test in `kernel_test.go`.
+
+### Why
+- **Unchanged pushes:** `push --watch` pushes once on start, and editors re-save files without changes (touch); both created identical versions (v11 duplicated v10 in the first run). Comparing with *main* (not the base) keeps `--force` from an old base meaningful. Pushes with `--reply` always store a version so the reply has one to point at.
+- **Seed as files, not SQL:** the seed goes through the same push path as agents, so it exercises blobs, versions, routes and threads, and stays valid when the schema changes.
+
+### What worked
+- Exit check (local server on `127.0.0.1:18080`, config in the scratchpad):
+  - `slop dev seed` → `seeded 41 versions, 10 routes on site.localhost:18080, 6 threads`; curl 200 for `/`, `/pricing`, `/journal`, `/journal/routes-not-templates`, `/apps/orbits`, `/play/orbits`; 404 for `/nowhere`; `/boutique.css` via Referer.
+  - `comments wait -a pricing --from-now` listed in `/api/agents`; Ramon's browser comment (cookie + CSRF) woke it with `anchor: section.tiers`, `computed styles: gap=24px paddingTop=64px`, and the reply hint.
+  - `push pricing -m … --reply th_…` → `pushed pricing v8 … replied on th_377b…`; `comments list --open` shows "Done: gap 24 → 12px" as the last comment.
+  - `route set /pricing pricing@8` → `pricing v5 → pricing v8 (slop route undo /pricing goes back)`; `route undo` → back to v5.
+  - Stale folder after someone else pushed v9 → refused with `main_moved`, exit 1; `--force` → v10.
+  - `push --watch`: two writes 100 ms apart → one version; a later write → another; a touch → `pricing unchanged · main is v14`.
+- `make lint` → 0 issues (the 8 `unused` findings from phase 2 are now used). Tests pass on SQLite and Postgres.
+
+### What didn't work
+- `defer` inside the seed loop (restoring each artifact's viewer) would have run only at the end; replaced with a viewers map applied after the loop.
+- `--host` collided: it meant the Host-header override (from francois) and the site host for routes. Renamed the override to `--host-header`.
+- Playwright refused to save a screenshot outside its allowed roots; saved under `.playwright-mcp/` in the repo and git-ignored it.
+- `make test-postgres` failed with `dial tcp 127.0.0.1:5432: connect: connection refused`: the test container `slop-test-pg` publishes `127.0.0.1:55432`. Ran with `TEST_DATABASE_URL=postgres://postgres:postgres@127.0.0.1:55432/postgres?sslmode=disable`.
+- The tmux session holding the server had died between checks; the first re-run of the watch test printed `connection refused` and left an extra `<!-- w4 -->` in the folder, which is why the next "same" push created v14 (verified by pulling v13 and diffing: exactly that line).
+- The first conflict hint read `slop pull pricing pricing`, which looked like a typo; reworded to name the artifact and say pull overwrites edits.
+
+### What I learned
+- fsnotify does not watch recursively; directories created after start must be added on their `Create` event, which `watchPush` does.
+- glazed's output flag is `--output-format`, not `--output`.
+
+### What was tricky to build
+- Ordering in `comments wait`: the server ignores comments made with the caller's own token, so an agent's `--reply` never wakes itself; the CLI's cursor makes a restarted wait not replay what it already handled.
+- Seeding as several people needs one token per author: the seed uses local mode's loopback-only `/api/local/token`, and falls back to the caller's own token when the server is not local.
+
+### What warrants a second pair of eyes
+- `sameVersion` compares paths and SHA-256 sums plus the manifest as decoded JSON (`reflect.DeepEqual`), so key order and whitespace do not count as changes; a changed media type alone would not either (it is derived from the path).
+- `examples/seed` is 1.8 MB of prototype content committed to the repo.
+
+### What should be done in the future
+- Phase 5: the Workshop (React + RTK Query) on top of these APIs.
+- Consider making the Makefile's Postgres port configurable or matching the container (55432).
+
+### Code review instructions
+- Start at `cmd/slop/cmds/push.go` (`pushOnce`, `watchPush`), then `routes.go` (`waitCmd`, `printWait`), `devseed.go`, `pkg/store/artifacts.go` (`Push`, `sameVersion`).
+- Validate: `slop serve --local`; `slop dev seed`; `slop auth login --as claude-you`; `slop comments wait -p lab-site` in one terminal, comment as another nickname, `slop push … --reply`.
+
+### Technical details
+- Push request: `{"tree":{path:sha},"manifest":{…},"message","via","session","base":n,"reply":{"thread","text"},"create":{title,kind,type,project},"moveMain":bool,"force":bool}` → `201 {artifact,version,created,unchanged:false,warnings}` or `200 {…,unchanged:true}`; `409 main_moved`.
+- Cursor file: `$SLOP_CONFIG_DIR/cursors.json`, keyed by server + scope (`project:<id>` / `artifact:<id>` / `all`).

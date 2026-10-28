@@ -43,3 +43,12 @@ Phase 2 (82dd101): kernel store, blobs, events broker, SSE, comments wait
 ## 2026-10-28
 
 Phase 3 (dcb7c1a): routing, records, rendering, site + sandbox hosts
+
+## 2026-10-28
+
+Phase 4: agent CLI (push/pull/route/comments/projects, push --watch), dev seed from the prototype, unchanged pushes (bfc8a96)
+
+### Related Files
+
+- /home/manuel/workspaces/2026-10-28/slop-computer/slop-computer/cmd/slop/cmds/devseed.go — dev seed
+- /home/manuel/workspaces/2026-10-28/slop-computer/slop-computer/cmd/slop/cmds/push.go — push, pull, watch
