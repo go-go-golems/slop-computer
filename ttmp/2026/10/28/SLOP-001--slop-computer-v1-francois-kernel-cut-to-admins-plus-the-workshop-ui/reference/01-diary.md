@@ -863,3 +863,56 @@ This step closes Phase 5 with the test the owner asked for: real coding agents, 
 ### Technical details
 - Agent start: `PATH=$A/bin:$PATH SLOP_CONFIG_DIR=$A/cfg SLOP_VIA=agent pi -p --model lunaroute/deepseek-4.1-flash --thinking medium --session-dir $A/sessions "$(cat prompt.txt)"`.
 - Threads after the test: colophon `th_73d40cc8…` (v1 → v2/v3), `th_10e853e0…` (v2 → v4); release-board `th_31fe97…` (v1 → v2), `th_f5a5c7…` (v2 → v3).
+
+## Step 17: Phase 6, server half — tools, grants, permissions, CORS
+
+This step lets a pushed page become a **tool**: a screen that runs inside the Workshop (in a sandbox-domain iframe) and calls the API with a short-lived grant that carries only the permissions an admin approved. It implements §6.13 on the server: manifests, tables, endpoints, a third kind of principal in the guard, CORS for preview origins, and the `tool.js` client injected into tools.
+
+### Prompt Context
+**User prompt (verbatim):** see Step 9; the tool scenario is from the earlier "ok i do want that scenario where ramon makes a publish release board or so, it's just the core workshop should be in the app embedded to avoid corruption."
+**Assistant interpretation:** Phase 6 of the guide; server first, with the exit-check rules as tests.
+**Inferred user intent:** Ramon (or his agent) can ship new screens without a binary deploy, and a pushed screen can never do more than an admin approved.
+**Commit (code):** f631ded — "SLOP-001 phase 6: tools on the server (manifests, grants, permissions, CORS)" (+ 56c7a22 gofmt)
+
+### What I did
+- Migration `004_tools.sql` (both dialects): `tools(artifact_id, version, permissions, title, icon, enabled_by, enabled_at)`, `tool_grants(token_hash, artifact_id, version, user_id, permissions, created_at, expires_at)`.
+- `pkg/store/tools.go`: `ToolPermissions` (8 permissions with plain-word descriptions), `ToolManifestOf`/`Validate`, `Tools`, `Tool`, `EnableTool` (permissions are taken from the version's manifest, deduplicated; other versions' grants revoked; audit + `tool.enabled` event), `DisableTool` (grants revoked; `tool.disabled`), `CreateGrant` (`slg_` + 32 random bytes, 1 h), `ResolveGrant`, `RevokeGrants`.
+- `pkg/server/auth.go`: `Principal.Grant`; `guardPerm(level, scope, perm, h)` (`guard` = `guardPerm` with no permission). A `Bearer slg_…` is accepted only if the route names a permission the grant carries; the user must still be an admin; audit via `tool <artifact>@<n>`; no CSRF/Origin check (not an ambient credential).
+- Every kernel route got its permission (e.g. `PUT /api/routes` → `routes:write`, `GET …/records` → `versions:read`, `GET /api/events` → `events:read`); users, tokens, audit, projects PUT, artifact PATCH, sandbox-url, agents, comments wait and tools themselves have none.
+- `pkg/server/tools.go`: `GET /api/tools` (enabled + newest manifest + `newPermissions`, and the permission descriptions), `PUT /api/tools/{id}` `{n}`, `DELETE /api/tools/{id}`, `POST /api/tools/{id}/grant` `{n, try}` (session only, `noToken`), `GET /tools/…` → Workshop; `cors()` for `/api/*` from `s<label>.<sandbox domain>` origins.
+- Push refuses an invalid tool section (unknown permission → 400); a push made with a grant records `via: "tool"`; a role change revokes the user's grants.
+- `pkg/render`: `ModeTool` injects `/_slop/tool.js` instead of the bridge; the sandbox accepts `mode=tool`.
+- `pkg/render/assets/tool.js`: `slop.tool.ready()` sends `tool-hello` to the Workshop and resolves when a `grant` message arrives (only from the parent origin); `api.get/post/put/patch/del` (bearer grant, `credentials: 'omit'`), `api.on(type, h)` (SSE parsed from a `fetch` stream, since `EventSource` cannot send headers), `api.can(perm)`.
+
+### Why
+- **Permissions from the manifest, not the request:** an admin approves exactly what the tool asked for; the API has no way to grant more (the guide had the client send the list and the server compare — taking it from the manifest removes the comparison).
+- **Grant check before the token check:** a grant on a `noToken` route (tokens, tools) must fail as "tools cannot call this" (403), not fall through to the token rules.
+- **Refuse at push:** an unknown permission is a typo or an overreach; failing the push tells the agent immediately.
+
+### What worked
+- `TestToolsGrantsAndCORS`: listed with 3 new permissions; grant before enable 404; grant with an API token 401; try grant → `GET /api/routes` 200, `PUT /api/routes` 200 and the route log entry is `via: "tool board@1"`, by ramon; with the grant, `/api/threads` 403 (not granted), `/api/tokens`, `/api/users`, `/api/audit`, `PUT /api/tools/board` 403; preflight from `http://sabc.sandbox.test` → 204 with the origin, no `Allow-Credentials`; from `http://evil.test` → no CORS headers; a session PUT with `Origin: http://sabc.sandbox.test` → 403; enable → 3 permissions; disable → the open grant gets 401; enabling a plain page → 400; a role change → 401.
+- `TestPushRefusesBadToolSection`: `users:write` → 400.
+- All tests on SQLite and Postgres; lint 0 issues.
+
+### What didn't work
+- My test first expected 401 for a grant on `/api/tokens` (`GET /api/tokens with a grant: 403, want 401`); the guard answers 403 `grant_not_allowed` before the token rules, which is the better answer. Fixed the expectation.
+- I committed once without gofmt (`pkg/server/kernel.go`), hence the separate "gofmt" commit.
+
+### What I learned
+- A preview origin and the main host may count as the same *site* in local mode (`*.localhost`), so cookies could ride along on a credentialed fetch; safety comes from the guard's Origin check for sessions and from never sending `Access-Control-Allow-Credentials`, not from SameSite.
+
+### What was tricky to build
+- The guard order: grant → token → session rules, so each credential type gets its own clear error and grants can never reach a route that did not opt in.
+
+### What warrants a second pair of eyes
+- The permission map per route (kernel.go, preview.go, stream.go): a route given a permission by mistake becomes reachable by tools.
+- `tool.js` trusts only `message` events whose `origin` is the boot data's parent origin *and* whose source is `window.parent`.
+
+### What should be done in the future
+- Workshop half (next step): Tools menu, ToolScreen with the grant handshake and renewal, EnableToolDialog; the release board example; the exit check.
+
+### Code review instructions
+- `pkg/server/auth.go` (`guardPerm`), `pkg/server/tools.go`, `pkg/store/tools.go`, `pkg/render/assets/tool.js`; `go test ./pkg/server -run 'TestTools|TestPushRefuses' -v`.
+
+### Technical details
+- Grant response: `{grant: "slg_…", expiresAt, permissions, n, try, user: {id, name}}`; messages: tool → Workshop `{slop:1, type:'tool-hello', version}`, Workshop → tool `{slop:1, type:'grant', grant, expiresAt, permissions, user}` (sent again on renewal).
