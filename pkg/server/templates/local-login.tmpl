@@ -1,0 +1,13 @@
+{{define "local-login"}}{{template "head" "Who are you?"}}{{template "banner" .}}
+<main class="card">
+<h1>Who are you?</h1>
+<p class="note">Local mode has no passwords. Pick a nickname; new nicknames start as <b>{{.Role}}</b>.</p>
+{{if .Problem}}<p class="problem">{{.Problem}}</p>{{end}}
+{{if .Users}}<div class="people">{{range .Users}}
+<form method="post" action="/auth/local"><input type="hidden" name="return" value="{{$.Return}}"><input type="hidden" name="nickname" value="{{.Subject}}">
+<button class="person"><span class="av">{{upper (printf "%.1s" .Subject)}}</span>{{.Subject}} <small>{{.Role}}</small></button></form>{{end}}</div>{{end}}
+<form method="post" action="/auth/local" class="row">
+<input type="hidden" name="return" value="{{.Return}}">
+<input name="nickname" placeholder="new nickname, e.g. ramon" autocomplete="off" autofocus required pattern="[a-z0-9][a-z0-9_-]{0,31}">
+<button class="primary">Sign in</button></form>
+</main>{{template "foot"}}{{end}}

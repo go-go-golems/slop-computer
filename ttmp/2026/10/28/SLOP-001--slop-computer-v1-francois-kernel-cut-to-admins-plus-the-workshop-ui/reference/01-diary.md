@@ -375,3 +375,110 @@ Follow-up (verbatim): "what's the restrictions you are adding?"
 
 ### Technical details
 - Grants: `slg_` prefix, 1 h, permissions ⊆ manifest; never users/tokens/audit/tools.
+
+## Step 9: Phase 0 — module skeleton, workspace, diary format
+
+Implementation starts here. I uploaded the v3 guide, rewrote steps 1–8 of this diary into the skill's investigation format at the owner's explicit request, and created the Go module with the `slop` root command, Glazed field helpers copied from francois, a Makefile, lint config and AGENT.md. The module builds both inside the parent `go.work` and with `GOWORK=off`.
+
+### Prompt Context
+**User prompt (verbatim):** "yes. Then implemen task by task, and commit at appropriate intervals and keep a detailed diary as you work (using the diary format from the skill)
+
+IT'S MANDATORY to follow the diary skill format at each point."
+Follow-up during the work (verbatim): "make sure to write a diary at frequent intervals and MANDATORY: follow diary skill format"
+**Assistant interpretation:** Upload the v3 guide, then implement the phases in order, committing at sensible boundaries, with a diary entry in the skill's investigation format for every step.
+**Inferred user intent:** A working slop v1 with a reviewable trail of how it was built.
+**Commit (code):** ca57479 — "SLOP-001: ticket docs and slop module skeleton"
+
+### What I did
+- `remarquee upload bundle … --name "SLOP-001 slop computer v1 intern guide v3"` → `OK: uploaded SLOP-001 slop computer v1 intern guide v3.pdf -> /ai/2026/10/28/SLOP-001`.
+- Rewrote diary steps 1–8 in investigation format (format note at the top).
+- Created `go.mod` (`github.com/go-go-golems/slop-computer`, go 1.26.3, toolchain go1.26.10 — same as francois), `cmd/slop/main.go` (cobra root + glazed logging + help, as `../francois/cmd/francois/main.go`), `cmd/slop/cmds/fields.go` (the `in` accessor and `flag/list/boolean/integer` helpers from `../francois/cmd/francois/cmds/api.go:40-61,222-240`), `Makefile`, `.golangci.yml` and `.golangci-lint-version` (copied), `.gitignore`, `AGENT.md` (francois's, retargeted).
+- `cd .. && go work use ./slop-computer`.
+
+### Why
+- Same toolchain as francois so the shared `go.work` keeps one Go version.
+- Glazed helpers copied rather than re-invented, per AGENT.md ("Use glazed command framework").
+
+### What worked
+- `GOWORK=off go build ./... && GOWORK=off go run ./cmd/slop --help` printed the root help.
+- `go work use` then `go build ./...` → `WORK-OK` (the go command switched to go1.26.10 automatically: `go: francois/go.mod requires go >= 1.26.3; switching to go1.26.10`).
+
+### What didn't work
+- The editor's gopls reports `packages.Load error: … go: go.work requires go >= 1.26.3 (running go 1.25.5)`. This is the editor running the system Go 1.25.5 without toolchain switching; the `go` command itself builds. Not fixed (francois has the same requirement).
+- `go mod tidy` resolved glazed to `v1.4.4` rather than francois's pseudo-version `v1.4.4-0.20260823170018-a7fdfda5e3c6`; builds fine, noted only.
+
+### What I learned
+- The parent `go.work` had `go 1.25` although francois requires 1.26.3; `go work use` bumped it to `go 1.26.3`.
+
+### What was tricky to build
+- N/A
+
+### What warrants a second pair of eyes
+- `../go.work` (outside this repository) was modified by `go work use`.
+
+### What should be done in the future
+- Point gopls at go1.26 (`GOTOOLCHAIN=auto` in the editor environment) to get diagnostics back.
+
+### Code review instructions
+- `cmd/slop/main.go`, `cmd/slop/cmds/fields.go`, `Makefile`.
+- `go build ./... && go run ./cmd/slop --help`.
+
+### Technical details
+- `Register(root)` is still empty at this commit; commands arrive in Step 11.
+
+## Step 10: Phase 1a — store ported to database/sql for Postgres and SQLite
+
+I ported francois's catalog store files (users, sessions, tokens, device logins, audit, migration runner) from pgx to `database/sql`, so one implementation runs on Postgres (`pgx/v5/stdlib`) and SQLite (`modernc.org/sqlite`). Migrations live in `migrations/postgres` and `migrations/sqlite`. A `storetest` package gives every test a fresh database: SQLite by default, Postgres when `TEST_DATABASE_URL` is set. The auth store tests pass on both.
+
+The one real bug was time handling in SQLite: times written with a local offset compared wrongly against UTC values as text. I fixed it centrally by converting every time argument to UTC in the store's query wrapper.
+
+### Prompt Context
+**User prompt (verbatim):** see Step 9
+**Assistant interpretation:** Phase 1, first part: the storage layer for auth.
+**Inferred user intent:** Local mode on SQLite and production on Postgres with one code base (D5).
+**Commit (code):** pending (committed with the rest of Phase 1)
+
+### What I did
+- `pkg/store/store.go`: `Open(url)` picks the dialect from `sqlite:` / `postgres://`; `db` wrapper with `exec/query/row`, `rebind` (`?` → `$n` for Postgres), `forUpdate` (Postgres only), `InTx`, `scanAll`, `Migrate`/`Pending` with checksum ledger (Postgres advisory lock kept), `StringList` and `JSON` column types, `isUnique` for both drivers.
+- `pkg/store/migrations/{postgres,sqlite}/001_auth.sql`: `users` (role `admin|pending|disabled`, default `pending`, plus `last_seen_at`), `login_flows`, `sessions`, `api_tokens` (scopes as JSON text), `device_authorizations`, `audit` (adds `via`).
+- `users.go` (`UpsertIdentity(id, role)`, `SetUserRole` revoking sessions + tokens on demotion, `Users`, `UsersByIssuer`, `touchUser`), `sessions.go`, `tokens.go` (prefix `slp_`, scopes `read|write|admin`, write implies read), `device.go`, `audit.go` (`WithAuditToken`, `WithAuditVia`).
+- `pkg/store/storetest/storetest.go`; `pkg/store/auth_test.go` (users/sessions/tokens/demotion/audit, device login issue-once, migration-name parity).
+- Started a throwaway Postgres for tests: `docker run -d --name slop-test-pg -e POSTGRES_PASSWORD=postgres -p 127.0.0.1:55432:5432 postgres:17-alpine`.
+
+### Why
+- D5 (accepted): Postgres in production, SQLite for local mode and tests, one store.
+- `UpsertIdentity` takes the initial role so local mode can create admins (`--local-role`) while OIDC sign-ins start pending.
+- francois's advisory lock and email-collision check in `UpsertIdentity` were dropped (no email sign-in here).
+
+### What worked
+- `go test -count=1 ./pkg/store/...` → `ok` (SQLite).
+- `TEST_DATABASE_URL='postgres://postgres:postgres@127.0.0.1:55432/postgres?sslmode=disable' go test -count=1 ./pkg/store/...` → `ok`.
+
+### What didn't work
+- First SQLite run failed while Postgres passed:
+  ```
+  --- FAIL: TestUsersSessionsTokens (0.01s)
+      auth_test.go:45: resolve token {ID: UserID: Name: Scopes:[] CreatedAt:0001-01-01 00:00:00 +0000 UTC …} not found
+  ```
+  Cause: the test passed `time.Now().Add(time.Hour)` (offset `-04:00`) as `expires_at`; `ResolveToken` compares `expires_at > ?` with a UTC `now`. SQLite compares the two as text, so `…17:xx-04:00` sorted before `…20:xx+00:00` and the token looked expired. Fix: `utcArgs` in `db.exec/query/row` converts every `time.Time` / `*time.Time` argument to UTC. Both databases pass after the fix.
+
+### What I learned
+- modernc's default time format is `time.Time.String()` (with zone name and monotonic clock); `_time_format=sqlite` writes `2006-01-02 15:04:05.999999999-07:00`, and parsing back to `time.Time` happens only for columns declared `DATE`, `DATETIME` or `TIMESTAMP` (`modernc.org/sqlite@v1.54.0/rows.go:152-196`). Hence `TIMESTAMP` in the SQLite DDL.
+- With UTC everywhere, text comparison of that format is chronological (fraction digits compare correctly; `+` sorts before `.` and digits).
+
+### What was tricky to build
+- SQLite runs with one connection (`SetMaxOpenConns(1)`). Inside `InTx`, calling back into `s.DB` (instead of the transaction's `db`) would deadlock waiting for the only connection. `getUser(ctx, tx, id)` exists for that reason, and `InTx`'s comment says so.
+
+### What warrants a second pair of eyes
+- `rebind` assumes no literal `?` in SQL text.
+- `Pending` treats a missing `schema_migrations` table as "all pending" by ignoring the query error.
+
+### What should be done in the future
+- A schema-parity test that compares actual columns (information_schema vs pragma_table_info), not just migration names.
+
+### Code review instructions
+- Start at `pkg/store/store.go` (`Open`, `db`, `utcArgs`, `Migrate`), then `users.go`, `device.go`.
+- `go test ./pkg/store/...` and the same with `TEST_DATABASE_URL` pointing at a Postgres.
+
+### Technical details
+- SQLite DSN: `file:<path>?_pragma=journal_mode(WAL)&_pragma=busy_timeout(5000)&_pragma=foreign_keys(1)&_txlock=immediate&_time_format=sqlite&_texttotime=1`.

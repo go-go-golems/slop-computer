@@ -2,8 +2,8 @@
 package cmds
 
 import (
-	glazed "github.com/go-go-golems/glazed/pkg/cmds"
 	"github.com/go-go-golems/glazed/pkg/cli"
+	glazed "github.com/go-go-golems/glazed/pkg/cmds"
 	"github.com/go-go-golems/glazed/pkg/cmds/fields"
 	"github.com/go-go-golems/glazed/pkg/cmds/schema"
 	"github.com/go-go-golems/glazed/pkg/cmds/values"
@@ -78,5 +78,24 @@ func group(use, short string, cs ...glazed.Command) (*cobra.Command, error) {
 
 // Register adds every slop command to root.
 func Register(root *cobra.Command) error {
+	top, users := dbCommands()
+	for _, c := range append([]glazed.Command{newServe()}, top...) {
+		cmd, err := cli.BuildCobraCommandFromCommand(c)
+		if err != nil {
+			return err
+		}
+		root.AddCommand(cmd)
+	}
+	auth, err := authCommands()
+	if err != nil {
+		return err
+	}
+	usersGroup, err := group("users", "Manage users directly in the database (bootstrap and break-glass)", users...)
+	if err != nil {
+		return err
+	}
+	dbGroup := &cobra.Command{Use: "db", Short: "Direct database operations for operators"}
+	dbGroup.AddCommand(usersGroup)
+	root.AddCommand(auth, dbGroup)
 	return nil
 }

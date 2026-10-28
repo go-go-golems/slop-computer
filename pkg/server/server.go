@@ -1,0 +1,177 @@
+// Package server is slop's HTTP server: the main host (Workshop, sign-in,
+// JSON API), and later the site hosts and the sandbox domain.
+//
+// The request guard, sign-in, tokens and device login are ported from
+// github.com/go-go-golems/francois@106776a pkg/catalog.
+package server
+
+import (
+	"context"
+	"net"
+	"net/http"
+	"net/url"
+	"strings"
+	"time"
+
+	"github.com/go-go-golems/slop-computer/pkg/httpx"
+	"github.com/go-go-golems/slop-computer/pkg/identity"
+	"github.com/go-go-golems/slop-computer/pkg/store"
+	"github.com/pkg/errors"
+	"github.com/rs/zerolog/log"
+)
+
+// LocalConfig enables local mode: nickname sign-in instead of OIDC.
+type LocalConfig struct {
+	// Role is given to a nickname the first time it signs in.
+	Role string
+}
+
+type Config struct {
+	// PublicURL is the main host's origin, such as https://slop.computer.
+	PublicURL *url.URL
+	// ExtraOrigins are further origins that reach the main host: the Vite dev
+	// server (--dev-origin) and, in local mode, the 127.0.0.1 spelling.
+	ExtraOrigins []string
+	// OIDC signs people in; nil in local mode.
+	OIDC *identity.Provider
+	// Local enables nickname sign-in; nil unless --auth local.
+	Local *LocalConfig
+	// TrustProxyHeaders takes the client address from X-Real-Ip / X-Forwarded-For.
+	TrustProxyHeaders bool
+}
+
+func (c Config) Secure() bool { return c.PublicURL.Scheme == "https" }
+
+// Validate checks the configuration, including local mode's guard rails.
+func (c Config) Validate(listen string) error {
+	if c.PublicURL == nil || (c.PublicURL.Scheme != "http" && c.PublicURL.Scheme != "https") || c.PublicURL.Host == "" {
+		return errors.New("public-url must be an origin such as https://slop.computer")
+	}
+	if c.Local != nil {
+		if c.OIDC != nil {
+			return errors.New("choose either local mode or OIDC")
+		}
+		if err := identity.CheckLocalSafe(listen, c.PublicURL); err != nil {
+			return err
+		}
+		if !store.ValidRole(c.Local.Role) {
+			return errors.Errorf("invalid local role %q", c.Local.Role)
+		}
+	} else if c.OIDC == nil || !c.OIDC.Configured() {
+		return errors.New("configure OIDC (--oidc-issuer, --oidc-client-id) or use --local")
+	}
+	for _, o := range c.ExtraOrigins {
+		if u, err := url.Parse(o); err != nil || u.Host == "" || (u.Path != "" && u.Path != "/") {
+			return errors.Errorf("extra origin %q must be an origin such as http://localhost:5173", o)
+		}
+	}
+	return nil
+}
+
+type Server struct {
+	Config        Config
+	Store         *store.Store
+	mux           *http.ServeMux
+	deviceLimiter *limiter
+}
+
+func New(cfg Config, st *store.Store) *Server {
+	s := &Server{Config: cfg, Store: st, deviceLimiter: newLimiter()}
+	s.mux = s.routes()
+	return s
+}
+
+// origins are the main host's origins: the public URL first.
+func (s *Server) origins() []string {
+	out := []string{origin(s.Config.PublicURL)}
+	for _, o := range s.Config.ExtraOrigins {
+		out = append(out, strings.TrimRight(o, "/"))
+	}
+	return out
+}
+
+func origin(u *url.URL) string { return u.Scheme + "://" + u.Host }
+
+// requestOrigin is the main-host origin a request arrived on (so links and
+// device approval URLs stay on the host the browser uses), else the public URL.
+func (s *Server) requestOrigin(r *http.Request) string {
+	host := strings.ToLower(r.Host)
+	for _, o := range s.origins() {
+		if u, err := url.Parse(o); err == nil && strings.ToLower(u.Host) == host {
+			return o
+		}
+	}
+	return s.origins()[0]
+}
+
+// isMainHost reports whether host is one of the main host's origins.
+func (s *Server) isMainHost(host string) bool {
+	host = strings.ToLower(host)
+	for _, o := range s.origins() {
+		if u, err := url.Parse(o); err == nil && strings.ToLower(u.Host) == host {
+			return true
+		}
+	}
+	return false
+}
+
+// Handler answers every host the server serves.
+func (s *Server) Handler() http.Handler {
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("X-Content-Type-Options", "nosniff")
+		if s.Config.Local != nil {
+			w.Header().Set("X-Slop-Mode", "local")
+		}
+		if !s.isMainHost(r.Host) {
+			http.Error(w, "unknown host", http.StatusMisdirectedRequest)
+			return
+		}
+		w.Header().Set("X-Frame-Options", "DENY")
+		w.Header().Set("Referrer-Policy", "same-origin")
+		s.mux.ServeHTTP(w, r)
+	})
+}
+
+func (s *Server) routes() *http.ServeMux {
+	m := http.NewServeMux()
+	m.HandleFunc("GET /healthz", func(w http.ResponseWriter, r *http.Request) { httpx.OK(w, map[string]string{"status": "ok"}) })
+	m.HandleFunc("GET /readyz", func(w http.ResponseWriter, r *http.Request) {
+		ctx, cancel := context.WithTimeout(r.Context(), 2*time.Second)
+		defer cancel()
+		if err := s.Store.Ping(ctx); err != nil {
+			httpx.Fail(w, 503, "database_unavailable", "Database unavailable")
+			return
+		}
+		httpx.OK(w, map[string]string{"status": "ready"})
+	})
+	s.authRoutes(m)
+	s.tokenRoutes(m)
+	s.deviceRoutes(m)
+	s.userRoutes(m)
+	m.HandleFunc("/api/", func(w http.ResponseWriter, r *http.Request) { httpx.Fail(w, 404, "not_found", "Unknown API route") })
+	m.HandleFunc("GET /static/", s.staticFile)
+	m.HandleFunc("GET /{$}", s.guard(public, noToken, s.homePage))
+	return m
+}
+
+// clientAddress is the caller's IP address.
+func (s *Server) clientAddress(r *http.Request) string {
+	if s.Config.TrustProxyHeaders {
+		if ip := strings.TrimSpace(r.Header.Get("X-Real-Ip")); ip != "" {
+			return ip
+		}
+		if fwd := r.Header.Get("X-Forwarded-For"); fwd != "" {
+			return strings.TrimSpace(strings.Split(fwd, ",")[0])
+		}
+	}
+	host, _, err := net.SplitHostPort(r.RemoteAddr)
+	if err != nil {
+		return r.RemoteAddr
+	}
+	return host
+}
+
+func unavailable(w http.ResponseWriter, err error) {
+	log.Error().Err(err).Msg("request failed")
+	httpx.Fail(w, 503, "unavailable", "Request failed")
+}

@@ -1,0 +1,7 @@
+{{define "home"}}{{template "head" "slop.computer"}}{{template "banner" .}}
+<main class="card">
+<h1>slop.computer</h1>
+<p>Signed in as <b>{{.Me.DisplayName}}</b> ({{.Me.Role}}).</p>
+{{if eq .Me.Role "pending"}}<p class="note">An administrator has to let you in before you can see anything.</p>{{end}}
+<form method="post" action="/auth/logout"><input type="hidden" name="csrf" value="{{.CSRF}}"><button>Sign out</button></form>
+</main>{{template "foot"}}{{end}}

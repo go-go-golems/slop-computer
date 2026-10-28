@@ -1,0 +1,5 @@
+{{define "head"}}<!doctype html>
+<html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<title>{{.}} · slop.computer</title><link rel="stylesheet" href="/static/pages.css"></head><body>{{end}}
+{{define "banner"}}{{if .Local}}<div class="local">LOCAL MODE — no authentication, do not expose</div>{{end}}{{end}}
+{{define "foot"}}</body></html>{{end}}
