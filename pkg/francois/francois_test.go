@@ -230,6 +230,21 @@ func TestImportFromDatabase(t *testing.T) {
 		t.Fatal("census names users")
 	}
 
+	// A small shard size splits the media across data artifacts; links
+	// follow each file to its shard.
+	sharded := filepath.Join(t.TempDir(), "sharded")
+	if _, err := francois.Extract(ctx, src, snap, sharded, francois.Options{AllMedia: true, MediaShardBytes: 11}); err != nil {
+		t.Fatal(err)
+	}
+	for _, f := range []string{"artifacts/francois-media/v1/files/med_aa.png", "artifacts/francois-media-2/v1/files/med_bb.webp"} {
+		if _, err := os.Stat(filepath.Join(sharded, f)); err != nil {
+			t.Fatalf("shard: %v", err)
+		}
+	}
+	if sf2, _ := seed.Load(sharded); len(sf2.Artifacts) != len(sf.Artifacts)+1 {
+		t.Fatalf("sharded seed has %d artifacts, want %d", len(sf2.Artifacts), len(sf.Artifacts)+1)
+	}
+
 	// Push into slop, twice.
 	api, st := slopServer(t)
 	if _, act, err := st.ImportAdmin(ctx, store.Identity{Issuer: issuer, Subject: "1002", Name: "Ramon"}); err != nil || act != "created" {

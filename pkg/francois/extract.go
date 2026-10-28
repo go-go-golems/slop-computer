@@ -40,6 +40,10 @@ type Options struct {
 	// Cache is a directory of downloaded files by sha256 (<aa>/<sha256>),
 	// so repeated extracts read each file once; empty disables it.
 	Cache string
+	// MediaShardBytes caps one media data artifact (default 150 MB): slop
+	// refuses versions over 200 MB, so a large library is split into
+	// francois-media, francois-media-2, …
+	MediaShardBytes int64
 	// Workers download media in parallel (default 4).
 	Workers int
 	// Log reports progress; nil is silent.
@@ -61,9 +65,41 @@ var slopIDPattern = regexp.MustCompile(`^[a-z0-9][a-z0-9-]{0,62}$`)
 // mediaRef matches francois media links in Markdown and page fields.
 var mediaRef = regexp.MustCompile(`/media/(med_[0-9a-f]+)(\?[^)\s"'<>]*)?`)
 
-// MediaSrc is where an imported media file is served on slop: the media
+// mediaSrc is where an imported media file is served on slop: its media
 // data artifact's main version, so links survive re-imports.
-func MediaSrc(m Media) string { return "/_d/" + MediaID + "/main/files/" + m.File.Name }
+func (x *extractor) mediaSrc(m Media) string {
+	return "/_d/" + x.shard[m.ID] + "/main/files/" + m.File.Name
+}
+
+// shardMedia assigns the media to copy to media data artifacts of at most
+// MediaShardBytes each, in ID order, and returns their IDs.
+func (x *extractor) shardMedia() []string {
+	limit := x.opts.MediaShardBytes
+	if limit <= 0 {
+		limit = 150 << 20
+	}
+	ids := make([]string, 0, len(x.copy))
+	for id := range x.copy {
+		ids = append(ids, id)
+	}
+	sort.Strings(ids)
+	var shards []string
+	var size int64
+	for _, id := range ids {
+		f := x.media[id].File
+		if len(shards) == 0 || (size > 0 && size+f.Size > limit) {
+			shard := MediaID
+			if len(shards) > 0 {
+				shard = fmt.Sprintf("%s-%d", MediaID, len(shards)+1)
+			}
+			shards = append(shards, shard)
+			size = 0
+		}
+		size += f.Size
+		x.shard[id] = shards[len(shards)-1]
+	}
+	return shards
+}
 
 func ext(mediaType string) string {
 	switch strings.ToLower(strings.TrimSpace(strings.Split(mediaType, ";")[0])) {
@@ -98,7 +134,8 @@ type extractor struct {
 	opts   Options
 	census *Census
 	media  map[string]Media
-	copy   map[string]bool // media IDs to copy
+	copy   map[string]bool   // media IDs to copy
+	shard  map[string]string // media ID → media data artifact
 	ids    map[string]string
 	logf   func(string, ...any)
 }
@@ -113,7 +150,7 @@ func Extract(ctx context.Context, src Source, snap *Snapshot, out string, opts O
 		return nil, errors.Errorf("%s is not empty; extract into a new directory", out)
 	}
 	x := &extractor{ctx: ctx, src: src, snap: snap, out: out, opts: opts, census: newCensus(snap),
-		media: map[string]Media{}, copy: map[string]bool{}, ids: map[string]string{}, logf: opts.Log}
+		media: map[string]Media{}, copy: map[string]bool{}, shard: map[string]string{}, ids: map[string]string{}, logf: opts.Log}
 	if x.logf == nil {
 		x.logf = func(string, ...any) {}
 	}
@@ -124,19 +161,35 @@ func Extract(ctx context.Context, src Source, snap *Snapshot, out string, opts O
 		return nil, err
 	}
 	x.selectMedia()
+	shards := x.shardMedia()
+	for _, sh := range shards {
+		for fid, id := range x.ids {
+			if id == sh {
+				return nil, errors.Errorf("francois artifact %q maps to %q, which the import needs for media", fid, id)
+			}
+		}
+	}
 	project := ProjectID
 	f := &seed.File{Projects: []client.Project{{ID: ProjectID, Name: "francois import",
 		Brief: "Imported from francois (" + snap.Source + ", " + snap.TakenAt.Format("2006-01-02 15:04 MST") + "). " +
 			"Pages are releases; " + CatalogID + ", " + JournalID + ", " + CreatorsID + " and " + MediaID + " hold the storefront as data."}}}
-	data := []struct {
+	type dataArtifact struct {
 		id, title string
 		write     func(dir string) (int, error)
-	}{
-		{MediaID, "francois media", x.writeMedia},
+	}
+	var data []dataArtifact
+	for i, sh := range shards {
+		title := "francois media"
+		if i > 0 {
+			title += fmt.Sprintf(" %d", i+1)
+		}
+		data = append(data, dataArtifact{sh, title, func(dir string) (int, error) { return x.writeMedia(sh, dir) }})
+	}
+	data = append(data, []dataArtifact{
 		{CreatorsID, "francois creators", x.writeCreators},
 		{JournalID, "francois journal", x.writeJournal},
 		{CatalogID, "francois catalog", x.writeCatalog},
-	}
+	}...)
 	for _, d := range data {
 		dir := seed.VersionDir(out, d.id, 1)
 		n, err := d.write(dir)
@@ -224,7 +277,7 @@ func (x *extractor) rewrite(text string) string {
 	return mediaRef.ReplaceAllStringFunc(text, func(s string) string {
 		m := mediaRef.FindStringSubmatch(s)
 		if md, ok := x.media[m[1]]; ok && x.copy[m[1]] {
-			return MediaSrc(md)
+			return x.mediaSrc(md)
 		}
 		return s
 	})
@@ -236,7 +289,7 @@ func (x *extractor) mediaInfo(id string) map[string]any {
 	if !ok || !x.copy[id] {
 		return nil
 	}
-	return map[string]any{"id": m.ID, "src": MediaSrc(m), "type": m.MediaType, "width": m.Width, "height": m.Height, "alt": m.Alt}
+	return map[string]any{"id": m.ID, "src": x.mediaSrc(m), "type": m.MediaType, "width": m.Width, "height": m.Height, "alt": m.Alt}
 }
 
 func writeFile(path string, data []byte) error {
@@ -360,10 +413,12 @@ func linkOrCopy(src, dst string) error {
 	return err
 }
 
-func (x *extractor) writeMedia(dir string) (int, error) {
+func (x *extractor) writeMedia(shard, dir string) (int, error) {
 	ids := make([]string, 0, len(x.copy))
 	for id := range x.copy {
-		ids = append(ids, id)
+		if x.shard[id] == shard {
+			ids = append(ids, id)
+		}
 	}
 	sort.Strings(ids)
 	workers := x.opts.Workers
@@ -415,7 +470,7 @@ func (x *extractor) writeMedia(dir string) (int, error) {
 	if n == 0 {
 		return 0, nil
 	}
-	x.logf("media: %d files\n", n)
+	x.logf("%s: %d files\n", shard, n)
 	return n, writeJSON(filepath.Join(dir, "index.json"), index)
 }
 
