@@ -1,0 +1,20 @@
+{
+  "no": 5,
+  "title": "Hum Studio",
+  "kind": "Studio",
+  "date": "2026-10-08",
+  "size": "1.1 MB",
+  "tags": [
+    "audio",
+    "studio"
+  ],
+  "summary": "Hum a melody, edit it as a drawing, and play it back as a string quartet.",
+  "colors": [
+    "#4B2E5A",
+    "#C9A3D9",
+    "#F1E9F4",
+    "#FFFFFF"
+  ],
+  "by": "Ramon",
+  "href": null
+}

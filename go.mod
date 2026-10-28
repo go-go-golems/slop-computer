@@ -5,6 +5,7 @@ go 1.26.3
 toolchain go1.26.10
 
 require (
+	github.com/fsnotify/fsnotify v1.10.1
 	github.com/go-go-golems/glazed v1.4.4
 	github.com/jackc/pgx/v5 v5.11.0
 	github.com/pkg/errors v0.9.1

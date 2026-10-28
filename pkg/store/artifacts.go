@@ -5,6 +5,7 @@ import (
 	"database/sql"
 	"encoding/json"
 	"fmt"
+	"reflect"
 	"regexp"
 	"sort"
 	"time"
@@ -303,7 +304,10 @@ type PushResult struct {
 	Artifact Artifact `json:"artifact"`
 	Version  Version  `json:"version"`
 	Created  bool     `json:"created"`
-	Events   []Event  `json:"-"`
+	// Unchanged is set when the tree and manifest equal main's: no version
+	// is stored and Version is main (re-saves, push --watch).
+	Unchanged bool    `json:"unchanged,omitempty"`
+	Events    []Event `json:"-"`
 }
 
 // Push stores a new version. Pushes to one artifact are serialised (row
@@ -348,6 +352,16 @@ func (s *Store) Push(ctx context.Context, in PushInput) (PushResult, error) {
 		}
 		if len(in.Manifest) == 0 {
 			in.Manifest = JSON("{}")
+		}
+		if a.Main != 0 && in.Reply == nil {
+			cur, err := getVersion(ctx, s, tx, a.ID, a.Main)
+			if err != nil {
+				return err
+			}
+			if sameVersion(cur, in.Tree, in.Manifest) {
+				res.Unchanged, res.Version, res.Artifact = true, cur, a
+				return nil
+			}
 		}
 		replyThread := ""
 		if in.Reply != nil {
@@ -398,6 +412,27 @@ func (s *Store) Push(ctx context.Context, in PushInput) (PushResult, error) {
 		return nil
 	})
 	return res, err
+}
+
+// sameVersion reports whether a tree and manifest are v's.
+func sameVersion(v Version, tree map[string]FileEntry, manifest JSON) bool {
+	if len(v.Files) != len(tree) || !jsonEqual(v.Manifest, manifest) {
+		return false
+	}
+	for p, f := range tree {
+		if v.Files[p].SHA256 != f.SHA256 {
+			return false
+		}
+	}
+	return true
+}
+
+func jsonEqual(a, b JSON) bool {
+	var x, y any
+	if json.Unmarshal(a, &x) != nil || json.Unmarshal(b, &y) != nil {
+		return false
+	}
+	return reflect.DeepEqual(x, y)
 }
 
 func setRef(ctx context.Context, d db, now time.Time, artifact, name string, n int) error {

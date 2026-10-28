@@ -1,0 +1,49 @@
+<!doctype html>
+<html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Not found · slop.boutique</title>
+<link rel="stylesheet" href="boutique.css">
+</head><body><div class="sb-app">
+<header class="site-header page"><a class="site-wordmark" href="/">slop.boutique</a><p class="site-statement">A lab for computation and intelligence as material and medium.</p>
+<nav class="site-nav"><a href="/">Apps</a><a href="/journal">Journal</a><a href="/about">About</a><a class="site-support" href="/pricing"><span class="support-desktop">Support the lab</span><span class="support-mobile">Support</span></a></nav></header>
+<main class="sb-main page"><section class="sb-intro"><p class="sb-kicker">404</p><h1 class="sb-h1">Nothing lives at <span id="path" class="sb-v">this address</span> yet.</h1><p class="sb-text">Every page on this site is an artifact, and no route points one at this path.</p></section>
+<div class="lines"><a class="line" href="/"><span class="line-label">Experiments</span><span class="line-body muted">Everything the lab has made</span></a><a class="line" href="/journal"><span class="line-label">Journal</span><span class="line-body muted">Notes as we build</span></a></div></main>
+<footer class="site-footer page">
+  <div class="footer-brand"><span class="site-wordmark">slop.boutique</span><span>Run by Manuel and Ramon.</span></div>
+  <div><a href="/">Apps</a><a href="/journal">Journal</a><a href="/about">About</a></div>
+  <div><a href="/journal">RSS</a><a href="/press">Press</a><a href="/pricing">Support the lab</a></div>
+  <div class="footer-type"><span>Set in ABC Areal.</span><span>For humans.</span></div>
+</footer>
+</div>
+<script>(function pageLib() {
+    const esc = s => String(s == null ? '' : s).replace(/[&<>"]/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]));
+    const D = d => new Date(String(d).slice(0, 10) + 'T12:00:00Z');
+    window.lab = {
+      esc,
+      day: d => D(d).toLocaleDateString('en-GB', { day: 'numeric', month: 'short', timeZone: 'UTC' }),
+      long: d => D(d).toLocaleDateString('en-GB', { day: 'numeric', month: 'long', year: 'numeric', timeZone: 'UTC' }),
+      month: d => D(d).toLocaleDateString('en-GB', { month: 'long', year: 'numeric', timeZone: 'UTC' }),
+      iso: d => String(d).slice(0, 10),
+      data: async name => (window.slop && slop.data && slop.data[name]) ? await slop.data[name].list() : [],
+      one: async (name, id) => (window.slop && slop.data && slop.data[name]) ? await slop.data[name].get(id) : null,
+      params: () => (window.slop && slop.route && slop.route.params) || {},
+      // generative cover: soft bands in the experiment's colours, seeded by its id
+      art(canvas, colors, seed, t) {
+        const c = canvas.getContext('2d'), w = canvas.width, h = canvas.height;
+        let s = 0; for (const ch of String(seed || 'x')) s = (s * 31 + ch.charCodeAt(0)) >>> 0;
+        const r = () => ((s = (s * 1664525 + 1013904223) >>> 0) / 4294967296);
+        const cols = (colors && colors.length ? colors : ['#2F2D2A', '#CEE5FF', '#F4F3F0']);
+        c.fillStyle = cols[cols.length - 1]; c.fillRect(0, 0, w, h);
+        const n = 7;
+        for (let i = 0; i < n; i++) {
+          const y0 = r() * h, amp = (0.08 + r() * 0.2) * h, fr = 1 + r() * 2.5, ph = r() * 6.28 + (t || 0) * (0.2 + r() * 0.3);
+          c.beginPath(); c.moveTo(0, h);
+          for (let x = 0; x <= w; x += 8) c.lineTo(x, y0 + Math.sin(x / w * fr * 6.28 + ph) * amp);
+          c.lineTo(w, h); c.closePath();
+          c.globalAlpha = 0.55; c.fillStyle = cols[i % (cols.length - 1 || 1)]; c.fill();
+        }
+        c.globalAlpha = 1;
+      },
+    };
+  })();</script>
+<script>(function notFoundScript() { const el = document.getElementById('path'); if (el) el.textContent = (window.slop && slop.route && slop.route.path) || location.pathname; })({});</script>
+</body></html>

@@ -1,0 +1,20 @@
+{
+  "no": 12,
+  "title": "Type Specimen",
+  "kind": "Tool",
+  "date": "2026-10-23",
+  "size": "38 KB",
+  "tags": [
+    "tools",
+    "type"
+  ],
+  "summary": "The lab’s typeface at every size the site uses, with your own line of text.",
+  "colors": [
+    "#2F2D2A",
+    "#C6C3BD",
+    "#F4F3F0",
+    "#FFFFFF"
+  ],
+  "by": "Ramon",
+  "href": "/play/type"
+}

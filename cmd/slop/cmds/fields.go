@@ -97,5 +97,30 @@ func Register(root *cobra.Command) error {
 	dbGroup := &cobra.Command{Use: "db", Short: "Direct database operations for operators"}
 	dbGroup.AddCommand(usersGroup)
 	root.AddCommand(auth, dbGroup)
+	for _, c := range []glazed.Command{newPush(), newPull()} {
+		cmd, err := cli.BuildCobraCommandFromCommand(c)
+		if err != nil {
+			return err
+		}
+		root.AddCommand(cmd)
+	}
+	groups := []struct {
+		use, short string
+		cmds       []glazed.Command
+	}{
+		{"artifacts", "List artifacts", []glazed.Command{&artifactsCmd{glazed.NewCommandDescription("list", glazed.WithShort("List artifacts"),
+			glazed.WithFlags(append(serverFlags(), fields.New("project", fields.TypeString, fields.WithShortFlag("p"), fields.WithHelp("Only this project")))...))}}},
+		{"route", "Point site paths at page versions, with history and undo", routeCommands()},
+		{"comments", "Wait for, list and answer comments", commentCommands()},
+		{"projects", "List and edit projects", projectCommands()},
+		{"dev", "Development helpers", []glazed.Command{newDevSeed()}},
+	}
+	for _, g := range groups {
+		cmd, err := group(g.use, g.short, g.cmds...)
+		if err != nil {
+			return err
+		}
+		root.AddCommand(cmd)
+	}
 	return nil
 }

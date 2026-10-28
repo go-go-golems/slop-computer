@@ -1,0 +1,20 @@
+{
+  "no": 6,
+  "title": "Paper Moon IDE",
+  "kind": "Workbench",
+  "date": "2026-10-10",
+  "size": "740 KB",
+  "tags": [
+    "simulation",
+    "workbench"
+  ],
+  "summary": "An editor for small orbital mechanics programs, with each trajectory drawn beside its line.",
+  "colors": [
+    "#141416",
+    "#5A6B8C",
+    "#C8D3E6",
+    "#EEECE8"
+  ],
+  "by": "Manuel",
+  "href": null
+}

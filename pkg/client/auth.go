@@ -35,8 +35,10 @@ type Token struct {
 
 // Config is GET /api/config.
 type Config struct {
-	Mode      string `json:"mode"`
-	PublicURL string `json:"publicUrl"`
+	Mode          string   `json:"mode"`
+	PublicURL     string   `json:"publicUrl"`
+	SiteHosts     []string `json:"siteHosts"`
+	SandboxDomain string   `json:"sandboxDomain"`
 }
 
 func (c *Client) Me(ctx context.Context) (Me, error) {

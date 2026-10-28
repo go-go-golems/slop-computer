@@ -8,3 +8,4 @@ var/
 coverage/
 deploy/compose/.env
 web/workshop/dist/
+.playwright-mcp/

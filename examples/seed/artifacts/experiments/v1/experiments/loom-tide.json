@@ -1,0 +1,20 @@
+{
+  "no": 11,
+  "title": "Loom Tide",
+  "kind": "Simulation",
+  "date": "2026-10-21",
+  "size": "412 KB",
+  "tags": [
+    "simulation",
+    "data"
+  ],
+  "summary": "A tide table you can weave: each thread is a harbour, each knot a high water.",
+  "colors": [
+    "#1D3A5F",
+    "#5AA0C8",
+    "#E8F1F5",
+    "#FFFFFF"
+  ],
+  "by": "Ramon",
+  "href": null
+}

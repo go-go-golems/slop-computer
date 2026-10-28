@@ -43,13 +43,13 @@ func serverFlags() []*fields.Definition {
 	return []*fields.Definition{
 		flag("server", "Server origin (default: $SLOP_SERVER, then the default stored login)"),
 		flag("token-file", "File containing the API token (default: $SLOP_TOKEN, then the stored login)"),
-		flag("host", "Host header override, for tunnels"),
+		flag("host-header", "Host header override, for tunnels"),
 	}
 }
 
 // apiClient resolves the server and token the way every API command does.
 func apiClient(_ context.Context, a in) (*client.Client, error) {
-	res, err := credentials.Resolve(credentials.Inputs{Server: a.S("server"), TokenFile: a.S("token-file"), Host: a.S("host")})
+	res, err := credentials.Resolve(credentials.Inputs{Server: a.S("server"), TokenFile: a.S("token-file"), Host: a.S("host-header")})
 	if err != nil {
 		return nil, err
 	}

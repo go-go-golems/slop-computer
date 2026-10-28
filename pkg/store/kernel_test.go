@@ -37,6 +37,12 @@ func TestKernel(t *testing.T) {
 	if err != nil || res.Version.N != 2 || res.Version.Files["a.css"].SHA256 != "cc" {
 		t.Fatalf("push 2: %+v %v", res, err)
 	}
+	// The same tree and manifest as main stores nothing.
+	two := 2
+	same, err := s.Push(ctx, store.PushInput{Artifact: "pricing", Base: &two, Tree: res.Version.Files, Manifest: store.JSON(`{ }`), MoveMain: true, Actor: u.ID, Via: "cli"})
+	if err != nil || !same.Unchanged || same.Version.N != 2 || len(same.Events) != 0 {
+		t.Fatalf("unchanged push: %+v %v", same, err)
+	}
 	if _, err = s.Push(ctx, store.PushInput{Artifact: "pricing", Base: &one, Tree: map[string]store.FileEntry{"x.css": {SHA256: "cc"}}, MoveMain: true, Actor: u.ID, Force: true, Via: "cli"}); err == nil {
 		t.Fatal("a page version without index.html must be refused")
 	}
@@ -70,7 +76,6 @@ func TestKernel(t *testing.T) {
 	if err != nil || len(th.Comments) != 1 {
 		t.Fatalf("thread %+v %v", th, err)
 	}
-	two := 2
 	res, err = s.Push(ctx, store.PushInput{Artifact: "pricing", Base: &two, Tree: tree, MoveMain: true, Actor: u.ID, Via: "claude", TokenID: "tok_x",
 		Reply: &store.ReplyInput{Thread: th.ID, Text: "Done in v3"}})
 	if err != nil {

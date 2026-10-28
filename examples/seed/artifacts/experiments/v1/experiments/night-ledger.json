@@ -1,0 +1,20 @@
+{
+  "no": 7,
+  "title": "Night Ledger",
+  "kind": "Workbench",
+  "date": "2026-10-12",
+  "size": "655 KB",
+  "tags": [
+    "agents",
+    "workbench"
+  ],
+  "summary": "A double-entry ledger an agent keeps overnight, with every entry explained in the margin.",
+  "colors": [
+    "#1F2A2E",
+    "#6F8F8A",
+    "#E2E8E4",
+    "#F4F3F0"
+  ],
+  "by": "Manuel",
+  "href": null
+}

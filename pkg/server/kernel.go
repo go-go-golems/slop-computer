@@ -400,7 +400,11 @@ func (s *Server) push(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	s.publish(res.Events)
-	httpx.JSON(w, 201, map[string]any{"artifact": res.Artifact, "version": res.Version, "created": res.Created, "warnings": warnings})
+	code := 201
+	if res.Unchanged {
+		code = 200
+	}
+	httpx.JSON(w, code, map[string]any{"artifact": res.Artifact, "version": res.Version, "created": res.Created, "unchanged": res.Unchanged, "warnings": warnings})
 }
 
 func (s *Server) putRef(w http.ResponseWriter, r *http.Request) {
