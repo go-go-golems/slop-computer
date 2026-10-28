@@ -101,7 +101,7 @@ export function VisitLine({ a, v, routes, onAddRoute }: { a: Artifact; v: Versio
   )
 }
 
-export function Filmstrip({ a, versions, current, routes, onSelect }: { a: Artifact; versions: Version[]; current: number; routes: RouteView[]; onSelect: (n: number) => void }) {
+export function Filmstrip({ a, versions, current, routes, ctx, onSelect }: { a: Artifact; versions: Version[]; current: number; routes: RouteView[]; ctx: PreviewContext; onSelect: (n: number) => void }) {
   const by = useVersionBy()
   return (
     <div className="film" id="wFilm">
@@ -112,7 +112,7 @@ export function Filmstrip({ a, versions, current, routes, onSelect }: { a: Artif
         if (x.n === a.main) flags.push('main')
         return (
           <FilmFrame key={x.n} v={x} on={x.n === current} by={by(x)} flags={flags} onSelect={() => onSelect(x.n)}>
-            {a.kind === 'data' ? <DataSummary a={a} v={x} prev={prev} /> : <Thumb artifact={a.id} n={x.n} width={132} />}
+            {a.kind === 'data' ? <DataSummary a={a} v={x} prev={prev} /> : <Thumb artifact={a.id} n={x.n} width={132} host={ctx.host} path={ctx.path} />}
           </FilmFrame>
         )
       })}

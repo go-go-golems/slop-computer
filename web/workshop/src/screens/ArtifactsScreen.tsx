@@ -7,6 +7,7 @@ import { navigate, watchPath } from '../app/router'
 import { toast } from '../app/store'
 import { Button, Count, IconButton, Seg, Select, Tag } from '../components/atoms'
 import { Thumb } from '../components/organisms/PreviewStage'
+import { usePreviewContext } from '../components/organisms/WatchRight'
 
 type Kind = 'all' | 'page' | 'data'
 
@@ -56,7 +57,7 @@ function ArtifactCard({ a }: { a: Artifact }) {
   const open = threads.filter(t => t.artifact === a.id && !t.resolved).length
   return (
     <button type="button" className="acard" onClick={() => navigate(watchPath(a.id))}>
-      <div className="shot">{a.kind === 'data' ? <DataShot a={a} /> : a.main ? <Thumb artifact={a.id} n={a.main} /> : null}</div>
+      <div className="shot">{a.kind === 'data' ? <DataShot a={a} /> : a.main ? <PageShot a={a} /> : null}</div>
       <div className="ab">
         <div className="t"><b>{a.id}</b><Tag>{a.kind === 'data' ? a.type || 'data' : 'page'}</Tag>{open ? <Count n={open} bad title="open threads" /> : null}</div>
         <LatestLine a={a} />
@@ -64,6 +65,11 @@ function ArtifactCard({ a }: { a: Artifact }) {
       </div>
     </button>
   )
+}
+
+function PageShot({ a }: { a: Artifact }) {
+  const ctx = usePreviewContext(useRoutesUsing(a.id), null)
+  return <Thumb artifact={a.id} n={a.main} host={ctx.host} path={ctx.path} />
 }
 
 function LatestLine({ a }: { a: Artifact }) {

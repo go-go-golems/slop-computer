@@ -86,7 +86,7 @@ export function PreviewStage({ artifact, n, host, path, device, mode = 'preview'
 }
 
 // Thumb is a small, lazy, non-interactive preview 1280 px wide scaled down.
-export function Thumb({ artifact, n, width }: { artifact: string; n: number; width?: number }) {
+export function Thumb({ artifact, n, width, host, path }: { artifact: string; n: number; width?: number; host?: string; path?: string }) {
   const box = useRef<HTMLDivElement>(null)
   const [visible, setVisible] = useState(false)
   const [w, setW] = useState(width ?? 250)
@@ -100,13 +100,15 @@ export function Thumb({ artifact, n, width }: { artifact: string; n: number; wid
   }, [width])
   return (
     <div ref={box} style={{ position: 'absolute', inset: 0 }}>
-      {visible ? <ThumbFrame artifact={artifact} n={n} scale={w / 1280} /> : null}
+      {visible ? <ThumbFrame artifact={artifact} n={n} host={host} path={path} scale={w / 1280} /> : null}
     </div>
   )
 }
 
-function ThumbFrame({ artifact, n, scale }: { artifact: string; n: number; scale: number }) {
-  const { data } = useSandboxUrlQuery({ artifact, n, mode: 'thumb' })
+// A thumb is shown in its route's context (host and a sample path), so pages
+// behind /:param routes show a record instead of their "not found" state.
+function ThumbFrame({ artifact, n, scale, host, path }: { artifact: string; n: number; scale: number; host?: string; path?: string }) {
+  const { data } = useSandboxUrlQuery({ artifact, n, mode: 'thumb', ...(host ? { host } : {}), ...(path ? { path } : {}) })
   if (!data) return null
   return <iframe src={data.url} tabIndex={-1} aria-hidden="true" loading="lazy" sandbox="allow-scripts allow-same-origin" style={{ transform: `scale(${scale})` }} title="" />
 }
