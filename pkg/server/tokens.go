@@ -38,7 +38,7 @@ func (s *Server) apiMe(w http.ResponseWriter, r *http.Request) {
 
 // apiConfig describes the server to the Workshop and the CLI.
 func (s *Server) apiConfig(w http.ResponseWriter, r *http.Request) {
-	httpx.OK(w, map[string]any{"mode": s.mode(), "publicUrl": origin(s.Config.PublicURL)})
+	httpx.OK(w, map[string]any{"mode": s.mode(), "publicUrl": origin(s.Config.PublicURL), "siteHosts": s.Config.SiteHosts, "sandboxDomain": s.Config.SandboxDomain})
 }
 
 func (s *Server) tokens(w http.ResponseWriter, r *http.Request) {

@@ -37,6 +37,8 @@ func newServe() *serveCmd {
 			flagDefault("blobs", "./var/blobs", "Directory for file contents (sha256-addressed)"),
 			flag("listen", "Listen address (default 127.0.0.1:8080)"),
 			flag("public-url", "Main host origin, e.g. https://slop.computer (default with --local: http://localhost:<port>)"),
+			list("site-host", "Hosts served through the route table, e.g. slop.boutique (default with --local: site.localhost:<port>)"),
+			flag("sandbox-domain", "Domain for preview origins, e.g. slop.run (default with --local: sandbox.localhost:<port>)"),
 			list("dev-origin", "Further origins that reach the main host, e.g. http://localhost:5173 for the Vite dev server"),
 			flag("oidc-issuer", "OIDC issuer URL (ZITADEL)"),
 			flag("oidc-client-id", "OIDC client ID"),
@@ -106,7 +108,7 @@ func (c *serveCmd) Run(ctx context.Context, v *values.Values) error {
 	}
 	publicURL := a.S("public-url")
 	extra := a.L("dev-origin")
-	cfg := server.Config{TrustProxyHeaders: a.B("trust-proxy-headers")}
+	cfg := server.Config{TrustProxyHeaders: a.B("trust-proxy-headers"), SiteHosts: a.L("site-host"), SandboxDomain: a.S("sandbox-domain")}
 	if local {
 		if dbURL == "" {
 			dbURL = "sqlite:./var/slop.db"
@@ -115,6 +117,12 @@ func (c *serveCmd) Run(ctx context.Context, v *values.Values) error {
 			publicURL = "http://localhost:" + port
 		}
 		cfg.Local = &server.LocalConfig{Role: a.S("local-role")}
+		if len(cfg.SiteHosts) == 0 {
+			cfg.SiteHosts = []string{"site.localhost:" + port}
+		}
+		if cfg.SandboxDomain == "" {
+			cfg.SandboxDomain = "sandbox.localhost:" + port
+		}
 	}
 	if dbURL == "" {
 		return errors.New("--database-url is required (or use --local)")
@@ -162,7 +170,8 @@ func (c *serveCmd) Run(ctx context.Context, v *values.Values) error {
 	if local {
 		log.Warn().Msg("LOCAL MODE: no authentication; listening on loopback only")
 	}
-	log.Info().Str("listen", listen).Str("public", publicURL).Str("database", store.Redact(dbURL)).Msg("slop serving")
+	log.Info().Str("listen", listen).Str("public", publicURL).Strs("sites", cfg.SiteHosts).Str("sandbox", cfg.SandboxDomain).
+		Str("database", store.Redact(dbURL)).Msg("slop serving")
 	g, gctx := errgroup.WithContext(ctx)
 	g.Go(func() error {
 		if err := hs.ListenAndServe(); err != nil && !errors.Is(err, http.ErrServerClosed) {

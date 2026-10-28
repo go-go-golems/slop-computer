@@ -38,6 +38,12 @@ type Config struct {
 	OIDC *identity.Provider
 	// Local enables nickname sign-in; nil unless --auth local.
 	Local *LocalConfig
+	// SiteHosts are hosts served through the route table, such as
+	// slop.boutique or site.localhost:8080.
+	SiteHosts []string
+	// SandboxDomain serves previews at s<label>.<domain>, such as slop.run or
+	// sandbox.localhost:8080.
+	SandboxDomain string
 	// TrustProxyHeaders takes the client address from X-Real-Ip / X-Forwarded-For.
 	TrustProxyHeaders bool
 }
@@ -78,6 +84,7 @@ type Server struct {
 	mux           *http.ServeMux
 	deviceLimiter *limiter
 	waiters       *waiters
+	recCache      recordCache
 }
 
 func New(cfg Config, st *store.Store, bl *blobs.Blobs) *Server {
@@ -130,7 +137,18 @@ func (s *Server) Handler() http.Handler {
 		if s.Config.Local != nil {
 			w.Header().Set("X-Slop-Mode", "local")
 		}
-		if !s.isMainHost(r.Host) {
+		host := strings.ToLower(r.Host)
+		if !s.isMainHost(host) {
+			if label, ok := s.sandboxLabel(host); ok {
+				s.serveSandbox(w, r, label)
+				return
+			}
+			for _, h := range s.Config.SiteHosts {
+				if strings.EqualFold(h, host) {
+					s.serveSite(w, r)
+					return
+				}
+			}
 			http.Error(w, "unknown host", http.StatusMisdirectedRequest)
 			return
 		}
@@ -157,6 +175,7 @@ func (s *Server) routes() *http.ServeMux {
 	s.deviceRoutes(m)
 	s.userRoutes(m)
 	s.kernelRoutes(m)
+	s.previewRoutes(m)
 	s.streamRoutes(m)
 	m.HandleFunc("/api/", func(w http.ResponseWriter, r *http.Request) { httpx.Fail(w, 404, "not_found", "Unknown API route") })
 	m.HandleFunc("GET /static/", s.staticFile)

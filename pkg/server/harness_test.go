@@ -32,7 +32,7 @@ func newHarness(t *testing.T, role string) *harness {
 	ts.Start()
 	t.Cleanup(ts.Close)
 	u, _ := url.Parse(ts.URL)
-	cfg := Config{PublicURL: u, Local: &LocalConfig{Role: role}}
+	cfg := Config{PublicURL: u, Local: &LocalConfig{Role: role}, SiteHosts: []string{"site.test"}, SandboxDomain: "sandbox.test"}
 	if err := cfg.Validate(u.Host); err != nil {
 		t.Fatal(err)
 	}
