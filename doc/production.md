@@ -97,6 +97,31 @@ docker run -d --name slop -p 127.0.0.1:8080:8080 -v slop-data:/var/lib/slop \
 `--local` refuses to start unless it listens on loopback with an http
 loopback public URL: it has no authentication.
 
+## Kubernetes
+
+The test deployment on the hetzner k3s cluster (ticket SLOP-002) lives in the
+GitOps repository as `gitops/kustomize/slop/`, cloned from francois's
+package: one replica with `Recreate` (the blob volume is ReadWriteOnce), a
+database on the shared Postgres created by a bootstrap Job, secrets from
+Vault (`kv/apps/slop/prod/runtime`: `database-url`, `oidc-client-id`,
+`zitadel-org-id`) mounted as files, a DNS-01 certificate covering the main
+host, the site host and the sandbox wildcard, and Traefik ingress for all
+three. The image is `ghcr.io/go-go-golems/slop-computer:sha-<short>`,
+published from `main` by `.github/workflows/publish-image.yaml`.
+
+```
+slop serve --listen=0.0.0.0:8080 --blobs=/var/lib/slop/blobs \
+  --database-url-file=/run/slop/database-url \
+  --oidc-client-id-file=/run/slop/oidc-client-id \
+  --oidc-issuer=https://zitadel.example --oidc-scope=urn:zitadel:iam:org:id:<org> \
+  --public-url=https://slop.example --site-host=site.slop.example \
+  --sandbox-domain=sbx.slop.example --trust-proxy-headers
+```
+
+A network policy must let the pod reach the identity provider: when it
+resolves to the cluster's own address, that is the ingress controller's
+port (francois's policy allows Traefik on 8443 for this hairpin).
+
 ## Health
 
 - `GET /healthz` — the process is up.

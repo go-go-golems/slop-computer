@@ -43,6 +43,7 @@ func newServe() *serveCmd {
 			list("dev-origin", "Further origins that reach the main host, e.g. http://localhost:5173 for the Vite dev server"),
 			flag("oidc-issuer", "OIDC issuer URL (ZITADEL)"),
 			flag("oidc-client-id", "OIDC client ID"),
+			flag("oidc-client-id-file", "File containing the OIDC client ID (instead of --oidc-client-id)"),
 			flag("oidc-client-secret-file", "File containing the OIDC client secret (empty for a PKCE public client)"),
 			list("oidc-scope", "Extra OIDC scopes"),
 			boolean("no-migrate", "Do not apply pending migrations at start"),
@@ -59,6 +60,18 @@ func readSecret(path string) (string, error) {
 		return "", errors.Wrap(err, "read "+path)
 	}
 	return strings.TrimSpace(string(b)), nil
+}
+
+// oidcClientID takes the client ID from the flag or from a file (a mounted
+// secret), not both.
+func oidcClientID(id, file string) (string, error) {
+	if id != "" && file != "" {
+		return "", errors.New("use --oidc-client-id or --oidc-client-id-file, not both")
+	}
+	if file != "" {
+		return readSecret(file)
+	}
+	return id, nil
 }
 
 // openStore opens and optionally migrates the database.
@@ -148,10 +161,14 @@ func (c *serveCmd) Run(ctx context.Context, v *values.Values) error {
 		if err != nil {
 			return err
 		}
+		clientID, err := oidcClientID(a.S("oidc-client-id"), a.S("oidc-client-id-file"))
+		if err != nil {
+			return err
+		}
 		if err = identity.ValidateScopes(a.L("oidc-scope")); err != nil {
 			return err
 		}
-		cfg.OIDC = identity.New(identity.Config{Issuer: a.S("oidc-issuer"), ClientID: a.S("oidc-client-id"), ClientSecret: secret,
+		cfg.OIDC = identity.New(identity.Config{Issuer: a.S("oidc-issuer"), ClientID: clientID, ClientSecret: secret,
 			RedirectURL: strings.TrimRight(publicURL, "/") + "/auth/callback", ExtraScopes: a.L("oidc-scope")})
 	}
 	if err = cfg.Validate(listen); err != nil {
