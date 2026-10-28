@@ -72,12 +72,13 @@ textarea.inp { height:auto; padding:7px 8px; resize:vertical; background:var(--c
 .menu.right { left:auto; right:0; min-width:260px; }
 .menu .grp { padding:8px 14px 3px; font-size:var(--fs-xs); color:var(--ink-2); border-top:1px solid var(--rule); }
 .menu .grp:first-child { border-top:0; }
-.menu button { background:none; border:0; text-align:left; padding:6px 14px; display:grid; grid-template-columns:44px 1fr; gap:0 8px; font-size:var(--fs-s); border-radius:0; }
-.menu button:hover { background:var(--fill); }
+.menu button, .menu a { background:none; border:0; text-align:left; padding:6px 14px; display:grid; grid-template-columns:44px 1fr; gap:0 8px; font-size:var(--fs-s); border-radius:0; }
+.menu button:hover, .menu a:hover { background:var(--fill); }
 .menu button .code { color:var(--ink-2); font-size:var(--fs-xs); }
-.menu button small { grid-column:2; color:var(--ink-2); font-size:var(--fs-xs); white-space:nowrap; overflow:hidden; text-overflow:ellipsis; max-width:340px; }
+.menu button small, .menu a small { grid-column:2; color:var(--ink-2); font-size:var(--fs-xs); white-space:nowrap; overflow:hidden; text-overflow:ellipsis; max-width:340px; }
 .menu button.on .t { font-weight:700; }
 .menu .act { grid-template-columns:1fr; }
+.menu a { color:inherit; text-decoration:none; }
 .menu .mnote { margin:0; padding:6px 14px 8px; color:var(--ink-2); font-size:var(--fs-xs); white-space:normal; max-width:360px; }
 
 /* tiles and tab strips (the workbench's dock, fixed) */

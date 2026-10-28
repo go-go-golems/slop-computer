@@ -658,3 +658,69 @@ The real francois catalog is on the test deployment, and anyone can browse it at
 cluster routes on site.slop.yolo.scapegoat.dev: / → storefront, /apps/:id → storefront-entry {id}.json (bind catalog=francois-catalog), /r/<page> → <page>@<n> ×100
 census (api, 2026-10-28): 113 releases; static 83, static+downloads 12, needs-runtime 18 (db 16, user 12, room 7); external scripts 32; early access running 81
 ```
+
+## Step 10: A how-to for admins: connecting a coding agent
+
+This step adds one page explaining how to work with slop through a coding agent. It is embedded in the binary and has three entry points: `/help/agents` in the browser, `/help/agents.md` for the agent itself, and `slop help agents` in the terminal. The Workshop links to it from the user menu and from the empty state. Both commits are on PR #2. Checking the screenshot showed that the user menu didn't style links, which affected Safe mode as well as the new item; that is fixed in the same commit as this entry.
+
+### Prompt Context
+**User prompt (verbatim):** "how  do I use my agent with it? Can you add a howto on the landing page or under a doc page or something ? for admins?"
+**Assistant interpretation:** Write a how-to for admins: install the CLI, log an agent in, and work through pushes, routes and comments. Make it reachable from the Workshop.
+**Inferred user intent:** Admins of the live deployment should be able to point their own agents (Claude Code, pi, codex) at slop without reading the source.
+**Commit (code):** `ba2437f` "Help for admins: how to work with your coding agent"; `98fdfeb` "doc: no named results in Topic (lint)"; this commit adds the menu link styling.
+
+### What I did
+- `pkg/doc/doc.go` and `pkg/doc/topics/agents.md`: a Glazed help topic (slug `agents`). `AddDocToHelpSystem` is wired in `cmd/slop/main.go`. `doc.Topic(slug)` returns the title and the body without front matter, for the server.
+- The topic covers:
+  - install: `go install github.com/go-go-golems/slop-computer/cmd/slop@latest`, or copying the binary out of the image;
+  - `slop auth login --server …` with one `SLOP_CONFIG_DIR` per agent, and `SLOP_VIA=agent`;
+  - an AGENTS.md block to paste;
+  - the comment loop;
+  - sharp edges from the storefront agent's NOTES;
+  - a section on the francois import.
+- `pkg/server/help.go`: `GET /help/{name}` via `guard(public, scopeRW, …)`.
+  - Admins get HTML rendered with `records.Markdown` into the new `help` template.
+  - A `.md` suffix returns the raw markdown, which also works with a read token.
+  - Signed-out HTML requests get a 303 to login; `.md` requests get 401. Non-admins get 403.
+  - `fillHosts` replaces the placeholder `https://your-slop-server` and `site.your-slop-server` with this server's public URL and first site host.
+- Workshop: "Connect your agent" in the user menu (`TopBar.tsx`), and "connect your coding agent" in the empty state (`App.tsx`).
+- Menu styling fix: `workshop.css` now applies the `.menu button` rules to `.menu a` too, and the inline `style={{ color, textDecoration }}` on the two links is gone.
+
+### Why
+- Keeping one markdown file behind all three entry points means the browser, the agent and the CLI can't drift apart.
+- The page is admin-only because it describes push-as, tokens and route control. A read token can fetch `.md` so an agent that is already logged in can re-read its own instructions.
+
+### What worked
+- `go test ./pkg/server -run TestHelpForAdmins` passes. It covers admin HTML, `.md`, signed-out redirect, 401, non-admin 403 and the host substitution.
+- `go install github.com/go-go-golems/slop-computer/cmd/slop@latest` works from a clean module cache. It switches the toolchain to go1.26.10 because `go.mod` asks for 1.26.3+.
+- `s2-05-help-agents.png`: the page with `http://localhost:18120` filled in.
+- `s2-06-workshop-menu-connect-agent.png` (retaken after the fix): the user menu with "Connect your agent" between "Sign in as someone else" and "Safe mode".
+
+### What didn't work
+- **Lint failure committed.** `ba2437f` was committed with lint failing: `make lint | grep … | tail` hid the non-zero exit. Lint reported a named-results finding in `doc.Topic`, fixed in `98fdfeb`. Lint now runs to a file and I check `$?` before committing.
+- **Menu link layout.** The first s2-06 showed "Connect your agentLog a coding agent in…" run together, and "Safe modeThe fuse box…" too. The cause is `workshop.css:75-78`: the grid rules only match `.menu button`, and both items are `<a>`. The Safe mode link already had this bug before the step.
+- **Restart without the Workshop.** The first restart after the CSS fix used `go build ./cmd/slop`, which lacks `-tags embed`. The server served "This binary has no Workshop", so the Playwright click on the user menu timed out after 30 s. Rebuilding with `GOWORK=off go build -tags embed` (the Makefile's command) fixed it.
+
+### What I learned
+- The Workshop's menu styles key on `button`. Any future link item needs the shared `.menu a` rule, not inline styles.
+
+### What was tricky to build
+- The route had to answer differently for a person and for an agent. Browsers get a redirect to login; `.md` clients get a 401 they can act on. Both are served from one handler, keyed only on the suffix.
+
+### What warrants a second pair of eyes
+- `fillHosts` uses the first configured site host. A server with several site hosts will show only one in the examples.
+
+### What should be done in the future
+- Deploy: merge PR #2, then bump the image tag in `gitops/kustomize/slop/deployment.yaml`.
+- The routing gaps the agent hit are covered by the follow-up ticket SLOP-003 (templated page routes).
+
+### Code review instructions
+- Read `pkg/server/help.go`, `pkg/server/help_test.go`, `pkg/doc/topics/agents.md`, and `web/workshop/src/styles/workshop.css:75-81`.
+- Validate with `go test ./pkg/server -run TestHelpForAdmins`, then `make web && GOWORK=off go build -tags embed ./cmd/slop`, then open the user menu.
+
+### Technical details
+```
+GET /help/agents       admin → 200 text/html; signed out → 303 /auth/login?return=/help/agents; non-admin → 403
+GET /help/agents.md    read token or session → 200 text/markdown; none → 401
+slop help agents       same markdown, placeholders unfilled
+```
