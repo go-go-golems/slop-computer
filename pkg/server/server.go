@@ -13,6 +13,8 @@ import (
 	"strings"
 	"time"
 
+	"github.com/go-go-golems/slop-computer/pkg/blobs"
+	"github.com/go-go-golems/slop-computer/pkg/events"
 	"github.com/go-go-golems/slop-computer/pkg/httpx"
 	"github.com/go-go-golems/slop-computer/pkg/identity"
 	"github.com/go-go-golems/slop-computer/pkg/store"
@@ -71,15 +73,21 @@ func (c Config) Validate(listen string) error {
 type Server struct {
 	Config        Config
 	Store         *store.Store
+	Blobs         *blobs.Blobs
+	Events        *events.Broker
 	mux           *http.ServeMux
 	deviceLimiter *limiter
+	waiters       *waiters
 }
 
-func New(cfg Config, st *store.Store) *Server {
-	s := &Server{Config: cfg, Store: st, deviceLimiter: newLimiter()}
+func New(cfg Config, st *store.Store, bl *blobs.Blobs) *Server {
+	s := &Server{Config: cfg, Store: st, Blobs: bl, Events: events.New(), deviceLimiter: newLimiter(), waiters: newWaiters()}
 	s.mux = s.routes()
 	return s
 }
+
+// publish hands committed events to live subscribers.
+func (s *Server) publish(evs []store.Event) { s.Events.Publish(evs...) }
 
 // origins are the main host's origins: the public URL first.
 func (s *Server) origins() []string {
@@ -148,6 +156,8 @@ func (s *Server) routes() *http.ServeMux {
 	s.tokenRoutes(m)
 	s.deviceRoutes(m)
 	s.userRoutes(m)
+	s.kernelRoutes(m)
+	s.streamRoutes(m)
 	m.HandleFunc("/api/", func(w http.ResponseWriter, r *http.Request) { httpx.Fail(w, 404, "not_found", "Unknown API route") })
 	m.HandleFunc("GET /static/", s.staticFile)
 	m.HandleFunc("GET /{$}", s.guard(public, noToken, s.homePage))
@@ -172,6 +182,8 @@ func (s *Server) clientAddress(r *http.Request) string {
 }
 
 func unavailable(w http.ResponseWriter, err error) {
-	log.Error().Err(err).Msg("request failed")
+	unavailableLog(err)
 	httpx.Fail(w, 503, "unavailable", "Request failed")
 }
+
+func unavailableLog(err error) { log.Error().Err(err).Msg("request failed") }

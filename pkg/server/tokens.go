@@ -117,6 +117,7 @@ func (s *Server) createToken(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	_ = s.Store.Audit(r.Context(), actor(r), "token.create", t.ID, map[string]any{"name": t.Name, "scopes": t.Scopes, "expiresAt": t.ExpiresAt})
+	s.event(r, store.EvTokenCreated, t)
 	httpx.JSON(w, 201, map[string]any{"token": secret, "info": t})
 }
 
@@ -129,6 +130,7 @@ func (s *Server) revokeToken(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	_ = s.Store.Audit(r.Context(), actor(r), "token.revoke", t.ID, map[string]any{"name": t.Name, "owner": t.UserID})
+	s.event(r, store.EvTokenRevoked, t)
 	httpx.OK(w, map[string]bool{"revoked": true})
 }
 

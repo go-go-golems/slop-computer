@@ -11,6 +11,7 @@ import (
 
 	glazed "github.com/go-go-golems/glazed/pkg/cmds"
 	"github.com/go-go-golems/glazed/pkg/cmds/values"
+	"github.com/go-go-golems/slop-computer/pkg/blobs"
 	"github.com/go-go-golems/slop-computer/pkg/identity"
 	"github.com/go-go-golems/slop-computer/pkg/server"
 	"github.com/go-go-golems/slop-computer/pkg/store"
@@ -33,6 +34,7 @@ func newServe() *serveCmd {
 			flagDefault("local-role", "admin", "Local mode: role of a nickname on first sign-in (admin or pending)"),
 			flag("database-url", "sqlite:<path> or postgres://… (default with --local: sqlite:./var/slop.db)"),
 			flag("database-url-file", "File containing the database URL"),
+			flagDefault("blobs", "./var/blobs", "Directory for file contents (sha256-addressed)"),
 			flag("listen", "Listen address (default 127.0.0.1:8080)"),
 			flag("public-url", "Main host origin, e.g. https://slop.computer (default with --local: http://localhost:<port>)"),
 			list("dev-origin", "Further origins that reach the main host, e.g. http://localhost:5173 for the Vite dev server"),
@@ -151,7 +153,11 @@ func (c *serveCmd) Run(ctx context.Context, v *values.Values) error {
 	}
 	defer func() { _ = st.Close() }()
 
-	srv := server.New(cfg, st)
+	bl, err := blobs.Open(a.S("blobs"))
+	if err != nil {
+		return err
+	}
+	srv := server.New(cfg, st, bl)
 	hs := &http.Server{Addr: listen, Handler: srv.Handler(), ReadHeaderTimeout: 10 * time.Second}
 	if local {
 		log.Warn().Msg("LOCAL MODE: no authentication; listening on loopback only")

@@ -15,6 +15,7 @@ import (
 	"embed"
 	"encoding/hex"
 	"encoding/json"
+	"fmt"
 	"io/fs"
 	"os"
 	"path/filepath"
@@ -410,4 +411,17 @@ func Redact(url string) string {
 		}
 	}
 	return url
+}
+
+// InvalidError is a request the store refuses on validation grounds; the
+// message is safe to show to the caller.
+type InvalidError struct{ Msg string }
+
+func (e *InvalidError) Error() string { return e.Msg }
+
+func invalidf(format string, args ...any) error {
+	if len(args) == 0 {
+		return &InvalidError{Msg: format}
+	}
+	return &InvalidError{Msg: fmt.Sprintf(format, args...)}
 }

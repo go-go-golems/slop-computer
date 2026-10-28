@@ -12,6 +12,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/go-go-golems/slop-computer/pkg/blobs"
 	"github.com/go-go-golems/slop-computer/pkg/store"
 	"github.com/go-go-golems/slop-computer/pkg/store/storetest"
 )
@@ -35,7 +36,11 @@ func newHarness(t *testing.T, role string) *harness {
 	if err := cfg.Validate(u.Host); err != nil {
 		t.Fatal(err)
 	}
-	srv := New(cfg, st)
+	bl, err := blobs.Open(t.TempDir())
+	if err != nil {
+		t.Fatal(err)
+	}
+	srv := New(cfg, st, bl)
 	ts.Config.Handler = srv.Handler()
 	return &harness{t: t, srv: srv, ts: ts, st: st}
 }
