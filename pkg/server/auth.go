@@ -315,7 +315,13 @@ func (s *Server) logout(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 	if r.Header.Get("X-CSRF-Token") == "" { // a form post from a server-rendered page
-		http.Redirect(w, r, "/", http.StatusSeeOther)
+		// Go on to the identity provider's logout too; back on / its live
+		// session would sign the person straight in again.
+		dest := "/"
+		if target, ok := out["redirect"].(string); ok {
+			dest = target
+		}
+		http.Redirect(w, r, dest, http.StatusSeeOther)
 		return
 	}
 	httpx.OK(w, out)
