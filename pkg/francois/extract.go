@@ -62,8 +62,10 @@ func slopID(id string) string {
 
 var slopIDPattern = regexp.MustCompile(`^[a-z0-9][a-z0-9-]{0,62}$`)
 
-// mediaRef matches francois media links in Markdown and page fields.
-var mediaRef = regexp.MustCompile(`/media/(med_[0-9a-f]+)(\?[^)\s"'<>]*)?`)
+// mediaRef matches francois media links in Markdown and page fields,
+// relative or absolute (bodies link https://slop.boutique/media/<id>; the
+// origin goes too, so imported pages load media from their own host).
+var mediaRef = regexp.MustCompile(`(?:https?://[A-Za-z0-9.:-]+)?/media/(med_[0-9a-f]+)(\?[^)\s"'<>]*)?`)
 
 // mediaSrc is where an imported media file is served on slop: its media
 // data artifact's main version, so links survive re-imports.
