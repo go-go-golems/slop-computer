@@ -27,7 +27,7 @@ func fakeFrancois(t *testing.T) *httptest.Server {
 	auth := func(h http.HandlerFunc) http.HandlerFunc {
 		return func(w http.ResponseWriter, r *http.Request) {
 			if r.Header.Get("Authorization") != "Bearer fr_tok" {
-				http.Error(w, "no", 401)
+				http.Error(w, "no", http.StatusUnauthorized)
 				return
 			}
 			h(w, r)
@@ -53,16 +53,16 @@ func fakeFrancois(t *testing.T) *httptest.Server {
 	mux.HandleFunc("GET /api/studio/posts", auth(js([]any{})))
 	mux.HandleFunc("GET /api/studio/creators", auth(js([]any{})))
 	mux.HandleFunc("GET /api/studio/media", auth(js([]map[string]any{{"id": "med_ab", "sha256": sum(png), "mediaType": "image/png", "size": len(png)}})))
-	mux.HandleFunc("GET /api/admin/users", auth(func(w http.ResponseWriter, _ *http.Request) { http.Error(w, "scope", 403) }))
+	mux.HandleFunc("GET /api/admin/users", auth(func(w http.ResponseWriter, _ *http.Request) { http.Error(w, "scope", http.StatusForbidden) }))
 	mux.HandleFunc("GET /api/admin/instances", auth(js([]any{map[string]any{}, map[string]any{}})))
 	mux.HandleFunc("GET /media/med_ab", func(w http.ResponseWriter, _ *http.Request) { _, _ = w.Write([]byte(png)) })
 	mux.HandleFunc("GET /api/releases/{rel}/files/{file}/download", func(w http.ResponseWriter, r *http.Request) {
 		if r.Header.Get("Authorization") != "" {
-			http.Error(w, `{"error":{"code":"token_not_allowed"}}`, 401)
+			http.Error(w, `{"error":{"code":"token_not_allowed"}}`, http.StatusUnauthorized)
 			return
 		}
 		if r.PathValue("rel") != "rel_1" {
-			http.Error(w, `{"error":{"code":"login_required"}}`, 401)
+			http.Error(w, `{"error":{"code":"login_required"}}`, http.StatusUnauthorized)
 			return
 		}
 		_, _ = w.Write([]byte(free))
