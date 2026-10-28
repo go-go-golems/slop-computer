@@ -1,0 +1,10 @@
+{
+  "title": "Release board",
+  "kind": "page",
+  "project": "play",
+  "tool": {
+    "title": "Release board",
+    "icon": "ship",
+    "permissions": ["routes:read", "routes:write", "versions:read", "events:read"]
+  }
+}

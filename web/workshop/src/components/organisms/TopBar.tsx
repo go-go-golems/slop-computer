@@ -1,10 +1,10 @@
 import { useEffect, useState } from 'react'
-import { useAgentsQuery, useArtifactsQuery, useProjectsQuery, useThreadsQuery, useVersionsQuery } from '../../api/slopApi'
+import { useAgentsQuery, useArtifactsQuery, useProjectsQuery, useThreadsQuery, useToolsQuery, useVersionsQuery } from '../../api/slopApi'
 import type { Artifact } from '../../api/types'
 import { boot, csrfToken } from '../../app/boot'
 import { ago, cx, plural } from '../../app/format'
 import { useVersionBy } from '../../app/hooks'
-import { navigate, SCREEN_NAMES, SCREENS, watchPath, type Location, type ScreenName } from '../../app/router'
+import { navigate, SCREEN_NAMES, SCREENS, toolPath, watchPath, type Location, type ScreenName } from '../../app/router'
 import { useAppSelector } from '../../app/store'
 
 const kindLabel = (a: Artifact) => (a.kind === 'data' ? a.type || 'data' : 'page')
@@ -18,7 +18,7 @@ async function signOut() {
 // TopBar: the artifact picker, the version pill, the screens, who listens,
 // and who you are (prototype app.js drawBar).
 export function TopBar({ loc, artifact, onScreen }: { loc: Location; artifact?: Artifact; onScreen: (s: ScreenName) => void }) {
-  const [menu, setMenu] = useState<'art' | 'more' | null>(null)
+  const [menu, setMenu] = useState<'art' | 'more' | 'tools' | null>(null)
   const { data: agents = [] } = useAgentsQuery()
   const live = useAppSelector(s => s.ui.live)
   const me = boot().me.user
@@ -31,7 +31,7 @@ export function TopBar({ loc, artifact, onScreen }: { loc: Location; artifact?: 
     document.addEventListener('keydown', esc)
     return () => { document.removeEventListener('click', close); document.removeEventListener('keydown', esc) }
   }, [menu])
-  const toggle = (m: 'art' | 'more') => (e: React.MouseEvent) => { e.stopPropagation(); setMenu(menu === m ? null : m) }
+  const toggle = (m: 'art' | 'more' | 'tools') => (e: React.MouseEvent) => { e.stopPropagation(); setMenu(menu === m ? null : m) }
   return (
     <header className="bar" id="bar">
       <div className="brand">slop.computer<i>{'workshop'}{local ? <>{' · '}<b>local</b></> : null}</i></div>
@@ -46,6 +46,10 @@ export function TopBar({ loc, artifact, onScreen }: { loc: Location; artifact?: 
       {loc.screen === 'watch' && artifact ? <VersionPill a={artifact} n={loc.n} /> : null}
       <div className="seg" role="tablist" aria-label="Screens">
         {SCREENS.map(s => <button type="button" key={s} aria-pressed={loc.screen === s} onClick={() => onScreen(s)}>{SCREEN_NAMES[s]}</button>)}
+      </div>
+      <div className="proj">
+        <ToolsButton on={loc.screen === 'tools'} onClick={toggle('tools')} />
+        {menu === 'tools' ? <ToolsMenu current={loc.tool} onPick={(id, n) => { setMenu(null); navigate(toolPath(id, n)) }} /> : null}
       </div>
       <span className="sp" />
       <span className="pill" id="agentPill" title={live ? 'Live: changes from others show up as they happen.' : 'Reconnecting to the event stream…'}>
@@ -66,6 +70,43 @@ export function TopBar({ loc, artifact, onScreen }: { loc: Location; artifact?: 
         ) : null}
       </div>
     </header>
+  )
+}
+
+function ToolsButton({ on, onClick }: { on: boolean; onClick: (e: React.MouseEvent) => void }) {
+  const { data } = useToolsQuery()
+  const waiting = (data?.tools ?? []).filter(t => t.latest.n > (t.enabled?.version ?? 0) && !t.latest.error).length
+  return (
+    <button type="button" className="projbtn" id="toolsBtn" aria-haspopup="true" onClick={onClick} style={on ? { borderColor: 'var(--ink)' } : undefined}>
+      <span className="ptitle">Tools</span>{waiting ? <span className="count bad" title="new or updated tools">{waiting}</span> : null}<span className="caret">▾</span>
+    </button>
+  )
+}
+
+// ToolsMenu lists enabled tools, and tools waiting to be tried or enabled.
+function ToolsMenu({ current, onPick }: { current?: string; onPick: (id: string, tryN?: number) => void }) {
+  const { data } = useToolsQuery()
+  const tools = data?.tools ?? []
+  const enabled = tools.filter(t => t.enabled)
+  const waiting = tools.filter(t => t.latest.n > (t.enabled?.version ?? 0))
+  return (
+    <div className="menu" role="menu" onClick={e => e.stopPropagation()}>
+      <div className="grp">Tools</div>
+      {enabled.map(t => (
+        <button type="button" key={t.artifact} className={t.artifact === current ? 'on' : ''} role="menuitem" onClick={() => onPick(t.artifact)}>
+          <span className="code">{t.enabled!.icon || 'tool'}</span><span className="t">{t.enabled!.title}</span><small>{`v${t.enabled!.version} · ${t.enabled!.permissions.join(' ')}`}</small>
+        </button>
+      ))}
+      {!enabled.length ? <p className="mnote">No tool is enabled yet.</p> : null}
+      {waiting.length ? <div className="grp">New and updated</div> : null}
+      {waiting.map(t => (
+        <button type="button" key={'w' + t.artifact} role="menuitem" onClick={() => onPick(t.artifact, t.latest.error ? undefined : t.latest.n)}>
+          <span className="code">{t.enabled ? 'update' : 'new'}</span><span className="t">{`${t.artifact} v${t.latest.n}`}</span>
+          <small>{t.latest.error ? t.latest.error : t.enabled ? `v${t.enabled.version} is enabled${t.latest.newPermissions.length ? ' · asks for ' + t.latest.newPermissions.join(' ') : ''}` : 'not enabled · try it'}</small>
+        </button>
+      ))}
+      <p className="mnote">A tool is a page whose slop.json has a "tool" section. It runs here with only the permissions an admin approved.</p>
+    </div>
   )
 }
 

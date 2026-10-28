@@ -2,7 +2,7 @@ import { createApi, fetchBaseQuery, type FetchBaseQueryError } from '@reduxjs/to
 import { csrfToken } from '../app/boot'
 import type {
   Agent, Anchor, Artifact, AuditEntry, Comment, Project, PushRequest, PushResult, Rec, Resolved, Route, RouteLogEntry,
-  RouteView, SandboxURL, Thread, Token, User, Version,
+  RouteView, SandboxURL, Thread, Token, Tool, ToolGrant, ToolList, User, Version,
 } from './types'
 
 const baseQuery = fetchBaseQuery({
@@ -20,7 +20,7 @@ const baseQuery = fetchBaseQuery({
 export const slopApi = createApi({
   reducerPath: 'slopApi',
   baseQuery,
-  tagTypes: ['User', 'Token', 'Audit', 'Project', 'Artifact', 'Version', 'Route', 'RouteLog', 'Thread', 'Agent', 'Records'],
+  tagTypes: ['User', 'Token', 'Audit', 'Project', 'Artifact', 'Version', 'Route', 'RouteLog', 'Thread', 'Agent', 'Records', 'Tool'],
   endpoints: b => ({
     projects: b.query<Project[], void>({ query: () => 'projects', providesTags: ['Project'] }),
     artifacts: b.query<Artifact[], void>({ query: () => 'artifacts', providesTags: [{ type: 'Artifact', id: 'LIST' }] }),
@@ -52,13 +52,14 @@ export const slopApi = createApi({
       query: p => ({ url: 'threads', params: p ?? {} }),
       providesTags: (_r, _e, p) => [{ type: 'Thread', id: p?.artifact ?? 'ALL' }],
     }),
-    sandboxUrl: b.query<SandboxURL, { artifact: string; n: number; mode: 'preview' | 'thumb'; host?: string; path?: string }>({
+    sandboxUrl: b.query<SandboxURL, { artifact: string; n: number; mode: 'preview' | 'thumb' | 'tool'; host?: string; path?: string }>({
       query: p => ({ url: 'sandbox-url', params: p }),
       keepUnusedDataFor: 600,
     }),
     agents: b.query<Agent[], void>({ query: () => 'agents', providesTags: ['Agent'] }),
     users: b.query<User[], void>({ query: () => 'users', providesTags: ['User'] }),
     tokens: b.query<Token[], void>({ query: () => ({ url: 'tokens', params: { all: '1' } }), providesTags: ['Token'] }),
+    tools: b.query<ToolList, void>({ query: () => 'tools', providesTags: ['Tool'] }),
     audit: b.query<AuditEntry[], void>({ query: () => ({ url: 'audit', params: { limit: '200' } }), providesTags: ['Audit'] }),
 
     setRoute: b.mutation<Route, Partial<Route> & { host: string; path: string; page: string; note?: string }>({
@@ -80,6 +81,9 @@ export const slopApi = createApi({
       query: body => ({ url: 'tokens', method: 'POST', body }),
     }),
     revokeToken: b.mutation<void, string>({ query: id => ({ url: `tokens/${id}`, method: 'DELETE' }) }),
+    enableTool: b.mutation<Tool, { id: string; n: number }>({ query: ({ id, n }) => ({ url: `tools/${id}`, method: 'PUT', body: { n } }) }),
+    disableTool: b.mutation<void, string>({ query: id => ({ url: `tools/${id}`, method: 'DELETE' }) }),
+    grantTool: b.mutation<ToolGrant, { id: string; n: number; try?: boolean }>({ query: ({ id, ...body }) => ({ url: `tools/${id}/grant`, method: 'POST', body }) }),
 
     // push stores a version from the browser: files are hashed here, only
     // blobs the server lacks are uploaded, then the tree is posted.
@@ -123,4 +127,5 @@ export const {
   useResolveQuery, useThreadsQuery, useSandboxUrlQuery, useAgentsQuery, useUsersQuery, useTokensQuery, useAuditQuery,
   useSetRouteMutation, useRemoveRouteMutation, useUndoRouteMutation, useCreateThreadMutation, useReplyMutation,
   useResolveThreadMutation, useSetRoleMutation, useCreateTokenMutation, useRevokeTokenMutation, usePushMutation,
+  useToolsQuery, useEnableToolMutation, useDisableToolMutation, useGrantToolMutation,
 } = slopApi

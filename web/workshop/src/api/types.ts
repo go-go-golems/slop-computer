@@ -174,3 +174,14 @@ export interface SlopEvent {
 }
 
 export interface ApiError { code: string; message: string }
+
+// Tools: pushed pages that run inside the Workshop with a grant.
+export interface Tool { artifact: string; version: number; permissions: string[]; title: string; icon: string; enabledBy: string; enabledAt: string }
+export interface ToolView {
+  artifact: string
+  project: string | null
+  enabled: Tool | null
+  latest: { n: number; title: string; icon?: string; permissions: string[] | null; newPermissions: string[]; error?: string }
+}
+export interface ToolList { tools: ToolView[]; permissions: Record<string, string> }
+export interface ToolGrant { grant: string; expiresAt: string; permissions: string[]; n: number; try: boolean; user: { id: string; name: string } }

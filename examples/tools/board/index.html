@@ -1,0 +1,116 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Release board</title>
+<link rel="stylesheet" href="boutique.css">
+<style>
+  body { margin:0; background:var(--wall, #f4f3f0); }
+  .board { padding:32px 40px 64px; max-width:1200px; }
+  .board .sb-text { margin-bottom:24px; }
+  .bar { display:flex; gap:16px; align-items:center; flex-wrap:wrap; padding:12px 0; border-bottom:1px solid var(--line, #d8d6d0); font-size:14px; }
+  .bar select { font:inherit; padding:4px 6px; }
+  .who { margin-left:auto; color:var(--muted, #6b6a66); font:12px ui-monospace, Menlo, monospace; }
+  table { width:100%; border-collapse:collapse; font-size:15px; margin-top:8px; }
+  th { text-align:left; font-weight:400; color:var(--muted, #6b6a66); font-size:13px; padding:10px 8px; border-bottom:1px solid var(--line, #d8d6d0); }
+  td { padding:12px 8px; border-bottom:1px solid var(--line, #d8d6d0); vertical-align:baseline; }
+  td.mono, code { font:13px ui-monospace, Menlo, monospace; }
+  .behind { color:#b5001a; }
+  .live { color:#1a7a43; }
+  button { font:inherit; font-size:13px; padding:6px 12px; border:1px solid var(--ink, #1a1a1a); background:#fff; cursor:pointer; }
+  button.ship { background:var(--ink, #1a1a1a); color:#fff; }
+  button:disabled { opacity:.35; cursor:default; }
+  .msg { min-height:20px; font-size:13px; color:var(--muted, #6b6a66); padding-top:12px; }
+  .err { color:#b5001a; }
+  .log { margin-top:32px; font-size:13px; color:var(--muted, #6b6a66); }
+  .log li { margin:4px 0; }
+</style>
+</head>
+<body>
+<main class="board">
+  <section class="sb-intro" style="padding:24px 0 8px">
+    <h1 class="sb-h1">Release board</h1>
+    <p class="sb-text">Every route on the site, what it serves, and whether a newer version is waiting. Ship moves a route to the newest version; the route log keeps the old one, so it can always be undone on Routes.</p>
+  </section>
+  <div class="bar">
+    <label>Host <select id="host"></select></label>
+    <label><input type="checkbox" id="behindOnly"> only routes with something to ship</label>
+    <span class="who" id="who"></span>
+  </div>
+  <table>
+    <thead><tr><th>Path</th><th>Page</th><th>Serves</th><th>Newest</th><th>Last change</th><th></th></tr></thead>
+    <tbody id="rows"><tr><td colspan="6">Waiting for the Workshop…</td></tr></tbody>
+  </table>
+  <p class="msg" id="msg"></p>
+  <ul class="log" id="log"></ul>
+</main>
+<script type="module">
+const $ = s => document.querySelector(s)
+const esc = s => String(s ?? '').replace(/[&<>"]/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]))
+const say = (text, bad) => { $('#msg').textContent = text; $('#msg').className = 'msg' + (bad ? ' err' : '') }
+
+let api
+try {
+  api = await slop.tool.ready()
+} catch (e) {
+  $('#rows').innerHTML = `<tr><td colspan="6" class="err">${esc(e.message)}</td></tr>`
+  throw e
+}
+$('#who').textContent = `as ${api.user?.name ?? '?'} · ${api.permissions.join(' ')}`
+
+let routes = [], latest = {}
+async function load() {
+  try {
+    routes = await api.get('/routes', { resolve: 1 })
+    const pages = [...new Set(routes.map(r => r.page))]
+    const lists = await Promise.all(pages.map(p => api.get(`/artifacts/${p}/versions`)))
+    latest = Object.fromEntries(pages.map((p, i) => [p, lists[i].at(-1)]))
+    const hosts = [...new Set(routes.map(r => r.host))]
+    const sel = $('#host'), cur = sel.value
+    sel.innerHTML = hosts.map(h => `<option${h === cur ? ' selected' : ''}>${esc(h)}</option>`).join('')
+    draw()
+  } catch (e) {
+    say(`Could not load routes: ${e.message}`, true)
+  }
+}
+
+function draw() {
+  const host = $('#host').value
+  const rows = routes.filter(r => r.host === host && r.path !== '*')
+    .map(r => ({ r, newest: latest[r.page] }))
+    .filter(x => !$('#behindOnly').checked || (x.newest && x.newest.n > x.r.n))
+    .sort((a, b) => a.r.path.localeCompare(b.r.path))
+  $('#rows').innerHTML = rows.map(({ r, newest }, i) => {
+    const behind = newest && newest.n > r.n
+    return `<tr>
+      <td class="mono"><b>${esc(r.path)}</b></td>
+      <td>${esc(r.page)}</td>
+      <td class="mono">v${r.n}${r.version ? ' pinned' : ' (main)'}</td>
+      <td class="mono ${behind ? 'behind' : 'live'}">v${newest?.n ?? '?'} ${behind ? '· waiting' : '· live'}<br><span style="color:#6b6a66">${esc(newest?.message ?? '')}</span></td>
+      <td style="font-size:13px;color:#6b6a66">${esc(new Date(r.changedAt).toLocaleString())}</td>
+      <td><button class="${behind ? 'ship' : ''}" data-i="${i}" ${behind && api.can('routes:write') ? '' : 'disabled'}>Ship v${newest?.n ?? ''}</button></td>
+    </tr>`
+  }).join('') || '<tr><td colspan="6">Nothing to ship.</td></tr>'
+  $('#rows').querySelectorAll('button[data-i]').forEach(b => b.onclick = () => ship(rows[+b.dataset.i]))
+}
+
+async function ship({ r, newest }) {
+  const { n: _n, data: _d, ...route } = r
+  try {
+    await api.put('/routes', { ...route, version: newest.n, note: `shipped v${newest.n} from the release board` })
+    say(`${r.path} now serves ${r.page} v${newest.n}.`)
+    $('#log').insertAdjacentHTML('afterbegin', `<li>${new Date().toLocaleTimeString()} · shipped ${esc(r.path)} → v${newest.n}</li>`)
+    await load()
+  } catch (e) {
+    say(`${r.path}: ${e.message}${e.status === 401 ? ' (the tool was disabled or the grant expired)' : ''}`, true)
+  }
+}
+
+$('#host').onchange = draw
+$('#behindOnly').onchange = draw
+await load()
+if (api.can('events:read')) api.on('route.set', load).on('version.created', load)
+</script>
+</body>
+</html>

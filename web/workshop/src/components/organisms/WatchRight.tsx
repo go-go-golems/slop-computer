@@ -2,6 +2,7 @@ import { useMemo } from 'react'
 import { errorText, useFileQuery, useRecordsQuery, useSetRouteMutation } from '../../api/slopApi'
 import type { Artifact, RouteView, Version } from '../../api/types'
 import { toast } from '../../app/store'
+import { navigate, toolPath } from '../../app/router'
 import { cx, kb, plural } from '../../app/format'
 import { shortHost, useReaders, useVersionBy } from '../../app/hooks'
 import { Button, Field, Seg, Select } from '../atoms'
@@ -59,6 +60,7 @@ export function PageToolbar(p: {
         </Field>
       ) : null}
       {ctx.route && ctx.host && ctx.path ? <Button onClick={() => p.onOpenSite(ctx.host!, ctx.path!)}>Open in Site</Button> : null}
+      {p.v.manifest && 'tool' in p.v.manifest ? <Button onClick={() => navigate(toolPath(p.a.id, p.v.n))}>Open as tool</Button> : null}
     </div>
   )
 }
