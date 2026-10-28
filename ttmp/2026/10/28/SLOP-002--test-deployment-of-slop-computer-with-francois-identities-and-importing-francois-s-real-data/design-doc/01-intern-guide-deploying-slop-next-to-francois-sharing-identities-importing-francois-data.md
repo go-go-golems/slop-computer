@@ -57,6 +57,29 @@ This ticket asks three questions, and this guide answers all three:
 
 Nothing in this ticket changes francois, its database or its OAuth client. Every production-side step is an operator action (Terraform, Vault, Argo CD) and is listed explicitly as such.
 
+## 1a. Implementation status (as built, 2026-10-28)
+
+Read this before the rest: the guide was written first, then implemented, and some facts changed on the way. Details are in the diary (steps 3 onwards).
+
+| Guide section | State | Where |
+| --- | --- | --- |
+| Phase A: `--oidc-client-id-file`, image workflow, Kubernetes doc | done | slop `db623c3` |
+| G1 push on behalf, G2 data files `/_d/` | done | slop `c2ef259` |
+| Importer, census, admin import (§7.3, §8, §9) | done, with a second source: the live studio API | slop `7ba914e`, `35a62f8` |
+| Health checks on any host (probes) | done | slop `35a62f8` |
+| Kustomize package, Vault policies/roles, secrets script (§6) | written, validated with the repo's `validate_gitops.sh`; **not pushed** | hetzner-k3s branch `slop/test-deployment` (`5eaf707`), worktree `../hetzner-k3s-slop` |
+| ZITADEL client (§7.1) | written, `terraform validate` ok; **not applied, not pushed** | terraform branch `slop/zitadel-client` (`abc678a`), worktree `../terraform-slop` |
+| Operator steps (apply, Vault, Argo, first admin) | not done (operator) | `gitops/kustomize/slop/README.md` |
+
+Corrections to the text below:
+
+- **Issuer.** It is `https://auth.slop.boutique`, not `zitadel.yolo.scapegoat.dev`. All 12 francois users carry this issuer (read through `/api/admin/users`), so matching admins on issuer and subject works.
+- **Template.** Since 2026-10-23, `origin/main` of hetzner-k3s has `gitops/kustomize/francois-sandbox` ("Slop sandbox", demo-apps project, `sandbox.slop.boutique`). It was a better template for a test deployment than production, and slop's package follows it. One exception: no Traefik basic-auth gate, because it would consume the `Authorization` header that slop's bearer tokens use.
+- **The unpushed sandbox client is live.** The sandbox deployment uses Terraform `envs/sandbox` (local commit `04fd555`), which is still not on `origin/main`. Somebody applied it from a local checkout.
+- **Vault path.** `kv/apps/slop/test/runtime`, keys `database username password database-url oidc-client-id oidc-org-id` (francois's key names).
+- **Data artifact names.** `francois-catalog`, `francois-journal`, `francois-creators` and `francois-media`, prefixed so they can't collide with a francois artifact called `journal`.
+- **Probes.** See §5.2 below.
+
 ## 2. How to read this guide
 
 If you are new, read sections 3 and 4 first. They explain the vocabulary: host classes, artifacts and versions, routes, ZITADEL, PKCE and GitOps. Section 5 describes what exists today, with file references. Sections 6 to 9 are the design. Section 10 is the phased plan, with each step marked **[code]** (you write it, in a PR) or **[operator]** (someone with cluster/Vault/Terraform rights runs it). Section 11 covers testing, section 12 risks and open questions, and section 13 lists every file referenced.
@@ -166,7 +189,7 @@ whereas `polis.manifest.json` asks only for `{ "sample": {} }`. The runtime keep
 
 ### 4.3 ZITADEL, OIDC and PKCE in five bullets
 
-- **ZITADEL** is the identity provider at `https://zitadel.yolo.scapegoat.dev`. It holds the accounts. GitHub and Google are upstream identity providers linked by email.
+- **ZITADEL** is the identity provider. Its issuer has been `https://auth.slop.boutique` since hetzner-k3s commit `cfe0ebb` (2026-10-23); the management API is still reached at `zitadel.yolo.scapegoat.dev` (Terraform provider `domain`). It holds the accounts. GitHub and Google are upstream identity providers linked by email.
 - An **organisation** (`Francois`, id `394966170567966836`) groups users. A **project** groups applications. An **application** is an OAuth client with a client id and allowed redirect URIs.
 - **OIDC authorisation code + PKCE**: the browser goes to ZITADEL, comes back to `<app>/auth/callback?code=…`, and the server exchanges the code with a one-time verifier. No client secret is needed (a "public" client). slop implements this in `pkg/identity` and stores the flow in `login_flows`.
 - The ID token's `iss` is the instance URL and its `sub` is the ZITADEL **user id**, which is the same for every application in the instance. This is why identities carry over between francois and slop.
@@ -221,7 +244,7 @@ There is no `gitops/kustomize/slop*` directory yet (only the unrelated `hyperslo
 
 Two details from `deployment.yaml` are worth knowing before you copy it:
 
-- The probes send `Host: francois.yolo.scapegoat.dev`, because the app routes by host. slop also routes by host, but `/healthz` and `/readyz` answer on any host, so the header is harmless there. Keep it for clarity.
+- The probes send `Host: francois.yolo.scapegoat.dev`, because the app routes by host and answers unknown hosts with 421. *Correction (as built):* slop did the same until commit `35a62f8`, which makes `/healthz` and `/readyz` answer on hosts it does not serve, so slop's probes need no Host header (and the Docker `HEALTHCHECK` on 127.0.0.1 works).
 - The OIDC flags read the org id from the environment: `--oidc-extra-scopes=urn:zitadel:iam:org:id:$(FRANCOIS_ZITADEL_ORG_ID)`, and the client id from a file, `--oidc-client-id-file`. slop has no client-id-file flag (§5.1). Either add one (recommended, a 10-line change) or pass the client id as a literal argument; it is not a secret.
 
 ### 5.3 Identity configuration (Terraform)
@@ -304,7 +327,7 @@ spec:
             - --public-url=https://slop.yolo.scapegoat.dev
             - --site-host=site.slop.yolo.scapegoat.dev
             - --sandbox-domain=sbx.slop.yolo.scapegoat.dev
-            - --oidc-issuer=https://zitadel.yolo.scapegoat.dev
+            - --oidc-issuer=https://auth.slop.boutique
             - --oidc-client-id-file=/run/slop/oidc-client-id      # new flag, see §10 phase A
             - --oidc-scope=urn:zitadel:iam:org:id:$(SLOP_ZITADEL_ORG_ID)
             - --trust-proxy-headers
@@ -363,7 +386,7 @@ A copy of `scripts/bootstrap-francois-secrets.sh` creates the password and write
 
 ### 6.5 Network policy
 
-Copy francois's policy exactly, renaming selectors. The non-obvious line is egress to **Traefik on 8443**. slop's server fetches ZITADEL's discovery document and exchanges codes at `https://zitadel.yolo.scapegoat.dev`, which resolves to the node's public address. Inside the cluster that "hairpins" back into Traefik. Without that rule, sign-in fails with a timeout at the callback, not with a helpful error. Egress to :443 covers anything external (nothing today; later perhaps an LLM for agents running in-cluster).
+Copy francois's policy exactly, renaming selectors. The non-obvious line is egress to **Traefik on 8443**. slop's server fetches ZITADEL's discovery document and exchanges codes at `https://auth.slop.boutique`, which resolves to the node's public address. Inside the cluster that "hairpins" back into Traefik. Without that rule, sign-in fails with a timeout at the callback, not with a helpful error. Egress to :443 covers anything external (nothing today; later perhaps an LLM for agents running in-cluster).
 
 ### 6.6 Picture of the result
 
@@ -421,10 +444,10 @@ Do **not** add slop's callback to `francois_portal`'s redirect URIs. Sharing a c
 ```
 ZITADEL user 2846…  (Ramon, linked to GitHub ramon@…)
    │
-   ├── signs in to francois (client francois-portal)  → id_token { iss: https://zitadel.yolo.scapegoat.dev, sub: 2846… }
+   ├── signs in to francois (client francois-portal)  → id_token { iss: https://auth.slop.boutique, sub: 2846… }
    │                                                     francois.users(issuer, subject) = (…, 2846…)  role admin
    │
-   └── signs in to slop (client slop-web)             → id_token { iss: https://zitadel.yolo.scapegoat.dev, sub: 2846… }
+   └── signs in to slop (client slop-web)             → id_token { iss: https://auth.slop.boutique, sub: 2846… }
                                                          slop.users(issuer, subject)     = (…, 2846…)  role ?
 ```
 
