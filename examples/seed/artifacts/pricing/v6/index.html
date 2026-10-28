@@ -1,0 +1,76 @@
+<!doctype html>
+<html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Support the lab · slop.boutique</title>
+<link rel="stylesheet" href="boutique.css">
+<style>.tiers{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:48px;padding:24px 0 0}
+.tier{border-top:1px solid var(--ink);padding:20px 0 28px;display:flex;flex-direction:column;gap:12px;position:relative;min-width:0}
+.tier-name{margin:0;font-size:15px;color:var(--muted)}
+.tier-price{margin:0;display:flex;align-items:baseline;gap:8px;flex-wrap:wrap}
+.amt{font-size:64px;line-height:1;letter-spacing:-.035em;font-variant-numeric:tabular-nums}
+.per{color:var(--muted);font-size:15px}
+.tier-blurb{margin:0;font-size:17px}
+.tier ul{margin:0;padding:0;list-style:none;display:flex;flex-direction:column;gap:6px;font-size:15px;color:var(--muted)}
+.tier li{padding-left:16px;position:relative}.tier li::before{content:"–";position:absolute;left:0}
+.tier .site-button{align-self:flex-start;margin-top:12px}
+.tier .sb-badge{position:absolute;top:20px;right:0px}
+
+
+@media (max-width:900px){.tier.mid{order:-1}}
+@media (max-width:900px){.tiers{grid-template-columns:1fr;gap:24px}}</style>
+</head><body><div class="sb-app">
+<header class="site-header page"><a class="site-wordmark" href="/">slop.boutique</a><p class="site-statement">A lab for computation and intelligence as material and medium.</p>
+<nav class="site-nav"><a href="/">Apps</a><a href="/journal">Journal</a><a href="/about">About</a><a class="site-support" href="/pricing"><span class="support-desktop">Support the lab</span><span class="support-mobile">Support</span></a></nav></header>
+<main class="sb-main page"><section class="sb-intro"><h1 class="sb-h1">Support the lab.</h1><p class="sb-text">Reading about the lab is free and stays free. Supporters run every experiment in the browser and pay for the models behind them.</p></section>
+<div class="seg" id="period"><button aria-pressed="true" data-p="m">Monthly</button><button aria-pressed="false" data-p="y">Yearly, two months free</button></div>
+<section class="tiers"><div class="tier"><p class="tier-name">Reader</p><p class="tier-price"><span class="amt" data-m="Free" data-y="Free">Free</span><span class="per" data-m="" data-y=""></span></p><p class="tier-blurb">Read about every experiment and the journal.</p><ul><li>Every experiment’s page</li><li>The journal and its feed</li><li>Free samples to download</li></ul><a class="site-button" href="/">Start reading</a></div><div class="tier mid"><p class="tier-name">Supporter</p><p class="tier-price"><span class="amt" data-m="€8" data-y="€80">€8</span><span class="per" data-m="a month" data-y="a year">a month</span></p><p class="tier-blurb">Run the experiments in your browser.</p><ul><li>Everything for readers</li><li>Run every experiment</li><li>Model credits for about 200 runs a month</li><li>Early access to new work</li></ul><a class="site-button" href="/pricing">Support the lab</a><span class="sb-badge">Most people pick this</span></div><div class="tier"><p class="tier-name">Studio</p><p class="tier-price"><span class="amt" data-m="€24" data-y="€240">€24</span><span class="per" data-m="a month" data-y="a year">a month</span></p><p class="tier-blurb">For a small team that builds on the lab’s work.</p><ul><li>Everything for supporters</li><li>Five shared instances</li><li>Downloads of every release</li><li>Requests get read first</li></ul><a class="site-button" href="/about">Talk to us</a></div></section>
+<p class="final-label">Questions</p><div class="lines"><div class="line"><p class="line-label">Can I cancel?</p><div class="line-body"><div class="prose"><p>Yes, at any time. You keep access until the end of the period you paid for.</p></div></div></div><div class="line"><p class="line-label">What are model credits?</p><div class="line-body"><div class="prose"><p>Experiments that call a model spend credits. A typical run costs one; heavy ones say how many before they start.</p></div></div></div><div class="line"><p class="line-label">Do you sell my data?</p><div class="line-body"><div class="prose"><p>No. There are no ads and no trackers beyond counting page views.</p></div></div></div></div></main>
+<footer class="site-footer page">
+  <div class="footer-brand"><span class="site-wordmark">slop.boutique</span><span>Run by Manuel and Ramon.</span></div>
+  <div><a href="/">Apps</a><a href="/journal">Journal</a><a href="/about">About</a></div>
+  <div><a href="/journal">RSS</a><a href="/press">Press</a><a href="/pricing">Support the lab</a></div>
+  <div class="footer-type"><span>Set in ABC Areal.</span><span>For humans.</span></div>
+</footer>
+</div>
+<script>(function pageLib() {
+    const esc = s => String(s == null ? '' : s).replace(/[&<>"]/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]));
+    const D = d => new Date(String(d).slice(0, 10) + 'T12:00:00Z');
+    window.lab = {
+      esc,
+      day: d => D(d).toLocaleDateString('en-GB', { day: 'numeric', month: 'short', timeZone: 'UTC' }),
+      long: d => D(d).toLocaleDateString('en-GB', { day: 'numeric', month: 'long', year: 'numeric', timeZone: 'UTC' }),
+      month: d => D(d).toLocaleDateString('en-GB', { month: 'long', year: 'numeric', timeZone: 'UTC' }),
+      iso: d => String(d).slice(0, 10),
+      data: async name => (window.slop && slop.data && slop.data[name]) ? await slop.data[name].list() : [],
+      one: async (name, id) => (window.slop && slop.data && slop.data[name]) ? await slop.data[name].get(id) : null,
+      params: () => (window.slop && slop.route && slop.route.params) || {},
+      // generative cover: soft bands in the experiment's colours, seeded by its id
+      art(canvas, colors, seed, t) {
+        const c = canvas.getContext('2d'), w = canvas.width, h = canvas.height;
+        let s = 0; for (const ch of String(seed || 'x')) s = (s * 31 + ch.charCodeAt(0)) >>> 0;
+        const r = () => ((s = (s * 1664525 + 1013904223) >>> 0) / 4294967296);
+        const cols = (colors && colors.length ? colors : ['#2F2D2A', '#CEE5FF', '#F4F3F0']);
+        c.fillStyle = cols[cols.length - 1]; c.fillRect(0, 0, w, h);
+        const n = 7;
+        for (let i = 0; i < n; i++) {
+          const y0 = r() * h, amp = (0.08 + r() * 0.2) * h, fr = 1 + r() * 2.5, ph = r() * 6.28 + (t || 0) * (0.2 + r() * 0.3);
+          c.beginPath(); c.moveTo(0, h);
+          for (let x = 0; x <= w; x += 8) c.lineTo(x, y0 + Math.sin(x / w * fr * 6.28 + ph) * amp);
+          c.lineTo(w, h); c.closePath();
+          c.globalAlpha = 0.55; c.fillStyle = cols[i % (cols.length - 1 || 1)]; c.fill();
+        }
+        c.globalAlpha = 1;
+      },
+    };
+  })();</script>
+<script>(function pricingScript(o) {
+    if (!o.toggle) return;
+    const seg = document.getElementById('period');
+    seg.addEventListener('click', e => {
+      const b = e.target.closest('button'); if (!b) return;
+      seg.querySelectorAll('button').forEach(x => x.setAttribute('aria-pressed', String(x === b)));
+      const y = b.dataset.p === 'y';
+      document.querySelectorAll('.amt').forEach(a => { a.textContent = y ? a.dataset.y : a.dataset.m; });
+      document.querySelectorAll('.per').forEach(p => { p.textContent = y ? p.dataset.y : p.dataset.m; });
+    });
+  })({"headline":"Support the lab.","lede":"Reading about the lab is free and stays free. Supporters run every experiment in the browser and pay for the models behind them.","gap":48,"emph":"none","big":true,"phoneFirst":true,"badge":true,"toggle":true,"faq":true});</script>
+</body></html>

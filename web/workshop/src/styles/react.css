@@ -1,0 +1,9 @@
+/* Additions for the React Workshop. workshop.css is the prototype's style.css
+   unchanged; the prototype set these styles inline from app.js. */
+.cmp .cmpstage > .stage { position:absolute; inset:0; padding:0; background:transparent; }
+.mini > .stage { position:absolute; inset:0; padding:10px; }
+.live-dot { width:7px; height:7px; border-radius:50%; background:var(--ink-2); display:inline-block; }
+.live-dot.on { background:#1a9e4b; }
+.boot { display:grid; place-items:center; height:100%; color:var(--ink-2); }
+a.btn { color:inherit; text-decoration:none; }
+#root { height:100%; }

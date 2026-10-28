@@ -1,0 +1,20 @@
+{
+  "no": 2,
+  "title": "Gantry",
+  "kind": "Simulation",
+  "date": "2026-10-02",
+  "size": "512 KB",
+  "tags": [
+    "simulation",
+    "control"
+  ],
+  "summary": "A crane with real cable sway, built to teach PID tuning by feel.",
+  "colors": [
+    "#3A3A3A",
+    "#F2C14E",
+    "#D7D3CC",
+    "#EEECE8"
+  ],
+  "by": "Manuel",
+  "href": null
+}

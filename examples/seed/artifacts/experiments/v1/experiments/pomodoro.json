@@ -1,0 +1,20 @@
+{
+  "no": 13,
+  "title": "Pomodoro",
+  "kind": "Tool",
+  "date": "2026-10-25",
+  "size": "22 KB",
+  "tags": [
+    "tools",
+    "toy"
+  ],
+  "summary": "Twenty-five minutes, four times, then a long break.",
+  "colors": [
+    "#B5603F",
+    "#F0C9B5",
+    "#F4F3F0",
+    "#FFFFFF"
+  ],
+  "by": "Manuel",
+  "href": "/play/pomodoro"
+}

@@ -1,0 +1,19 @@
+{
+  "no": 3,
+  "title": "Kettle",
+  "kind": "Tool",
+  "date": "2026-10-04",
+  "size": "96 KB",
+  "tags": [
+    "tools"
+  ],
+  "summary": "A recipe card that recalculates for altitude, pot size and how many people turn up.",
+  "colors": [
+    "#7A3E22",
+    "#E0A26B",
+    "#F6E6D4",
+    "#FFFFFF"
+  ],
+  "by": "Ramon",
+  "href": null
+}

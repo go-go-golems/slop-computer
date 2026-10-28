@@ -5,6 +5,16 @@ topics:
       description: Backend services
     - slug: websocket
       description: WebSocket lifecycle & events
+    - slug: frontend
+      description: Browser UI and shells
+    - slug: auth
+      description: Sign-in, sessions, tokens and roles
+    - slug: architecture
+      description: System architecture and design
+    - slug: deployment
+      description: Deployment, infrastructure and operations
+    - slug: data-migration
+      description: Moving data between systems
 docTypes:
     - slug: design-doc
       description: Structured rationale and architecture notes

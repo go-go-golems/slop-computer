@@ -1,0 +1,20 @@
+{
+  "no": 4,
+  "title": "Tessellate",
+  "kind": "Toy",
+  "date": "2026-10-06",
+  "size": "204 KB",
+  "tags": [
+    "graphics",
+    "math"
+  ],
+  "summary": "Wallpaper groups as a toy: pick one of the seventeen and paint a single tile.",
+  "colors": [
+    "#2340D8",
+    "#CEE5FF",
+    "#F4F3F0",
+    "#FFFFFF"
+  ],
+  "by": "Manuel",
+  "href": null
+}

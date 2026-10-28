@@ -1,0 +1,21 @@
+{{define "device"}}{{template "head" "Approve a login"}}{{template "banner" .}}
+<main class="card">
+<h1>Approve a command-line login</h1>
+<p class="note">Signed in as <b>{{.Me.DisplayName}}</b> ({{.Me.Role}}).</p>
+{{if .Problem}}<p class="problem">{{.Problem}}</p>{{end}}
+{{if .Request}}
+<p><b>{{.Request.ClientName}}</b> asked from {{.Request.RequesterAddress}} for a token. Check that it shows the code <code class="code">{{.Code}}</code>.</p>
+<form method="post" action="/device">
+<input type="hidden" name="csrf" value="{{.CSRF}}"><input type="hidden" name="code" value="{{.Code}}">
+<fieldset><legend>Scopes</legend>{{range .Allowed}}
+<label><input type="checkbox" name="scope" value="{{.}}"{{if contains $.Suggested .}} checked{{end}}> {{.}}</label>{{end}}</fieldset>
+<label>Lifetime in days (0 = no expiry) <input name="days" type="number" min="0" max="366" value="{{.Days}}"></label>
+<div class="row"><button class="primary" name="decision" value="approve">Approve</button><button name="decision" value="deny">Deny</button></div>
+</form>
+{{else}}
+<form method="get" action="/device" class="row"><input name="code" placeholder="XXXX-XXXX" value="{{.Code}}" autofocus><button class="primary">Continue</button></form>
+{{end}}
+</main>{{template "foot"}}{{end}}
+{{define "device-done"}}{{template "head" "Login"}}{{template "banner" .}}
+<main class="card">{{if .Approved}}<h1>Approved</h1><p>{{.Client}} receives a token with {{join .Scopes ", "}}. You can close this page.</p>
+{{else}}<h1>Denied</h1><p>{{.Client}} gets no token.</p>{{end}}</main>{{template "foot"}}{{end}}

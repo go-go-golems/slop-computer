@@ -1,0 +1,20 @@
+{
+  "no": 10,
+  "title": "Orbits",
+  "kind": "Simulation",
+  "date": "2026-10-19",
+  "size": "41 KB",
+  "tags": [
+    "simulation",
+    "toy"
+  ],
+  "summary": "Bodies in orbit around one sun. Change the count and the speed.",
+  "colors": [
+    "#141416",
+    "#2340D8",
+    "#E9E6DF",
+    "#F4F3F0"
+  ],
+  "by": "Ramon",
+  "href": "/play/orbits"
+}

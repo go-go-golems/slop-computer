@@ -1,0 +1,45 @@
+# Builds and tests on pull requests; on main, publishes
+# ghcr.io/go-go-golems/slop-computer:sha-<short> (SLOP-002). Copied from
+# francois's publish-image workflow without the GitOps pin PR: the slop
+# deployment pins its image by hand until a gitops-pr Vault role exists.
+name: publish-image
+
+on:
+  pull_request:
+  push:
+    branches:
+      - main
+    # Documentation and ticket changes do not change the container.
+    paths-ignore:
+      - "ttmp/**"
+      - "*.md"
+      - "doc/**"
+  workflow_dispatch:
+
+# The reusable workflow declares these four; a caller that grants less gets
+# a startup_failure.
+permissions:
+  contents: read
+  packages: write
+  pull-requests: write
+  id-token: write
+
+concurrency:
+  group: publish-image-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  release:
+    uses: go-go-golems/infra-tooling/.github/workflows/publish-ghcr-image.yml@main
+    secrets: inherit
+    with:
+      dockerfile: ./Dockerfile
+      build_context: .
+      test_command: go test ./... -count=1
+      go_version_file: go.mod
+      image_name: ghcr.io/go-go-golems/slop-computer
+      platforms: linux/amd64
+      push_image: ${{ github.event_name != 'pull_request' }}
+      open_gitops_pr: false
+      tooling_repository: go-go-golems/infra-tooling
+      tooling_ref: main

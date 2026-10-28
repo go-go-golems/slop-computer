@@ -1,0 +1,11 @@
+You are Manuel's coding agent. Read AGENTS.md first.
+
+Task 1. Create a new page artifact `colophon` in project `lab-site`: a short page "How this site is made"
+(artifacts, versions, routes, comments; made by Manuel and Ramon with their agents). Match the look of the
+existing lab-site pages (pull `about` to see how it is built and reuse its boutique.css). Push it, then
+route /colophon to it. Check it renders: curl -s http://site.localhost:18080/colophon | head -40
+
+Task 2. Then answer comments on project lab-site: run `slop comments wait -p lab-site --timeout 900`.
+For each comment: pull the artifact it is about (into a fresh folder or your existing one), make the
+change the person asked for, and push with --reply <thread> --reply-text "<what you did>".
+Handle comments until you have answered 2 of them, or until a wait times out. Then stop and summarise.

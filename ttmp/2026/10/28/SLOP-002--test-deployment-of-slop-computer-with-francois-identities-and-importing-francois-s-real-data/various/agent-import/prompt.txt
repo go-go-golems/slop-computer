@@ -1,0 +1,20 @@
+You are Manuel's coding agent. Read AGENTS.md first.
+
+Goal: a storefront for the imported francois catalog, built on slop, in project `francois`.
+
+Task 1. Create a page artifact `storefront` that lists every listed (visibility "listed")
+catalog record as a card: cover image, title, description, tags, latest version. Featured ones
+first, then by sortOrder, then title. Mark early-access items (earlyAccessUntil in the future) and
+items whose latest release needs a runtime capability (any of db, user, room, comments, assets,
+artifact, files) with small badges. Route it at /.
+
+Task 2. Create a page artifact `storefront-entry` for one catalog record, routed at /apps/:id with
+--record '{id}.json' --bind catalog=francois-catalog: title, cover, the Markdown body rendered to
+HTML (write a small renderer: headings, paragraphs, emphasis, links, images, lists, code), the
+gallery, and the release history. Link each card on / to its entry page.
+
+Task 3. From an entry page, link to the release itself (the page artifact named in `page`, its
+latest version). Find out how to make that work with routes; do the simplest thing that works.
+
+Then write NOTES.md in your working directory: every point where slop made something hard,
+impossible or awkward, with what you did instead. Be concrete. Print NOTES.md at the end.

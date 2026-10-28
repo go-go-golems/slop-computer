@@ -1,0 +1,13 @@
+You are Ramon's coding agent. Read AGENTS.md first.
+
+Task 1. Create a new page artifact `release-board` in project `play`: a release board for the Play
+experiments (orbits, pomodoro, type-specimen) with three columns: Planned, In review, Released, and a
+card per release (experiment, version, one-line note, date). Keep the data as a JSON array inside the page.
+Match the look of the existing play pages (pull `orbits` to see how it is built and reuse its boutique.css).
+Keep it under 50 KB. Push it, then route /play/releases to it.
+Check it renders: curl -s http://site.localhost:18080/play/releases | head -40
+
+Task 2. Then answer comments on project play: run `slop comments wait -p play --timeout 900`.
+For each comment: pull the artifact it is about, make the change the person asked for, and push with
+--reply <thread> --reply-text "<what you did>".
+Handle comments until you have answered 2 of them, or until a wait times out. Then stop and summarise.

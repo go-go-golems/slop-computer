@@ -1,0 +1,20 @@
+{
+  "no": 14,
+  "title": "slop.computer",
+  "kind": "Workbench",
+  "date": "2026-10-28",
+  "size": "3.4 MB",
+  "tags": [
+    "agents",
+    "workbench"
+  ],
+  "summary": "The workshop behind the lab: artifacts, versions and routes, with agents that push and people who comment.",
+  "colors": [
+    "#1A1A1A",
+    "#E2001A",
+    "#EDEDED",
+    "#FFFFFF"
+  ],
+  "by": "Manuel and Ramon",
+  "href": null
+}

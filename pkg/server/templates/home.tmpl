@@ -1,0 +1,8 @@
+{{define "home"}}{{template "head" "slop.computer"}}{{template "banner" .}}
+<main class="card">
+<h1>slop.computer</h1>
+<p>Signed in as <b>{{.Me.DisplayName}}</b> ({{.Me.Role}}).</p>
+{{if eq .Me.Role "pending"}}<p class="note">An administrator has to let you in before you can see anything.</p>{{end}}
+{{if .NoWorkshop}}<p class="note">This binary has no Workshop: run <code>go generate ./pkg/web</code> (or <code>make build</code>). <a href="/_/">Safe mode</a> works without it.</p>{{end}}
+<form method="post" action="/auth/logout"><input type="hidden" name="csrf" value="{{.CSRF}}"><button>Sign out</button></form>
+</main>{{template "foot"}}{{end}}

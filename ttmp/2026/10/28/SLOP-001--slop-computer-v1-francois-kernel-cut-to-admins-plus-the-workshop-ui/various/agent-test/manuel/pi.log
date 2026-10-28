@@ -1,0 +1,23 @@
+Both tasks are done.
+
+**Task 1** — `colophon` page created in `lab-site`, reusing `about`'s structure and `boutique.css`:
+- Pulled `about` (v3), copied `boutique.css`, kept the same header/nav/footer and `.lines` / `.experiment-editorial` rows.
+- Content: artifacts, versions, routes, comments — plus "Who" (Manuel, Ramon, their agents, type). Added `slop.json` with `tokens: lab-tokens` so it follows the site tokens.
+- Pushed v1, routed `/colophon` → `colophon@main`, verified `curl -s http://site.localhost:18080/colophon` returns 200 with the page.
+
+**Task 2** — two comment threads answered, both on colophon:
+
+1. `th_73d40cc8…` "Too much space between each section title and its text" — the default 17px margins on `.line-label` and on the first `<p>` inside each row were stacking. Zeroed both, 4px gap when the row stacks under 900px (v2); also removed the 56px top margin that separated the "Who" heading from its rows (v3).
+2. `th_10e853e0…` "Add one line under the intro saying when this page was last pushed, in mono, small, muted" — added `<p class="pushed">Last pushed 28 October 2026 · v4</p>` right under `.sb-text`, `font-family:var(--mono)`, 14px, `var(--muted)`. The date is written at push time so each version carries its own (v4).
+
+Final artifact: `colophon` v4 (@main), route `/colophon` public. Verified renders at 1440px and 711px; screenshots in `shots/`.
+
+One caveat worth flagging: the "last pushed" date is static text in the file, so it must be updated on every future push or it will go stale.
+
+<summary>
+This turn: Created and routed the `colophon` page in lab-site, then answered two comment threads on it.
+Session so far: about→pillaged for structure+boutique.css, colophon v1–v4 pushed, /colophon live, both threads replied.
+Issues: `/colophon/boutique.css` 404s but styles load via root `/boutique.css` — harmless; the static "last pushed" date needs updating on each future push.
+Next steps: Continue `slop comments wait -p lab-site` when more feedback arrives; keep the pushed line in sync with each new version.
+</summary>
+DONE

@@ -1,0 +1,23 @@
+Both tasks are done.
+
+**Task 1 — `release-board` (project `play`)**
+- Pulled `orbits`, reused its page structure and copied `boutique.css` verbatim.
+- `release-board/index.html` (7.3 KB) + `boutique.css` (29.5 KB) = **36.9 KB**, under 50 KB.
+- Data is a JSON array inside the page (`<script type="application/json" id="release-data">`): 12 releases across orbits / pomodoro / type-specimen, each with experiment, version, status, one-line note, date. Rendered into three columns (Planned, In review, Released) with count badges; dates in mono, version chips in `--sky`.
+- Pushed v1, routed `site.localhost:18080/play/releases → release-board@main`; `curl` returns 200 and the browser render matched the play pages' look.
+
+**Task 2 — comments on `play`** (2 answered)
+1. `th_31fe97…`: three columns should sit side by side on wide screens, stack only on phones → moved the breakpoint from 900px to 700px, added a tighter-gap/padding step under 1100px so three columns still fit; replied on **v2**.
+2. `th_f5a5c7…`: show per-column counts next to the board title → added a mono tally beside the `h1`, computed from the release array ("3 planned · 3 in review · 6 out"); replied on **v3**.
+
+Both replies went out as pushes with `--reply`/`--reply-text`. Stopped because 2 comments had been answered.
+
+Files: `release-board/index.html`, `release-board/boutique.css` (in the session scratchpad dir).
+
+<summary>
+This turn: Built and pushed the `release-board` page for `play` (3 columns, 12 release cards from an in-page JSON array), routed `/play/releases`, then answered 2 comments on project play (responsive breakpoint, per-column tally).
+Session so far: Task 1 complete (v1: 36.9 KB, route live, curl 200); Task 2 complete after two comment rounds (v2, v3), each pushed with a reply.
+Issues: Playwright browser became unusable mid-session ("Browser is already in use" — duplicate MCP CLI on the shared profile), so v2/v3 were verified via curl + CSS/data checks rather than screenshots.
+Next steps: Re-verify v3 visually in the Workshop once the browser lock clears; keep waiting for further play comments if asked.
+</summary>
+DONE

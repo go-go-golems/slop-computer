@@ -1,0 +1,20 @@
+{
+  "no": 8,
+  "title": "Quarry",
+  "kind": "Search",
+  "date": "2026-10-14",
+  "size": "820 KB",
+  "tags": [
+    "agents",
+    "search"
+  ],
+  "summary": "Search a corpus by shape instead of words: sketch a curve, get the paragraphs that move like it.",
+  "colors": [
+    "#5B4B3A",
+    "#B9A58A",
+    "#EFE8DD",
+    "#FFFFFF"
+  ],
+  "by": "Ramon",
+  "href": null
+}

@@ -1,0 +1,885 @@
+{
+  "projects": [
+    {
+      "id": "lab-site",
+      "name": "Lab site",
+      "brief": "The public site of the lab: experiments, journal, support. Same look as slop.boutique. Pages read the experiments and the journal as data, and the colours from lab-tokens."
+    },
+    {
+      "id": "play",
+      "name": "Play",
+      "brief": "Small experiments that run in the page. Keep each one under 50 KB."
+    },
+    {
+      "id": "workshop",
+      "name": "Workshop",
+      "brief": "slop.computer’s own screens. Shells run on the main origin with the API."
+    }
+  ],
+  "users": [
+    {
+      "id": "manuel",
+      "name": "Manuel",
+      "role": "admin"
+    },
+    {
+      "id": "ramon",
+      "name": "Ramon",
+      "role": "admin"
+    },
+    {
+      "id": "sasha",
+      "name": "Sasha Ilić",
+      "role": "pending"
+    }
+  ],
+  "artifacts": [
+    {
+      "id": "front-page",
+      "title": "Front page",
+      "kind": "page",
+      "type": "",
+      "viewer": "",
+      "project": "lab-site",
+      "versions": [
+        {
+          "n": 1,
+          "message": "First front page: the list of experiments",
+          "by": "manuel",
+          "via": "claude",
+          "session": "",
+          "manifest": {
+            "reads": {
+              "experiments": "experiments",
+              "posts": "journal"
+            },
+            "tokens": "lab-tokens"
+          }
+        },
+        {
+          "n": 2,
+          "message": "Search, tags and sort above the list",
+          "by": "manuel",
+          "via": "claude",
+          "session": "",
+          "manifest": {
+            "reads": {
+              "experiments": "experiments",
+              "posts": "journal"
+            },
+            "tokens": "lab-tokens"
+          }
+        },
+        {
+          "n": 3,
+          "message": "Latest three journal posts under the list",
+          "by": "ramon",
+          "via": "claude",
+          "session": "",
+          "manifest": {
+            "reads": {
+              "experiments": "experiments",
+              "posts": "journal"
+            },
+            "tokens": "lab-tokens"
+          }
+        },
+        {
+          "n": 4,
+          "message": "Support callout at the bottom",
+          "by": "ramon",
+          "via": "cli",
+          "session": "",
+          "manifest": {
+            "reads": {
+              "experiments": "experiments",
+              "posts": "journal"
+            },
+            "tokens": "lab-tokens"
+          }
+        }
+      ]
+    },
+    {
+      "id": "app-page",
+      "title": "Experiment page",
+      "kind": "page",
+      "type": "",
+      "viewer": "",
+      "project": "lab-site",
+      "versions": [
+        {
+          "n": 1,
+          "message": "One page for every experiment, by slug",
+          "by": "manuel",
+          "via": "claude",
+          "session": "",
+          "manifest": {
+            "reads": {
+              "experiments": "experiments"
+            },
+            "tokens": "lab-tokens"
+          }
+        },
+        {
+          "n": 2,
+          "message": "Animated cover and “more like this”",
+          "by": "ramon",
+          "via": "claude",
+          "session": "",
+          "manifest": {
+            "reads": {
+              "experiments": "experiments"
+            },
+            "tokens": "lab-tokens"
+          }
+        }
+      ]
+    },
+    {
+      "id": "pricing",
+      "title": "Pricing",
+      "kind": "page",
+      "type": "",
+      "viewer": "",
+      "project": "lab-site",
+      "versions": [
+        {
+          "n": 1,
+          "message": "First take: three tiers",
+          "by": "manuel",
+          "via": "claude",
+          "session": "",
+          "manifest": {
+            "reads": {},
+            "tokens": "lab-tokens"
+          }
+        },
+        {
+          "n": 2,
+          "message": "Copy from Ramon’s brief",
+          "by": "manuel",
+          "via": "claude",
+          "session": "",
+          "manifest": {
+            "reads": {},
+            "tokens": "lab-tokens"
+          }
+        },
+        {
+          "n": 3,
+          "message": "Bigger prices, no shadows",
+          "by": "ramon",
+          "via": "cli",
+          "session": "",
+          "manifest": {
+            "reads": {},
+            "tokens": "lab-tokens"
+          }
+        },
+        {
+          "n": 4,
+          "message": "Middle tier first on phones, with a badge",
+          "by": "manuel",
+          "via": "claude",
+          "session": "",
+          "manifest": {
+            "reads": {},
+            "tokens": "lab-tokens"
+          }
+        },
+        {
+          "n": 5,
+          "message": "Monthly and yearly switch",
+          "by": "manuel",
+          "via": "claude",
+          "session": "",
+          "manifest": {
+            "reads": {},
+            "tokens": "lab-tokens"
+          }
+        },
+        {
+          "n": 6,
+          "message": "Three questions under the tiers",
+          "by": "ramon",
+          "via": "claude",
+          "session": "",
+          "manifest": {
+            "reads": {},
+            "tokens": "lab-tokens"
+          }
+        },
+        {
+          "n": 7,
+          "message": "Tiers: gap 48 → 24px, middle tier inverted",
+          "by": "manuel",
+          "via": "claude",
+          "session": "sess-manuel-1028",
+          "manifest": {
+            "reads": {},
+            "tokens": "lab-tokens"
+          }
+        }
+      ]
+    },
+    {
+      "id": "about",
+      "title": "About",
+      "kind": "page",
+      "type": "",
+      "viewer": "",
+      "project": "lab-site",
+      "versions": [
+        {
+          "n": 1,
+          "message": "About us, two lines",
+          "by": "ramon",
+          "via": "cli",
+          "session": "",
+          "manifest": {
+            "reads": {
+              "experiments": "experiments",
+              "posts": "journal"
+            },
+            "tokens": "lab-tokens"
+          }
+        },
+        {
+          "n": 2,
+          "message": "Numbers: experiments and posts, read from the data",
+          "by": "manuel",
+          "via": "claude",
+          "session": "",
+          "manifest": {
+            "reads": {
+              "experiments": "experiments",
+              "posts": "journal"
+            },
+            "tokens": "lab-tokens"
+          }
+        },
+        {
+          "n": 3,
+          "message": "How we work",
+          "by": "ramon",
+          "via": "claude",
+          "session": "",
+          "manifest": {
+            "reads": {
+              "experiments": "experiments",
+              "posts": "journal"
+            },
+            "tokens": "lab-tokens"
+          }
+        }
+      ]
+    },
+    {
+      "id": "journal-index",
+      "title": "Journal",
+      "kind": "page",
+      "type": "",
+      "viewer": "",
+      "project": "lab-site",
+      "versions": [
+        {
+          "n": 1,
+          "message": "Journal as a plain list",
+          "by": "manuel",
+          "via": "claude",
+          "session": "",
+          "manifest": {
+            "reads": {
+              "posts": "journal"
+            },
+            "tokens": "lab-tokens"
+          }
+        },
+        {
+          "n": 2,
+          "message": "Grouped by month",
+          "by": "manuel",
+          "via": "claude",
+          "session": "",
+          "manifest": {
+            "reads": {
+              "posts": "journal"
+            },
+            "tokens": "lab-tokens"
+          }
+        },
+        {
+          "n": 3,
+          "message": "Summaries under the titles",
+          "by": "ramon",
+          "via": "claude",
+          "session": "",
+          "manifest": {
+            "reads": {
+              "posts": "journal"
+            },
+            "tokens": "lab-tokens"
+          }
+        },
+        {
+          "n": 4,
+          "message": "Tags",
+          "by": "ramon",
+          "via": "claude",
+          "session": "",
+          "manifest": {
+            "reads": {
+              "posts": "journal"
+            },
+            "tokens": "lab-tokens"
+          }
+        },
+        {
+          "n": 5,
+          "message": "Covers for the three newest",
+          "by": "manuel",
+          "via": "claude",
+          "session": "",
+          "manifest": {
+            "reads": {
+              "posts": "journal"
+            },
+            "tokens": "lab-tokens"
+          }
+        },
+        {
+          "n": 6,
+          "message": "Dates in mono",
+          "by": "manuel",
+          "via": "claude",
+          "session": "sess-manuel-1028",
+          "manifest": {
+            "reads": {
+              "posts": "journal"
+            },
+            "tokens": "lab-tokens"
+          }
+        }
+      ]
+    },
+    {
+      "id": "journal-post",
+      "title": "Journal post",
+      "kind": "page",
+      "type": "",
+      "viewer": "",
+      "project": "lab-site",
+      "versions": [
+        {
+          "n": 1,
+          "message": "One page for every post",
+          "by": "manuel",
+          "via": "claude",
+          "session": "",
+          "manifest": {
+            "reads": {
+              "posts": "journal"
+            },
+            "tokens": "lab-tokens"
+          }
+        },
+        {
+          "n": 2,
+          "message": "Tags and reading time",
+          "by": "ramon",
+          "via": "claude",
+          "session": "",
+          "manifest": {
+            "reads": {
+              "posts": "journal"
+            },
+            "tokens": "lab-tokens"
+          }
+        },
+        {
+          "n": 3,
+          "message": "Earlier and later links",
+          "by": "manuel",
+          "via": "claude",
+          "session": "",
+          "manifest": {
+            "reads": {
+              "posts": "journal"
+            },
+            "tokens": "lab-tokens"
+          }
+        }
+      ]
+    },
+    {
+      "id": "not-found",
+      "title": "Not found",
+      "kind": "page",
+      "type": "",
+      "viewer": "",
+      "project": "lab-site",
+      "versions": [
+        {
+          "n": 1,
+          "message": "A 404 that says why",
+          "by": "ramon",
+          "via": "cli",
+          "session": "",
+          "manifest": {
+            "reads": {},
+            "tokens": "lab-tokens"
+          }
+        }
+      ]
+    },
+    {
+      "id": "press-kit",
+      "title": "Press kit",
+      "kind": "page",
+      "type": "",
+      "viewer": "",
+      "project": "lab-site",
+      "versions": [
+        {
+          "n": 1,
+          "message": "Press page, not routed yet",
+          "by": "ramon",
+          "via": "claude",
+          "session": "",
+          "manifest": {
+            "reads": {},
+            "tokens": "lab-tokens"
+          }
+        }
+      ]
+    },
+    {
+      "id": "orbits",
+      "title": "Orbits",
+      "kind": "page",
+      "type": "",
+      "viewer": "",
+      "project": "play",
+      "versions": [
+        {
+          "n": 1,
+          "message": "Six bodies on circles",
+          "by": "ramon",
+          "via": "claude",
+          "session": "",
+          "manifest": {
+            "reads": {},
+            "tokens": "lab-tokens"
+          }
+        },
+        {
+          "n": 2,
+          "message": "Trails, on a dark ground",
+          "by": "ramon",
+          "via": "claude",
+          "session": "",
+          "manifest": {
+            "reads": {},
+            "tokens": "lab-tokens"
+          }
+        },
+        {
+          "n": 3,
+          "message": "Colours from the site’s tokens",
+          "by": "ramon",
+          "via": "claude",
+          "session": "",
+          "manifest": {
+            "reads": {},
+            "tokens": "lab-tokens"
+          }
+        }
+      ]
+    },
+    {
+      "id": "type-specimen",
+      "title": "Type specimen",
+      "kind": "page",
+      "type": "",
+      "viewer": "",
+      "project": "play",
+      "versions": [
+        {
+          "n": 1,
+          "message": "Three sizes",
+          "by": "ramon",
+          "via": "cli",
+          "session": "",
+          "manifest": {
+            "reads": {},
+            "tokens": "lab-tokens"
+          }
+        },
+        {
+          "n": 2,
+          "message": "Waterfall of every size, mono switch",
+          "by": "ramon",
+          "via": "claude",
+          "session": "",
+          "manifest": {
+            "reads": {},
+            "tokens": "lab-tokens"
+          }
+        }
+      ]
+    },
+    {
+      "id": "pomodoro",
+      "title": "Pomodoro",
+      "kind": "page",
+      "type": "",
+      "viewer": "",
+      "project": "play",
+      "versions": [
+        {
+          "n": 1,
+          "message": "A 25 minute timer",
+          "by": "manuel",
+          "via": "claude",
+          "session": "",
+          "manifest": {
+            "reads": {},
+            "tokens": "lab-tokens"
+          }
+        },
+        {
+          "n": 2,
+          "message": "Sessions and a length slider",
+          "by": "ramon",
+          "via": "claude",
+          "session": "",
+          "manifest": {
+            "reads": {},
+            "tokens": "lab-tokens"
+          }
+        }
+      ]
+    },
+    {
+      "id": "journal",
+      "title": "Journal posts",
+      "kind": "data",
+      "type": "post",
+      "viewer": "journal-post",
+      "project": "lab-site",
+      "versions": [
+        {
+          "n": 1,
+          "message": "Six posts from the old site",
+          "by": "manuel",
+          "via": "cli",
+          "session": "",
+          "manifest": {
+            "type": "post"
+          }
+        },
+        {
+          "n": 2,
+          "message": "Fix the date on “Routes, not templates”",
+          "by": "manuel",
+          "via": "browser",
+          "session": "",
+          "manifest": {
+            "type": "post"
+          }
+        },
+        {
+          "n": 3,
+          "message": "Two posts about slop.computer",
+          "by": "manuel",
+          "via": "cli",
+          "session": "sess-manuel-1028",
+          "manifest": {
+            "type": "post"
+          }
+        }
+      ]
+    },
+    {
+      "id": "experiments",
+      "title": "Experiments",
+      "kind": "data",
+      "type": "records",
+      "viewer": "app-page",
+      "project": "lab-site",
+      "versions": [
+        {
+          "n": 1,
+          "message": "Thirteen experiments",
+          "by": "ramon",
+          "via": "cli",
+          "session": "",
+          "manifest": {
+            "type": "records"
+          }
+        },
+        {
+          "n": 2,
+          "message": "Add slop.computer itself",
+          "by": "ramon",
+          "via": "browser",
+          "session": "",
+          "manifest": {
+            "type": "records"
+          }
+        }
+      ]
+    },
+    {
+      "id": "lab-tokens",
+      "title": "Lab tokens",
+      "kind": "data",
+      "type": "tokens",
+      "viewer": "front-page",
+      "project": "lab-site",
+      "versions": [
+        {
+          "n": 1,
+          "message": "Colours and type from slop.boutique",
+          "by": "ramon",
+          "via": "cli",
+          "session": "",
+          "manifest": {
+            "type": "tokens"
+          }
+        },
+        {
+          "n": 2,
+          "message": "Sky a little stronger",
+          "by": "ramon",
+          "via": "browser",
+          "session": "",
+          "manifest": {
+            "type": "tokens"
+          }
+        }
+      ]
+    }
+  ],
+  "routes": [
+    {
+      "path": "/",
+      "page": "front-page",
+      "version": null,
+      "record": "",
+      "access": "public",
+      "bindings": {}
+    },
+    {
+      "path": "/apps/:slug",
+      "page": "app-page",
+      "version": null,
+      "record": "experiments/{slug}.json",
+      "access": "public",
+      "bindings": {}
+    },
+    {
+      "path": "/pricing",
+      "page": "pricing",
+      "version": 5,
+      "record": "",
+      "access": "public",
+      "bindings": {}
+    },
+    {
+      "path": "/about",
+      "page": "about",
+      "version": null,
+      "record": "",
+      "access": "public",
+      "bindings": {}
+    },
+    {
+      "path": "/journal",
+      "page": "journal-index",
+      "version": null,
+      "record": "",
+      "access": "public",
+      "bindings": {}
+    },
+    {
+      "path": "/journal/:slug",
+      "page": "journal-post",
+      "version": null,
+      "record": "posts/{slug}.md",
+      "access": "public",
+      "bindings": {}
+    },
+    {
+      "path": "/play/orbits",
+      "page": "orbits",
+      "version": null,
+      "record": "",
+      "access": "public",
+      "bindings": {}
+    },
+    {
+      "path": "/play/type",
+      "page": "type-specimen",
+      "version": null,
+      "record": "",
+      "access": "public",
+      "bindings": {}
+    },
+    {
+      "path": "/play/pomodoro",
+      "page": "pomodoro",
+      "version": null,
+      "record": "",
+      "access": "public",
+      "bindings": {}
+    },
+    {
+      "path": "*",
+      "page": "not-found",
+      "version": null,
+      "record": "",
+      "access": "public",
+      "bindings": {}
+    }
+  ],
+  "threads": [
+    {
+      "artifact": "pricing",
+      "version": 6,
+      "anchor": {
+        "selector": "section.tiers",
+        "fx": 0.5,
+        "fy": 0.12,
+        "text": "Reader Free Read about every experiment…"
+      },
+      "resolved": false,
+      "comments": [
+        {
+          "by": "ramon",
+          "agent": false,
+          "version": null,
+          "text": "Too much air between the tiers. The middle one should win."
+        },
+        {
+          "by": "manuel",
+          "agent": true,
+          "version": 7,
+          "text": "Done in v7: gap 48px → 24px on section.tiers, and the middle tier is inverted. Point /pricing at it when it looks right."
+        }
+      ]
+    },
+    {
+      "artifact": "pricing",
+      "version": 7,
+      "anchor": {
+        "selector": "#period",
+        "fx": 0.8,
+        "fy": 0.5,
+        "text": "Monthly Yearly, two months free"
+      },
+      "resolved": false,
+      "comments": [
+        {
+          "by": "manuel",
+          "agent": false,
+          "version": null,
+          "text": "Yearly should say how much it saves, in euros."
+        }
+      ]
+    },
+    {
+      "artifact": "journal-index",
+      "version": 5,
+      "anchor": {
+        "selector": "p.sb-kicker",
+        "fx": 0.1,
+        "fy": 0.5,
+        "text": "28 October 2026 · 2 min read"
+      },
+      "resolved": true,
+      "comments": [
+        {
+          "by": "ramon",
+          "agent": false,
+          "version": null,
+          "text": "Dates in mono, please."
+        },
+        {
+          "by": "manuel",
+          "agent": true,
+          "version": 6,
+          "text": "Done in v6: dates are in the mono face and written as 2026-10-28."
+        }
+      ]
+    },
+    {
+      "artifact": "front-page",
+      "version": 4,
+      "anchor": {
+        "selector": "section.support-callout",
+        "fx": 0.3,
+        "fy": 0.3,
+        "text": "Keep the lab running."
+      },
+      "resolved": false,
+      "comments": [
+        {
+          "by": "manuel",
+          "agent": false,
+          "version": null,
+          "text": "The callout is too loud on phones."
+        },
+        {
+          "by": "ramon",
+          "agent": false,
+          "version": null,
+          "text": "Agreed. Let’s try it smaller next week."
+        }
+      ]
+    },
+    {
+      "artifact": "journal",
+      "version": 1,
+      "anchor": {
+        "record": "posts/routes-not-templates.md",
+        "field": "date"
+      },
+      "resolved": true,
+      "comments": [
+        {
+          "by": "ramon",
+          "agent": false,
+          "version": null,
+          "text": "This went out on the 26th, not the 25th."
+        },
+        {
+          "by": "manuel",
+          "agent": false,
+          "version": 2,
+          "text": "Fixed in v2."
+        }
+      ]
+    },
+    {
+      "artifact": "orbits",
+      "version": 3,
+      "anchor": {
+        "selector": "div.runner-surface",
+        "fx": 0.5,
+        "fy": 0.5,
+        "text": ""
+      },
+      "resolved": false,
+      "comments": [
+        {
+          "by": "manuel",
+          "agent": false,
+          "version": null,
+          "text": "I miss the trails from v2. Can they be on by default?"
+        }
+      ]
+    }
+  ]
+}
