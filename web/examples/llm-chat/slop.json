@@ -1,0 +1,5 @@
+{
+  "title": "LLM chat",
+  "kind": "page",
+  "capabilities": { "sample": {}, "user": {} }
+}
