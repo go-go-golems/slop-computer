@@ -12,6 +12,7 @@
      const stop = api.stream('/docs/x/events', { after: () => rev, on: (type, data, id) => … })
      await api.putRaw('/blobs/' + sha, bytes)    // a non-JSON body
      api.beacon('POST', '/presence/x', {...})    // survives the page closing
+     api.setArgs({ file: 'design-x' })           // the Workshop's URL follows
 */
 (function () {
   'use strict';
@@ -122,6 +123,9 @@
     stream: function (path, o) { return sse(path, o.after || function () { return 0; }, o.on); },
     putRaw: function (path, raw, type) { return call('PUT', path, { raw: raw, type: type }); },
     beacon: function (method, path, body) { return call(method, path, { body: body, keepalive: true }).catch(function () {}); },
+    // setArgs asks the Workshop to put these in its URL (/tools/<id>?…), so
+    // reopening the tool opens the same thing.
+    setArgs: function (args) { if (grant) grant.args = args || {}; post({ type: 'tool-args', args: args || {} }); },
     can: function (perm) { return !!grant && grant.permissions.indexOf(perm) >= 0; },
     get permissions() { return grant ? grant.permissions.slice() : []; },
     get user() { return grant ? grant.user : null; },

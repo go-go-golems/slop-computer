@@ -40,7 +40,7 @@ export function ToolScreen({ id, tryN, args = {} }: { id: string; tryN?: number;
     <div className="split">
       <section className="tile main">
         <div className="toolbar">
-          <div className="addr"><span>tool</span><span className="ro">{t.latest.title || enabled?.title || id}</span></div>
+          <div className="addr label"><span>tool</span><span className="ro">{t.latest.title || enabled?.title || id}</span></div>
           {enabled ? <Tag tone="ink">{`enabled v${enabled.version}`}</Tag> : <Tag tone="red">not enabled</Tag>}
           {trying ? <Tag tone="red">{`trying v${tryN} · only you`}</Tag> : null}
           <span className="sp" />
@@ -94,7 +94,17 @@ function ToolFrame({ id, n, trying, args }: { id: string; n: number; trying: boo
     }
     const on = (e: MessageEvent) => {
       if (!frame.current || e.source !== frame.current.contentWindow || !isSandboxOrigin(e.origin) || e.origin !== sb.origin) return
-      const m = e.data as { slop?: number; type?: string } | null
+      const m = e.data as { slop?: number; type?: string; args?: Record<string, unknown> } | null
+      if (m && m.slop === 1 && m.type === 'tool-args') {
+        // The tool chose what it shows (Pinup: a design); keep it in the URL.
+        const q = new URLSearchParams(location.search)
+        for (const k of [...q.keys()]) if (k !== 'try') q.delete(k)
+        for (const [k, v] of Object.entries(m.args ?? {})) if (typeof v === 'string' && v) q.set(k, v)
+        const s = q.toString()
+        history.replaceState(history.state, '', location.pathname + (s ? '?' + s : ''))
+        argsRef.current = toolArgs(q)
+        return
+      }
       if (!m || m.slop !== 1 || m.type !== 'tool-hello') return
       void give()
       clearInterval(renew)
@@ -124,7 +134,9 @@ function EnableToolDialog({ t, n, permissions, onClose }: { t: ToolView; n: numb
       await enable({ id: t.artifact, n }).unwrap()
       toast(`${t.latest.title} v${n} is enabled for everyone.`)
       onClose()
-      navigate(toolPath(t.artifact))
+      // Keep what the tool was showing (?file=…), drop the try.
+      const q = new URLSearchParams(toolArgs(new URLSearchParams(location.search))).toString()
+      navigate(toolPath(t.artifact) + (q ? '?' + q : ''))
     } catch (e) { toast(errorText(e), true) }
   }
   return (
