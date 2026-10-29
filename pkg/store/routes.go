@@ -19,11 +19,15 @@ type Binding struct {
 }
 
 // Route maps (host, path pattern) to a page artifact, following main
-// (Version nil) or pinned to a version.
+// (Version nil) or pinned to a version. A page-from route fills PageFrom
+// ("{page}", "release-{page}") from the path's parameters to name the page
+// it serves, among the pages of Page's project; Page is served, as a 404,
+// when it names none.
 type Route struct {
 	Host      string             `json:"host"`
 	Path      string             `json:"path"`
 	Page      string             `json:"page"`
+	PageFrom  string             `json:"pageFrom,omitempty"`
 	Version   *int               `json:"version"`
 	Bindings  map[string]Binding `json:"bindings"`
 	Record    string             `json:"record,omitempty"`
@@ -47,9 +51,45 @@ type RouteLogEntry struct {
 }
 
 var (
-	hostPattern    = regexp.MustCompile(`^[a-z0-9.-]+(:[0-9]{1,5})?$`)
-	segmentPattern = regexp.MustCompile(`^(\*|:[a-zA-Z_][a-zA-Z0-9_]*|[A-Za-z0-9._~!$&'()+,;=@%-]+)$`)
+	hostPattern     = regexp.MustCompile(`^[a-z0-9.-]+(:[0-9]{1,5})?$`)
+	segmentPattern  = regexp.MustCompile(`^(\*|:[a-zA-Z_][a-zA-Z0-9_]*|[A-Za-z0-9._~!$&'()+,;=@%-]+)$`)
+	pageFromPattern = regexp.MustCompile(`^([a-z0-9-]|\{[a-zA-Z_][a-zA-Z0-9_]*\})+$`)
+	templateParam   = regexp.MustCompile(`\{([a-zA-Z_][a-zA-Z0-9_]*)\}`)
 )
+
+// TemplateParams lists the {name} placeholders of a page-from template.
+func TemplateParams(t string) []string {
+	var out []string
+	for _, m := range templateParam.FindAllStringSubmatch(t, -1) {
+		out = append(out, m[1])
+	}
+	return out
+}
+
+// validPageFrom checks a page-from template against its route's path: only
+// artifact-id characters and placeholders, at least one placeholder, each
+// one a :param of the path.
+func validPageFrom(t, path string) error {
+	if !pageFromPattern.MatchString(t) || len(t) > 200 {
+		return invalidf("pageFrom must be artifact-id characters (a-z 0-9 -) and {param} placeholders, such as {page} or release-{page}")
+	}
+	names := TemplateParams(t)
+	if len(names) == 0 {
+		return invalidf("pageFrom needs a {param} placeholder, such as {page}")
+	}
+	params := map[string]bool{}
+	for _, seg := range strings.Split(path, "/") {
+		if strings.HasPrefix(seg, ":") {
+			params[seg[1:]] = true
+		}
+	}
+	for _, n := range names {
+		if !params[n] {
+			return invalidf("pageFrom uses {%s}, but the path %s has no :%s", n, path, n)
+		}
+	}
+	return nil
+}
 
 // ValidRoutePath accepts "*" (the fallback) and paths like /journal/:slug or
 // /files/*, where * may only be the last segment.
@@ -86,15 +126,21 @@ func (r *Route) validate() error {
 	if r.Bindings == nil {
 		r.Bindings = map[string]Binding{}
 	}
+	if r.PageFrom != "" {
+		if r.Version != nil {
+			return invalidf("page-from routes follow main; drop the version")
+		}
+		return validPageFrom(r.PageFrom, r.Path)
+	}
 	return nil
 }
 
-const routeColumns = `host,path,page,version,bindings,record,access,changed_by,changed_at`
+const routeColumns = `host,path,page,page_from,version,bindings,record,access,changed_by,changed_at`
 
 func scanRoute(r scanner) (Route, error) {
 	var rt Route
 	var bindings JSON
-	err := r.Scan(&rt.Host, &rt.Path, &rt.Page, &rt.Version, &bindings, &rt.Record, &rt.Access, &rt.ChangedBy, &rt.ChangedAt)
+	err := r.Scan(&rt.Host, &rt.Path, &rt.Page, &rt.PageFrom, &rt.Version, &bindings, &rt.Record, &rt.Access, &rt.ChangedBy, &rt.ChangedAt)
 	if err != nil {
 		return rt, notFound(err)
 	}
@@ -149,6 +195,9 @@ func setRoute(ctx context.Context, s *Store, tx db, r Route, note, actor string)
 	if page.Kind != KindPage {
 		return Route{}, nil, invalidf("%s is a data artifact; routes serve pages", r.Page)
 	}
+	if r.PageFrom != "" && deref(page.Project) == "" {
+		return Route{}, nil, invalidf("page-from routes choose among the pages of the route page's project; %s has no project", r.Page)
+	}
 	if r.Version != nil {
 		var one int
 		if err = tx.row(ctx, `SELECT 1 FROM versions WHERE artifact_id=? AND n=?`, r.Page, *r.Version).Scan(&one); err != nil {
@@ -166,10 +215,10 @@ func setRoute(ctx context.Context, s *Store, tx db, r Route, note, actor string)
 		return Route{}, nil, err
 	}
 	bindings := MustJSON(r.Bindings)
-	if _, err = tx.exec(ctx, `INSERT INTO routes(`+routeColumns+`) VALUES(?,?,?,?,?,?,?,?,?)
-ON CONFLICT(host,path) DO UPDATE SET page=excluded.page, version=excluded.version, bindings=excluded.bindings, record=excluded.record,
+	if _, err = tx.exec(ctx, `INSERT INTO routes(`+routeColumns+`) VALUES(?,?,?,?,?,?,?,?,?,?)
+ON CONFLICT(host,path) DO UPDATE SET page=excluded.page, page_from=excluded.page_from, version=excluded.version, bindings=excluded.bindings, record=excluded.record,
 access=excluded.access, changed_by=excluded.changed_by, changed_at=excluded.changed_at`,
-		r.Host, r.Path, r.Page, r.Version, bindings, r.Record, r.Access, nullable(actor), now); err != nil {
+		r.Host, r.Path, r.Page, r.PageFrom, r.Version, bindings, r.Record, r.Access, nullable(actor), now); err != nil {
 		return Route{}, nil, err
 	}
 	to, err := getRoute(ctx, tx, r.Host, r.Path)

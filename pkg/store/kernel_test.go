@@ -2,6 +2,7 @@ package store_test
 
 import (
 	"context"
+	"strings"
 	"testing"
 
 	"github.com/go-go-golems/slop-computer/pkg/store"
@@ -106,5 +107,59 @@ func TestKernel(t *testing.T) {
 	last, _ := s.LastSeq(ctx)
 	if last != evs[len(evs)-1].Seq {
 		t.Fatalf("last seq %d", last)
+	}
+}
+
+func TestPageFromRoutes(t *testing.T) {
+	ctx := context.Background()
+	s := storetest.Open(t)
+	u, _ := s.UpsertIdentity(ctx, store.Identity{Issuer: "local", Subject: "manuel"}, store.RoleAdmin)
+	proj := "francois"
+	if _, _, err := s.PutProject(ctx, store.Project{ID: proj, Name: "francois"}, u.ID); err != nil {
+		t.Fatal(err)
+	}
+	tree := map[string]store.FileEntry{"index.html": {SHA256: "aa", Size: 1, Type: "text/html"}}
+	for _, a := range []struct {
+		id   string
+		proj *string
+	}{{"release-missing", &proj}, {"loose", nil}} {
+		if _, err := s.Push(ctx, store.PushInput{Artifact: a.id, Tree: tree, MoveMain: true, Actor: u.ID, Via: "cli",
+			Create: &store.ArtifactInput{Title: a.id, Kind: store.KindPage, Project: a.proj}}); err != nil {
+			t.Fatal(err)
+		}
+	}
+	one := 1
+	for _, c := range []struct {
+		r    store.Route
+		want string
+	}{
+		{store.Route{Path: "/r/:page", Page: "release-missing", PageFrom: "{slug}"}, "has no :slug"},
+		{store.Route{Path: "/r/:page", Page: "release-missing", PageFrom: "release"}, "needs a {param}"},
+		{store.Route{Path: "/r/:page", Page: "release-missing", PageFrom: "Rel_{page}"}, "artifact-id characters"},
+		{store.Route{Path: "/r/:page", Page: "release-missing", PageFrom: "{page}", Version: &one}, "follow main"},
+		{store.Route{Path: "/r/:page", Page: "loose", PageFrom: "{page}"}, "has no project"},
+	} {
+		c.r.Host = "site.localhost"
+		if _, _, err := s.SetRoute(ctx, c.r, "", u.ID); err == nil || !strings.Contains(err.Error(), c.want) {
+			t.Errorf("%+v: %v, want %q", c.r, err, c.want)
+		}
+	}
+	r, _, err := s.SetRoute(ctx, store.Route{Host: "site.localhost", Path: "/r/:page", Page: "release-missing", PageFrom: "release-{page}"}, "all releases", u.ID)
+	if err != nil || r.PageFrom != "release-{page}" {
+		t.Fatalf("set %+v %v", r, err)
+	}
+	if _, _, err = s.SetRoute(ctx, store.Route{Host: "site.localhost", Path: "/r/:page", Page: "release-missing"}, "plain", u.ID); err != nil {
+		t.Fatal(err)
+	}
+	back, _, err := s.UndoRoute(ctx, "site.localhost", "/r/:page", u.ID)
+	if err != nil || back == nil || back.PageFrom != "release-{page}" {
+		t.Fatalf("undo %+v %v", back, err)
+	}
+	rs, err := s.Routes(ctx, "site.localhost")
+	if err != nil || len(rs) != 1 || rs[0].PageFrom != "release-{page}" {
+		t.Fatalf("routes %+v %v", rs, err)
+	}
+	if got := store.TemplateParams("a-{x}-{y}"); len(got) != 2 || got[0] != "x" || got[1] != "y" {
+		t.Errorf("TemplateParams %v", got)
 	}
 }

@@ -72,11 +72,10 @@ func (s *Server) resolveRoute(w http.ResponseWriter, r *http.Request) {
 		httpx.Fail(w, 404, "not_found", "No route matches")
 		return
 	}
-	n := 0
-	if res.Route.Version != nil {
-		n = *res.Route.Version
+	v, missing, err := s.target(r.Context(), res)
+	if missing {
+		res.Page, res.Missing = res.Route.Page, true
 	}
-	v, err := s.Store.Version(r.Context(), res.Route.Page, n)
 	if err != nil {
 		httpx.OK(w, map[string]any{"resolution": res, "n": 0, "bindings": map[string]any{}})
 		return
