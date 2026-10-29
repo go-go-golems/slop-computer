@@ -96,20 +96,20 @@ func TestServeSiteAndSandbox(t *testing.T) {
 		}
 	}
 
-	// Previews: an unguessable origin per version.
+	// Previews: an unguessable origin per artifact, the version in the path.
 	var su map[string]any
 	if code := manuel.do("GET", "/api/sandbox-url?artifact=journal-post&n=1&host=site.test&path=/journal/other", nil, &su); code != 200 {
 		t.Fatalf("sandbox url %d %v", code, su)
 	}
 	u, _ := url.Parse(su["url"].(string))
-	if !strings.HasSuffix(u.Host, ".sandbox.test") || u.Path != "/journal/other" {
+	if !strings.HasSuffix(u.Host, ".sandbox.test") || u.Path != "/v/1/" || u.Query().Get("path") != "/journal/other" {
 		t.Fatalf("sandbox url %v", u)
 	}
 	code, body, _ = h.get(u.Host, u.RequestURI(), "")
-	if code != 200 || !strings.Contains(body, "bridge.js") || !strings.Contains(body, `"parentOrigin":"`+h.ts.URL+`"`) || !strings.Contains(body, `"record":"posts/other.md"`) {
+	if code != 200 || !strings.Contains(body, "bridge.js") || !strings.Contains(body, "claude.js") || !strings.Contains(body, `"parentOrigin":"`+h.ts.URL+`"`) || !strings.Contains(body, `"record":"posts/other.md"`) {
 		t.Fatalf("preview %d %s", code, body)
 	}
-	if code, body, _ = h.get(u.Host, "/journal/style.css", ""); code != 200 || body != "body{margin:0}" {
+	if code, body, _ = h.get(u.Host, "/v/1/style.css", ""); code != 200 || body != "body{margin:0}" {
 		t.Fatalf("preview asset %d %q", code, body)
 	}
 	if code, _, _ = h.get("s00000000000000000000.sandbox.test", "/", ""); code != 404 {

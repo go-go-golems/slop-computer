@@ -13,6 +13,7 @@ import (
 
 	"github.com/go-go-golems/slop-computer/pkg/blobs"
 	"github.com/go-go-golems/slop-computer/pkg/httpx"
+	"github.com/go-go-golems/slop-computer/pkg/rt"
 	"github.com/go-go-golems/slop-computer/pkg/store"
 )
 
@@ -158,6 +159,7 @@ func (s *Server) patchArtifact(w http.ResponseWriter, r *http.Request) {
 	var in struct {
 		Title   *string          `json:"title"`
 		Viewer  *string          `json:"viewer"`
+		App     *string          `json:"app"`
 		Project *json.RawMessage `json:"project"`
 	}
 	if err := httpx.Read(w, r, &in, 16<<10); err != nil {
@@ -173,7 +175,7 @@ func (s *Server) patchArtifact(w http.ResponseWriter, r *http.Request) {
 		}
 		project = &p
 	}
-	a, evs, err := s.Store.UpdateArtifact(r.Context(), r.PathValue("id"), in.Title, in.Viewer, project, actor(r))
+	a, evs, err := s.Store.UpdateArtifact(r.Context(), r.PathValue("id"), store.ArtifactPatch{Title: in.Title, Viewer: in.Viewer, App: in.App, Project: project}, actor(r))
 	if err != nil {
 		s.fail(w, err)
 		return
@@ -419,9 +421,10 @@ func (s *Server) push(w http.ResponseWriter, r *http.Request) {
 			if a, err := s.Store.Artifact(r.Context(), m.Tokens); err != nil || a.Type != "tokens" {
 				warnings = append(warnings, "tokens: "+m.Tokens+" is not a tokens data artifact (yet)")
 			}
-		} // A tool section must be valid when it is pushed, not when it is enabled.
-		if _, err := store.ToolManifestOf(store.Version{Manifest: manifest}); err != nil {
-			s.fail(w, err)
+		}
+		// Capabilities must be valid when they are pushed, not when the app opens.
+		if _, err := rt.ParseManifest(manifest, rt.SlopPermissions); err != nil {
+			httpx.Fail(w, 400, "invalid_request", err.Error())
 			return
 		}
 	}
@@ -430,8 +433,8 @@ func (s *Server) push(w http.ResponseWriter, r *http.Request) {
 	}
 	p := principal(r.Context())
 	via := "browser"
-	if p.Grant != nil {
-		via = "tool"
+	if p.View != nil {
+		via = "app"
 	} else if p.Token != nil {
 		via = "cli"
 		if in.Via == "claude" || in.Via == "agent" || in.Via == "import" {
@@ -440,7 +443,7 @@ func (s *Server) push(w http.ResponseWriter, r *http.Request) {
 	}
 	author := actor(r)
 	if in.Author != "" && in.Author != author {
-		if p.Grant != nil || (p.Token != nil && !p.Token.Allows(store.ScopeAdmin)) {
+		if p.View != nil || (p.Token != nil && !p.Token.Allows(store.ScopeAdmin)) {
 			httpx.Fail(w, 403, "author_not_allowed", "Pushing on behalf of someone else needs the admin scope")
 			return
 		}

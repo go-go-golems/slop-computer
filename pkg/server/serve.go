@@ -16,6 +16,7 @@ import (
 	"github.com/go-go-golems/slop-computer/pkg/records"
 	"github.com/go-go-golems/slop-computer/pkg/render"
 	"github.com/go-go-golems/slop-computer/pkg/routing"
+	"github.com/go-go-golems/slop-computer/pkg/rt"
 	"github.com/go-go-golems/slop-computer/pkg/store"
 	"github.com/pkg/errors"
 )
@@ -122,7 +123,7 @@ func (s *Server) bindings(ctx context.Context, page store.Version, route *store.
 }
 
 // renderPage injects boot data into a page version's index.html.
-func (s *Server) renderPage(ctx context.Context, page store.Version, res *routing.Resolution, host, reqPath, mode, parent string) ([]byte, error) {
+func (s *Server) renderPage(ctx context.Context, page store.Version, res *routing.Resolution, host, reqPath, mode, parent string, runtime *render.Runtime) ([]byte, error) {
 	idx, ok := page.Files["index.html"]
 	if !ok {
 		return nil, errors.New("this version has no index.html")
@@ -133,7 +134,7 @@ func (s *Server) renderPage(ctx context.Context, page store.Version, res *routin
 	}
 	var route *store.Route
 	boot := render.Boot{Route: render.RouteInfo{Host: host, Path: reqPath, Params: map[string]string{}}, Data: map[string][]records.Record{},
-		Version: render.VersionInfo{Artifact: page.Artifact, N: page.N}, Mode: mode, ParentOrigin: parent}
+		Version: render.VersionInfo{Artifact: page.Artifact, N: page.N}, Mode: mode, ParentOrigin: parent, Runtime: runtime}
 	if res != nil {
 		route = &res.Route
 		boot.Route.Params = res.Params
@@ -426,7 +427,7 @@ func (s *Server) serveSite(w http.ResponseWriter, r *http.Request) {
 	if missing {
 		res.Page, res.Missing = res.Route.Page, true
 	}
-	body, err := s.renderPage(ctx, v, &res, host, r.URL.Path, render.ModeSite, "")
+	body, err := s.renderPage(ctx, v, &res, host, r.URL.Path, render.ModeSite, "", nil)
 	if err != nil {
 		unavailable(w, err)
 		return
@@ -453,53 +454,73 @@ func (s *Server) sandboxLabel(host string) (string, bool) {
 
 var sandboxLabelPattern = regexp.MustCompile(`^s[0-9a-f]{20}$`)
 
-// serveSandbox serves one version as a Workshop preview. ?host= gives the
-// route context (bindings, params, record) of that host's route for the path.
+// appPath is /v/<n>/<file>: a version of the target's app.
+var appPath = regexp.MustCompile(`^/v/([0-9]+)/(.*)$`)
+
+// serveSandbox serves a target's origin: its app's versions under /v/<n>/
+// (the boot injected into index.html), the runtime's calls under /_rt/, the
+// target's assets under /_blob/, and data files previews read. A page
+// artifact is its own target, so Workshop previews use the same scheme.
 func (s *Server) serveSandbox(w http.ResponseWriter, r *http.Request, label string) {
-	if r.Method != http.MethodGet && r.Method != http.MethodHead {
-		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+	ctx := r.Context()
+	target, err := s.Store.RTOriginTarget(ctx, label)
+	if err != nil {
+		notFoundPage(w)
 		return
 	}
-	if strings.HasPrefix(r.URL.Path, "/_slop/") {
+	r = r.WithContext(context.WithValue(ctx, originTarget{}, target))
+	p := r.URL.Path
+	get := r.Method == http.MethodGet || r.Method == http.MethodHead
+	switch {
+	case p == "/_rt/events" && get:
+		s.viewEvents(w, r)
+		return
+	case p == "/_rt/rpc" && r.Method == http.MethodPost:
+		s.viewRPC(w, r)
+		return
+	case p == "/_rt/assets" && r.Method == http.MethodPost:
+		s.uploadAsset(w, r)
+		return
+	case strings.HasPrefix(p, "/_rt/api/"):
+		s.slopProxy(w, r, strings.TrimPrefix(p, "/_rt"))
+		return
+	case !get:
+		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+		return
+	case strings.HasPrefix(p, "/_slop/"):
 		s.serveSlopAsset(w, r)
+		return
+	case strings.HasPrefix(p, "/_blob/"):
+		s.serveAsset(w, r, target, strings.TrimPrefix(p, "/_blob/"))
 		return
 	}
 	s.frameAncestors(w)
-	ctx := r.Context()
-	artifact, n, err := s.Store.SandboxTarget(ctx, label)
+	t, err := s.Store.Artifact(ctx, target)
 	if err != nil {
 		notFoundPage(w)
 		return
 	}
-	v, err := s.Store.Version(ctx, artifact, n)
-	if err != nil {
-		notFoundPage(w)
-		return
+	app := t.ID
+	if t.App != "" {
+		app = t.App
 	}
-	// Data files the previewed version reads, by its manifest or through a
-	// route to it on any site host.
-	if m := dataPath.FindStringSubmatch(r.URL.Path); m != nil {
-		if s.reads(ctx, v, nil)[m[1]] {
-			s.serveData(w, r, m)
+	m := appPath.FindStringSubmatch(p)
+	if m == nil {
+		if dm := dataPath.FindStringSubmatch(p); dm != nil {
+			s.serveSandboxData(w, r, app, dm)
 			return
 		}
-		for _, host := range s.Config.SiteHosts {
-			routes, err := s.Store.Routes(ctx, host)
-			if err != nil {
-				continue
-			}
-			for _, rt := range routes {
-				if (rt.Page == v.Artifact || s.admits(ctx, rt, v.Artifact)) && s.reads(ctx, v, &rt)[m[1]] {
-					s.serveData(w, r, m)
-					return
-				}
-			}
-		}
 		notFoundPage(w)
 		return
 	}
-	if r.URL.Path != "/" && path.Ext(r.URL.Path) != "" && path.Ext(r.URL.Path) != ".html" {
-		if f, ok := fileFor(v, r.URL.Path); ok {
+	n, _ := strconv.Atoi(m[1])
+	v, err := s.Store.Version(ctx, app, n)
+	if err != nil {
+		notFoundPage(w)
+		return
+	}
+	if rest := m[2]; rest != "" && rest != "index.html" {
+		if f, ok := fileFor(v, "/"+rest); ok {
 			s.serveBlob(w, r, f)
 			return
 		}
@@ -507,29 +528,84 @@ func (s *Server) serveSandbox(w http.ResponseWriter, r *http.Request, label stri
 		return
 	}
 	q := r.URL.Query()
+	caps, _, _ := s.appCaps(ctx, app, n)
 	mode := render.ModePreview
-	if m := q.Get("mode"); m == render.ModeThumb || m == render.ModeTool {
-		mode = m
+	if caps.IsApp() {
+		mode = render.ModeApp
+	}
+	if qm := q.Get("mode"); qm == render.ModePreview || qm == render.ModeThumb || qm == render.ModeApp {
+		mode = qm
 	}
 	parent := q.Get("parent")
 	if !slicesContains(s.origins(), parent) {
 		parent = s.origins()[0]
 	}
 	var res *routing.Resolution
+	routePath := q.Get("path")
+	if !strings.HasPrefix(routePath, "/") {
+		routePath = "/"
+	}
 	if host := q.Get("host"); host != "" {
-		routes, err := s.Store.Routes(ctx, host)
-		if err == nil {
-			if rr, ok := routing.Resolve(routes, host, r.URL.Path); ok {
+		if routes, err := s.Store.Routes(ctx, host); err == nil {
+			if rr, ok := routing.Resolve(routes, host, routePath); ok {
 				res = &rr
 			}
 		}
 	}
-	body, err := s.renderPage(ctx, v, res, q.Get("host"), r.URL.Path, mode, parent)
+	body, err := s.renderPage(ctx, v, res, q.Get("host"), routePath, mode, parent, s.runtimeBoot(target, v, caps))
 	if err != nil {
 		httpx.Fail(w, 404, "not_found", err.Error())
 		return
 	}
 	s.writePage(w, http.StatusOK, body)
+}
+
+// runtimeBoot is what claude.js reads before a view arrives: the names of
+// the capabilities the app declares.
+func (s *Server) runtimeBoot(target string, v store.Version, caps rt.Caps) *render.Runtime {
+	names := map[string]any{}
+	for name := range caps.Declared {
+		names[name] = map[string]any{}
+	}
+	return &render.Runtime{Target: target, App: v.Artifact, Version: v.N, Caps: names}
+}
+
+// serveSandboxData serves data files the app reads, by its manifest or a
+// route to it on any site host.
+func (s *Server) serveSandboxData(w http.ResponseWriter, r *http.Request, app string, m []string) {
+	ctx := r.Context()
+	v, err := s.Store.Version(ctx, app, 0)
+	if err == nil && s.reads(ctx, v, nil)[m[1]] {
+		s.serveData(w, r, m)
+		return
+	}
+	for _, host := range s.Config.SiteHosts {
+		routes, err := s.Store.Routes(ctx, host)
+		if err != nil {
+			continue
+		}
+		for _, rt := range routes {
+			if (rt.Page == app || s.admits(ctx, rt, app)) && s.reads(ctx, v, &rt)[m[1]] {
+				s.serveData(w, r, m)
+				return
+			}
+		}
+	}
+	notFoundPage(w)
+}
+
+// slopProxy is the slop capability: /_rt/api/… on the target origin runs the
+// main host's /api/… with the view's secret, which guardPerm accepts for the
+// permissions an admin approved. Same-origin for the page, so no CORS.
+func (s *Server) slopProxy(w http.ResponseWriter, r *http.Request, apiPath string) {
+	if s.viewOf(r) == nil {
+		httpx.Fail(w, 401, "revoked", "The view is closed or expired")
+		return
+	}
+	r2 := r.Clone(r.Context())
+	r2.URL.Path, r2.URL.RawPath, r2.RequestURI = apiPath, "", ""
+	r2.Host = s.Config.PublicURL.Host
+	s.mux.ServeHTTP(w, r2)
 }
 
 func slicesContains(l []string, s string) bool {

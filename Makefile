@@ -1,4 +1,4 @@
-.PHONY: lint fmt-check test test-postgres build web generate run-local dev-backend dev-frontend pinup pinup-push
+.PHONY: lint fmt-check test test-postgres build web generate run-local dev-backend dev-frontend pinup pinup-push runtime runtime-test
 
 lint:
 	GOWORK=off golangci-lint run -v
@@ -12,6 +12,14 @@ test:
 # Runs the store and server tests against Postgres as well as SQLite.
 test-postgres:
 	TEST_DATABASE_URL=$${TEST_DATABASE_URL:-postgres://postgres:postgres@127.0.0.1:5432/postgres?sslmode=disable} GOWORK=off go test ./...
+
+# The page runtime (window.claude): web/runtime → pkg/render/assets/claude.js,
+# committed because the server embeds it.
+runtime:
+	cd web/runtime && pnpm install --frozen-lockfile && pnpm check && node build.mjs
+
+runtime-test:
+	cd web/runtime && node --test --experimental-strip-types test/*.test.ts
 
 # Builds the Workshop into pkg/web/workshop (served from disk by plain builds).
 web generate:

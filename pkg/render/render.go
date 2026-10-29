@@ -21,7 +21,8 @@ const (
 	ModeSite    = "site"    // a visitor on a site host
 	ModePreview = "preview" // a Workshop preview: bridge for picking and pins
 	ModeThumb   = "thumb"   // a Workshop thumbnail: bridge, no clicks, slowed timers
-	ModeTool    = "tool"    // a tool open in the Workshop: tool.js, API calls with a grant
+	ModeApp     = "app"     // an app on its target's origin: claude.js, calls with a view secret
+	ModeStatic  = "static"  // an app read-only from a saved db.json (players): claude.js
 )
 
 // Boot is what a page reads as window.slop.
@@ -33,6 +34,18 @@ type Boot struct {
 	Mode         string                      `json:"mode"`
 	Tokens       *records.Tokens             `json:"tokens,omitempty"`
 	ParentOrigin string                      `json:"parentOrigin,omitempty"`
+	// Runtime configures claude.js: the capabilities this app declares and,
+	// in static mode, the saved documents.
+	Runtime *Runtime `json:"runtime,omitempty"`
+}
+
+// Runtime is what claude.js needs before the shell hands it a view.
+type Runtime struct {
+	Target  string          `json:"target"`
+	App     string          `json:"app"`
+	Version int             `json:"version"`
+	Caps    map[string]any  `json:"caps"`
+	Docs    json.RawMessage `json:"docs,omitempty"` // static mode: {path: body}
 }
 
 type RouteInfo struct {
@@ -62,11 +75,14 @@ func Inject(page []byte, boot Boot) []byte {
 	head.WriteString(`<script type="application/json" id="slop-boot">`)
 	head.Write(raw)
 	head.WriteString(`</script><script src="/_slop/runtime.js"></script>`)
+	// claude.js is the first script a page runs anywhere but the public site,
+	// so window.claude.use exists (and resolves null where nothing is served).
+	if boot.Mode != ModeSite {
+		head.WriteString(`<script src="/_slop/claude.js"></script>`)
+	}
 	switch boot.Mode {
 	case ModePreview, ModeThumb:
 		head.WriteString(`<script src="/_slop/bridge.js"></script>`)
-	case ModeTool:
-		head.WriteString(`<script src="/_slop/tool.js"></script>`)
 	}
 	tail := ""
 	if boot.Tokens != nil {

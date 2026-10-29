@@ -12,12 +12,14 @@ import (
 	"net/http"
 	"net/url"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/go-go-golems/slop-computer/pkg/blobs"
 	"github.com/go-go-golems/slop-computer/pkg/events"
 	"github.com/go-go-golems/slop-computer/pkg/httpx"
 	"github.com/go-go-golems/slop-computer/pkg/identity"
+	"github.com/go-go-golems/slop-computer/pkg/rt"
 	"github.com/go-go-golems/slop-computer/pkg/store"
 	"github.com/pkg/errors"
 	"github.com/rs/zerolog/log"
@@ -87,14 +89,24 @@ type Server struct {
 	mux           *http.ServeMux
 	deviceLimiter *limiter
 	waiters       *waiters
-	presence      *presenceHub
+	views         *rt.Registry
+	caps          capsCache
+	roomMu        sync.Mutex
+	joined        map[string][]string // view id → named rooms
 	recCache      recordCache
 	site          siteCache
 }
 
 func New(cfg Config, st *store.Store, bl *blobs.Blobs) *Server {
-	s := &Server{Config: cfg, Store: st, Blobs: bl, Events: events.New(), deviceLimiter: newLimiter(), waiters: newWaiters(), presence: newPresenceHub()}
+	s := &Server{Config: cfg, Store: st, Blobs: bl, Events: events.New(), deviceLimiter: newLimiter(), waiters: newWaiters(),
+		views: rt.NewRegistry(), joined: map[string][]string{}}
+	s.views.OnClose = s.roomClosed
 	s.mux = s.routes()
+	go func() {
+		for now := range time.Tick(5 * time.Second) {
+			s.views.Sweep(now)
+		}
+	}()
 	return s
 }
 
@@ -176,9 +188,6 @@ func (s *Server) Handler() http.Handler {
 		}
 		w.Header().Set("X-Frame-Options", "DENY")
 		w.Header().Set("Referrer-Policy", "same-origin")
-		if s.cors(w, r) {
-			return
-		}
 		s.mux.ServeHTTP(w, r)
 	})
 }
@@ -202,13 +211,12 @@ func (s *Server) routes() *http.ServeMux {
 	s.kernelRoutes(m)
 	s.previewRoutes(m)
 	s.streamRoutes(m)
-	s.docRoutes(m)
+	s.rtRoutes(m)
 	s.siteRoutes(m)
 	m.HandleFunc("/api/", func(w http.ResponseWriter, r *http.Request) { httpx.Fail(w, 404, "not_found", "Unknown API route") })
 	s.workshopRoutes(m)
 	s.safeRoutes(m)
 	s.helpRoutes(m)
-	s.toolRoutes(m)
 	m.HandleFunc("GET /static/", s.staticFile)
 	return m
 }

@@ -12,6 +12,7 @@ import (
 
 	"github.com/go-go-golems/slop-computer/pkg/httpx"
 	"github.com/go-go-golems/slop-computer/pkg/identity"
+	"github.com/go-go-golems/slop-computer/pkg/rt"
 	"github.com/go-go-golems/slop-computer/pkg/store"
 	"github.com/pkg/errors"
 	"github.com/rs/zerolog/log"
@@ -23,8 +24,9 @@ type Principal struct {
 	Session store.Session
 	User    store.User
 	Token   *store.APIToken
-	// Grant is set when a tool calls with a grant (slg_…).
-	Grant *store.Grant
+	// View is set when an app calls the management API through its slop
+	// capability, with its view secret (slv_…).
+	View *rt.View
 }
 
 type principalKey struct{}
@@ -126,23 +128,29 @@ func (s *Server) guardPerm(level int, sc scope, perm string, h http.HandlerFunc)
 			return
 		}
 		ctx := store.WithAuditVia(r.Context(), "browser")
-		// A tool grant reaches only routes that name a permission it carries.
-		if bearer := r.Header.Get("Authorization"); p == nil && strings.HasPrefix(bearer, "Bearer "+store.GrantPrefix) {
+		// An app's view reaches only routes that name a permission an admin
+		// approved for its version.
+		if bearer := r.Header.Get("Authorization"); p == nil && strings.HasPrefix(bearer, "Bearer "+rt.SecretPrefix) {
 			if perm == "" {
-				httpx.Fail(w, 403, "grant_not_allowed", "Tools cannot call this endpoint")
+				httpx.Fail(w, 403, "app_not_allowed", "Apps cannot call this endpoint")
 				return
 			}
-			g, u, err := s.Store.ResolveGrant(ctx, strings.TrimPrefix(bearer, "Bearer "))
-			if err != nil {
-				httpx.Fail(w, 401, "grant_invalid", "The tool grant is invalid, expired or revoked")
+			v := s.views.Lookup(strings.TrimPrefix(bearer, "Bearer "))
+			if v == nil {
+				httpx.Fail(w, 401, "view_invalid", "The view is closed or expired")
 				return
 			}
-			if !g.Has(perm) {
-				httpx.Fail(w, 403, "grant_permission", "This tool was not granted "+perm)
+			if !slices.Contains(v.Perms, perm) {
+				httpx.Fail(w, 403, "app_permission", "This app version was not approved for "+perm)
 				return
 			}
-			p = &Principal{User: u, Grant: &g}
-			ctx = store.WithAuditVia(ctx, "tool "+g.Artifact+"@"+strconv.Itoa(g.Version))
+			u, err := s.Store.User(ctx, v.User)
+			if err != nil || u.Role != store.RoleAdmin {
+				httpx.Fail(w, 401, "view_invalid", "The view's user cannot call this")
+				return
+			}
+			p = &Principal{User: u, View: v}
+			ctx = store.WithAuditVia(ctx, "app "+v.App+"@"+strconv.Itoa(v.Version))
 		}
 		// A personal API token reaches only routes whose scope it carries. The
 		// scope is a ceiling: the role check below still applies.
@@ -173,7 +181,7 @@ func (s *Server) guardPerm(level int, sc scope, perm string, h http.HandlerFunc)
 		}
 		// A bearer token is not an ambient browser credential: no Origin or
 		// CSRF check applies to it.
-		if r.Method != http.MethodGet && r.Method != http.MethodHead && p != nil && p.Token == nil && p.Grant == nil {
+		if r.Method != http.MethodGet && r.Method != http.MethodHead && p != nil && p.Token == nil && p.View == nil {
 			if !s.sameOrigin(r) {
 				httpx.Fail(w, 403, "invalid_origin", "Cross-origin request rejected")
 				return

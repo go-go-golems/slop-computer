@@ -33,6 +33,7 @@ type Artifact struct {
 	Kind      string    `json:"kind"`
 	Type      string    `json:"type,omitempty"`
 	Viewer    string    `json:"viewer,omitempty"`
+	App       string    `json:"app,omitempty"`
 	Project   *string   `json:"project"`
 	CreatedBy *string   `json:"createdBy"`
 	CreatedAt time.Time `json:"createdAt"`
@@ -63,13 +64,13 @@ type Version struct {
 	Files       map[string]FileEntry `json:"files"`
 }
 
-const artifactColumns = `a.id,a.title,a.kind,a.type,a.viewer,a.project_id,a.created_by,a.created_at,
+const artifactColumns = `a.id,a.title,a.kind,a.type,a.viewer,a.app,a.project_id,a.created_by,a.created_at,
 COALESCE((SELECT n FROM refs WHERE artifact_id=a.id AND name='main'),0),
 COALESCE((SELECT MAX(n) FROM versions WHERE artifact_id=a.id),0)`
 
 func scanArtifact(r scanner) (Artifact, error) {
 	var a Artifact
-	err := r.Scan(&a.ID, &a.Title, &a.Kind, &a.Type, &a.Viewer, &a.Project, &a.CreatedBy, &a.CreatedAt, &a.Main, &a.Latest)
+	err := r.Scan(&a.ID, &a.Title, &a.Kind, &a.Type, &a.Viewer, &a.App, &a.Project, &a.CreatedBy, &a.CreatedAt, &a.Main, &a.Latest)
 	return a, notFound(err)
 }
 
@@ -93,6 +94,7 @@ type ArtifactInput struct {
 	Kind    string  `json:"kind"`
 	Type    string  `json:"type"`
 	Viewer  string  `json:"viewer"`
+	App     string  `json:"app"` // the page artifact that runs this data artifact
 	Project *string `json:"project"`
 }
 
@@ -103,8 +105,8 @@ func (in ArtifactInput) validate() error {
 	if in.Kind != KindPage && in.Kind != KindData {
 		return invalidf("kind must be page or data")
 	}
-	if in.Kind == KindPage && (in.Type != "" || in.Viewer != "") {
-		return invalidf("type and viewer are for data artifacts")
+	if in.Kind == KindPage && (in.Type != "" || in.Viewer != "" || in.App != "") {
+		return invalidf("type, viewer and app are for data artifacts")
 	}
 	return nil
 }
@@ -116,8 +118,8 @@ func createArtifact(ctx context.Context, d db, now time.Time, id string, in Arti
 	if err := in.validate(); err != nil {
 		return Event{}, err
 	}
-	_, err := d.exec(ctx, `INSERT INTO artifacts(id,title,kind,type,viewer,project_id,created_by,created_at) VALUES(?,?,?,?,?,?,?,?)`,
-		id, in.Title, in.Kind, in.Type, in.Viewer, in.Project, nullable(actor), now)
+	_, err := d.exec(ctx, `INSERT INTO artifacts(id,title,kind,type,viewer,app,project_id,created_by,created_at) VALUES(?,?,?,?,?,?,?,?,?)`,
+		id, in.Title, in.Kind, in.Type, in.Viewer, in.App, in.Project, nullable(actor), now)
 	if isUnique(err) {
 		return Event{}, ErrConflict
 	}
@@ -150,8 +152,15 @@ func (s *Store) CreateArtifact(ctx context.Context, id string, in ArtifactInput,
 	return out, evs, err
 }
 
-// UpdateArtifact changes title, project and viewer; kind and type are fixed.
-func (s *Store) UpdateArtifact(ctx context.Context, id string, title, viewer *string, project **string, actor string) (Artifact, []Event, error) {
+// ArtifactPatch names the metadata an update changes; nil fields stay.
+type ArtifactPatch struct {
+	Title, Viewer, App *string
+	Project            **string
+}
+
+// UpdateArtifact changes title, viewer, app and project; kind and type are
+// fixed.
+func (s *Store) UpdateArtifact(ctx context.Context, id string, p ArtifactPatch, actor string) (Artifact, []Event, error) {
 	var out Artifact
 	var evs []Event
 	err := s.InTx(ctx, func(tx db) error {
@@ -159,16 +168,22 @@ func (s *Store) UpdateArtifact(ctx context.Context, id string, title, viewer *st
 		if err != nil {
 			return err
 		}
-		if title != nil {
-			a.Title = *title
+		if p.Title != nil {
+			a.Title = *p.Title
 		}
-		if viewer != nil {
-			a.Viewer = *viewer
+		if p.Viewer != nil {
+			a.Viewer = *p.Viewer
 		}
-		if project != nil {
-			a.Project = *project
+		if p.App != nil {
+			if a.Kind != KindData && *p.App != "" {
+				return invalidf("app is for data artifacts")
+			}
+			a.App = *p.App
 		}
-		if _, err = tx.exec(ctx, `UPDATE artifacts SET title=?, viewer=?, project_id=? WHERE id=?`, a.Title, a.Viewer, a.Project, id); err != nil {
+		if p.Project != nil {
+			a.Project = *p.Project
+		}
+		if _, err = tx.exec(ctx, `UPDATE artifacts SET title=?, viewer=?, app=?, project_id=? WHERE id=?`, a.Title, a.Viewer, a.App, a.Project, id); err != nil {
 			return err
 		}
 		now := s.Now()
