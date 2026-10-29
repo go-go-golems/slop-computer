@@ -112,7 +112,8 @@ function slopAppRootCSS(c, n) {
 
 // Compiles the checked screens into the app page's files and manifest.
 // designVersion is the saved design version it is compiled from.
-async function slopAppCompile(chk, designVersion) {
+// opts.inline keeps images as data: URLs (the live preview has no files).
+async function slopAppCompile(chk, designVersion, opts = {}) {
   const app = S.file.app, base = slopAppPath(app.base), screens = chk.screens;
   const byId = new Map(screens.map(f => [f.id, f]));
   const trees = screens.map(f => ({ f, t: expand(f, null) })).filter(x => x.t);
@@ -122,7 +123,7 @@ async function slopAppCompile(chk, designVersion) {
   // the version (the site finds a page's files by base name there).
   const imgs = new Map();
   const collect = t => { for (const f of t.n.fills || []) if (f.t === 'image' && typeof f.src === 'string' && f.src.startsWith('data:')) imgs.set(f.src, null); t.kids.forEach(collect); };
-  trees.forEach(x => collect(x.t));
+  if (!opts.inline) trees.forEach(x => collect(x.t));
   for (const src of imgs.keys()) {
     const d = slopDataURL(src); if (!d) { imgs.delete(src); continue; }
     const name = 'i-' + (await slopSha(d.bytes)).slice(0, 16) + '.' + d.ext;
@@ -558,6 +559,15 @@ function slopAppReplaceSheet(preview, n) {
 
 // ---------- the Prototype tab ----------
 const SLOP_APP = { fields: new Map(), last: null };
+
+// The rows a data source gives the page, as the server injects them: the
+// records of a data artifact's main, or the site index of the app's host.
+function slopAppRows(id, host) {
+  const api = SLOP.api, enc = encodeURIComponent;
+  if (id === '$site') return api.get('/site', { host });
+  if (id.startsWith('$')) return Promise.resolve([]);
+  return api.get('/artifacts/' + enc(id)).then(a => (a.main ? api.get(`/artifacts/${enc(id)}/versions/${a.main}/records`) : []));
+}
 // Field names of a source's records, loaded once: a data artifact's main,
 // or for $site the site index of the app's host (with record.* keys).
 function slopAppFields(name) {
@@ -567,10 +577,7 @@ function slopAppFields(name) {
   const c = SLOP_APP.fields.get(key);
   if (c) return c === 'loading' ? [] : c;
   SLOP_APP.fields.set(key, 'loading');
-  const api = SLOP.api, enc = encodeURIComponent;
-  const load = id === '$site' ? api.get('/site', { host: app.host })
-    : api.get('/artifacts/' + enc(id)).then(a => (a.main ? api.get(`/artifacts/${enc(id)}/versions/${a.main}/records`) : []));
-  load.then(rs => {
+  slopAppRows(id, app.host).then(rs => {
     const ks = new Set();
     for (const r of (rs || []).slice(0, 200)) for (const k of Object.keys(r)) {
       if (k === 'record' && r.record && typeof r.record === 'object') for (const rk of Object.keys(r.record)) ks.add('record.' + rk);

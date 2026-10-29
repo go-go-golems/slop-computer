@@ -101,6 +101,7 @@ function slopMenu() {
     S.file.app
       ? { label: 'App settings…', icon: 'settings', disabled: !push, act: slopAppSheet }
       : { label: 'Make this an app…', icon: 'globe', disabled: !push, act: slopAppSheet },
+    { label: LP.open ? 'Hide live preview' : 'Live preview', icon: 'app-window', disabled: !ready, act: () => lpToggle() },
     { label: 'Preview app', icon: 'eye', disabled: !push || !S.file.app, act: () => slopAppRun(true) },
     { label: 'Publish app', icon: 'rocket', disabled: !push || !S.file.app || !SLOP.api.can('routes:write'), act: () => slopAppRun(false) },
     '-',
