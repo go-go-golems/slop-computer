@@ -113,3 +113,84 @@ host contract (mock.js): db{doc,collection,onSnapshot,set,update,delete,acquire,
 slop limits that shape the design: maxFiles 2000, maxVersionSize 200 MB, push body 4 MiB, grant TTL 1 h, sandbox origin per (artifact, version)
 reMarkable: /ai/2026/10/29/SLOP-004/SLOP-004 Pinup on slop intern guide.pdf
 ```
+
+## Step 2: The docs store, its API and stream, and presence
+
+This step builds the slop primitive Pinup lacked: live, mutable JSON documents per design artifact, with a change stream and leases. The data lives in two tables. `docs` holds one row per document, or a tombstone once it is deleted. `doc_heads` holds the per-artifact revision counter; its upsert locks the row, which serializes an artifact's writers until commit. On top sit `/api/docs/...`, a server-sent stream that replays by revision and then goes live, and in-memory presence per design that also lists agents waiting on it. Document and presence events stay off the Workshop's kernel stream. Tool grants now carry `people`, the names of active users, because a grant cannot list users itself.
+
+Everything passes on SQLite and Postgres, and lint is clean. One check deliberately broke a test to prove it can fail. Undoing that change with `git checkout` also reverted my uncommitted fix, which I caught from `git diff --stat` and reapplied.
+
+### Prompt Context
+**User prompt (verbatim):** "Implement, commit at appropriate intervals and keep a detailed diary as you work (using the diary format from the skill) (use skill iary format, MANDATORY). When done,  write a detailed project report for the obsidian vault as a deep dive technical analysis blog post using a textbook writing style (no analogies, see skill).      
+ Commit and push the bsidian vault when done (go-go-parc vault)."
+**Assistant interpretation:** Implement the SLOP-004 guide, phases 1 and 2. Phase 3 (the `sample` proxy, assets, roles) needs an API key and a role decision. Keep this diary, then write a vault report and push the vault.
+**Inferred user intent:** Pinup working on slop end to end, documented well enough to teach from.
+**Commit (code):** `6de88a3` "Docs store: live JSON documents for tool working copies"; `f87ad27` "Docs API, docs stream and presence; people in tool grants".
+
+### What I did
+- **Migrations** `pkg/store/migrations/{postgres,sqlite}/006_docs.sql`:
+  - `doc_heads(artifact_id PK, rev)`;
+  - `docs(artifact_id, path, data NULL=tombstone, size, rev, updated_by, updated_at, lease_holder, lease_until)` with index `docs_rev(artifact_id, rev)`.
+- **Store** `pkg/store/docs.go`:
+  - `DocTypes{pinup}` and the limits: 256 KiB per document, 20k documents and 64 MB per artifact, a 1 min lease cap, tombstones kept 7 days;
+  - `PutDoc` (object check, size, quota, rev, upsert), `DeleteDoc` (tombstone), `GetDoc`, `Docs(prefix, after)` (live documents only when `after == 0`, tombstones included otherwise), `AcquireDoc`, `PruneDocTombstones`, `DocArtifact`;
+  - errors `ErrDocTooLarge` and `ErrDocQuota`.
+- **Events** (`pkg/store/events.go`): `EvDoc` and `EvPresence`, plus `DocStreamOnly`. `eventStream` (`stream.go`) now subscribes with a filter that drops these types.
+- **API** `pkg/server/docs.go`, registered with `s.docRoutes(m)` in `server.go`:
+  - `GET /api/docs/{artifact}` (`?prefix=&after=`);
+  - `GET|PUT|DELETE /api/docs/{artifact}/{coll}/{id}`;
+  - `POST …/acquire` with `{holder, ttlMs}`;
+  - `GET /api/docs/{artifact}/events` (SSE; `id:` lines carry the rev);
+  - `GET|POST /api/presence/{artifact}`;
+  - `docFail` maps errors to `413 too_large` and `507 quota_exceeded`;
+  - doc events carry the data inline up to 64 KiB, and above that `big: true`.
+- **Presence:** `presenceHub` keeps peers per design for 30 s. It refuses a peer id already held by another user (`409 peer_taken`). Agents whose waiter matches the design, its project, or everything are listed as `kind: agent`, and their `agent.waiting` and `agent.left` events are relayed onto the design's stream as `presence` events.
+- **Permissions:** `ToolPermissions` gains `docs:read` and `docs:write`. `grantTool` adds `people`.
+- **Tests:**
+  - `pkg/store/docs_test.go`: `TestDocs` covers type, path, object and size refusals, revs, tombstones, prefix (`_` is not a wildcard), leases (exclusive, renewable, expiring, none on a tombstone) and prune. `TestDocRevsUnderConcurrency` runs 40 parallel writers and checks every rev is unique.
+  - `pkg/server/docs_test.go`: `TestDocsAPI` covers stream ready, then live doc, tombstone, replay after rev 1, grant permissions (403 for docs:read only), 400, 404 and 413, leases, presence on the docs stream, nothing on the kernel stream, and leave.
+
+### Why
+- **The revision is a counter row, not `MAX(rev)+1`.** Two concurrent transactions computing `MAX` could hand out the same rev. Upserting `doc_heads` locks that row until commit, so revs are unique and *commit in order*. That is what lets the stream skip duplicates with `rev <= last`, as `eventStream` does with `seq`.
+- **Prefix matching uses `substr(path,1,n)=prefix`, not `LIKE`.** `_` is a legal path character but a `LIKE` wildcard; the test `no_es/` would otherwise match `noXes/`.
+- **Doc events are ephemeral.** Storing them would put every drag in the event log, and they'd reach every Workshop tab. The docs table plus `rev` is the durable record.
+- **Presence lives in memory.** One process is the broker's assumption too (`broker.go:8`).
+
+### What worked
+- `go test ./pkg/server ./pkg/store` → ok on SQLite. With `TEST_DATABASE_URL=…:55432` → ok on Postgres, including the 40-writer concurrency test.
+- `make lint` → exit 0, after `gofmt`.
+- A mutation check: with `eventStream` back on `Subscribe(nil)`, `TestDocsAPI` fails with `the kernel stream must skip doc and presence events, got presence …`. So the test guards the filter.
+
+### What didn't work
+- **First build:** `pkg/server/docs.go:294:15: assignment mismatch: 2 variables but s.Store.Docs returns 3 values`. I had used `Docs(…, 1<<62)` as a stand-in for "does this artifact keep docs?". I replaced it with a proper `Store.DocArtifact`.
+- **First lint:** `pkg/server/docs_test.go:135:1: File is not properly formatted (gofmt)` and `pkg/store/docs.go:65:1: … (gofmt)`. Fixed with `gofmt -w`; lint then returned 0. As in earlier steps, lint went to a file and I checked its exit code, so nothing was committed unformatted.
+- **Mutation undo reverted real work.** After the mutation check I ran `git checkout pkg/server/stream.go`, which reset the file to HEAD and so also dropped the *uncommitted* filter change. `git diff --stat` showed nothing changed. I reapplied the edit, and the next runs and the commit include it. Lesson: undo a mutation with the inverse `sed`, not `git checkout`, when the file has uncommitted work.
+
+### What I learned
+- The broker already supports filtered subscribers and ephemeral events, so the docs stream needed no broker change. The kernel stream simply had to stop accepting everything.
+- `guardPerm` with a permission accepts grants *and* admin tokens. The same endpoints therefore serve Pinup (grant) and the CLI (token).
+
+### What was tricky to build
+- **Ordering in the stream.** The subscription must exist before the replay query, and the replay's last rev becomes the cursor. Doc events include their rev in the payload, not in `Seq`, which is 0 for ephemeral events, so the live branch decodes `rev` to dedupe.
+- **Agents as peers.** `Waiter` events carry the waiter's artifact and project. `agentFor` treats a waiter with no artifact as matching its project, or every design when it has no project either.
+
+### What warrants a second pair of eyes
+- **Quota scan.** `PutDoc` counts and sums an artifact's live documents on every write, up to 20k rows, under the head lock. That's fine at Pinup sizes but should be measured on big files.
+- **No server-side expiry timer for presence.** Peers expire lazily on the next post or list for that design. The adapter heartbeats every 15 s, so a closed tab disappears within 30–45 s.
+- **No pruning schedule yet.** `PruneDocTombstones` exists but nothing calls it.
+
+### What should be done in the future
+- Call `PruneDocTombstones` on a schedule, at startup and daily.
+
+### Code review instructions
+- Read `pkg/store/docs.go`, then `pkg/server/docs.go` (`docEvents`, `postPresence`), then the one-line filter in `pkg/server/stream.go`.
+- Validate with `go test ./pkg/store ./pkg/server`, then the same with `TEST_DATABASE_URL`, then `make lint`.
+
+### Technical details
+```
+PUT /api/docs/design-x/nodes/n1 {"type":"frame"}       → {"path":"nodes/n1","rev":1}
+SSE  event: doc   id: 1   data: {"path":"nodes/n1","rev":1,"data":{"type":"frame"},"by":"usr_…"}
+     event: ready         data: {"rev":3}
+     event: presence      data: {"peer":"tab-a","user":"usr_…","name":"manuel","kind":"viewer","presence":{"page":"p1"}}
+errors: 400 invalid_request (path, object, type) · 404 not_found · 413 too_large · 507 quota_exceeded · 409 peer_taken
+```
