@@ -297,3 +297,7 @@ The run also found an inconsistency, which I fixed. The server's warning on a ha
   - `s5-09` site Run detail;
   - `s5-10` replace sheet;
   - `s5-11` Workshop Edit in Pinup.
+
+## Correction (2026-10-29, while writing the SLOP-006 vault report)
+
+Step 2 says the compiled page carries "a 3 KB runtime". That was an estimate, not a measurement. Measured on the compiled test page at `f5e8662`, `slopAppRuntime` is 9,541 bytes. The SLOP-006 sanitizer and filters account for part of that.
