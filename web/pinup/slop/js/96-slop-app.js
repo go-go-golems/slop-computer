@@ -340,7 +340,8 @@ function slopAppRuntime() {
 // host: routes it would add that point at another page stop it before
 // anything is written, and routes of this page that no screen has any more
 // are removed. Routes elsewhere are never touched.
-async function slopAppPublish(preview) {
+// replace: the person confirmed replacing a hand-written main.
+async function slopAppPublish(preview, replace) {
   const api = SLOP.api, app = S.file.app, enc = encodeURIComponent;
   const chk = slopAppCheck();
   if (chk.errors.length) throw new Error(chk.errors[0] + (chk.errors.length > 1 ? ` (and ${chk.errors.length - 1} more problems)` : ''));
@@ -351,7 +352,15 @@ async function slopAppPublish(preview) {
   if (page && page.main) {
     const v = await api.get(`/artifacts/${enc(app.page)}/versions/${page.main}`);
     const pin = v.manifest && v.manifest.pinup;
-    if (!pin || pin.design !== SLOP.file) throw new Error(`${app.page} exists and is not compiled from this design: choose another page id in App settings.`);
+    if (pin && pin.design !== SLOP.file) throw new Error(`${app.page} is compiled from ${pin.design}, not this design: choose another page id in App settings.`);
+    if (!pin && !replace) {
+      // A page that never came from this design is someone else's; one whose
+      // main was pushed by hand over a Pinup version is replaced only on request.
+      const vs = await api.get(`/artifacts/${enc(app.page)}/versions`);
+      const ours = (vs || []).some(x => x.manifest && x.manifest.pinup && x.manifest.pinup.design === SLOP.file);
+      if (!ours) throw new Error(`${app.page} exists and was not published from this design: choose another page id in App settings.`);
+      throw Object.assign(new Error(`${app.page} v${page.main} was changed by hand.`), { handWritten: page.main });
+    }
   }
   let routes = [];
   if (!preview) {
@@ -438,16 +447,29 @@ function slopAppSheet() {
   }, () => { for (const [k, v] of Object.entries(cur.data || {})) addRow(k, v); });
 }
 
-async function slopAppRun(preview) {
+async function slopAppRun(preview, replace) {
   toast(preview ? 'Compiling a preview…' : 'Publishing…', 60000);
   try {
-    const r = await slopAppPublish(preview);
+    const r = await slopAppPublish(preview, replace);
     if (preview) { toast(`Preview: ${S.file.app.page} v${r.n} (not live).`, 3500); window.open(r.url, '_blank', 'noopener'); return; }
     const app = S.file.app, url = location.protocol + '//' + app.host + slopAppPath(app.base);
     toast(`Published ${app.page} v${r.n} at ${url}` + (r.removed.length ? ` · removed ${r.removed.join(', ')}` : ''), 5000);
     SLOP_APP.last = { n: r.n, url };
     INSP.force = true; renderInspector();
-  } catch (e) { toast((preview ? 'Preview failed: ' : 'Publish failed: ') + (e.message || e), 6000); }
+  } catch (e) {
+    if (e.handWritten) { toast('Publishing waits for you.', 1500); slopAppReplaceSheet(preview, e.handWritten); return; }
+    toast((preview ? 'Preview failed: ' : 'Publish failed: ') + (e.message || e), 6000);
+  }
+}
+
+function slopAppReplaceSheet(preview, n) {
+  const app = S.file.app;
+  const go = h('button', { class: 'btn primary sm', text: 'Replace with the design', onclick: () => { sh.close(); slopAppRun(preview, true); } });
+  const sh = sheet('Replace a hand-written version?', [
+    h('p', { text: `${app.page} v${n} was pushed by hand, not published from this design. Publishing replaces it on the site with the design; v${n} stays in the page’s history.` }),
+    h('p', { class: 'muted', text: 'If the page is meant to be hand-written code now, keep it and remove the app from this design instead.' }),
+    h('div', { class: 'acts' }, h('button', { class: 'btn sm', text: 'Keep v' + n, onclick: () => sh.close() }), go),
+  ], { width: 520 });
 }
 
 // ---------- the Prototype tab ----------
@@ -518,8 +540,8 @@ function slopAppSections() {
       h('div', { class: 'g2' }, h('span', { text: 'For each record of', style: { color: 'var(--muted)', alignSelf: 'center' } }),
         selField([{ v: '', label: 'Nothing (no repeat)' }, ...sources.map(s => ({ v: s, label: s }))], r.from || '', v => set({ from: v }), { aria: 'Repeat source' })),
       r.from ? h('div', { class: 'g2' }, h('span', { text: 'Sort by', style: { color: 'var(--muted)', alignSelf: 'center' } }), field(r.sort, 'field, or -field for descending', v => set({ from: r.from, sort: v }), 'Sort')) : null,
-      r.from ? h('div', { class: 'g2' }, h('span', { text: 'At most', style: { color: 'var(--muted)', alignSelf: 'center' } }), numField('items', +r.limit || 0, v => set({ from: r.from, limit: Math.max(0, v) }), { suffix: 'items', title: '0 shows all' })) : null,
-      h('p', { class: 'note', text: r.from ? 'The first child is repeated once per record; the others are sample copies and are left out of the page.' : 'Repeat this frame’s first child once per record of a data source.' }));
+      r.from ? h('div', { class: 'g2' }, h('span', { text: 'At most', style: { color: 'var(--muted)', alignSelf: 'center' } }), numField('≤', +r.limit || 0, v => set({ from: r.from, limit: Math.max(0, v) }), { title: 'At most this many records (0 shows all)', aria: 'At most' })) : null,
+      h('p', { class: 'note', text: r.from ? 'The first child is repeated once per record (0 above shows all); the others are sample copies and are left out of the page.' : 'Repeat this frame’s first child once per record of a data source.' }));
     out.push(sec('Repeat', null, body));
   }
   const img = (n.fills || []).findIndex(f => f.t === 'image');

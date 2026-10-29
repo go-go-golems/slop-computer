@@ -312,7 +312,7 @@ func mediaType(p string) string {
 
 // compiledWarning warns when a push replaces a page that Pinup compiles from
 // a design (manifest pinup.design) with a version that does not come from
-// Pinup: the next Publish app in Pinup replaces it again.
+// Pinup: Publish app in Pinup then asks before replacing it.
 func (s *Server) compiledWarning(ctx context.Context, id string, manifest json.RawMessage) string {
 	a, err := s.Store.Artifact(ctx, id)
 	if err != nil || a.Main == 0 {
@@ -334,7 +334,7 @@ func (s *Server) compiledWarning(ctx context.Context, id string, manifest json.R
 	if len(manifest) > 0 && json.Unmarshal(manifest, &next) == nil && next.Pinup != nil {
 		return ""
 	}
-	return id + " is compiled from the Pinup design " + cur.Pinup.Design + ": the next Publish app in Pinup replaces this version (edit the design instead)"
+	return id + " is compiled from the Pinup design " + cur.Pinup.Design + "; this version is not, and Publish app in Pinup will ask before replacing it (to keep the page in Pinup, edit the design instead)"
 }
 
 type pushRequest struct {

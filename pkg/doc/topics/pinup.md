@@ -151,10 +151,10 @@ path. The page's manifest says where it comes from:
 {"pinup": {"design": "design-pace-club", "version": 5}, "reads": {"runs": "data-runs"}}
 ```
 
-**The design is the source.** Change the design, not the page: a
-`slop push` to a compiled page warns that the next *Publish app* replaces it.
-To turn an app into hand-written code, push without the `pinup` key, and
-remove `app` from the design's `meta/file`.
+**The design is the source.** Change the design, not the page. A
+`slop push` to a compiled page warns you, and *Publish app* then asks the
+person before replacing the hand-written version. That push is how an app
+becomes hand-written code; also remove `app` from the design's `meta/file`.
 
 These are the fields an agent can set with steps (`{"op": "update", "id": …, "set": {…}}`):
 
