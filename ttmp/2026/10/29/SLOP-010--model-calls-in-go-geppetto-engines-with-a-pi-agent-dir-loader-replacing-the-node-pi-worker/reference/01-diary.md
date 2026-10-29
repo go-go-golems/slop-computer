@@ -117,3 +117,227 @@ This step answers whether slop's `sample` capability can run on geppetto instead
 
 - **Branches:** geppetto `task/pi-agent-provider` at `b58b7483`; slop `task/slop-geppetto-sample` at `9011dc8` plus the ticket commit.
 - **Catalog counts** (Pi 0.85.1 built-in data): `openai-completions` 679, `anthropic-messages` 325, `bedrock-converse-stream` 121, `openai-responses` 107, `azure-openai-responses` 39, `mistral-conversations` 32, `google-generative-ai` 29, `google-vertex` 14, `openai-codex-responses` 8.
+
+## Step 2: geppetto `providers/pi`: the agent directory, credentials, the lock, Codex refresh and thinking levels
+
+This step implements guide phases 1, 4 and 5 in geppetto, on branch `task/pi-agent-provider`, in a worktree at `/home/manuel/workspaces/2026-10-28/slop-computer/geppetto`. The new package `pkg/steps/ai/providers/pi` loads a Pi agent directory and resolves `provider/model` to a geppetto engine. Credentials come from `auth.json` and `models.json`, provider headers from `models.json` and from the host, and thinking levels are mapped per wire API. A refreshed Codex credential is written back to `auth.json` under a lock compatible with Pi's.
+
+A live run against lunaroute through the package succeeded. Codex was tested against a fake token endpoint and a fake API, not live (see "What warrants a second pair of eyes").
+
+### Prompt Context
+
+**User prompt (verbatim):** "Implement, commit at appropriate intervals and keep a detailed diary as you work (using the diary format from the skill). Diary format is MANDATORY."
+
+**Assistant interpretation:** Implement SLOP-010's phases in both repositories, committing at milestones, with a diary entry per milestone.
+
+**Commit (geppetto):** `4e0d7137` "providers/pi: read a Pi agent directory and resolve Pi models to engines"
+
+### What I did
+
+- **Worktree.** Added `git worktree add …/2026-10-28/slop-computer/geppetto task/pi-agent-provider`, following the workspace's layout of one worktree per repo, so that `~/code/wesen/go-go-golems/geppetto` stays on `main`. The workspace `go.work` pins Go 1.26.3 and does not list geppetto, so every geppetto command runs with `GOWORK=off`. That way geppetto's `go 1.26.6` toolchain is fetched automatically.
+- **Read Pi's sources for the exact formats:**
+  - `pi-coding-agent/dist/core/model-config.d.ts`: `models.json` is `{providers: {id: {baseUrl, apiKey, api, headers, compat, authHeader, models, modelOverrides}}}`;
+  - `provider-composer.js`: credential precedence is a stored `auth.json` credential first, then the configured `apiKey`;
+  - `resolve-config-value.js`: `!cmd`, `$NAME` and `${NAME}`, with `$$` and `$!` as escapes;
+  - `auth-storage.js`: the async lock is stale after 30 s, the sync lock uses the proper-lockfile default of 10 s;
+  - `pi-ai/dist/auth/oauth/openai-codex.js`: the client id, the token URL, rotating refresh tokens, and `accountId` from the `https://api.openai.com/auth` claim;
+  - `api/openai-completions.js`: thinking formats.
+- **Package files:**
+  - `agentdir.go`: `LoadAgentDir` and options (`WithEnv`, `WithCommandValues`, `WithProviderHeaders`, `WithHTTPClient`, `WithLocalProviders`, `WithClock`), and `DefaultDir(envValue)`.
+  - `catalog.go`: `Model`, `Catalog`, and the merge of `models-store.json` with `models.json`. A provider's `baseUrl`, `api` and headers also apply to its stored models. `maxOutputTokens` stands in for `maxTokens`. `Supported` is set per wire API.
+  - `values.go`: Pi's configured values. `!cmd` runs only with `WithCommandValues()`, and its errors never echo the command.
+  - `lock.go`: a mkdir lock directory, refreshed every 5 s, stale after 30 s, and compromise detection.
+  - `authfile.go`: `Entry`, and `update`, which re-reads under the lock, keeps unknown fields and writes atomically with mode 0600. `providerStore` implements `credentials.Store`.
+  - `resolve.go`:
+    - `Resolve` builds `InferenceSettings` with no temperature or top-p (Pi sends neither), a `MaxResponseTokens` default, `ModelInfo.Reasoning`, and a header transport;
+    - each wire API maps to its engine; Codex goes through `openaicodex.RequestTransport`;
+    - API keys for Anthropic and Gemini go into the private settings, as those engines expect.
+  - `thinking.go`: Pi level → `InferenceConfig`, covering OpenAI-style `reasoning_effort` with `thinkingLevelMap`, zai and deepseek thinking toggles, Responses effort, and budgets for Anthropic and Gemini.
+  - `codex.go`: an `oauth.Client` with `RequireReplacementRefreshToken`, a renewable source over `auth.json`, and `codexSource`, which implements `openaicodex.UnauthorizedSource` with the account id from the JWT.
+- **Tests (`pi_test.go`, 10):**
+  - the catalog merge, including ignored top-level `models.json` keys, unsupported APIs and unknown models;
+  - missing and malformed files;
+  - configured values, including command opt-in and env precedence;
+  - an end-to-end Chat Completions request against `httptest`: path, bearer, both header sources, `reasoning_effort`, `max_tokens` chosen by `compat.maxTokensField`, no temperature, and a per-turn `MaxResponseTokens` override;
+  - credential precedence;
+  - `auth.json` writes that keep fields, mode and lock;
+  - the lock: waiting, stale, serialized and compromised;
+  - a Codex refresh that rotates and writes back, with the request carrying the new bearer and `chatgpt-account-id`;
+  - the JWT claim, and a table of thinking levels.
+
+### Why
+
+- **Engines are built directly, not through `StandardEngineFactory`.** The factory's validation requires a bearer source or an API key for Responses providers. Codex has neither: its credential middleware sits on the transport.
+- **An OAuth `auth.json` entry other than Codex is a static key.** That is how Pi's lunaroute provider treats it: its `refreshToken` returns the same credential. A renewable source would fail on an expired entry that never really expires.
+- **`ModelInfo.Reasoning` stands in for `compat.maxTokensField`.** Geppetto's Chat Completions builder sends `max_completion_tokens` for reasoning models and `max_tokens` otherwise. Pi's default is `max_completion_tokens`, and `maxTokensField: max_tokens` switches it.
+
+### What worked
+
+- `GOWORK=off go test -race -count=1 -v ./pkg/steps/ai/providers/pi/`: 10 of 10 pass.
+- `golangci-lint` reports 0 issues, and the geppetto and glazed vet linters are clean. The pre-commit hook passed (`✔️ test`, `✔️ lint`).
+- **Mutation:** with `withHeaders` returning the base client, `TestResolveOpenAICompletionsEndToEnd` fails (`expected: "slop" actual: ""`). Restored, it passes.
+- **Live, through a scratch program** (`$S/pismoke`, against the real `~/.pi/agent`; it prints no secrets):
+  - `catalog: 222 models, 65 supported`;
+  - `lunaroute/glm-5.3-flash off "Reply with the single word: pong"` → `text: "pong" (7.008s)`, usage in=19 out=12;
+  - `lunaroute/deepseek-4.1-flash high "What is 17*17?…"` → `"289" (268ms)`;
+  - `lunaroute/glm-5.3` → `"Red"` at off (65.1 s) and at medium (80.7 s).
+
+### What didn't work
+
+- **`glm-5.3` timing.** The first `glm-5.3 medium` run hit the scratch program's 90 s timeout (`run: context deadline exceeded`). Retries took 65 s and 80 s for 5–8 output tokens, while deepseek on the same gateway took 268 ms. That points at gateway or model latency, not at the client.
+- **`invalid BOM in the middle of the file`.** The `"﻿"` escape was written as a literal BOM. I replaced it with `sed 's/\xEF\xBB\xBF/\\ufeff/g'`.
+- **The lefthook pre-commit hook failed twice:**
+  - under the workspace `go.work`: `pattern ./...: directory prefix . does not contain modules listed in go.work`. I committed with `GOWORK=off`.
+  - glazed-lint: `agentdir.go:34:10: use Glazed config/env middleware … instead of os.Getenv in CLI code`. `DefaultDir` now takes the env value from its caller. The next attempt still failed, because I had edited after `git add` and the hook lints the staged copy. Re-staging fixed it.
+- **golangci-lint:** gofmt in `codex.go`, and `predeclared` on a variable named `max`. Both fixed.
+
+### What I learned
+
+- **Pi's real `models.json` has a mix of keys.** Pi reads only `providers`; the legacy top-level providers (`fireworks`, `wafer`, `glm-lunaroute-test`) are ignored. The lunaroute key there is a literal `apiKey`.
+- **Lunaroute's stored models carry no `compat` and no `thinkingLevelMap`.** Pi's defaults (OpenAI-style `reasoning_effort`, `max_completion_tokens`) therefore apply to them.
+
+### What was tricky to build
+
+- **Lock compatibility.** Pi uses two lock modes with different stale intervals: 10 s for the sync lock and 30 s for the async one. Refreshing the mtime every 5 s keeps a held lock fresh for both. A lock whose mtime changes under us has been taken over: the write is abandoned, and the lock directory is not removed, because it belongs to someone else.
+
+### What warrants a second pair of eyes
+
+- **Codex has not been run live.** A live Codex refresh would rotate the token in your real `~/.pi/agent/auth.json`. The code is built to keep Pi logged in, but that should be tried deliberately, with your go-ahead.
+- **API keys in private settings for Anthropic and Gemini.** These engines take keys only through settings. The `Resolved.Settings` object is never serialized, but it does hold the key.
+
+### What should be done in the future
+
+- **slop:** the geppetto backend (phases 2, 3 and 6) is next.
+- **geppetto:** a `doc` topic for `providers/pi`. The README lists provider packages.
+
+### Code review instructions
+
+- **Start with:** `resolve.go` (`Resolve`, `credential`), `lock.go`, `authfile.go` (`update`).
+- **Run:** `cd geppetto && GOWORK=off go test -race ./pkg/steps/ai/providers/pi/`
+
+### Technical details
+
+- **Lock:** `newFileLock(file)` uses `{path: file+".lock", stale: 30s, update: 5s, deadline: 30s}`, with backoff `min(10ms<<retry, 1s)` plus jitter.
+- **Codex OAuth:** client `app_EMoamEEZ73f0CkXaXp7hrann`, token URL `https://auth.openai.com/oauth/token`, claim `https://api.openai.com/auth`.`chatgpt_account_id`.
+
+## Step 3: slop's `sample` on geppetto (`pkg/piworker/gepp`), `--models pi`, and 20 of 20 on lunaroute
+
+This step implements guide phases 2, 3 and 6 in slop. `pkg/piworker/gepp` implements `piworker.Backend` on geppetto's `providers/pi`:
+- one engine call per round, with text and thinking accumulated across rounds;
+- page tools in parallel, and no tools offered in the last round;
+- one 64k output budget per call;
+- tiers, explicit models and effort as the Node worker resolves them;
+- Pi's error codes with fixed messages.
+
+`slop serve --models pi` selects it. The browser sample suite passed 20 of 20 in three consecutive runs on the Go backend, with no Node process running.
+
+### Prompt Context
+
+**User prompt (verbatim):** see step 2.
+
+**Commits:**
+- slop: `ebe6be0` "SLOP-010: sample on geppetto (pkg/piworker/gepp) and slop serve --models pi", and `e61caed` (the image test);
+- geppetto: `452f0711` "providers/pi: HasCredential and Available".
+
+### What I did
+
+- **Read the Node worker** again for exact behaviour (`web/piworker/src/main.ts:57-130` init and tiers, `:155-345` the call loop, `provider-error.ts`):
+  - the last round gets `context.tools = []`;
+  - the reasoning level is `effort ?? (tierLevel === "off" ? none : tierLevel ?? (quick ? none : settings default))`;
+  - tool results are the string value, or else its JSON;
+  - the conversation is bounded at 512 KiB, images excluded;
+  - an empty answer gives `empty_completion`;
+  - running out of rounds gives "Tool round limit reached".
+- **`backend.go`:**
+  - `New(Config{AgentDir, Tiers, Options})` loads the directory with lunaroute's headers (`lunaroute-agent: slop` plus a per-process session id, as `lunaroute.ts` sends).
+  - It picks a preferred model: Pi's default if it is eligible and in `enabledModels`, else the first enabled model, else the first available.
+  - It resolves tier references `provider/id[:level]`, or a bare id that names exactly one model.
+  - `Models()` lists the tier models first.
+- **`sample.go`:**
+  - the `call` round loop sets `engine.KeyInferenceConfig{MaxResponseTokens}` per round from the budget;
+  - a `sink` turns `EventTextDelta`, `EventReasoningDelta` and `EventProviderCallFinished` into `text`, `thinking` and `usage` events, with the `"\n\n"` separator between rounds;
+  - `runTools` uses an errgroup and returns results in call order; error results use `NewToolUseBlockWithError(id, nil, text)`, which geppetto sends as `{"error": …}`;
+  - `toTurn` puts images on the last user turn with `NewUserMultimodalBlock`;
+  - `classify` maps errors to `authentication_error`, `rate_limited`, `prompt_too_large` or `upstream_error`, always with a fixed message.
+- **geppetto:** `AgentDir.HasCredential(provider)` checks without resolving `$ENV` or `!cmd`; `Available()` lists supported models that have a credential.
+- **`serve.go`:**
+  - `--models pi|pi-node|fake`; without it, `--pi-fake` means fake and `--pi-worker` means pi-node, as before;
+  - the agent directory defaults to `pi.DefaultDir(os.Getenv(pi.EnvAgentDir))`;
+  - the Go backend gets `WithEnv(os.LookupEnv)` and `WithCommandValues()`: it is the user's own Pi config on the user's own server, as Pi itself treats it.
+- **Workspace:**
+  - `go work use ./geppetto`, which raised `go.work` to `go 1.26.6`; a backup is at `$S/go.work.bak`;
+  - slop's `go.mod` now says `go 1.26.6` and `toolchain go1.26.10`, matching the Dockerfile's `golang:1.26.10`, and requires `geppetto v0.13.11`.
+- **Tests (`gepp_test.go`, 9):**
+  - a scripted Chat Completions server;
+  - text streaming, result and usage;
+  - tools over rounds: both calls in flight at once (peak 2), an error result as `{"error":…}`, the second round's bound reduced;
+  - the last round without tools;
+  - failures: unknown tool, empty completion, 429, 401, 500 (the message hides the provider body), images on a text-only model;
+  - cancellation during a tool, which emits no error event;
+  - model choice: tier order, quick without thinking, `:high` from the tier reference, effort winning, an explicit model, and the fallback for an unknown model;
+  - no models available; the budget; images joining the last user turn as a data URL.
+
+### Why
+
+- **Text is accumulated from deltas, not from `EventTextDelta.Text`.** Geppetto's `Text` is the round's own message, and the contract's `onText` wants the whole answer across rounds.
+- **Cancellation returns `ctx.Err()` and emits nothing.** `rt_sample.go` sends no error after a cancelled context, and the page has already rejected with `cancelled` and the partial text.
+- **`--models` keeps `--pi-worker` meaning what it meant.** Existing start scripts keep working; the Node worker stays as a fallback until it is removed from the image (phase 7).
+
+### What worked
+
+- **`go test -race -count=3 ./pkg/piworker/gepp/`** passes; `golangci-lint run ./...` reports 0 issues; `go test ./...` passes in the workspace.
+- **Live:**
+  - `slop17 serve --local … --models pi --model-quick lunaroute/glm-5.3-flash --model-default lunaroute/glm-5.3 --model-complex lunaroute/deepseek-4.1-flash` logs `Pi models ready (geppetto) models=43`, and no `worker.js` process runs.
+  - `NODE_PATH=$S/pw/node_modules PW_CHROMIUM=… node web/rt-conformance/run.mjs http://localhost:18140 rt-sample` gives `all passed` in three runs (`$S/gepp-sample-run1.log`, `run2.log` and `run3.log` with `VERBOSE=1`).
+- **Run 2 compared with the Node backend's SLOP-009 run 1:**
+
+  | Check | Go backend | Node backend |
+  |---|---|---|
+  | multi-turn | `ZEPHYRINE` 444 ms | 11,768 ms |
+  | one page tool | `17.25°C` 985 ms | 9,099 ms |
+  | several tools in one turn | `5555 and 1517` 691 ms | 27,024 ms |
+  | chained tools | `User u-77 lives in Quillmarsh.` 1,028 ms | 19,747 ms |
+  | throwing tool | `UNAVAILABLE`, 1 try | — |
+  | abort while streaming | `cancelled 55 chars` | — |
+  | explicit `glm-5.3-flash` | `Hi there! 👋 How can I help you today?` | the same answer with leaked reasoning (`…</think>Hi there! 👋`) |
+
+  The timing difference is large, but both runs went through the same gateway at different times, and in step 2 `glm-5.3` alone took 65–80 s. I record the numbers without claiming a cause. The reasoning leak is a real difference: geppetto routes `reasoning_content` deltas to thinking events.
+
+### What didn't work
+
+- **Tool-result order.** `TestToolsOverRounds` first failed with `expected: "call_1" actual: "call_2"`. Logging the second request showed that when text precedes tool calls, geppetto's Chat Completions reducer emits the `tool_call` blocks in varying order, while every result stays matched to its `tool_call_id`. This is an upstream ordering detail, not a correctness problem; the test now matches by id.
+- **`page.waitForSelector: Timeout 15000ms exceeded … locator('iframe')`.** The first binary was built without `-tags embed`, so the Workshop was missing: `embed_none.go` looks for `pkg/web/workshop` from the working directory, and the server runs in `$S`. Rebuilt with `go build -tags embed`.
+- **`Cannot find module 'playwright'`.** `NODE_PATH` was missing. The runner needs `NODE_PATH=$S/pw/node_modules`, as in SLOP-009.
+- **`GOWORK=off go build ./...` fails:** `no required module provides package github.com/go-go-golems/geppetto/pkg/steps/ai/providers/pi`, plus missing `go.sum` entries for geppetto's dependencies. So `make test`, `make build` and the Docker build (all `GOWORK=off`) fail on this branch until the geppetto branch is pushed or released and slop pins it. I did not push: nobody asked for it.
+- **golangci-lint: `field roundText is unused`.** Removed.
+
+### What I learned
+
+- **The Go backend lists 43 models:** lunaroute 20, openai-codex 9, zai 7, kimi-coding 4, minimax 3. The Node worker listed 48. Pi's built-in providers also take keys from their own environment variables (for example `FIREWORKS_API_KEY`), which `HasCredential` does not model. Which 5 models differ is not established.
+
+### What was tricky to build
+
+- **Separators between rounds.** A delta is changed only for the first visible text of a round after the first, and only when something is already visible. The thinking stream follows the same rule. `FinalText` is the last round's own text, without separators.
+
+### What warrants a second pair of eyes
+
+- **The publication gap** (above): slop's branch depends on an unpublished geppetto branch.
+- **`!command` values are allowed in slop** (`WithCommandValues`). They run as the server's user, from Pi's own config files.
+
+### What should be done in the future
+
+- Push the geppetto branch (or tag a release), pin it in slop, then `go mod tidy` (phase 7).
+- Remove the Node worker from the image and make `--models pi` the default (phase 7).
+- Decide whether to resolve built-in providers' environment-variable keys.
+
+### Code review instructions
+
+- **Start with:** `pkg/piworker/gepp/sample.go` (`call.run`, `sink.PublishEvent`, `runTools`) and `backend.go` (`New`, `lookup`).
+- **Run:**
+  - `go test -race ./pkg/piworker/gepp/` (in the workspace);
+  - then the live suite as above with `--models pi`.
+
+### Technical details
+
+- **Per-round bound:** `min(model.maxTokens, remaining)`. The default tier `glm-5.3` (maxTokens 131072) gets 65,536 in round 1, and the remainder after the reported `completion_tokens` in later rounds.
+- **Request for the default tier with no effort:** `reasoning_effort: "medium"` in the test fixture (settings' default level). With the real settings that level is `minimal`.

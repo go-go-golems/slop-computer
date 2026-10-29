@@ -21,10 +21,16 @@ RelatedFiles:
       Note: backend flags
     - Path: repo://pkg/piworker/backend.go
       Note: Backend seam the new Go backend implements
+    - Path: repo://pkg/piworker/gepp/backend.go
+      Note: tiers and model choice
+    - Path: repo://pkg/piworker/gepp/sample.go
+      Note: the Go round loop
     - Path: repo://pkg/server/rt_sample.go
       Note: HTTP side of sample, unchanged
     - Path: repo://web/piworker/src/main.ts
       Note: Node worker behaviour to reproduce
+    - Path: ws://geppetto/pkg/steps/ai/providers/pi/resolve.go
+      Note: Pi model to geppetto engine
 ExternalSources: []
 Summary: How slop's sample capability works today through a Node Pi worker, and how to replace that worker with geppetto engines in Go plus a new geppetto package that reads Pi's agent directory (models, settings, credentials).
 LastUpdated: 2026-10-29T17:56:10.602639105-04:00
