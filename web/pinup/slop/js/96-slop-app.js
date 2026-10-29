@@ -7,6 +7,10 @@
 // screen on a site host. S.file.app = {page, host, base, data} says where.
 // Guide: ttmp/2026/10/29/SLOP-005-…/design-doc/01.
 
+// Steps from agents (and Claude's tools) set only the fields Pinup allows;
+// the app's own fields are among them. Image bindings travel inside fills.
+for (const k of ['route', 'record', 'repeat', 'href', 'html']) ALLOWED_KEYS.add(k);
+
 const APP_SEG = /^(?:[a-z0-9][a-z0-9_-]*|:[a-z][a-z0-9_]*)$/;
 const APP_ID = /^[a-z0-9][a-z0-9-]{0,62}$/;
 
@@ -638,10 +642,11 @@ function slopAppSections() {
     const where = r.where || [];
     const setWhere = list => set({ where: list.length ? list : undefined });
     const OPS = [{ v: '=', label: '=' }, { v: '!=', label: '≠' }, { v: 'contains', label: 'contains' }, { v: '<', label: '<' }, { v: '>', label: '>' }, { v: 'exists', label: 'is set' }, { v: 'missing', label: 'is empty' }];
-    const conds = where.map((c, i) => h('div', { style: { display: 'flex', gap: '4px', alignItems: 'center' } },
-      h('input', { class: 'sel', value: c.field || '', placeholder: 'field', 'aria-label': 'Condition field', disabled: !S.canEdit, style: { flex: '1 1 0', minWidth: 0 }, onchange: e => setWhere(where.map((x, j) => (j === i ? Object.assign({}, x, { field: e.target.value.trim() }) : x))) }),
-      selField(OPS, c.op || '=', v => setWhere(where.map((x, j) => (j === i ? Object.assign({}, x, { op: v }) : x))), { aria: 'Condition operator' }),
-      c.op === 'exists' || c.op === 'missing' ? null : h('input', { class: 'sel', value: c.value == null ? '' : String(c.value), placeholder: 'value', 'aria-label': 'Condition value', disabled: !S.canEdit, style: { flex: '1 1 0', minWidth: 0 }, onchange: e => setWhere(where.map((x, j) => (j === i ? Object.assign({}, x, { value: e.target.value }) : x))) }),
+    // field · operator · value · remove, on one grid row
+    const conds = where.map((c, i) => h('div', { style: { display: 'grid', gridTemplateColumns: 'minmax(0,1fr) 84px minmax(0,1fr) 28px', gap: '4px', alignItems: 'center' } },
+      h('input', { class: 'sel', value: c.field || '', placeholder: 'field', 'aria-label': 'Condition field', disabled: !S.canEdit, style: { width: '100%', minWidth: 0 }, onchange: e => setWhere(where.map((x, j) => (j === i ? Object.assign({}, x, { field: e.target.value.trim() }) : x))) }),
+      Object.assign(selField(OPS, c.op || '=', v => setWhere(where.map((x, j) => (j === i ? Object.assign({}, x, { op: v }) : x))), { aria: 'Condition operator' }), { style: 'width:100%;min-width:0' }),
+      c.op === 'exists' || c.op === 'missing' ? h('span') : h('input', { class: 'sel', value: c.value == null ? '' : String(c.value), placeholder: 'value', 'aria-label': 'Condition value', disabled: !S.canEdit, style: { width: '100%', minWidth: 0 }, onchange: e => setWhere(where.map((x, j) => (j === i ? Object.assign({}, x, { value: e.target.value }) : x))) }),
       ib('x', 'Remove condition', () => setWhere(where.filter((x, j) => j !== i)))));
     const body = h('div', { class: 'stack' },
       h('div', { class: 'g2' }, muted('For each'),

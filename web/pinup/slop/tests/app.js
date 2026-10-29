@@ -129,10 +129,11 @@ const check = (ok, what, extra) => { console.log((ok ? 'ok   ' : 'FAIL ') + what
     patch(d(S1, 'Heading').id, { href: 'https://example.com/' });
     const chk = slopAppCheck();
     const c = await slopAppCompile(chk, 8);
-    return { errors: chk.errors, bad, html: c.files['index.html'], reads: c.manifest.reads };
+    return { errors: chk.errors, bad, html: c.files['index.html'], reads: c.manifest.reads, stepKeys: ['route', 'record', 'repeat', 'href', 'html'].every(k => STEP_KEYS.has(k)) };
   });
   check(!res2.errors.length, 'SLOP-006 design compiles', res2.errors);
   check(res2.bad.some(e => /javascript:alert\(1\).*not a site path/.test(e)), 'a javascript: link is refused at compile time', res2.bad);
+  check(res2.stepKeys, 'agent steps may set route, record, repeat, href and html');
   check(res2.reads.pages === '$site' && res2.reads.posts === 'journal', 'reads names $site', res2.reads);
   check(res2.html.includes('data-where=') && res2.html.includes('data-repeat-field="record.tags"') && res2.html.includes('href="https://example.com/" rel="noopener"') && res2.html.includes('class="pinup-rich '),
     'where, list-field repeat, external link and rich text compile');
