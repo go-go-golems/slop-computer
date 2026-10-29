@@ -372,3 +372,21 @@ func TestBudget(t *testing.T) {
 	_, err = newBudget(70000)
 	assert.Error(t, err)
 }
+
+func TestImagesJoinTheLastUserTurn(t *testing.T) {
+	b, p := setup(t, nil, text("a cat"))
+	r := req(`[{"role":"user","content":"hi"},{"role":"assistant","content":"hello"},{"role":"user","content":"what is this?"}]`, piworker.Options{Model: "lunaroute/small"})
+	r.Images = []piworker.Image{{MimeType: "image/jpeg", Data: "/9j/AA=="}}
+	rec := &recorder{}
+	require.NoError(t, b.Sample(context.Background(), r, rec.emit, noTools))
+	require.Equal(t, "a cat", rec.last("result").Result.Text)
+	msgs := p.bodies[0]["messages"].([]any)
+	require.Len(t, msgs, 3)
+	assert.Equal(t, "hi", msgs[0].(map[string]any)["content"])
+	assert.Equal(t, "assistant", msgs[1].(map[string]any)["role"])
+	parts, ok := msgs[2].(map[string]any)["content"].([]any)
+	require.True(t, ok, "the last user turn carries parts: %v", msgs[2])
+	raw, _ := json.Marshal(parts)
+	assert.Contains(t, string(raw), "what is this?")
+	assert.Contains(t, string(raw), "data:image/jpeg;base64,/9j/AA==")
+}
