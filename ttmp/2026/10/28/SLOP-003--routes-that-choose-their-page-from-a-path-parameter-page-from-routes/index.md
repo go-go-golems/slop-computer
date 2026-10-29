@@ -14,8 +14,12 @@ RelatedFiles:
       Note: Path matcher
     - Path: repo://pkg/server/serve.go
       Note: Site serving and gates
+    - Path: repo://pkg/store/routes.go
+      Note: PageFrom field and validation
     - Path: repo://ttmp/2026/10/28/SLOP-003--routes-that-choose-their-page-from-a-path-parameter-page-from-routes/design-doc/01-intern-guide-slop-routing-and-routes-that-choose-their-page.md
       Note: The intern guide (routing, page-from design, plan)
+    - Path: repo://ttmp/2026/10/28/SLOP-003--routes-that-choose-their-page-from-a-path-parameter-page-from-routes/scripts/01-swap-release-routes.sh
+      Note: 'Cluster rollout: swap 100 routes for one'
 ExternalSources: []
 Summary: ""
 LastUpdated: 2026-10-28T20:01:14.15851215-04:00
