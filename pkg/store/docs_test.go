@@ -5,6 +5,7 @@ import (
 	"errors"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -151,5 +152,54 @@ func TestDocRevsUnderConcurrency(t *testing.T) {
 	}
 	if len(seen) != 40 {
 		t.Fatalf("%d revs", len(seen))
+	}
+}
+
+// A put and a delete of one document take their locks in the same order
+// (the artifact's head, then the document), so on Postgres neither
+// deadlocks the other: each succeeds or finds nothing to delete, and a
+// delete that finds nothing hands out no rev.
+func TestDocPutDeleteRace(t *testing.T) {
+	ctx := context.Background()
+	s := storetest.Open(t)
+	u, _ := s.UpsertIdentity(ctx, store.Identity{Issuer: "local", Subject: "manuel"}, store.RoleAdmin)
+	if _, err := s.Push(ctx, store.PushInput{Artifact: "design-x", Tree: map[string]store.FileEntry{"file.json": {SHA256: "aa", Size: 2}}, MoveMain: true, Actor: u.ID, Via: "cli",
+		Create: &store.ArtifactInput{Title: "x", Kind: store.KindData, Type: "pinup"}}); err != nil {
+		t.Fatal(err)
+	}
+	var writes atomic.Int64
+	var wg sync.WaitGroup
+	for round := 0; round < 50; round++ {
+		if _, err := s.PutDoc(ctx, "design-x", "nodes/a", store.JSON(`{}`), u.ID); err != nil {
+			t.Fatal(err)
+		}
+		writes.Add(1)
+		for i := 0; i < 4; i++ {
+			wg.Add(2)
+			go func() {
+				defer wg.Done()
+				if _, err := s.PutDoc(ctx, "design-x", "nodes/a", store.JSON(`{"x":1}`), u.ID); err != nil {
+					t.Error("put:", err)
+					return
+				}
+				writes.Add(1)
+			}()
+			go func() {
+				defer wg.Done()
+				_, err := s.DeleteDoc(ctx, "design-x", "nodes/a", u.ID)
+				if err == nil {
+					writes.Add(1)
+				} else if !errors.Is(err, store.ErrNotFound) {
+					t.Error("delete:", err)
+				}
+			}()
+		}
+		wg.Wait()
+		if t.Failed() {
+			return
+		}
+	}
+	if _, head, err := s.Docs(ctx, "design-x", "", 0); err != nil || head != writes.Load() {
+		t.Fatalf("head %d after %d writes: %v", head, writes.Load(), err)
 	}
 }

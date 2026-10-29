@@ -116,7 +116,9 @@ updated_by=excluded.updated_by, updated_at=excluded.updated_at`,
 	return out, err
 }
 
-// DeleteDoc replaces a live document with a tombstone.
+// DeleteDoc replaces a live document with a tombstone. Like PutDoc it takes
+// the head lock before the document's row: locking in the other order
+// deadlocks against a concurrent put on Postgres. A miss rolls back the rev.
 func (s *Store) DeleteDoc(ctx context.Context, artifact, path, actor string) (Doc, error) {
 	out := Doc{Path: path, At: s.Now()}
 	if actor != "" {
@@ -126,18 +128,24 @@ func (s *Store) DeleteDoc(ctx context.Context, artifact, path, actor string) (Do
 		if err := docArtifact(ctx, tx, artifact); err != nil {
 			return err
 		}
-		var one int
-		if err := tx.row(ctx, tx.forUpdate(`SELECT 1 FROM docs WHERE artifact_id=? AND path=? AND data IS NOT NULL`), artifact, path).Scan(&one); err != nil {
-			return notFound(err)
-		}
 		rev, err := nextRev(ctx, tx, artifact)
 		if err != nil {
 			return err
 		}
+		res, err := tx.exec(ctx, `UPDATE docs SET data=NULL, size=0, rev=?, updated_by=?, updated_at=?, lease_holder=NULL, lease_until=NULL
+WHERE artifact_id=? AND path=? AND data IS NOT NULL`, rev, nullable(actor), out.At, artifact, path)
+		if err != nil {
+			return err
+		}
+		n, err := res.RowsAffected()
+		if err != nil {
+			return err
+		}
+		if n == 0 {
+			return ErrNotFound
+		}
 		out.Rev = rev
-		_, err = tx.exec(ctx, `UPDATE docs SET data=NULL, size=0, rev=?, updated_by=?, updated_at=?, lease_holder=NULL, lease_until=NULL
-WHERE artifact_id=? AND path=?`, rev, nullable(actor), out.At, artifact, path)
-		return err
+		return nil
 	})
 	return out, err
 }

@@ -145,9 +145,14 @@ func writeDocEvent(w io.Writer, rev int64, typ string, payload []byte) error {
 
 // docEvents streams an artifact's document changes after ?after= (or
 // Last-Event-ID) and then live ones, with presence. Like eventStream it
-// subscribes before it replays, and skips what the replay already sent:
-// revs are handed out under a row lock held to commit, so they commit in
-// order.
+// subscribes before it replays, and skips what the replay already sent.
+//
+// The stream's revs only ever increase, so a client's cursor is always
+// safe to resume from. Revs are handed out under a row lock held to commit,
+// so they commit in order, but writers publish after commit and can publish
+// out of order. An event that skips past the next rev therefore means the
+// revs between are committed and their events are still on the way: the
+// stream takes them from the table first, and drops the late events.
 func (s *Server) docEvents(w http.ResponseWriter, r *http.Request) {
 	flusher, ok := w.(http.Flusher)
 	if !ok {
@@ -170,7 +175,7 @@ func (s *Server) docEvents(w http.ResponseWriter, r *http.Request) {
 		return (ev.Type == store.EvAgentWaiting || ev.Type == store.EvAgentLeft) && agentFor(ev.Artifact, ev.Project, a, project)
 	})
 	defer s.Events.Unsubscribe(sub)
-	docs, _, err := s.Store.Docs(ctx, a, "", after)
+	docs, head, err := s.Store.Docs(ctx, a, "", after)
 	if err != nil {
 		s.docFail(w, err)
 		return
@@ -180,16 +185,25 @@ func (s *Server) docEvents(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("X-Accel-Buffering", "no")
 	w.WriteHeader(http.StatusOK)
 	last := after
-	for _, d := range docs {
-		var data any
-		if d.Data != nil {
-			data = json.RawMessage(d.Data)
+	send := func(docs []store.Doc) error {
+		for _, d := range docs {
+			var data any
+			if d.Data != nil {
+				data = json.RawMessage(d.Data)
+			}
+			if err := writeDocEvent(w, d.Rev, store.EvDoc, store.MustJSON(map[string]any{"path": d.Path, "rev": d.Rev, "data": data, "by": d.By})); err != nil {
+				return err
+			}
+			last = max(last, d.Rev)
 		}
-		if writeDocEvent(w, d.Rev, store.EvDoc, store.MustJSON(map[string]any{"path": d.Path, "rev": d.Rev, "data": data, "by": d.By})) != nil {
-			return
-		}
-		last = max(last, d.Rev)
+		return nil
 	}
+	if send(docs) != nil {
+		return
+	}
+	// Docs reads the head before the documents, so the replay covers every
+	// rev up to it (a full replay leaves out only tombstones).
+	last = max(last, head)
 	_, _ = fmt.Fprintf(w, "event: ready\ndata: {\"rev\":%d}\n\n", last)
 	flusher.Flush()
 	ping := time.NewTicker(25 * time.Second)
@@ -212,13 +226,21 @@ func (s *Server) docEvents(w http.ResponseWriter, r *http.Request) {
 					Rev int64 `json:"rev"`
 				}
 				_ = json.Unmarshal(ev.Payload, &p)
-				if p.Rev <= last {
+				switch {
+				case p.Rev <= last: // sent already, by the replay or a catch-up
 					continue
+				case p.Rev > last+1: // revs between are committed: catch up from the table
+					docs, _, err := s.Store.Docs(ctx, a, "", last)
+					if err != nil || send(docs) != nil {
+						return
+					}
+					last = max(last, p.Rev)
+				default:
+					if writeDocEvent(w, p.Rev, ev.Type, ev.Payload) != nil {
+						return
+					}
+					last = p.Rev
 				}
-				if writeDocEvent(w, p.Rev, ev.Type, ev.Payload) != nil {
-					return
-				}
-				last = p.Rev
 			case store.EvPresence:
 				if writeDocEvent(w, 0, ev.Type, ev.Payload) != nil {
 					return

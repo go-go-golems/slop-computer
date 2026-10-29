@@ -185,3 +185,49 @@ func TestDocsAPI(t *testing.T) {
 		t.Fatalf("left event %s %v", typ, m)
 	}
 }
+
+// Writers publish after they commit, so a later rev's event can arrive
+// before an earlier one's. The stream then sends the earlier rev from the
+// table first, so the revs it sends only increase, and drops the late event.
+func TestDocEventsOutOfOrder(t *testing.T) {
+	h := newHarness(t, store.RoleAdmin)
+	manuel := h.signIn("manuel")
+	tok := h.token(manuel.id(), store.ScopeRead, store.ScopeWrite)
+	h.pushFiles(tok, "design-x", map[string]any{"title": "Design X", "kind": "data", "type": "pinup"}, nil, map[string]string{"file.json": `{"name":"X"}`})
+	st := h.stream(tok, "/api/docs/design-x/events?after=0")
+	if typ, _ := st.next(); typ != "ready" {
+		t.Fatalf("ready %s", typ)
+	}
+
+	// Rev 1 commits, and its writer has not published yet; rev 2 commits
+	// and publishes.
+	late, err := h.st.PutDoc(context.Background(), "design-x", "nodes/late", store.JSON(`{"type":"rect"}`), manuel.id())
+	if err != nil || late.Rev != 1 {
+		t.Fatalf("late put %+v %v", late, err)
+	}
+	if code := h.bearer(tok, "PUT", "/api/docs/design-x/nodes/n1", map[string]any{"type": "frame"}, nil); code != 200 {
+		t.Fatalf("put %d", code)
+	}
+	for i, path := range []string{"nodes/late", "nodes/n1"} {
+		if typ, m := st.next(); typ != "doc" || m["path"] != path || m["rev"].(float64) != float64(i+1) {
+			t.Fatalf("event %d: %s %v", i+1, typ, m)
+		}
+	}
+	// Rev 1's event arrives at last and is dropped: the next event is rev 3.
+	h.srv.publishDoc("design-x", late, manuel.id())
+	if code := h.bearer(tok, "DELETE", "/api/docs/design-x/nodes/late", nil, nil); code != 200 {
+		t.Fatalf("delete %d", code)
+	}
+	if typ, m := st.next(); typ != "doc" || m["path"] != "nodes/late" || m["data"] != nil || m["rev"].(float64) != 3 {
+		t.Fatalf("after the late event %s %v", typ, m)
+	}
+
+	// A full replay leaves out tombstones, yet is ready at the head.
+	again := h.stream(tok, "/api/docs/design-x/events?after=0")
+	if typ, m := again.next(); typ != "doc" || m["path"] != "nodes/n1" {
+		t.Fatalf("replay %s %v", typ, m)
+	}
+	if typ, m := again.next(); typ != "ready" || m["rev"].(float64) != 3 {
+		t.Fatalf("ready at the head %s %v", typ, m)
+	}
+}
