@@ -32,6 +32,8 @@ var ToolPermissions = map[string]string{
 	"threads:read":   "read comment threads",
 	"threads:write":  "comment, reply and resolve threads",
 	"events:read":    "follow live changes",
+	"docs:read":      "read live design files (Pinup) and who has them open",
+	"docs:write":     "edit live design files (Pinup) and show presence in them",
 }
 
 // ToolManifest is the "tool" section of a page version's slop.json.

@@ -61,6 +61,11 @@ func docArtifact(ctx context.Context, d db, id string) error {
 	return nil
 }
 
+// DocArtifact checks that id is a data artifact that keeps live documents.
+func (s *Store) DocArtifact(ctx context.Context, id string) error {
+	return docArtifact(ctx, s.db(), id)
+}
+
 // nextRev takes the artifact's next document revision. The upsert locks the
 // head row, so writers of one artifact are serialized from here to commit.
 func nextRev(ctx context.Context, d db, artifact string) (int64, error) {

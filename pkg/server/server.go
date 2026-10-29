@@ -87,11 +87,12 @@ type Server struct {
 	mux           *http.ServeMux
 	deviceLimiter *limiter
 	waiters       *waiters
+	presence      *presenceHub
 	recCache      recordCache
 }
 
 func New(cfg Config, st *store.Store, bl *blobs.Blobs) *Server {
-	s := &Server{Config: cfg, Store: st, Blobs: bl, Events: events.New(), deviceLimiter: newLimiter(), waiters: newWaiters()}
+	s := &Server{Config: cfg, Store: st, Blobs: bl, Events: events.New(), deviceLimiter: newLimiter(), waiters: newWaiters(), presence: newPresenceHub()}
 	s.mux = s.routes()
 	return s
 }
@@ -195,6 +196,7 @@ func (s *Server) routes() *http.ServeMux {
 	s.kernelRoutes(m)
 	s.previewRoutes(m)
 	s.streamRoutes(m)
+	s.docRoutes(m)
 	m.HandleFunc("/api/", func(w http.ResponseWriter, r *http.Request) { httpx.Fail(w, 404, "not_found", "Unknown API route") })
 	s.workshopRoutes(m)
 	s.safeRoutes(m)

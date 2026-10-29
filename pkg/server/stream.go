@@ -53,7 +53,8 @@ func (s *Server) eventStream(w http.ResponseWriter, r *http.Request) {
 		httpx.Fail(w, 500, "unsupported", "Streaming unsupported")
 		return
 	}
-	sub := s.Events.Subscribe(nil)
+	// Doc and presence events go to docs streams only (docs.go).
+	sub := s.Events.Subscribe(func(ev store.Event) bool { return !store.DocStreamOnly(ev.Type) })
 	defer s.Events.Unsubscribe(sub)
 	last, err := s.cursor(r)
 	if err != nil {
