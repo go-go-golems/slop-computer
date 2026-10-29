@@ -226,13 +226,16 @@ async function slopSha(bytes) {
   const d = await crypto.subtle.digest('SHA-256', bytes);
   return [...new Uint8Array(d)].map(x => x.toString(16).padStart(2, '0')).join('');
 }
+// files: path → string or bytes. o: {message, base | create, manifest, moveMain}.
 async function slopPush(artifact, files, o) {
   const api = SLOP.api, enc = new TextEncoder(), tree = {}, bytes = {};
-  for (const p of Object.keys(files)) { const b = enc.encode(files[p]); const sha = await slopSha(b); tree[p] = sha; bytes[sha] = b; }
+  for (const p of Object.keys(files)) { const b = typeof files[p] === 'string' ? enc.encode(files[p]) : files[p]; const sha = await slopSha(b); tree[p] = sha; bytes[sha] = b; }
   const m = await api.post('/blobs/missing', { sha256: Object.values(tree) });
   for (const sha of (m && m.missing) || []) await api.putRaw('/blobs/' + sha, bytes[sha], 'application/octet-stream');
   const body = { tree, message: o.message || 'Saved from Pinup' };
   if (o.create) body.create = o.create; else body.base = o.base;
+  if (o.manifest) body.manifest = o.manifest;
+  if (o.moveMain === false) body.moveMain = false;
   return api.post('/artifacts/' + encodeURIComponent(artifact) + '/versions', body);
 }
 

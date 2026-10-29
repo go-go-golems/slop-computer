@@ -5,3 +5,5 @@ vendor/node_modules/
 tests/index.html
 tests/*.png
 tests/dump.json
+# Written by slop/tests/app.js
+slop/tests/out/

@@ -17,6 +17,9 @@ const mods = [['src', path.join(root, 'src')], ['slop/js', path.join(__dirname, 
   .flatMap(([label, dir]) => fs.readdirSync(dir).filter(f => /^\d\d-.*\.js$/.test(f)).map(f => ({ label: label + '/' + f, file: path.join(dir, f), key: f })))
   .sort((a, b) => (a.key < b.key ? -1 : a.key > b.key ? 1 : 0));
 const js = mods.map(m => `// ===== ${m.label} =====\n` + fs.readFileSync(m.file, 'utf8')).join('\n');
+// The bundle is inlined in a <script> element: a literal closing tag in any
+// module would end it early (write <\/script> inside strings).
+for (const m of mods) if (/<\/script/i.test(fs.readFileSync(m.file, 'utf8'))) throw new Error(m.label + ' contains </script>');
 const iconJSON = JSON.stringify(icons).replace(/</g, '\\u003c');
 const read = f => fs.readFileSync(path.join(root, 'src', f), 'utf8');
 const page = `<!doctype html>
