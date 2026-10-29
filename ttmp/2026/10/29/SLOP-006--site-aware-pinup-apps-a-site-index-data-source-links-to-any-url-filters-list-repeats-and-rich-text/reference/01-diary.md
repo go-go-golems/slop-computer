@@ -151,3 +151,114 @@ I implemented guide §3. A page that reads `"$site"` now gets one record per URL
 
 ### Technical details
 - `GET /api/site?host=site.test` → `[{id, path, title, kind, route, page, section, depth, updated, project?, projectName?, record?}]`, or 400 `host must be one of the site hosts`.
+
+## Step 3: The Pinup features, and a Site map app on the local server
+
+I implemented guide §4 in `web/pinup/slop/js/96-slop-app.js`:
+- `href` links to any URL;
+- `where` filters;
+- repeats over a list field;
+- rich text from a field;
+- `$site` as a source in App settings and the field hints.
+
+I extended the browser test, then built a real app on the local server: a new design, `design-site-map`, published at `site.localhost:18120/site-map`. It lists every public page, journal post, app and release read from `$site`, and each card links to its real URL. A second screen, `/site-map/read/:id`, shows a journal post as rich text.
+
+The run found three problems:
+- the visibility rule hid every catalogue entry;
+- agent steps silently dropped the new fields;
+- the filter row's inputs collapsed.
+
+All three are fixed and recorded below.
+
+### Prompt Context
+**User prompt (verbatim):** see Step 1 (prompts 2 and 3).
+**Assistant interpretation:** Guide §4–§6 (tasks 7–12): the Pinup features, tests, docs, and the end-to-end run.
+**Inferred user intent:** Design the site's navigation in Pinup, live from what is on the site.
+**Commit (code):**
+- `f9ba57f` — "Pinup apps: links to any URL, repeat filters, list-field repeats, rich text, $site as a source"
+- `409bb65` — "Site index: hide records by an explicit set of visibility values, not by 'anything but public'"
+- `f5e8662` — "Pinup apps: agent steps may set the app fields; condition rows on a grid"
+
+### What I did
+- **Compiler:**
+  - `slopAppHref` / `APP_URL` (`^(/|https?://|mailto:|#)`); `href` wins over `link`; external links get `rel="noopener"`;
+  - `data-where` (JSON) and `data-repeat-field` on repeat templates;
+  - rich text: a `div` with class `pinup-rich` and `data-html`, plus `.pinup-rich` rules;
+  - `slopAppCheck` refuses a static `href` that is neither a site path nor an http(s) URL, and a list repeat without a field.
+- **Runtime:**
+  - `cmp` and `sortRows` with dotted fields (`-record.date`);
+  - `test(v, op, want)` for `=`, `!=`, `contains`, `<`, `>`, `exists`, `missing`, with arrays handled by element;
+  - `items(v)` for list fields (primitives become `{value, index}`);
+  - `LINK`, checked again after filling `data-href`;
+  - `clean` and `rich`: a `DOMParser` document, allowlisted tags, removal of dangerous elements, `a[href|title]` and `img[src|alt|title]` with safe URLs, then `adoptNode` into the page.
+- **Editor:**
+  - App settings offer *This site's public pages ($site)*;
+  - `slopAppFields` reads `GET /api/site?host=` for `$site` (top-level keys plus `record.*`);
+  - `slopAppScope` / `slopAppScopeNote`;
+  - the Repeat section has "For each" (record of a source, or item of a list field…), condition rows, Sort and At most;
+  - new sections "Link to a URL" and "Rich text from".
+- **Steps:** `ALLOWED_KEYS.add` for `route`, `record`, `repeat`, `href`, `html`.
+- **Tests:** `slop/tests/app.js` gained 10 checks (37 in all). Docs: `slop help pinup` (table rows, "Reading the site") and `slop help agents` (`$site`).
+- **End to end:**
+  - binaries `slop11` and `slop12`; Pinup v6, v7 and v8, each updated in the Workshop;
+  - created `design-site-map` (project Play) in the picker;
+  - as the agent, imported the Site map screen (`inbox/h1`, 38 layers) and the Read screen (`inbox/h2`);
+  - in the UI, made it an app (`pages` = `$site`, `posts` = `journal`) and set the Pages repeat (where `kind = page`, sort `title`);
+  - as the agent, set the other repeats and the `{{path}}` links (`inbox/s2`) and the Read screen (`inbox/s3`);
+  - published.
+
+### Why
+- **Filter values are filled from the enclosing scope, not the row.** A screen `/topics/:tag` can then use `record.tags contains {{params.tag}}`.
+- **Rich text is cleaned in an inert `DOMParser` document,** so handlers like `onerror` never run, before the nodes are adopted into the page.
+- **App fields are added to Pinup's `ALLOWED_KEYS` instead of the steps code being changed,** because the upstream sources stay untouched (sha256 still `531ef701b5c1417e`).
+
+### What worked
+- **Browser test:** all 37 checks pass, including:
+  - journal rows only, sorted by path, linking to their paths;
+  - a `javascript:` path loses its `href`;
+  - tags repeat per row;
+  - rich text keeps `<strong>` and drops `script`, `onerror`, `onclick`, `iframe`, `style` and the `javascript:` link (`window.__pwned` stays unset).
+- **Mutation check of the sanitizer.** With attribute removal disabled (`… void 0;`), 2 checks fail (`onerror` kept; `["javascript:alert(1)","/ok"]`). Restored by replacing the text back, and the test passes again.
+- **`slop site ls` on the local data:** 241 URLs (12 pages, 123 records, 106 project pages). Sections: r 106, apps 101, experiments 14, journal 9, …. A cache miss takes 0.20 s, a hit 0.04 s.
+- **`/site-map` on the site:**
+  - PAGES 13, sorted by title;
+  - JOURNAL 9, newest first by `record.date`;
+  - APPS 12 (limit), with `record.title exists`, so the catalogue's `index` record is skipped;
+  - RELEASES 24 (limit), newest first;
+  - following links works: `/journal/pages-and-data` → "Pages and data · slop.boutique", `/r/storefront` → 200, `/apps/agent-gym-works` → 200;
+  - no page errors.
+- **`/site-map/read/routes-not-templates`** → "Routes, not templates · Site map", three `<p>`s with the post's bold `/journal/:slug`, and Back → `/site-map` (screenshot `s6-04`).
+- **Checks:** `make lint` 0; `go test ./...` 0; Postgres (`pkg/server`, `pkg/store`, `pkg/routing`) ok; `tsc` 0.
+
+### What didn't work
+- **The visibility rule hid the whole catalogue.** The first `slop site ls` on the local data listed 141 URLs with a single `/apps/…` entry (`/apps/index`). The francois catalogue's values are `{'listed': 100, 'hidden': 4}`, and my rule kept only `visibility` = `public`. Fix (`409bb65`): an explicit hiding set (`hidden`, `private`, `draft`, `unlisted`, `internal`). The test adds `visibility: "listed"` (listed) and `draft: "True"` (hidden). Now 241 URLs, with 101 under `/apps`.
+- **`slop site ls --output json` failed:** `unknown flag: --output`. The glazed flag is `--format`; the command's help example is fixed.
+- **Agent steps dropped the new fields.** After `inbox/s1` was consumed, `slop docs get … nodes/Ya5e3gbNf4` showed no `repeat`. Pinup's step code copies only keys in `ALLOWED_KEYS` (`src/10-claude.js:64`; `13-feedback.js:382` `STEP_KEYS = ALLOWED_KEYS`), so `route`, `record`, `repeat`, `href` and `html` were dropped silently. This had also been wrong since SLOP-005, whose help said agents could set these with steps; that run used only `text` and `ov`, which are allowed. Fix (`f5e8662`): `96-slop-app.js` adds the keys to the set at load. Re-sent as `inbox/s2` and `s3` (`seq` 2 and 3), and the fields landed.
+- **Condition inputs collapsed** (screenshot taken before the fix): the field and value inputs shrank to a few pixels next to a full-width operator select. Fix: a grid `minmax(0,1fr) 84px minmax(0,1fr) 28px` with explicit widths (`s6-02`).
+- **Tree driving:** expanding every collapsed row in a loop got stuck on leaf rows, whose expand button is hidden. I expanded the ancestors by id instead.
+
+### What I learned
+- **`$site` sections follow the first path segment,** so a section mixes kinds. The JOURNAL list included the `/journal` index page (kind `page`) at the end; `kind = record` filters it out.
+- **The index shows real route-table quirks.** `/apps/:slug` (app-page) is fully shadowed by `/apps/:id` (same specificity, earlier in order), so none of the 14 experiments appear under `/apps/`; they appear under `/experiments/`.
+
+### What was tricky to build
+- **Scope for filter values versus rows.** `lookup([row], c.field)` reads the row, and `fill(c.value, chain)` reads the enclosing scope. Mixing them up would let `{{title}}` in a condition mean the row's own title.
+
+### What warrants a second pair of eyes
+- **The rich-text allowlist and URL rule** (`clean` in `slopAppRuntime`), especially `img src` with relative paths and `data:` URLs (refused today).
+- **Index size in pages:** `/site-map` embeds 241 rows. The catalogue record fields are kept (minus body/html), which makes every reader's boot JSON larger.
+
+### What should be done in the future
+- Per-reader filters on `$site` (guide §7), and deploying to the cluster (new image, `make pinup-push`, update the tool).
+
+### Code review instructions
+- `96-slop-app.js`: `emit` (`href`, rich text, repeat attributes), `slopAppRuntime` (`test`, `items`, `clean`, `rich`, `bind`), `slopAppSections` (Repeat, Link to a URL, Data).
+- Validate: `cd web/pinup && node slop/build.js && node slop/tests/app.js`, then `GOWORK=off go test ./pkg/server -run TestSiteIndex`.
+
+### Technical details
+- Screenshots:
+  - `s6-01` App settings with the `$site` source;
+  - `s6-02` Repeat with a condition;
+  - `s6-03` `/site-map` on the site (full page);
+  - `s6-04` the rich-text Read screen.
+- Steps used: `inbox/s2` (repeats with `where`, `sort`, `limit`; `href: "{{path}}"`) and `inbox/s3` (`route: "/read/:id"`, `record: "posts"`, `html: "html"`, Back `href: "/site-map"`).

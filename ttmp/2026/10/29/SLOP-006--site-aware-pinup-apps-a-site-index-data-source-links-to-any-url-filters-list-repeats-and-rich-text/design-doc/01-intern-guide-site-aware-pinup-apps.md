@@ -379,3 +379,16 @@ sanitize(html):
 | Pinup app compiler, runtime, sections | `web/pinup/slop/js/96-slop-app.js` |
 | Pinup app browser test | `web/pinup/slop/tests/app.js` |
 | Workshop routes table, preview context | `web/workshop/src/screens/RoutesScreen.tsx`, `components/organisms/WatchRight.tsx` |
+
+## As built (2026-10-29)
+
+- **Unlisted records** use an explicit hiding set for `visibility`: `hidden`, `private`, `draft`, `unlisted`, `internal`. The first version, which required `public`, hid the francois catalogue's 100 `listed` entries. `draft`, `hidden` and `listed` accept `"True"`/`"False"` strings, as the francois import wrote them.
+- **Agent steps:** Pinup applies only fields in `ALLOWED_KEYS`, and the slop module adds `route`, `record`, `repeat`, `href` and `html` at load.
+- **CLI:** `slop site ls [--host] [--format json]`.
+- **On the local data,** the index has 241 URLs. A cache miss takes 0.2 s.
+- **Files:**
+  - `pkg/routing/routing.go` (`RecordMatcher`, `FillPath`);
+  - `pkg/server/siteindex.go`, `siteindex_test.go`;
+  - `pkg/client/site.go`, `cmd/slop/cmds/site.go`;
+  - `web/pinup/slop/js/96-slop-app.js`, `web/pinup/slop/tests/app.js`.
+- **Commits:** `aecbd55`, `409bb65`, `f9ba57f`, `f5e8662`. Diary steps 2–3 have the end-to-end run.
