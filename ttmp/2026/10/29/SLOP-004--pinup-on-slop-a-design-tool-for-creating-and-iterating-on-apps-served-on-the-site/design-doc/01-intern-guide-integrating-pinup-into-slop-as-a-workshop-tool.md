@@ -57,9 +57,9 @@ Sections 1–4 explain the parts you need to understand: slop, Pinup, the Artifa
 
 ### As built (2026-10-29)
 
-Phases 1 and 2 are implemented. They differ from the design below in these points; the diary (`reference/01-diary.md`, steps 2–3) has the details.
+Phases 1 and 2 are implemented. They differ from the design below in these points; the diary (`reference/01-diary.md`, steps 2–4) has the details.
 
-- **Docs API paths.** Paths are exactly `collection/id`. The lease endpoint is `POST /api/docs/{artifact}/{coll}/{id}/acquire`, and the stream is `GET /api/docs/{artifact}/events`. Revs come from a `doc_heads` counter row, whose upsert serializes writers until commit.
+- **Docs API paths.** Paths are exactly `collection/id`. The lease endpoint is `POST /api/docs/{artifact}/{coll}/{id}/acquire`, and the stream is `GET /api/docs/{artifact}/events`. Revs come from a `doc_heads` counter row, whose upsert serializes writers until commit. Every write takes that row before the document's row: `DeleteDoc` first locked the document and then the head, and deadlocked against a concurrent `PutDoc` on Postgres (fixed after review on PR #3).
 - **No separate player bundle.** There is no `--player` bundle or `90-player.js`. The one slop build (`web/pinup/slop/build.js`) runs in **tool mode** in the Workshop and in **player mode** on a site route that binds a design. `pinup-player` is the same `index.html` with a plain page manifest. The reason: `06-proto.js` depends on a dozen editor functions.
 - **Adapter location.** The adapter is `web/pinup/slop/js/00-slop-host.js`, and the menu is `95-slop-ui.js`. Both are spliced into Pinup's IIFE, so upstream `src/` is unchanged.
 - **Snapshots** are `file.json`, `pages/<pageId>.json` and `handoff.md`. **Feedback is not snapshotted**, because a published route makes the version public.
@@ -335,11 +335,16 @@ The `artifact` must be a data artifact of type `pinup`, or of a type in an allow
 docEvents(artifact, after):
     sub := Broker.Subscribe(ev.Type in {doc, presence} && ev.Artifact == artifact)
     replay: SELECT path, data, rev FROM docs WHERE artifact_id=? AND rev > after ORDER BY rev
-    write "ready {rev}"
-    live: forward sub events with rev > last (presence always)
+    write "ready {head}"
+    live: presence always; a doc event with
+        rev <= last       → drop (the replay or a catch-up sent it)
+        rev == last + 1   → forward
+        rev >  last + 1   → catch up: replay from the table after last, then drop it
 ```
 
 A doc write publishes an **ephemeral** event (`Seq 0`) carrying `{path, rev, data}`. The *replay* comes from the `docs` table by `rev`, not from the event log, so a reconnecting client never misses a change.
+
+The catch-up case exists because revs *commit* in order but are *published* after commit. Two writers can commit N and N+1 and publish them in the opposite order. Forwarding N+1 and dropping the late N would lose N on that stream, and a client that reconnects from N+1 would never ask for it. Since N+1 has committed, N has too, so the table has it. The stream's revs therefore only increase, and a client's cursor is always safe to resume from. (This was a review finding on PR #3; the first version forwarded `rev > last` and dropped the rest.)
 
 **Errors → Pinup codes.** The adapter maps them so Pinup's existing messages apply (`02-store.js:236-243`):
 

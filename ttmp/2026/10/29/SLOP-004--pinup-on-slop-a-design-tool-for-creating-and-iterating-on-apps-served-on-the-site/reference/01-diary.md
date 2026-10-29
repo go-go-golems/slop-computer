@@ -314,3 +314,92 @@ snapshot (design-pace-club v2): file.json · pages/p1.json (77) · pages/p7ndBvr
 routes: /proto/pace-club, /proto/pace-club/:screen → pinup-player, bindings {"design":{"artifact":"design-pace-club","version":null}}
 module order (slop build): 00-slop-host 01-util … 14-log 95-slop-ui 99-boot
 ```
+
+## Step 4: Review fixes on PR #3, a lost rev on the docs stream and a put/delete deadlock
+
+Codex reviewed PR #3 and found two concurrency bugs in the docs store from step 2. Both were real, and both came from the same over-strong assumption. Step 2 relied on "revs commit in order", and that is true. But it went on to say this "is what lets the stream skip duplicates with `rev <= last`", and that does not follow, because writers *publish* after commit, outside the lock. Separately, `DeleteDoc` took its two row locks in the opposite order from `PutDoc`.
+
+Both are fixed in `2fe5f5a`, each with a test that fails on the old code. Lint is clean, all tests pass on SQLite and Postgres (also under `-race`), and both review comments have replies pointing at the commit.
+
+### Prompt Context
+**User prompt (verbatim):** "Handle code review comments https://github.com/go-go-golems/slop-computer/pull/3"
+**Assistant interpretation:** Read the review on PR #3, fix what holds up, test the fixes, reply on the threads, and keep the diary.
+**Inferred user intent:** Get the PR to a mergeable state without hand-waving the reviewer's findings.
+**Commit (code):** `2fe5f5a` "Docs store: no lost revs on the docs stream, no put/delete deadlock"
+
+### What I did
+- **Fetched the review.** `gh api repos/go-go-golems/slop-computer/pulls/3/comments` returned two inline findings from `chatgpt-codex-connector[bot]` on `256bb83`:
+  - **P1 at `pkg/server/docs.go:216`:** "Preserve document events published out of revision order";
+  - **P2 at `pkg/store/docs.go:133`:** "Acquire document locks in the same order for puts and deletes".
+  There were no human review comments.
+- **P2, the store** (`pkg/store/docs.go` `DeleteDoc`):
+  - it now calls `nextRev` (the head-row lock) first, then tombstones with a single `UPDATE docs SET data=NULL … WHERE artifact_id=? AND path=? AND data IS NOT NULL`;
+  - `RowsAffected() == 0` returns `ErrNotFound`, which rolls the transaction back, rev included;
+  - the old `SELECT 1 … FOR UPDATE` is gone.
+- **P1, the stream** (`pkg/server/docs.go` `docEvents`):
+  - the replay loop became a `send(docs)` closure that advances `last`;
+  - after the replay, `last = max(last, head)`;
+  - the live branch is now a three-way switch: `rev <= last` → drop; `rev > last+1` → `Store.Docs(after=last)` and `send`, then `last = max(last, rev)`; otherwise forward;
+  - the function comment explains why.
+- **Tests:**
+  - `pkg/store/docs_test.go` `TestDocPutDeleteRace`: 50 rounds of 4 concurrent `PutDoc`/`DeleteDoc` pairs on `nodes/a`. Every error must be nil or `ErrNotFound`, and at the end the head must equal the number of successful writes, which shows that a miss hands out no rev.
+  - `pkg/server/docs_test.go` `TestDocEventsOutOfOrder`:
+    - rev 1 is committed through `h.st.PutDoc` without publishing (the descheduled writer), and rev 2 goes through `PUT`;
+    - the stream must send rev 1 and then rev 2;
+    - `h.srv.publishDoc(late)` must then be dropped, so the next event is rev 3 (a `DELETE`);
+    - a fresh full replay must be `ready` at 3 even though rev 3 is a tombstone it leaves out.
+- **Docs:** the SLOP-004 guide's stream pseudocode (§6.3) now shows the three cases and why the catch-up exists. Its as-built note on `doc_heads` states the lock order.
+- **Replies** on both threads, with the commit, the approach and the test: `#discussion_r4416388966` (P1) and `#discussion_r4416389371` (P2).
+
+### Why
+- **Catch-up in the reader rather than a per-artifact mutex around commit and publish.** Codex offered both. Holding a Go mutex across a database transaction would serialize writers a second time, and every write path would have to remember to take it. The catch-up uses a fact that already holds: once N+1's event is out, N+1 has committed, so N has too. It costs one query only when a gap shows up, which is rare, and it makes the stream correct whoever publishes. The stream's revs stay strictly increasing, which is what the client's resume cursor (`after: () => rev` in `00-slop-host.js`) assumes.
+- **`last = max(last, rev)` after a catch-up, not just the max rev that was sent.** A full replay (`after == 0`) leaves out tombstones. If the event that triggered the catch-up was a tombstone, the catch-up might send nothing; `last` would stay behind and the late put for the same document would then be forwarded, bringing a deleted document back. The client has every rev up to `rev` reflected either way.
+- **`last = max(last, head)` after the replay.** `Docs` reads the head *before* the documents, so everything up to the head is reflected in the replay. Without it, a replay that ends in a tombstone triggers a needless catch-up on the next live event.
+- **One `UPDATE` instead of `SELECT … FOR UPDATE` and then `UPDATE`.** The head lock already serializes the artifact's writers, so a separate document lock has nothing left to protect. `AcquireDoc` takes only the document row, in a single statement, so it cannot close a cycle with either write.
+
+### What worked
+- `go test ./pkg/store ./pkg/server -run TestDoc` → ok on SQLite and on Postgres (`TEST_DATABASE_URL=postgres://…@127.0.0.1:55432/postgres`).
+- **Mutation checks**, each restored afterwards from a scratchpad copy rather than `git checkout`, per step 2's lesson:
+  - old `pkg/store/docs.go` on Postgres → `--- FAIL: TestDocPutDeleteRace … docs_test.go:193: delete: ERROR: deadlock detected (SQLSTATE 40P01)`;
+  - old `pkg/server/docs.go` → `docs_test.go:213: event 1: doc map[… path:nodes/n1 rev:2]`, meaning rev 2 arrived first and rev 1 was lost;
+  - new code with `last = max(last, head)` replaced by `_ = head` → `docs_test.go:231: ready at the head ready map[rev:2]`.
+- **The gate:**
+  - `make lint` → exit 0, `0 issues.`;
+  - `go test ./...` → 10 ok packages on SQLite and on Postgres;
+  - `go test -race ./pkg/server ./pkg/store -run TestDoc` → ok;
+  - `TestDocPutDeleteRace -race -count=3` on Postgres → ok.
+
+### What didn't work
+- **The first mutation that dropped the `last = max(last, head)` line** did not compile: `FAIL github.com/go-go-golems/slop-computer/pkg/server [build failed]`, because `head` became unused. I redid it with `sed 's/…/\t_ = head/'`.
+- **A quoting slip in the first fetch command.** It wrote to `$S/../scratchpad/…` before `S` was set: `(eval):1: no such file or directory: /../scratchpad/pr3-comments.json`. The same command then set `S` and fetched again, so nothing was lost.
+- **No failures in the fixes themselves.**
+
+### What I learned
+- "Commit order" and "publication order" are different orders. An in-process broker gives no ordering across goroutines, so a dedupe rule like `rev <= last` is only sound if every rev it might skip has already been delivered by some other route.
+- The deadlock was easy to reproduce: 50 rounds of 4 pairs hit it in about a second on Postgres. SQLite cannot show it, because `BEGIN IMMEDIATE` serializes the whole transaction.
+
+### What was tricky to build
+- **Choosing `last` after a catch-up.** The obvious "max rev sent" is wrong in the tombstone case described under *Why*. The rule that holds is that everything up to the triggering event's rev is reflected, because that event's commit implies all earlier commits.
+- **`continue` and `break` inside `select` inside `for`.** The drop case uses `continue`, which skips the flush, as before. The catch-up and forward cases fall through to the `flusher.Flush()` after the `select`.
+
+### What warrants a second pair of eyes
+- **Postgres isolation:** the catch-up relies on READ COMMITTED, where each statement sees every transaction committed before it starts. That is Postgres's default and what `InTx`/`s.db()` use; a stricter level on the stream's queries would not break it, but a replica read would.
+- **Big documents in the catch-up:** like the replay, it sends documents inline up to `MaxDocBytes` (256 KiB). Only live events switch to `big: true` above 64 KiB, as before.
+
+### What should be done in the future
+- N/A for these findings. The step 2 follow-up (a schedule for `PruneDocTombstones`) still stands.
+
+### Code review instructions
+- Read `pkg/store/docs.go` `DeleteDoc`, then `pkg/server/docs.go` `docEvents` (the comment, `send`, the switch).
+- Read the tests `TestDocPutDeleteRace` and `TestDocEventsOutOfOrder`.
+- Validate with `go test ./pkg/store ./pkg/server -run TestDoc`, the same with `TEST_DATABASE_URL`, then `make lint`.
+
+### Technical details
+```
+lock order, every docs write:  doc_heads(artifact) row  →  docs(artifact, path) row
+stream, live doc event with rev r:
+    r <= last      drop
+    r == last+1    forward; last = r
+    r >  last+1    send Docs(after=last); last = max(last, r)
+ready after replay: max(after, max replayed rev, head)
+```

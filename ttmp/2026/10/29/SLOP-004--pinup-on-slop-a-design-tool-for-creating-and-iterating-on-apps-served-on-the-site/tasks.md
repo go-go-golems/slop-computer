@@ -17,3 +17,4 @@
 - [ ] Scripted Playwright test of tool mode against slop serve --local (slop1.js) <!-- t:dly6 -->
 - [ ] Schedule PruneDocTombstones (startup + daily) <!-- t:n9jy -->
 - [ ] Deploy: image bump, make pinup-push to the cluster, enable the tool <!-- t:zf91 -->
+- [x] PR #3 review: no lost revs on the docs stream, no put/delete deadlock (2fe5f5a) <!-- t:jj1v -->
