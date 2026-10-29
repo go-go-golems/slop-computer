@@ -145,15 +145,30 @@ port (francois's policy allows Traefik on 8443 for this hairpin).
 
 ## Models (the sample capability)
 
-`slop serve --pi-worker web/piworker/dist/worker.js` starts Pi as a Node child
-process (`make piworker` builds it; Node 24 or newer). It reads Pi's agent
-directory (`--pi-agent-dir`, default `~/.pi/agent`: `auth.json`,
-`models.json`, `models-store.json`, `settings.json`), so models and
-credentials are managed with Pi on the server host and never reach the
-database or a browser. `--model-quick/default/complex` pin the tiers
-(e.g. `lunaroute/glm-5.3-flash`); without them every tier is Pi's default
-model. Only admins sample; there is no per-person budget, and every call
-writes an audit row (`sample`, with model and token counts).
+`slop serve --models pi` serves `sample` in Go, on geppetto engines. It reads
+Pi's agent directory (`--pi-agent-dir`, default `$PI_CODING_AGENT_DIR` or
+`~/.pi/agent`: `auth.json`, `models.json`, `models-store.json`,
+`settings.json`), so models and credentials are managed with Pi on the server
+host and never reach the database or a browser. `--model-quick/default/complex`
+pin the tiers, optionally with a thinking level (`lunaroute/glm-5.3-flash`,
+`deepseek-4.1-flash:high`); without them every tier is Pi's default model.
+Only admins sample; there is no per-person budget, and every call writes an
+audit row (`sample`, with model and token counts).
+
+- Supported wire APIs: `openai-completions`, `openai-responses`,
+  `openai-codex-responses`, `anthropic-messages`, `google-generative-ai`.
+  Bedrock, Vertex, Mistral Conversations and Azure models are not offered.
+- `models.json` values may be `$ENV` or `!command` references, resolved as
+  Pi does; commands run as the server's user.
+- **OAuth refresh rotates tokens.** When a Codex credential expires, slop
+  refreshes it and writes it back to `auth.json` under Pi's lock, so Pi on
+  the same host stays logged in. A *copy* of `auth.json` on another host
+  holds the same refresh token: whichever refreshes first invalidates the
+  other. Give each host its own login, or use API-key providers on servers.
+
+`--models pi-node --pi-worker web/piworker/dist/worker.js` runs the previous
+Node worker instead (`make piworker`; Node 24 or newer), which also covers the
+providers geppetto lacks. `--pi-worker` alone still selects it.
 
 ## Backups and upgrades
 

@@ -88,6 +88,7 @@ still works. `slop` gives `get/post/put/patch/del(path)`, `stream`, `on`,
 
 ## sample
 
-`sample` runs through slop's Pi model worker (`slop serve --pi-worker …`):
+`sample` runs on Pi's models and credentials (`slop serve --models pi`, Go on
+geppetto; `--models pi-node` for the Node worker):
 any model and effort Pi has credentials for, with page tools, for admins
 only. `(await sample.limits()).models` lists them.
