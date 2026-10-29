@@ -341,3 +341,23 @@ This step implements guide phases 2, 3 and 6 in slop. `pkg/piworker/gepp` implem
 
 - **Per-round bound:** `min(model.maxTokens, remaining)`. The default tier `glm-5.3` (maxTokens 131072) gets 65,536 in round 1, and the remainder after the reported `completion_tokens` in later rounds.
 - **Request for the default tier with no effort:** `reasoning_effort: "medium"` in the test fixture (settings' default level). With the real settings that level is `minimal`.
+
+## Step 4: Operator docs for `--models pi`
+
+`doc/production.md` ("Models") and `pkg/doc/topics/runtime.md` (`slop help runtime`) now describe the Go backend. They cover the supported wire APIs, `$ENV` and `!command` values, tier references with thinking levels, the rotation of refresh tokens across copies of `auth.json`, and `--models pi-node` as the fallback.
+
+### Prompt Context
+**User prompt (verbatim):** (see Step 2)
+**Assistant interpretation:** Keep the operator docs true to the new flag.
+**Inferred user intent:** An operator can run `sample` without Node and knows the credential risks.
+
+### Evidence and commits
+- slop `a139b97` "SLOP-010: docs for slop serve --models pi (supported APIs, refresh rotation)".
+
+### Noteworthy decisions or failures
+- `--pi-worker` alone still selects the Node worker, so existing start scripts are unaffected.
+
+### Remaining requirements and next action
+- **kg55** (phase 5, live): a deliberate live Codex refresh. It rotates the real token in `~/.pi/agent/auth.json`, so it needs the user's go-ahead.
+- **y2l5** (phase 7): publish the geppetto branch (push it, or tag it), pin it in slop's `go.mod`, run `go mod tidy`, then check that `GOWORK=off make test build` passes. Also make `--models pi` the default.
+- **dqib:** decide about built-in providers' catalog and their environment-variable keys (43 vs 48 models).
