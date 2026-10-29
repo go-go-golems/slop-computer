@@ -17,7 +17,7 @@ export interface PreviewContext { route: RouteView | null; host?: string; path?:
 export function usePreviewContext(routes: RouteView[], sample: string | null): PreviewContext {
   const r = routes.find(x => x.path !== '*') ?? routes[0] ?? null
   const hasParams = !!r && /[:*]/.test(r.path) && r.path !== '*'
-  const data = r && hasParams ? Object.entries(r.data ?? {}).find(([k]) => k !== '$tokens')?.[1] : undefined
+  const data = r && hasParams ? Object.entries(r.data ?? {}).find(([k, b]) => k !== '$tokens' && !b.artifact.startsWith('$'))?.[1] : undefined
   const { data: recs } = useRecordsQuery(data ? { id: data.artifact, n: data.n } : { id: '', n: 0 }, { skip: !data })
   return useMemo(() => {
     if (!r) return { route: null, samples: [] }

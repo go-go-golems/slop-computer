@@ -140,6 +140,12 @@ func (s *Server) renderPage(ctx context.Context, page store.Version, res *routin
 		boot.Record = res.Record
 	}
 	for name, b := range s.bindings(ctx, page, route) {
+		if b.Artifact == SiteSource {
+			if h := s.siteHost(host); h != "" {
+				boot.Data[name] = s.siteIndex(ctx, h)
+			}
+			continue
+		}
 		if b.N == 0 {
 			continue
 		}

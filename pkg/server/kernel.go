@@ -405,6 +405,12 @@ func (s *Server) push(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 		for name, id := range m.Reads {
+			if strings.HasPrefix(id, "$") {
+				if id != SiteSource {
+					warnings = append(warnings, "reads."+name+": "+id+" is not a known source (the one there is: "+SiteSource+")")
+				}
+				continue
+			}
 			if a, err := s.Store.Artifact(r.Context(), id); err != nil || a.Kind != store.KindData {
 				warnings = append(warnings, "reads."+name+": "+id+" is not a data artifact (yet)")
 			}
