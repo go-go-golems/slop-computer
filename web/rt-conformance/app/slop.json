@@ -1,0 +1,11 @@
+{
+  "title": "Runtime conformance",
+  "kind": "page",
+  "capabilities": {
+    "db": { "rules": [ { "path": "locked", "write": "owner" }, { "path": "votes", "read": "view", "write": "owner" }, { "path": "votes/{self}", "write": "interact" } ] },
+    "user": { "scopes": ["profile"] },
+    "room": { "topics": { "ping": "interact" } },
+    "downloads": true,
+    "artifact": {}
+  }
+}

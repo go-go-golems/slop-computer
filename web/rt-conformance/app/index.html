@@ -1,0 +1,179 @@
+<!doctype html>
+<html><head><meta charset="utf-8"><title>Runtime conformance</title>
+<style>body{font:13px/1.5 ui-monospace,monospace;margin:16px}.ok{color:#176f2c}.bad{color:#b3261e}</style></head>
+<body>
+<h1 style="font-size:16px">Runtime conformance</h1>
+<p id="status">running…</p>
+<ol id="list"></ol>
+<pre id="results" hidden></pre>
+<script>
+// Checks observable contract behaviour of window.claude. Each check is one
+// rule from the capability's type definitions; results go to #results as
+// JSON for the Playwright runner (run.mjs) and to the list for people.
+const results = [];
+const list = document.getElementById("list");
+function report(name, ok, detail) {
+  results.push({ name, ok, detail: detail === undefined ? "" : String(detail) });
+  const li = document.createElement("li");
+  li.className = ok ? "ok" : "bad";
+  li.textContent = (ok ? "✓ " : "✗ ") + name + (detail ? " — " + detail : "");
+  list.appendChild(li);
+}
+async function check(name, fn) {
+  try {
+    const r = await fn();
+    report(name, r !== false, r === false ? "returned false" : (typeof r === "string" ? r : ""));
+  } catch (e) {
+    report(name, false, (e && (e.code || "")) + " " + (e && e.message));
+  }
+}
+const code = async (p) => { try { await p; return "resolved"; } catch (e) { return e && e.code; } };
+const wait = (ms) => new Promise((r) => setTimeout(r, ms));
+function next(subscribe, pred = () => true, ms = 4000) {
+  return new Promise((resolve, reject) => {
+    let off = () => {};
+    const t = setTimeout(() => { off(); reject(new Error("no snapshot in " + ms + " ms")); }, ms);
+    off = subscribe((s) => { if (pred(s)) { clearTimeout(t); queueMicrotask(() => off()); resolve(s); } }, (e) => { clearTimeout(t); reject(e); });
+  });
+}
+
+(async () => {
+  await check("window.claude carries only use", () => Object.keys(window.claude).join(",") === "use");
+  await check("use() of an unknown name resolves null", async () => (await claude.use("teleport")) === null);
+  await check("files and mcp resolve null (not served)", async () => (await claude.use("files")) === null && (await claude.use("mcp")) === null);
+  const db = await claude.use("db");
+  const user = await claude.use("user");
+  const room = await claude.use("room");
+  await check("db, user, room resolve", () => !!db && !!user && !!room);
+  await check("use() is memoized", async () => (await claude.use("db")) === db);
+  if (!db) return finish();
+  const run = "r" + Date.now().toString(36);
+
+  // --- db: paths
+  await check("doc() with odd segments throws TypeError", () => { try { db.doc("tasks"); return false; } catch (e) { return e instanceof TypeError; } });
+  await check("collection() with even segments throws TypeError", () => { try { db.collection("a/b"); return false; } catch (e) { return e instanceof TypeError; } });
+  await check("a segment with a space throws TypeError", () => { try { db.doc("a b/c"); return false; } catch (e) { return e instanceof TypeError; } });
+
+  // --- db: writes and reads
+  const t1 = db.doc(`${run}/t1`);
+  await check("set then get round-trips", async () => { await t1.set({ title: "one", n: 1, nested: { a: 1 } }); const s = await t1.get(); return s.exists && s.data().title === "one" && s.id === "t1"; });
+  await check("update merges nested objects", async () => { await t1.update({ nested: { b: 2 } }); const d = (await t1.get()).data(); return d.nested.a === 1 && d.nested.b === 2 && d.title === "one"; });
+  await check("update of a missing document rejects invalid_argument", async () => (await code(db.doc(`${run}/none`).update({ x: 1 }))) === "invalid_argument");
+  await check("a missing document reads exists:false", async () => { const s = await db.doc(`${run}/none`).get(); return s.exists === false && s.data() === undefined; });
+  await check("a non-object body rejects invalid_argument", async () => (await code(t1.set([1, 2]))) === "invalid_argument");
+  await check("a body over 256 KiB rejects invalid_argument", async () => (await code(t1.set({ x: "y".repeat(256 * 1024) }))) === "invalid_argument");
+  await check("delete is idempotent", async () => { await db.doc(`${run}/gone`).delete(); await db.doc(`${run}/gone`).delete(); return true; });
+  await check("snapshots are frozen", async () => { const s = await t1.get(); return Object.isFrozen(s) && Object.isFrozen(s.data()); });
+
+  // --- db: rules
+  const me = await user.id();
+  await check("user.id() is a string", () => typeof me === "string" && me.length > 0);
+  await check("own subtree data/users/<id> is writable", async () => { await db.doc(`data/users/${me}/prefs`).set({ dark: true }); return (await db.doc(`data/users/${me}/prefs`).get()).exists; });
+  await check("another viewer's subtree rejects invalid_argument", async () => (await code(db.doc("data/users/someone-else/prefs").set({ x: 1 }))) === "invalid_argument");
+  await check("another viewer's subtree reads as missing", async () => (await db.doc("data/users/someone-else/prefs").get()).exists === false);
+  await check("a {self} rule lets you write your own vote", async () => { await db.doc(`votes/${me}`).set({ pick: 1 }); return true; });
+
+  // --- db: subscriptions
+  await check("doc onSnapshot delivers the current state", async () => { const s = await next((n, e) => t1.onSnapshot(n, e)); return s.exists && s.data().title === "one"; });
+  await check("doc onSnapshot sees a later write", async () => {
+    const seen = next((n, e) => t1.onSnapshot(n, e), (s) => s.data() && s.data().title === "two");
+    await wait(50); await t1.set({ title: "two" }); await seen; return true;
+  });
+  const coll = db.collection(`${run}/items/list`.split("/").slice(0, 1).join("/"));
+  await check("query: where/orderBy/limit window over a collection", async () => {
+    const c = db.collection(`${run}q`);
+    for (let i = 0; i < 6; i++) await c.doc("d" + i).set({ n: i, even: i % 2 === 0 });
+    const s = await c.where("even", "==", true).orderBy("n", "desc").limit(2).get();
+    return s.size === 2 && s.docs[0].id === "d4" && s.docs[1].id === "d2";
+  });
+  await check("query onSnapshot: a document leaving the window brings the next one in", async () => {
+    const c = db.collection(`${run}q`);
+    let first = true;
+    const p = next((n, e) => c.where("even", "==", true).orderBy("n", "desc").limit(2).onSnapshot(n, e), (s) => {
+      if (first) { first = false; return false; }
+      return s.size === 2 && s.docs[0].id === "d2" && s.docs[1].id === "d0";
+    });
+    await wait(100); await c.doc("d4").update({ even: false }); await p; return true;
+  });
+  await check("an unchanged document is the same object across deliveries", async () => {
+    const c = db.collection(`${run}id`);
+    await c.doc("a").set({ v: 1 }); await c.doc("b").set({ v: 1 });
+    const snaps = [];
+    const off = c.onSnapshot((s) => snaps.push(s));
+    await wait(300); await c.doc("b").set({ v: 2 }); await wait(500); off();
+    const last = snaps[snaps.length - 1], firstS = snaps[0];
+    const a0 = firstS.docs.find((d) => d.id === "a"), a1 = last.docs.find((d) => d.id === "a");
+    return snaps.length >= 2 && a0 === a1 && last.docChanges().some((ch) => ch.type === "modified" && ch.doc.id === "b");
+  });
+  await check("own writes show hasPendingWrites first", async () => {
+    const d = db.doc(`${run}/pending`);
+    const metas = [];
+    const off = d.onSnapshot((s) => metas.push(s.metadata.hasPendingWrites));
+    await wait(200); await d.set({ x: 1 }); await wait(300); off();
+    return metas.includes(true) && metas[metas.length - 1] === false;
+  });
+  await check("the 65th subscription errors resource_exhausted", async () => {
+    const offs = [];
+    let err = null;
+    for (let i = 0; i < 70; i++) offs.push(db.doc(`${run}/many${i}`).onSnapshot(() => {}, (e) => { if (!err) err = e; }));
+    await wait(1500); offs.forEach((o) => o());
+    return err && err.code === "resource_exhausted";
+  });
+  await check("acquire grants, then refuses another holder", async () => {
+    const d = db.doc(`${run}/lease`);
+    const a = await d.acquire({ holder: "tab-a", ttlMs: 5000 });
+    const b = await d.acquire({ holder: "tab-b", ttlMs: 5000 });
+    return a.acquired === true && a.holder === "tab-a" && b.acquired === false && !!b.expiresAt && b.holder === undefined;
+  });
+
+  // --- user
+  await check("user.me() reports canEdit and a name", async () => { const m = await user.me(); return m.canEdit === true && m.id === me && m.name.length > 0; });
+  await check("user.can('data.write') is true for an admin", async () => (await user.can("data.write")) === true);
+  await check("user.profiles resolves your name", async () => { const ps = await user.profiles([me]); return ps[me] && ps[me].isMe && ps[me].name.length > 0; });
+
+  // --- room
+  await check("room connects", async () => { for (let i = 0; i < 30 && !room.connected(); i++) await wait(100); return room.connected(); });
+  await check("peers() includes you", async () => { for (let i = 0; i < 20 && !room.peers().some((p) => p.isMe); i++) await wait(100); return room.peers().some((p) => p.isMe); });
+  await check("emit echoes to yourself with isMe", async () => {
+    const got = new Promise((r) => { const off = room.on("ping", (m) => { off(); r(m); }); });
+    await room.emit("ping", { n: 1 });
+    const m = await Promise.race([got, wait(2000).then(() => null)]);
+    return m && m.isMe === true && m.data.n === 1 && m.by === me;
+  });
+  await check("a moment over 4 KiB rejects invalid_argument", async () => (await code(room.emit("ping", "x".repeat(4097)))) === "invalid_argument");
+  await check("a bad topic rejects invalid_argument", async () => (await code(room.emit("Bad Topic", 1))) === "invalid_argument");
+  await check("presence merges and shows on your peer", async () => {
+    await room.presence({ cursor: [1, 2], mode: "x" }); await room.presence({ mode: null });
+    const p = room.peers().find((x) => x.isMe);
+    return p && JSON.stringify(p.presence) === JSON.stringify({ cursor: [1, 2] });
+  });
+  await check("join a named room and leave it", async () => {
+    const g = await room.join("game-1");
+    for (let i = 0; i < 20 && !g.peers().some((p) => p.isMe); i++) await wait(100);
+    const ok = g.name === "game-1" && g.peers().some((p) => p.isMe);
+    await g.leave();
+    return ok && (await code(g.emit("ping", 1))) === "invalid_argument";
+  });
+
+  // --- permissions, downloads, artifact
+  const perms = await claude.use("permissions");
+  await check("permissions.state() returns a map", async () => { const s = await perms.state(); return typeof s === "object" && s.db === "granted"; });
+  const dl = await claude.use("downloads");
+  await check("downloads refuses a .exe", async () => (await code(dl.save({ filename: "x.exe", data: "x" }))) === "rejected_extension");
+  const art = await claude.use("artifact");
+  await check("artifact resolves on a self-contained app", () => !!art && typeof art.publish === "function");
+
+  // Coordination for the runner's two-tab check: the doc it watches.
+  window.__run = run;
+  finish();
+})();
+
+function finish() {
+  const failed = results.filter((r) => !r.ok).length;
+  document.getElementById("status").textContent = `${results.length - failed}/${results.length} passed`;
+  const pre = document.getElementById("results");
+  pre.textContent = JSON.stringify(results);
+  document.title = "done";
+}
+</script>
+</body></html>
