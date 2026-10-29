@@ -97,6 +97,12 @@ https://site.your-slop-server). The `slop` CLI is logged in.
 - A page reads data through slop.json {"reads": {"posts": "journal"}} and
   window.slop.data.posts.list(). Under a route with --record, window.slop.record
   and window.slop.route.params name the record.
+- {"reads": {"pages": "$site"}} gives a page every public URL of its host
+  (path, title, kind, section, project, updated; record routes add record):
+  static routes, each listed record a record route serves, each page a
+  page-from route admits. Left out: private routes, the fallback, pages with
+  "listed": false, records with draft/hidden: true, listed: false or a
+  visibility other than public. See it with: slop site ls
 - Keep pages self-contained: no external network requests, no build step.
 - Check a routed page with: curl -s https://site.your-slop-server/<path>
 ```

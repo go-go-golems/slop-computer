@@ -74,8 +74,8 @@ const check = (ok, what, extra) => { console.log((ok ? 'ok   ' : 'FAIL ') + what
 
   // The compiled page as the server would serve it: boot data and runtime.js
   // injected after <head>.
-  const serve = async (reqPath, mode = 'site') => {
-    const boot = { route: { host: 'site.localhost', path: reqPath, params: {} }, data: { runs }, version: { artifact: 'pace', n: 1 }, mode };
+  const serve = async (reqPath, mode = 'site', data = { runs }) => {
+    const boot = { route: { host: 'site.localhost', path: reqPath, params: {} }, data, version: { artifact: 'pace', n: 1 }, mode };
     const f = path.join(out, 'page.html');
     fs.writeFileSync(f, res.html.replace('<head>', '<head><script type="application/json" id="slop-boot">' + JSON.stringify(boot).replace(/</g, '\\u003c') + '</script><script>' + runtimeJS + '</script>'));
     await p.goto('file://' + f);
@@ -104,6 +104,55 @@ const check = (ok, what, extra) => { console.log((ok ? 'ok   ' : 'FAIL ') + what
   check(r.title === 'Not found', 'a path outside the app is not found', r.title);
   r = await serve('/elsewhere', 'preview');
   check(r.title.startsWith('Welcome'), 'previews fall back to the start screen', r.title);
+
+  // SLOP-006: a list of $site rows filtered by section, links from {{path}},
+  // a repeat over a list field, rich text, and links that must not survive.
+  await p.goto('file://' + path.join(out, 'harness.html'));
+  await p.waitForTimeout(300);
+  const res2 = await p.evaluate(async () => {
+    await loadExample();
+    const fr = name => allFrames().find(f => f.name === name);
+    const W = fr('Welcome');
+    const site = await importHTML('<div data-name="Site" style="display:flex;flex-direction:column;gap:12px;width:390px;padding:24px;background:#ffffff"><span data-name="Heading" style="font-size:24px">Journal</span><div data-name="Entries" style="display:flex;flex-direction:column;gap:8px"><div data-name="Entry" style="display:flex;flex-direction:column;padding:12px;background:#eeeeee"><span data-name="T">{{title}}</span><span data-name="P">{{path}}</span><div data-name="Tags" style="display:flex;gap:4px"><span data-name="Tag">{{value}}</span></div></div></div></div>', { page: W.page, x: 1400, y: 0, width: 390 });
+    const post = await importHTML('<div data-name="Post" style="display:flex;flex-direction:column;width:390px;padding:24px;background:#ffffff"><span data-name="Body">body here</span></div>', { page: W.page, x: 1900, y: 0, width: 390 });
+    const S1 = get(site.ids[0]), P1 = get(post.ids[0]);
+    const d = (root, name) => descendants(root.id).find(n => n.name === name);
+    patchMany([[S1.id, { route: '/site' }], [P1.id, { route: '/posts/:id', record: 'posts' }],
+      [d(S1, 'Entries').id, { repeat: { from: 'pages', where: [{ field: 'section', op: '=', value: 'journal' }], sort: 'path' } }],
+      [d(S1, 'Entry').id, { href: '{{path}}' }], [d(S1, 'Tags').id, { repeat: { field: 'record.tags' } }],
+      [d(S1, 'Heading').id, { href: 'https://example.com/' }], [d(P1, 'Body').id, { html: 'html' }]]);
+    setFile({ app: { page: 'pace', host: 'site.localhost', base: '/pace', data: { pages: '$site', posts: 'journal' } } });
+    SLOP.file = 'design-test';
+    // a link that is neither a site path nor http(s) is refused
+    patch(d(S1, 'Heading').id, { href: 'javascript:alert(1)' });
+    const bad = slopAppCheck().errors;
+    patch(d(S1, 'Heading').id, { href: 'https://example.com/' });
+    const chk = slopAppCheck();
+    const c = await slopAppCompile(chk, 8);
+    return { errors: chk.errors, bad, html: c.files['index.html'], reads: c.manifest.reads };
+  });
+  check(!res2.errors.length, 'SLOP-006 design compiles', res2.errors);
+  check(res2.bad.some(e => /javascript:alert\(1\).*not a site path/.test(e)), 'a javascript: link is refused at compile time', res2.bad);
+  check(res2.reads.pages === '$site' && res2.reads.posts === 'journal', 'reads names $site', res2.reads);
+  check(res2.html.includes('data-where=') && res2.html.includes('data-repeat-field="record.tags"') && res2.html.includes('href="https://example.com/" rel="noopener"') && res2.html.includes('class="pinup-rich '),
+    'where, list-field repeat, external link and rich text compile');
+  res.html = res2.html;
+  const pages = [
+    { id: '/journal/b', path: '/journal/b', title: 'B post', section: 'journal', kind: 'record', record: { tags: ['x', 'y'] } },
+    { id: '/journal/a', path: '/journal/a', title: 'A post', section: 'journal', kind: 'record', record: { tags: ['z'] } },
+    { id: '/about', path: '/about', title: 'About', section: 'about', kind: 'page' },
+    { id: 'evil', path: 'javascript:alert(1)', title: 'Evil', section: 'journal', kind: 'page' },
+  ];
+  const posts = [{ id: 'p1', path: 'posts/p1.md', title: 'P1', html: '<p>Hello <strong>world</strong></p><script>window.__pwned=1<\/script><img src="x.png" onerror="window.__pwned=2"><a href="javascript:alert(1)">bad</a> <a href="/ok" onclick="window.__pwned=3">ok</a><iframe src="https://example.com"></iframe><style>body{display:none}</style>' }];
+  r = await serve('/pace/site', 'site', { pages, posts });
+  const entries = await p.evaluate(() => [...document.querySelectorAll('main a[href], main a:not([href])')].filter(a => !a.closest('a[href^="https"]')).map(a => ({ href: a.getAttribute('href'), text: a.innerText.replace(/\n+/g, ' | ') })));
+  check(JSON.stringify(entries.map(e => e.href)) === JSON.stringify(['/journal/a', '/journal/b', null]), 'journal rows only, sorted by path, each linking to its path; a javascript: path loses its href', entries);
+  check(entries[0].text.includes('A post') && entries[0].text.includes('z') && entries[1].text.includes('x') && entries[1].text.includes('y') && !r.text.includes('About'), 'tags repeat per row; other sections filtered out', entries);
+  await p.screenshot({ path: path.join(out, 'app-site-list.png') });
+  r = await serve('/pace/posts/p1', 'site', { pages, posts });
+  const post = await p.evaluate(() => { const el = document.querySelector('.pinup-rich'); return { html: el.innerHTML, pwned: window.__pwned || null, links: [...el.querySelectorAll('a')].map(a => a.getAttribute('href')) }; });
+  check(post.html.includes('<strong>world</strong>') && !/script|onerror|onclick|iframe|style/i.test(post.html) && post.pwned === null, 'rich text keeps formatting and drops scripts, handlers, iframes and styles', post);
+  check(JSON.stringify(post.links) === JSON.stringify([null, '/ok']), 'rich text drops javascript: links and keeps site links', post.links);
   check(!errs.length, 'no page errors', errs);
   await b.close();
   console.log(failed ? failed + ' failed' : 'all passed');

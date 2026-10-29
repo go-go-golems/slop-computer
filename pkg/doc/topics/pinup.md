@@ -164,8 +164,21 @@ These are the fields an agent can set with steps (`{"op": "update", "id": …, "
 | top-level frame | `route: "/runs/:id"` | The screen's path under the base. A frame without a route is not a page |
 | top-level frame | `record: "runs"` | On a path with a `:param`, show the record of that source whose `id` (or `slug`) is the param |
 | frame | `repeat: {from: "runs", sort: "-date", limit: 10}` | Repeat the first child once per record. The other children are sample copies and are left out |
+| frame | `repeat: {from: "pages", where: [{field: "section", op: "=", value: "journal"}]}` | Only rows that pass every condition. Ops: `=` `!=` `contains` `<` `>` `exists` `missing`; values can hold `{{placeholders}}` of the screen |
+| frame | `repeat: {field: "record.tags"}` | Repeat over a list field of the scope: object items as they are, others as `{{value}}` and `{{index}}` |
+| any layer | `href: "{{path}}"`, `"/journal"`, `"https://…"` | A real link to any URL (a site path, http(s), mailto or #), filled from the scope; it replaces the prototype link |
 | image fill | `bind: "photo"` | Use the record's field (a file record's `src`, or a URL) as the image |
 | text | `{{title}}`, `{{params.id}}`, `{{app.name}}` | Filled from the repeat's row, then the screen's record, then the path and the app |
+| text | `html: "html"` | Show that field as rich text (a Markdown post's `html`), with scripts, styles, handlers and unsafe links removed |
+
+**Reading the site.** A data source can be `"$site"` instead of a data
+artifact (`"data": {"pages": "$site"}`): one row per public URL of the app's
+host, with `path`, `title`, `kind` (`page`, `record`, `project-page`), `route`,
+`page`, `project`, `projectName`, `section` (the first path segment), `depth`,
+`updated`, and for record routes `record` (the record's fields without its
+body). `slop site ls` prints it. A navigation list is a frame that repeats
+`pages` (filtered by `section`, `kind` or `record.*`) with a child whose
+`href` is `{{path}}`.
 
 Prototype links become `<a href>`s. A link to a screen whose path has
 parameters is filled in from the record in scope (`/pace-club/runs/{{id}}`).
