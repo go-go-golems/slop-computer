@@ -1,0 +1,22 @@
+const { chromium } = require('playwright');
+const fs = require('fs');
+(async () => {
+  require('./wrap.js');
+  const b = await chromium.launch();
+  const p = await b.newPage({ viewport: { width: 1440, height: 900 } });
+  const errs = [];
+  p.on('pageerror', e => errs.push('PAGEERROR ' + e.message));
+  await p.route('**/fonts.googleapis.com/**', r => r.abort());
+  await p.addInitScript({ content: fs.readFileSync(__dirname + '/mock.js', 'utf8') });
+  await p.goto('file://' + __dirname + '/index.html');
+  await p.waitForTimeout(800);
+  await p.click('text=Start with an example app');
+  await p.waitForTimeout(5000);
+  const docs = await p.evaluate(() => [...window.__docs.entries()]);
+  const file = docs.find(d => d[0] === 'meta/file');
+  const nodes = docs.filter(d => d[0].startsWith('nodes/'));
+  console.log('nodes', nodes.length, 'file', JSON.stringify(file[1]).length, 'bytes total', JSON.stringify(docs).length);
+  fs.writeFileSync(__dirname + '/seed.json', JSON.stringify(docs));
+  console.log(errs.join('\n'));
+  await b.close();
+})();

@@ -1,0 +1,145 @@
+<!--
+PINUP — README FOR CLAUDE (and anyone reading the source)
+
+Pinup is a shared design file: pages of frames (screens) on an infinite canvas, plus components,
+colour/text tokens, prototype links and comment pins. Everything lives in this artifact's db, so
+Claude in the conversation can read and edit the same file the people in the page are editing.
+
+DB LAYOUT (ArtifactData, collection paths)
+  meta/file           { name, pages:[{id,name}], tokens:{ colors:{<id>:{name,light,dark}},
+                        type:{<id>:{name,font,size,weight,lh,ls}} }, v:1 }
+  nodes/<id>          one doc per layer (schema below). Read a page: query nodes where page == <pageId>.
+  inbox/<id>          { html, page?, parent?, x?, y?, name?, replace? }  — the easiest way for Claude to
+                      ADD or REPLACE a design: write plain HTML with inline styles; the first open editor
+                      tab imports it as real layers (flex → auto layout) and deletes the inbox doc.
+                      Conventions the importer understands:
+                        data-name="Card"          layer name
+                        data-icon="arrow-right"   lucide icon (on an empty <i> or <span>), colour = CSS color
+                        data-component="Button/Primary"   make this element a component (main)
+                        data-instance="Button/Primary"    place an instance; descendants with a matching
+                                                          data-name and different text become overrides
+                        data-link="Run detail" | "back"   prototype: on click, go to the frame with that name
+                        data-flow="Onboarding"            this root frame starts a prototype flow
+                        var(--tk-<tokenId>)               colours that match a token are bound to it
+                      The root element should set an explicit width (390 for phones, 1440 for desktop).
+                      `replace:<nodeId>` swaps that node for the imported one (same place in the tree).
+
+NODE SCHEMA (nodes/<id>; omit what you don't need — defaults fill in)
+  id, type: frame|rect|ellipse|line|text|icon|svg|instance, page, parent (null = on canvas), z (order
+  among siblings, ascending = on top), name, x, y, w, h (relative to parent; w/h are last-known for
+  hug/fill), rot, visible, locked, opacity,
+  fills: [{t:'solid', c:'#RRGGBB' | '$tokenId', o:0..1} | {t:'gradient', css:'linear-gradient(...)'}
+          | {t:'image', src, fit:'cover'|'contain'|'fill'}]   bottom→top; text/icon colour = fills[0]
+  stroke: {c, w, style:'solid'|'dashed'|'dotted'} | null      (drawn inside)
+  radius: n | [tl,tr,br,bl];  effects: [{t:'shadow',x,y,b,s,c,inset} | {t:'blur',r} | {t:'bgblur',r}]
+  clip (frames), group (frame used as a group), mode:'light'|'dark' (token mode for a frame)
+  layout: null | {dir:'row'|'col', gap:n|'auto', pad:[t,r,b,l], align:'start'|'center'|'end'|'stretch'|'baseline',
+                  justify:'start'|'center'|'end'|'between', wrap}
+  sw/sh: 'fixed'|'hug'|'fill' (horizontal/vertical sizing),  abs: true = ignore parent auto layout
+  text: text, font, size, weight, lh (≤4 = multiplier, else px), ls (px), talign, italic, deco, tcase, tstyle
+  icon: icon (lucide name), svg (inner markup, 24×24 viewBox), iw (stroke width);  svg: markup
+  component: true on a main component frame;  instance: of:<mainId>, ov:{<mainChildId>:{text?,fills?,visible?}}
+  link: {to:<frameId>|'back', on:'click'|'hover', tr:'instant'|'dissolve'|'slide-left'|'slide-right'|
+         'slide-up'|'push-left'|'push-right'|'scale', dur:ms};  flow:'<name>' on a frame = flow start
+
+FEEDBACK → STEPS → HISTORY (how Claude works through review feedback)
+  feedback/<id>       { n (number shown as #n), text, cat: visual|layout|copy|interaction|a11y|question,
+                        node (layer id it is pinned to), dx, dy | area:{x,y,w,h} (px relative to that layer),
+                        marks:[{t:'pen'|'marker'|'arrow'|'box', c, w, pts:[x1,y1,x2,y2,…]}] (sketch, same coords),
+                        status: open|doing|done|wontfix, by, at, reply, doneBy, log:[logIds] }
+  inbox/<id> STEP     { kind:'step', seq (order), feedback:'<feedback id or #n>', label:'short title',
+                        reply:'one line for the reviewer', status?:'done'|'doing',
+                        ops:[ {op:'update', id, data:{…fields}} | {op:'set', id, data:{…full node}} |
+                              {op:'delete', id} | {op:'html', html, parent?, replace?, x?, y?, name?, page?} |
+                              {op:'tokens', data:{colors?, type?}} ] }
+                      The first open editor tab applies each step in seq order as ONE history entry (by Claude),
+                      links it to the feedback item and marks the item done. Do one item per step, smallest change.
+  log/<id>            history: { t, by ('claude' or a user id), label, feedback, changes:[{id, before, after}],
+                        revertedBy, revertOf, undone }. Anyone with edit access can revert any step on its own
+                        from the History tab; a revert is itself a step. If you write nodes directly instead of
+                        using steps, also write a log doc with before/after so the change stays revertible.
+  Roles: editors change the design; contributors can leave feedback; commenters use comment threads.
+
+LIVE CONTEXT: the room presence of each open tab carries page, frame and selected layer names + ids,
+so "this", "the selected card" etc. can be resolved. Comment pins use anchors of the form
+  "<Frame> › <Layer> #<nodeId>@<dx>,<dy>"   or   "area <Frame> #<frameId>@<x>,<y>,<w>,<h>"
+— the id after # is the node the comment is about. Read threads with the artifact comments tool.
+Icons: Lucide (ISC licence), lucide.dev.
+-->
+<div id="app">
+  <header class="top" role="toolbar" aria-label="File and tools">
+    <button class="tb narrow" id="bLeft" title="Layers and assets" aria-label="Layers and assets"></button>
+    <div class="brand"><span class="pin" aria-hidden="true"></span><span class="wide-only">Pinup</span></div>
+    <input class="fname" id="fname" aria-label="File name" spellcheck="false">
+    <span class="sep wide-only"></span>
+    <div class="tools" id="tools"></div>
+    <span class="sep"></span>
+    <button class="tb" id="bUndo" title="Undo (⌘Z)" aria-label="Undo"></button>
+    <button class="tb" id="bRedo" title="Redo (⇧⌘Z)" aria-label="Redo"></button>
+    <div class="grow"></div>
+    <div class="avatars" id="avatars"></div>
+    <span class="role" id="role" hidden></span>
+    <button class="zoom" id="bZoom" title="Zoom" aria-label="Zoom options">100%</button>
+    <button class="btn" id="bShare"><span class="wide-only">Share</span><span class="narrow" style="display:none"></span></button>
+    <button class="btn primary" id="bPlay" title="Present prototype (⌘↵)"></button>
+    <button class="tb narrow" id="bRight" title="Design panel" aria-label="Design panel"></button>
+  </header>
+
+  <aside id="left" aria-label="Pages, layers and assets">
+    <div class="rtabs" role="tablist">
+      <button role="tab" data-ltab="layers" aria-selected="true">Layers</button>
+      <button role="tab" data-ltab="assets" aria-selected="false">Assets</button>
+      <button role="tab" data-ltab="feedback" aria-selected="false">Feedback</button>
+      <button role="tab" data-ltab="history" aria-selected="false">History</button>
+    </div>
+    <div id="lLayers" class="scroll" style="display:flex;flex-direction:column;overflow:hidden">
+      <div class="hd">Pages<span class="grow"></span><button class="ib" id="bAddPage" title="Add page" aria-label="Add page"></button></div>
+      <div class="pages" id="pages"></div>
+      <div class="hd">Layers</div>
+      <div class="scroll tree" id="tree" role="tree" aria-label="Layers"></div>
+    </div>
+    <div id="lAssets" class="scroll" hidden></div>
+    <div id="lFeedback" class="scroll" hidden></div>
+    <div id="lHistory" class="scroll" hidden></div>
+  </aside>
+
+  <main id="stage" class="grid-dots" tabindex="-1" aria-label="Canvas">
+    <div id="world"></div>
+    <div id="fbLayer" aria-hidden="true"></div>
+    <div id="ov"></div>
+    <div class="empty" id="empty" hidden></div>
+    <div id="ask" class="min" hidden>
+      <div class="out" id="askOut" aria-live="polite"></div>
+      <div class="scope" id="askScope"></div>
+      <div class="row">
+        <textarea id="askIn" rows="1" placeholder="Ask Claude to design or change something…" aria-label="Ask Claude"></textarea>
+        <button class="btn sm ghost" id="askChat" title="Put the selection into this chat with Claude">In chat</button>
+        <button class="btn sm primary" id="askGo">Ask</button>
+      </div>
+    </div>
+  </main>
+
+  <aside id="right" aria-label="Properties">
+    <div class="rtabs" role="tablist">
+      <button role="tab" data-rtab="design" aria-selected="true">Design</button>
+      <button role="tab" data-rtab="proto" aria-selected="false">Prototype</button>
+      <button role="tab" data-rtab="inspect" aria-selected="false">Inspect</button>
+    </div>
+    <div class="scroll" id="insp"></div>
+  </aside>
+</div>
+
+<div id="present" hidden>
+  <div class="pbar">
+    <button class="btn sm" id="pvClose">Close</button>
+    <select id="pvFlow" aria-label="Flow"></select>
+    <button class="btn sm" id="pvBack" title="Back (←)">Back</button>
+    <button class="btn sm" id="pvRestart" title="Restart (R)">Restart</button>
+    <span class="phint" id="pvName"></span>
+    <span class="grow"></span>
+    <select id="pvFit" aria-label="Scale"><option value="fit">Fit</option><option value="width">Fit width</option><option value="1">100%</option></select>
+    <button class="btn sm" id="pvComment" hidden>Comment</button>
+  </div>
+  <div id="pv"><div id="pvbox"><div id="pvclip"></div></div></div>
+</div>
+<div id="toast" hidden role="status"></div>
