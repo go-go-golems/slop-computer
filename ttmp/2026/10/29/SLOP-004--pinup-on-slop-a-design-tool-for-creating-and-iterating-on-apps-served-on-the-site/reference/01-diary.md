@@ -194,3 +194,123 @@ SSE  event: doc   id: 1   data: {"path":"nodes/n1","rev":1,"data":{"type":"frame
      event: presence      data: {"peer":"tab-a","user":"usr_…","name":"manuel","kind":"viewer","presence":{"page":"p1"}}
 errors: 400 invalid_request (path, object, type) · 404 not_found · 413 too_large · 507 quota_exceeded · 409 peer_taken
 ```
+
+## Step 3: Pinup running on slop, end to end on the local server
+
+This step builds everything between the docs API and a person using Pinup:
+
+- **Grants:** the Workshop forwards tool `args`, `config` and `people` with each grant.
+- **Tool client:** `tool.js` gains `stream`, `putRaw`, `beacon` and `setArgs`.
+- **CLI:** `slop docs` for agents.
+- **Pinup adapter:** `00-slop-host.js` (tool mode and player mode) and the `95-slop-ui.js` menu (Save version, Publish prototype, Hand off, a picker).
+- **Build:** `slop/build.js` and `make pinup`/`pinup-push`.
+- **Help:** `slop help pinup`.
+
+The whole loop then ran on the local server, which holds the francois import:
+
+1. enable the tool;
+2. create *Pace Club*;
+3. load the example (106 documents);
+4. an agent writes HTML to `inbox/` and the open tab imports it as a screen;
+5. *Save version*;
+6. *Publish prototype*, with the player navigating on the site host;
+7. *Hand off*, which wakes an agent waiting in `comments wait`;
+8. an agent's inbox step resolves feedback #1, and History shows each step with its actor.
+
+Three bugs surfaced along the way and are fixed: the icon load order, the Workshop dropping `?file=` after enabling, and the `tool <name>` label CSS the user reported.
+
+### Prompt Context
+**User prompt (verbatim):** see Step 2. Mid-step: "CSS for \"tool Pinup\" on the left looks a bit weird. [Image #2]" and "can we create apps that display artifacts / itneract with the artifacts db?"
+**Assistant interpretation:** Finish phases 1 and 2. Fix the label. Answer the question about apps that use artifacts and the db in the turn summary.
+**Inferred user intent:** A usable Pinup in the Workshop, and a sense of what other apps the same machinery allows.
+**Commit (code):**
+- `ef8a8d2` "Tools get args, config and people; tool.js stream/putRaw/beacon; slop docs CLI";
+- `2f1f2b9` "Pinup on slop: host adapter, slop menu, player mode, build and push targets";
+- `ea9c141` "Help: slop help pinup (designs for agents); agents topic links it".
+
+### What I did
+- **Workshop** (`ToolScreen.tsx`, `App.tsx`):
+  - `toolArgs(query)`, the query without `try`, is forwarded in the grant message with `people`, and `config: {siteHosts, publicUrl}` comes from the boot config;
+  - `tool-args` messages from the tool replace the Workshop URL's query;
+  - enabling a version keeps the args;
+  - the iframe gets `allow-downloads` and `allow="clipboard-read; clipboard-write"`.
+- **CSS** (`workshop.css`): `.addr span` is vertically centred; `.addr.label` is a compact label with a 6 px gap, used by the tool screen.
+- **`tool.js`:**
+  - one SSE reader, `sse(path, after, on)`, now serves both `api.on` (kernel events) and the new `api.stream(path, {after, on})`;
+  - `api.putRaw` (blob bodies), `api.beacon` (`keepalive`), `api.setArgs`;
+  - `api.args`, `api.config` and `api.people`.
+- **Client and CLI:** `pkg/client/docs.go` (`Docs`, `Doc`, `PutDoc`, `DeleteDoc`, `WatchDocs` with reconnect from the last rev) and `cmd/slop/cmds/docs.go` (`slop docs ls/get/put/rm/watch`), registered as the `docs` group.
+- **`web/pinup/slop/js/00-slop-host.js`.** It is spliced into Pinup's IIFE before `01-util.js`.
+  - Tool mode: `db` keeps a mirror of the design fed by `/api/docs/<design>/events`. The replay builds the initial snapshots, then live events become `docChanges()`; big documents are fetched; out-of-order revs are ignored.
+  - `user` comes from the grant and its `people`.
+  - `room`: presence is posted at most every 250 ms, with a 15 s heartbeat, `pagehide` leave, and stale peers dropped after 45 s. `sendToClaudeSession` becomes a thread on the design.
+  - `downloads` uses a Blob download.
+  - The picker lists `type: pinup` artifacts or creates a design: it pushes v1 and writes `meta/file`.
+  - Player mode: a read-only `db` from `slop.data.design` records (`file.json` and `pages/*.json`), and a `user` who cannot edit.
+- **`web/pinup/slop/js/95-slop-ui.js`:**
+  - the slop menu: Save version, Publish prototype (PUT two routes `/proto/<slug>` and `/:screen` to `pinup-player` with a `design` binding), Hand off (save, then a thread with the build brief), Copy agent brief, and Open another design;
+  - player mode hides `#app` and `#pvClose`, wraps `onLoaded` to present the screen named by `:screen`, and wraps `showFrame` to keep the URL on the current screen;
+  - snapshots are `file.json`, `pages/<pageId>.json` and `handoff.md`, with `_m` stripped.
+- **`web/pinup/slop/build.js`:** upstream modules plus `slop/js`, sorted by file name, in a document skeleton. It writes `dist/slop/` (tool manifest: docs:read, docs:write, artifacts:read, versions:push, threads:write, routes:write) and `dist/slop-player/`, with the same `index.html`. The Makefile gains `pinup` and `pinup-push` (`SLOP ?= slop`).
+- **Help:** `pkg/doc/topics/pinup.md` covers the layout, the inbox (HTML and steps), the loop, building, and publishing. `agents.md` §6 links to it.
+- **The local run** (server `slop7`, `slop_fr`), with screenshots `various/s4-01…s4-10`:
+  1. `Applied migration migration=006_docs.sql`. `make pinup-push` → `pushed pinup v1 (new artifact)` and `pushed pinup-player v1 (new artifact) … 0 uploaded` (same blob).
+  2. Enabled v1. The dialog lists the new permissions in plain words (`s4-01`).
+  3. The picker listed the four projects. *Create* "Pace Club" in Play → the URL became `/tools/pinup?file=design-pace-club`.
+  4. *Start with an example app* → `slop docs ls` → 106 documents (104 nodes, meta, one log entry).
+  5. `slop docs put design-pace-club inbox/h1` (HTML Leaderboard) → the inbox drained, 110 documents, and a "Leaderboard" frame (390×844, auto layout gap 12, padding 24) on the canvas (`s4-04`).
+  6. Pushed v2 with the icon fix and updated through the dialog. Then *Save version* → `Saved design-pace-club v2.`. `slop pull` → `file.json`, `pages/p1.json` (77 nodes), `pages/p7ndBvr.json` (31), `handoff.md` (21,670 characters), no `_m`, and versions listed `via tool`.
+  7. *Publish prototype* → routes `/proto/pace-club` and `/proto/pace-club/:screen` → `pinup-player`, binding `design-pace-club@main`. On the site host: 200 each, about 849 KB with the design inlined. Clicking "Find a run" in the player went Welcome → Home, and the URL became `/proto/pace-club/home` (`s4-07`, `s4-08`).
+  8. With `slop comments wait --artifact design-pace-club` running, the tool showed a "Claude" avatar. *Hand off* woke it with a thread on v2, anchor `{pinup:{file, handoff:true}}`, carrying the build brief and the note.
+  9. `slop docs put feedback/Fcli1` (an open item on `Upcoming`), then `inbox/s1` (a step with `feedback "#1"`, gap 12 → 20) → node gap 20; feedback `done` with the reply and `log: ['Lmvtmn5wtqWfB']`. History shows the three steps with their actors (`s4-10`).
+- **Checks:** `make lint` 0; `go test ./...` 0; Postgres store and server 0; `npx tsc --noEmit` 0; `node --check` on `tool.js` and on `dist/slop-check.js`; the upstream `dist/pinup.html` still has sha `531ef701b5c1417e`.
+
+### Why
+- **One page, two modes.** `06-proto.js` calls a dozen functions from the editor modules (`finishEdit`, `topOf`, `goPage`, `select`, `presenceSoon`, `CA`, …). A cut-down player bundle would have to stub them all. The full page with a read-only `db`, a non-editing `user` and `#app` hidden reuses Pinup unchanged.
+- **The adapter is spliced into the IIFE**, not loaded as a separate script. That way slop's modules can call Pinup's `h`, `sheet`, `menuAt`, `toast`, `handoffMarkdown` and `slug`, and wrap `boot`, `onLoaded` and `showFrame`, without touching upstream files.
+- **Snapshots leave feedback out.** A published route makes the bound version public, through the boot data and `/_d/`. Review items are internal; the handoff and layers are the design itself.
+- **"Send to Claude" becomes a thread.** On slop the agent is a process blocked on `comments wait`. A thread wakes it and records what was asked.
+
+### What worked
+- The upstream review flow (feedback → inbox step → leased, applied, linked, revertible) works unchanged against the real server. This is what `fb1.js` exercised against the mock.
+- A tool upgrade (v1 → v2) went through the existing approval dialog. The design's documents are unaffected, because they live on the server, not in the sandbox origin's storage.
+
+### What didn't work
+- **Missing icon.** The first build's slop button had a blank icon: `ico()` ran at module load, but `boot()` calls `loadIcons()` later (`01-util.js:52`), so `ICONS` was still `{}`. Fixed by creating the button in a wrapper around `boot` (pinup v2).
+- **Lost `?file=`.** After *Update to v2* the Workshop navigated to `/tools/pinup` and dropped `?file=`, so the picker reopened: `EnableToolDialog` called `navigate(toolPath(t.artifact))`. It now keeps `toolArgs(location.search)`.
+- **The user's CSS report.** The tool label sat at the top of a full-width address box with "tool" and "Pinup" run together: `.addr span` was 26 px tall without vertical centring, and `.addr` is `flex:1`. Fixed with the `.addr.label` variant (`s4-05`).
+- **Ambiguous locator.** `locator('textarea').fill(…)` → `strict mode violation: locator('textarea') resolved to 2 elements`, Pinup's prompt bar and the sheet's. I used the placeholder instead.
+- **Invalid click argument.** `browser_click` with `element`/`ref` → `Invalid arguments … expected string, received undefined → at target`. I used `browser_run_code_unsafe` with role locators.
+- **A guess I caught before it shipped.** The first `slopPush` sent `via: 'pinup'`. I dropped it, because grant pushes are attributed to the tool by the server (`via tool`).
+
+### What I learned
+- `comments wait` with a token excludes only comments made *with that token*. Threads created by a tool grant carry no token, so a person's hand-off through Pinup wakes an agent logged in as the same person.
+- A binding name doesn't have to be in the page's `reads`: route bindings add names. `pinup-player` needs no `reads` at all, and one player serves every design.
+
+### What was tricky to build
+- **Snapshot timing in the mirror.** Pinup registers its five listeners synchronously, before the stream's `ready`. The mirror therefore applies replayed documents silently and delivers each listener's initial `added` set at `ready`. Listeners added later get theirs on the next tick. Live events after `ready` are diffed against the mirror into `added`, `modified` or `removed`. Tombstones stay in the mirror with their rev, so a late fetch of a big document cannot resurrect it.
+- **URL state in the player.** `openPresent` sets `#present` after `showFrame`, which the wrapper has already pointed at `/<screen>`. The URL ends up as `/proto/pace-club/welcome#present`, which is harmless.
+
+### What warrants a second pair of eyes
+- **`routes:write` in the tool manifest** lets Pinup point routes on every host, not only `/proto/*`. It is approved by an admin, but a narrower permission (routes under a prefix) would match the need better.
+- **Toast wording.** Pinup's toasts still say "Sent to Claude — check the conversation". On slop it is a thread; changing that wording means patching upstream text.
+- **Player page size:** about 849 KB, the Pinup page plus the design in the boot data. Images as data URLs would grow it; the `assets` capability is phase 3.
+- **The docs store is limited to `type: pinup`** (`store.DocTypes`). Other tools need a registration step before they can use it (see the answer in the turn summary).
+
+### What should be done in the future
+- A scripted Playwright test of tool mode against `slop serve --local` (this step was verified by driving the browser by hand).
+- Phase 3: `sample` (in-page Claude) via an API proxy, `assets`, a reviewer role, `viewer: pinup-player` for design artifacts.
+- Deploy: merge, publish the image, bump the gitops tag, then `make pinup-push` against the cluster and enable the tool.
+
+### Code review instructions
+- Read `web/pinup/slop/js/00-slop-host.js` against `web/pinup/tests/mock.js` (the contract), then `95-slop-ui.js`, then `slop/build.js`.
+- Check `pkg/render/assets/tool.js` (`sse`) and `web/workshop/src/screens/ToolScreen.tsx`.
+- Reproduce: `make pinup-push SLOP=./slop` against a local server, enable Pinup, then follow the run in What I did.
+
+### Technical details
+```
+tool manifest: {"title":"Pinup","kind":"page","tool":{"title":"Pinup","icon":"pen-tool","permissions":["docs:read","docs:write","artifacts:read","versions:push","threads:write","routes:write"]}}
+snapshot (design-pace-club v2): file.json · pages/p1.json (77) · pages/p7ndBvr.json (31) · handoff.md (21,670 chars)
+routes: /proto/pace-club, /proto/pace-club/:screen → pinup-player, bindings {"design":{"artifact":"design-pace-club","version":null}}
+module order (slop build): 00-slop-host 01-util … 14-log 95-slop-ui 99-boot
+```

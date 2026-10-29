@@ -55,6 +55,18 @@ The integration is mostly a matter of *mapping*, not rewriting, because Pinup re
 
 Sections 1–4 explain the parts you need to understand: slop, Pinup, the Artifact runtime contract, and the slop features we build on. Section 5 lists the gaps. Section 6 is the design, 7 walks through a whole session end to end, 8 is the phased plan with files, 9 covers tests, 10 risks, and 11 how we keep Pinup maintainable here.
 
+### As built (2026-10-29)
+
+Phases 1 and 2 are implemented. They differ from the design below in these points; the diary (`reference/01-diary.md`, steps 2–3) has the details.
+
+- **Docs API paths.** Paths are exactly `collection/id`. The lease endpoint is `POST /api/docs/{artifact}/{coll}/{id}/acquire`, and the stream is `GET /api/docs/{artifact}/events`. Revs come from a `doc_heads` counter row, whose upsert serializes writers until commit.
+- **No separate player bundle.** There is no `--player` bundle or `90-player.js`. The one slop build (`web/pinup/slop/build.js`) runs in **tool mode** in the Workshop and in **player mode** on a site route that binds a design. `pinup-player` is the same `index.html` with a plain page manifest. The reason: `06-proto.js` depends on a dozen editor functions.
+- **Adapter location.** The adapter is `web/pinup/slop/js/00-slop-host.js`, and the menu is `95-slop-ui.js`. Both are spliced into Pinup's IIFE, so upstream `src/` is unchanged.
+- **Snapshots** are `file.json`, `pages/<pageId>.json` and `handoff.md`. **Feedback is not snapshotted**, because a published route makes the version public.
+- **Tool manifest:** `docs:read`, `docs:write`, `artifacts:read`, `versions:push`, `threads:write` and `routes:write`. It has no `events:read`; presence and changes arrive on the docs stream.
+- **Grant message:** the Workshop forwards `args` (the query of `/tools/<id>`), `config` (site hosts) and `people`. `tool.js` gains `api.stream`, `api.putRaw`, `api.beacon` and `api.setArgs`.
+- **Not built yet:** Open version, static publish (C), phase 3, a scripted Playwright test, and scheduled tombstone pruning.
+
 ---
 
 ## 1. slop in five minutes

@@ -11,12 +11,22 @@ DocType: index
 Intent: long-term
 Owners: []
 RelatedFiles:
+    - Path: repo://pkg/server/docs.go
+      Note: Docs API, stream, presence
     - Path: repo://pkg/server/tools.go
       Note: Tools and grants Pinup runs as
+    - Path: repo://pkg/store/docs.go
+      Note: Docs store
     - Path: repo://ttmp/2026/10/29/SLOP-004--pinup-on-slop-a-design-tool-for-creating-and-iterating-on-apps-served-on-the-site/design-doc/01-intern-guide-integrating-pinup-into-slop-as-a-workshop-tool.md
       Note: The intern guide
     - Path: repo://web/pinup/README.md
       Note: Pinup in this repo (provenance, build, test)
+    - Path: repo://web/pinup/slop/build.js
+      Note: The slop build
+    - Path: repo://web/pinup/slop/js/00-slop-host.js
+      Note: Host adapter (tool and player mode)
+    - Path: repo://web/pinup/slop/js/95-slop-ui.js
+      Note: Save version, Publish prototype, Hand off
     - Path: repo://web/pinup/tests/mock.js
       Note: The host contract Pinup expects
 ExternalSources: []
