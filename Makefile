@@ -1,4 +1,4 @@
-.PHONY: lint fmt-check test test-postgres build web generate run-local dev-backend dev-frontend pinup pinup-push runtime runtime-test piworker conformance
+.PHONY: lint fmt-check test test-postgres build web generate run-local dev-backend dev-frontend pinup pinup-push runtime runtime-test piworker conformance blocks blocks-push
 
 lint:
 	GOWORK=off golangci-lint run -v
@@ -31,6 +31,13 @@ piworker:
 conformance:
 	node web/rt-conformance/run.mjs $${SLOP_SERVER:-http://localhost:8080} rt-conformance
 	node web/rt-conformance/run.mjs $${SLOP_SERVER:-http://localhost:8080} rt-sample
+
+# Claude Blocks (web/blocks): the upstream files, checked, plus slop.json.
+blocks:
+	web/blocks/build.sh
+
+blocks-push: blocks
+	$(SLOP) push web/blocks/dist -a blocks --title "Claude Blocks" -m "Claude Blocks $$(git rev-parse --short HEAD)"
 
 # Builds the Workshop into pkg/web/workshop (served from disk by plain builds).
 web generate:
