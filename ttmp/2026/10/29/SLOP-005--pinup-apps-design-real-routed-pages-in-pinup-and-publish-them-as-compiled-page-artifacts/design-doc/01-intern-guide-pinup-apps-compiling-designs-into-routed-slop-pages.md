@@ -589,3 +589,20 @@ Testing strategy:
 | `web/workshop/src/components/organisms/WatchRight.tsx` | `PageToolbar` (Edit in Pinup) |
 | `web/workshop/src/screens/WatchScreen.tsx` | data toolbar (Open in Pinup) |
 | `pkg/doc/topics/pinup.md` | `slop help pinup` |
+
+## As built (2026-10-29)
+
+The implementation follows this guide, with these differences:
+
+- **Hand-written pages.** §4.2 said a hand push would be replaced by the next Publish app. As built:
+  - Publish app **asks** ("Replace a hand-written version?") when the page's `main` was pushed by hand over versions from this design;
+  - it **refuses** a page that has no version from this design, or one compiled from another design.
+  The push warning says the same.
+- **Preview of a new page** creates the artifact with no `main`, so nothing serves it until the first Publish.
+- **The compiler gives the designed height** (`min-height`) to a layer with Fill height inside a parent that hugs. Without it, CSS collapses such a layer to its content, for example icon buttons in a top bar.
+- **The build refuses `</script>` in any module.** The bundle is inlined in one `<script>` element, and the compiler's HTML template once closed it.
+- **Files:**
+  - `web/pinup/slop/js/96-slop-app.js` (compiler, runtime, publish, settings, Prototype-tab sections);
+  - `web/pinup/slop/tests/app.js` (browser test, 24 checks);
+  - `pkg/server/kernel.go` `compiledWarning`, with `TestPushWarnsOnPinupPages`.
+- **Commits:** `51fbeac`, `5b90016`, `7e012b5`. The diary (steps 2–3) has the end-to-end run and its screenshots.
