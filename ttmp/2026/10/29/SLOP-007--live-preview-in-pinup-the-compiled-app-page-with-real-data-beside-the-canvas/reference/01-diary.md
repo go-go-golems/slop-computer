@@ -275,3 +275,62 @@ The Workshop console had no errors or warnings. I documented the panel in `slop 
 
 - Look at the four screenshots in `various/`.
 - Reproduce: open a Pinup app design in the Workshop and click the window icon left of *slop*.
+
+## Step 4: The design picker stacked every design in one cell
+
+The user reported that the "Open a design" sheet (Pinup opened without `?file=`) looked wrong. Their screenshot showed one button, "Site map · design-site-map · v2", lying over a second one cut off at "P…". The cause is CSS:
+
+- `slopPick` (`web/pinup/slop/js/00-slop-host.js`) put each design in its own `<div class="acts">` inside a `.opt` grid;
+- Pinup's rule `.opt .acts { grid-row: 1 / span 2; grid-column: 2; }` puts every `.acts` in the same cell;
+- so the designs overlapped and only the last one could be clicked.
+
+The bug dates from SLOP-004, when the picker was written, and it showed up only once there were two designs. Designs are now a vertical list of full-width rows, sorted by title: the title on the left, and the project, id and main version on the right. The list scrolls past 320 px.
+
+### Prompt Context
+
+- **User prompt (verbatim):** "The design list here is weird: [Image #3]" (a screenshot of the Open a design sheet, with two overlapping design buttons).
+- **Assistant interpretation:** Fix the picker's layout.
+- **Inferred user intent:** Be able to see and pick every design.
+- **Commit (code):** `c643852` — "Pinup on slop: the design picker lists one row per design".
+
+### What I did
+
+- **Read** `slopPick` and Pinup's `.opt` / `.opt .acts` rules (`src/head.html:335–338`).
+- **Replaced** the per-design `.acts` boxes with `button.slop-design` rows in a `div.slop-designs` flex column. The CSS is a style element appended by `00-slop-host.js`; `h` is a hoisted function declaration, so the module can call it before `01-util.js`'s text.
+- **Loaded artifacts and projects together**, so rows show the project's name (`Play`), and sorted by title.
+- **Checked in the harness** with a stub API (a scratchpad script): three rows at tops 293, 332 and 371, a long title truncated with an ellipsis, and a click that resolves to the clicked id. No page errors.
+- **Added** a regression check to `slop/tests/app.js`: "the design picker lists designs one per row, sorted, and opens the one clicked" (row texts, increasing tops, picked id) → `all passed` (67 checks).
+- **Pushed** `pinup v10` to the local server; *trying v10* showed "Pace Club · Play · design-pace-club · v5" and "Site map · Play · design-site-map · v2" as two rows. Then Workshop → *Update to v10…* → `enabled v10`.
+
+### Why
+
+- **Rows instead of a button cloud.** A design is chosen by name. A full-width row has room for the id and version, which people need for `slop docs` commands, and a list scrolls once there are many designs.
+
+### What worked
+
+- The fix needs no change to Pinup's own CSS: the new classes are scoped to the slop picker.
+
+### What didn't work
+
+- The original layout relied on Pinup's `.opt` grid, which is built for one label and one `.acts` box per option row.
+
+### What I learned
+
+- Pinup's `.opt` component is a two-column grid with exactly one actions cell. Anything repeated has to live outside it.
+
+### What was tricky to build
+
+- Nothing; the diagnosis came from the screenshot and the CSS rule.
+
+### What warrants a second pair of eyes
+
+- The picker lists only designs with a saved version (artifacts of type `pinup`). A design created in the picker gets one right away.
+
+### What should be done in the future
+
+- Nothing for this fix.
+
+### Code review instructions
+
+- `slopPick` in `web/pinup/slop/js/00-slop-host.js`.
+- The new check near the end of `web/pinup/slop/tests/app.js`.
