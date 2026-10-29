@@ -11,12 +11,12 @@
 <tbody>
 {{range .Routes}}{{$r := .}}
 <tr>
-<td><code>{{.Path}}</code></td><td>{{.Page}}</td>
-<td>{{if .Version}}v{{.Version}} pinned{{else}}main → v{{.Main}}{{end}}</td>
-<td><form method="post" action="/_/route" class="inline">
+<td><code>{{.Path}}</code></td><td>{{if .PageFrom}}<code>{{.PageFrom}}</code>, else {{.Page}}{{else}}{{.Page}}{{end}}</td>
+<td>{{if .PageFrom}}main of each page{{else if .Version}}v{{.Version}} pinned{{else}}main → v{{.Main}}{{end}}</td>
+<td>{{if .PageFrom}}–{{else}}<form method="post" action="/_/route" class="inline">
 <input type="hidden" name="csrf" value="{{$.CSRF}}"><input type="hidden" name="host" value="{{.Host}}"><input type="hidden" name="path" value="{{.Path}}">
 <select name="version"><option value="main"{{if not .Version}} selected{{end}}>follow main</option>{{range .Versions}}<option value="{{.}}"{{if and $r.Version (eq . (deref $r.Version))}} selected{{end}}>v{{.}}</option>{{end}}</select>
-<button>Point</button></form></td>
+<button>Point</button></form>{{end}}</td>
 <td><form method="post" action="/_/undo" class="inline"><input type="hidden" name="csrf" value="{{$.CSRF}}"><input type="hidden" name="host" value="{{.Host}}"><input type="hidden" name="path" value="{{.Path}}"><button>Undo last change</button></form></td>
 </tr>
 {{end}}

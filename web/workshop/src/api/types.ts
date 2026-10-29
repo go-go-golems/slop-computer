@@ -47,6 +47,9 @@ export interface Route {
   host: string
   path: string
   page: string
+  // A template filled from the path's params (e.g. "{page}"): the page to
+  // serve among the pages of page's project; page is then the 404 else page.
+  pageFrom?: string
   version: number | null
   bindings: Record<string, Binding> | null
   record?: string
@@ -70,7 +73,7 @@ export interface RouteLogEntry {
   at: string
 }
 
-export interface Resolution { route: Route; params: Record<string, string>; record?: string; fallback: boolean }
+export interface Resolution { route: Route; params: Record<string, string>; record?: string; page?: string; missing?: boolean; fallback: boolean }
 export interface Resolved { resolution: Resolution; n: number; bindings: Record<string, ResolvedBinding> }
 
 export interface Anchor {

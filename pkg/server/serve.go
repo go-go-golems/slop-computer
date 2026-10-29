@@ -277,22 +277,19 @@ func (s *Server) admits(ctx context.Context, rt store.Route, id string) bool {
 // target is the version a resolution serves: for a page-from route, the
 // main of the page it names when the route admits it; otherwise (missing)
 // the route's own page.
-func (s *Server) target(ctx context.Context, res routing.Resolution) (v store.Version, missing bool, err error) {
+func (s *Server) target(ctx context.Context, res routing.Resolution) (store.Version, bool, error) {
 	rt := res.Route
-	if rt.PageFrom != "" {
-		if s.admits(ctx, rt, res.Page) {
-			if v, err = s.Store.Version(ctx, res.Page, 0); err == nil {
-				return v, false, nil
-			}
+	if rt.PageFrom != "" && s.admits(ctx, rt, res.Page) {
+		if v, err := s.Store.Version(ctx, res.Page, 0); err == nil {
+			return v, false, nil
 		}
-		missing = true
 	}
 	n := 0
 	if rt.Version != nil {
 		n = *rt.Version
 	}
-	v, err = s.Store.Version(ctx, rt.Page, n)
-	return v, missing, err
+	v, err := s.Store.Version(ctx, rt.Page, n)
+	return v, rt.PageFrom != "", err
 }
 
 // pageFromReads reports whether a page a page-from route admits reads data

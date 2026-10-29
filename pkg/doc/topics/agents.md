@@ -86,6 +86,10 @@ https://site.your-slop-server). The `slop` CLI is logged in.
 - slop push <dir> -m "what changed"        # new version (folder remembers its artifact)
 - slop push <dir> -a <id> --project <p> --title "Title" -m "first"   # new page
 - slop route set /path <artifact>          # put a page on the site (follows main)
+- slop route set /r/:page <else-page> --page-from '{page}'
+                                           # one route for many pages: serves the page
+                                           # named by :page from <else-page>'s project,
+                                           # <else-page> (404) when there is none
 - slop route undo /path                    # take the last route change back
 - slop comments wait -p <project>          # BLOCKS until someone comments; prints
                                            # the thread, the element and how to reply
@@ -118,8 +122,13 @@ https://site.your-slop-server). The `slop` CLI is logged in.
   `reads` are inlined into the page. Large data means large pages.
 - **Relative links resolve from the route.** A page routed at `/apps/:id`
   finds `style.css` at `/apps/style.css`. Keep a page's files flat at its root.
-- **A route serves one page.** There is no "route to the page this record
-  names" yet. Linking to many pages means one route each.
+- **A route serves one page, unless it is a page-from route.** To give many
+  page artifacts a URL each, don't write one route per page:
+  `slop route set /r/:page release-missing --page-from '{page}'` serves page
+  `weft` at `/r/weft`, for every page of `release-missing`'s project, at main.
+  Every page of that project whose id fits the template becomes public, so a
+  prefix (`--page-from 'release-{page}'`) narrows it. A page cannot be chosen
+  by a record field yet; put the page id in the URL.
 - **Routes of the same shape shadow each other without warning.**
   `/apps/:id` and `/apps/:slug` cannot both work. `slop route set /` replaces
   the home page. `slop route list` before you route.
@@ -132,7 +141,9 @@ The francois catalogue lives in project `francois`:
 - `francois-catalog`: one JSON record per app.
 - `francois-creators`.
 - `francois-media`, `-2`, `-3`: images, cover and gallery `src` included.
-- One page artifact per app whose versions are its releases.
+- One page artifact per app whose versions are its releases, served at
+  `/r/<page>` (one page-from route, if the server has it; one route each on
+  older servers).
 
 The storefront at https://site.your-slop-server/ is the pages `storefront` and
 `storefront-entry`; `slop pull storefront` is the quickest example of a page that

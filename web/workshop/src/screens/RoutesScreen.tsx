@@ -73,12 +73,12 @@ function RouteTable({ rows, selected, onSelect }: { rows: RouteView[]; selected?
             return (
               <tr key={r.path} className={cx('click', selected?.path === r.path && 'on')} onClick={() => onSelect(r)}>
                 <td><code style={{ fontWeight: 700 }}>{r.path}</code></td>
-                <td>{r.page}</td>
+                <td>{r.pageFrom ? <><code>{r.pageFrom}</code><div className="dim">{`else ${r.page}`}</div></> : r.page}</td>
                 <td className="dim">
                   {data.length ? data.map(([k, b]) => <div key={k}><code>{`${b.artifact}@${b.version ? 'v' + b.version : 'main'}`}</code></div>) : '–'}
                   {r.record ? <div><code style={{ color: 'var(--ink-2)' }}>{r.record}</code></div> : null}
                 </td>
-                <td>{r.version ? <><code>{`v${r.version}`}</code>{' pinned '}{main > r.version ? <Tag tone="red">{`v${main} newer`}</Tag> : null}</> : <code>{`main → v${main}`}</code>}</td>
+                <td>{r.pageFrom ? <code>main of each</code> : r.version ? <><code>{`v${r.version}`}</code>{' pinned '}{main > r.version ? <Tag tone="red">{`v${main} newer`}</Tag> : null}</> : <code>{`main → v${main}`}</code>}</td>
                 <td className="dim">{r.access}</td>
                 <td className="dim">{`${name(r.changedBy)} · ${ago(r.changedAt)}`}</td>
               </tr>
@@ -151,15 +151,18 @@ function RouteDetail({ r, onOpenSite }: { r: RouteView; onOpenSite: (t: SiteTarg
   return (
     <div className="tilebody"><div className="scroll"><div className="det">
       <h3>{r.path}</h3>
-      <p className="sub">{`${r.host} · ${r.page} · changed by ${name(r.changedBy)} ${ago(r.changedAt)}`}</p>
+      <p className="sub">{`${r.host} · ${r.pageFrom ? `${r.pageFrom}, else ${r.page}` : r.page} · changed by ${name(r.changedBy)} ${ago(r.changedAt)}`}</p>
       <div className="mini">{r.n ? <PreviewStage artifact={r.page} n={r.n} host={r.host} path={path} device="desktop" className="mini-stage" /> : null}</div>
       <div className="kv">
-        <span>Page</span>
+        {r.pageFrom ? <><span>Page from</span><span><code>{r.pageFrom}</code><span className="dim">{` · any page of ${a?.project ?? 'its project'} it names, at main`}</span></span></> : null}
+        <span>{r.pageFrom ? 'Else page' : 'Page'}</span>
         <Select aria-label="Page" value={r.page} onChange={val => set({ page: val, version: null }, `page is now ${val}, following main`)} options={pages.map(p => ({ value: p.id, label: p.id }))} />
-        <span>Points at</span>
-        <Select aria-label="Version" value={r.version ? String(r.version) : 'main'}
-          onChange={val => (val === 'main' ? set({ version: null }, 'follows main') : set({ version: +val }, `pinned v${val}`))}
-          options={[{ value: 'main', label: `Follow main (now v${a?.main ?? '?'})` }, ...versions.slice().reverse().map(x => ({ value: String(x.n), label: `v${x.n} · ${x.message}` }))]} />
+        {r.pageFrom ? null : <>
+          <span>Points at</span>
+          <Select aria-label="Version" value={r.version ? String(r.version) : 'main'}
+            onChange={val => (val === 'main' ? set({ version: null }, 'follows main') : set({ version: +val }, `pinned v${val}`))}
+            options={[{ value: 'main', label: `Follow main (now v${a?.main ?? '?'})` }, ...versions.slice().reverse().map(x => ({ value: String(x.n), label: `v${x.n} · ${x.message}` }))]} />
+        </>}
         {binds.map(([k, b]) => <BindingSelect key={k} name={k} artifact={b.artifact} version={b.version}
           onChange={ver => set({ bindings: { ...(r.bindings ?? {}), [k]: { artifact: b.artifact, version: ver } } }, ver ? `${b.artifact} pinned v${ver}` : `${b.artifact} follows main`)} />)}
         {r.record ? <><span>Record</span><code>{r.record}</code></> : null}

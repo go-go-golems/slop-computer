@@ -38,7 +38,7 @@ function describe(e: SlopEvent): string | null {
   switch (e.type) {
     case 'version.created': return `pushed ${p.artifact} v${p.n}${p.message ? ` · ${p.message}` : ''}`
     case 'ref.moved': return `moved ${p.artifact} ${p.ref} to v${p.to}`
-    case 'route.set': return `route ${(p.route as Payload)?.host ?? ''}${(p.route as Payload)?.path ?? ''} → ${(p.route as Payload)?.page ?? ''}@${(p.route as Payload)?.version ?? 'main'}${p.note ? ` (${p.note})` : ''}`
+    case 'route.set': return `route ${(p.route as Payload)?.host ?? ''}${(p.route as Payload)?.path ?? ''} → ${(p.route as Payload)?.pageFrom ? `${(p.route as Payload).pageFrom} else ` : ''}${(p.route as Payload)?.page ?? ''}@${(p.route as Payload)?.version ?? 'main'}${p.note ? ` (${p.note})` : ''}`
     case 'route.removed': return `removed route ${p.host}${p.path}`
     case 'thread.created': return `commented on ${e.artifact}`
     case 'comment.created': return `replied on ${e.artifact}`
