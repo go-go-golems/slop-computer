@@ -26,3 +26,10 @@ form.inline button{padding:4px 10px}
 select{font:inherit;padding:4px}
 .ok{border-left:3px solid var(--ink);padding:6px 10px;background:var(--wall)}
 .err{border-left:3px solid var(--red);padding:6px 10px;color:var(--red)}
+.doc{line-height:1.55}
+.doc h1{font-size:26px;margin:8px 0 16px}
+.doc h2{font-size:17px;margin:28px 0 8px}
+.doc pre{background:var(--wall);border:1px solid var(--line);padding:10px 12px;overflow:auto}
+.doc code,.doc pre{font:13px/1.5 ui-monospace,SFMono-Regular,Menlo,Consolas,monospace}
+.doc li{margin:4px 0}
+.doc a{color:inherit}

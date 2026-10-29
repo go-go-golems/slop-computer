@@ -13,6 +13,7 @@ import (
 	"github.com/go-go-golems/glazed/pkg/help"
 	help_cmd "github.com/go-go-golems/glazed/pkg/help/cmd"
 	"github.com/go-go-golems/slop-computer/cmd/slop/cmds"
+	"github.com/go-go-golems/slop-computer/pkg/doc"
 	"github.com/pkg/errors"
 	"github.com/spf13/cobra"
 )
@@ -28,7 +29,11 @@ func run(ctx context.Context) error {
 	if err := logging.AddLoggingSectionToRootCommand(root, "slop"); err != nil {
 		return errors.Wrap(err, "configure logging")
 	}
-	help_cmd.SetupCobraRootCommand(help.NewHelpSystem(), root)
+	hs := help.NewHelpSystem()
+	if err := doc.AddDocToHelpSystem(hs); err != nil {
+		return errors.Wrap(err, "load help topics")
+	}
+	help_cmd.SetupCobraRootCommand(hs, root)
 	if err := cmds.Register(root); err != nil {
 		return errors.Wrap(err, "register commands")
 	}

@@ -59,6 +59,7 @@ type Route struct {
 	Host      string             `json:"host"`
 	Path      string             `json:"path"`
 	Page      string             `json:"page"`
+	PageFrom  string             `json:"pageFrom,omitempty"`
 	Version   *int               `json:"version"`
 	Bindings  map[string]Binding `json:"bindings,omitempty"`
 	Record    string             `json:"record,omitempty"`

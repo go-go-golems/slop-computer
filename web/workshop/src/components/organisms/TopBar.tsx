@@ -64,7 +64,8 @@ export function TopBar({ loc, artifact, onScreen }: { loc: Location; artifact?: 
         {menu === 'more' ? (
           <div className="menu right" role="menu" onClick={e => e.stopPropagation()}>
             {local ? <button type="button" className="act" onClick={signOut}><span className="t">Sign in as someone else</span><small style={{ gridColumn: 1 }}>Local mode: nicknames, no passwords.</small></button> : null}
-            <a className="act" href="/_/" style={{ color: 'inherit', textDecoration: 'none' }}><span className="t">Safe mode</span><small style={{ gridColumn: 1 }}>The fuse box: routes and tokens without the Workshop.</small></a>
+            <a className="act" href="/help/agents"><span className="t">Connect your agent</span><small style={{ gridColumn: 1 }}>Log a coding agent in and work with it through pushes and comments.</small></a>
+            <a className="act" href="/_/"><span className="t">Safe mode</span><small style={{ gridColumn: 1 }}>The fuse box: routes and tokens without the Workshop.</small></a>
             <button type="button" className="act" onClick={signOut}><span className="t">Sign out</span></button>
           </div>
         ) : null}

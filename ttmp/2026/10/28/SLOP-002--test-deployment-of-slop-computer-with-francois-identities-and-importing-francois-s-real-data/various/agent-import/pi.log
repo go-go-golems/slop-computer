@@ -1,0 +1,16 @@
+Done. Built and verified in project `francois`:
+
+- `storefront` (v2) at `/` — 100 listed apps, covers from `/_d/…`, featured-first → sortOrder → title, version, tags, `Early access` (79) and `needs db|user|room` (23) badges, monogram fallback for the 6 coverless records. All 100 card links resolve.
+- `storefront-entry` (v2) at `/apps/:id` with `--record '{id}.json' --bind catalog=francois-catalog` — title, cover, hand-written Markdown renderer (headings, paragraphs, emphasis, links, images, lists, inline/fenced code, quotes/rules, HTML-comment stripping, HTML escaping, origin rewriting), gallery, full release history.
+- Release links: `/r/<page>` routes pinned to each record's latest release `n` (100 routes, e.g. `/r/lattice-deck` → `lattice-deck@3` = 0.1.2). All return 200 and serve the imported HTML.
+- Preserved `/`'s old page at `/lab-home` and the shadowed experiments route at `/experiments/:slug`.
+
+Key discovery: `/_d/…` data-file URLs 404 until a routed page declares the artifact in `reads`; `/_v/…` serves routed page assets, numeric versions only. Full evidence and workarounds are in `/tmp/.../work/NOTES.md` (printed above).
+
+<summary>
+This turn: Built storefront + storefront-entry pages, 100 release routes, verified in browser and wrote NOTES.md.
+Session so far: Discovered slop's data-asset gating (/_d needs reads, /_v for routed pages), pushed both pages twice, routed /, /apps/:id, /r/*, preserved old routes.
+Issues: /apps/:id silently shadows /apps/:slug; every page ships 667KB boot data; 100 routes needed for task 3.
+Next steps: Rerun the /r/<page> route script when releases change; update pages if the import's media layout changes.
+</summary>
+AGENT-DONE

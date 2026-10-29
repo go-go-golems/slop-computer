@@ -359,7 +359,10 @@ func (c *Census) Markdown() string {
 		posts = append(posts, fmt.Sprintf("%d %s", n, st))
 	}
 	sort.Strings(posts)
-	p("- posts: %s; creators: %d; francois admins: %d\n", strings.Join(append(posts, ""), " "), c.Creators, c.Admins)
+	if len(posts) == 0 {
+		posts = []string{"none"}
+	}
+	p("- posts: %s; creators: %d; francois admins: %d\n", strings.Join(posts, ", "), c.Creators, c.Admins)
 	if len(c.Counts) > 0 {
 		p("\n## Not imported (row counts)\n\n")
 		keys := make([]string, 0, len(c.Counts))

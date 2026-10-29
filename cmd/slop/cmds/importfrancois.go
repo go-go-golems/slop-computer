@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"strings"
 
 	glazed "github.com/go-go-golems/glazed/pkg/cmds"
 	"github.com/go-go-golems/glazed/pkg/cmds/fields"
@@ -144,7 +145,8 @@ func newImportAdmins() *importAdminsCmd {
 		glazed.WithLong("Reads francois's enabled admins (database or studio API with admin:read) and, matching on OIDC issuer and "+
 			"subject, creates them as slop admins or promotes their pending accounts. Everyone else stays pending. "+
 			"Only useful when both apps sign in through the same ZITADEL instance."),
-		dbFlags(append(francoisFlags(), boolean("dry-run", "Only list who would be imported"))...))}
+		dbFlags(append(francoisFlags(), boolean("dry-run", "Only list who would be imported"),
+			list("email", "Only the admins with these emails (e.g. leave out test accounts)"))...))}
 }
 
 func (c *importAdminsCmd) RunIntoGlazeProcessor(ctx context.Context, v *values.Values, out middlewares.Processor) error {
@@ -158,9 +160,13 @@ func (c *importAdminsCmd) RunIntoGlazeProcessor(ctx context.Context, v *values.V
 	if err != nil {
 		return err
 	}
+	only := map[string]bool{}
+	for _, e := range a.L("email") {
+		only[strings.ToLower(e)] = true
+	}
 	var admins []francois.User
 	for _, u := range snap.Users {
-		if u.Role == "admin" && !u.Disabled {
+		if u.Role == "admin" && !u.Disabled && (len(only) == 0 || only[strings.ToLower(u.Email)]) {
 			admins = append(admins, u)
 		}
 	}

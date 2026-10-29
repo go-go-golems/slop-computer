@@ -49,3 +49,38 @@ func TestResolve(t *testing.T) {
 		t.Error("specificity order")
 	}
 }
+
+func TestPageFrom(t *testing.T) {
+	rows := []store.Route{
+		{Host: "site", Path: "/r/:page", Page: "release-missing", PageFrom: "{page}"},
+		{Host: "site", Path: "/x/:id", Page: "release-missing", PageFrom: "release-{id}"},
+		{Host: "site", Path: "/r/feed", Page: "feed"},
+	}
+	cases := []struct{ path, page string }{
+		{"/r/weft", "weft"},
+		{"/x/weft", "release-weft"},
+		{"/r/feed", "feed"},
+	}
+	for _, c := range cases {
+		res, ok := Resolve(rows, "site", c.path)
+		if !ok || res.Page != c.page {
+			t.Errorf("%s → %+v %v, want page %s", c.path, res, ok, c.page)
+		}
+	}
+	m := TemplateMatcher("release-{id}")
+	if !m.MatchString("release-weft") || m.MatchString("weft") || m.MatchString("release-") {
+		t.Errorf("matcher %s", m)
+	}
+	if !TemplateMatcher("{page}").MatchString("weft") || TemplateMatcher("a.{x}").MatchString("abx") {
+		t.Error("matcher quoting")
+	}
+	// No :page makes {page}-{page} into private-draft; repeats match nothing.
+	for _, id := range []string{"private-draft", "a-a", ""} {
+		if TemplateMatcher("{page}-{page}").MatchString(id) {
+			t.Errorf("repeated placeholder admitted %q", id)
+		}
+	}
+	if !TemplateMatcher("{a}-{b}").MatchString("private-draft") {
+		t.Error("distinct placeholders are independent")
+	}
+}

@@ -73,15 +73,45 @@ func Specificity(pattern string) int {
 }
 
 // Resolution is the route a path resolves to, with its parameters and the
-// record path filled in from them.
+// record path filled in from them. Page is the page the route names for the
+// path: its PageFrom filled in, or its Page. The server sets Missing when a
+// filled-in page is not one the route may serve, and serves Route.Page.
 type Resolution struct {
 	Route    store.Route       `json:"route"`
 	Params   map[string]string `json:"params"`
 	Record   string            `json:"record,omitempty"`
+	Page     string            `json:"page"`
+	Missing  bool              `json:"missing,omitempty"`
 	Fallback bool              `json:"fallback"`
 }
 
-var recordParam = regexp.MustCompile(`\{(\w+)\}`)
+var (
+	recordParam  = regexp.MustCompile(`\{(\w+)\}`)
+	matchNothing = regexp.MustCompile(`[^\x00-\x{10FFFF}]`)
+)
+
+func fill(t string, params map[string]string) string {
+	return recordParam.ReplaceAllStringFunc(t, func(m string) string { return params[m[1:len(m)-1]] })
+}
+
+// TemplateMatcher matches the artifact ids a page-from template can name:
+// "release-{page}" → ^release-(.+)$. Each placeholder matches on its own, which
+// is exact only when no name repeats; a template that repeats one (refused
+// when a route is set) matches nothing.
+func TemplateMatcher(t string) *regexp.Regexp {
+	seen := map[string]bool{}
+	for _, m := range recordParam.FindAllStringSubmatch(t, -1) {
+		if seen[m[1]] {
+			return matchNothing
+		}
+		seen[m[1]] = true
+	}
+	parts := recordParam.Split(t, -1)
+	for i := range parts {
+		parts[i] = regexp.QuoteMeta(parts[i])
+	}
+	return regexp.MustCompile("^" + strings.Join(parts, "(.+)") + "$")
+}
 
 // Resolve picks the most specific route of rows that matches path; rows of
 // other hosts are ignored.
@@ -101,9 +131,12 @@ func Resolve(rows []store.Route, host, path string) (Resolution, bool) {
 		if !ok {
 			continue
 		}
-		res := Resolution{Route: r, Params: params, Fallback: r.Path == "*"}
+		res := Resolution{Route: r, Params: params, Page: r.Page, Fallback: r.Path == "*"}
 		if r.Record != "" {
-			res.Record = recordParam.ReplaceAllStringFunc(r.Record, func(m string) string { return params[m[1:len(m)-1]] })
+			res.Record = fill(r.Record, params)
+		}
+		if r.PageFrom != "" {
+			res.Page = fill(r.PageFrom, params)
 		}
 		return res, true
 	}

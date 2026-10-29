@@ -66,6 +66,7 @@ type Identity struct {
 type Route struct {
 	Path     string                    `json:"path"`
 	Page     string                    `json:"page"`
+	PageFrom string                    `json:"pageFrom,omitempty"`
 	Version  *int                      `json:"version"`
 	Record   string                    `json:"record"`
 	Access   string                    `json:"access"`
@@ -193,7 +194,7 @@ func Push(ctx context.Context, dir string, f *File, o Options) (Result, error) {
 		if o.Host == "" {
 			break
 		}
-		if _, err := o.Admin.SetRoute(ctx, client.Route{Host: o.Host, Path: r.Path, Page: r.Page, Version: r.Version, Record: r.Record, Access: r.Access, Bindings: r.Bindings, Note: o.Note}); err != nil {
+		if _, err := o.Admin.SetRoute(ctx, client.Route{Host: o.Host, Path: r.Path, Page: r.Page, PageFrom: r.PageFrom, Version: r.Version, Record: r.Record, Access: r.Access, Bindings: r.Bindings, Note: o.Note}); err != nil {
 			return res, errors.Wrap(err, "route "+r.Path)
 		}
 		res.Routes++

@@ -49,12 +49,15 @@ export function SiteScreen({ site, setSite, onAddRoute }: { site: SiteState; set
     body = isFetching ? null : <Empty>A visitor would get the server’s plain 404.</Empty>
   } else {
     const r = res.resolution
+    const served = r.page ?? r.route.page
     const binds = Object.entries(res.bindings).filter(([k]) => k !== '$tokens')
     visit = (
-      <div className={res.resolution.fallback ? 'visit' : 'visit calm'} id="siteVisit">
+      <div className={r.fallback || r.missing ? 'visit' : 'visit calm'} id="siteVisit">
         <span>
           {r.fallback ? <b>No route of its own. </b> : null}
-          <code>{r.route.path}</code>{' → '}<b>{`${r.route.page} v${res.n}`}</b>{r.route.version ? ' (pinned)' : ' (main)'}
+          {r.missing ? <b>{`${r.route.pageFrom} names no page here (404). `}</b> : null}
+          <code>{r.route.path}</code>{' → '}<b>{`${served} v${res.n}`}</b>{r.route.version ? ' (pinned)' : ' (main)'}
+          {r.route.pageFrom && !r.missing ? <span className="muted">{` · from ${r.route.pageFrom}`}</span> : null}
           {binds.map(([k, b]) => <span key={k} className="muted">{` · ${k} = ${b.artifact} v${b.n}${b.version ? ' pinned' : ''}`}</span>)}
           {r.record ? <><span className="muted"> · record </span><code>{r.record}</code></> : null}
           {res.bindings.$tokens ? <span className="muted">{` · tokens v${res.bindings.$tokens.n}`}</span> : null}
@@ -62,8 +65,8 @@ export function SiteScreen({ site, setSite, onAddRoute }: { site: SiteState; set
         {r.fallback ? <Button small onClick={() => onAddRoute(site.host, site.path)}>{`Add a route for ${site.path}…`}</Button> : null}
       </div>
     )
-    body = res.n ? <PreviewStage key={reload} artifact={r.route.page} n={res.n} host={site.host} path={site.path} device={device} onMessage={onMessage} title={site.host + site.path} />
-      : <Empty>{`${r.route.page} has no version to serve yet.`}</Empty>
+    body = res.n ? <PreviewStage key={reload} artifact={served} n={res.n} host={site.host} path={site.path} device={device} onMessage={onMessage} title={site.host + site.path} />
+      : <Empty>{`${served} has no version to serve yet.`}</Empty>
   }
 
   return (
@@ -81,7 +84,7 @@ export function SiteScreen({ site, setSite, onAddRoute }: { site: SiteState; set
           </div>
           <Button onClick={() => go({ path: addr.trim() || '/' })}>Go</Button>
           <DeviceSeg device={device} onChange={setDevice} />
-          <Button id="siteWatch" disabled={!res} onClick={() => res && navigate(watchPath(res.resolution.route.page, res.resolution.route.version ? res.n : null))}>Watch this page</Button>
+          <Button id="siteWatch" disabled={!res} onClick={() => res && navigate(watchPath(res.resolution.page ?? res.resolution.route.page, res.resolution.route.version ? res.n : null))}>Watch this page</Button>
           <a className="btn" href={`${location.protocol}//${site.host}${site.path}`} target="_blank" rel="noreferrer">Open the site ↗</a>
         </div>
         {visit}

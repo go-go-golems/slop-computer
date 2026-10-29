@@ -15,3 +15,11 @@ Intern guide written: k3s deployment cloned from francois's package (namespace s
 ## 2026-10-28
 
 Uploaded guide + diary bundle to reMarkable: /ai/2026/10/28/SLOP-002/SLOP-002 Intern Guide - slop next to francois.pdf
+
+## 2026-10-28
+
+Deployed to the hetzner k3s cluster (slop.yolo.scapegoat.dev); real francois catalog imported (108 artifacts, media in 3 shards); storefront built by a pi agent, copied to the cluster; agent NOTES (16 findings) and census saved; diary steps 8-9
+
+## 2026-10-28
+
+Uploaded to reMarkable: /ai/2026/10/28/SLOP-002/SLOP-002 As Built - guide diary and agent notes.pdf (guide + diary steps 1-9 + agent NOTES)

@@ -107,7 +107,7 @@ func seedFixture(f *fixture) {
 	f.exec(`INSERT INTO catalog_media(id,sha256,storage_key,media_type,size,uploaded_by) VALUES ('med_bb',$1,$2,'image/webp',12,'usr_m')`, unSum, unKey)
 	f.exec(`INSERT INTO creators(id,slug,name,bio,avatar_media_id,links,user_id) VALUES ('cr_1','manuel','Manuel','Makes things','med_aa','[{"label":"web","url":"https://x"}]','usr_m')`)
 	f.exec(`INSERT INTO catalog_artifacts(id,title,description,tags,page,page_draft,featured,early_access_until,launch_mode) VALUES
- ('weft_lab','Weft','Glyph shaders','{shaders,type}','{"body":"See ![x](/media/med_aa?w=640) and /media/med_ff","cover":"med_aa","gallery":["med_aa"]}','{"body":"draft"}',true,'2999-01-01','inline'),
+ ('weft_lab','Weft','Glyph shaders','{shaders,type}','{"body":"See ![x](/media/med_aa?w=640), ![y](https://slop.boutique/media/med_aa) and /media/med_ff","cover":"med_aa","gallery":["med_aa"]}','{"body":"draft"}',true,'2999-01-01','inline'),
  ('polis','Polis','A city','{}','{"body":"plain","gallery":[]}',NULL,false,NULL,'tab'),
  ('soon','Soon','No release yet','{}','{}',NULL,false,NULL,'tab')`)
 	f.exec(`INSERT INTO artifact_creators VALUES ('weft_lab','cr_1',0)`)
@@ -201,7 +201,8 @@ func TestImportFromDatabase(t *testing.T) {
 	}
 	var cat map[string]any
 	readJSON(t, filepath.Join(seed.VersionDir(out, francois.CatalogID, 1), "weft-lab.json"), &cat)
-	if body := cat["body"].(string); !strings.Contains(body, "/_d/francois-media/main/files/med_aa.png)") || !strings.Contains(body, "/media/med_ff") {
+	if body := cat["body"].(string); !strings.Contains(body, "![x](/_d/francois-media/main/files/med_aa.png)") ||
+		!strings.Contains(body, "![y](/_d/francois-media/main/files/med_aa.png)") || !strings.Contains(body, "/media/med_ff") {
 		t.Fatalf("catalog body %q", body)
 	}
 	if cat["page"] != "weft-lab" || cat["latest"] != "1.0.0" || cat["cover"].(map[string]any)["alt"] != "a lens" {
@@ -228,6 +229,21 @@ func TestImportFromDatabase(t *testing.T) {
 	md, _ := os.ReadFile(filepath.Join(out, "census.md"))
 	if strings.Contains(string(md), "@example.com") {
 		t.Fatal("census names users")
+	}
+
+	// A small shard size splits the media across data artifacts; links
+	// follow each file to its shard.
+	sharded := filepath.Join(t.TempDir(), "sharded")
+	if _, err := francois.Extract(ctx, src, snap, sharded, francois.Options{AllMedia: true, MediaShardBytes: 11}); err != nil {
+		t.Fatal(err)
+	}
+	for _, f := range []string{"artifacts/francois-media/v1/files/med_aa.png", "artifacts/francois-media-2/v1/files/med_bb.webp"} {
+		if _, err := os.Stat(filepath.Join(sharded, f)); err != nil {
+			t.Fatalf("shard: %v", err)
+		}
+	}
+	if sf2, _ := seed.Load(sharded); len(sf2.Artifacts) != len(sf.Artifacts)+1 {
+		t.Fatalf("sharded seed has %d artifacts, want %d", len(sf2.Artifacts), len(sf.Artifacts)+1)
 	}
 
 	// Push into slop, twice.

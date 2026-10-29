@@ -252,6 +252,69 @@ func (s *Server) reads(ctx context.Context, v store.Version, route *store.Route)
 	return out
 }
 
+// projectOf is the project of an artifact, "" when it has none.
+func (s *Server) projectOf(ctx context.Context, id string) string {
+	a, err := s.Store.Artifact(ctx, id)
+	if err != nil || a.Project == nil {
+		return ""
+	}
+	return *a.Project
+}
+
+// admits reports whether a page-from route can serve page artifact id: its
+// template names it, and it is a page of the route page's project.
+func (s *Server) admits(ctx context.Context, rt store.Route, id string) bool {
+	if rt.PageFrom == "" || !store.ValidArtifactID(id) || !routing.TemplateMatcher(rt.PageFrom).MatchString(id) {
+		return false
+	}
+	a, err := s.Store.Artifact(ctx, id)
+	if err != nil || a.Kind != store.KindPage || a.Project == nil {
+		return false
+	}
+	return *a.Project == s.projectOf(ctx, rt.Page)
+}
+
+// target is the version a resolution serves: for a page-from route, the
+// main of the page it names when the route admits it; otherwise (missing)
+// the route's own page.
+func (s *Server) target(ctx context.Context, res routing.Resolution) (store.Version, bool, error) {
+	rt := res.Route
+	if rt.PageFrom != "" && s.admits(ctx, rt, res.Page) {
+		if v, err := s.Store.Version(ctx, res.Page, 0); err == nil {
+			return v, false, nil
+		}
+	}
+	n := 0
+	if rt.Version != nil {
+		n = *rt.Version
+	}
+	v, err := s.Store.Version(ctx, rt.Page, n)
+	return v, rt.PageFrom != "", err
+}
+
+// pageFromReads reports whether a page a page-from route admits reads data
+// artifact d at its main version.
+func (s *Server) pageFromReads(ctx context.Context, rt store.Route, d string) bool {
+	proj := s.projectOf(ctx, rt.Page)
+	if proj == "" {
+		return false
+	}
+	arts, err := s.Store.Artifacts(ctx, proj)
+	if err != nil {
+		return false
+	}
+	match := routing.TemplateMatcher(rt.PageFrom)
+	for _, a := range arts {
+		if a.Kind != store.KindPage || a.Main == 0 || !match.MatchString(a.ID) {
+			continue
+		}
+		if v, err := s.Store.Version(ctx, a.ID, a.Main); err == nil && s.reads(ctx, v, &rt)[d] {
+			return true
+		}
+	}
+	return false
+}
+
 // serveSite answers a site host through its route table.
 func (s *Server) serveSite(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodGet && r.Method != http.MethodHead {
@@ -278,7 +341,7 @@ func (s *Server) serveSite(w http.ResponseWriter, r *http.Request) {
 	}
 	routedPage := func(page string) bool {
 		for _, rt := range public {
-			if rt.Page == page {
+			if rt.Page == page || s.admits(ctx, rt, page) {
 				return true
 			}
 		}
@@ -292,6 +355,13 @@ func (s *Server) serveSite(w http.ResponseWriter, r *http.Request) {
 				n = *rt.Version
 			}
 			if v, err := s.Store.Version(ctx, rt.Page, n); err == nil && s.reads(ctx, v, &rt)[m[1]] {
+				s.serveData(w, r, m)
+				return
+			}
+		}
+		// Then the pages page-from routes admit, which costs a lookup per page.
+		for _, rt := range public {
+			if rt.PageFrom != "" && s.pageFromReads(ctx, rt, m[1]) {
 				s.serveData(w, r, m)
 				return
 			}
@@ -314,20 +384,13 @@ func (s *Server) serveSite(w http.ResponseWriter, r *http.Request) {
 		notFoundPage(w)
 		return
 	}
-	versionOf := func(rt store.Route) (store.Version, error) {
-		n := 0
-		if rt.Version != nil {
-			n = *rt.Version
-		}
-		return s.Store.Version(ctx, rt.Page, n)
-	}
 	res, ok := routing.Resolve(public, host, r.URL.Path)
 	// A path with an extension may be a file of the page it resolves to, or of
 	// the page the browser was on (relative links from /pricing to style.css
-	// arrive as /style.css).
+	// arrive as /style.css; from /r/weft as /r/style.css).
 	if path.Ext(r.URL.Path) != "" {
 		if ok && !res.Fallback {
-			if v, err := versionOf(res.Route); err == nil {
+			if v, missing, err := s.target(ctx, res); err == nil && !missing {
 				if f, found := fileFor(v, r.URL.Path); found {
 					s.serveBlob(w, r, f)
 					return
@@ -336,7 +399,7 @@ func (s *Server) serveSite(w http.ResponseWriter, r *http.Request) {
 		}
 		if ref, err := url.Parse(r.Referer()); err == nil && strings.EqualFold(ref.Host, r.Host) {
 			if rr, rok := routing.Resolve(public, host, ref.Path); rok {
-				if v, err := versionOf(rr.Route); err == nil {
+				if v, _, err := s.target(ctx, rr); err == nil {
 					if f, found := fileFor(v, r.URL.Path); found {
 						s.serveBlob(w, r, f)
 						return
@@ -349,10 +412,13 @@ func (s *Server) serveSite(w http.ResponseWriter, r *http.Request) {
 		notFoundPage(w)
 		return
 	}
-	v, err := versionOf(res.Route)
+	v, missing, err := s.target(ctx, res)
 	if err != nil {
 		notFoundPage(w)
 		return
+	}
+	if missing {
+		res.Page, res.Missing = res.Route.Page, true
 	}
 	body, err := s.renderPage(ctx, v, &res, host, r.URL.Path, render.ModeSite, "")
 	if err != nil {
@@ -360,7 +426,7 @@ func (s *Server) serveSite(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	status := http.StatusOK
-	if res.Fallback {
+	if res.Fallback || res.Missing {
 		status = http.StatusNotFound
 	}
 	s.writePage(w, status, body)
@@ -417,7 +483,7 @@ func (s *Server) serveSandbox(w http.ResponseWriter, r *http.Request, label stri
 				continue
 			}
 			for _, rt := range routes {
-				if rt.Page == v.Artifact && s.reads(ctx, v, &rt)[m[1]] {
+				if (rt.Page == v.Artifact || s.admits(ctx, rt, v.Artifact)) && s.reads(ctx, v, &rt)[m[1]] {
 					s.serveData(w, r, m)
 					return
 				}

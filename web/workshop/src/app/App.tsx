@@ -39,7 +39,7 @@ export function App() {
   else if (loc.screen === 'site') body = <SiteScreen site={site} setSite={setSite} onAddRoute={(host, path) => addRoute({ host, path })} />
   else if (loc.screen === 'admin') body = <AdminScreen />
   else if (loc.screen === 'tools' && loc.tool) body = <ToolScreen key={loc.tool} id={loc.tool} tryN={Number(loc.query.get('try')) || undefined} />
-  else if (!artifact) body = <div className="split"><section className="tile main"><Empty>{loc.artifact ? `There is no artifact called ${loc.artifact}.` : 'No artifacts yet. Push one: slop push ./folder -a name'}</Empty></section></div>
+  else if (!artifact) body = <div className="split"><section className="tile main"><Empty>{loc.artifact ? `There is no artifact called ${loc.artifact}.` : <>No artifacts yet. Push one with <code>slop push ./folder -a name</code>, or <a href="/help/agents">connect your coding agent</a>.</>}</Empty></section></div>
   else body = <WatchScreen key={artifact.id} a={artifact} n={loc.n} onOpenSite={openSite} onAddRoute={page => addRoute({ page })} />
 
   return (

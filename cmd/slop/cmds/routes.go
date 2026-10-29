@@ -72,7 +72,7 @@ func (c *routeListCmd) RunIntoGlazeProcessor(ctx context.Context, v *values.Valu
 			ver = "v" + strconv.Itoa(*r.Version)
 		}
 		b, _ := json.Marshal(r.Bindings)
-		if err := out.AddRow(ctx, types.NewRow(types.MRP("host", r.Host), types.MRP("path", r.Path), types.MRP("page", r.Page), types.MRP("version", ver),
+		if err := out.AddRow(ctx, types.NewRow(types.MRP("host", r.Host), types.MRP("path", r.Path), types.MRP("page", r.Page), types.MRP("page_from", r.PageFrom), types.MRP("version", ver),
 			types.MRP("record", r.Record), types.MRP("bindings", string(b)), types.MRP("access", r.Access))); err != nil {
 			return err
 		}
@@ -98,7 +98,7 @@ func (c *routeSetCmd) Run(ctx context.Context, v *values.Values) error {
 	if err != nil {
 		return err
 	}
-	r := client.Route{Host: host, Path: a.S("path"), Page: page, Version: ver, Record: a.S("record"), Access: firstNonEmpty(a.S("access"), "public"), Note: a.S("note"),
+	r := client.Route{Host: host, Path: a.S("path"), Page: page, PageFrom: a.S("page-from"), Version: ver, Record: a.S("record"), Access: firstNonEmpty(a.S("access"), "public"), Note: a.S("note"),
 		Bindings: map[string]client.Binding{}}
 	for _, b := range a.L("bind") {
 		name, ref, ok := strings.Cut(b, "=")
@@ -122,12 +122,20 @@ func (c *routeSetCmd) Run(ctx context.Context, v *values.Values) error {
 		return loginHint(err)
 	}
 	fmt.Printf("%s%s  %s → %s   (slop route undo %s goes back)\n", host, r.Path, describeRoute(prev), describeRoute(&r), r.Path)
+	if r.PageFrom != "" && r.Access == "public" {
+		if art, err := api.Artifact(ctx, r.Page); err == nil && art.Project != nil {
+			fmt.Printf("Every page of project %s whose id fits %s is now public at %s%s.\n", *art.Project, r.PageFrom, host, r.Path)
+		}
+	}
 	return nil
 }
 
 func describeRoute(r *client.Route) string {
 	if r == nil {
 		return "(none)"
+	}
+	if r.PageFrom != "" {
+		return fmt.Sprintf("%s in %s's project, else %s@main", r.PageFrom, r.Page, r.Page)
 	}
 	if r.Version == nil {
 		return r.Page + "@main"
@@ -172,9 +180,14 @@ func routeCommands() []glazed.Command {
 	return []glazed.Command{
 		&routeListCmd{glazed.NewCommandDescription("list", glazed.WithShort("List routes (all hosts unless --host)"), glazed.WithFlags(common...))},
 		&routeSetCmd{glazed.NewCommandDescription("set", glazed.WithShort("Point a path at a page: artifact (follows main) or artifact@<version>"),
-			glazed.WithLong("Examples:\n  slop route set /pricing pricing@7\n  slop route set /journal/:slug journal-post --record 'posts/{slug}.md' --bind posts=journal"),
+			glazed.WithLong("Examples:\n  slop route set /pricing pricing@7\n  slop route set /journal/:slug journal-post --record 'posts/{slug}.md' --bind posts=journal\n"+
+				"  slop route set /r/:page release-missing --page-from '{page}'\n\n"+
+				"--page-from serves the page a template names, filled from the path's :params, among the pages of\n"+
+				"the given page's project; the given page is served (404) when it names none. Every page of that\n"+
+				"project whose id fits the template becomes public on the host."),
 			glazed.WithFlags(append(common, arg("path", "Path pattern: /, *, /a/:param, /a/*"), arg("page", "artifact, artifact@main or artifact@<version>"),
 				flag("record", "Record pattern filled from params, e.g. posts/{slug}.md"),
+				flag("page-from", "Page template filled from params, e.g. {page} or release-{page}; page is then the else page"),
 				list("bind", "Data binding name=artifact[@version] (repeatable)"),
 				flag("access", "public (default) or admins"), flag("note", "Why, for the route log"))...))},
 		&routeUndoCmd{glazed.NewCommandDescription("undo", glazed.WithShort("Restore a route to its state before its last change"),

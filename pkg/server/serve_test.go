@@ -126,3 +126,65 @@ func TestServeSiteAndSandbox(t *testing.T) {
 		t.Fatalf("records %d %v", code, recs)
 	}
 }
+
+func TestPageFromRoutes(t *testing.T) {
+	h := newHarness(t, store.RoleAdmin)
+	manuel := h.signIn("manuel")
+	tok := h.token(manuel.id(), store.ScopeRead, store.ScopeWrite)
+	for _, p := range []string{"francois", "other"} {
+		if code := manuel.do("PUT", "/api/projects/"+p, map[string]any{"name": p}, nil); code != 200 {
+			t.Fatalf("project %s: %d", p, code)
+		}
+	}
+	page := func(id, project, html string, manifest map[string]any, extra map[string]string) {
+		files := map[string]string{"index.html": html}
+		for k, v := range extra {
+			files[k] = v
+		}
+		h.pushFiles(tok, id, map[string]any{"title": id, "kind": "page", "project": project}, manifest, files)
+	}
+	h.pushFiles(tok, "media", map[string]any{"title": "Media", "kind": "data", "project": "francois"}, nil, map[string]string{"a.png": "PNG"})
+	page("release-missing", "francois", "<!doctype html><html><head></head><body>no such release</body></html>", nil, nil)
+	page("weft", "francois", "<!doctype html><html><head><link rel=stylesheet href=style.css></head><body>weft</body></html>",
+		map[string]any{"reads": map[string]string{"media": "media"}}, map[string]string{"style.css": "weft{}"})
+	page("intruder", "other", "<p>other project", nil, nil)
+
+	var rt map[string]any
+	if code := manuel.do("PUT", "/api/routes", map[string]any{"host": "site.test", "path": "/r/:page", "page": "release-missing", "pageFrom": "{page}"}, &rt); code != 200 || rt["pageFrom"] != "{page}" {
+		t.Fatalf("put page-from route %d %v", code, rt)
+	}
+	if code := manuel.do("PUT", "/api/routes", map[string]any{"host": "site.test", "path": "/x/:p", "page": "release-missing", "pageFrom": "{nope}"}, &rt); code != 400 {
+		t.Fatalf("unknown param must be refused: %d %v", code, rt)
+	}
+
+	code, body, _ := h.get("site.test", "/r/weft", "")
+	if code != 200 || !strings.Contains(body, "<body>weft") || !strings.Contains(body, `"version":{"artifact":"weft","n":1}`) || !strings.Contains(body, `"params":{"page":"weft"}`) {
+		t.Fatalf("/r/weft %d %s", code, body)
+	}
+	for _, p := range []string{"/r/nope", "/r/intruder", "/r/media", "/r/Weft"} {
+		if code, body, _ = h.get("site.test", p, ""); code != 404 || !strings.Contains(body, "no such release") {
+			t.Fatalf("%s must be the else page with 404: %d %s", p, code, body)
+		}
+	}
+	if code, body, _ = h.get("site.test", "/r/style.css", "http://site.test/r/weft"); code != 200 || body != "weft{}" {
+		t.Fatalf("relative asset via referer %d %q", code, body)
+	}
+	if code, _, _ = h.get("site.test", "/_v/weft/1/style.css", ""); code != 200 {
+		t.Fatalf("/_v/ of an admitted page %d", code)
+	}
+	if code, _, _ = h.get("site.test", "/_v/intruder/1/index.html", ""); code != 404 {
+		t.Fatalf("/_v/ of another project's page %d", code)
+	}
+	if code, body, _ = h.get("site.test", "/_d/media/1/a.png", ""); code != 200 || body != "PNG" {
+		t.Fatalf("/_d/ of data an admitted page reads %d %q", code, body)
+	}
+
+	var res map[string]any
+	if code := manuel.do("GET", "/api/resolve?host=site.test&path=/r/weft", nil, &res); code != 200 || res["resolution"].(map[string]any)["page"] != "weft" {
+		t.Fatalf("resolve %d %v", code, res)
+	}
+	if code := manuel.do("GET", "/api/resolve?host=site.test&path=/r/nope", nil, &res); code != 200 || res["resolution"].(map[string]any)["page"] != "release-missing" ||
+		res["resolution"].(map[string]any)["missing"] != true {
+		t.Fatalf("resolve missing %d %v", code, res)
+	}
+}

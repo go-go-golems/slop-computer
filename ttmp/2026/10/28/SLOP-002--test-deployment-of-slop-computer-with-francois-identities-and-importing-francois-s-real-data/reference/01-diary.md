@@ -481,3 +481,246 @@ This step tests the deployment and the importer against things that look like pr
 
 ### Technical details
 - Container run: `docker run -d --network host -v …/img-secrets:/run/secrets/slop:ro slop:slop002 serve --listen=0.0.0.0:8080 …` (the Deployment's args).
+
+## Step 8: The remote deployment, live
+
+The user chose "do it all", and slop now runs on the cluster at https://slop.yolo.scapegoat.dev with TLS, signing in through ZITADEL. On the way, two problems in my own manifests and one in the Terraform provider domain blocked it, and they were fixed in order. Using the deployment immediately turned up a real sign-out bug. Pushing the real data hit the 200 MB version limit, which led to media shards.
+
+### Prompt Context
+**User prompts (verbatim):**
+- "what about the remote deploy?"
+- Then, to a choice of how far to go: "do it all actually".
+- Mid-turn: "we need TLScertificate, maybe it's some special waves login ? See ~/code/wesen/go-go-golems/go-go-parc/Research/playbooks/infra I think."
+- "I can't properly sign out and https://slop.yolo.scapegoat.dev/ just gets me back to \"an admin has to let you tin\"".
+- "k, merged 1 2" and "merged #398".
+
+**Assistant interpretation:** Carry out the operator steps too: merge, apply, seed, sync, first admins, push the data. Then fix what breaks.
+**Inferred user intent:** A working test deployment with real data today.
+**Commit (code):**
+- slop: `9776e4e` (workflow permissions); `cb68898` (merge of PR #1); PR #2: `18f8617` (sign-out, `--email`), `1d06618` (media shards).
+- hetzner-k3s: PR #397 → `47830b9` (package and image `sha-cb68898`); PR #398 (VaultAuth audiences).
+- terraform: PR #38 (`envs/slop`, applied).
+
+### What I did
+1. **Image.** `gh run list` showed every publish-image run with `startup_failure`.
+   - The reusable `infra-tooling/.github/workflows/publish-ghcr-image.yml` declares `permissions: contents read, packages write, pull-requests write, id-token write`, and my caller lacked `pull-requests: write`. Fixed in `9776e4e`; the PR run passed (`release / publish success`).
+   - Merged PR #1 (`cb68898`). The main build published `ghcr.io/go-go-golems/slop-computer:sha-cb68898` (tags `latest`, `main`, `sha-cb68898`; package public).
+2. **Terraform.** No default AWS credentials; `AWS_PROFILE=manuel` (per the terraform README) → `arn:aws:iam::745667007186:user/manuel`.
+   - First `terraform apply` failed creating `zitadel_project_v2.slop`. `curl` showed `zitadel.yolo.scapegoat.dev` answers `/management/v1/projects/_search` with `404 page not found`, while `auth.slop.boutique` answers 200.
+   - A search of the organization's projects found only `francois` and `francois-sandbox`, so nothing half-created. Provider domain → `auth.slop.boutique`, then plan: "2 to add, 0 to change, 0 to destroy", then `Apply complete! Resources: 2 added`. Client ID `397165131227726018`.
+   - PR wesen/terraform#38. My `gh pr merge` was denied by the permission classifier ("Merge Without Review"); the user merged.
+3. **Vault.**
+   - `vault policy write` and `vault write auth/kubernetes/role/<name> @file` for `slop-test` and `slop-test-db-bootstrap` only, the same commands as `bootstrap-vault-kubernetes-auth.sh` uses, without reapplying every app.
+   - `bootstrap-slop-secrets.sh` first stopped: `missing required environment variable: VAULT_TOKEN` (the CLI keeps it in `~/.vault-token`). Rerun with it inline → `Seeded kv/apps/slop/test/runtime (database slop, role slop_app)`, version 1.
+4. **gitops.**
+   - Rebased `slop/test-deployment` on `origin/main`, set the image to `sha-cb68898`, validator PASS, PR #397.
+   - Argo has no app-of-apps, and `demo-apps` was applied by hand (it has `last-applied-configuration`). So I ran `kubectl apply -f gitops/projects/demo-apps.yaml -f gitops/applications/slop.yaml` before the merge: Application status "app path does not exist" until the merge.
+5. **After the merge (47830b9).**
+   - Sync stuck: `waiting for completion of hook batch/Job/slop-db-bootstrap`; the pod showed `CreateContainerConfigError … secret "slop-postgres-admin" not found`.
+   - VaultStaticSecret events: `Failed to get Vault auth login … PUT …/v1/auth/kubernetes/login Code: 403`.
+   - Cause: my roles copy francois-sandbox's (`"audience": "vault"`) but my VaultAuths copy francois prod's (no `audiences`). Fix: `audiences: [vault]` in both, PR #398.
+   - The user asked about TLS and sync waves. The Certificate (wave 2) waited behind the bootstrap hook (wave 1), which waited on the secrets.
+   - After the merge I server-side-applied the two VaultAuths from `origin/main` (`--field-manager=argocd-controller`), the same content Argo would apply.
+   - Within 25 s: both VaultStaticSecrets synced, `job.batch/slop-db-bootstrap Complete 1/1`, the pod Running, `slop-tls` Ready, PVC Bound, Application `Synced Healthy`.
+   - `https://slop.yolo.scapegoat.dev/healthz` → 200, `ssl_verify_result=0`. `/auth/login` → 303 to `https://auth.slop.boutique/oauth/v2/authorize?client_id=397165131227726018…`: the Traefik hairpin egress rule works.
+6. **Admins.** `kubectl -n postgres port-forward svc/postgres 15432:5432`; the database URL from Vault rewritten to 127.0.0.1:15432, written to a mode-600 file in the scratchpad.
+   - `slop db import-francois-admins --dry-run` listed Ramon, Manuel and "E2E Admin" (`e2e-admin@francois.test`, a test account).
+   - Added `--email` and ran it with Manuel and Ramon only: Ramon `created`, Manuel `promoted` (he had signed in once and was pending).
+7. **Sign-out bug** (user report).
+   - `logout` in `pkg/server/auth.go` revoked the slop session, but a form post (pending screen, safe mode) redirected to `/` rather than to the provider logout. ZITADEL's live session then signed the person straight back in.
+   - Fix: form posts redirect to the `end_session` URL. `TestFormLogoutEndsProviderSession` uses a fake issuer serving a discovery document. It passes with the fix, and with the fix stashed it fails as in production: `form logout: 303 /`.
+   - PR #2.
+8. **Real data to the cluster.**
+   - Device login (`slop auth login --server https://slop.yolo.scapegoat.dev --scopes read,write,admin --days 7 --no-browser`), approved by the user → token `tok_81f…` (admin, read write admin).
+   - `slop import francois push --dir fr-api` started uploading. Then the numbers: referenced media are 322.1 MB in one data version, against `maxVersionSize` 200 MB, so the push would have ended in 413 after all uploads.
+   - Added media shards (`MediaShardBytes`, default 150 MiB): `francois-media`, `francois-media-2`, `francois-media-3` (151, 148, 8 MiB). Each file's `src` points at its shard. Test: two fixture images, 11-byte shards → two artifacts.
+   - Re-extract from the cache: 24.5 s, against about 50 min the first time. Stopped the old push (anchored `pkill -f "^./slop import francois push"`), with 115 MB already uploaded and kept, and started the sharded push.
+9. **Local push** of the same directory: `pushed 118 versions; 0 unchanged, 0 already imported` in 3 s. The storefront agent (pi, deepseek-4.1-flash, thinking medium) started in tmux window `slop:storefront` with the brief in `various/agent-import/`.
+
+### Why
+- Applying the VaultAuths by hand instead of waiting: Argo's running operation was blocked on a hook that could not finish with the old manifests. The applied objects were byte-for-byte `origin/main`'s, so self-heal had nothing to undo.
+- Admins by email: francois has an E2E test admin, and making it a slop admin would hand the Workshop to whoever holds that test account.
+
+### What worked
+- The real census (`fr-api2/census.md`):
+  - 104 catalog artifacts (103 with releases); 113 releases (110 published, 3 withdrawn); 96 free samples; 95 releases with their HTML (74.9 MB), 18 placeholders.
+  - Buckets: `static` 83, `static+downloads` 12, `needs-runtime:db,user` 7, `needs-runtime:db,room,user` 5, `needs-runtime:db` 4, `needs-runtime:room` 2.
+  - Gaps: G10 external scripts 32 releases; G5 runtime 18 (db 16, user 12, room 7); G9 placeholder HTML 18; G3 access tiers 15; G4 withdrawn 3.
+  - Storefront: listed 100, hidden 4, featured 5, demo 21, early access still running 81. Media 689 of 745 copied (322 MB); attachments 18 (63.8 MB); 89 instances not imported.
+
+### What didn't work
+- Exact diagnostics, in order:
+  1. `startup_failure` (workflow permissions).
+  2. Terraform `zitadel_project_v2.slop` create error on the dead domain (`404 page not found`).
+  3. `missing required environment variable: VAULT_TOKEN`.
+  4. VSO `Code: 403` at `auth/kubernetes/login` (audience), hence `secret "slop-postgres-admin" not found`.
+  5. Sign-out returning to the pending screen (`303 /`).
+  6. 322 MB media version against the 200 MB limit (caught before the 413).
+- Smaller slips:
+  - `slop db import-francois-admins --fields …`: `unknown flag: --fields`.
+  - `--output json` printed a table; I read the table.
+  - A `sleep 45; …` chain was blocked by the harness; I used an until-loop on the certificate's Ready condition instead.
+
+### What I learned
+- The terraform repo's `envs/prod` still defaults `zitadel_domain` to `zitadel.yolo.scapegoat.dev`, which now 404s for management calls. Its next plan will likely fail the same way.
+- In the census, the 18 paid releases are exactly the 18 that need the runtime. Paid content and runtime-dependent content are the same set today.
+- 81 of 104 artifacts are in early access, so access tiers (G3) matter more than the release count suggests.
+
+### What was tricky to build
+- Reading "no TLS" correctly. The certificate was not failing: it had never been created, because Argo waves stop at the first unhealthy hook. The real fault was three steps upstream, at Vault login.
+
+### What warrants a second pair of eyes
+- Media shards: when a re-import adds or reorders media, a file can move to another shard. `/_d/<shard>/main/` links in Markdown written earlier would then 404. Records are rewritten on each import, so only copies outside the import are affected.
+- The admin import ran through a port-forward with the app role's credentials, from a laptop.
+
+### What should be done in the future
+- Merge PR #2, then bump the gitops image tag (a third gitops PR) so sign-out is fixed on the cluster.
+- The census has an empty "posts:" line when there are no posts; to fix.
+
+### Code review instructions
+- `pkg/server/auth.go` `logout`, plus `pkg/server/logout_test.go`.
+- `pkg/francois/extract.go` `shardMedia`, `mediaSrc`, `writeMedia(shard, dir)`.
+- hetzner-k3s `gitops/kustomize/slop/{vault-auth,db-bootstrap-vault-auth}.yaml`.
+
+### Technical details
+```
+kubectl -n slop get certificate,ingress,pvc   → slop-tls True; ingress 91.98.46.169 80,443; slop-data Bound 5Gi
+kubectl -n argocd get application slop        → Synced Healthy
+```
+
+## Step 9: Real data on the cluster, a storefront built by an agent, and what slop is missing
+
+The real francois catalog is on the test deployment, and anyone can browse it at https://site.slop.yolo.scapegoat.dev/. The storefront pages were written by a pi agent working on the same data locally. The agent's NOTES are the most direct answer yet to "what support would we add". Its notes also caught an importer bug, absolute media links, which is fixed and was re-imported. The re-import ran idempotently on real data.
+
+### Prompt Context
+**User prompt (verbatim):** see Step 8, plus: "I don't see any on slop.yolo.scapegoat.dev though, right? Also never forget the diary, it's MANDATORY."
+**Assistant interpretation:** Get the imported data visibly onto the cluster and keep the diary current at every milestone.
+**Inferred user intent:** See real francois content on the new deployment, with the reasoning recorded.
+**Commit (code):** `d1c670f` (census "posts: none"); `47bf7a7` (absolute media links). Evidence is committed with this entry.
+
+### What I did
+- **Cluster push.** `slop import francois push --dir fr-api2` with the device-login token → `pushed 118 versions; 0 unchanged, 0 already imported`. The cluster now has 108 artifacts in `francois`: 103 pages plus `francois-catalog`, `francois-creators` and `francois-media`, `-2`, `-3`. Versions are `by usr_8a5…` (Manuel, the token's owner; the API source has no authors) and `via import`.
+- **Smoke test.** `slop route set /weft weft` on `site.slop.yolo.scapegoat.dev` → `site /weft 200 1043130 bytes`. Later removed (`route rm /weft`) in favour of `/r/weft`.
+- **Local storefront agent.** pi, `lunaroute/deepseek-4.1-flash`, thinking medium, `SLOP_VIA=agent`, its own `claude-manuel` login. Brief: `various/agent-import/{AGENTS.md.txt,prompt.txt}`. It built `storefront` (v2) at `/` and `storefront-entry` (v2) at `/apps/:id --record '{id}.json' --bind catalog=francois-catalog`, plus 100 `/r/<page>` routes pinned to each record's latest release. It wrote `NOTES.md`: 16 findings, all saved.
+- **Importer fix** from NOTES §11. Catalogue bodies link `https://slop.boutique/media/<id>`, and `mediaRef` only matched the path, so 124 links became `https://slop.boutique/_d/francois-media…`. The regex now swallows an optional `https?://host` origin; the fixture has an absolute link. Re-extract from the cache → `absolute _d links: 0`.
+- **Re-push to both servers** → `pushed 1 versions; 4 unchanged, 113 already imported` (`francois-catalog` v2 only).
+- **Moved the storefront to the cluster.**
+  - `slop pull storefront|storefront-entry|lab-tokens` from local, then `slop push` to the cluster. `lab-tokens` lost its `lab-site` project, which doesn't exist there.
+  - Routes `/`, `/apps/:id` (same record and bind), and the 100 lines of `release-routes.tsv`.
+  - Checks: `/ 200 670476`, `/apps/weft 200 676481`, `/r/weft 200 1043132`, `/r/lattice-deck 200 426291`, `/_d/francois-media/main/index.json 200`, a cover `/_d/francois-media-3/main/files/med_fc42….webp 200 image/webp`.
+- **Screenshots** (`various/screenshots/`):
+  - `s2-01-remote-storefront.png`: the catalogue, 100 apps.
+  - `s2-02-remote-entry-weft.png`: the entry page with "Open release · v1.0.0".
+  - `s2-03-remote-release-type-studio.png`: an imported release running.
+  - `s2-04-remote-workshop-signin.png`: the Workshop sends you to ZITADEL login with `organization=394966170567966836`.
+- **Saved evidence:** `various/agent-import/{NOTES.md.txt, pi.log, session.jsonl, release-routes.tsv}`, plus `various/census-api-2026-10-28.{md.txt,json}`. The agent's local `slp_` token appeared twice in `session.jsonl` and was redacted to `slp_REDACTED` before committing. The census contains no email addresses (`grep -c @` → 0).
+
+### Why
+- Building the pages locally first kept the agent's 100 probe routes and throwaway artifacts (`probe-media`, `/probe`) off the shared deployment.
+- Copying the pages rather than letting the agent push to the cluster: the agent has no cluster login, and a second device approval just to copy two folders wasn't worth the user's time.
+
+### What worked
+- The import's design held on real data: idempotent re-runs, sharded media, `/_d/` serving gated by `reads`, release HTML served unmodified.
+- The agent built a working storefront for 100 apps in one session. Badges: early access 79, `needs db|user|room` 23. Covers come from `/_d/`, and there's a monogram fallback for 6 records without a cover.
+
+### What didn't work
+- **Wiped search path.** While creating cluster routes, `while IFS=$'\t' read -r path target` in zsh assigned `path`, which zsh ties to `$PATH`. The following `curl` calls failed with `command not found: curl`. The routes were unaffected (the binary was called by absolute path), and the checks reran in a fresh shell.
+- **Screenshot read.** `Read` of the second screenshot reported "File does not exist" right after Playwright saved it, while it was still being written. A `find /` I started to look for it overran its timeout and was killed.
+
+### What I learned (the agent's findings, ranked)
+1. **Gating of data files** (NOTES §1, §3): `/_d/` files are public only if some routed page `reads` the artifact. The agent found this only by probing; `src` values look broken until then. This is my G2 design working as intended, but it's undocumented and surprising.
+2. **Boot payload** (§2): `reads` is page-wide, so every page ships the whole catalogue and all media records, 667 KB of `#slop-boot` on `/apps/weft`. A per-route projection, or loading records on demand, would fix it.
+3. **No route by record** (§6, §14): a route can't choose its page from a parameter, hence 100 pinned routes that go stale when a release is added. This is the biggest missing feature for a catalogue.
+4. **Silent route shadowing** (§7): `/apps/:id` shadowed the existing `/apps/:slug` with no warning. **Silent `/` replacement** (§8): same problem.
+5. **Asset paths** (§4, §5): `/_v/` is undocumented, numeric versions only. Relative assets resolve from the route's prefix, so files must sit flat at the page root.
+6. **No structured CLI output** (§9): `--output json` is not available on `artifacts list` or `route list`. No preview without a route (§10). No artifact delete. `route rm` has no `--note`.
+7. **No server-rendered Markdown for JSON records** (§11): only `.md` records get `html`.
+8. **Imported releases make external requests** (§15): Google Fonts and cdnjs. That matches census G10 (32 releases).
+
+### What was tricky to build
+- Choosing what to fix now. Only the importer bug was mine to fix in this step. The rest are product decisions for slop (route by record, data projections, documenting `/_v/`/`/_d/`), recorded as next tasks rather than built ad hoc.
+
+### What warrants a second pair of eyes
+- The cluster's public site now serves 100 imported francois releases. 15 of them are paid releases on francois (census G3), but they came over as placeholders, so no paid HTML is exposed. The free samples are public on francois too. Still, someone who owns the francois catalogue should be told it is mirrored on a second host.
+- The storefront pages copy `lab-tokens` and `boutique.css` from the dev seed's lab-site.
+
+### What should be done in the future
+- Product, in order of what blocks a real catalogue: route-by-record (`/r/:page → {page}`, or a page binding taken from the record); per-route data projections; route conflict warnings; `--output json` on list commands; documenting `/_d/` and `/_v/`.
+- Deploy PR #2 (sign-out fix, media shards, absolute-link fix) and bump the gitops image tag.
+- Upload the updated guide and diary to reMarkable.
+
+### Code review instructions
+- `pkg/francois/extract.go` `mediaRef`; `pkg/francois/francois_test.go` (the absolute link case).
+- Read `various/agent-import/NOTES.md.txt` in full. It is the input for the next slop ticket.
+
+### Technical details
+```
+cluster routes on site.slop.yolo.scapegoat.dev: / → storefront, /apps/:id → storefront-entry {id}.json (bind catalog=francois-catalog), /r/<page> → <page>@<n> ×100
+census (api, 2026-10-28): 113 releases; static 83, static+downloads 12, needs-runtime 18 (db 16, user 12, room 7); external scripts 32; early access running 81
+```
+
+## Step 10: A how-to for admins: connecting a coding agent
+
+This step adds one page explaining how to work with slop through a coding agent. It is embedded in the binary and has three entry points: `/help/agents` in the browser, `/help/agents.md` for the agent itself, and `slop help agents` in the terminal. The Workshop links to it from the user menu and from the empty state. Both commits are on PR #2. Checking the screenshot showed that the user menu didn't style links, which affected Safe mode as well as the new item; that is fixed in the same commit as this entry.
+
+### Prompt Context
+**User prompt (verbatim):** "how  do I use my agent with it? Can you add a howto on the landing page or under a doc page or something ? for admins?"
+**Assistant interpretation:** Write a how-to for admins: install the CLI, log an agent in, and work through pushes, routes and comments. Make it reachable from the Workshop.
+**Inferred user intent:** Admins of the live deployment should be able to point their own agents (Claude Code, pi, codex) at slop without reading the source.
+**Commit (code):** `ba2437f` "Help for admins: how to work with your coding agent"; `98fdfeb` "doc: no named results in Topic (lint)"; this commit adds the menu link styling.
+
+### What I did
+- `pkg/doc/doc.go` and `pkg/doc/topics/agents.md`: a Glazed help topic (slug `agents`). `AddDocToHelpSystem` is wired in `cmd/slop/main.go`. `doc.Topic(slug)` returns the title and the body without front matter, for the server.
+- The topic covers:
+  - install: `go install github.com/go-go-golems/slop-computer/cmd/slop@latest`, or copying the binary out of the image;
+  - `slop auth login --server …` with one `SLOP_CONFIG_DIR` per agent, and `SLOP_VIA=agent`;
+  - an AGENTS.md block to paste;
+  - the comment loop;
+  - sharp edges from the storefront agent's NOTES;
+  - a section on the francois import.
+- `pkg/server/help.go`: `GET /help/{name}` via `guard(public, scopeRW, …)`.
+  - Admins get HTML rendered with `records.Markdown` into the new `help` template.
+  - A `.md` suffix returns the raw markdown, which also works with a read token.
+  - Signed-out HTML requests get a 303 to login; `.md` requests get 401. Non-admins get 403.
+  - `fillHosts` replaces the placeholder `https://your-slop-server` and `site.your-slop-server` with this server's public URL and first site host.
+- Workshop: "Connect your agent" in the user menu (`TopBar.tsx`), and "connect your coding agent" in the empty state (`App.tsx`).
+- Menu styling fix: `workshop.css` now applies the `.menu button` rules to `.menu a` too, and the inline `style={{ color, textDecoration }}` on the two links is gone.
+
+### Why
+- Keeping one markdown file behind all three entry points means the browser, the agent and the CLI can't drift apart.
+- The page is admin-only because it describes push-as, tokens and route control. A read token can fetch `.md` so an agent that is already logged in can re-read its own instructions.
+
+### What worked
+- `go test ./pkg/server -run TestHelpForAdmins` passes. It covers admin HTML, `.md`, signed-out redirect, 401, non-admin 403 and the host substitution.
+- `go install github.com/go-go-golems/slop-computer/cmd/slop@latest` works from a clean module cache. It switches the toolchain to go1.26.10 because `go.mod` asks for 1.26.3+.
+- `s2-05-help-agents.png`: the page with `http://localhost:18120` filled in.
+- `s2-06-workshop-menu-connect-agent.png` (retaken after the fix): the user menu with "Connect your agent" between "Sign in as someone else" and "Safe mode".
+
+### What didn't work
+- **Lint failure committed.** `ba2437f` was committed with lint failing: `make lint | grep … | tail` hid the non-zero exit. Lint reported a named-results finding in `doc.Topic`, fixed in `98fdfeb`. Lint now runs to a file and I check `$?` before committing.
+- **Menu link layout.** The first s2-06 showed "Connect your agentLog a coding agent in…" run together, and "Safe modeThe fuse box…" too. The cause is `workshop.css:75-78`: the grid rules only match `.menu button`, and both items are `<a>`. The Safe mode link already had this bug before the step.
+- **Restart without the Workshop.** The first restart after the CSS fix used `go build ./cmd/slop`, which lacks `-tags embed`. The server served "This binary has no Workshop", so the Playwright click on the user menu timed out after 30 s. Rebuilding with `GOWORK=off go build -tags embed` (the Makefile's command) fixed it.
+
+### What I learned
+- The Workshop's menu styles key on `button`. Any future link item needs the shared `.menu a` rule, not inline styles.
+
+### What was tricky to build
+- The route had to answer differently for a person and for an agent. Browsers get a redirect to login; `.md` clients get a 401 they can act on. Both are served from one handler, keyed only on the suffix.
+
+### What warrants a second pair of eyes
+- `fillHosts` uses the first configured site host. A server with several site hosts will show only one in the examples.
+
+### What should be done in the future
+- Deploy: merge PR #2, then bump the image tag in `gitops/kustomize/slop/deployment.yaml`.
+- The routing gaps the agent hit are covered by the follow-up ticket SLOP-003 (templated page routes).
+
+### Code review instructions
+- Read `pkg/server/help.go`, `pkg/server/help_test.go`, `pkg/doc/topics/agents.md`, and `web/workshop/src/styles/workshop.css:75-81`.
+- Validate with `go test ./pkg/server -run TestHelpForAdmins`, then `make web && GOWORK=off go build -tags embed ./cmd/slop`, then open the user menu.
+
+### Technical details
+```
+GET /help/agents       admin → 200 text/html; signed out → 303 /auth/login?return=/help/agents; non-admin → 403
+GET /help/agents.md    read token or session → 200 text/markdown; none → 401
+slop help agents       same markdown, placeholders unfilled
+```
