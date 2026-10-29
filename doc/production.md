@@ -137,8 +137,23 @@ port (francois's policy allows Traefik on 8443 for this hairpin).
   pages, `immutable` for blobs.
 - HTTPS deployments: `Strict-Transport-Security: max-age=31536000` on every
   host (without `includeSubDomains`).
-- CORS only on `/api/*`, only for sandbox origins, never with credentials:
-  tools call the API with a grant (`slg_…`), not with cookies.
+- No CORS: an app's runtime calls `/_rt/…` on its own target origin with a
+  view secret (`slv_…`) handed over by postMessage, never cookies. The
+  `slop` capability reaches the API through `/_rt/api/…` on that origin.
+- Assets (`/_blob/<id>` on a target origin) carry `X-Content-Type-Options:
+  nosniff` and `Content-Security-Policy: sandbox`.
+
+## Models (the sample capability)
+
+`slop serve --pi-worker web/piworker/dist/worker.js` starts Pi as a Node child
+process (`make piworker` builds it; Node 24 or newer). It reads Pi's agent
+directory (`--pi-agent-dir`, default `~/.pi/agent`: `auth.json`,
+`models.json`, `models-store.json`, `settings.json`), so models and
+credentials are managed with Pi on the server host and never reach the
+database or a browser. `--model-quick/default/complex` pin the tiers
+(e.g. `lunaroute/glm-5.3-flash`); without them every tier is Pi's default
+model. Only admins sample; there is no per-person budget, and every call
+writes an audit row (`sample`, with model and token counts).
 
 ## Backups and upgrades
 

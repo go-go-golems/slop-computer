@@ -14,6 +14,11 @@ function slopSnapshotFiles() {
     files['pages/' + pg.id + '.json'] = JSON.stringify({ id: pg.id, name: pg.name, nodes: [...S.nodes.values()].filter(n => n.page === pg.id) }, strip);
   }
   files['handoff.md'] = handoffMarkdown();
+  // db.json: the documents a player reads in static mode (the runtime's
+  // db, read-only), {path: body}.
+  const docs = { 'meta/file': JSON.parse(files['file.json']) };
+  for (const n of S.nodes.values()) docs['nodes/' + n.id] = JSON.parse(JSON.stringify(n, strip));
+  files['db.json'] = JSON.stringify(docs);
   return files;
 }
 
@@ -50,7 +55,7 @@ function slopPublishSheet() {
       await api.get('/artifacts/pinup-player').catch(() => { throw new Error('the pinup-player page is not on this server yet (make pinup-push)'); });
       const v = await slopSaveVersion('Published from Pinup');
       const route = sp => ({ host: host.value, path: sp, page: 'pinup-player', version: null, access: 'public',
-        bindings: { design: { artifact: SLOP.file, version: null } }, note: 'Pinup prototype of ' + SLOP.file + ' (v' + v + ', follows main)' });
+        bindings: { target: { artifact: SLOP.file, version: null } }, note: 'Pinup prototype of ' + SLOP.file + ' (v' + v + ', follows main)' });
       await api.put('/routes', route(p));
       await api.put('/routes', route(p + '/:screen'));
       const url = location.protocol + '//' + host.value + p;
@@ -62,7 +67,7 @@ function slopPublishSheet() {
   sheet('Publish prototype', [
     h('p', { text: 'Saves a version of this design and serves it as a clickable prototype: one URL per screen, following the design’s main.' }),
     h('div', { class: 'opt' }, h('b', { text: 'Where' }), host, path),
-    can ? h('div', { class: 'acts' }, go) : h('p', { class: 'muted', text: 'This tool was not granted routes:write. An admin can publish it with: slop route set ' + path.value + '/:screen pinup-player --bind design=' + SLOP.file }),
+    can ? h('div', { class: 'acts' }, go) : h('p', { class: 'muted', text: 'This Pinup version was not approved for routes:write. An admin can publish it with: slop route set ' + path.value + '/:screen pinup-player --bind design=' + SLOP.file }),
     out,
   ], { width: 560 });
 }
@@ -73,7 +78,7 @@ async function slopHandOff(note) {
   const text = [
     'Build the app designed in ' + SLOP.file + ' v' + v + '.',
     '`slop pull ' + SLOP.file + '` gives handoff.md (tokens, components, screens as JSX, the prototype map) and pages/*.json (every layer).',
-    'Push the app as a page artifact, route it on the site, and reply here with the URL. Design changes go through `slop docs` (see `slop help pinup`).',
+    'Push the app as a page artifact, route it on the site, and reply here with the URL. Design changes go through `slop data` (see `slop help pinup`).',
     note ? 'Notes: ' + note : '',
   ].filter(Boolean).join('\n\n');
   await api.post('/artifacts/' + id + '/threads', { version: v, anchor: { pinup: { file: SLOP.file, handoff: true } }, text });
@@ -83,9 +88,9 @@ async function slopHandOff(note) {
 function slopBrief() {
   return [
     'Pinup design on slop: ' + SLOP.file + ' (' + S.file.name + ').',
-    'Read it:   slop docs ls ' + SLOP.file + ' nodes/      slop docs get ' + SLOP.file + ' meta/file',
-    'Change it: write HTML or a step to inbox/<id>:  slop docs put ' + SLOP.file + ' inbox/s1 step.json',
-    'Follow it: slop docs watch ' + SLOP.file,
+    'Read it:   slop data list ' + SLOP.file + ' nodes      slop data get ' + SLOP.file + ' meta/file',
+    'Change it: write HTML or a step to inbox/<id>:  slop data set ' + SLOP.file + ' inbox/s1 --file step.json',
+    'Follow it: slop room watch ' + SLOP.file,
     'Formats:   slop help pinup',
   ].join('\n');
 }
@@ -108,7 +113,7 @@ function slopMenu() {
     { label: 'Hand off to an agent…', icon: 'bot', disabled: !push || !SLOP.api.can('threads:write'), act: () => slopNoteSheet('Hand off to an agent', 'Saves a version and opens a thread asking a coding agent (slop comments wait) to build the app from it.', 'Hand off', slopHandOff) },
     '-',
     { label: 'Copy agent brief', icon: 'clipboard-copy', disabled: !ready, act: () => copyText(slopBrief(), 'Agent brief copied') },
-    { label: 'Open another design…', icon: 'folder-open', disabled: !ready, act: () => { SLOP.api.setArgs({}); location.reload(); } },
+    { label: 'Open another design…', icon: 'folder-open', disabled: !ready, act: () => slopPick(SLOP.api) },
   ];
 }
 

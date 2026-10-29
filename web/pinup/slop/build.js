@@ -4,7 +4,7 @@
 // the Artifact host wrapped it).
 //   dist/slop/          the pinup tool        (slop push web/pinup/dist/slop -a pinup)
 //   dist/slop-player/   the prototype player  (slop push web/pinup/dist/slop-player -a pinup-player)
-// Both hold the same index.html; slop/js/00-slop-host.js picks the mode.
+// Both hold the same index.html; slop/js/00-slop.js reads the mode from the boot data.
 const fs = require('fs'), path = require('path');
 const root = path.join(__dirname, '..');
 const nodes = JSON.parse(fs.readFileSync(path.join(root, 'vendor/node_modules/lucide-static/icon-nodes.json'), 'utf8'));
@@ -43,9 +43,12 @@ ${js}
 </html>
 `;
 const manifests = {
-  'slop': { title: 'Pinup', kind: 'page',
-    tool: { title: 'Pinup', icon: 'pen-tool', permissions: ['docs:read', 'docs:write', 'artifacts:read', 'versions:read', 'versions:push', 'threads:write', 'routes:read', 'routes:write'] } },
-  'slop-player': { title: 'Pinup player', kind: 'page' },
+  // An app on slop's runtime: designs are data artifacts with app = pinup.
+  'slop': { title: 'Pinup', kind: 'page', capabilities: {
+    db: {}, user: { scopes: ['profile'] }, room: {}, downloads: true, sample: {},
+    slop: { permissions: ['artifacts:read', 'versions:read', 'versions:push', 'threads:write', 'routes:read', 'routes:write'] } } },
+  // Read-only on a site route that binds target=<design>: static mode.
+  'slop-player': { title: 'Pinup player', kind: 'page', capabilities: { db: {}, user: {} } },
 };
 for (const [dir, manifest] of Object.entries(manifests)) {
   const out = path.join(root, 'dist', dir);

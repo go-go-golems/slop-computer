@@ -116,9 +116,10 @@ func (s *Server) guard(level int, sc scope, h http.HandlerFunc) http.HandlerFunc
 	return s.guardPerm(level, sc, "", h)
 }
 
-// guardPerm is guard for a route a tool may call with a grant carrying
-// permission perm (store.ToolPermissions). Routes guarded without a
-// permission never accept grants.
+// guardPerm is guard for a route an app may call through its slop
+// capability, with a view whose approved permissions include perm
+// (rt.SlopPermissions). Routes guarded without a permission never accept
+// view secrets.
 func (s *Server) guardPerm(level int, sc scope, perm string, h http.HandlerFunc) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		p, err := s.resolve(r)

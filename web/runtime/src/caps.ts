@@ -397,6 +397,11 @@ export function slop(h: Hello) {
     get view() {
       return state.view;
     },
+    /** Asks the Workshop to open another target (the app on it). */
+    open(target: string) {
+      post({ type: "navigate", target: String(target) });
+    },
+    config: ((h.caps.slop as any)?.config ?? {}) as { siteHosts?: string[]; publicUrl?: string },
     target: h.target,
     app: h.app,
     version: h.version,

@@ -92,6 +92,9 @@ export function AppScreen({ target, version, args }: { target: string; version?:
           return
         case 'compose': setAsk({ kind: 'compose', id: String(m.id), anchor: m.anchor, text: String(m.text ?? '') }); return
         case 'permissions': setAsk({ kind: 'permissions', id: String(m.id) }); return
+        case 'navigate':
+          if (typeof m.target === 'string' && /^[a-z0-9][a-z0-9-]{0,62}$/.test(m.target)) navigate(runPath(m.target))
+          return
         case 'args': {
           // The app chose what it shows; keep it in the Workshop's URL.
           const q = new URLSearchParams()

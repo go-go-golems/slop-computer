@@ -259,20 +259,23 @@ const check = (ok, what, extra) => { console.log((ok ? 'ok   ' : 'FAIL ') + what
   await p.evaluate(() => lpToggle(false));
   check(await p.$eval('#slopPreview', el => el.hidden && !el.querySelector('iframe')), 'closing removes the page');
 
-  // The design picker (no ?file=): one row per design, none on top of another.
+  // The design picker (Pinup opened on itself): one row per design of this
+  // app, none on top of another; a click asks the Workshop to open it.
   const pick = await p.evaluate(async () => {
-    const arts = [{ id: 'design-b', title: 'Bravo', kind: 'data', type: 'pinup', project: 'play', main: 2 },
-      { id: 'design-a', title: 'Alpha', kind: 'data', type: 'pinup', main: 5 }, { id: 'journal', title: 'Journal', kind: 'data', type: 'post', main: 3 }];
-    const picked = slopPick({ args: {}, setArgs() {}, get: async u => (u === '/artifacts' ? arts : u === '/projects' ? [{ id: 'play', name: 'Playground' }] : []) });
+    const arts = [{ id: 'design-b', title: 'Bravo', kind: 'data', app: 'pinup', project: 'play', main: 2 },
+      { id: 'design-a', title: 'Alpha', kind: 'data', app: 'pinup', main: 5 }, { id: 'design-c', title: 'Other app', kind: 'data', app: 'blocks', main: 1 },
+      { id: 'journal', title: 'Journal', kind: 'data', type: 'post', main: 3 }];
+    let opened = null;
+    slopPick({ app: 'pinup', open: id => { opened = id; }, get: async u => (u === '/artifacts' ? arts : u === '/projects' ? [{ id: 'play', name: 'Playground' }] : []) });
     await new Promise(r => setTimeout(r, 200));
     const rows = [...document.querySelectorAll('.slop-design')];
     const out = { text: rows.map(b => b.innerText.replace(/\n/g, ' | ')), tops: rows.map(b => Math.round(b.getBoundingClientRect().top)) };
     rows[1].click();
-    out.picked = await picked;
+    out.picked = opened;
     return out;
   });
   check(JSON.stringify(pick.text) === JSON.stringify(['Alpha | design-a · v5', 'Bravo | Playground · design-b · v2']) && pick.tops[1] > pick.tops[0] && pick.picked === 'design-b',
-    'the design picker lists designs one per row, sorted, and opens the one clicked', pick);
+    'the design picker lists this app\'s designs one per row, sorted, and opens the one clicked', pick);
   check(!errs.length, 'no page errors', errs);
   await b.close();
   console.log(failed ? failed + ' failed' : 'all passed');

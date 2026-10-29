@@ -22,7 +22,9 @@ export function staticDb(docs: Record<string, Body>) {
       const rows = Object.keys(docs).filter((p) => collOf(p) === coll && !p.slice(coll.length + 1).includes("/"))
         .map((p) => ({ path: p, body: docs[p], version: 1 }));
       const out = apply(q, rows).map((r) => snap(r.path));
-      return Object.freeze({ docs: Object.freeze(out), size: out.length, empty: !out.length, docChanges: () => [], metadata: META });
+      // The first (and only) snapshot of a listener is all-added.
+      const changes = Object.freeze(out.map((doc, i) => Object.freeze({ type: "added", doc, oldIndex: -1, newIndex: i })));
+      return Object.freeze({ docs: Object.freeze(out), size: out.length, empty: !out.length, docChanges: () => changes, metadata: META });
     },
     onSnapshot(next: (s: unknown) => void) {
       this.get().then(next);

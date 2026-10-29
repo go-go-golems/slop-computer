@@ -77,7 +77,7 @@ func Inject(page []byte, boot Boot) []byte {
 	head.WriteString(`</script><script src="/_slop/runtime.js"></script>`)
 	// claude.js is the first script a page runs anywhere but the public site,
 	// so window.claude.use exists (and resolves null where nothing is served).
-	if boot.Mode != ModeSite {
+	if boot.Mode != ModeSite || boot.Runtime != nil {
 		head.WriteString(`<script src="/_slop/claude.js"></script>`)
 	}
 	switch boot.Mode {

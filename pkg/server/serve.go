@@ -141,6 +141,14 @@ func (s *Server) renderPage(ctx context.Context, page store.Version, res *routin
 		boot.Record = res.Record
 	}
 	for name, b := range s.bindings(ctx, page, route) {
+		if name == "target" && mode == render.ModeSite {
+			// An app on a site route runs read-only against the bound
+			// target's saved documents (static mode, players).
+			if rb := s.staticRuntime(ctx, page, b); rb != nil {
+				boot.Mode, boot.Runtime = render.ModeStatic, rb
+			}
+			continue
+		}
 		if b.Artifact == SiteSource {
 			if h := s.siteHost(host); h != "" {
 				boot.Data[name] = s.siteIndex(ctx, h)
@@ -573,6 +581,28 @@ func (s *Server) serveSandbox(w http.ResponseWriter, r *http.Request, label stri
 		return
 	}
 	s.writePage(w, http.StatusOK, body)
+}
+
+// staticRuntime is the runtime boot of an app page bound to a target on a
+// site route: the documents of the target version's db.json, nil when the
+// page declares no capabilities.
+func (s *Server) staticRuntime(ctx context.Context, page store.Version, b ResolvedBinding) *render.Runtime {
+	caps, err := rt.ParseManifest(page.Manifest, rt.SlopPermissions)
+	if err != nil || !caps.IsApp() {
+		return nil
+	}
+	rb := s.runtimeBoot(b.Artifact, page, caps)
+	rb.Docs = json.RawMessage("{}")
+	if b.N > 0 {
+		if v, err := s.Store.Version(ctx, b.Artifact, b.N); err == nil {
+			if f, ok := v.Files["db.json"]; ok {
+				if raw, err := s.Blobs.Read(f.SHA256); err == nil && json.Valid(raw) {
+					rb.Docs = raw
+				}
+			}
+		}
+	}
+	return rb
 }
 
 // runtimeBoot is what claude.js reads before a view arrives: the names of

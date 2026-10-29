@@ -365,8 +365,13 @@ func fromRow(d store.RTDoc) docOut {
 }
 
 func (s *Server) hello(ctx context.Context, v *rt.View, head int64) map[string]any {
+	caps := grantedCaps(v)
+	if sl, ok := caps["slop"].(map[string]any); ok {
+		// What the management API's callers need to address the site.
+		sl["config"] = map[string]any{"siteHosts": s.Config.SiteHosts, "publicUrl": origin(s.Config.PublicURL)}
+	}
 	return map[string]any{"view": v.ID, "target": v.Target, "app": v.App, "version": v.Version, "kind": v.Kind,
-		"level": v.Level.String(), "caps": grantedCaps(v), "rev": head, "me": s.userInfo(ctx, v),
+		"level": v.Level.String(), "caps": caps, "rev": head, "me": s.userInfo(ctx, v),
 		"permissions": s.permissionStates(ctx, v)}
 }
 

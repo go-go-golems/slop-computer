@@ -15,8 +15,5 @@
       all: rows,
     };
   });
-  // Tools get slop.tool from tool.js when the Workshop opens them; anywhere
-  // else (site, previews, thumbnails) ready() says where to open them.
-  var tool = { ready: function () { return Promise.reject(new Error('This is a tool: open it from the Workshop’s Tools menu (/tools/' + ((D.version && D.version.artifact) || '…') + ').')); } };
-  window.slop = { route: D.route || { params: {} }, data: data, record: D.record || null, version: D.version || null, mode: D.mode || 'site', tokens: D.tokens || null, tool: tool };
+  window.slop = { route: D.route || { params: {} }, data: data, record: D.record || null, version: D.version || null, mode: D.mode || 'site', tokens: D.tokens || null };
 })();

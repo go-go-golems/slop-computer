@@ -702,6 +702,11 @@
       get view() {
         return state.view;
       },
+      /** Asks the Workshop to open another target (the app on it). */
+      open(target) {
+        post({ type: "navigate", target: String(target) });
+      },
+      config: h.caps.slop?.config ?? {},
       target: h.target,
       app: h.app,
       version: h.version
@@ -1592,7 +1597,8 @@
         if (bad) throw fail("invalid_argument", bad);
         const rows = Object.keys(docs).filter((p) => collOf(p) === coll && !p.slice(coll.length + 1).includes("/")).map((p) => ({ path: p, body: docs[p], version: 1 }));
         const out = apply(q, rows).map((r) => snap(r.path));
-        return Object.freeze({ docs: Object.freeze(out), size: out.length, empty: !out.length, docChanges: () => [], metadata: META });
+        const changes = Object.freeze(out.map((doc, i) => Object.freeze({ type: "added", doc, oldIndex: -1, newIndex: i })));
+        return Object.freeze({ docs: Object.freeze(out), size: out.length, empty: !out.length, docChanges: () => changes, metadata: META });
       },
       onSnapshot(next) {
         this.get().then(next);
