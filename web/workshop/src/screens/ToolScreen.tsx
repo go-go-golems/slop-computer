@@ -1,7 +1,7 @@
 import { useEffect, useRef, useState } from 'react'
 import { errorText, useDisableToolMutation, useEnableToolMutation, useGrantToolMutation, useSandboxUrlQuery, useToolsQuery } from '../api/slopApi'
 import type { ToolView } from '../api/types'
-import { isSandboxOrigin } from '../app/boot'
+import { boot, isSandboxOrigin } from '../app/boot'
 import { ago } from '../app/format'
 import { useNames } from '../app/hooks'
 import { navigate, toolPath, watchPath } from '../app/router'
@@ -11,10 +11,19 @@ import { Button, Empty, IconButton, Tag } from '../components/atoms'
 // Renew the grant well before its hour is up.
 const RENEW_MS = 45 * 60 * 1000
 
+// toolArgs are the query of /tools/<id>?…, less the Workshop's own try:
+// what the tool should open (Pinup: ?file=<design>). They are display state
+// for the tool, not authority; the grant decides what it may do.
+export function toolArgs(q: URLSearchParams): Record<string, string> {
+  const out: Record<string, string> = {}
+  q.forEach((v, k) => { if (k !== 'try') out[k] = v })
+  return out
+}
+
 // ToolScreen runs a tool in an iframe on the sandbox domain. The chrome
 // around it (version, try, update, disable) belongs to the Workshop, so a
 // broken or hostile tool cannot hide the way out.
-export function ToolScreen({ id, tryN }: { id: string; tryN?: number }) {
+export function ToolScreen({ id, tryN, args = {} }: { id: string; tryN?: number; args?: Record<string, string> }) {
   const { data, isLoading } = useToolsQuery()
   const [dialog, setDialog] = useState<number | null>(null)
   const [disable] = useDisableToolMutation()
@@ -50,7 +59,7 @@ export function ToolScreen({ id, tryN }: { id: string; tryN?: number }) {
           {t.latest.error ? <span className="muted" style={{ color: 'var(--accent)' }}>{`v${t.latest.n}: ${t.latest.error}`}</span> : null}
         </div>
         <div className="tilebody">
-          {n ? <ToolFrame key={`${id}@${n}`} id={id} n={n} trying={trying} />
+          {n ? <ToolFrame key={`${id}@${n}`} id={id} n={n} trying={trying} args={args} />
             : <Empty>{`Try v${t.latest.n} to see it; enabling it then lets everyone open it from the Tools menu.`}</Empty>}
         </div>
       </section>
@@ -61,11 +70,13 @@ export function ToolScreen({ id, tryN }: { id: string; tryN?: number }) {
 
 // ToolFrame loads one tool version and answers its hello with a grant,
 // renewed while it is open. Without a grant the tool can do nothing.
-function ToolFrame({ id, n, trying }: { id: string; n: number; trying: boolean }) {
+function ToolFrame({ id, n, trying, args }: { id: string; n: number; trying: boolean; args: Record<string, string> }) {
   const { data: sb, isError } = useSandboxUrlQuery({ artifact: id, n, mode: 'tool' })
   const frame = useRef<HTMLIFrameElement>(null)
   const [grantTool] = useGrantToolMutation()
   const [problem, setProblem] = useState('')
+  const argsRef = useRef(args)
+  argsRef.current = args
 
   useEffect(() => {
     if (!sb) return
@@ -73,7 +84,9 @@ function ToolFrame({ id, n, trying }: { id: string; n: number; trying: boolean }
     const give = async () => {
       try {
         const g = await grantTool({ id, n, try: trying }).unwrap()
-        frame.current?.contentWindow?.postMessage({ slop: 1, type: 'grant', grant: g.grant, expiresAt: g.expiresAt, permissions: g.permissions, user: g.user }, sb.origin)
+        const cfg = boot().config
+        frame.current?.contentWindow?.postMessage({ slop: 1, type: 'grant', grant: g.grant, expiresAt: g.expiresAt, permissions: g.permissions, user: g.user,
+          people: g.people ?? {}, args: argsRef.current, config: { siteHosts: cfg.siteHosts, publicUrl: cfg.publicUrl } }, sb.origin)
         setProblem('')
       } catch (e) {
         setProblem(errorText(e))
@@ -93,7 +106,7 @@ function ToolFrame({ id, n, trying }: { id: string; n: number; trying: boolean }
 
   return (
     <div className="stage" style={{ padding: 0 }}>
-      {sb ? <iframe ref={frame} src={sb.url} title={`Tool ${id} v${n}`} sandbox="allow-scripts allow-same-origin allow-forms allow-popups" style={{ width: '100%', height: '100%', border: 0, background: '#fff' }} /> : null}
+      {sb ? <iframe ref={frame} src={sb.url} title={`Tool ${id} v${n}`} sandbox="allow-scripts allow-same-origin allow-forms allow-popups allow-downloads" allow="clipboard-read; clipboard-write" style={{ width: '100%', height: '100%', border: 0, background: '#fff' }} /> : null}
       {isError ? <Empty>The tool could not be opened.</Empty> : null}
       {problem ? <div className="pickhint" style={{ background: 'var(--accent)' }}>{`No grant: ${problem}`}</div> : null}
     </div>

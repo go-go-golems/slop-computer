@@ -127,6 +127,7 @@ func Register(root *cobra.Command) error {
 		{"artifacts", "List artifacts", []glazed.Command{&artifactsCmd{glazed.NewCommandDescription("list", glazed.WithShort("List artifacts"),
 			glazed.WithFlags(append(serverFlags(), fields.New("project", fields.TypeString, fields.WithShortFlag("p"), fields.WithHelp("Only this project")))...))}}},
 		{"route", "Point site paths at page versions, with history and undo", routeCommands()},
+		{"docs", "Read and write live design documents (Pinup files)", docsCommands()},
 		{"comments", "Wait for, list and answer comments", commentCommands()},
 		{"projects", "List and edit projects", projectCommands()},
 		{"dev", "Development helpers", []glazed.Command{newDevSeed()}},
