@@ -27,8 +27,10 @@ async function signIn(page, nick) {
 // Accepts the Workshop's consent dialog whenever it shows.
 function autoAllow(page) {
   const timer = setInterval(async () => {
-    const b = page.locator('.dialog button:has-text("Allow")');
-    if (await b.count().catch(() => 0)) await b.first().click().catch(() => {});
+    for (const label of ["Allow", "Save"]) {
+      const b = page.locator(`.dialog button:has-text("${label}")`);
+      if (await b.count().catch(() => 0)) await b.first().click().catch(() => {});
+    }
   }, 300);
   page.on("close", () => clearInterval(timer));
 }
@@ -110,6 +112,12 @@ await check("two tabs: a moment from one tab reaches the other", async () => {
   await new Promise((r) => setTimeout(r, 300));
   await frame.evaluate(async () => (await claude.use("room")).emit("ping", "hi"));
   return got;
+});
+await check("downloads: the shell asks, and the file arrives in the browser", async () => {
+  const dl = page.waitForEvent("download", { timeout: 8000 });
+  const res = await frame.evaluate(async () => (await claude.use("downloads")).save({ filename: "notes.txt", data: "hello" }));
+  const d = await dl;
+  return res.status === "saved" && d.suggestedFilename() === "notes.txt";
 });
 await check("a reload converges: the document is there after reloading", async () => {
   const f = await appFrame(page2);

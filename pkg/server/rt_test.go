@@ -379,3 +379,36 @@ func TestRuntimeSample(t *testing.T) {
 		t.Fatalf("foreign cancel %d", r.StatusCode)
 	}
 }
+
+func TestRuntimePublish(t *testing.T) {
+	h := newHarness(t, store.RoleAdmin)
+	manuel := h.signIn("manuel")
+	tok := h.token(manuel.id(), store.ScopeRead, store.ScopeWrite)
+	h.pushFiles(tok, "poll", map[string]any{"title": "Poll", "kind": "page"}, map[string]any{"capabilities": map[string]any{"artifact": map[string]any{}}},
+		map[string]string{"index.html": "<!doctype html><html><head></head><body>v1</body></html>", "style.css": "b{}"})
+	a := h.openView(manuel, "poll")
+	a.stream()
+	b := h.openView(manuel, "poll")
+	b.stream()
+	if _, e := a.rpc("artifact.publish", map[string]any{"html": "<p>no doctype"}); e != "invalid_content" {
+		t.Fatalf("no doctype: %q", e)
+	}
+	r, e := a.rpc("artifact.publish", map[string]any{"html": "<!doctype html><html><head></head><body>v2</body></html>"})
+	if e != "" || r["version"].(float64) != 2 {
+		t.Fatalf("publish %v %q", r, e)
+	}
+	if ev := b.next("reload"); ev.Data["version"].(float64) != 2 {
+		t.Fatalf("reload %v", ev)
+	}
+	// The other files are kept; index.html is the new document.
+	if code, body, _ := h.get(a.host, "/v/2/style.css", ""); code != 200 || body != "b{}" {
+		t.Fatalf("kept file %d %q", code, body)
+	}
+	if code, body, _ := h.get(a.host, "/v/2/", ""); code != 200 || !strings.Contains(body, "v2") {
+		t.Fatalf("published page %d", code)
+	}
+	// A view still on v1 publishing again lost the race: conflict.
+	if _, e := b.rpc("artifact.publish", map[string]any{"html": "<!doctype html><html><body>late</body></html>"}); e != "conflict" {
+		t.Fatalf("stale publish: %q", e)
+	}
+}

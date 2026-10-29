@@ -163,6 +163,30 @@ function next(subscribe, pred = () => true, ms = 4000) {
   const art = await claude.use("artifact");
   await check("artifact resolves on a self-contained app", () => !!art && typeof art.publish === "function");
 
+  // --- assets
+  const assets = await claude.use("assets");
+  await check("assets: upload, serve at /_blob/<id>, list, delete", async () => {
+    const png = Uint8Array.from(atob("iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNk+M9QDwADhgGAWjR9awAAAABJRU5ErkJggg=="), (c) => c.charCodeAt(0));
+    const up = await assets.upload(new Blob([png], { type: "image/png" }));
+    const r = await fetch(up.url);
+    const listed = (await assets.list()).assets.some((a) => a.id === up.id);
+    const del = await assets.delete(up.id);
+    const gone = await fetch(up.url);
+    return up.url === "/_blob/" + up.id && r.status === 200 && r.headers.get("content-type") === "image/png" && r.headers.get("x-content-type-options") === "nosniff" && listed && del.deleted && gone.status === 404;
+  });
+  await check("assets: an SVG upload rejects unsupported_type", async () => (await code(assets.upload(new Blob(["<svg/>"], { type: "image/svg+xml" })))) === "unsupported_type");
+
+  // --- comments (the full form asks consent on its first write)
+  const comments = await claude.use("comments");
+  await check("comments: create, reply, resolve", async () => {
+    const anchor = await comments.anchorFor(document.querySelector("h1"));
+    const c = await comments.create({ anchor, text: "conformance thread " + run });
+    const r = await comments.reply(c.threadId, "a reply");
+    await comments.resolve(c.threadId, true);
+    return typeof c.threadId === "string" && c.threadId.length > 0 && r.commentId;
+  });
+  await check("comments: an empty comment rejects invalid", async () => (await code(comments.create({ anchor: {}, text: "" }))) === "invalid");
+
   // Coordination for the runner's two-tab check: the doc it watches.
   window.__run = run;
   finish();

@@ -395,9 +395,20 @@ func (s *Server) serveAsset(w http.ResponseWriter, r *http.Request, target, id s
 		notFoundPage(w)
 		return
 	}
+	file, err := s.Blobs.Open(a.SHA256)
+	if err != nil {
+		unavailable(w, err)
+		return
+	}
+	defer func() { _ = file.Close() }()
+	w.Header().Set("Content-Type", a.ContentType)
 	w.Header().Set("X-Content-Type-Options", "nosniff")
 	w.Header().Set("Content-Security-Policy", "sandbox; default-src 'none'")
-	s.serveBlob(w, r, store.FileEntry{SHA256: a.SHA256, Size: a.Size, Type: a.ContentType})
+	// Revalidated on every use (a cheap 304 by ETag): a deleted asset is
+	// gone for good, not served from the browser's cache.
+	w.Header().Set("Cache-Control", "private, no-cache")
+	w.Header().Set("ETag", `"`+a.SHA256+`"`)
+	http.ServeContent(w, r, "", zeroTime, file)
 }
 
 func (s *Server) rpcAssetsList(ctx context.Context, v *rt.View, _ json.RawMessage) (any, error) {

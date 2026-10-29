@@ -6,6 +6,8 @@
     "user": { "scopes": ["profile"] },
     "room": { "topics": { "ping": "interact" } },
     "downloads": true,
+    "assets": {},
+    "comments": {},
     "artifact": {}
   }
 }
