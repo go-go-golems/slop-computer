@@ -37,6 +37,14 @@ export function DeviceSeg({ device, onChange }: { device: Device; onChange: (d: 
   return <Seg label="Width" value={device} onChange={onChange} options={[['fit', 'Fit'], ['desktop', 'Desktop'], ['phone', 'Phone']]} />
 }
 
+// A page compiled by Pinup names its design in its manifest; Edit in Pinup
+// opens that design in the Pinup tool.
+export function pinupDesign(m: Record<string, unknown> | undefined): string | null {
+  const p = m?.pinup as { design?: unknown } | undefined
+  return typeof p?.design === 'string' ? p.design : null
+}
+export const pinupPath = (design: string) => `${toolPath('pinup')}?file=${encodeURIComponent(design)}`
+
 export function PageToolbar(p: {
   a: Artifact; versions: Version[]; v: Version; ctx: PreviewContext; rtab: string; device: Device; cmpLeft: number
   onDevice: (d: Device) => void; onSample: (s: string) => void; onCmpLeft: (n: number) => void; onOpenSite: (host: string, path: string) => void
@@ -61,6 +69,7 @@ export function PageToolbar(p: {
       ) : null}
       {ctx.route && ctx.host && ctx.path ? <Button onClick={() => p.onOpenSite(ctx.host!, ctx.path!)}>Open in Site</Button> : null}
       {p.v.manifest && 'tool' in p.v.manifest ? <Button onClick={() => navigate(toolPath(p.a.id, p.v.n))}>Open as tool</Button> : null}
+      {pinupDesign(p.v.manifest) ? <Button title={`This page is compiled from ${pinupDesign(p.v.manifest)}`} onClick={() => navigate(pinupPath(pinupDesign(p.v.manifest)!))}>Edit in Pinup</Button> : null}
     </div>
   )
 }

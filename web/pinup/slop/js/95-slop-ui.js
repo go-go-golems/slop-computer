@@ -96,7 +96,14 @@ function slopMenu() {
   return [
     { head: ready ? 'slop · ' + SLOP.file : 'slop' },
     { label: 'Save version…', icon: 'save', disabled: !push, act: () => slopNoteSheet('Save version', 'Writes the live file as a new version of ' + SLOP.file + '. Published prototypes follow it.', 'Save', slopSaveVersion) },
-    { label: 'Publish prototype…', icon: 'globe', disabled: !push, act: slopPublishSheet },
+    { label: 'Publish prototype…', icon: 'presentation', disabled: !push, act: slopPublishSheet },
+    '-',
+    S.file.app
+      ? { label: 'App settings…', icon: 'settings', disabled: !push, act: slopAppSheet }
+      : { label: 'Make this an app…', icon: 'globe', disabled: !push, act: slopAppSheet },
+    { label: 'Preview app', icon: 'eye', disabled: !push || !S.file.app, act: () => slopAppRun(true) },
+    { label: 'Publish app', icon: 'rocket', disabled: !push || !S.file.app || !SLOP.api.can('routes:write'), act: () => slopAppRun(false) },
+    '-',
     { label: 'Hand off to an agent…', icon: 'bot', disabled: !push || !SLOP.api.can('threads:write'), act: () => slopNoteSheet('Hand off to an agent', 'Saves a version and opens a thread asking a coding agent (slop comments wait) to build the app from it.', 'Hand off', slopHandOff) },
     '-',
     { label: 'Copy agent brief', icon: 'clipboard-copy', disabled: !ready, act: () => copyText(slopBrief(), 'Agent brief copied') },

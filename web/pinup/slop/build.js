@@ -44,7 +44,7 @@ ${js}
 `;
 const manifests = {
   'slop': { title: 'Pinup', kind: 'page',
-    tool: { title: 'Pinup', icon: 'pen-tool', permissions: ['docs:read', 'docs:write', 'artifacts:read', 'versions:push', 'threads:write', 'routes:write'] } },
+    tool: { title: 'Pinup', icon: 'pen-tool', permissions: ['docs:read', 'docs:write', 'artifacts:read', 'versions:read', 'versions:push', 'threads:write', 'routes:read', 'routes:write'] } },
   'slop-player': { title: 'Pinup player', kind: 'page' },
 };
 for (const [dir, manifest] of Object.entries(manifests)) {

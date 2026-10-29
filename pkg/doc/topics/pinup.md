@@ -138,3 +138,35 @@ slop route set /proto/pace-club         pinup-player --bind design=design-pace-c
 - **Updating it.** Saving a new version updates the prototype.
 - **What becomes public.** The route makes the saved version public:
   `file.json`, the pages and `handoff.md`. Feedback stays in the live documents.
+
+## Pinup apps: designs that are real pages
+
+A design can be published as a real page instead of a prototype. In Pinup:
+slop menu → *Make this an app…*, then *Publish app*. Publishing compiles every
+screen that has a page path into one page artifact (`S.file.app.page`, for
+example `pace-club`), and routes each screen on the app's host under its base
+path. The page's manifest says where it comes from:
+
+```json
+{"pinup": {"design": "design-pace-club", "version": 5}, "reads": {"runs": "data-runs"}}
+```
+
+**The design is the source.** Change the design, not the page: a
+`slop push` to a compiled page warns that the next *Publish app* replaces it.
+To turn an app into hand-written code, push without the `pinup` key, and
+remove `app` from the design's `meta/file`.
+
+These are the fields an agent can set with steps (`{"op": "update", "id": …, "set": {…}}`):
+
+| Where | Field | Meaning |
+|---|---|---|
+| `meta/file` | `app: {page, host, base, data}` | The page artifact, site host, base path, and data sources (name → data artifact) |
+| top-level frame | `route: "/runs/:id"` | The screen's path under the base. A frame without a route is not a page |
+| top-level frame | `record: "runs"` | On a path with a `:param`, show the record of that source whose `id` (or `slug`) is the param |
+| frame | `repeat: {from: "runs", sort: "-date", limit: 10}` | Repeat the first child once per record. The other children are sample copies and are left out |
+| image fill | `bind: "photo"` | Use the record's field (a file record's `src`, or a URL) as the image |
+| text | `{{title}}`, `{{params.id}}`, `{{app.name}}` | Filled from the repeat's row, then the screen's record, then the path and the app |
+
+Prototype links become `<a href>`s. A link to a screen whose path has
+parameters is filled in from the record in scope (`/pace-club/runs/{{id}}`).
+Publishing stays a person's action in Pinup: it moves routes on the site.

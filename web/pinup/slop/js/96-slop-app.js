@@ -333,3 +333,215 @@ function slopAppRuntime() {
     try { var r = new URL(document.referrer); if (r.origin === location.origin && rel(r.pathname) != null && history.length > 1) { e.preventDefault(); history.back(); } } catch (err) { /* follow the link */ }
   });
 }
+
+// ---------- publishing ----------
+// Preview pushes a version of the app page without moving main and returns
+// its Workshop URL. Publish moves main and routes every screen on the app's
+// host: routes it would add that point at another page stop it before
+// anything is written, and routes of this page that no screen has any more
+// are removed. Routes elsewhere are never touched.
+async function slopAppPublish(preview) {
+  const api = SLOP.api, app = S.file.app, enc = encodeURIComponent;
+  const chk = slopAppCheck();
+  if (chk.errors.length) throw new Error(chk.errors[0] + (chk.errors.length > 1 ? ` (and ${chk.errors.length - 1} more problems)` : ''));
+  const urls = chk.screens.map(f => slopAppJoin(app.base, f.route));
+  let page = null;
+  try { page = await api.get('/artifacts/' + enc(app.page)); } catch (e) { if (e.status !== 404) throw e; }
+  if (page && page.kind !== 'page') throw new Error(`${app.page} is a ${page.kind} artifact: choose another page id in App settings.`);
+  if (page && page.main) {
+    const v = await api.get(`/artifacts/${enc(app.page)}/versions/${page.main}`);
+    const pin = v.manifest && v.manifest.pinup;
+    if (!pin || pin.design !== SLOP.file) throw new Error(`${app.page} exists and is not compiled from this design: choose another page id in App settings.`);
+  }
+  let routes = [];
+  if (!preview) {
+    routes = (await api.get('/routes', { host: app.host })) || [];
+    const clash = routes.filter(r => urls.includes(r.path) && r.page !== app.page);
+    if (clash.length) throw new Error(clash.map(r => `${r.path} is routed to ${r.page}`).join('; ') + '. Change the paths or the base path, or move those routes first.');
+  }
+  const dv = await slopSaveVersion(preview ? 'Previewed as an app' : 'Published as an app');
+  const out = await slopAppCompile(chk, dv);
+  const o = { message: `${preview ? 'Preview' : 'Published'} from ${SLOP.file} v${dv}`, manifest: out.manifest, moveMain: !preview };
+  if (page) o.base = page.main;
+  else o.create = { title: S.file.name, kind: 'page', project: (await api.get('/artifacts/' + enc(SLOP.file))).project || null };
+  const r = await slopPush(app.page, out.files, o);
+  const n = r && r.version ? r.version.n : null;
+  if (preview) return { n, url: ((api.config && api.config.publicUrl) || '') + '/watch/' + enc(app.page) + '/' + n };
+  const note = 'Pinup app ' + SLOP.file;
+  for (const p of urls) {
+    const cur = routes.find(x => x.path === p);
+    if (cur && cur.page === app.page && cur.version == null && !cur.pageFrom && !cur.record && cur.access === 'public' && !Object.keys(cur.bindings || {}).length) continue;
+    await api.put('/routes', { host: app.host, path: p, page: app.page, version: null, access: 'public', bindings: {}, note });
+  }
+  const gone = routes.filter(x => x.page === app.page && !urls.includes(x.path));
+  for (const x of gone) await api.del('/routes', { host: app.host, path: x.path, note: note + ': no screen at this path any more' });
+  return { n, urls, removed: gone.map(x => x.path) };
+}
+
+// ---------- settings ----------
+// First time: every top-level frame on the current page without a path gets
+// one (the flow start or first frame '/', the others their slugged name).
+function slopAppAssignPaths() {
+  const frames = framesOnPage(S.pageId).filter(f => !f.component && f.visible);
+  if (!frames.length || slopAppScreens().length) return;
+  const start = frames.find(f => f.flow) || frames[0];
+  const taken = new Set();
+  patchMany(frames.map(f => {
+    let p = f === start ? '/' : '/' + (slug(f.name) || 'screen'), i = 2;
+    while (taken.has(p)) p = '/' + slug(f.name) + '-' + i++;
+    taken.add(p);
+    return [f.id, { route: p }];
+  }), { label: 'Page paths' });
+}
+
+function slopAppSheet() {
+  const api = SLOP.api, cur = S.file.app || {};
+  const hosts = (api.config && api.config.siteHosts) || [];
+  const page = h('input', { type: 'text', value: cur.page || slug(S.file.name), 'aria-label': 'Page id', style: { width: '100%' } });
+  const host = h('select', { 'aria-label': 'Site host' }, ...hosts.map(x => h('option', { value: x, text: x, selected: x === cur.host })));
+  const base = h('input', { type: 'text', value: cur.base || '/' + slug(S.file.name), 'aria-label': 'Base path', style: { width: '100%' } });
+  const rows = h('div', { class: 'stack' });
+  let arts = [];
+  const addRow = (name, id) => {
+    const nm = h('input', { type: 'text', value: name || '', placeholder: 'name, e.g. runs', 'aria-label': 'Source name', style: { width: '120px' } });
+    const sel = h('select', { 'aria-label': 'Data artifact' }, h('option', { value: '', text: 'Choose data…' }), ...arts.map(a => h('option', { value: a.id, text: a.title + ' · ' + a.id, selected: a.id === id })));
+    if (id && !arts.some(a => a.id === id)) sel.append(h('option', { value: id, text: id, selected: true }));
+    const row = h('div', { class: 'acts', style: { justifyContent: 'flex-start' } }, nm, sel, h('button', { class: 'btn sm', text: 'Remove', onclick: () => row.remove() }));
+    row._get = () => [nm.value.trim(), sel.value];
+    rows.append(row);
+  };
+  const out = h('span', { class: 'muted' });
+  const save = h('button', { class: 'btn primary sm', text: S.file.app ? 'Save' : 'Make this an app', onclick: () => {
+    const data = {};
+    for (const r of rows.children) { const [k, v] = r._get(); if (!k && !v) continue; if (!/^[a-z][a-z0-9_]*$/.test(k) || !v) { out.textContent = 'A source is a lowercase name and a data artifact.'; return; } data[k] = v; }
+    const app = { page: page.value.trim(), host: host.value, base: slopAppPath(base.value), data };
+    if (!APP_ID.test(app.page)) { out.textContent = 'The page id is lowercase letters, digits and -.'; return; }
+    if (!slopAppValidPath(app.base, false)) { out.textContent = 'The base path is lowercase letters, digits, - and _ between slashes.'; return; }
+    const first = !S.file.app;
+    setFile({ app }, { label: 'App settings' });
+    if (first) slopAppAssignPaths();
+    sh.close();
+    toast(first ? 'This design is an app: each screen with a page path becomes a page. Prototype tab → App.' : 'App settings saved.', 3500);
+    setTab('proto'); INSP.force = true; renderInspector();
+  } });
+  const sh = sheet(S.file.app ? 'App settings' : 'Make this an app', [
+    h('p', { text: 'Publish app compiles the screens that have a page path into a page artifact and routes each screen on the site. The design stays the source: edit here, publish again.' }),
+    h('div', { class: 'opt' }, h('b', { text: 'Page artifact' }), page),
+    h('div', { class: 'opt' }, h('b', { text: 'Where' }), host, base),
+    h('div', { class: 'opt' }, h('b', { text: 'Data sources' }), h('p', { class: 'muted', text: 'Data artifacts the pages read. Text can show {{field}}, frames can repeat once per record, a screen whose path has a :parameter can show one record.' }), rows,
+      h('div', { class: 'acts', style: { justifyContent: 'flex-start' } }, h('button', { class: 'btn sm', text: 'Add source', onclick: () => addRow('', '') }))),
+    h('div', { class: 'acts' }, save), out,
+  ], { width: 560 });
+  api.get('/artifacts').then(list => {
+    arts = (list || []).filter(a => a.kind === 'data' && a.type !== 'pinup' && a.type !== 'tokens');
+    for (const [k, v] of Object.entries(cur.data || {})) addRow(k, v);
+  }, () => { for (const [k, v] of Object.entries(cur.data || {})) addRow(k, v); });
+}
+
+async function slopAppRun(preview) {
+  toast(preview ? 'Compiling a preview…' : 'Publishing…', 60000);
+  try {
+    const r = await slopAppPublish(preview);
+    if (preview) { toast(`Preview: ${S.file.app.page} v${r.n} (not live).`, 3500); window.open(r.url, '_blank', 'noopener'); return; }
+    const app = S.file.app, url = location.protocol + '//' + app.host + slopAppPath(app.base);
+    toast(`Published ${app.page} v${r.n} at ${url}` + (r.removed.length ? ` · removed ${r.removed.join(', ')}` : ''), 5000);
+    SLOP_APP.last = { n: r.n, url };
+    INSP.force = true; renderInspector();
+  } catch (e) { toast((preview ? 'Preview failed: ' : 'Publish failed: ') + (e.message || e), 6000); }
+}
+
+// ---------- the Prototype tab ----------
+const SLOP_APP = { fields: new Map(), last: null };
+// Field names of a source's records (from its main), loaded once.
+function slopAppFields(name) {
+  const id = S.file.app && S.file.app.data && S.file.app.data[name];
+  if (!id) return [];
+  const c = SLOP_APP.fields.get(id);
+  if (c) return c === 'loading' ? [] : c;
+  SLOP_APP.fields.set(id, 'loading');
+  const api = SLOP.api, enc = encodeURIComponent;
+  api.get('/artifacts/' + enc(id)).then(a => (a.main ? api.get(`/artifacts/${enc(id)}/versions/${a.main}/records`) : []))
+    .then(rs => { const ks = new Set(); for (const r of (rs || []).slice(0, 50)) for (const k of Object.keys(r)) ks.add(k); SLOP_APP.fields.set(id, [...ks].sort()); INSP.force = true; renderInspector(); },
+      () => SLOP_APP.fields.set(id, []));
+  return [];
+}
+// The data source in scope for a layer: the nearest repeat above it, else
+// its screen's record.
+function slopAppScope(n) {
+  for (const a of [n, ...ancestors(n.id)]) { const r = slopAppRepeat(a.repeat); if (r && a.id !== n.id) return r.from; }
+  const top = topOf(n.id);
+  return top && top.record ? top.record : null;
+}
+
+function slopAppSections() {
+  const out = [], ns = selNodes(), app = S.file.app, can = SLOP.api && SLOP.api.can('versions:push');
+  const field = (value, ph, set, aria) => h('input', { class: 'sel', value: value || '', placeholder: ph, disabled: !S.canEdit, 'aria-label': aria, onchange: e => set(e.target.value.trim()) });
+  const sources = app ? Object.keys(app.data || {}) : [];
+  if (!ns.length) {
+    if (!app) {
+      out.push(sec('App', null, h('p', { class: 'note', text: 'Publish this design as real pages on the site: each screen gets a path, links become links, text and lists can show data.' }),
+        h('button', { class: 'btn', disabled: !can, onclick: slopAppSheet }, ico('globe'), 'Make this an app…')));
+      return out;
+    }
+    const chk = slopAppCheck();
+    const list = h('div', { class: 'stack' }, ...chk.screens.map(f => h('div', { style: { display: 'flex', gap: '8px', alignItems: 'baseline' } },
+      h('button', { class: 'btn sm', onclick: () => { if (f.page !== S.pageId) goPage(f.page); select([f.id]); centerOn(f.id); } }, f.name),
+      h('code', { text: slopAppJoin(app.base, f.route), style: { color: 'var(--muted)', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' } }))));
+    const probs = [...chk.errors.map(e => h('p', { class: 'note', text: '✕ ' + e, style: { color: 'var(--danger, #c0362c)' } })), ...chk.warnings.map(w => h('p', { class: 'note', text: '! ' + w }))];
+    const pub = SLOP.api && SLOP.api.can('routes:write');
+    out.push(sec('App', ib('settings', 'App settings', slopAppSheet, { disabled: !can }),
+      h('p', { class: 'note', text: `${app.page} on ${app.host}${slopAppPath(app.base)}` + (sources.length ? ' · data: ' + sources.join(', ') : '') }),
+      list, ...probs,
+      SLOP_APP.last ? h('p', { class: 'note' }, 'Live: ', h('a', { href: SLOP_APP.last.url, target: '_blank', rel: 'noopener', text: SLOP_APP.last.url })) : null,
+      h('div', { class: 'acts', style: { justifyContent: 'flex-start' } },
+        h('button', { class: 'btn', disabled: !can || chk.errors.length > 0, onclick: () => slopAppRun(true) }, ico('eye'), 'Preview'),
+        h('button', { class: 'btn primary', disabled: !can || !pub || chk.errors.length > 0, title: pub ? '' : 'This tool was not granted routes:write', onclick: () => slopAppRun(false) }, ico('globe'), 'Publish app'))));
+    return out;
+  }
+  if (ns.length !== 1) return out;
+  const n = ns[0];
+  if (!n.parent && n.type === 'frame' && !n.component) {
+    if (!app) { out.push(sec('Page path', null, h('p', { class: 'note', text: 'Make this design an app (Prototype tab with nothing selected) to give screens paths on the site.' }))); return out; }
+    const p = n.route ? slopAppPath(n.route) : '';
+    const body = [field(n.route, 'not a page (e.g. /runs/:id)', v => patch(n.id, { route: v ? slopAppPath(v) : null }, { label: 'Page path' }), 'Page path'),
+      h('p', { class: 'note', text: p ? location.protocol + '//' + app.host + slopAppJoin(app.base, p) : 'Without a path this screen stays design-only.' })];
+    if (p.includes('/:')) body.push(h('div', { class: 'g2' }, h('span', { text: 'Shows a record of', style: { color: 'var(--muted)', alignSelf: 'center' } }),
+      selField([{ v: '', label: 'None' }, ...sources.map(s => ({ v: s, label: s }))], n.record || '', v => patch(n.id, { record: v || null }, { label: 'Record' }), { aria: 'Record source' })));
+    out.push(sec('Page path', null, h('div', { class: 'stack' }, ...body)));
+    return out;
+  }
+  if (!app || !topOf(n.id).route) return out;
+  if (n.type === 'frame' || n.type === 'instance') {
+    const r = slopAppRepeat(n.repeat) || {};
+    const set = p => patch(n.id, { repeat: p.from ? Object.assign({}, r, p) : null }, { label: 'Repeat' });
+    const body = h('div', { class: 'stack' },
+      h('div', { class: 'g2' }, h('span', { text: 'For each record of', style: { color: 'var(--muted)', alignSelf: 'center' } }),
+        selField([{ v: '', label: 'Nothing (no repeat)' }, ...sources.map(s => ({ v: s, label: s }))], r.from || '', v => set({ from: v }), { aria: 'Repeat source' })),
+      r.from ? h('div', { class: 'g2' }, h('span', { text: 'Sort by', style: { color: 'var(--muted)', alignSelf: 'center' } }), field(r.sort, 'field, or -field for descending', v => set({ from: r.from, sort: v }), 'Sort')) : null,
+      r.from ? h('div', { class: 'g2' }, h('span', { text: 'At most', style: { color: 'var(--muted)', alignSelf: 'center' } }), numField('items', +r.limit || 0, v => set({ from: r.from, limit: Math.max(0, v) }), { suffix: 'items', title: '0 shows all' })) : null,
+      h('p', { class: 'note', text: r.from ? 'The first child is repeated once per record; the others are sample copies and are left out of the page.' : 'Repeat this frame’s first child once per record of a data source.' }));
+    out.push(sec('Repeat', null, body));
+  }
+  const img = (n.fills || []).findIndex(f => f.t === 'image');
+  if (img >= 0) {
+    const f = n.fills[img];
+    out.push(sec('Image from data', null, field(f.bind, 'field, e.g. photo', v => patch(n.id, { fills: n.fills.map((x, i) => (i === img ? Object.assign({}, x, { bind: v || undefined }) : x)) }, { label: 'Image from data' }), 'Image field'),
+      h('p', { class: 'note', text: 'The record’s field (an image file of the data artifact, or a URL) replaces this image on the page.' })));
+  }
+  if (n.type === 'text') {
+    const src = slopAppScope(n), fields = src ? slopAppFields(src) : [];
+    out.push(sec('Data', null, h('p', { class: 'note', text: src
+      ? `Write {{field}} in the text to show a field of ${src}` + (fields.length ? ': ' + fields.map(k => '{{' + k + '}}').join(' ') : '.')
+      : 'Text inside a repeated frame, or on a screen that shows a record, can show {{field}}. {{params.name}} shows a part of the path.' })));
+  }
+  return out;
+}
+
+if (SLOP.mode === 'tool') {
+  const panel = protoPanel;
+  protoPanel = function () {
+    const out = panel();
+    try { out.push(...slopAppSections()); } catch (e) { console.warn('[pinup/slop] app panel', e); }
+    return out;
+  };
+}

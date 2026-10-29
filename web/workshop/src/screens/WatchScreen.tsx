@@ -5,11 +5,11 @@ import { navigate, watchPath } from '../app/router'
 import { toast } from '../app/store'
 import { usePref, useRoutesUsing, useVersionBy } from '../app/hooks'
 import { isAgent } from '../app/format'
-import { Avatar, Empty, Tabs } from '../components/atoms'
+import { Avatar, Button, Empty, Tabs } from '../components/atoms'
 import { PreviewStage, type Device } from '../components/organisms/PreviewStage'
 import { RecordsPane, TokensEditor } from '../components/organisms/DataPanes'
 import { CommentsPane, ConsolePane, VersionsPane, threadNumbers, type Pending } from '../components/organisms/WatchLeft'
-import { FilesPane, Filmstrip, PageToolbar, VisitLine, DeviceSeg, recWord, usePreviewContext } from '../components/organisms/WatchRight'
+import { FilesPane, Filmstrip, PageToolbar, VisitLine, DeviceSeg, pinupPath, recWord, usePreviewContext } from '../components/organisms/WatchRight'
 import type { FromPreview, Pin } from '../preview/bridge-protocol'
 import type { SiteTarget } from './SiteScreen'
 
@@ -187,7 +187,7 @@ export function WatchScreen({ a, n, onOpenSite, onAddRoute }: Props) {
       <section className="tile main">
         <div className="dstrip"><Tabs value={tab} onChange={k => { setRtab(k); setPicking(false) }} tabs={rtabs} /></div>
         {isData
-          ? <div className="toolbar" id="wTool"><div className="addr"><span>{a.type}</span><span className="ro">{a.type === 'tokens' ? 'tokens.json' : `v${v.n}`}</span></div>{tab === 'records' ? <DeviceSeg device={device} onChange={setDevice} /> : null}</div>
+          ? <div className="toolbar" id="wTool"><div className="addr"><span>{a.type}</span><span className="ro">{a.type === 'tokens' ? 'tokens.json' : `v${v.n}`}</span></div>{tab === 'records' ? <DeviceSeg device={device} onChange={setDevice} /> : null}{a.type === 'pinup' ? <Button onClick={() => navigate(pinupPath(a.id))}>Open in Pinup</Button> : null}</div>
           : <PageToolbar a={a} versions={versions} v={v} ctx={ctx} rtab={tab} device={device} cmpLeft={left} onDevice={setDevice} onSample={setSample} onCmpLeft={setCmpLeft} onOpenSite={openSite} />}
         <VisitLine a={a} v={v} routes={routes} onAddRoute={() => onAddRoute(a.id)} />
         <div className="tilebody" id="wRight">{body}</div>
