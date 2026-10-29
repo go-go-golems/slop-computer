@@ -284,8 +284,12 @@ func truthy(v any) (bool, bool) {
 	return false, false
 }
 
+// hiddenVisibility are the visibility values that keep a record out of the
+// index. Others ("public", "listed", the francois import's values) list it.
+var hiddenVisibility = map[string]bool{"hidden": true, "private": true, "draft": true, "unlisted": true, "internal": true}
+
 // listedRecord leaves out records marked unlisted: draft or hidden, listed
-// false, or a visibility other than public.
+// false, or a hiding visibility (hidden, private, draft, unlisted, internal).
 func listedRecord(r records.Record) bool {
 	if b, ok := truthy(r["draft"]); ok && b {
 		return false
@@ -296,7 +300,7 @@ func listedRecord(r records.Record) bool {
 	if b, ok := truthy(r["listed"]); ok && !b {
 		return false
 	}
-	if v, ok := r["visibility"].(string); ok && v != "" && !strings.EqualFold(v, "public") {
+	if v, ok := r["visibility"].(string); ok && hiddenVisibility[strings.ToLower(strings.TrimSpace(v))] {
 		return false
 	}
 	return true

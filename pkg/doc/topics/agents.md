@@ -101,8 +101,9 @@ https://site.your-slop-server). The `slop` CLI is logged in.
   (path, title, kind, section, project, updated; record routes add record):
   static routes, each listed record a record route serves, each page a
   page-from route admits. Left out: private routes, the fallback, pages with
-  "listed": false, records with draft/hidden: true, listed: false or a
-  visibility other than public. See it with: slop site ls
+  "listed": false, records with draft/hidden: true, listed: false or
+  visibility hidden, private, draft, unlisted or internal. See it with:
+  slop site ls
 - Keep pages self-contained: no external network requests, no build step.
 - Check a routed page with: curl -s https://site.your-slop-server/<path>
 ```

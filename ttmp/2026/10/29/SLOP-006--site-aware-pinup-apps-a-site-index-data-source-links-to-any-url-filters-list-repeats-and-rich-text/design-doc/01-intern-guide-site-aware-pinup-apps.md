@@ -28,7 +28,7 @@ This ticket closes those gaps:
 
 1. **`$site`, a built-in data source.** Any page can read it (`"reads": {"pages": "$site"}`). It gives one record per **public URL** on the page's host: static routes, every record a record route serves (each journal post, each catalogue entry), and every page a page-from route admits (each `/r/<release>`). Each record has its path, title, project, and when it last changed.
 2. **Links to any URL.** A layer can link to `/journal`, to `{{path}}` from a record, or to an external `https://…` URL. Until now, links could only go to the app's own screens.
-3. **Filters on repeats** (`where visibility = public`, `section = journal`), plus a `group` field for sections.
+3. **Filters on repeats** (`where record.visibility = listed`, `section = journal`). The `section` field of `$site` rows is what lists group by.
 4. **Repeats over a list field** of the record in scope, such as tags or a gallery.
 5. **Rich text.** A text layer can show a record's `html` (rendered Markdown), sanitized.
 
@@ -125,7 +125,7 @@ Site requests (`serveSite`, `serve.go:319`) use only routes with `access == "pub
 - **R2:** The index lists only what a visitor can reach: public routes, never the fallback, never a URL that another route shadows.
 - **R3:** The index leaves out what is marked unlisted:
   - pages whose manifest says `"listed": false`;
-  - records that say `draft: true`, `listed: false`, or a `visibility` other than `public`.
+  - records that say `draft: true`, `hidden: true`, `listed: false`, or a hiding `visibility` (`hidden`, `private`, `draft`, `unlisted`, `internal`).
 - **R4:** It is cheap: cached per host and rebuilt after changes, never once per request.
 - **R5:** In Pinup, a layer can link to a URL template. The URL is validated at compile time and again after filling.
 - **R6:** Repeats can filter (`where`) and can iterate over a list field of the scope.
@@ -235,7 +235,7 @@ publish(evs):    if any ev.type in {route.set, route.removed, ref.moved, version
 
 The index makes reachable URLs *discoverable*. Before this ticket, a hidden catalogue entry was reachable only by someone who knew its id. So:
 
-- **Records** are skipped when they have `draft: true`, `listed: false`, `hidden: true`, or a `visibility` that is set and is not `public`. The francois catalogue has `visibility: hidden` entries, and they stay out.
+- **Records** are skipped when they have `draft: true`, `listed: false`, `hidden: true`, or a hiding `visibility` (`hidden`, `private`, `draft`, `unlisted`, `internal`). The francois catalogue uses `listed` (100 entries, which are listed) and `hidden` (4 entries, which stay out). (As built: the first version required `visibility` to be `public`, which hid every `listed` entry; see diary step 3.)
 - **Pages** are skipped when their main manifest has `"listed": false`. This suits utility pages such as a not-found page that also has a normal route.
 - **Never listed:** non-public routes, the fallback, and a page-from route's else page.
 

@@ -38,7 +38,7 @@ func (c *siteListCmd) RunIntoGlazeProcessor(ctx context.Context, v *values.Value
 func siteCommands() []glazed.Command {
 	return []glazed.Command{
 		&siteListCmd{glazed.NewCommandDescription("ls", glazed.WithShort("List every public URL of a site host (what pages read as $site)"),
-			glazed.WithLong("Static routes, each listed record a record route serves, and each page a page-from route admits.\nUnlisted: private routes, the fallback, :param routes without a record, pages with \"listed\": false,\nand records marked draft, hidden, listed: false or with a visibility other than public.\n\nExamples:\n  slop site ls\n  slop site ls --host site.example.com --output json"),
+			glazed.WithLong("Static routes, each listed record a record route serves, and each page a page-from route admits.\nUnlisted: private routes, the fallback, :param routes without a record, pages with \"listed\": false,\nand records marked draft, hidden, listed: false or with visibility hidden, private,\ndraft, unlisted or internal.\n\nExamples:\n  slop site ls\n  slop site ls --host site.example.com --format json"),
 			glazed.WithFlags(append(serverFlags(), flag("host", "Site host (default: the first site host)"))...))},
 	}
 }

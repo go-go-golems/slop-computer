@@ -29,7 +29,8 @@ func TestSiteIndex(t *testing.T) {
 		"posts/draft.md":  "---\ntitle: Not yet\ndraft: true\n---\nWIP\n",
 		"notes/other.md":  "---\ntitle: Not a post\n---\n"})
 	h.pushFiles(tok, "catalog", map[string]any{"title": "Catalog", "kind": "data", "project": "lab"}, nil, map[string]string{
-		"a.json": `{"title":"App A","visibility":"public"}`, "b.json": `{"title":"App B","visibility":"hidden"}`})
+		"a.json": `{"title":"App A","visibility":"public"}`, "b.json": `{"title":"App B","visibility":"hidden"}`,
+		"c.json": `{"title":"App C","visibility":"listed"}`, "d.json": `{"title":"App D","draft":"True"}`})
 	page("home", "Home", nil)
 	page("about", "About us", nil)
 	page("post", "Post", map[string]any{"reads": map[string]string{"posts": "journal"}})
@@ -73,6 +74,7 @@ func TestSiteIndex(t *testing.T) {
 		"/ page Home",
 		"/about page About us",
 		"/apps/a record App A",
+		"/apps/c record App C",
 		"/index page Index",
 		"/journal/first record The first post",
 		"/journal/second page Shadow",
