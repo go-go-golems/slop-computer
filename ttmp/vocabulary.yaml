@@ -15,6 +15,8 @@ topics:
       description: Deployment, infrastructure and operations
     - slug: data-migration
       description: Moving data between systems
+    - slug: routing
+      description: Route table, path matching and page resolution
 docTypes:
     - slug: design-doc
       description: Structured rationale and architecture notes
