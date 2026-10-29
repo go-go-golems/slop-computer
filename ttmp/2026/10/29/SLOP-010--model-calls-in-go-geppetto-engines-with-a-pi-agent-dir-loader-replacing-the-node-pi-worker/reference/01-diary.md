@@ -428,3 +428,59 @@ PR #442 was merged by the user. geppetto `main` was fast-forwarded to the merge 
 ### Remaining requirements and next action
 - **y2l5:** `--models pi` as the default, and the Node worker out of the image. The Docker build now has what it needs.
 - **kg55:** the live Codex check, with the user's go-ahead.
+
+## Step 7: `web/examples/llm-chat`, a chat app for testing `sample` locally
+
+The user asked how to test locally with an artifact that chats with an LLM. `web/examples/llm-chat` is that artifact: one page plus a manifest declaring `sample` and `user`. It has multi-turn history, streaming through `onText`, a model picker filled from `sample.limits().models`, an effort picker, three page tools (`get_time`, `roll_dice`, `calculate`) and Stop. Its README gives the four commands for a local run on `--models pi`. It was checked in Chromium against the local server.
+
+### Prompt Context
+
+**User prompt (verbatim):** "how can i test things locally, with an artifact with llm chat ?"
+
+**Assistant interpretation:** Provide a working chat artifact and the exact local steps, verified end to end.
+
+### What I did
+
+- **The app:** `web/examples/llm-chat/{slop.json,index.html,README.md}`.
+- **Pushed to the local server:** `$S/slop18 push web/examples/llm-chat -a llm-chat --server http://localhost:18140 --token-file $S/rt1/token` (v1 to v3). `slop18` is the `GOWORK=off -tags embed` build pinned to geppetto v0.13.12.
+- **Checked in a browser:** `$S/chatcheck/check.mjs` (Playwright) signs in, opens `/run/llm-chat`, accepts the consent dialog, then asks "Roll 3 dice with 6 sides and tell me the sum. Use the tool." and "What did you roll, one number per line?". A screenshot is at `$S/shots/llm-chat.png`.
+
+### Why
+
+- **Tool calls are written into the stored assistant turn** (`[tools used: roll_dice({"n":3,"sides":6}) → [6,6,1]]`). The contract's turns are `{role, content}` strings, and `sample` is memoryless. A page that keeps only the final answer loses what its tools did.
+
+### What worked
+
+- The status line read `43 models`.
+- **v2 run:** first answer "You rolled **6, 6, 1** — a sum of **13**!" (1,043 ms, one `roll_dice` call); the follow-up answered "6 6 1" (348 ms) with no new tool call.
+- **v3 run:** the tool lines are placed above the reply they feed.
+
+### What didn't work
+
+- **v1 had wrong history.** Its history held only `r.text`. The follow-up then answered "I need to actually roll the dice first …", called `roll_dice` again and reported different numbers (2, 1, 6). That is the memoryless-turns behaviour above; v2 fixes it in the page.
+- **A script bug.** My first check printed `A: …` for both questions. The wait selector was `".meta, "`, which is invalid, and the `.catch` swallowed the error, so the script read the bubble immediately. Fixed to `".meta"`.
+- **Wrong CLI command in the README draft.** It said `slop login`, which does not exist. The command is `slop auth login --server … --as <nickname>` (local mode).
+
+### What I learned
+
+- The Workshop's consent dialog for `sample` appears on the first call. The Playwright check accepts it the way `run.mjs` does.
+
+### What was tricky to build
+
+- **N/A:** a small page.
+
+### What warrants a second pair of eyes
+
+- **`calculate` uses `Function()`** after a whitelist regex (`^[\d\s+\-*/().]+$`). It is a demo tool in a sandboxed origin.
+
+### What should be done in the future
+
+- Optional: render Markdown in replies. They are shown as plain text, so `**13**` appears literally.
+
+### Code review instructions
+
+- Open `web/examples/llm-chat/index.html`; follow the README for a local run.
+
+### Technical details
+
+- **Commit:** slop `29f5ef0`.
