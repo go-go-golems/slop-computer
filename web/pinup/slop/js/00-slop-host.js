@@ -240,13 +240,21 @@ async function slopPush(artifact, files, o) {
 }
 
 // ---------- choosing the design (no ?file=) ----------
+document.head.append(h('style', { text: `
+.slop-designs { display: flex; flex-direction: column; gap: 4px; max-height: min(320px, 45vh); overflow: auto; padding-bottom: 12px; }
+.slop-design { display: flex; align-items: baseline; gap: 12px; width: 100%; padding: 8px 10px; border: 1px solid var(--line-2); border-radius: var(--r); background: var(--panel); text-align: left; cursor: pointer; flex: none; }
+.slop-design:hover { background: var(--panel-2); }
+.slop-design b { flex: 1; min-width: 0; font-weight: 600; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.slop-design span { flex: none; max-width: 60%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: var(--muted); font-size: 11.5px; }
+` }));
 function slopPick(api) {
   const f = api.args && api.args.file;
   if (f) return Promise.resolve(f);
   return new Promise(resolve => {
     let done = false;
     const pickFile = id => { if (done) return; done = true; sh.close(); api.setArgs && api.setArgs({ file: id }); resolve(id); };
-    const list = h('div', { class: 'opt' }, h('b', { text: 'Designs' }), h('span', { text: 'Loading…' }));
+    // One row per design; Pinup's .opt .acts would put them all in one grid cell.
+    const list = h('div', { class: 'slop-designs' }, h('span', { class: 'muted', text: 'Loading…' }));
     const name = h('input', { type: 'text', placeholder: 'Name, e.g. Pace Club', 'aria-label': 'Design name', style: { width: '100%' } });
     const proj = h('select', { 'aria-label': 'Project' }, h('option', { value: '', text: 'No project' }));
     const err = h('span', { class: 'muted' });
@@ -261,14 +269,22 @@ function slopPick(api) {
         pickFile(id);
       } catch (e) { create.disabled = false; err.textContent = 'Could not create ' + id + ': ' + (e.message || e); }
     } });
-    const body = [list, h('div', { class: 'opt' }, h('b', { text: 'New design' }), name, h('div', { class: 'acts' }, proj, create), err)];
+    const body = [h('div', { class: 'opt', style: { paddingBottom: '6px' } }, h('b', { text: 'Designs' })), list,
+      h('div', { class: 'opt' }, h('b', { text: 'New design' }), name, h('div', { class: 'acts' }, proj, create), err)];
     const sh = sheet('Open a design', body, { width: 520, onclose: () => { if (!done) { done = true; resolve(null); } } });
-    api.get('/artifacts').then(arts => {
-      const ds = (arts || []).filter(a => a.kind === 'data' && a.type === 'pinup');
+    const projects = api.get('/projects').then(ps => ps || [], () => []);
+    projects.then(ps => { for (const p of ps) proj.append(h('option', { value: p.id, text: p.name })); });
+    Promise.all([api.get('/artifacts'), projects]).then(([arts, ps]) => {
+      const pname = new Map(ps.map(p => [p.id, p.name]));
+      const ds = (arts || []).filter(a => a.kind === 'data' && a.type === 'pinup')
+        .sort((a, b) => String(a.title || a.id).localeCompare(String(b.title || b.id)));
       list.textContent = '';
-      list.append(h('b', { text: ds.length ? 'Designs' : 'No designs yet' }));
-      for (const a of ds) list.append(h('div', { class: 'acts' }, h('button', { class: 'btn sm', onclick: () => pickFile(a.id) }, a.title + ' · ' + a.id + ' · v' + a.main)));
+      if (!ds.length) list.append(h('span', { class: 'muted', text: 'No designs yet: create one below.' }));
+      for (const a of ds) {
+        list.append(h('button', { class: 'slop-design', title: 'Open ' + a.id, onclick: () => pickFile(a.id) },
+          h('b', { text: a.title || a.id }),
+          h('span', { text: [a.project && (pname.get(a.project) || a.project), a.id, 'v' + a.main].filter(Boolean).join(' · ') })));
+      }
     }, e => { list.textContent = 'Could not list designs: ' + (e.message || e); });
-    api.get('/projects').then(ps => { for (const p of ps || []) proj.append(h('option', { value: p.id, text: p.name })); }, () => {});
   });
 }
