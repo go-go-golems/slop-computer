@@ -399,3 +399,32 @@ The geppetto branch is published and in review as https://github.com/go-go-golem
 
 - **y2l5:** after #442 is merged (and tagged), pin geppetto in slop, run `go mod tidy`, and check `GOWORK=off make test build`. Until then slop can pin the branch commit as a pseudo-version (`go get github.com/wesen/geppetto@dc04fcff` does not work for a fork module path; this needs the upstream merge or a `replace`).
 - **kg55:** the live Codex check, with the user's go-ahead.
+
+## Step 6: geppetto v0.13.12 released and pinned in slop
+
+PR #442 was merged by the user. geppetto `main` was fast-forwarded to the merge commit and released as v0.13.12. slop's branch now pins that version and builds and tests with `GOWORK=off`, which `make` and the Dockerfile use. The publication gap from steps 3 and 5 is closed.
+
+### Prompt Context
+**User prompt (verbatim):** "merged geppetto, rebase main and make release"
+**Assistant interpretation:** Update geppetto's local `main` to the merge, then tag and publish a release with the repository's own targets.
+**Inferred user intent:** A published geppetto version that slop can depend on.
+
+### Evidence and commits
+- **geppetto:**
+  - `git pull --ff-only origin main` → `e4bef177 Merge pull request #442`;
+  - no local-only tags (compared `git tag` with `git ls-remote --tags origin`);
+  - `svu patch` → v0.13.12;
+  - `make tag-patch` gives `git tag v0.13.12`; `make release` gives `* [new tag] v0.13.12 -> v0.13.12`, and `go list -m github.com/go-go-golems/geppetto@v0.13.12` resolves through `proxy.golang.org`;
+  - CI on the tag: `tag-release-notes` succeeded; `release` and `golangci-lint` were still in progress when checked.
+- **slop:**
+  - `GOWORK=off go get github.com/go-go-golems/geppetto@v0.13.12 && go mod tidy`;
+  - `GOWORK=off go build ./...`, `go test ./...`, `golangci-lint run` (0 issues) and `go build -tags embed` all pass;
+  - commit `1a7fb8e`.
+- **slop's `origin/main` (`96eab85`) is already an ancestor of this branch**, so no rebase is needed. `task/slop-runtime` is not merged into `main` yet; this branch is stacked on it.
+
+### Noteworthy decisions or failures
+- The tag was made on `main` at the merge commit. The release follows the repository's patch-tag convention (v0.13.x).
+
+### Remaining requirements and next action
+- **y2l5:** `--models pi` as the default, and the Node worker out of the image. The Docker build now has what it needs.
+- **kg55:** the live Codex check, with the user's go-ahead.

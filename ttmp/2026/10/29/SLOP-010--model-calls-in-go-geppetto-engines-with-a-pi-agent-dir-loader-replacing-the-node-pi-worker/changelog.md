@@ -12,3 +12,7 @@ Uploaded the guide to reMarkable: `OK: uploaded SLOP-010 Intern Guide - sample o
 ## 2026-10-29 (implementation)
 
 geppetto `providers/pi` (4e0d7137, 452f0711 on task/pi-agent-provider): Pi agent directory, credentials, lock, Codex refresh, thinking levels. slop `pkg/piworker/gepp` and `serve --models pi` (ebe6be0, e61caed). Sample suite 20/20 three times on the Go backend with lunaroute tiers. Diary steps 2–3.
+
+## 2026-10-29
+
+geppetto v0.13.12 released (providers/pi); slop pins it (1a7fb8e) and builds with GOWORK=off
