@@ -85,15 +85,27 @@ type Resolution struct {
 	Fallback bool              `json:"fallback"`
 }
 
-var recordParam = regexp.MustCompile(`\{(\w+)\}`)
+var (
+	recordParam  = regexp.MustCompile(`\{(\w+)\}`)
+	matchNothing = regexp.MustCompile(`[^\x00-\x{10FFFF}]`)
+)
 
 func fill(t string, params map[string]string) string {
 	return recordParam.ReplaceAllStringFunc(t, func(m string) string { return params[m[1:len(m)-1]] })
 }
 
 // TemplateMatcher matches the artifact ids a page-from template can name:
-// "release-{page}" → ^release-(.+)$.
+// "release-{page}" → ^release-(.+)$. Each placeholder matches on its own, which
+// is exact only when no name repeats; a template that repeats one (refused
+// when a route is set) matches nothing.
 func TemplateMatcher(t string) *regexp.Regexp {
+	seen := map[string]bool{}
+	for _, m := range recordParam.FindAllStringSubmatch(t, -1) {
+		if seen[m[1]] {
+			return matchNothing
+		}
+		seen[m[1]] = true
+	}
 	parts := recordParam.Split(t, -1)
 	for i := range parts {
 		parts[i] = regexp.QuoteMeta(parts[i])

@@ -11,3 +11,7 @@ Ticket opened; intern guide written and uploaded to reMarkable (/ai/2026/10/28/S
 ## 2026-10-28
 
 Page-from routes implemented (c708f11, 3772573); local swap: 100 /r/<page> routes → one, bodies identical
+
+## 2026-10-29
+
+Review fix (Codex P2): refuse repeated pageFrom placeholders; matcher matches nothing for them

@@ -83,10 +83,17 @@ func validPageFrom(t, path string) error {
 			params[seg[1:]] = true
 		}
 	}
+	seen := map[string]bool{}
 	for _, n := range names {
 		if !params[n] {
 			return invalidf("pageFrom uses {%s}, but the path %s has no :%s", n, path, n)
 		}
+		// Admission matches each placeholder on its own (no backreferences),
+		// so {page}-{page} would admit ids no :page can produce.
+		if seen[n] {
+			return invalidf("pageFrom uses {%s} more than once", n)
+		}
+		seen[n] = true
 	}
 	return nil
 }

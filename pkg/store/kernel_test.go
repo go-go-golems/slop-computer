@@ -136,6 +136,7 @@ func TestPageFromRoutes(t *testing.T) {
 		{store.Route{Path: "/r/:page", Page: "release-missing", PageFrom: "{slug}"}, "has no :slug"},
 		{store.Route{Path: "/r/:page", Page: "release-missing", PageFrom: "release"}, "needs a {param}"},
 		{store.Route{Path: "/r/:page", Page: "release-missing", PageFrom: "Rel_{page}"}, "artifact-id characters"},
+		{store.Route{Path: "/r/:page", Page: "release-missing", PageFrom: "{page}-{page}"}, "more than once"},
 		{store.Route{Path: "/r/:page", Page: "release-missing", PageFrom: "{page}", Version: &one}, "follow main"},
 		{store.Route{Path: "/r/:page", Page: "loose", PageFrom: "{page}"}, "has no project"},
 	} {

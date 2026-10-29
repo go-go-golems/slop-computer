@@ -219,3 +219,52 @@ GET /api/resolve?host=site.test&path=/r/nope → resolution.page "release-missin
 validation: pageFrom ^([a-z0-9-]|\{name\})+$, ≥1 placeholder, each a :param of path; version must be null; page must have a project
 local: 114 → 15 routes on site.localhost:18120; 100/100 bodies identical; release-missing@1 in francois
 ```
+
+## Step 3: Review fix: repeated placeholders admitted pages outside the template
+
+Codex reviewed PR #2 and found a scope hole in admission. `TemplateMatcher` turns every `{name}` into an independent `(.+)`, so a template such as `{page}-{page}` admits `private-draft`, an id that no value of `:page` can produce. The matcher decides more than which page a URL serves. It also authorizes `/_v/<page>/…` and the data read by admitted pages under `/_d/`. So a route like that would have published pages and data beyond what its template can name. Templates with only distinct placeholders are exact, because path parameters are independent. The fix refuses repeats when a route is saved, and makes the matcher match nothing for a repeated template.
+
+### Prompt Context
+**User prompt (verbatim):** "Address issue:" followed by the pasted review comment. The comment, from the Codex connector, says: "P2 Badge Preserve repeated-parameter constraints in template admission — For an accepted template such as {page}-{page}, each occurrence becomes an independent (.+), so the matcher admits private-draft even though no value of :page can produce that ID. This matcher also controls public access: admits authorizes /_v/private-draft/1/index.html, and pageFromReads exposes data read by that page, provided it belongs to the fallback page's project. Thus a route can publish otherwise unrouted pages and data outside the template's actual scope. Enforce consistent values for repeated placeholders in both admission paths, or reject repeated placeholders during route validation."
+**Assistant interpretation:** Close the over-admission, in validation and in the shared matcher.
+**Inferred user intent:** A page-from route must never publish more than its template can actually name.
+**Commit (code):** this commit, "Page-from routes: refuse repeated placeholders".
+
+### What I did
+- `pkg/store/routes.go` `validPageFrom`: refuses a placeholder that appears twice, with `pageFrom uses {page} more than once`.
+- `pkg/routing/routing.go` `TemplateMatcher`: returns `matchNothing` (`[^\x00-\x{10FFFF}]`, an empty class) when a name repeats. Both admission paths, `admits` (which gates `/_v/` and the render) and `pageFromReads` (which gates `/_d/`), call this one function, so both are covered.
+- Tests:
+  - `TestPageFrom` asserts that `{page}-{page}` matches none of `private-draft`, `a-a` or the empty string, and that `{a}-{b}` still matches `private-draft`, since distinct placeholders are independent;
+  - `TestPageFromRoutes` (store) has the new refusal case.
+- Guide §8.3 gains the rule and the reason for it.
+
+### Why
+- I chose refusal over enforcing consistent values. Go's RE2 has no backreferences. Checking that every occurrence captured the same value would mean trying every way of splitting the id. No real template needs a repeated placeholder, and refusing it keeps admission a single regular expression whose meaning is easy to state.
+- The matcher also refuses, as a backstop for rows written before this check and for any future path into the table that skips `validate`.
+
+### What worked
+- `go test ./pkg/routing ./pkg/store ./pkg/server` passes on SQLite. The same packages pass with `TEST_DATABASE_URL=…:55432` on Postgres. `make lint` → exit 0.
+
+### What didn't work
+- No failures in this step.
+
+### What I learned
+- An independent `(.+)` per placeholder is exact *only* because the placeholders are distinct path parameters. Any admission rule built from a template has to keep that property, or the template stops describing its scope.
+
+### What was tricky to build
+- Nothing beyond seeing that the matcher is an access-control boundary, not only a lookup aid.
+
+### What warrants a second pair of eyes
+- No server-level test stores a repeated template, because the store refuses it. The matcher test is what stands behind the backstop.
+
+### What should be done in the future
+- N/A beyond the cluster rollout in Step 2.
+
+### Code review instructions
+- Read `validPageFrom` in `pkg/store/routes.go` and `TemplateMatcher` in `pkg/routing/routing.go`, then run `go test ./pkg/routing ./pkg/store`.
+
+### Technical details
+```
+{page}-{page}  → refused at PUT /api/routes (400 invalid_request "pageFrom uses {page} more than once"); matcher: matches nothing
+{a}-{b}        → ^(.+)-(.+)$ — exact: any id it matches is produced by some (:a, :b)
+```

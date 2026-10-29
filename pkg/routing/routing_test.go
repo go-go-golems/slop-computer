@@ -74,4 +74,13 @@ func TestPageFrom(t *testing.T) {
 	if !TemplateMatcher("{page}").MatchString("weft") || TemplateMatcher("a.{x}").MatchString("abx") {
 		t.Error("matcher quoting")
 	}
+	// No :page makes {page}-{page} into private-draft; repeats match nothing.
+	for _, id := range []string{"private-draft", "a-a", ""} {
+		if TemplateMatcher("{page}-{page}").MatchString(id) {
+			t.Errorf("repeated placeholder admitted %q", id)
+		}
+	}
+	if !TemplateMatcher("{a}-{b}").MatchString("private-draft") {
+		t.Error("distinct placeholders are independent")
+	}
 }

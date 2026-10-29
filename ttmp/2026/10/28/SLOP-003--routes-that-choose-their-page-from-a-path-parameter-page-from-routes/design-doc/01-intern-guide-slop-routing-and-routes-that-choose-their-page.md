@@ -353,6 +353,7 @@ Everything else is unchanged: `record` is still filled from params, and `binding
 
 - `PageFrom` must contain at least one `{name}`, and every `name` must be a `:name` segment of `Path`. Otherwise the error is `pageFrom uses {x}, but the path has no :x`. (This is the agent's NOTES §8 trap, in which `--record '{slug}.json'` on a path without `:slug` silently produced `.json`. We make the new feature strict from day one.)
 - The literal parts of `PageFrom` may only use artifact-id characters (`[a-z0-9-]`).
+- Each placeholder may appear only once. Admission (§8.5) matches every placeholder on its own, because Go's RE2 has no backreferences. `{page}-{page}` would therefore admit `private-draft`, which no value of `:page` produces. (Added after review; a template with a repeated placeholder that is already stored matches nothing.)
 - `Version` must be nil: `page-from routes follow main`.
 - The `Page` artifact must be in a project: `page-from routes choose among the pages of the route page's project; <page> has no project`.
 
