@@ -12,4 +12,4 @@
 - [x] Browser test in slop/tests/app.js <!-- t:40np -->
 - [x] Docs: slop help pinup <!-- t:8vlh -->
 - [x] End to end on the local server with screenshots <!-- t:ep9b -->
-- [ ] Diary, as-built notes, push <!-- t:uif9 -->
+- [x] Diary, as-built notes, push <!-- t:uif9 -->
