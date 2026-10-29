@@ -134,7 +134,11 @@ https://site.your-slop-server). The `slop` CLI is logged in.
   the home page. `slop route list` before you route.
 - **There is no artifact delete.** Throwaway pushes stay, so name them clearly.
 
-## 6. If this server has the francois import
+## 6. Designs (Pinup)
+
+If people design in the Workshop's Pinup tool, an agent can read and change a design while it is open, resolve review items one step at a time, and build the real app from a hand-off. See `slop help pinup` (or `/help/pinup`).
+
+## 7. If this server has the francois import
 
 The francois catalogue lives in project `francois`:
 
