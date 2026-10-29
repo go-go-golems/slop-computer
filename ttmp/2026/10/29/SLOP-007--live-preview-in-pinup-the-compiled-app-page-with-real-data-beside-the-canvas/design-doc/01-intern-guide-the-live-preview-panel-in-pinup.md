@@ -8,12 +8,16 @@ Topics:
 DocType: design-doc
 Intent: long-term
 Owners: []
-RelatedFiles: []
+RelatedFiles:
+    - Path: repo://web/pinup/slop/js/96-slop-app.js
+      Note: compiler and data rows
+    - Path: repo://web/pinup/slop/js/97-slop-preview.js
+      Note: the live preview panel
 ExternalSources: []
-Summary: "A panel in Pinup that compiles the app in the browser after every edit and shows the compiled page with the data the server would inject, in a sandboxed iframe, following the selected screen and the preview's own links."
+Summary: A panel in Pinup that compiles the app in the browser after every edit and shows the compiled page with the data the server would inject, in a sandboxed iframe, following the selected screen and the preview's own links.
 LastUpdated: 2026-10-29T15:00:00-04:00
-WhatFor: "Onboarding and implementation reference for SLOP-007"
-WhenToUse: "Before changing web/pinup/slop/js/97-slop-preview.js or the compiler's preview mode"
+WhatFor: Onboarding and implementation reference for SLOP-007
+WhenToUse: Before changing web/pinup/slop/js/97-slop-preview.js or the compiler's preview mode
 ---
 
 # Intern guide: the live preview panel in Pinup
@@ -309,3 +313,20 @@ Hover and selection do not go through these functions, so they never recompile. 
 | `h`, `ico`, `toast`, `lsGet`/`lsSet` | `web/pinup/src/01-util.js` |
 | `runtime.js`, `render.Inject` | `pkg/render/assets/runtime.js`, `pkg/render/render.go` |
 | records and site APIs | `pkg/server/preview.go`, `pkg/server/siteindex.go` |
+
+## 8. As built (2026-10-29)
+
+The implementation follows §3, with these differences:
+
+| Guide | As built | Why |
+|---|---|---|
+| `PV`, `pv*` | `LP`, `lp*` (`LP_KEY`, `lpRender`, `lpToggle`, CSS `.lp-*`) | Pinup's Present mode already declares `PV` and `pvBack`, `pvFit`, … in the same function scope; the first build failed with `Identifier 'PV' has already been declared`. |
+| `PV.path` | `LP.at = {id, params}` | A screen id plus parameters survives editing a screen's route; the path is computed at render time (`lpPath`). |
+| wrap `applyStates` | not wrapped | `applyStates` calls `commit`, which is wrapped. |
+| swap on `load` | swap on a `ready` message (DOMContentLoaded + one frame), `load` as fallback | `load` waits for fonts and images; the page is complete earlier. |
+| hooks in tool mode | store and selection hooks in every mode except player; the toolbar button and reopen-on-load in tool mode | The browser test runs Pinup without a grant and needs the hooks; they do nothing while the panel is closed. |
+| follow every `select` | follow only when the selection changes (`!same(was, S.sel)`) | Pinup re-selects the same layers; following then undid a screen reached by a link in the preview. A mutation check confirms the test catches it. |
+| data loader in the panel | `slopAppRows(id, host)` in `96-slop-app.js`, shared with the Prototype tab's field list | One definition of "the rows a source gives the page". |
+| — | the panel reopens when Pinup loads if it was open (`pinup.slop.preview.open`) | Designers keep it open across sessions. |
+
+**Files:** `web/pinup/slop/js/97-slop-preview.js` (new, 367 lines), `96-slop-app.js` (`opts.inline`, `slopAppRows`), `95-slop-ui.js` (menu item), `slop/tests/app.js` (29 checks), `pkg/doc/topics/pinup.md` ("The live preview").

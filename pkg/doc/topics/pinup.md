@@ -183,3 +183,21 @@ body). `slop site ls` prints it. A navigation list is a frame that repeats
 Prototype links become `<a href>`s. A link to a screen whose path has
 parameters is filled in from the record in scope (`/pace-club/runs/{{id}}`).
 Publishing stays a person's action in Pinup: it moves routes on the site.
+
+**The live preview.** The toolbar button left of *slop*
+(or slop menu → *Live preview*) opens a panel beside the canvas with the app
+page as a visitor sees it: compiled in the browser from the live design, with the rows each data
+source has on `main` (and `$site`), the way the server serves it. Nothing is
+saved or routed. It recompiles after every change, including an agent's
+steps, so a person can watch an agent work on the real page. The panel:
+
+- shows the screen of the selected layer, or the one picked in its Screen list;
+- on a record screen, offers a Record list;
+- shows the page at phone (390), tablet (768) or desktop (1280) width;
+- moves to another screen when a link to it is clicked, and opens any other
+  link in a new tab;
+- reloads the data on request (↻).
+
+It shows problems that stop a publish and keeps the last page on screen until
+they are fixed. Images from data records load from the site, so a data
+artifact no public route reads yet shows no images.
