@@ -1,4 +1,4 @@
-.PHONY: lint fmt-check test test-postgres build web generate run-local dev-backend dev-frontend pinup pinup-push runtime runtime-test
+.PHONY: lint fmt-check test test-postgres build web generate run-local dev-backend dev-frontend pinup pinup-push runtime runtime-test piworker conformance
 
 lint:
 	GOWORK=off golangci-lint run -v
@@ -20,6 +20,17 @@ runtime:
 
 runtime-test:
 	cd web/runtime && node --test --experimental-strip-types test/*.test.ts
+
+# The Pi model worker (web/piworker/dist/worker.js) for slop serve --pi-worker.
+piworker:
+	cd web/piworker && pnpm install --frozen-lockfile && pnpm check && node build.mjs
+
+# The browser conformance suites against a running local server
+# (SLOP_SERVER, default http://localhost:8080), apps pushed as rt-conformance
+# and rt-sample; needs playwright on NODE_PATH.
+conformance:
+	node web/rt-conformance/run.mjs $${SLOP_SERVER:-http://localhost:8080} rt-conformance
+	node web/rt-conformance/run.mjs $${SLOP_SERVER:-http://localhost:8080} rt-sample
 
 # Builds the Workshop into pkg/web/workshop (served from disk by plain builds).
 web generate:

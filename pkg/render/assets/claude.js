@@ -478,7 +478,7 @@
       if (typeof t !== "string" || !t.trim() || bytes(t) > limits.MaxCommentBytes) throw fail("invalid", `a comment is 1-${limits.MaxCommentBytes} bytes`);
       return t;
     };
-    const call2 = async (method, args) => {
+    const call3 = async (method, args) => {
       await consent("comments", "consent_required");
       try {
         return await rpc(method, args);
@@ -488,21 +488,21 @@
     };
     Object.assign(base, {
       async create(o) {
-        const t = await call2("comments.create", { anchor: o?.anchor ?? {}, text: text(o?.text) });
+        const t = await call3("comments.create", { anchor: o?.anchor ?? {}, text: text(o?.text) });
         return freeze({ threadId: t.id, commentId: String(t.comments?.[0]?.id ?? "") });
       },
       async reply(threadId, t) {
-        const c = await call2("comments.reply", { thread: threadId, text: text(t) });
+        const c = await call3("comments.reply", { thread: threadId, text: text(t) });
         return freeze({ commentId: String(c.id) });
       },
       async resolve(threadId, resolved) {
-        await call2("comments.resolve", { thread: threadId, resolved: resolved !== false });
+        await call3("comments.resolve", { thread: threadId, resolved: resolved !== false });
       },
       async delete(threadId) {
-        await call2("comments.resolve", { thread: threadId, resolved: true });
+        await call3("comments.resolve", { thread: threadId, resolved: true });
       },
       async sendToClaude(t) {
-        const r = await call2("comments.sendToClaude", { anchor: t?.anchor, thread: t?.threadId, text: text(t?.text) });
+        const r = await call3("comments.sendToClaude", { anchor: t?.anchor, thread: t?.threadId, text: text(t?.text) });
         return freeze({ threadId: r.thread, commentId: String(r.comment ?? "") });
       },
       canSendToClaude: async () => {
@@ -580,7 +580,7 @@
     const handlers2 = /* @__PURE__ */ new Map();
     let streaming = false;
     let args = Object.fromEntries(new URLSearchParams(location.hash.slice(1)));
-    const call2 = async (method, path, o = {}) => {
+    const call3 = async (method, path, o = {}) => {
       let url = "/_rt/api" + (path.startsWith("/") ? path : "/" + path);
       if (o.params) {
         const q = Object.entries(o.params).filter(([, v]) => v != null).map(([k, v]) => encodeURIComponent(k) + "=" + encodeURIComponent(String(v))).join("&");
@@ -662,13 +662,13 @@
       };
     };
     const api2 = {
-      get: (path, params) => call2("GET", path, { params }),
-      post: (path, body) => call2("POST", path, { body }),
-      put: (path, body) => call2("PUT", path, { body }),
-      patch: (path, body) => call2("PATCH", path, { body }),
-      del: (path, params) => call2("DELETE", path, { params }),
-      putRaw: (path, raw, type) => call2("PUT", path, { raw, type }),
-      beacon: (method, path, body) => call2(method, path, { body, keepalive: true }).catch(() => {
+      get: (path, params) => call3("GET", path, { params }),
+      post: (path, body) => call3("POST", path, { body }),
+      put: (path, body) => call3("PUT", path, { body }),
+      patch: (path, body) => call3("PATCH", path, { body }),
+      del: (path, params) => call3("DELETE", path, { params }),
+      putRaw: (path, raw, type) => call3("PUT", path, { raw, type }),
+      beacon: (method, path, body) => call3(method, path, { body, keepalive: true }).catch(() => {
       }),
       on(type, h2) {
         let s = handlers2.get(type);
@@ -1373,9 +1373,206 @@
   }
 
   // src/sample.ts
-  function sample(_h) {
-    const off = () => Promise.reject(fail("sampling_disabled", "sampling is not served yet"));
-    return Object.freeze(Object.assign(off, { json: off, limits: async () => ({ maxPromptBytes: 256 << 10 }) }));
+  var cache = /* @__PURE__ */ new Map();
+  function checkInput(input) {
+    if (typeof input === "string") {
+      if (!input.trim()) throw fail("invalid_request", "the prompt is empty");
+      if (bytes(input) > limits.MaxPromptBytes) throw fail("prompt_too_large", `a prompt is at most ${limits.MaxPromptBytes} bytes`);
+      return input;
+    }
+    if (!Array.isArray(input) || !input.length) throw fail("invalid_request", "input is a string or a list of turns");
+    let n = 0;
+    for (const t of input) {
+      if (!t || t.role !== "user" && t.role !== "assistant" || typeof t.content !== "string") throw fail("invalid_request", "a turn is {role: user|assistant, content: string}");
+      n += bytes(t.content);
+    }
+    if (input[0].role !== "user" || input[input.length - 1].role !== "user") throw fail("invalid_request", "turns begin and end with a user turn");
+    if (n > limits.MaxPromptBytes) throw fail("prompt_too_large", `a prompt is at most ${limits.MaxPromptBytes} bytes`);
+    return input.map((t) => ({ role: t.role, content: t.content }));
+  }
+  async function prepare(blob) {
+    if (!/^image\/(jpeg|png|webp|gif)$/.test(blob.type)) throw fail("image_rejected", "images are JPEG, PNG, WebP or GIF");
+    const bmp = await createImageBitmap(blob);
+    const scale = Math.min(1, 1568 / Math.max(bmp.width, bmp.height));
+    const w = Math.max(1, Math.round(bmp.width * scale)), h = Math.max(1, Math.round(bmp.height * scale));
+    const canvas = new OffscreenCanvas(w, h);
+    const g = canvas.getContext("2d");
+    g.fillStyle = "#fff";
+    g.fillRect(0, 0, w, h);
+    g.drawImage(bmp, 0, 0, w, h);
+    const jpeg = await canvas.convertToBlob({ type: "image/jpeg", quality: 0.85 });
+    const buf = new Uint8Array(await jpeg.arrayBuffer());
+    let bin = "";
+    for (let i = 0; i < buf.length; i += 32768) bin += String.fromCharCode(...buf.subarray(i, i + 32768));
+    return { mimeType: "image/jpeg", data: btoa(bin) };
+  }
+  var codes = {
+    cancelled: "cancelled",
+    images_unavailable: "images_unavailable",
+    prompt_too_large: "prompt_too_large",
+    empty_completion: "empty_completion",
+    rate_limited: "rate_limited",
+    invalid_request: "invalid_request",
+    sampling_disabled: "sampling_disabled",
+    not_granted: "not_granted",
+    not_declared: "not_declared",
+    session_expired: "session_expired",
+    image_rejected: "image_rejected"
+  };
+  async function call2(images, input, o = {}) {
+    const prompt = checkInput(input);
+    const tools = o.tools ?? [];
+    if (tools.length > 16) throw fail("tools_unavailable", "at most 16 tools");
+    for (const t of tools) if (!t || typeof t.name !== "string" || typeof t.execute !== "function") throw fail("invalid_request", "a tool is {name, description, execute}");
+    const list = o.images ? o.images instanceof Blob ? [o.images] : Array.from(o.images) : [];
+    if (list.length && !images) throw fail("images_unavailable", "declare sample: {images: true} to send images");
+    if (o.signal?.aborted) throw fail("cancelled", "the call was aborted");
+    const tier = o.modelTier && o.modelTier !== "inherit" ? o.modelTier : "default";
+    const useCache = o.cache !== false && !tools.length && !list.length && !o.onText;
+    const ttl = typeof o.cache === "object" && o.cache.gcTime ? o.cache.gcTime : 5 * 6e4;
+    const key = canon({ prompt, tier, model: o.model ?? null, effort: o.effort ?? null });
+    if (useCache && !(typeof o.cache === "object" && o.cache.refresh)) {
+      const hit = cache.get(key);
+      if (hit && Date.now() - hit.at < hit.ttl) return hit.result;
+    }
+    await consent("sample");
+    const body = {
+      input: prompt,
+      modelTier: tier,
+      model: o.model,
+      effort: o.effort,
+      tools: tools.map((t) => ({ name: t.name, description: String(t.description ?? ""), inputSchema: t.inputSchema })),
+      images: list.length ? await Promise.all(list.map(prepare)) : void 0
+    };
+    const ctrl = new AbortController();
+    let callId = "";
+    let text = "";
+    const onAbort = () => {
+      if (callId) void request(`/_rt/sample/${callId}/cancel`, { method: "POST" }).catch(() => {
+      });
+      ctrl.abort();
+    };
+    o.signal?.addEventListener("abort", onAbort, { once: true });
+    try {
+      const r = await request("/_rt/sample", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body), signal: ctrl.signal });
+      if (!r.ok || !r.body) {
+        const e = await r.json().catch(() => null);
+        throw fail(codes[e?.error?.code] ?? "upstream_error", e?.error?.message ?? "HTTP " + r.status);
+      }
+      const reader = r.body.getReader();
+      const dec = new TextDecoder();
+      let buf = "";
+      let thinking = false;
+      for (; ; ) {
+        const x = await reader.read();
+        if (x.done) break;
+        buf += dec.decode(x.value, { stream: true });
+        let i;
+        while ((i = buf.indexOf("\n\n")) >= 0) {
+          const block = buf.slice(0, i);
+          buf = buf.slice(i + 2);
+          let type = "", data = "";
+          for (const line of block.split("\n")) {
+            if (line.startsWith("event: ")) type = line.slice(7);
+            else if (line.startsWith("data: ")) data += line.slice(6);
+          }
+          if (!data) continue;
+          const ev = JSON.parse(data);
+          switch (type) {
+            case "call":
+              callId = ev.call;
+              break;
+            case "thinking":
+              if (!text && !thinking && o.onText) {
+                thinking = true;
+                o.onText({ text: "Thinking\u2026", delta: "" });
+              }
+              break;
+            case "text":
+              text = ev.text;
+              o.onText?.({ text: ev.text, delta: ev.delta });
+              break;
+            case "tool":
+              void runTool(callId, tools, ev, ctrl.signal);
+              break;
+            case "result": {
+              const res = freeze({
+                text: ev.text,
+                truncated: !!ev.truncated,
+                modelTierApplied: ev.modelTierApplied ?? tier,
+                ...ev.modelApplied ? { modelApplied: ev.modelApplied } : {}
+              });
+              if (useCache) cache.set(key, { at: Date.now(), ttl, result: res });
+              return res;
+            }
+            case "error":
+              throw fail(codes[ev.code] ?? "upstream_error", ev.message ?? "the model call failed", ev.text || text ? { text: ev.text || text } : void 0);
+          }
+        }
+      }
+      if (o.signal?.aborted) throw fail("cancelled", "the call was aborted", text ? { text } : void 0);
+      throw fail("upstream_error", "the call ended without a result", text ? { text } : void 0);
+    } catch (e) {
+      if (o.signal?.aborted || e?.name === "AbortError") throw fail("cancelled", "the call was aborted", text ? { text } : void 0);
+      throw e;
+    } finally {
+      o.signal?.removeEventListener("abort", onAbort);
+    }
+  }
+  async function runTool(callId, tools, ev, signal) {
+    const t = tools.find((x) => x.name === ev.name);
+    let value, isError = false;
+    try {
+      if (!t) throw new Error("no tool " + ev.name);
+      value = await t.execute(ev.input ?? {}, { signal });
+      if (value === void 0) value = null;
+      let s = JSON.stringify(value);
+      if (s === void 0) s = "null";
+      if (bytes(s) > limits.MaxToolResultBytes) {
+        value = "The tool result exceeded 32 KB and was dropped.";
+        isError = true;
+      }
+    } catch (e) {
+      value = String(e?.message ?? e);
+      isError = true;
+    }
+    if (signal.aborted) return;
+    await request(`/_rt/sample/${callId}/tools/${encodeURIComponent(ev.use)}`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ value, isError })
+    }).catch(() => {
+    });
+  }
+  function parseJSON(text) {
+    const tries = [text.trim()];
+    const fence = /```(?:json)?\s*([\s\S]*?)```/i.exec(text);
+    if (fence) tries.push(fence[1].trim());
+    for (const [open, close] of [["{", "}"], ["[", "]"]]) {
+      const a = text.indexOf(open), b = text.lastIndexOf(close);
+      if (a >= 0 && b > a) tries.push(text.slice(a, b + 1));
+    }
+    for (const t of tries) {
+      try {
+        return JSON.parse(t);
+      } catch {
+      }
+    }
+    throw fail("invalid_json", "the reply is not JSON", { text });
+  }
+  function sample(h) {
+    const images = !!h.caps.sample?.images;
+    const fn = (input, o) => call2(images, input, o);
+    return Object.freeze(Object.assign(fn, {
+      json: async (input, o) => parseJSON((await call2(images, input, o)).text),
+      limits: async () => {
+        try {
+          return freeze(await rpc("sample.limits"));
+        } catch {
+          return freeze({ maxPromptBytes: limits.MaxPromptBytes });
+        }
+      }
+    }));
   }
 
   // src/static.ts

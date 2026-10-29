@@ -19,6 +19,7 @@ import (
 	"github.com/go-go-golems/slop-computer/pkg/events"
 	"github.com/go-go-golems/slop-computer/pkg/httpx"
 	"github.com/go-go-golems/slop-computer/pkg/identity"
+	"github.com/go-go-golems/slop-computer/pkg/piworker"
 	"github.com/go-go-golems/slop-computer/pkg/rt"
 	"github.com/go-go-golems/slop-computer/pkg/store"
 	"github.com/pkg/errors"
@@ -51,6 +52,8 @@ type Config struct {
 	TrustProxyHeaders bool
 	// Workshop is the Workshop's build (pkg/web); nil shows a placeholder.
 	Workshop fs.FS
+	// Sample answers the sample capability (the Pi worker); nil turns it off.
+	Sample piworker.Backend
 }
 
 func (c Config) Secure() bool { return c.PublicURL.Scheme == "https" }
@@ -93,6 +96,7 @@ type Server struct {
 	caps          capsCache
 	roomMu        sync.Mutex
 	joined        map[string][]string // view id → named rooms
+	samples       samples
 	recCache      recordCache
 	site          siteCache
 }

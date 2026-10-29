@@ -6,6 +6,7 @@ import (
 	"net/http"
 	"net/url"
 	"os"
+	"path/filepath"
 	"strings"
 	"time"
 
@@ -13,6 +14,7 @@ import (
 	"github.com/go-go-golems/glazed/pkg/cmds/values"
 	"github.com/go-go-golems/slop-computer/pkg/blobs"
 	"github.com/go-go-golems/slop-computer/pkg/identity"
+	"github.com/go-go-golems/slop-computer/pkg/piworker"
 	"github.com/go-go-golems/slop-computer/pkg/server"
 	"github.com/go-go-golems/slop-computer/pkg/store"
 	"github.com/go-go-golems/slop-computer/pkg/web"
@@ -48,6 +50,13 @@ func newServe() *serveCmd {
 			list("oidc-scope", "Extra OIDC scopes"),
 			boolean("no-migrate", "Do not apply pending migrations at start"),
 			boolean("trust-proxy-headers", "Take the client address from X-Real-Ip / X-Forwarded-For"),
+			flag("pi-worker", "Pi model worker script (web/piworker/dist/worker.js); enables the sample capability for admins"),
+			flagDefault("pi-node", "node", "Node binary that runs the Pi worker"),
+			flag("pi-agent-dir", "Pi's agent directory: models, credentials, settings (default ~/.pi/agent)"),
+			flag("model-quick", "Model for modelTier quick, e.g. lunaroute/glm-5.3-flash (default: Pi's default model)"),
+			flag("model-default", "Model for modelTier default (default: Pi's default model)"),
+			flag("model-complex", "Model for modelTier complex (default: Pi's default model)"),
+			boolean("pi-fake", "Use a deterministic fake model instead of Pi (tests)"),
 		))}
 }
 
@@ -183,6 +192,30 @@ func (c *serveCmd) Run(ctx context.Context, v *values.Values) error {
 	bl, err := blobs.Open(a.S("blobs"))
 	if err != nil {
 		return err
+	}
+	switch {
+	case a.B("pi-fake"):
+		cfg.Sample = &piworker.Fake{}
+	case a.S("pi-worker") != "":
+		agentDir := a.S("pi-agent-dir")
+		if agentDir == "" {
+			home, _ := os.UserHomeDir()
+			agentDir = filepath.Join(home, ".pi", "agent")
+		}
+		tiers := map[string]string{}
+		for _, t := range []string{"quick", "default", "complex"} {
+			if m := a.S("model-" + t); m != "" {
+				tiers[t] = m
+			}
+		}
+		pi, err := piworker.Start(ctx, a.S("pi-node"), a.S("pi-worker"), agentDir, os.TempDir(), tiers)
+		if err != nil {
+			return errors.Wrap(err, "start the Pi worker")
+		}
+		defer func() { _ = pi.Close() }()
+		models := pi.Models()
+		log.Info().Int("models", len(models)).Msg("Pi worker ready")
+		cfg.Sample = pi
 	}
 	srv := server.New(cfg, st, bl)
 	// No WriteTimeout: /api/events and comments wait hold responses open.

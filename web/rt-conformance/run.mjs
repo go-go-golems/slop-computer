@@ -6,6 +6,8 @@
 //
 // Needs playwright (NODE_PATH) and a local-mode server with the app pushed:
 //   slop push web/rt-conformance/app -a rt-conformance
+//   slop push web/rt-conformance/sample -a rt-sample      (needs --pi-worker)
+// Consent dialogs in the Workshop are accepted as a person would.
 import { createRequire } from "node:module";
 
 // CommonJS resolution, so NODE_PATH can point at a playwright install.
@@ -22,11 +24,21 @@ async function signIn(page, nick) {
   if (r.status() !== 303) throw new Error("sign in: HTTP " + r.status());
 }
 
+// Accepts the Workshop's consent dialog whenever it shows.
+function autoAllow(page) {
+  const timer = setInterval(async () => {
+    const b = page.locator('.dialog button:has-text("Allow")');
+    if (await b.count().catch(() => 0)) await b.first().click().catch(() => {});
+  }, 300);
+  page.on("close", () => clearInterval(timer));
+}
+
 async function appFrame(page) {
+  autoAllow(page);
   await page.goto(base + "/run/" + target);
   const el = await page.waitForSelector("iframe", { timeout: 15000 });
   const frame = await el.contentFrame();
-  await frame.waitForFunction(() => document.title === "done", null, { timeout: 60000 });
+  await frame.waitForFunction(() => document.title === "done", null, { timeout: 600000, polling: 500 });
   return frame;
 }
 
@@ -37,8 +49,14 @@ await signIn(page, "manuel");
 const frame = await appFrame(page);
 const results = JSON.parse(await frame.$eval("#results", (e) => e.textContent));
 for (const r of results) {
-  console.log((r.ok ? "ok   " : "FAIL ") + r.name + (r.ok || !r.detail ? "" : "  — " + r.detail));
+  console.log((r.ok ? "ok   " : "FAIL ") + r.name + (r.detail && (!r.ok || process.env.VERBOSE) ? "  — " + r.detail : ""));
   if (!r.ok) failed++;
+}
+
+if (target !== "rt-conformance") {
+  await browser.close();
+  console.log(failed ? `${failed} failed` : "all passed");
+  process.exit(failed ? 1 : 0);
 }
 
 // Two tabs on one target.

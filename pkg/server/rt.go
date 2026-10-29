@@ -508,6 +508,7 @@ func (s *Server) rpcTable() map[string]rpcFunc {
 		"assets.list":           s.rpcAssetsList, "assets.delete": s.rpcAssetsDelete,
 		"artifact.publish":  s.rpcArtifactPublish,
 		"permissions.state": s.rpcPermissionsState,
+		"sample.limits":     s.rpcSampleLimits,
 	}
 }
 

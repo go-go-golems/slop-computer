@@ -481,6 +481,21 @@ func (s *Server) serveSandbox(w http.ResponseWriter, r *http.Request, label stri
 	case p == "/_rt/assets" && r.Method == http.MethodPost:
 		s.uploadAsset(w, r)
 		return
+	case p == "/_rt/sample" && r.Method == http.MethodPost:
+		s.startSample(w, r)
+		return
+	case strings.HasPrefix(p, "/_rt/sample/") && r.Method == http.MethodPost:
+		// /_rt/sample/{call}/cancel or /_rt/sample/{call}/tools/{use}
+		parts := strings.Split(strings.TrimPrefix(p, "/_rt/sample/"), "/")
+		switch {
+		case len(parts) == 2 && parts[1] == "cancel":
+			s.cancelSample(w, r, parts[0])
+		case len(parts) == 3 && parts[1] == "tools":
+			s.sampleTool(w, r, parts[0], parts[2])
+		default:
+			notFoundPage(w)
+		}
+		return
 	case strings.HasPrefix(p, "/_rt/api/"):
 		s.slopProxy(w, r, strings.TrimPrefix(p, "/_rt"))
 		return

@@ -10,6 +10,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/go-go-golems/slop-computer/pkg/piworker"
 	"github.com/go-go-golems/slop-computer/pkg/store"
 )
 
@@ -291,3 +292,90 @@ func TestRuntimeViews(t *testing.T) {
 }
 
 func mustJSON(v any) string { b, _ := json.Marshal(v); return string(b) }
+
+func TestRuntimeSample(t *testing.T) {
+	h := newHarness(t, store.RoleAdmin)
+	h.srv.Config.Sample = &piworker.Fake{}
+	manuel := h.signIn("manuel")
+	tok := h.token(manuel.id(), store.ScopeRead, store.ScopeWrite)
+	h.pushFiles(tok, "asker", map[string]any{"title": "Asker", "kind": "page"}, map[string]any{"capabilities": map[string]any{"sample": map[string]any{}}},
+		map[string]string{"index.html": "<!doctype html><html><head></head><body></body></html>"})
+	h.pushFiles(tok, "plain", map[string]any{"title": "Plain", "kind": "page"}, map[string]any{"capabilities": map[string]any{"db": map[string]any{}}},
+		map[string]string{"index.html": "<!doctype html><html><head></head><body></body></html>"})
+	a := h.openView(manuel, "asker")
+	a.stream()
+	post := func(vc *viewClient, path string, body any) *http.Response {
+		raw, _ := json.Marshal(body)
+		req := vc.req("POST", path, strings.NewReader(string(raw)))
+		req.Header.Set("Content-Type", "application/json")
+		resp, err := http.DefaultClient.Do(req)
+		if err != nil {
+			t.Fatal(err)
+		}
+		return resp
+	}
+	tool := map[string]any{"name": "lookup", "description": "Looks something up", "inputSchema": map[string]any{"type": "object"}}
+	ask := map[string]any{"input": "hello", "modelTier": "default", "tools": []any{tool}}
+	// No consent yet: the shell's dialog has to grant it.
+	if resp := post(a, "/_rt/sample", ask); resp.StatusCode != 403 {
+		t.Fatalf("sample before consent: %d", resp.StatusCode)
+	}
+	if code := manuel.do("POST", "/api/rt/views/"+a.id+"/consent", map[string]string{"sample": "granted"}, nil); code != 200 {
+		t.Fatalf("consent %d", code)
+	}
+	// A page that does not declare sample cannot use it.
+	p := h.openView(manuel, "plain")
+	if resp := post(p, "/_rt/sample", ask); resp.StatusCode != 403 {
+		t.Fatalf("undeclared sample: %d", resp.StatusCode)
+	}
+	if r, _ := a.rpc("sample.limits", nil); r["available"] != true || len(r["models"].([]any)) != 1 {
+		t.Fatalf("limits %v", r)
+	}
+	resp := post(a, "/_rt/sample", ask)
+	if resp.StatusCode != 200 {
+		t.Fatalf("sample %d", resp.StatusCode)
+	}
+	defer func() { _ = resp.Body.Close() }()
+	sc := bufio.NewScanner(resp.Body)
+	call, typ := "", ""
+	var result map[string]any
+	for sc.Scan() {
+		line := sc.Text()
+		switch {
+		case strings.HasPrefix(line, "event: "):
+			typ = line[7:]
+		case strings.HasPrefix(line, "data: "):
+			var d map[string]any
+			_ = json.Unmarshal([]byte(line[6:]), &d)
+			switch typ {
+			case "call":
+				call = d["call"].(string)
+			case "tool":
+				if d["name"] != "lookup" {
+					t.Fatalf("tool event %v", d)
+				}
+				// The page answers its tool; the model continues.
+				if r := post(a, "/_rt/sample/"+call+"/tools/"+d["use"].(string), map[string]any{"value": map[string]int{"n": 1}}); r.StatusCode != 200 {
+					t.Fatalf("tool result %d", r.StatusCode)
+				}
+				if r := post(a, "/_rt/sample/"+call+"/tools/"+d["use"].(string), map[string]any{"value": 1}); r.StatusCode != 404 {
+					t.Fatalf("a second result for the same use: %d", r.StatusCode)
+				}
+			case "result":
+				result = d
+			case "error":
+				t.Fatalf("error event %v", d)
+			}
+		}
+		if result != nil {
+			break
+		}
+	}
+	if result == nil || result["text"] != "The browser tool completed successfully." {
+		t.Fatalf("result %v", result)
+	}
+	// Another view cannot answer or cancel this view's calls.
+	if r := post(p, "/_rt/sample/"+call+"/cancel", nil); r.StatusCode != 401 && r.StatusCode != 200 {
+		t.Fatalf("foreign cancel %d", r.StatusCode)
+	}
+}
