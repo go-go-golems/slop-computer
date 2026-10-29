@@ -1,4 +1,4 @@
-.PHONY: lint fmt-check test test-postgres build web generate run-local dev-backend dev-frontend
+.PHONY: lint fmt-check test test-postgres build web generate run-local dev-backend dev-frontend pinup pinup-push
 
 lint:
 	GOWORK=off golangci-lint run -v
@@ -31,3 +31,15 @@ dev-backend:
 
 dev-frontend:
 	cd web/workshop && pnpm install && pnpm dev
+
+# Pinup (web/pinup) built for slop: the pinup tool and the prototype player.
+# pinup-push publishes both to the server you are logged in to (SLOP_SERVER);
+# an admin then enables the new tool version in the Workshop.
+SLOP ?= slop
+pinup:
+	cd web/pinup/vendor && npm ci --no-audit --no-fund
+	node web/pinup/slop/build.js
+
+pinup-push: pinup
+	$(SLOP) push web/pinup/dist/slop -a pinup --title Pinup -m "Pinup $$(git rev-parse --short HEAD)"
+	$(SLOP) push web/pinup/dist/slop-player -a pinup-player --title "Pinup player" -m "Pinup player $$(git rev-parse --short HEAD)"

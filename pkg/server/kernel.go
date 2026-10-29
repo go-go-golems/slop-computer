@@ -1,6 +1,7 @@
 package server
 
 import (
+	"context"
 	"encoding/json"
 	"errors"
 	"mime"
@@ -309,6 +310,33 @@ func mediaType(p string) string {
 	return "application/octet-stream"
 }
 
+// compiledWarning warns when a push replaces a page that Pinup compiles from
+// a design (manifest pinup.design) with a version that does not come from
+// Pinup: Publish app in Pinup then asks before replacing it.
+func (s *Server) compiledWarning(ctx context.Context, id string, manifest json.RawMessage) string {
+	a, err := s.Store.Artifact(ctx, id)
+	if err != nil || a.Main == 0 {
+		return ""
+	}
+	v, err := s.Store.Version(ctx, id, a.Main)
+	if err != nil {
+		return ""
+	}
+	type compiled struct {
+		Pinup *struct {
+			Design string `json:"design"`
+		} `json:"pinup"`
+	}
+	var cur, next compiled
+	if store.ManifestOf(v, &cur) != nil || cur.Pinup == nil || cur.Pinup.Design == "" {
+		return ""
+	}
+	if len(manifest) > 0 && json.Unmarshal(manifest, &next) == nil && next.Pinup != nil {
+		return ""
+	}
+	return id + " is compiled from the Pinup design " + cur.Pinup.Design + "; this version is not, and Publish app in Pinup will ask before replacing it (to keep the page in Pinup, edit the design instead)"
+}
+
 type pushRequest struct {
 	Base     *int                 `json:"base"`
 	Tree     map[string]string    `json:"tree"`
@@ -377,6 +405,12 @@ func (s *Server) push(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 		for name, id := range m.Reads {
+			if strings.HasPrefix(id, "$") {
+				if id != SiteSource {
+					warnings = append(warnings, "reads."+name+": "+id+" is not a known source (the one there is: "+SiteSource+")")
+				}
+				continue
+			}
 			if a, err := s.Store.Artifact(r.Context(), id); err != nil || a.Kind != store.KindData {
 				warnings = append(warnings, "reads."+name+": "+id+" is not a data artifact (yet)")
 			}
@@ -390,6 +424,9 @@ func (s *Server) push(w http.ResponseWriter, r *http.Request) {
 			s.fail(w, err)
 			return
 		}
+	}
+	if w := s.compiledWarning(r.Context(), r.PathValue("id"), in.Manifest); w != "" {
+		warnings = append(warnings, w)
 	}
 	p := principal(r.Context())
 	via := "browser"

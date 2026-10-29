@@ -1,0 +1,20 @@
+const { chromium } = require('playwright');
+(async () => {
+  require('./wrap.js');
+  const b = await chromium.launch();
+  const p = await b.newPage({ viewport: { width: 1440, height: 900 } });
+  const errs = [];
+  p.on('console', m => { if (m.type() === 'error' || m.type() === 'warning') errs.push(m.type() + ': ' + m.text()); });
+  p.on('pageerror', e => errs.push('PAGEERROR ' + e.message + '\n' + e.stack));
+  await p.route('**/fonts.googleapis.com/**', r => r.abort());
+  await p.goto('file://' + __dirname + '/index.html');
+  await p.waitForTimeout(800);
+  await p.screenshot({ path: __dirname + '/s1-empty.png' });
+  await p.click('text=Start with an example app');
+  await p.waitForTimeout(4000);
+  await p.screenshot({ path: __dirname + '/s2-example.png' });
+  const info = await p.evaluate(() => ({ nodes: document.querySelectorAll('#world [data-nid]').length, layers: document.querySelectorAll('#tree .lr').length }));
+  console.log(JSON.stringify(info));
+  console.log(errs.slice(0, 30).join('\n'));
+  await b.close();
+})();

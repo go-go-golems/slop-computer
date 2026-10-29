@@ -15,3 +15,7 @@ Page-from routes implemented (c708f11, 3772573); local swap: 100 /r/<page> route
 ## 2026-10-29
 
 Review fix (Codex P2): refuse repeated pageFrom placeholders; matcher matches nothing for them
+
+## 2026-10-29
+
+Cluster: sha-6cb2f2a deployed (gitops #399); 100 /r/<page> routes swapped for one page-from route; 102 → 3 routes, bodies identical

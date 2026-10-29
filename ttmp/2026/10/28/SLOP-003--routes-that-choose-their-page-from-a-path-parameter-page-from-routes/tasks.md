@@ -10,4 +10,4 @@
 - [x] Docs: agents help topic section on page-from routes <!-- t:x0r3 -->
 - [x] Tests: routing, store validation, site serving and gates <!-- t:fxzf -->
 - [x] Local demo: replace the 100 /r/<page> routes with one page-from route <!-- t:3bvs -->
-- [ ] Cluster rollout after merge (image bump, release-missing page, swap routes) <!-- t:7gah -->
+- [x] Cluster rollout after merge (image bump, release-missing page, swap routes) <!-- t:7gah -->

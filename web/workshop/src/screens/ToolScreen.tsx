@@ -1,7 +1,7 @@
 import { useEffect, useRef, useState } from 'react'
 import { errorText, useDisableToolMutation, useEnableToolMutation, useGrantToolMutation, useSandboxUrlQuery, useToolsQuery } from '../api/slopApi'
 import type { ToolView } from '../api/types'
-import { isSandboxOrigin } from '../app/boot'
+import { boot, isSandboxOrigin } from '../app/boot'
 import { ago } from '../app/format'
 import { useNames } from '../app/hooks'
 import { navigate, toolPath, watchPath } from '../app/router'
@@ -11,10 +11,19 @@ import { Button, Empty, IconButton, Tag } from '../components/atoms'
 // Renew the grant well before its hour is up.
 const RENEW_MS = 45 * 60 * 1000
 
+// toolArgs are the query of /tools/<id>?…, less the Workshop's own try:
+// what the tool should open (Pinup: ?file=<design>). They are display state
+// for the tool, not authority; the grant decides what it may do.
+export function toolArgs(q: URLSearchParams): Record<string, string> {
+  const out: Record<string, string> = {}
+  q.forEach((v, k) => { if (k !== 'try') out[k] = v })
+  return out
+}
+
 // ToolScreen runs a tool in an iframe on the sandbox domain. The chrome
 // around it (version, try, update, disable) belongs to the Workshop, so a
 // broken or hostile tool cannot hide the way out.
-export function ToolScreen({ id, tryN }: { id: string; tryN?: number }) {
+export function ToolScreen({ id, tryN, args = {} }: { id: string; tryN?: number; args?: Record<string, string> }) {
   const { data, isLoading } = useToolsQuery()
   const [dialog, setDialog] = useState<number | null>(null)
   const [disable] = useDisableToolMutation()
@@ -31,7 +40,7 @@ export function ToolScreen({ id, tryN }: { id: string; tryN?: number }) {
     <div className="split">
       <section className="tile main">
         <div className="toolbar">
-          <div className="addr"><span>tool</span><span className="ro">{t.latest.title || enabled?.title || id}</span></div>
+          <div className="addr label"><span>tool</span><span className="ro">{t.latest.title || enabled?.title || id}</span></div>
           {enabled ? <Tag tone="ink">{`enabled v${enabled.version}`}</Tag> : <Tag tone="red">not enabled</Tag>}
           {trying ? <Tag tone="red">{`trying v${tryN} · only you`}</Tag> : null}
           <span className="sp" />
@@ -50,7 +59,7 @@ export function ToolScreen({ id, tryN }: { id: string; tryN?: number }) {
           {t.latest.error ? <span className="muted" style={{ color: 'var(--accent)' }}>{`v${t.latest.n}: ${t.latest.error}`}</span> : null}
         </div>
         <div className="tilebody">
-          {n ? <ToolFrame key={`${id}@${n}`} id={id} n={n} trying={trying} />
+          {n ? <ToolFrame key={`${id}@${n}`} id={id} n={n} trying={trying} args={args} />
             : <Empty>{`Try v${t.latest.n} to see it; enabling it then lets everyone open it from the Tools menu.`}</Empty>}
         </div>
       </section>
@@ -61,11 +70,13 @@ export function ToolScreen({ id, tryN }: { id: string; tryN?: number }) {
 
 // ToolFrame loads one tool version and answers its hello with a grant,
 // renewed while it is open. Without a grant the tool can do nothing.
-function ToolFrame({ id, n, trying }: { id: string; n: number; trying: boolean }) {
+function ToolFrame({ id, n, trying, args }: { id: string; n: number; trying: boolean; args: Record<string, string> }) {
   const { data: sb, isError } = useSandboxUrlQuery({ artifact: id, n, mode: 'tool' })
   const frame = useRef<HTMLIFrameElement>(null)
   const [grantTool] = useGrantToolMutation()
   const [problem, setProblem] = useState('')
+  const argsRef = useRef(args)
+  argsRef.current = args
 
   useEffect(() => {
     if (!sb) return
@@ -73,7 +84,9 @@ function ToolFrame({ id, n, trying }: { id: string; n: number; trying: boolean }
     const give = async () => {
       try {
         const g = await grantTool({ id, n, try: trying }).unwrap()
-        frame.current?.contentWindow?.postMessage({ slop: 1, type: 'grant', grant: g.grant, expiresAt: g.expiresAt, permissions: g.permissions, user: g.user }, sb.origin)
+        const cfg = boot().config
+        frame.current?.contentWindow?.postMessage({ slop: 1, type: 'grant', grant: g.grant, expiresAt: g.expiresAt, permissions: g.permissions, user: g.user,
+          people: g.people ?? {}, args: argsRef.current, config: { siteHosts: cfg.siteHosts, publicUrl: cfg.publicUrl } }, sb.origin)
         setProblem('')
       } catch (e) {
         setProblem(errorText(e))
@@ -81,7 +94,17 @@ function ToolFrame({ id, n, trying }: { id: string; n: number; trying: boolean }
     }
     const on = (e: MessageEvent) => {
       if (!frame.current || e.source !== frame.current.contentWindow || !isSandboxOrigin(e.origin) || e.origin !== sb.origin) return
-      const m = e.data as { slop?: number; type?: string } | null
+      const m = e.data as { slop?: number; type?: string; args?: Record<string, unknown> } | null
+      if (m && m.slop === 1 && m.type === 'tool-args') {
+        // The tool chose what it shows (Pinup: a design); keep it in the URL.
+        const q = new URLSearchParams(location.search)
+        for (const k of [...q.keys()]) if (k !== 'try') q.delete(k)
+        for (const [k, v] of Object.entries(m.args ?? {})) if (typeof v === 'string' && v) q.set(k, v)
+        const s = q.toString()
+        history.replaceState(history.state, '', location.pathname + (s ? '?' + s : ''))
+        argsRef.current = toolArgs(q)
+        return
+      }
       if (!m || m.slop !== 1 || m.type !== 'tool-hello') return
       void give()
       clearInterval(renew)
@@ -93,7 +116,7 @@ function ToolFrame({ id, n, trying }: { id: string; n: number; trying: boolean }
 
   return (
     <div className="stage" style={{ padding: 0 }}>
-      {sb ? <iframe ref={frame} src={sb.url} title={`Tool ${id} v${n}`} sandbox="allow-scripts allow-same-origin allow-forms allow-popups" style={{ width: '100%', height: '100%', border: 0, background: '#fff' }} /> : null}
+      {sb ? <iframe ref={frame} src={sb.url} title={`Tool ${id} v${n}`} sandbox="allow-scripts allow-same-origin allow-forms allow-popups allow-downloads" allow="clipboard-read; clipboard-write" style={{ width: '100%', height: '100%', border: 0, background: '#fff' }} /> : null}
       {isError ? <Empty>The tool could not be opened.</Empty> : null}
       {problem ? <div className="pickhint" style={{ background: 'var(--accent)' }}>{`No grant: ${problem}`}</div> : null}
     </div>
@@ -111,7 +134,9 @@ function EnableToolDialog({ t, n, permissions, onClose }: { t: ToolView; n: numb
       await enable({ id: t.artifact, n }).unwrap()
       toast(`${t.latest.title} v${n} is enabled for everyone.`)
       onClose()
-      navigate(toolPath(t.artifact))
+      // Keep what the tool was showing (?file=…), drop the try.
+      const q = new URLSearchParams(toolArgs(new URLSearchParams(location.search))).toString()
+      navigate(toolPath(t.artifact) + (q ? '?' + q : ''))
     } catch (e) { toast(errorText(e), true) }
   }
   return (

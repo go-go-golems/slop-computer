@@ -268,3 +268,64 @@ Codex reviewed PR #2 and found a scope hole in admission. `TemplateMatcher` turn
 {page}-{page}  → refused at PUT /api/routes (400 invalid_request "pageFrom uses {page} more than once"); matcher: matches nothing
 {a}-{b}        → ^(.+)-(.+)$ — exact: any id it matches is produced by some (:a, :b)
 ```
+
+## Step 4: The swap on the cluster: 102 routes → 3
+
+PR #2 merged into `main` (`6cb2f2a`), and the publish workflow built `sha-6cb2f2a`. The user merged gitops PR #399, which bumps the image, and Argo rolled it out; migration 005 was applied on start. When the user asked to clean up the individual release pages, I ran the swap script from Step 2 against `site.slop.yolo.scapegoat.dev`. The cluster now has three routes: `/`, `/apps/:id`, and `/r/:page → {page}, else release-missing`. All 100 release URLs serve byte-identical bodies to before, apart from the injected boot data.
+
+### Prompt Context
+**User prompt (verbatim):** "It's merged, rebase, release", and later "btw those wildcard pages, can we now cleanup the individual pages for each artifact that we currently have in slop.yolo.spacegoat.dev?"
+**Assistant interpretation:** Fast-forward the branch, get the merged code deployed, then replace the 100 per-release routes on the cluster with the page-from route. The release *artifacts* stay; they are what the route serves.
+**Inferred user intent:** The live site should use the new mechanism, with a short route table.
+**Commit (code):** none in this step (operations only). Gitops: wesen/2026-03-27--hetzner-k3s#399 `fc85ed3` "slop: image sha-6cb2f2a".
+
+### What I did
+- `git rebase origin/main` (a fast-forward to `6cb2f2a`) and push. Publish run `40881725518` on main succeeded, and `docker manifest inspect ghcr.io/go-go-golems/slop-computer:sha-6cb2f2a` showed the image exists.
+- Gitops: branch `slop/image-6cb2f2a` with `deployment.yaml` changed from `sha-cb68898` to `sha-6cb2f2a`, opened as PR #399 only after the image existed. The user merged it at 13:31:52Z.
+- Checks before the swap:
+  - `kubectl -n slop get deploy slop` → `sha-6cb2f2a`;
+  - the pod log shows `Applied migration migration=005_route_page_from.sql`;
+  - `slop route list` → 102 routes, 100 of them `/r/`;
+  - hashed all 100 `/r/<page>` bodies, with `#slop-boot` stripped: 100 distinct hashes.
+- `SLOP=…/slop6 HOST=site.slop.yolo.scapegoat.dev scripts/01-swap-release-routes.sh`:
+  - `pushed release-missing v1 (new artifact)`;
+  - `/r/:page (none) → {page} in release-missing's project, else release-missing@main`;
+  - `Every page of project francois whose id fits {page} is now public …`;
+  - `nope: 404 (want 404); failures: 0`.
+- Checks after:
+  - `route list` → 3 routes;
+  - re-hashed the 100 bodies → `100/100 release bodies identical`;
+  - `/ 200`, `/apps/weft 200`, `/r/polis 200` and `/r/craftkit-studio 200` (both previously unrouted), `/r/nope 404`;
+  - main host: `/help/agents` → 303 to login, and `/help/agents.md` → 401, both the designed behaviour for a signed-out client.
+
+### Why
+- The page-from route was added before the static routes were removed. Static routes are more specific, so they kept serving until each was removed, and no URL was unserved during the switch.
+
+### What worked
+- The swap script from Step 2 ran unchanged against the cluster.
+
+### What didn't work
+- No failures. `/help/agents` on the *site* host returned 404. That is correct: help is served on the main host only.
+
+### What I learned
+- The SLOP-002 `release-routes.tsv` doubled as the exact checklist for the cleanup and the verification.
+
+### What was tricky to build
+- Nothing new. Ordering, add before remove, was the only constraint.
+
+### What warrants a second pair of eyes
+- `/r/storefront`, `/r/storefront-entry` and `/r/release-missing` are now also reachable on the cluster, the exposure noted in the guide's §8.4. On the cluster there is no `probe-media` page; it only existed locally.
+
+### What should be done in the future
+- N/A for this ticket.
+
+### Code review instructions
+- `ttmp/2026/10/28/SLOP-003--…/scripts/01-swap-release-routes.sh`; compare `route list` before (102) and after (3).
+
+### Technical details
+```
+cluster routes on site.slop.yolo.scapegoat.dev:
+  /           storefront        main
+  /apps/:id   storefront-entry  main   record {id}.json
+  /r/:page    release-missing   main   pageFrom {page}
+```

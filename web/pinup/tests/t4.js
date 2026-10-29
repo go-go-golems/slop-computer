@@ -1,0 +1,24 @@
+const { chromium } = require('playwright');
+(async () => {
+  require('./wrap.js');
+  const b = await chromium.launch();
+  const p = await b.newPage({ viewport: { width: 1440, height: 900 } });
+  const errs = [];
+  p.on('pageerror', e => errs.push('PAGEERROR ' + e.message + '\n' + e.stack));
+  p.on('console', m => { if ((m.type() === 'error' || m.type()==='warning') && !/ERR_FAILED/.test(m.text())) errs.push(m.text()); });
+  await p.route('**/fonts.googleapis.com/**', r => r.abort());
+  await p.goto('file://' + __dirname + '/index.html');
+  await p.waitForTimeout(500);
+  await p.click('text=Start with an example app');
+  await p.waitForTimeout(3500);
+  const lab = await p.evaluate(() => { const e=[...document.querySelectorAll('.flabel')].find(e=>e.textContent==='Home'); const r=e.getBoundingClientRect(); return {x:r.x+5,y:r.y+5}; });
+  await p.mouse.click(lab.x, lab.y); await p.waitForTimeout(200);
+  await p.click('[data-rtab="inspect"]'); await p.waitForTimeout(200);
+  console.log(await p.evaluate(() => { const s=[...document.querySelectorAll('.sec h3')].find(h=>h.textContent.startsWith('Code')); return s.outerHTML.slice(0,600); }));
+  const code = await p.evaluate(() => [...document.querySelectorAll('pre.code')].pop().textContent);
+  console.log(code.slice(0, 2500));
+  await p.click('[data-ltab="assets"]'); await p.waitForTimeout(300);
+  await p.screenshot({ path: __dirname + '/s12.png', clip: {x:0,y:40,width:250,height:300} });
+  console.log(errs.join('\n'));
+  await b.close();
+})();

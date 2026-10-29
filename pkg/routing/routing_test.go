@@ -84,3 +84,42 @@ func TestPageFrom(t *testing.T) {
 		t.Error("distinct placeholders are independent")
 	}
 }
+
+func TestRecordMatcherAndFillPath(t *testing.T) {
+	re, names := RecordMatcher("posts/{slug}.md")
+	m := re.FindStringSubmatch("posts/routes-not-templates.md")
+	if len(m) != 2 || m[1] != "routes-not-templates" || len(names) != 1 || names[0] != "slug" {
+		t.Fatalf("posts/{slug}.md: %v %v", m, names)
+	}
+	for _, p := range []string{"posts/a/b.md", "posts/x.json", "other/x.md"} {
+		if re.MatchString(p) {
+			t.Fatalf("%s should not match", p)
+		}
+	}
+	if re, _ := RecordMatcher("{a}/{a}.md"); re.MatchString("x/x.md") {
+		t.Fatal("a repeated placeholder matches nothing")
+	}
+	re, names = RecordMatcher("{year}/{slug}.json")
+	if m := re.FindStringSubmatch("2026/hello.json"); len(m) != 3 || m[1] != "2026" || m[2] != "hello" || names[1] != "slug" {
+		t.Fatalf("two placeholders: %v %v", m, names)
+	}
+	for _, c := range []struct {
+		pattern string
+		params  map[string]string
+		want    string
+		ok      bool
+	}{
+		{"/journal/:slug", map[string]string{"slug": "routes-not-templates"}, "/journal/routes-not-templates", true},
+		{"/about", nil, "/about", true},
+		{"/", nil, "/", true},
+		{"/r/:page", map[string]string{"page": "a b"}, "/r/a%20b", true},
+		{"/journal/:slug", map[string]string{}, "", false},
+		{"/journal/:slug", map[string]string{"slug": "a/b"}, "", false},
+		{"/files/*", nil, "", false},
+	} {
+		got, ok := FillPath(c.pattern, c.params)
+		if got != c.want || ok != c.ok {
+			t.Fatalf("FillPath(%s, %v) = %q, %v", c.pattern, c.params, got, ok)
+		}
+	}
+}

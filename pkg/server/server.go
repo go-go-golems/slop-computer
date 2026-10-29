@@ -87,17 +87,24 @@ type Server struct {
 	mux           *http.ServeMux
 	deviceLimiter *limiter
 	waiters       *waiters
+	presence      *presenceHub
 	recCache      recordCache
+	site          siteCache
 }
 
 func New(cfg Config, st *store.Store, bl *blobs.Blobs) *Server {
-	s := &Server{Config: cfg, Store: st, Blobs: bl, Events: events.New(), deviceLimiter: newLimiter(), waiters: newWaiters()}
+	s := &Server{Config: cfg, Store: st, Blobs: bl, Events: events.New(), deviceLimiter: newLimiter(), waiters: newWaiters(), presence: newPresenceHub()}
 	s.mux = s.routes()
 	return s
 }
 
 // publish hands committed events to live subscribers.
-func (s *Server) publish(evs []store.Event) { s.Events.Publish(evs...) }
+// publish sends committed events to subscribers; a change that can alter a
+// site index makes the cached indexes stale first.
+func (s *Server) publish(evs []store.Event) {
+	s.site.changed(evs)
+	s.Events.Publish(evs...)
+}
 
 // origins are the main host's origins: the public URL first.
 func (s *Server) origins() []string {
@@ -195,6 +202,8 @@ func (s *Server) routes() *http.ServeMux {
 	s.kernelRoutes(m)
 	s.previewRoutes(m)
 	s.streamRoutes(m)
+	s.docRoutes(m)
+	s.siteRoutes(m)
 	m.HandleFunc("/api/", func(w http.ResponseWriter, r *http.Request) { httpx.Fail(w, 404, "not_found", "Unknown API route") })
 	s.workshopRoutes(m)
 	s.safeRoutes(m)

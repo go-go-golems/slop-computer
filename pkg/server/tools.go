@@ -165,8 +165,18 @@ func (s *Server) grantTool(w http.ResponseWriter, r *http.Request) {
 		unavailable(w, err)
 		return
 	}
+	// people names the active users, so a tool can show who did what: a
+	// grant cannot list users itself.
+	people := map[string]map[string]string{}
+	if us, err := s.Store.Users(ctx); err == nil {
+		for _, u := range us {
+			if u.Role == store.RoleAdmin {
+				people[u.ID] = map[string]string{"id": u.ID, "name": u.DisplayName}
+			}
+		}
+	}
 	httpx.OK(w, map[string]any{"grant": secret, "expiresAt": g.ExpiresAt, "permissions": g.Permissions, "n": in.N, "try": in.Try,
-		"user": map[string]string{"id": me(r).ID, "name": me(r).DisplayName}})
+		"user": map[string]string{"id": me(r).ID, "name": me(r).DisplayName}, "people": people})
 }
 
 // isSandboxOrigin reports whether an Origin header names a preview origin

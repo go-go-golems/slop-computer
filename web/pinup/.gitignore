@@ -1,0 +1,9 @@
+# Build output (node build.js) and the icon set it reads
+dist/
+vendor/node_modules/
+# Written by the Playwright scripts
+tests/index.html
+tests/*.png
+tests/dump.json
+# Written by slop/tests/app.js
+slop/tests/out/

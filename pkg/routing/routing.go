@@ -142,3 +142,44 @@ func Resolve(rows []store.Route, host, path string) (Resolution, bool) {
 	}
 	return Resolution{}, false
 }
+
+// RecordMatcher matches the record paths a record pattern can name, one
+// path segment per placeholder: "posts/{slug}.md" → ^posts/([^/]+)\.md$,
+// with the placeholder names in order. A pattern that repeats a name
+// matches nothing.
+func RecordMatcher(pattern string) (*regexp.Regexp, []string) {
+	names := []string{}
+	seen := map[string]bool{}
+	for _, m := range recordParam.FindAllStringSubmatch(pattern, -1) {
+		if seen[m[1]] {
+			return matchNothing, nil
+		}
+		seen[m[1]] = true
+		names = append(names, m[1])
+	}
+	parts := recordParam.Split(pattern, -1)
+	for i := range parts {
+		parts[i] = regexp.QuoteMeta(parts[i])
+	}
+	return regexp.MustCompile("^" + strings.Join(parts, "([^/]+)") + "$"), names
+}
+
+// FillPath puts params into a route path: /journal/:slug with slug=x is
+// /journal/x. It reports false when a parameter is missing or empty, or
+// the path has a trailing *, since then it names no single URL.
+func FillPath(pattern string, params map[string]string) (string, bool) {
+	segs := segments(pattern)
+	for i, s := range segs {
+		switch {
+		case s == "*":
+			return "", false
+		case strings.HasPrefix(s, ":"):
+			v := params[s[1:]]
+			if v == "" || strings.Contains(v, "/") {
+				return "", false
+			}
+			segs[i] = url.PathEscape(v)
+		}
+	}
+	return "/" + strings.Join(segs, "/"), true
+}

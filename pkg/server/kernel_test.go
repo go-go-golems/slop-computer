@@ -195,3 +195,35 @@ func TestCommentsWait(t *testing.T) {
 		t.Fatalf("replay after cursor: %d %v", code, again)
 	}
 }
+
+// A page compiled by Pinup names its design; a push from anywhere else gets
+// a warning that Publish app will replace it, and Pinup's own pushes do not.
+func TestPushWarnsOnPinupPages(t *testing.T) {
+	h := newHarness(t, store.RoleAdmin)
+	manuel := h.signIn("manuel")
+	tok := h.token(manuel.id(), store.ScopeRead, store.ScopeWrite)
+	h.pushFiles(tok, "pace", map[string]any{"title": "Pace", "kind": "page"}, map[string]any{"pinup": map[string]any{"design": "design-pace", "version": 3}},
+		map[string]string{"index.html": "<p>compiled"})
+	push := func(manifest any, html string) []any {
+		t.Helper()
+		var a map[string]any
+		h.bearer(tok, "GET", "/api/artifacts/pace", nil, &a)
+		body := map[string]any{"tree": map[string]string{"index.html": h.upload(tok, []byte(html))}, "base": a["main"], "manifest": manifest}
+		var res map[string]any
+		if code := h.bearer(tok, "POST", "/api/artifacts/pace/versions", body, &res); code != 201 {
+			t.Fatalf("push: %d %v", code, res)
+		}
+		w, _ := res["warnings"].([]any)
+		return w
+	}
+	if w := push(map[string]any{"pinup": map[string]any{"design": "design-pace", "version": 4}}, "<p>compiled again"); len(w) != 0 {
+		t.Fatalf("a Pinup push warned: %v", w)
+	}
+	w := push(nil, "<p>by hand")
+	if len(w) != 1 || !strings.Contains(w[0].(string), "compiled from the Pinup design design-pace") {
+		t.Fatalf("a hand push to a compiled page: %v", w)
+	}
+	if w := push(nil, "<p>by hand again"); len(w) != 0 {
+		t.Fatalf("once main is hand-written there is nothing to warn about: %v", w)
+	}
+}

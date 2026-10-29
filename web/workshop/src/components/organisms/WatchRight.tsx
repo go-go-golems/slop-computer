@@ -17,7 +17,7 @@ export interface PreviewContext { route: RouteView | null; host?: string; path?:
 export function usePreviewContext(routes: RouteView[], sample: string | null): PreviewContext {
   const r = routes.find(x => x.path !== '*') ?? routes[0] ?? null
   const hasParams = !!r && /[:*]/.test(r.path) && r.path !== '*'
-  const data = r && hasParams ? Object.entries(r.data ?? {}).find(([k]) => k !== '$tokens')?.[1] : undefined
+  const data = r && hasParams ? Object.entries(r.data ?? {}).find(([k, b]) => k !== '$tokens' && !b.artifact.startsWith('$'))?.[1] : undefined
   const { data: recs } = useRecordsQuery(data ? { id: data.artifact, n: data.n } : { id: '', n: 0 }, { skip: !data })
   return useMemo(() => {
     if (!r) return { route: null, samples: [] }
@@ -36,6 +36,14 @@ export function usePreviewContext(routes: RouteView[], sample: string | null): P
 export function DeviceSeg({ device, onChange }: { device: Device; onChange: (d: Device) => void }) {
   return <Seg label="Width" value={device} onChange={onChange} options={[['fit', 'Fit'], ['desktop', 'Desktop'], ['phone', 'Phone']]} />
 }
+
+// A page compiled by Pinup names its design in its manifest; Edit in Pinup
+// opens that design in the Pinup tool.
+export function pinupDesign(m: Record<string, unknown> | undefined): string | null {
+  const p = m?.pinup as { design?: unknown } | undefined
+  return typeof p?.design === 'string' ? p.design : null
+}
+export const pinupPath = (design: string) => `${toolPath('pinup')}?file=${encodeURIComponent(design)}`
 
 export function PageToolbar(p: {
   a: Artifact; versions: Version[]; v: Version; ctx: PreviewContext; rtab: string; device: Device; cmpLeft: number
@@ -61,6 +69,7 @@ export function PageToolbar(p: {
       ) : null}
       {ctx.route && ctx.host && ctx.path ? <Button onClick={() => p.onOpenSite(ctx.host!, ctx.path!)}>Open in Site</Button> : null}
       {p.v.manifest && 'tool' in p.v.manifest ? <Button onClick={() => navigate(toolPath(p.a.id, p.v.n))}>Open as tool</Button> : null}
+      {pinupDesign(p.v.manifest) ? <Button title={`This page is compiled from ${pinupDesign(p.v.manifest)}`} onClick={() => navigate(pinupPath(pinupDesign(p.v.manifest)!))}>Edit in Pinup</Button> : null}
     </div>
   )
 }

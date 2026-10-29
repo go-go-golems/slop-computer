@@ -97,6 +97,13 @@ https://site.your-slop-server). The `slop` CLI is logged in.
 - A page reads data through slop.json {"reads": {"posts": "journal"}} and
   window.slop.data.posts.list(). Under a route with --record, window.slop.record
   and window.slop.route.params name the record.
+- {"reads": {"pages": "$site"}} gives a page every public URL of its host
+  (path, title, kind, section, project, updated; record routes add record):
+  static routes, each listed record a record route serves, each page a
+  page-from route admits. Left out: private routes, the fallback, pages with
+  "listed": false, records with draft/hidden: true, listed: false or
+  visibility hidden, private, draft, unlisted or internal. See it with:
+  slop site ls
 - Keep pages self-contained: no external network requests, no build step.
 - Check a routed page with: curl -s https://site.your-slop-server/<path>
 ```
@@ -134,7 +141,11 @@ https://site.your-slop-server). The `slop` CLI is logged in.
   the home page. `slop route list` before you route.
 - **There is no artifact delete.** Throwaway pushes stay, so name them clearly.
 
-## 6. If this server has the francois import
+## 6. Designs (Pinup)
+
+If people design in the Workshop's Pinup tool, an agent can read and change a design while it is open, resolve review items one step at a time, and build the real app from a hand-off. See `slop help pinup` (or `/help/pinup`).
+
+## 7. If this server has the francois import
 
 The francois catalogue lives in project `francois`:
 

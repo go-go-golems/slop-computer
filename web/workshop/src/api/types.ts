@@ -187,4 +187,4 @@ export interface ToolView {
   latest: { n: number; title: string; icon?: string; permissions: string[] | null; newPermissions: string[]; error?: string }
 }
 export interface ToolList { tools: ToolView[]; permissions: Record<string, string> }
-export interface ToolGrant { grant: string; expiresAt: string; permissions: string[]; n: number; try: boolean; user: { id: string; name: string } }
+export interface ToolGrant { grant: string; expiresAt: string; permissions: string[]; n: number; try: boolean; user: { id: string; name: string }; people?: Record<string, { id: string; name: string }> }

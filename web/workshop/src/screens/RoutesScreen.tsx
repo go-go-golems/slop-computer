@@ -1,4 +1,4 @@
-import { useState } from 'react'
+import { Fragment, useState } from 'react'
 import {
   errorText, useArtifactsQuery, useRemoveRouteMutation, useRouteLogQuery, useRoutesQuery, useSetRouteMutation, useUndoRouteMutation, useVersionsQuery,
 } from '../api/slopApi'
@@ -75,7 +75,7 @@ function RouteTable({ rows, selected, onSelect }: { rows: RouteView[]; selected?
                 <td><code style={{ fontWeight: 700 }}>{r.path}</code></td>
                 <td>{r.pageFrom ? <><code>{r.pageFrom}</code><div className="dim">{`else ${r.page}`}</div></> : r.page}</td>
                 <td className="dim">
-                  {data.length ? data.map(([k, b]) => <div key={k}><code>{`${b.artifact}@${b.version ? 'v' + b.version : 'main'}`}</code></div>) : '–'}
+                  {data.length ? data.map(([k, b]) => <div key={k}><code>{b.artifact.startsWith('$') ? (b.artifact === '$site' ? 'site index' : b.artifact) : `${b.artifact}@${b.version ? 'v' + b.version : 'main'}`}</code></div>) : '–'}
                   {r.record ? <div><code style={{ color: 'var(--ink-2)' }}>{r.record}</code></div> : null}
                 </td>
                 <td>{r.pageFrom ? <code>main of each</code> : r.version ? <><code>{`v${r.version}`}</code>{' pinned '}{main > r.version ? <Tag tone="red">{`v${main} newer`}</Tag> : null}</> : <code>{`main → v${main}`}</code>}</td>
@@ -163,7 +163,8 @@ function RouteDetail({ r, onOpenSite }: { r: RouteView; onOpenSite: (t: SiteTarg
             onChange={val => (val === 'main' ? set({ version: null }, 'follows main') : set({ version: +val }, `pinned v${val}`))}
             options={[{ value: 'main', label: `Follow main (now v${a?.main ?? '?'})` }, ...versions.slice().reverse().map(x => ({ value: String(x.n), label: `v${x.n} · ${x.message}` }))]} />
         </>}
-        {binds.map(([k, b]) => <BindingSelect key={k} name={k} artifact={b.artifact} version={b.version}
+        {binds.filter(([, b]) => b.artifact.startsWith('$')).map(([k, b]) => <Fragment key={k}><span>{`Data: ${k}`}</span><span className="dim">{b.artifact === '$site' ? 'the site index: every public URL on this host' : b.artifact}</span></Fragment>)}
+        {binds.filter(([, b]) => !b.artifact.startsWith('$')).map(([k, b]) => <BindingSelect key={k} name={k} artifact={b.artifact} version={b.version}
           onChange={ver => set({ bindings: { ...(r.bindings ?? {}), [k]: { artifact: b.artifact, version: ver } } }, ver ? `${b.artifact} pinned v${ver}` : `${b.artifact} follows main`)} />)}
         {r.record ? <><span>Record</span><code>{r.record}</code></> : null}
         <span>Access</span>
