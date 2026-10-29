@@ -6,15 +6,16 @@ import (
 	"net/http"
 	"net/url"
 	"os"
-	"path/filepath"
 	"strings"
 	"time"
 
+	"github.com/go-go-golems/geppetto/pkg/steps/ai/providers/pi"
 	glazed "github.com/go-go-golems/glazed/pkg/cmds"
 	"github.com/go-go-golems/glazed/pkg/cmds/values"
 	"github.com/go-go-golems/slop-computer/pkg/blobs"
 	"github.com/go-go-golems/slop-computer/pkg/identity"
 	"github.com/go-go-golems/slop-computer/pkg/piworker"
+	"github.com/go-go-golems/slop-computer/pkg/piworker/gepp"
 	"github.com/go-go-golems/slop-computer/pkg/server"
 	"github.com/go-go-golems/slop-computer/pkg/store"
 	"github.com/go-go-golems/slop-computer/pkg/web"
@@ -50,7 +51,8 @@ func newServe() *serveCmd {
 			list("oidc-scope", "Extra OIDC scopes"),
 			boolean("no-migrate", "Do not apply pending migrations at start"),
 			boolean("trust-proxy-headers", "Take the client address from X-Real-Ip / X-Forwarded-For"),
-			flag("pi-worker", "Pi model worker script (web/piworker/dist/worker.js); enables the sample capability for admins"),
+			flag("models", "Model backend for the sample capability (admins only): pi (Go, geppetto), pi-node (the Node worker, --pi-worker), fake; default: pi-node when --pi-worker is set, fake with --pi-fake, else none"),
+			flag("pi-worker", "Pi model worker script (web/piworker/dist/worker.js) for --models pi-node"),
 			flagDefault("pi-node", "node", "Node binary that runs the Pi worker"),
 			flag("pi-agent-dir", "Pi's agent directory: models, credentials, settings (default ~/.pi/agent)"),
 			flag("model-quick", "Model for modelTier quick, e.g. lunaroute/glm-5.3-flash (default: Pi's default model)"),
@@ -193,29 +195,49 @@ func (c *serveCmd) Run(ctx context.Context, v *values.Values) error {
 	if err != nil {
 		return err
 	}
+	backend := a.S("models")
 	switch {
+	case backend != "":
 	case a.B("pi-fake"):
-		cfg.Sample = &piworker.Fake{}
+		backend = "fake"
 	case a.S("pi-worker") != "":
-		agentDir := a.S("pi-agent-dir")
-		if agentDir == "" {
-			home, _ := os.UserHomeDir()
-			agentDir = filepath.Join(home, ".pi", "agent")
+		backend = "pi-node"
+	}
+	agentDir := a.S("pi-agent-dir")
+	if agentDir == "" {
+		agentDir = pi.DefaultDir(os.Getenv(pi.EnvAgentDir))
+	}
+	tiers := map[string]string{}
+	for _, t := range []string{"quick", "default", "complex"} {
+		if m := a.S("model-" + t); m != "" {
+			tiers[t] = m
 		}
-		tiers := map[string]string{}
-		for _, t := range []string{"quick", "default", "complex"} {
-			if m := a.S("model-" + t); m != "" {
-				tiers[t] = m
-			}
+	}
+	switch backend {
+	case "":
+	case "fake":
+		cfg.Sample = &piworker.Fake{}
+	case "pi":
+		b, err := gepp.New(gepp.Config{AgentDir: agentDir, Tiers: tiers, Options: []pi.Option{pi.WithEnv(os.LookupEnv), pi.WithCommandValues()}})
+		if err != nil {
+			return errors.Wrap(err, "load Pi's models")
 		}
-		pi, err := piworker.Start(ctx, a.S("pi-node"), a.S("pi-worker"), agentDir, os.TempDir(), tiers)
+		log.Info().Int("models", len(b.Models())).Msg("Pi models ready (geppetto)")
+		cfg.Sample = b
+	case "pi-node":
+		if a.S("pi-worker") == "" {
+			return errors.New("--models pi-node needs --pi-worker")
+		}
+		worker, err := piworker.Start(ctx, a.S("pi-node"), a.S("pi-worker"), agentDir, os.TempDir(), tiers)
 		if err != nil {
 			return errors.Wrap(err, "start the Pi worker")
 		}
-		defer func() { _ = pi.Close() }()
-		models := pi.Models()
+		defer func() { _ = worker.Close() }()
+		models := worker.Models()
 		log.Info().Int("models", len(models)).Msg("Pi worker ready")
-		cfg.Sample = pi
+		cfg.Sample = worker
+	default:
+		return errors.Errorf("unknown --models %q (pi, pi-node, fake)", backend)
 	}
 	srv := server.New(cfg, st, bl)
 	// No WriteTimeout: /api/events and comments wait hold responses open.
