@@ -796,3 +796,111 @@ SQLite shows each change. `tsc` and the server tests pass.
 - Scope state: `ui.project: string | null`, persisted as JSON under `slop:workshop:project`.
 - The rule: `inScope = a => scope == null || (a.project ?? '') === scope`.
 - `updateArtifact` sends only changed fields, e.g. `{"project": "the-lab"}` or `{"project": null}` for no project. The server takes `project` as `*json.RawMessage`, so an explicit `null` clears it (`pkg/server/kernel.go`, `patchArtifact`).
+
+## Step 8: Code review: previews read their own version's data; thumbnails keep EXIF orientation
+
+The Codex review of PR #5 (commit 657ec23) left two P2 findings, and both
+hold.
+
+1. **Older previews lost their records.** Phase 3 moved records out of the
+   page into `/_r/<artifact>/<n>.js` scripts. On a sandbox origin those
+   scripts were authorized by `sandboxReads`, which asked only what main and
+   the site routes read. A Workshop preview of an older page version whose
+   data main no longer reads therefore got 404s and empty `.all`. Before,
+   the records were inlined from the selected version.
+2. **Sideways photos.** `?w=` thumbnails of JPEGs with an EXIF orientation
+   came out sideways: Go's decoder ignores EXIF, and the re-encoded copy
+   carries none.
+
+Both are fixed with tests. The orientation fix also corrects a twin bug the
+review did not name: image records reported their stored dimensions rather
+than the displayed ones.
+
+### Prompt Context
+**User prompt (verbatim):** "Address code review issues: https://github.com/go-go-golems/slop-computer/pull/5"
+**Assistant interpretation:** Read the review comments on PR #5, verify each, and fix the valid ones on the branch, with tests, commits and a diary entry.
+**Inferred user intent:** Get PR #5 to a mergeable state with the reviewer's correctness concerns resolved.
+**Commit (code):** 13dc440 — "SLOP-012 review: previews read their version's data; thumbnails keep EXIF orientation"
+
+### What I did
+- Read the review comments with `gh api repos/go-go-golems/slop-computer/pulls/5/comments`: #4428052009 at `pkg/server/serve.go:574` and #4428397971 at `pkg/server/thumbs.go:139`.
+- `pkg/server/serve.go`:
+  - Added `previewRoute(ctx, q url.Values) (*routing.Resolution, string)`, factored out of the preview branch of `serveSandbox` (`?host=` and `?path=` resolved like a visitor's request).
+  - `sandboxReads(r, app, data)` now takes the request. It first parses the Referer. If the Referer has the same host and its path matches `appPath` (`/v/<n>/…`), it loads that version and checks `s.reads(ctx, v, route)` with the route from the Referer's query. Then it falls back to main and the routes as before.
+  - Both callers (the `/_d/` and `/_r/` branches) pass `r`.
+- `pkg/server/thumbs.go`:
+  - `jpegOrientation(io.ReadSeeker)` walks the JPEG segments up to SOS and reads APP1.
+  - `exifOrientation(seg)` reads TIFF II/MM, IFD0, tag 0x0112 of type SHORT, valid values 1–8.
+  - `turns(o)` is true for 5–8.
+  - `orient(*image.NRGBA, o)` maps each output pixel to its source, following the EXIF table.
+  - `makeThumb` computes the displayed size, compares the ladder width with the displayed width, scales in stored orientation to the swapped target size, then calls `orient` on the small copy.
+  - `imageSize` swaps width and height for a turned JPEG.
+- `pkg/server/files_test.go`: added `TestPreviewReadsItsVersion`, `withOrientation` (inserts an APP1 with a big-endian IFD0 holding one orientation entry), `TestThumbnailOrientation` and `TestOrient`.
+- Ran:
+  - `GOWORK=off go test ./...` (all ok);
+  - `make lint` (`0 issues.`);
+  - a mutation check of the Referer branch.
+
+### Why
+- **Referer, not a new URL.** Putting the version into the script URL (`/v/<n>/_r/…`) would have made the rendered page depend on where it is served. The Referer already carries the full context (version, host, path) on a same-origin request, because `server.go:197` sets `Referrer-Policy: same-origin`.
+- **Trusting the Referer is safe here.** It can be forged, but a forged one claims only a version the sandbox label already serves at `/v/<n>/`, with that version's data rendered in. Unguessable labels remain the boundary.
+- **Scale first, then turn.** Turning a 160–1920 px copy is cheap; turning the full decoded original would cost a second full-size buffer under the decode slots.
+- **No EXIF library.** Reading one tag from IFD0 is about 60 lines, and any parse failure falls back to orientation 1, the old behaviour.
+
+### What worked
+- `TestPreviewReadsItsVersion`. A page `board` v1 reads `notes`; v2 is main and reads nothing. Its v1 sandbox page contains `src="/_r/notes/1.js"`, and:
+
+  | Request | Referer | Status |
+  |---|---|---|
+  | `/_r/notes/1.js` | `/v/1/` | 200 |
+  | `/_d/notes/1/x.png` | `/v/1/` | 200 |
+  | `/_r/notes/1.js` | none | 404 |
+  | `/_r/notes/1.js` | `/v/2/` | 404 |
+  | `/_r/notes/1.js` | another host | 404 |
+
+- Mutation check: with the Referer branch disabled (`false &&`), the test failed on exactly the two 200 rows (`404, want 200`). Restoring the file brought it back to passing.
+- `TestThumbnailOrientation`. A 640×320 JPEG (red left, blue right) with orientation 6 came back from `?w=160` as 160×320 JPEG, red on top and blue below. Its record says `"width":320`, `"height":640`.
+- `TestOrient`: all eight orientations of a 3×2 image match a reference built only from `mirror` and `right`.
+
+### What didn't work
+- The first `TestOrient` failed for orientation 5:
+  `orientation 5: (0,0)-(2,3) [0 1 2 3 12 13 14 15 4 5 6 7 …], want … [20 21 22 23 8 9 10 11 …]`.
+  The output puts `src(0,1)` at `(1,0)`, which is a transpose, so `orient` was right and the reference wrong: I had composed `right³(mirror(right²(src)))`. "Mirror top-bottom, then turn right" is `right(right(right(mirror(src))))`. I fixed the reference and its comment.
+
+### What I learned
+- The `/_d/` file branch had the same gap before this PR: an older preview's images 404'd when only that version read the data. The same fix covers it.
+- On a sandbox, `Version(ctx, app, 0)` is main, and `appPath` accepts `/v/0/`, so a Referer of `/v/0/` asks main as well. That is harmless.
+
+### What was tricky to build
+- **Where the orientation applies.** The ladder width is the displayed width, so the "never enlarge" check (`shownW <= width`) and the height (`shownH*width/shownW`) use displayed sizes. The scaler writes in stored orientation, so its target is the swapped pair, and only then is the copy turned. Getting any one of those three in the wrong orientation still gives a picture of the right shape, just stretched or the wrong size, so the test checks both size and colour.
+- **The order of turns in the reference.** As above, the composition reads inside-out.
+
+### What warrants a second pair of eyes
+- **The Referer only names a version.** A page served with `<meta name="referrer" content="no-referrer">` loses the version context and falls back to main and the routes, as before this fix.
+- **Stale derived copies.** The derived key `<sha>.w<width>` has no algorithm version, so copies made before this fix of oriented JPEGs would be served sideways until `gc-blobs` or a manual delete. No cluster has run thumbnails yet (PR #5 is not deployed). Locally, `rt1/blobs/derived` may hold such copies, though the francois media are WebP and PNG.
+- **WebP and PNG.** Their EXIF orientation is not read. Browsers honour it in those formats too, but it is rare.
+
+### What should be done in the future
+- Reply on the two review threads once the user agrees. I have not posted to GitHub.
+- If derived formats ever change again, add a version to the derived key.
+
+### Code review instructions
+- `pkg/server/serve.go`: `previewRoute`, `sandboxReads` and the preview branch of `serveSandbox`.
+- `pkg/server/thumbs.go`: `makeThumb`, `jpegOrientation`, `exifOrientation`, `orient` and `imageSize`.
+- Validate:
+  1. `GOWORK=off go test ./pkg/server -run 'TestPreviewReadsItsVersion|TestThumbnailOrientation|TestOrient|TestThumbnails' -count=1`
+  2. `make lint`
+
+### Technical details
+- EXIF layout read: APP1 `FF E1 <len>` then `Exif\0\0`, then TIFF (`II`/`MM`, 42, IFD0 offset ≥ 8), then IFD0 entries of 12 bytes (tag, type, count, value). The value is SHORT in the first 2 bytes.
+- Mapping, for source W×H and output (x, y):
+
+  | o | Name | Source pixel |
+  |---|---|---|
+  | 2 | mirror | (W-1-x, y) |
+  | 3 | turn half way | (W-1-x, H-1-y) |
+  | 4 | flip | (x, H-1-y) |
+  | 5 | transpose | (y, x) |
+  | 6 | turn right | (y, H-1-x) |
+  | 7 | transverse | (W-1-y, H-1-x) |
+  | 8 | turn left | (W-1-y, x) |

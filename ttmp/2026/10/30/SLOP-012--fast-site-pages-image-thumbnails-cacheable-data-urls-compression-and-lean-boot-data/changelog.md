@@ -47,3 +47,12 @@ Workshop project UI: a project scope shared by the artifact menu and Artifacts s
 ### Related Files
 
 - /home/manuel/workspaces/2026-10-28/slop-computer/slop-computer/web/workshop/src/components/organisms/Projects.tsx — project scope, ProjectDialog, ArtifactDialog
+
+## 2026-10-30
+
+Review fixes: sandbox previews authorize /_r/ and /_d/ by the version named in the Referer; ?w= thumbnails and image record sizes follow JPEG EXIF orientation (13dc440)
+
+### Related Files
+
+- /home/manuel/workspaces/2026-10-28/slop-computer/slop-computer/pkg/server/serve.go — sandboxReads, previewRoute
+- /home/manuel/workspaces/2026-10-28/slop-computer/slop-computer/pkg/server/thumbs.go — jpegOrientation, orient, makeThumb
