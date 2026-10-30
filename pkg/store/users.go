@@ -88,7 +88,8 @@ func (s *Store) UsersByIssuer(ctx context.Context, issuer string) ([]User, error
 }
 
 // SetUserRole changes a role. Moving away from admin revokes the user's
-// sessions and tokens, so a demoted or disabled user loses access at once.
+// sessions (main and site hosts) and tokens, so a demoted or disabled user
+// loses access at once.
 func (s *Store) SetUserRole(ctx context.Context, id, role string) (User, error) {
 	if !ValidRole(role) {
 		return User{}, errors.New("role must be admin, pending or disabled")
@@ -109,6 +110,9 @@ func (s *Store) SetUserRole(ctx context.Context, id, role string) (User, error) 
 					return err
 				}
 				if _, err := tx.exec(ctx, `UPDATE api_tokens SET revoked_at=? WHERE user_id=? AND revoked_at IS NULL`, now, id); err != nil {
+					return err
+				}
+				if _, err := tx.exec(ctx, `UPDATE site_sessions SET revoked_at=? WHERE principal=? AND revoked_at IS NULL`, now, id); err != nil {
 					return err
 				}
 			}

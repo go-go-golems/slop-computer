@@ -23,6 +23,13 @@ type Binding struct {
 // ("{page}", "release-{page}") from the path's parameters to name the page
 // it serves, among the pages of Page's project; Page is served, as a 404,
 // when it names none.
+//
+// A live route runs its page, an app, against a target (its "target"
+// binding, else the page itself) on the site: the site serves a shell that
+// opens a view for whoever Access admits. Access says who sees a route on
+// the site: public; signed-in (live routes only); admins (a static page:
+// the Workshop only). Create says who may create an instance at a live
+// route whose target comes from the path ("" nobody).
 type Route struct {
 	Host      string             `json:"host"`
 	Path      string             `json:"path"`
@@ -32,6 +39,8 @@ type Route struct {
 	Bindings  map[string]Binding `json:"bindings"`
 	Record    string             `json:"record,omitempty"`
 	Access    string             `json:"access"`
+	Live      bool               `json:"live,omitempty"`
+	Create    string             `json:"create,omitempty"`
 	ChangedBy *string            `json:"changedBy"`
 	ChangedAt time.Time          `json:"changedAt"`
 }
@@ -127,13 +136,28 @@ func (r *Route) validate() error {
 	if r.Access == "" {
 		r.Access = "public"
 	}
-	if r.Access != "public" && r.Access != "admins" {
-		return invalidf("access must be public or admins")
+	if r.Access != "public" && r.Access != "signed-in" && r.Access != "admins" {
+		return invalidf("access must be public, signed-in or admins")
+	}
+	if r.Access == "signed-in" && !r.Live {
+		return invalidf("access signed-in needs a live route: a static page has no viewer to check")
+	}
+	if r.Create != "" && r.Create != "admins" && r.Create != "signed-in" && r.Create != "public" {
+		return invalidf("create must be admins, signed-in or public")
+	}
+	if r.Live && r.Path == "*" {
+		return invalidf("the fallback cannot be live: give the live route a path")
+	}
+	if r.Create != "" && !r.Live {
+		return invalidf("create needs a live route")
 	}
 	if r.Bindings == nil {
 		r.Bindings = map[string]Binding{}
 	}
 	if r.PageFrom != "" {
+		if r.Live {
+			return invalidf("page-from routes cannot be live: a live route runs one app")
+		}
 		if r.Version != nil {
 			return invalidf("page-from routes follow main; drop the version")
 		}
@@ -142,12 +166,12 @@ func (r *Route) validate() error {
 	return nil
 }
 
-const routeColumns = `host,path,page,page_from,version,bindings,record,access,changed_by,changed_at`
+const routeColumns = `host,path,page,page_from,version,bindings,record,access,live,create_policy,changed_by,changed_at`
 
 func scanRoute(r scanner) (Route, error) {
 	var rt Route
 	var bindings JSON
-	err := r.Scan(&rt.Host, &rt.Path, &rt.Page, &rt.PageFrom, &rt.Version, &bindings, &rt.Record, &rt.Access, &rt.ChangedBy, &rt.ChangedAt)
+	err := r.Scan(&rt.Host, &rt.Path, &rt.Page, &rt.PageFrom, &rt.Version, &bindings, &rt.Record, &rt.Access, &rt.Live, &rt.Create, &rt.ChangedBy, &rt.ChangedAt)
 	if err != nil {
 		return rt, notFound(err)
 	}
@@ -222,10 +246,10 @@ func setRoute(ctx context.Context, s *Store, tx db, r Route, note, actor string)
 		return Route{}, nil, err
 	}
 	bindings := MustJSON(r.Bindings)
-	if _, err = tx.exec(ctx, `INSERT INTO routes(`+routeColumns+`) VALUES(?,?,?,?,?,?,?,?,?,?)
+	if _, err = tx.exec(ctx, `INSERT INTO routes(`+routeColumns+`) VALUES(?,?,?,?,?,?,?,?,?,?,?,?)
 ON CONFLICT(host,path) DO UPDATE SET page=excluded.page, page_from=excluded.page_from, version=excluded.version, bindings=excluded.bindings, record=excluded.record,
-access=excluded.access, changed_by=excluded.changed_by, changed_at=excluded.changed_at`,
-		r.Host, r.Path, r.Page, r.PageFrom, r.Version, bindings, r.Record, r.Access, nullable(actor), now); err != nil {
+access=excluded.access, live=excluded.live, create_policy=excluded.create_policy, changed_by=excluded.changed_by, changed_at=excluded.changed_at`,
+		r.Host, r.Path, r.Page, r.PageFrom, r.Version, bindings, r.Record, r.Access, r.Live, r.Create, nullable(actor), now); err != nil {
 		return Route{}, nil, err
 	}
 	to, err := getRoute(ctx, tx, r.Host, r.Path)

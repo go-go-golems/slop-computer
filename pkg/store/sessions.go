@@ -95,11 +95,21 @@ func (s *Store) RevokeSession(ctx context.Context, hash []byte) error {
 	return err
 }
 
-// RevokeUserSessions revokes every session of a user.
+// RevokeUserSessions revokes every session of a user, on the main host and
+// on every site host.
 func (s *Store) RevokeUserSessions(ctx context.Context, user string) (int64, error) {
-	res, err := s.db().exec(ctx, `UPDATE sessions SET revoked_at=?, id_token='' WHERE user_id=? AND revoked_at IS NULL`, s.Now(), user)
+	now := s.Now()
+	res, err := s.db().exec(ctx, `UPDATE sessions SET revoked_at=?, id_token='' WHERE user_id=? AND revoked_at IS NULL`, now, user)
 	if err != nil {
 		return 0, err
 	}
-	return res.RowsAffected()
+	n, err := res.RowsAffected()
+	if err != nil {
+		return 0, err
+	}
+	if res, err = s.db().exec(ctx, `UPDATE site_sessions SET revoked_at=? WHERE principal=? AND revoked_at IS NULL`, now, user); err != nil {
+		return n, err
+	}
+	m, err := res.RowsAffected()
+	return n + m, err
 }

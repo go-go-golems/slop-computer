@@ -54,7 +54,11 @@ export interface Route {
   version: number | null
   bindings: Record<string, Binding> | null
   record?: string
-  access: 'public' | 'admins'
+  // Who sees the route on the site. A live route runs its app against its
+  // target there, for whoever access admits; signed-in is for live routes.
+  access: 'public' | 'signed-in' | 'admins'
+  live?: boolean
+  create?: '' | 'admins' | 'signed-in' | 'public'
   changedBy: string | null
   changedAt: string
 }

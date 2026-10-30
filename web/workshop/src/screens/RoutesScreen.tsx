@@ -79,7 +79,7 @@ function RouteTable({ rows, selected, onSelect }: { rows: RouteView[]; selected?
                   {r.record ? <div><code style={{ color: 'var(--ink-2)' }}>{r.record}</code></div> : null}
                 </td>
                 <td>{r.pageFrom ? <code>main of each</code> : r.version ? <><code>{`v${r.version}`}</code>{' pinned '}{main > r.version ? <Tag tone="red">{`v${main} newer`}</Tag> : null}</> : <code>{`main → v${main}`}</code>}</td>
-                <td className="dim">{r.access}</td>
+                <td className="dim">{r.live ? <Tag tone="ink">live</Tag> : null}{r.live ? ' ' : ''}{r.access}</td>
                 <td className="dim">{`${name(r.changedBy)} · ${ago(r.changedAt)}`}</td>
               </tr>
             )
@@ -167,8 +167,16 @@ function RouteDetail({ r, onOpenSite }: { r: RouteView; onOpenSite: (t: SiteTarg
         {binds.filter(([, b]) => !b.artifact.startsWith('$')).map(([k, b]) => <BindingSelect key={k} name={k} artifact={b.artifact} version={b.version}
           onChange={ver => set({ bindings: { ...(r.bindings ?? {}), [k]: { artifact: b.artifact, version: ver } } }, ver ? `${b.artifact} pinned v${ver}` : `${b.artifact} follows main`)} />)}
         {r.record ? <><span>Record</span><code>{r.record}</code></> : null}
+        {r.pageFrom ? null : <>
+          <span>Runs</span>
+          <Seg small label="Runs" value={r.live ? 'live' : 'static'} onChange={x => {
+            const live = x === 'live'
+            if (live !== !!r.live) void set({ live, access: !live && r.access === 'signed-in' ? 'admins' : r.access }, live ? 'live: the site runs the app' : 'static')
+          }} options={[['static', 'static page'], ['live', 'live app']]} />
+        </>}
         <span>Access</span>
-        <Seg small label="Access" value={r.access} onChange={x => { if (x !== r.access) void set({ access: x }, `access ${x}`) }} options={[['public', 'public'], ['admins', 'admins']]} />
+        <Seg small label="Access" value={r.access} onChange={x => { if (x !== r.access) void set({ access: x }, `access ${x}`) }}
+          options={r.live ? [['public', 'anyone'], ['signed-in', 'signed in'], ['admins', 'admins']] : [['public', 'public'], ['admins', 'admins']]} />
       </div>
       <div className="row">
         <Button onClick={() => onOpenSite({ host: r.host, path })}>Open in Site</Button>

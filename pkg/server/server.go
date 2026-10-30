@@ -102,6 +102,7 @@ type Server struct {
 	site          siteCache
 	derived       singleflight.Group // derived-file builds, by name (files.go)
 	thumbSlots    chan struct{}      // concurrent image decodes (thumbs.go)
+	siteMux       *http.ServeMux     // /_site/ on site hosts (live.go)
 }
 
 func New(cfg Config, st *store.Store, bl *blobs.Blobs) *Server {
@@ -109,6 +110,7 @@ func New(cfg Config, st *store.Store, bl *blobs.Blobs) *Server {
 		views: rt.NewRegistry(), joined: map[string][]string{}, thumbSlots: make(chan struct{}, thumbSlots)}
 	s.views.OnClose = s.roomClosed
 	s.mux = s.routes()
+	s.siteMux = s.siteLiveRoutes()
 	go func() {
 		for now := range time.Tick(5 * time.Second) {
 			s.views.Sweep(now)

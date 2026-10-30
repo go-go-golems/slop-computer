@@ -215,7 +215,11 @@ func (s *Server) serveSlopAsset(w http.ResponseWriter, r *http.Request) {
 		w.WriteHeader(http.StatusNotModified)
 		return
 	}
-	writeBody(w, r, http.StatusOK, "text/javascript; charset=utf-8", b)
+	typ := "text/javascript; charset=utf-8"
+	if strings.HasSuffix(name, ".css") {
+		typ = "text/css; charset=utf-8"
+	}
+	writeBody(w, r, http.StatusOK, typ, b)
 }
 
 // frameAncestors lets the Workshop (on any main-host origin) frame a page.
@@ -351,6 +355,10 @@ func (s *Server) pageFromReads(ctx context.Context, rt store.Route, d string) bo
 
 // serveSite answers a site host through its route table.
 func (s *Server) serveSite(w http.ResponseWriter, r *http.Request) {
+	if strings.HasPrefix(r.URL.Path, "/_site/") {
+		s.siteMux.ServeHTTP(w, r)
+		return
+	}
 	if r.Method != http.MethodGet && r.Method != http.MethodHead {
 		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
 		return
@@ -367,12 +375,15 @@ func (s *Server) serveSite(w http.ResponseWriter, r *http.Request) {
 		unavailable(w, err)
 		return
 	}
+	// public: the static routes anyone sees. Live routes run their app on
+	// its target's origin, so they make no files or data public here.
 	public := routes[:0:0]
 	for _, rt := range routes {
-		if rt.Access == "public" {
+		if rt.Access == "public" && !rt.Live {
 			public = append(public, rt)
 		}
 	}
+	served := servedRoutes(routes)
 	routedPage := func(page string) bool {
 		for _, rt := range public {
 			if rt.Page == page || s.admits(ctx, rt, page) {
@@ -434,12 +445,16 @@ func (s *Server) serveSite(w http.ResponseWriter, r *http.Request) {
 		notFoundPage(w)
 		return
 	}
-	res, ok := routing.Resolve(public, host, r.URL.Path)
+	res, ok := routing.Resolve(served, host, r.URL.Path)
+	if ok && res.Route.Live && !res.Fallback {
+		s.serveShell(w, r, res)
+		return
+	}
 	// A path with an extension may be a file of the page it resolves to, or of
 	// the page the browser was on (relative links from /pricing to style.css
 	// arrive as /style.css; from /r/weft as /r/style.css).
 	if path.Ext(r.URL.Path) != "" {
-		if ok && !res.Fallback {
+		if ok && !res.Fallback && !res.Route.Live {
 			if v, missing, err := s.target(ctx, res); err == nil && !missing {
 				if f, found := fileFor(v, r.URL.Path); found {
 					s.serveFile(w, r, f, placeURL) // the page's path, not its version
@@ -553,7 +568,8 @@ func (s *Server) serveSandbox(w http.ResponseWriter, r *http.Request, label stri
 		s.serveAsset(w, r, target, strings.TrimPrefix(p, "/_blob/"))
 		return
 	}
-	s.frameAncestors(w)
+	// The Workshop and the shells of live routes on site hosts frame apps.
+	w.Header().Set("Content-Security-Policy", "frame-ancestors 'self' "+strings.Join(append(s.origins(), s.siteOrigins()...), " "))
 	t, err := s.Store.Artifact(ctx, target)
 	if err != nil {
 		notFoundPage(w)
@@ -600,7 +616,7 @@ func (s *Server) serveSandbox(w http.ResponseWriter, r *http.Request, label stri
 		mode = qm
 	}
 	parent := q.Get("parent")
-	if !slicesContains(s.origins(), parent) {
+	if !slicesContains(append(s.origins(), s.siteOrigins()...), parent) {
 		parent = s.origins()[0]
 	}
 	res, routePath := s.previewRoute(ctx, q)

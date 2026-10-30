@@ -177,7 +177,7 @@ func (s *Server) targetURL(ctx context.Context, r *http.Request, target string, 
 	if err != nil {
 		return "", "", err
 	}
-	q := url.Values{"mode": {mode}, "parent": {s.requestOrigin(r)}}
+	q := url.Values{"mode": {mode}, "parent": {s.parentOrigin(r)}}
 	for k, vs := range extra {
 		q[k] = vs
 	}
