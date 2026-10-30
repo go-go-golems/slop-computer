@@ -2,7 +2,7 @@
 
 ## TODO
 - [x] Write the intern guide (design, API, data model, phases) <!-- t:f556 -->
-- [ ] Phase 1: site sessions by handoff, live routes, site shell, /_site/views for admins <!-- t:fzcu -->
+- [x] Phase 1: site sessions by handoff, live routes, site shell, /_site/views for admins <!-- t:fzcu -->
 - [ ] Phase 2: rt_grants, member role, levelOf with grants and caps, access API and slop access CLI, capability policy, CSP sandbox for non-shell site pages <!-- t:3v6j -->
 - [ ] Phase 3: templated target bindings (/blocks/:db), instance creation policy, share links <!-- t:4ohq -->
 - [ ] Phase 4: anonymous visitors (vis_ ids), guest peers, quotas, rate limits, garbage collection, claiming <!-- t:kkxe -->

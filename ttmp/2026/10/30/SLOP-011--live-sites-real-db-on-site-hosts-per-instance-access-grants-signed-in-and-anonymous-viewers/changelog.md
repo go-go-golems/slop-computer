@@ -15,3 +15,12 @@ Ticket created; intern guide written (current system: hosts, routes, modes, runt
 ## 2026-10-30
 
 Uploaded the intern guide to reMarkable: /ai/2026/10/30/SLOP-011/SLOP-011 Live sites intern guide.pdf (remarquee: OK: uploaded).
+
+## 2026-10-30
+
+Phase 1: live routes on site hosts for admins signed in by handoff; site shell; site sessions (cb350c4)
+
+### Related Files
+
+- /home/manuel/workspaces/2026-10-28/slop-computer/slop-computer/pkg/render/assets/shell.js — the site shell
+- /home/manuel/workspaces/2026-10-28/slop-computer/slop-computer/pkg/server/live.go — handoff, /_site/ API, shell
