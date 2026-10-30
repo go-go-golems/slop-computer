@@ -587,3 +587,112 @@ This step finished the code:
 ### Technical details
 
 - Inject order: boot JSON, `runtime.js?h=`, `/_r/` scripts (sorted by binding name, deduplicated), `claude.js?h=` (apps), `bridge.js?h=` (previews), then the page's own head.
+
+## Step 6: The records table shows what records have; projects have no Workshop UI
+
+The user opened `francois-media-3` in the Workshop (Watch → Records) and saw an
+empty table. The table was built for two shapes only: posts (title, date, tags)
+and the "experiments" sample (no, title, kind, date). A data artifact of image
+files has none of those fields, so its 28 rows rendered as blank cells. The
+fix derives the columns from the records themselves. Image files get a
+thumbnail through the `?w=` scaling this ticket added, plus their name and
+size. When no viewer page is set, a selected image shows large on the right.
+
+The same message asked how projects are created. Nothing in the Workshop
+creates a project or moves an artifact into one. The CLI and the API can, so I
+checked those paths against the code, and I will offer the Workshop UI as
+follow-up work rather than build it unasked.
+
+### Prompt Context
+**User prompt (verbatim):** "I wouldn't even know how to create projects? Also, when looking at data the records table doesn't show anything: http://localhost:18140/watch/francois-media-3"
+**Follow-up while working (verbatim):** "don't forget the diary, and the diary format! (MANDATORY) commit at appropriate intervals and keep a detailed diary as you work (using the diary format from the skill)"
+**Assistant interpretation:** Make the records table useful for any data shape, starting with file-only media; explain how projects are made today.
+**Inferred user intent:** The Workshop should show what is in a data artifact without the user knowing its schema. Projects should be something a person can find and use, not only an agent.
+**Commit (code):** addd400 — "SLOP-012: the records table shows what records have; image files get thumbnails"
+
+### What I did
+- Changed `web/workshop/src/components/organisms/DataPanes.tsx`:
+  - The fixed `cols` array is now `columns(a, recs)`, which returns `Column{key, label, main?, cell(r, a, v)}`.
+  - **Posts:** title, date and tags, as before.
+  - **Mostly files** (`file` records > half): a thumbnail (`fileURL(a, v, r, 160)`), the base name (`.brk`, breaks anywhere), and `W×H · KB` (`.nowrap`). Non-file rows show only their name.
+  - **Other records:**
+    - The first column is the name: `title`, else `id`.
+    - Up to three more fields: values of 40 characters or fewer, no booleans, nothing in `hidden`.
+    - Order: familiar keys first (`known`: no, kind, date, tags, type, status, visibility), then by how many records have the field.
+  - `text(x)` joins arrays and cuts ISO timestamps to their date.
+  - `fileURL` builds `/api/artifacts/<id>/versions/<n>/files/<path>?w=`, with path segments URL-encoded.
+  - New `ImagePreview` replaces `ViewerPreview` in the right pane when `!a.viewer` and the selected record is a JPEG, PNG, WebP or GIF file. It shows `?w=960`, links to the original, and names the `src` that pages use.
+- Changed `web/workshop/src/styles/workshop.css`: added `.rt .nowrap`, `.rt .brk`, `.rt td .rthumb` (48×36, cover) and `.imgstage`.
+- Checked:
+  - `npx tsc --noEmit -p .`;
+  - `go generate ./pkg/web`;
+  - `go build -tags embed -o $S/slop21 ./cmd/slop`;
+  - a restart of tmux `slop:server`;
+  - Playwright checks on `francois-media-3`, `francois-catalog`, `s12-data` and `ws-team`.
+- For projects, read:
+  - `slop projects --help` and `slop projects put --help` (flags `--name`, `--brief`);
+  - `cmd/slop/cmds/push.go:47` ("Project, when the push creates the artifact");
+  - `pkg/server/kernel.go:34`: `PATCH /api/artifacts/{id}`, admin only, with `{"project": "<id>"|null}`;
+  - `web/workshop/src/api/slopApi.ts`: its only PATCH is `users/{id}`.
+
+### Why
+- The data decides the columns. A per-type list would go stale with every import (francois catalog, media, creators). Picking short, common fields generalises without a schema.
+- The thumbnails use the main-host API URL, not the record's `src`:
+  - `src` is `/_d/<a>/<n>/…`, which only site hosts serve, and only for routed readers.
+  - The API URL works with the Workshop session and already supports `?w=`, because `serveFile` applies `variant` to every image URL.
+- Files win when they are the majority, not only when every record is a file. `francois-media-3` holds 27 images and an `index.json` that maps media ids to alt texts, so an "every record" rule never applied.
+- The image preview replaces "No viewer page is set". For a media collection, the image itself is the record's view.
+
+### What worked
+- `francois-media-3`:
+  - Columns: `["", "File", "Size"]`.
+  - Row 2: `med_f4f9f619b57aa8d740e38020.webp`, `2400×1500 · 779.0 KB`.
+  - Thumbnail requests `…/files/files/med_….webp?w=160` returned `naturalWidth` 160.
+  - The preview requested `?w=960` and returned `naturalWidth` 960.
+- `francois-catalog`: columns `Title, Visibility, Tags, createdAt`; a row reads `asd | hidden | | 2026-10-19`.
+- `s12-data` (mixed): `Title, Type`. `ws-team`: `Title`.
+- Horizontal overflow of `.dlist .scroll` is 0 for all three after the fixes.
+
+### What didn't work
+- **"Every record is a file" rule.** The first version used `recs.every(r => r.file === true)`. `francois-media-3` still showed a `Title | Type` table, because `index` is a JSON record:
+  `{"n":28,"files":27,"index":"{\"id\":\"index\",\"med_f4f9…\":{\"alt\":…`.
+  Fixed with the majority rule.
+- **Long names.** Full paths (`files/med_<24 hex>.webp`) wrapped the size column and scrolled the table sideways. The `index.json` row showed `0.0 KB`. Fixed with base names that break anywhere, a size on one line, and no size for non-file rows.
+- **Catalog picks.** The first generic picks for the catalog were `Tags, createdAt, demoEnabled`, which showed `2026-10-23T23:28:14.805764Z` and `false` (overflow 12 px). Fixed: booleans are skipped, timestamps show their date, and `visibility` is a familiar key.
+- **Server restart.** The first restart left no server: `curl` gave `000` and `tmux capture-pane -t slop:server` said `can't find window: server`. `C-c` ended the `exec`'d script, which closed the window, so the `send-keys` of the restart command went nowhere. I now restart with `tmux kill-window -t slop:server; tmux new-window -d -t slop -n server "$S/rt1/run-tmux.sh"`.
+- **Early screenshot.** One screenshot showed "0 records" because it was taken before the query resolved. Later checks wait for `img.rthumb`.
+
+### What I learned
+- Data artifacts from the francois import mix shapes: the media folders carry an `index.json` beside the images. Any "all records are X" rule will miss them.
+- Projects:
+  - **Create** with `slop projects put <id> --name "…" [--brief "…"]`.
+  - **Join at creation:** the first push with `--project` (or `"project"` in `slop.json`), or the project select in the Workshop's new-artifact flow.
+  - **Move an existing artifact:** only `PATCH /api/artifacts/<id> {"project": "<id>"}` with an admin token. There is no CLI command and no Workshop control for it.
+
+### What was tricky to build
+- **Which URL to load from.** A record's `src` is a site-host URL. Inside the Workshop (main host) it 404s, because `/_d/` is not mounted there and the data may not be routed. The cell builds an API URL from `path` instead, and splits on `/` before encoding so the slashes stay.
+- **Choosing columns without a schema.** "Familiar first, then most common" is enough only together with the length cap (≤40), dropping booleans and the `hidden` set. Without them, long descriptions and flags crowd out the useful fields.
+
+### What warrants a second pair of eyes
+- **Thumbnail load.** Each data artifact opened in the Workshop now decodes up to N thumbnails on first view (2 decode slots; derived files are kept afterwards). For an artifact with hundreds of large images, the first open is slow, though `loading="lazy"` limits it to rows on screen.
+- **The 40-character cap and ranking** are heuristics. A catalog whose useful fields are long gets only the name column.
+
+### What should be done in the future
+- Workshop project UI:
+  - a "New project" control;
+  - "Move to project" on an artifact, using the existing admin PATCH;
+  - a project switcher in the artifact menu, so projects are reachable without the CLI.
+- Optionally, a CLI `slop artifacts set <id> --project <p>` that wraps the same PATCH.
+- Optionally, alt text from a sibling `index.json` as the media rows' title.
+
+### Code review instructions
+- Start at `columns`, `fileURL`, `isImage` and `ImagePreview` in `web/workshop/src/components/organisms/DataPanes.tsx`, then the four new rules at the end of `web/workshop/src/styles/workshop.css`.
+- Validate:
+  1. `cd web/workshop && npx tsc --noEmit -p .`
+  2. Rebuild with `go generate ./pkg/web && go build -tags embed`.
+  3. Open `/watch/francois-media-3` and `/watch/francois-catalog` on a local server with the imported data.
+
+### Technical details
+- Column rule: posts → `[Title, Date, Tags]`. More than half files → `[thumb, File, Size]`. Otherwise → `[Title] + top 3` of the non-hidden fields with short, non-boolean values.
+- `hidden` = id, path, title, body, html, file, src, size, width, height, summary, description.
+- Thumbnail URL: `/api/artifacts/francois-media-3/versions/1/files/files/med_f565d5e727a5cfbe72561bfc.jpg?w=160`. The cache class is private because this is the main host (`TestCacheClassesAndCompression`, "Off the site host, everything is private").
