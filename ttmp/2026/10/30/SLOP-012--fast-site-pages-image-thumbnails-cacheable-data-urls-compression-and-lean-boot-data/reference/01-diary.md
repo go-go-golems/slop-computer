@@ -904,3 +904,45 @@ than the displayed ones.
   | 6 | turn right | (y, H-1-x) |
   | 7 | transverse | (W-1-y, H-1-x) |
   | 8 | turn left | (W-1-y, x) |
+
+## Step 9: Deployed: image sha-ec4c4c9 on the test cluster
+
+The user merged PR #5 and asked to watch the image job, then open and merge
+the GitOps PR. The image built, and GitOps PR #402 (wesen/2026-03-27--hetzner-k3s)
+bumped the deployment and was merged. Argo CD rolled the new pod out, and a
+live measurement shows the phase 1–3 behaviour in production.
+
+### Prompt Context
+**User prompt (verbatim):** "also i merged, watch until image job finished, and open gitops PR and merge to deploy"
+**Assistant interpretation:** Watch publish-image for the merge commit, open the GitOps bump PR, merge it, and confirm the rollout.
+**Inferred user intent:** Get PR #5 onto the test cluster.
+**Commit (code):** N/A. GitOps commit ec26c22, merged as d3a2735.
+
+### What I did
+- Watched the image build: `gh run watch 41131642819 --exit-status`, for publish-image on `ec4c4c9`. It succeeded; its "Open GitOps PR" step was skipped, as for #401.
+- `docker manifest inspect ghcr.io/go-go-golems/slop-computer:sha-ec4c4c9` reported the tag exists.
+- In the GitOps worktree `hetzner-k3s-slop`: branch `slop/image-ec4c4c9` from `origin/main`, a one-line change to `gitops/kustomize/slop/deployment.yaml`, commit `ec26c22`.
+- Opened PR #402. Its `validate` check passed in 15 s. Merged it with a merge commit: `d3a2735`.
+- Polled the deployment's image until it changed (~130 s), then `kubectl -n slop rollout status deploy/slop`, which reported "successfully rolled out".
+- Ran `scripts/01-measure-site.py` against https://site.slop.yolo.scapegoat.dev/.
+
+### What worked
+- The page: 2999 bytes on the wire, gzip, `no-cache`, an ETag, and revalidation answered 304.
+- Data scripts, all `public, max-age=31536000, immutable`:
+
+  | Script | Records | Gzipped |
+  |---|---|---|
+  | `/_r/francois-catalog/2.js` | 104 | 99819 B |
+  | `/_r/francois-media/1.js` | 304 | 31773 B |
+  | `/_r/francois-media-2/1.js` | 360 | 37418 B |
+  | `/_r/francois-media-3/1.js` | 28 | 3106 B |
+
+- The first cover is 285314 B as WebP and 30057 B as JPEG at `?w=640`. It is still a `main` link, so a place URL (`max-age=60, swr`).
+- The new pod (`slop-7fb5bc9bb6-llfr6`) logged no error or warn lines in its first minutes.
+
+### What didn't work
+- No failures observed.
+
+### What should be done in the future
+- Push storefront v2 from `various/storefront-v2/` (it uses `files` instead of `reads` for the media, plus srcset thumbnails), then `slop import francois push` to pin links to numbered versions. The cover URLs then become content URLs. The live page still reads all three media shards, about 72 KB of records it does not need.
+- Run the SLOP-013 manual sign-in check on the cluster.
