@@ -16,3 +16,7 @@ geppetto `providers/pi` (4e0d7137, 452f0711 on task/pi-agent-provider): Pi agent
 ## 2026-10-29
 
 geppetto v0.13.12 released (providers/pi); slop pins it (1a7fb8e) and builds with GOWORK=off
+
+## 2026-10-29
+
+geppetto PR #443: Claude adaptive/disabled thinking, budget clamp; providers/pi Anthropic adaptive effort and Pi level clamping (diary step 8)

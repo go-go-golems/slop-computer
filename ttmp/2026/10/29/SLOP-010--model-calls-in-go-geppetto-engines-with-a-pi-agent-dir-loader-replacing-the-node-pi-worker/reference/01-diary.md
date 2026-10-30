@@ -484,3 +484,116 @@ The user asked how to test locally with an artifact that chats with an LLM. `web
 ### Technical details
 
 - **Commit:** slop `29f5ef0`.
+
+## Step 8: Thinking levels checked against Pi; Anthropic adaptive thinking and Pi's level clamping in geppetto (PR #443)
+
+The user doubted that thinking levels worked, because `lunaroute/glm-5.3` answered quickly even at `high`. I compared our request bodies and the amount of thinking with the Node/Pi worker on the same prompts. The two sent the same parameters and got the same amount of thinking back, so the speed comes from the model and the gateway, not from slop.
+
+Reading Pi's request builders for that comparison turned up two real gaps:
+- Anthropic models that Pi drives with adaptive thinking plus an effort (`compat.forceAdaptiveThinking`; the Kimi coding models in this catalog) got a token budget from us. Geppetto's Claude engine could not send adaptive thinking at all.
+- For OpenAI and Google models, Pi clamps an unoffered level to a neighbouring one; we sent nothing.
+
+Geppetto PR #443 fixes both. It is open; the user merges.
+
+### Prompt Context
+
+**User prompts (verbatim, in order):**
+- "I'm not sure thinking level properly works with say, lunaroute/glm-5.3, I did a few calls and it went superfast even on high thinking"
+- "ok this just got merged into geppetto s well: https://github.com/go-go-golems/geppetto/pull/441"
+- "maybe it's a hint?"
+- "look at the lunaroute extension as well, maybe there's something there as well"
+- "what's pi'a anthropic effort handling?"
+- "sure why not" (to: tag a geppetto release with #441, match Pi's Anthropic effort handling in `providers/pi`, pin it in slop)
+- "yes continue" (after I stopped an over-broad `find /` for pi-ai's source)
+- "commit at appropriate intervals and keep a detailed diary as you work (using the diary format from the skill) (diary format mandatory)"
+
+**Assistant interpretation:** Check whether levels reach the model. Then make geppetto send what Pi sends for Anthropic adaptive models, and release it after the user merges.
+
+**Inferred user intent:** A thinking level picked in a slop page has the same effect it has in Pi.
+
+### What I did
+
+- **Thinking measurement (before the context compaction; figures from the session summary):**
+  - `$S/pismoke/think_test.go` sends one three-part reasoning prompt at levels off, low and high, logs the request body without messages, and counts reasoning and text characters.
+  - It ran on lunaroute `glm-5.3` and `deepseek-4.1-flash`, through `providers/pi` and through the Node/Pi worker.
+  - For glm-5.3 at high, we send `{max_tokens, reasoning_effort:"high", thinking:{type:"enabled"}}`. That is Pi's zai format, from `models-store.json` (`compat.thinkingFormat:"zai"`, `thinkingLevelMap.medium:"high"`).
+- **Pi's handling, read in pi-ai 0.85:**
+  - `api/anthropic-messages.js` (`streamSimple`, `mapThinkingLevelToEffort`);
+  - `api/simple-options.js` (`clampReasoning`, `adjustMaxTokensForThinking`);
+  - `models.js` (`clampThinkingLevel`, `getSupportedThinkingLevels`);
+  - `api/google-generative-ai.js` and `api/google-shared.js`.
+
+  These live under `~/.nvm/versions/node/v24.18.0/lib/node_modules/@earendil-works/pi-coding-agent/node_modules/@earendil-works/pi-ai/dist`.
+- **The lunaroute extension** (`@lunaroute/pi-extension` 0.7.2) maps the gateway's `client_compat.pi` into `compat` and `thinkingLevelMap`, and sends attribution headers. It does not change thinking parameters.
+- **geppetto, branch `task/pi-adaptive-thinking`** from `origin/main` `be6406b2` (#441 merged):
+  - **`5026a890`, Claude engine:**
+    - new `thinkingParam(cfg)` in `pkg/steps/ai/claude/helpers.go`: `ThinkingType` `adaptive` gives `{type:"adaptive",display:"summarized"}`, `disabled` gives `{type:"disabled"}`, `enabled` needs a budget, and anything else is an error;
+    - a budget at or above `max_tokens` is cut to `max_tokens-1024`, or dropped below 2048;
+    - `ThinkingParam.BudgetTokens` is `omitempty`, and `Display` is new;
+    - `token_count.go` uses the same helper.
+  - **`d8873cf4`, `providers/pi`:**
+    - `Compat.ForceAdaptiveThinking` and `SupportsMidConvoEffort`, merged in `mergeCompat`;
+    - in `thinking.go`, Anthropic gets adaptive thinking plus `anthropicEffort` (Pi's `mapThinkingLevelToEffort`);
+    - mid-conversation-effort models stay adaptive at off;
+    - Anthropic off gives `disabled` unless the map has `off:null`;
+    - budgets clamp `xhigh` and `max` to 16384;
+    - `clampLevel` (Pi's `clampThinkingLevel`) applies to every API except Anthropic, and only when the level is not off.
+  - **PR:** <https://github.com/go-go-golems/geppetto/pull/443>.
+
+### Why
+
+- **Mid-conversation effort:** Pi adds per-message effort entries for these models; a single request cannot carry that. Sending effort `high` with adaptive thinking matches Pi's request-level part.
+- **Budget clamping in the engine:** slop's per-round `MaxResponseTokens` can drop below a 16384 budget, and Claude rejects `budget_tokens >= max_tokens`. Pi applies the same rule in `streamSimple`.
+- **No clamp for Anthropic:** Pi's Anthropic builder does not call `clampThinkingLevel`. `k3` at medium (null in its map) therefore gets effort `medium`, as in Pi.
+
+### What worked
+
+- **Thinking comparison:** the Go backend and the Node/Pi worker produced the same amounts.
+  - glm-5.3: about 227–285 reasoning characters at low and high;
+  - deepseek-4.1-flash: about 1000–1600.
+- **Tests:** `GOWORK=off go test ./pkg/steps/ai/claude/... ./pkg/steps/ai/providers/pi/` pass.
+  - `TestMakeMessageRequestFromTurnThinking` has 9 wire-level cases;
+  - `TestThinkingConfig` gained 15 cases.
+- **Hooks:** lefthook pre-commit (test, lint) passed on both commits. Pre-push passed (lint, gosec, govulncheck: "Your code is affected by 0 vulnerabilities").
+- **Live request shape:** `MODEL=kimi-coding/k3 go test -run TestThink` in `$S/pismoke`, with `replace` pointing at the worktree, sent:
+  - at low: `thinking:{display:summarized,type:adaptive}`, `output_config:{effort:low}`, `max_tokens:8000`;
+  - at high: the same with effort high;
+  - at off: neither field, because `k3` maps `off` to null.
+
+### What didn't work
+
+- **Kimi rejected the key:** all three levels returned `claude API error: The API Key appears to be invalid or may have expired.` The response side of adaptive thinking is therefore not verified against a live provider.
+- **No credential check:** a `jq` look at the structure of the `kimi-coding` credential (type and keys only) was denied by the permission classifier ("Credential Exploration"). I did not try again; the question goes to the user.
+- **Search too broad:** I first ran `find / -path '*node_modules/@*/pi-ai/dist'`. The user stopped it. `readlink -f $(command -v pi)` led to the nvm install directly.
+
+### What I learned
+
+- In this catalog, the `kimi-coding` models (`k3`, `k3-256k`, `kimi-for-coding`, `kimi-for-coding-highspeed`) are `anthropic-messages` with `forceAdaptiveThinking:true`. `k3`'s level map is `{off:null, minimal:null, low:"low", medium:null, high:"high", xhigh:null, max:"max"}`.
+- Pi's `clampThinkingLevel` searches upward first. `xhigh` and `max` count only when the map defines them, so a model without a map clamps `xhigh` to `high`.
+- Gemini in Pi uses per-model budgets for 2.5 (for example, 2.5-pro high is 32768), thinking *levels* for Gemini 3 and Gemma 4, and `-1` (dynamic) otherwise. Our Gemini mapping is still the generic budget table.
+
+### What was tricky to build
+
+- **Where Pi clamps:** the clamp lives in each provider's builder, not in one place, and Anthropic's builder doesn't call it. Applying it everywhere would have changed `k3` at medium from effort `medium` to `high`.
+- **The off case:** each provider treats off differently. Anthropic off gives `disabled` except when the map has `off:null`. zai always disables. deepseek keeps its mode when the map has `off:null`. Mid-conversation-effort models never turn thinking off.
+
+### What warrants a second pair of eyes
+
+- **The `enabled`-without-budget error:** it is new, and could surface for callers that set `ThinkingType:"enabled"` on Claude without a budget. Before, that silently did nothing.
+- **`clampLevel` behaviour change:** a null level now sends a neighbouring effort instead of nothing. This matches Pi but changes what reaches lunaroute for models with null levels.
+
+### What should be done in the future
+
+- After #443 merges: tag v0.13.13 (`make tag-patch`, `make release`), pin it in slop, and rebuild.
+- Verify adaptive thinking live once a working Kimi (or Anthropic) credential is available.
+- Gemini: per-model budgets and Gemini 3 thinking levels.
+
+### Code review instructions
+
+- **Claude engine:** start at `thinkingParam` and the budget clamp in `pkg/steps/ai/claude/helpers.go`; the tests are in `helpers_test.go` (`TestMakeMessageRequestFromTurnThinking`).
+- **`providers/pi`:** `pkg/steps/ai/providers/pi/thinking.go` (the Anthropic branch, `anthropicEffort`, `clampLevel`), plus the `TestThinkingConfig` table in `pi_test.go`.
+
+### Technical details
+
+- **geppetto commits:** `5026a890`, `d8873cf4` on `task/pi-adaptive-thinking`, pushed to `wesen`; PR #443.
+- **Scratch:** `$S/pismoke/go.mod` now has `replace github.com/go-go-golems/geppetto => …/geppetto`; the originals are `go.mod.bak` and `go.sum.bak`.
