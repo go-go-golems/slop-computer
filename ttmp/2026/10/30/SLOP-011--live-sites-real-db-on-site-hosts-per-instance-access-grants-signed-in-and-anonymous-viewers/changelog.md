@@ -11,3 +11,7 @@ Ticket created; intern guide written (current system: hosts, routes, modes, runt
 ### Related Files
 
 - /home/manuel/workspaces/2026-10-28/slop-computer/slop-computer/ttmp/2026/10/30/SLOP-011--live-sites-real-db-on-site-hosts-per-instance-access-grants-signed-in-and-anonymous-viewers/design-doc/01-intern-guide-live-sites-instances-and-access-grants.md — The guide
+
+## 2026-10-30
+
+Uploaded the intern guide to reMarkable: /ai/2026/10/30/SLOP-011/SLOP-011 Live sites intern guide.pdf (remarquee: OK: uploaded).
