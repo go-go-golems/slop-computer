@@ -735,3 +735,109 @@ On the local server, a fresh browser opening `/blocks/i-tmtocfaazmgvi6ip`
   | assets, comments | no | interact+ / yes | yes |
   | sample, publish, slop | no | no | yes |
   | create instances | no | by policy, 50/day | by policy |
+
+## Step 7: Phase 5, the Access panel, sharing from the site, and help
+
+Phase 5 makes access visible and manageable without the CLI.
+
+**In the Workshop**, app data and apps get an **Access** tab on Watch. It
+shows:
+- the live URLs;
+- the owner;
+- every grant, with a level select and Remove;
+- a form to grant to a person, everyone signed in, or anyone;
+- share links (make one, copy it, revoke it);
+- who has the target open now.
+
+**Open live** opens the first live URL. A live instance (which has no versions)
+now shows its Access panel instead of "has no versions yet".
+
+**On the site**, the shell shows a **Share** button to the target's owner and
+to admins. The dialog sets "Everyone signed in" and "Anyone, guests too" to
+No / Can view / Can edit, lists people and links with Remove and Revoke, and
+makes a 30-day link with a Copy button (decision 5).
+
+**Help:** `slop help live-sites` exists (the route CLI already pointed to
+it), `runtime.md` points to it, and `slop db users member` sets the new role
+from the server.
+
+### Prompt Context
+**User prompt (verbatim):** see Step 3.
+**Assistant interpretation:** Phase 5 of the guide: the Workshop Access panel and Open live link, owners sharing from the site, and the help pages.
+**Inferred user intent:** The user and Ramon can see and change who has access to a workspace without the terminal. An owner (also a member who created an instance) can share it themselves.
+**Commit (code):** 76291b1 — "SLOP-011 phase 5: Access panel, Open live, sharing from the site, help"
+
+### What I did
+- **Workshop:**
+  - `web/workshop/src/components/organisms/Access.tsx`: `AccessPane`, `OpenLive`, `liveApp`, and an `Item` row (name and controls on one line, a dim detail below), styled by `.acc-item` in `workshop.css`.
+  - `slopApi.ts`: `access` (tag `Access`), `putGrant`, `removeGrant`, `createLink` and `revokeLink`.
+  - `events.ts`: `access.changed` invalidates `Access` and `Audit` and writes a console line.
+  - `WatchScreen.tsx`: the Access tab when `liveApp(a, v.manifest)`; Open live in the data toolbar; and an Access-only layout for live data without versions.
+- **Site** (`pkg/server/siteaccess.go`): `POST /_site/access {path}`, `/_site/grants {path, subject, level}`, `/_site/links {path, level, days}` and `/_site/links/{id}/revoke {path}`, all behind `shellOnly` and `managed` (route → target → principal → `mayManage`: owner level, or admin role; never a visitor).
+  - Owners give `view` or `interact`, only to `*signed-in` or `*anyone`; `level: ""` removes any subject's grant.
+  - The link URL is this route's own URL plus `?k=`.
+- **Shell:**
+  - a `#share` button in the bar, shown when `view.level === "owner"` or `/_site/me` says admin;
+  - `share()` builds the dialog from `/_site/access` and re-renders after each change;
+  - levels read "Can view" / "Can edit" everywhere in it.
+- **CLI:** `slop db users member`.
+- **Help:** `pkg/doc/topics/live-sites.md` and a "Live on a site" section in `runtime.md`.
+- **Test:** `TestOwnerShares`.
+
+### Why
+- **Owners give at most interact, to groups or by link.** Naming one person needs a people picker, which would show the member list to members. Links cover "share with Ramon" without that. Admin and owner grants change who manages the target, so they stay with admins.
+- **`POST` for reading access on the site.** Every `/_site/` call that touches a target goes through `shellOnly` (Origin, `Sec-Fetch-Site`, JSON). A `GET` would skip the Origin check, and the answer names people.
+- **Access-only view for instances.** An instance created on the site has no versions (its content is its database), and the watch screen used to stop at "has no versions yet", which hid the one thing to manage.
+
+### What worked
+- `GOWORK=off go test ./...`, Postgres, `make lint` (`0 issues.`) and `tsc` pass.
+- `TestOwnerShares`:
+  - a member creates an instance;
+  - another member gets 403 on its access and on opening it;
+  - the owner shares `*signed-in view`, and the other member opens at `view`;
+  - `admin` level and a one-person subject give 400;
+  - the owner makes an `interact` link (`http://site.test/board/i-…?k=…`), and the other member redeems it at `interact`;
+  - the access listing shows two grants and one link;
+  - revoking the link and unsharing `*signed-in` gives the other member 403.
+- Browser (Playwright, local server):
+  - as the owner on `/blocks/i-tmtocfaazmgvi6ip`, Share showed the two group selects, "ramon (by link) · Can edit · Remove", the links, and a new link with Copy;
+  - in the Workshop, `/watch/i-tmtocfaazmgvi6ip` showed the Access layout (screenshots `share.png` and `access.png` in the scratchpad), with one Open live button.
+- `slop help live-sites` renders, and `slop db users --help` lists `member`.
+
+### What didn't work
+- The Workshop check first failed with `waiting for locator('text=Access')`. The instance had no versions, and `WatchScreen` returned "has no versions yet" before rendering tabs. That is the Access-only layout above.
+- The first Access pane wrapped badly in the narrow side tile (selects and buttons on separate lines, details squeezed). It now uses `Item` rows.
+- My first help draft named `slop db users set-role` and `slop db users ls`, which do not exist (the command is `list`, and no CLI set the member role), then `--email`, which is not a flag (`--user-id` is). I added `member` and corrected the text against `slop db users --help`.
+
+### What I learned
+- An instance is data without versions. Any Workshop screen that assumes "data has a version" hides instances. The Artifacts list and Watch were the two places that mattered here.
+
+### What was tricky to build
+- **Who sees Share.** The view's level is in the open response, the role in `/_site/me`. Both arrive asynchronously, and `me()` runs first, so `open()` can decide from both.
+
+### What warrants a second pair of eyes
+- **Owners can remove any grant** (`level: ""` for any subject), including one an admin gave. That matches "owner manages access", but an admin's explicit grant can be undone by the owner.
+- **`siteAccess` loads all users for names.** That is fine at this size.
+
+### What should be done in the future
+- PR for `task/live-sites` (the user merges), then deploy and publish Blocks on `site.slop.yolo.scapegoat.dev`, after:
+  1. checking `TrustProxyHeaders` in the cluster config (the visitor limit is per address);
+  2. telling the user the D8 trade-off for releases on that host.
+
+### Code review instructions
+- Read `pkg/server/siteaccess.go`, then `share()` in `shell.js`, then `Access.tsx` and the `WatchScreen.tsx` hunk.
+- Validate:
+  1. `GOWORK=off go test ./pkg/server -run TestOwnerShares -count=1`
+  2. Locally, as the owner of an instance on a live route, click Share; in the Workshop, open the instance on Watch.
+
+### Technical details
+- The decisions from guide section 12.2, as adopted (task `e6xd`):
+
+  | # | Question | Decision | Where |
+  |---|---|---|---|
+  | 1 | who creates instances | signed-in members and admins (`--create signed-in`); guests never | phase 3 and 4 |
+  | 2 | members and `sample` | no, admins only | phase 2 |
+  | 3 | URL shape | `/blocks/:db` | phase 3 |
+  | 4 | new OIDC users | stay pending; admins let them in as member or admin | phase 2 |
+  | 5 | owners share from the site | yes: the Share dialog, view or edit, groups and links | phase 5 |
+  | 6 | guest data on sign-in | offered, kept only on yes | phase 4 |

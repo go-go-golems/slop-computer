@@ -50,3 +50,12 @@ Phase 4 (722c158): visitors (vis_, migration 011) on public live routes, capped 
 ### Related Files
 
 - /home/manuel/workspaces/2026-10-28/slop-computer/slop-computer/pkg/store/visitors.go — visitors, private docs, moving grants, sweep
+
+## 2026-10-30
+
+Phase 5 (76291b1): Workshop Access tab and Open live, owner Share dialog on the site (/_site/access, grants, links), slop db users member, slop help live-sites; decisions from 12.2 recorded
+
+### Related Files
+
+- /home/manuel/workspaces/2026-10-28/slop-computer/slop-computer/pkg/server/siteaccess.go — owners share from the site
+- /home/manuel/workspaces/2026-10-28/slop-computer/slop-computer/web/workshop/src/components/organisms/Access.tsx — Workshop Access panel
