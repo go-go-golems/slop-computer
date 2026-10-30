@@ -11,3 +11,7 @@ Ticket created. Baseline measured on the cluster (76 MB of covers, 670 KB no-sto
 ### Related Files
 
 - /home/manuel/workspaces/2026-10-28/slop-computer/slop-computer/ttmp/2026/10/30/SLOP-012--fast-site-pages-image-thumbnails-cacheable-data-urls-compression-and-lean-boot-data/design-doc/01-intern-guide-serving-site-pages-fast.md — The guide
+
+## 2026-10-30
+
+Uploaded the intern guide to reMarkable: /ai/2026/10/30/SLOP-012/SLOP-012 Fast site pages intern guide.pdf (remarquee: OK: uploaded).
