@@ -68,7 +68,8 @@ var slopIDPattern = regexp.MustCompile(`^[a-z0-9][a-z0-9-]{0,62}$`)
 var mediaRef = regexp.MustCompile(`(?:https?://[A-Za-z0-9.:-]+)?/media/(med_[0-9a-f]+)(\?[^)\s"'<>]*)?`)
 
 // mediaSrc is where an imported media file is served on slop: its media
-// data artifact's main version, so links survive re-imports.
+// data artifact's main version, so links survive re-imports. The push pins
+// it to the version pushed (seed.pinLinks), so pages link content URLs.
 func (x *extractor) mediaSrc(m Media) string {
 	return "/_d/" + x.shard[m.ID] + "/main/files/" + m.File.Name
 }
