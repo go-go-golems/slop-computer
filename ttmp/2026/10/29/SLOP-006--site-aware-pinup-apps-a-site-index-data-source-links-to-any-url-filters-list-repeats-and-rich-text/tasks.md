@@ -14,4 +14,4 @@
 - [x] Docs: slop help pinup and agents <!-- t:nvb8 -->
 - [x] End to end: a Site map Pinup app on the local server, screenshots <!-- t:jrx8 -->
 - [ ] Per-reader filters on $site (e.g. $site?section=journal) to keep boot data small <!-- t:0r0g -->
-- [ ] Deploy: image bump, make pinup-push on the cluster, update the tool <!-- t:rnah -->
+- [x] Deploy: closed here, tracked once in SLOP-004 (pinup-push and blocks-push on the cluster). <!-- t:rnah -->

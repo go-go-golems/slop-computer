@@ -15,8 +15,8 @@ const art = (e: SlopEvent) => e.artifact ?? (e.payload.artifact as string | unde
 const INVALIDATES: Record<string, (e: SlopEvent) => Tag[]> = {
   'artifact.created': () => [{ type: 'Artifact', id: 'LIST' }, 'App'],
   'artifact.updated': e => [{ type: 'Artifact', id: 'LIST' }, { type: 'Version', id: art(e) }, 'App'],
-  'version.created': e => [{ type: 'Version', id: art(e) }, { type: 'Artifact', id: 'LIST' }, { type: 'Route', id: 'LIST' }, 'Audit', 'App'],
-  'ref.moved': e => [{ type: 'Version', id: art(e) }, { type: 'Artifact', id: 'LIST' }, { type: 'Route', id: 'LIST' }],
+  'version.created': e => [{ type: 'Version', id: art(e) }, { type: 'Artifact', id: 'LIST' }, { type: 'Route', id: 'LIST' }, { type: 'Records', id: 'COVERS' }, 'Audit', 'App'],
+  'ref.moved': e => [{ type: 'Version', id: art(e) }, { type: 'Artifact', id: 'LIST' }, { type: 'Route', id: 'LIST' }, { type: 'Records', id: 'COVERS' }],
   'route.set': () => [{ type: 'Route', id: 'LIST' }, 'RouteLog', 'Audit'],
   'route.removed': () => [{ type: 'Route', id: 'LIST' }, 'RouteLog', 'Audit'],
   'thread.created': e => [{ type: 'Thread', id: art(e) }, { type: 'Thread', id: 'ALL' }],

@@ -1,7 +1,7 @@
 ---
 Title: Routes that choose their page from a path parameter (page-from routes)
 Ticket: SLOP-003
-Status: active
+Status: complete
 Topics:
     - routing
     - architecture
@@ -22,7 +22,7 @@ RelatedFiles:
       Note: 'Cluster rollout: swap 100 routes for one'
 ExternalSources: []
 Summary: ""
-LastUpdated: 2026-10-28T20:01:14.15851215-04:00
+LastUpdated: 2026-10-30T17:49:15.698037454-04:00
 WhatFor: ""
 WhenToUse: ""
 ---

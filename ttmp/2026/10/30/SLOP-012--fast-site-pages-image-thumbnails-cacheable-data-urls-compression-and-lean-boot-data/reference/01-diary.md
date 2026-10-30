@@ -881,7 +881,7 @@ than the displayed ones.
 - **WebP and PNG.** Their EXIF orientation is not read. Browsers honour it in those formats too, but it is rare.
 
 ### What should be done in the future
-- Reply on the two review threads once the user agrees. I have not posted to GitHub.
+- Reply on the two review threads: done after the user agreed (discussion_r4428657262, discussion_r4428657477).
 - If derived formats ever change again, add a version to the derived key.
 
 ### Code review instructions
@@ -904,3 +904,191 @@ than the displayed ones.
   | 6 | turn right | (y, H-1-x) |
   | 7 | transverse | (W-1-y, H-1-x) |
   | 8 | turn left | (W-1-y, x) |
+
+## Step 9: Deployed: image sha-ec4c4c9 on the test cluster
+
+The user merged PR #5 and asked to watch the image job, then open and merge
+the GitOps PR. The image built, and GitOps PR #402 (wesen/2026-03-27--hetzner-k3s)
+bumped the deployment and was merged. Argo CD rolled the new pod out, and a
+live measurement shows the phase 1–3 behaviour in production.
+
+### Prompt Context
+**User prompt (verbatim):** "also i merged, watch until image job finished, and open gitops PR and merge to deploy"
+**Assistant interpretation:** Watch publish-image for the merge commit, open the GitOps bump PR, merge it, and confirm the rollout.
+**Inferred user intent:** Get PR #5 onto the test cluster.
+**Commit (code):** N/A. GitOps commit ec26c22, merged as d3a2735.
+
+### What I did
+- Watched the image build: `gh run watch 41131642819 --exit-status`, for publish-image on `ec4c4c9`. It succeeded; its "Open GitOps PR" step was skipped, as for #401.
+- `docker manifest inspect ghcr.io/go-go-golems/slop-computer:sha-ec4c4c9` reported the tag exists.
+- In the GitOps worktree `hetzner-k3s-slop`: branch `slop/image-ec4c4c9` from `origin/main`, a one-line change to `gitops/kustomize/slop/deployment.yaml`, commit `ec26c22`.
+- Opened PR #402. Its `validate` check passed in 15 s. Merged it with a merge commit: `d3a2735`.
+- Polled the deployment's image until it changed (~130 s), then `kubectl -n slop rollout status deploy/slop`, which reported "successfully rolled out".
+- Ran `scripts/01-measure-site.py` against https://site.slop.yolo.scapegoat.dev/.
+
+### What worked
+- The page: 2999 bytes on the wire, gzip, `no-cache`, an ETag, and revalidation answered 304.
+- Data scripts, all `public, max-age=31536000, immutable`:
+
+  | Script | Records | Gzipped |
+  |---|---|---|
+  | `/_r/francois-catalog/2.js` | 104 | 99819 B |
+  | `/_r/francois-media/1.js` | 304 | 31773 B |
+  | `/_r/francois-media-2/1.js` | 360 | 37418 B |
+  | `/_r/francois-media-3/1.js` | 28 | 3106 B |
+
+- The first cover is 285314 B as WebP and 30057 B as JPEG at `?w=640`. It is still a `main` link, so a place URL (`max-age=60, swr`).
+- The new pod (`slop-7fb5bc9bb6-llfr6`) logged no error or warn lines in its first minutes.
+
+### What didn't work
+- No failures observed.
+
+### What should be done in the future
+- Push storefront v2 from `various/storefront-v2/` (it uses `files` instead of `reads` for the media, plus srcset thumbnails), then `slop import francois push` to pin links to numbered versions. The cover URLs then become content URLs. The live page still reads all three media shards, about 72 KB of records it does not need.
+- Run the SLOP-013 manual sign-in check on the cluster.
+
+## Step 10: Workshop pages show a cover or a summary, never a live thumbnail
+
+The user reported that `/watch/craftkit-workbench` was "super super slow" and
+that `/watch/stamen-studio` logged a storage error. I measured both on the
+cluster:
+- **Slowness:** `craftkit-workbench` is a 9.8 MB release, and the Workshop ran
+  it more than once. Every Artifacts card and every Versions-strip frame was a
+  live iframe of the page.
+- **Storage error:** not ours. It comes from a browser extension.
+
+I offered stored screenshots, rendered by headless Chromium on the server. The
+user chose "just use catalog images and placeholder otherwise". The Workshop
+now asks the server for covers, which any data record can give a page. Pages
+without one get a summary card. Nothing runs a page except the main preview.
+
+### Prompt Context
+**User prompts (verbatim):**
+- "close stale stuff. Also, I get [Uncaught (in promise) Error: Access to storage is not allowed from this context. … [Violation] 'message' handler took 432ms] when going to say https://slop.yolo.scapegoat.dev/watch/stamen-studio and sometimes loading a page is super super slow, not sure if it's related to what, say https://slop.yolo.scapegoat.dev/watch/craftkit-workbench was just super slow I guess it's a 10 MB html and then it didn't even seem to load."
+- "can we store the live thumbnail when done?"
+- "ok just use catalog images and placeholder otherwise"
+
+**Assistant interpretation:** Diagnose both reports; replace live thumbnails with catalog covers, and a placeholder otherwise.
+**Inferred user intent:** The Workshop should stay fast however large the pages in it are.
+**Commit (code):** 4626897 — "Workshop: pages show their catalog cover or a summary, never a live thumbnail"
+
+### What I did
+- **Diagnosis (read-only on the cluster):** a probe at `scratchpad/probe/probe.py` read the CLI's token from `~/.config/slop/credentials.json` without printing it. It lists versions and file sizes, fetches the sandbox URL and saves the page.
+  - `craftkit-workbench`: `index.html` is 9802638 B, plus an 8.2 MB source zip. Fetched with gzip, the sandbox page is wire=6356300, raw=9803111 and took 7.67 s.
+  - In a clean headless Chromium, `console.cjs` reported `loaded in 25230 ms` and no console output.
+  - Composition: 33 inline scripts, the largest 7946169 chars, holding 6 base64 strings of 4187172 chars together.
+  - `stamen-studio`: 272680 B. In a clean Chromium it loaded in 3902 ms with only WebGL "GPU stall due to ReadPixels" warnings and no storage error. The page uses plain `localStorage` and loads React 18 from cdnjs. The 432 ms `message` handler is React's scheduler.
+  - Neither slop nor the page contains "Access to storage is not allowed from this context", and the preview frame has `allow-same-origin`. The message is one Chrome extensions raise inside frames.
+- **Server:** new `pkg/server/covers.go` with `GET /api/covers`, `listCovers`, `cover{artifact, version, path}`, `cover.url()` and `coverOf`. It is registered in `kernelRoutes` with `artifacts:read`.
+- **Workshop:**
+  - the `covers` query, invalidated with `{Records, COVERS}` on `version.created` and `ref.moved`;
+  - `VersionShot` and `VersionSummary` in `WatchRight.tsx`, replacing `DataSummary` and `Thumb`;
+  - `Filmstrip` loses its `ctx` prop;
+  - `PageShot` on the Artifacts screen passes the version before main;
+  - `Thumb` and `ThumbFrame` are removed from `PreviewStage.tsx`;
+  - CSS: `.shot > img.cover`, and the thumbnail iframe rules are removed.
+- **Bookkeeping:** stale-ticket cleanup (523fb73), and the SLOP-012 task, added during diagnosis and closed by this step.
+
+### Why
+- **Cover lookup is generic.** Any record with `page` and `cover` counts, with no "francois-catalog" in the code. The server gathers covers in one call because only it can cheaply scan every data artifact's main records: they are cached in `recCache`, and the media records already carry their sizes.
+- **Only existing covers are listed.** Covers that name a missing file are left out, so a card never shows a broken image. Locally the catalog points at `francois-media` and `francois-media-2`, which do not exist, so this matters.
+- **The placeholder says what the version is.** It reuses the data cards' summary: a page's size is the big figure, then the file count, then what changed since the previous version. Cards and the strip read the same way for pages and data.
+- **No stored screenshots.** I proposed headless Chromium as a second container in the pod, and the user declined.
+
+### What worked
+- `TestCovers`: string and `{src}` covers, an old origin (`https://slop.boutique/_d/…`), a missing file, a missing artifact, an external URL, a record without `page`, and `?w=320` on the cover URL (decoded width 320, JPEG).
+- Local server, via Playwright:
+  - `/api/covers` listed exactly the 7 pages whose covers live in `francois-media-3`.
+  - A stand-in `agent-gym-works` page pushed through Push a file… showed its cover: `?w=640` on the card (`naturalWidth` 640) and `?w=320` in the strip.
+  - The Artifacts screen had 0 iframes; `/watch/agent-gym-works` and `/watch/blocks` had 1 each, the main preview.
+- Card texts: `storefront` reads "35.0 KB / 2 files / 1 changed"; `blocks` reads "730.2 KB / 10 files / first version".
+- `GOWORK=off go test ./...` all ok; `make lint` `0 issues.`; `tsc` clean.
+
+### What didn't work
+- **Duplicated count.** The first placeholder repeated the count ("1" then "1 file"). The big figure is now a page's size.
+- **Wrong "first version".** Cards said "first version" for `storefront` v2 because `PageShot` passed no previous version. It now passes the version before main.
+- **Old local logins.** `slop push` with `SLOP_CONFIG_DIR=$S/rt1/cfg` failed with "set --server or SLOP_SERVER…": that directory has no credentials, and `$S/cfg` points at an old port. I pushed the stand-in through the Workshop's Push dialog instead.
+- **Branching.** `git switch main` failed: `'main' is already used by worktree at '/home/manuel/code/wesen/slop-computer'`. I branched from `origin/main`, then cherry-picked onto `task/slop-012-deploy-notes` (PR #6), so the diary, which both branches append to, does not conflict.
+
+### What I learned
+- An imported release is the francois HTML as uploaded (`"html": "original"`), so a release's size is whatever its author bundled. The Workshop has to budget for 10 MB pages anywhere it lists them.
+- `Version(ctx, a, 0)` resolves main. On error it returns no files, so a missing version simply has no cover.
+
+### What was tricky to build
+- Cover URLs are site URLs (`/_d/…`, sometimes with the old `https://slop.boutique` origin), but the Workshop is on the main host, where `/_d/` is not served. `coverOf` parses the path with the server's own `dataPath` pattern, and `cover.url()` rebuilds it as the file API path with the file path escaped. `main` stays `main`, which `versionNumber` accepts.
+
+### What warrants a second pair of eyes
+- **Cost per call.** `/api/covers` reads the main records of every data artifact. They are cached per artifact version, but the first call after a restart computes media records, including image header sizes, for all shards.
+- **Which record wins.** When two records name the same page, the data artifact first by id wins.
+
+### What should be done in the future
+- Deploy with the next image bump. After that, `/watch/craftkit-workbench` runs the page once.
+- The storage error needs nothing from slop. A private window without extensions confirms it.
+
+### Code review instructions
+- `pkg/server/covers.go`, then `VersionShot` and `VersionSummary` in `web/workshop/src/components/organisms/WatchRight.tsx`, `PageShot` in `ArtifactsScreen.tsx`, and the removals in `PreviewStage.tsx`.
+- Validate:
+  1. `GOWORK=off go test ./pkg/server -run TestCovers -count=1`
+  2. `cd web/workshop && npx tsc --noEmit -p .`
+  3. Open the Artifacts screen locally and check that no iframes load.
+
+## Step 11: Storefront v2 on the cluster, and covers pinned to numbered versions
+
+The user asked whether the storefront on `site.*` could change now. It could:
+storefront v2 only needs what sha-ec4c4c9 already serves, namely `?w=`,
+the manifest `files` key and `/_r/` data scripts. I made two changes on the
+cluster:
+- pushed storefront and storefront-entry v2 from `various/storefront-v2/`;
+- re-ran the francois import push, so covers link to numbered media versions.
+
+The front page now loads one data script instead of four, and its covers are
+scaled, immutable content URLs. It reaches network idle in 2.3 s from an empty
+browser cache, against 13 s on the first, cold run of the same probe. These are
+the last phase 4 and importer tasks.
+
+### Prompt Context
+**User prompt (verbatim):** "ok, but now we can also change the storefront app that is served on site.* no?"
+**Assistant interpretation:** Do the outstanding SLOP-012 cluster step: publish storefront v2 and pin its cover links.
+**Inferred user intent:** The public front page should get the speed-ups, not just the Workshop.
+**Commit (code):** N/A (cluster content). Cluster versions: storefront v2, storefront-entry v2, francois-catalog v3.
+
+### What I did
+- Compared the cluster with the v2 sources:
+  - The cluster had v1 of both pages; v2 was derived from v1 (`boutique.css` sha `66b1738814` on both sides).
+  - `diff` of `index.html`: `boutique.css?v=2`; covers through `slop.image(u, 640)` with `slop.srcset(u, [320…1280])` and `sizes`; the first 6 covers `fetchpriority="high"`, the rest lazy; the monogram fallback also catches images that failed before the listener was attached.
+  - The manifests move the media shards from `reads` to `files`.
+- Pushed from a scratch copy (`$S/sf-push/`), so no folder state was written into the repo. `slop push $S/sf-push/<page> --server https://slop.yolo.scapegoat.dev -m "…"` gave `pushed storefront v2 · 2 files · 34 KB` and `pushed storefront-entry v2 · 2 files · 40 KB`. The routes `/` and `/apps/:id` follow main.
+- Chose the seed. Of `fr-api2` and `fr-api3`, only `fr-api3` matches the cluster's `francois-catalog` v2: 104 of 104 files identical, against 70 of 104 for `fr-api2`.
+- `slop import francois push --dir fr-api3 --server https://slop.yolo.scapegoat.dev` gave `pushed 1 versions; 4 unchanged, 113 already imported`, which is francois-catalog v3 with pinned links.
+- Measured with `scripts/01-measure-site.py`, and in a clean Chromium with `scratchpad/probe/site.cjs`, which counts image bytes, monograms and errors and takes screenshots.
+
+### What worked
+
+| | Before | After v2 | After pinning |
+|---|---|---|---|
+| Data scripts on `/` | catalog + 3 media (≈172 KB gz) | catalog only (99819 B gz) | catalog v3 only (99732 B gz) |
+| Cover URL | `/_d/…/main/…` | `/_d/…/main/…?w=480` | `/_d/francois-media-2/1/…?w=480` |
+| Cover cache | `max-age=60, swr` | `max-age=60, swr` | `max-age=31536000, immutable` |
+| `/` to network idle, empty browser | n/a | 13.4 s cold, 5.6 s warm server | 2.3 s |
+| `/apps/agent-gym-works` | n/a | 9.5 s cold, 2.7 s warm | 1.0 s |
+
+- Covers on first view: 22 image requests, 433 KB, all 200, no console errors.
+- 6 monograms are visible, which matches the 6 listed catalog records without a cover (`listed 100 without cover 6`).
+- A screenshot of `/` shows the catalogue with scaled covers.
+
+### What didn't work
+- No failures. The 13 s first run was the server building thumbnails on first request (two decode slots); later runs reuse the stored copies.
+
+### What I learned
+- The import push is idempotent: matching release ids and unchanged data are skipped, so re-running it changed only what pinning altered, the catalog.
+- The "cold" cost of thumbnails falls on the first visitor of each width. On a fresh deploy that is a few seconds for the front page, once.
+
+### What should be done in the future
+- Phase 5, the per-host index, stays optional; it is SLOP-012's only open task.
+- When francois data is re-extracted, push it the same way. Links are pinned automatically.
+
+### Code review instructions
+- No code. Check the live site with `python3 -I ttmp/2026/10/30/SLOP-012*/scripts/01-measure-site.py`.
+
+### Technical details
+- Cluster artifacts: storefront v2, storefront-entry v2, francois-catalog v3; media shards unchanged at v1.

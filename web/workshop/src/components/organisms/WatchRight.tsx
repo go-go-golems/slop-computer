@@ -1,5 +1,5 @@
 import { useMemo } from 'react'
-import { errorText, useFileQuery, useRecordsQuery, useSetRouteMutation } from '../../api/slopApi'
+import { errorText, useCoversQuery, useFileQuery, useRecordsQuery, useSetRouteMutation } from '../../api/slopApi'
 import type { Artifact, RouteView, Version } from '../../api/types'
 import { toast } from '../../app/store'
 import { navigate, runPath } from '../../app/router'
@@ -7,7 +7,7 @@ import { cx, kb, plural } from '../../app/format'
 import { shortHost, useReaders, useVersionBy } from '../../app/hooks'
 import { Button, Field, Seg, Select } from '../atoms'
 import { FilmFrame } from '../molecules'
-import { Thumb, type Device } from './PreviewStage'
+import type { Device } from './PreviewStage'
 
 // PreviewContext is where a page is previewed: the route that serves it, and
 // for routes with :params a concrete path built from a sample record.
@@ -112,7 +112,7 @@ export function VisitLine({ a, v, routes, onAddRoute }: { a: Artifact; v: Versio
   )
 }
 
-export function Filmstrip({ a, versions, current, routes, ctx, onSelect }: { a: Artifact; versions: Version[]; current: number; routes: RouteView[]; ctx: PreviewContext; onSelect: (n: number) => void }) {
+export function Filmstrip({ a, versions, current, routes, onSelect }: { a: Artifact; versions: Version[]; current: number; routes: RouteView[]; onSelect: (n: number) => void }) {
   const by = useVersionBy()
   return (
     <div className="film" id="wFilm">
@@ -123,7 +123,7 @@ export function Filmstrip({ a, versions, current, routes, ctx, onSelect }: { a: 
         if (x.n === a.main) flags.push('main')
         return (
           <FilmFrame key={x.n} v={x} on={x.n === current} by={by(x)} flags={flags} onSelect={() => onSelect(x.n)}>
-            {a.kind === 'data' ? <DataSummary a={a} v={x} prev={prev} /> : <Thumb artifact={a.id} n={x.n} width={132} host={ctx.host} path={ctx.path} />}
+            <VersionShot a={a} v={x} prev={prev} cover={320} />
           </FilmFrame>
         )
       })}
@@ -131,19 +131,35 @@ export function Filmstrip({ a, versions, current, routes, ctx, onSelect }: { a: 
   )
 }
 
-function DataSummary({ a, v, prev }: { a: Artifact; v: Version; prev?: Version }) {
+// VersionShot stands for a version in the filmstrip and on cards: a page's
+// cover image when a record gives it one (GET /api/covers), otherwise what
+// the version holds. Pages are never run for this: a live thumbnail of a
+// large app costs as much as opening it.
+export function VersionShot({ a, v, prev, cover }: { a: Artifact; v: Version; prev?: Version; cover: number }) {
+  const { data: covers } = useCoversQuery(undefined, { skip: a.kind !== 'page' })
+  const src = covers?.[a.id]
+  if (src) return <img className="cover" src={`${src}?w=${cover}`} alt="" loading="lazy" decoding="async" />
+  return <VersionSummary a={a} v={v} prev={prev} />
+}
+
+// VersionSummary is what a version holds: a page's size or how many
+// records, and what changed since the version before it.
+function VersionSummary({ a, v, prev }: { a: Artifact; v: Version; prev?: Version }) {
   const files = Object.keys(v.files).filter(f => f !== 'slop.json')
   const add = prev ? files.filter(f => !prev.files[f]).length : files.length
   const chg = prev ? files.filter(f => prev.files[f] && prev.files[f].sha256 !== v.files[f].sha256).length : 0
   const gone = prev ? Object.keys(prev.files).filter(f => !v.files[f]).length : 0
+  const size = files.reduce((n, f) => n + v.files[f].size, 0)
   return (
     <div className="dsum">
-      {a.type === 'tokens' ? <b>tokens</b> : <b>{files.length}</b>}
-      <span>{a.type === 'tokens' ? 'colours and type' : plural(files.length, recWord(a))}</span>
+      <b>{a.type === 'tokens' ? 'tokens' : a.kind === 'page' ? mb(size) : files.length}</b>
+      <span>{a.type === 'tokens' ? 'colours and type' : plural(files.length, a.kind === 'page' ? 'file' : recWord(a))}</span>
       <span>{prev ? [add ? `+${add} new` : '', chg ? `${chg} changed` : '', gone ? `${gone} removed` : ''].filter(Boolean).join(' · ') || 'no change' : 'first version'}</span>
     </div>
   )
 }
+
+const mb = (n: number) => (n >= 1 << 20 ? (n / (1 << 20)).toFixed(1) + ' MB' : kb(n))
 
 export const recWord = (a: Artifact) => (a.type === 'post' ? 'post' : 'record')
 

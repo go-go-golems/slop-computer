@@ -346,3 +346,34 @@ func TestOrient(t *testing.T) {
 		}
 	}
 }
+
+// A record that names a page and a cover gives that page its Workshop
+// image: /api/covers maps page → the cover's file on the main host, which
+// takes ?w=. Covers that are not slop data files, or name a file that does
+// not exist, are left out.
+func TestCovers(t *testing.T) {
+	h := newHarness(t, store.RoleAdmin)
+	manuel := h.signIn("manuel")
+	tok := h.token(manuel.id(), store.ScopeRead, store.ScopeWrite)
+	h.pushFiles(tok, "media", map[string]any{"title": "Media", "kind": "data"}, nil, map[string]string{"files/w.png": pngOf(t, 800, 500, false)})
+	h.pushFiles(tok, "catalog", map[string]any{"title": "Catalog", "kind": "data"}, nil, map[string]string{
+		"weft.json":  `{"title":"Weft","page":"weft","cover":{"src":"https://slop.boutique/_d/media/main/files/w.png"}}`,
+		"loom.json":  `{"title":"Loom","page":"loom","cover":"/_d/media/1/files/w.png"}`,
+		"away.json":  `{"title":"Away","page":"away","cover":{"src":"https://elsewhere.test/x.png"}}`,
+		"plain.json": `{"title":"No page","cover":"/_d/media/1/files/w.png"}`,
+		"gone.json":  `{"title":"Gone","page":"gone","cover":"/_d/media/1/files/missing.png"}`,
+		"lost.json":  `{"title":"Lost","page":"lost","cover":"/_d/nowhere/main/x.png"}`,
+	})
+	var covers map[string]string
+	if code := manuel.do("GET", "/api/covers", nil, &covers); code != 200 {
+		t.Fatalf("covers %d", code)
+	}
+	want := map[string]string{"weft": "/api/artifacts/media/versions/main/files/files/w.png", "loom": "/api/artifacts/media/versions/1/files/files/w.png"}
+	if len(covers) != len(want) || covers["weft"] != want["weft"] || covers["loom"] != want["loom"] {
+		t.Fatalf("covers %v, want %v", covers, want)
+	}
+	code, body, hdr := h.fetch(h.ts.Listener.Addr().String(), covers["weft"]+"?w=320", map[string]string{"Authorization": "Bearer " + tok})
+	if cfg, _, err := image.DecodeConfig(bytes.NewReader(body)); code != 200 || err != nil || cfg.Width != 320 || hdr.Get("Content-Type") != "image/jpeg" {
+		t.Fatalf("cover at ?w=320: %d %v %v", code, hdr, cfg)
+	}
+}

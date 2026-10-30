@@ -24,6 +24,8 @@ export const slopApi = createApi({
   endpoints: b => ({
     projects: b.query<Project[], void>({ query: () => 'projects', providesTags: ['Project'] }),
     artifacts: b.query<Artifact[], void>({ query: () => 'artifacts', providesTags: [{ type: 'Artifact', id: 'LIST' }] }),
+    // covers is page id → the image a data record gives it (GET /api/covers).
+    covers: b.query<Record<string, string>, void>({ query: () => 'covers', providesTags: [{ type: 'Records', id: 'COVERS' }] }),
     versions: b.query<Version[], string>({ query: id => `artifacts/${id}/versions`, providesTags: (_r, _e, id) => [{ type: 'Version', id }] }),
     file: b.query<string, { id: string; n: number; path: string }>({
       query: a => ({ url: `artifacts/${a.id}/versions/${a.n}/files/${a.path}`, responseHandler: 'text' }),
@@ -140,7 +142,7 @@ export function errorText(e: unknown): string {
 }
 
 export const {
-  useProjectsQuery, useArtifactsQuery, useVersionsQuery, useFileQuery, useRecordsQuery, useRoutesQuery, useRouteLogQuery,
+  useProjectsQuery, useArtifactsQuery, useCoversQuery, useVersionsQuery, useFileQuery, useRecordsQuery, useRoutesQuery, useRouteLogQuery,
   useResolveQuery, useThreadsQuery, useSandboxUrlQuery, useAgentsQuery, useUsersQuery, useTokensQuery, useAuditQuery,
   useSetRouteMutation, useRemoveRouteMutation, useUndoRouteMutation, useCreateThreadMutation, useReplyMutation,
   useResolveThreadMutation, useSetRoleMutation, usePutProjectMutation, useUpdateArtifactMutation, useCreateTokenMutation, useRevokeTokenMutation, usePushMutation,

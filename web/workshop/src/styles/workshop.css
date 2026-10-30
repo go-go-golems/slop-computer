@@ -142,7 +142,6 @@ body.resizing iframe { pointer-events:none; }
 .frame .shot { width:132px; height:83px; position:relative; overflow:hidden; background:var(--stage); box-shadow:0 0 0 1px var(--hair); }
 .frame:hover .shot { box-shadow:0 0 0 1px var(--ink); }
 .frame.on .shot { box-shadow:0 0 0 2px var(--accent); }
-.frame .shot iframe { position:absolute; left:0; top:0; width:1280px; height:800px; border:0; transform-origin:0 0; pointer-events:none; background:#fff; }
 .frame .shot .dsum { position:absolute; inset:0; padding:8px; font-size:var(--fs-xs); color:var(--ink); background:var(--bg); display:flex; flex-direction:column; gap:3px; }
 .frame .shot .dsum b { font-size:18px; font-weight:700; }
 .frame .meta { display:flex; align-items:center; gap:5px; font-size:var(--fs-xs); color:var(--ink-2); white-space:nowrap; overflow:hidden; }
@@ -236,7 +235,7 @@ body.resizing iframe { pointer-events:none; }
 .acard { background:none; border:1px solid var(--hair); padding:0; text-align:left; display:flex; flex-direction:column; border-radius:0; min-width:0; }
 .acard:hover { border-color:var(--ink); }
 .acard .shot { position:relative; aspect-ratio:16/10; overflow:hidden; background:var(--stage); border-bottom:1px solid var(--hair); }
-.acard .shot iframe { position:absolute; left:0; top:0; width:1280px; height:800px; border:0; transform-origin:0 0; pointer-events:none; background:#fff; }
+.shot > img.cover { position:absolute; inset:0; width:100%; height:100%; object-fit:cover; display:block; }
 .acard .shot .dsum { position:absolute; inset:0; padding:12px; display:flex; flex-direction:column; gap:4px; background:var(--code-bg); font:400 11px/1.5 var(--code); color:var(--ink-2); overflow:hidden; }
 .acard .shot .dsum b { font:700 22px/1.1 var(--sans); color:var(--ink); }
 .acard .ab { padding:8px 10px 10px; display:flex; flex-direction:column; gap:4px; min-width:0; }
