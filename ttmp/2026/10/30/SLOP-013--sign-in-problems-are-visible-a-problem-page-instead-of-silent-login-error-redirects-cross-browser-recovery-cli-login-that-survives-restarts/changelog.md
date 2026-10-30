@@ -11,3 +11,7 @@ Ticket created; intern guide written (OIDC and device flows, why failures are si
 ### Related Files
 
 - /home/manuel/workspaces/2026-10-28/slop-computer/slop-computer/ttmp/2026/10/30/SLOP-013--sign-in-problems-are-visible-a-problem-page-instead-of-silent-login-error-redirects-cross-browser-recovery-cli-login-that-survives-restarts/design-doc/01-intern-guide-sign-in-device-login-and-their-failures.md — The guide
+
+## 2026-10-30
+
+Uploaded the intern guide to reMarkable: /ai/2026/10/30/SLOP-013/SLOP-013 Sign-in problems intern guide.pdf (remarquee: OK: uploaded).
