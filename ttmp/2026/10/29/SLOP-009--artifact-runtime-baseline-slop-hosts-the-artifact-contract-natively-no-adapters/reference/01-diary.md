@@ -390,3 +390,83 @@ The user added one request mid-step: "use lunaroute models to extensively test t
   - `POST /_rt/sample {input, modelTier, model?, effort?, tools?, images?}` streams `call {call}`, then `text {text, delta}` and `thinking`, then `tool {use, name, input}`, then `result {text, truncated, modelTierApplied, modelApplied?, modelUsed}` or `error {code, message, text?}`.
   - A tool's result goes to `POST /_rt/sample/{call}/tools/{use} {value, isError}`, at most 32 KB.
 - **Pi:** worker `ready` reported 48 models. The tiers come from `--model-*`; `settings.json` `enabledModels` scopes the default.
+
+## Step 4: Review of PR #4: approval of what was shown, stream resume from rev 0, the published version after a publish
+
+Codex reviewed slop PR #4, which carries this ticket together with SLOP-008 and SLOP-010, and left three findings, all in this ticket's code. I confirmed each in the code and fixed all three. Checking the publish fix in a browser exposed a fourth gap behind the third: pages that never called `claude.use()` had no stream, so no reload reached them. All four are fixed in `d1b4e75`, and the replies are on the PR threads.
+
+### Prompt Context
+
+**User prompt (verbatim):** "Address https://github.com/go-go-golems/slop-computer/pull/4"
+
+**Assistant interpretation:** Act on the review findings on PR #4: verify each one, fix the real ones with tests, push, and answer the threads.
+
+**Inferred user intent:** A PR that is ready to merge.
+
+### What I did
+
+- **P1, approval (`AppScreen.tsx:234`):**
+  - **Confirmed.** `ApproveDialog` listed `app.permissions`, which `listApps` derives from main, and approved version `n`. `approveApp` then granted whatever `n` declares.
+  - **Client fix:** the dialog takes `asks` from the opened view (`newView` returns the version's unapproved permissions), and the mutation sends them.
+  - **Server fix:** `approveApp` requires `permissions` and compares sorted, deduplicated lists with the version's `caps.Permission`. It answers 409 `conflict` on a mismatch and 400 when the list is missing.
+- **P2, resume (`rt.go:431`):**
+  - **Confirmed.** `transport.ts` omitted `after` when `lastRev` was 0, and `viewEvents` caught up only for `after > 0`.
+  - **Runtime fix:** `lastRev` starts at -1 and takes the hello's rev, and `after=` is sent whenever `lastRev >= 0`.
+  - **Server fix:** it catches up whenever `after` is present (`r.URL.Query().Has("after")`).
+  - **Test:** `TestRuntimeResumeFromZero`, with a new `streamFrom(path)` helper.
+- **P2, publish (`transport.ts:246`):**
+  - **Confirmed.** `reload` did `location.reload()` on `/v/<old>/`.
+  - **Runtime fix:** it now posts `{type:"reload", version}` to the shell. The plain reload stays as a fallback after 5 s, or at once when the page isn't framed.
+  - **Workshop fix:** `AppScreen` handles `reload` by opening a view on the new version (on main, unless the URL pins `?v=`, which it then updates), closing the old view and swapping the frame.
+- **Found by testing, connect at boot:** `index.ts` now calls `connect()` at boot in app mode, so the stream (and with it `reload`) exists without a `use()` call.
+
+### Why
+
+- **Approval:** checking on the server makes the approval mean "these permissions, for this version" even if the version or the dialog is stale.
+- **Connecting at boot:** the shell has already opened a view for every app page, so the stream adds no new grant. Without it, the contract's "every open view reloads to it" held only for pages that had touched a capability.
+
+### What worked
+
+- **Tests and checks:**
+  - `GOWORK=off go test ./...` passes and `golangci-lint run` reports 0 issues;
+  - `tsc --noEmit` is clean for the Workshop and the runtime, and the runtime's tests pass (3 of 3);
+  - `make runtime` and `make web` rebuild `claude.js` and the Workshop.
+- **Mutation check:** with the server condition put back to `after > 0`, `TestRuntimeResumeFromZero` fails with `rt_test.go:155: no doc event`.
+- **Browser check** (`$S/pubcheck/check.mjs`, app `pubcheck` with `capabilities: {artifact: {}}`, two tabs, against `$S/slop20` on 18140):
+  - publishing from tab A moved both tabs from `/v/3/` "gen 3" to `/v/4/` "gen 4";
+  - publishing again from tab B moved both to `/v/5/` "gen 5", with no stale-base conflict.
+- **Conformance:** `run.mjs … rt-conformance` passed all 51 checks, and `run.mjs … rt-sample` passed too.
+
+### What didn't work
+
+- **Before connect-at-boot**, the first browser run showed tab A at `/v/3/` "gen 3" and tab B still at `/v/2/` "gen 2". Tab B's page had not called `claude.use`, so it had no stream.
+- **The first mutation attempt** didn't compile: `declared and not used: resume`. I reran it with the variable kept in use.
+
+### What I learned
+
+- The runtime's stream is opened by the shell's `view` message, and that message answers the runtime's `hello`, which `connect()` sends. Before this change, nothing in a page that never called `use()` started that handshake.
+
+### What was tricky to build
+
+- **Swapping views on reload:** the new view must be open before the old one is closed, and before the frame's `key` (its URL) changes. Otherwise the frame's `hello` meets a closed view. The handler ignores versions not newer than the current one, so repeated `reload` events don't open views twice.
+
+### What warrants a second pair of eyes
+
+- **Connecting at boot** opens a stream for every app page, whether or not it uses capabilities. Each such page holds one long-lived request per open tab.
+- **A pinned `?v=` follows a publish** to the new version. I chose this because the publisher's own frame would otherwise go back to the old version.
+
+### What should be done in the future
+
+- Add the two-tab publish check to `web/rt-conformance/run.mjs`. It needs an app that declares `artifact`, which the conformance app does not.
+
+### Code review instructions
+
+- **Server:** `approveApp` in `pkg/server/rt_more.go`, and `viewEvents` (`resume`) in `pkg/server/rt.go`.
+- **Runtime:** `dispatch` (`reload`) and `lastRev` in `web/runtime/src/transport.ts`, and the end of `web/runtime/src/index.ts`.
+- **Workshop:** the `reload` case and `ApproveDialog` in `web/workshop/src/screens/AppScreen.tsx`.
+- **Tests:** `GOWORK=off go test ./pkg/server -run TestRuntime`.
+
+### Technical details
+
+- **Commit:** `d1b4e75`.
+- **PR replies:** discussion_r4419330466, discussion_r4419330644, discussion_r4419330807.

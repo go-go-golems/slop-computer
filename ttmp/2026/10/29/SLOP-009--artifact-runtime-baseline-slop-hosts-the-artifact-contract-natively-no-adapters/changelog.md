@@ -21,3 +21,7 @@ Implemented the runtime: pkg/rt, migration 007, store, views/stream/RPC, claude.
 - /home/manuel/workspaces/2026-10-28/slop-computer/slop-computer/pkg/server/rt.go — views, stream, RPC
 - /home/manuel/workspaces/2026-10-28/slop-computer/slop-computer/web/runtime/src/db.ts — the runtime's db
 - /home/manuel/workspaces/2026-10-28/slop-computer/slop-computer/web/rt-conformance/run.mjs — browser conformance runner
+
+## 2026-10-29
+
+PR #4 review fixed (d1b4e75): approval bound to the permissions shown; stream resume from rev 0; reload opens the published version; runtime connects at boot (diary step 4)
