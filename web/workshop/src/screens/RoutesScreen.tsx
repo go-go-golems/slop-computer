@@ -164,7 +164,8 @@ function RouteDetail({ r, onOpenSite }: { r: RouteView; onOpenSite: (t: SiteTarg
             options={[{ value: 'main', label: `Follow main (now v${a?.main ?? '?'})` }, ...versions.slice().reverse().map(x => ({ value: String(x.n), label: `v${x.n} · ${x.message}` }))]} />
         </>}
         {binds.filter(([, b]) => b.artifact.startsWith('$')).map(([k, b]) => <Fragment key={k}><span>{`Data: ${k}`}</span><span className="dim">{b.artifact === '$site' ? 'the site index: every public URL on this host' : b.artifact}</span></Fragment>)}
-        {binds.filter(([, b]) => !b.artifact.startsWith('$')).map(([k, b]) => <BindingSelect key={k} name={k} artifact={b.artifact} version={b.version}
+        {binds.filter(([, b]) => b.artifact.startsWith('{')).map(([k, b]) => <Fragment key={k}><span>{`Data: ${k}`}</span><span className="dim">{`named in the path (:${b.artifact.slice(1, -1)}): any data artifact of ${r.page}`}</span></Fragment>)}
+        {binds.filter(([, b]) => !b.artifact.startsWith('$') && !b.artifact.startsWith('{')).map(([k, b]) => <BindingSelect key={k} name={k} artifact={b.artifact} version={b.version}
           onChange={ver => set({ bindings: { ...(r.bindings ?? {}), [k]: { artifact: b.artifact, version: ver } } }, ver ? `${b.artifact} pinned v${ver}` : `${b.artifact} follows main`)} />)}
         {r.record ? <><span>Record</span><code>{r.record}</code></> : null}
         {r.pageFrom ? null : <>
@@ -174,6 +175,11 @@ function RouteDetail({ r, onOpenSite }: { r: RouteView; onOpenSite: (t: SiteTarg
             if (live !== !!r.live) void set({ live, access: !live && r.access === 'signed-in' ? 'admins' : r.access }, live ? 'live: the site runs the app' : 'static')
           }} options={[['static', 'static page'], ['live', 'live app']]} />
         </>}
+        {r.live && binds.some(([k, b]) => k === 'target' && b.artifact.startsWith('{')) ? <>
+          <span>New ones</span>
+          <Seg small label="Who may create" value={r.create || 'none'} onChange={x => { const c = x === 'none' ? '' : x; if (c !== (r.create ?? '')) void set({ create: c }, c ? `${c} may create` : 'no one creates') }}
+            options={[['none', 'no one'], ['signed-in', 'signed in'], ['admins', 'admins']]} />
+        </> : null}
         <span>Access</span>
         <Seg small label="Access" value={r.access} onChange={x => { if (x !== r.access) void set({ access: x }, `access ${x}`) }}
           options={r.live ? [['public', 'anyone'], ['signed-in', 'signed in'], ['admins', 'admins']] : [['public', 'public'], ['admins', 'admins']]} />

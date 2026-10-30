@@ -3,8 +3,11 @@ package server
 import (
 	"bytes"
 	"context"
+	"crypto/rand"
+	"encoding/base32"
 	"encoding/json"
 	"html/template"
+	"maps"
 	"net/http"
 	"net/url"
 	"slices"
@@ -133,6 +136,7 @@ func (s *Server) siteLiveRoutes() *http.ServeMux {
 	m.HandleFunc("GET /_site/callback", s.siteCallback)
 	m.HandleFunc("POST /_site/logout", s.shellOnly(s.siteLogout))
 	m.HandleFunc("POST /_site/views", s.shellOnly(s.openSiteView))
+	m.HandleFunc("POST /_site/instances", s.shellOnly(s.createInstance))
 	m.HandleFunc("POST /_site/views/{v}/renew", s.shellOnly(s.siteOwnView(s.renewView)))
 	m.HandleFunc("POST /_site/views/{v}/consent", s.shellOnly(s.siteOwnView(s.consentView)))
 	m.HandleFunc("DELETE /_site/views/{v}", s.shellOnly(s.siteOwnView(s.closeView)))
@@ -298,22 +302,54 @@ func admitted(rt store.Route, p *sitePrincipal) bool {
 	return false
 }
 
-// liveTarget is the target a live route runs its app against: its "target"
-// binding, else the page itself. The target must be the app or a data
-// artifact that names it, so a route never opens unrelated data.
+// liveTarget is the target a live route runs its app against: the one its
+// path names (/blocks/:db with target {db}), its fixed "target" binding, or
+// else the page itself. The target must be the app or a data artifact that
+// names it, so a route never opens unrelated data.
 func (s *Server) liveTarget(ctx context.Context, res routing.Resolution) (store.Artifact, error) {
 	id := res.Route.Page
-	if b, ok := res.Route.Bindings["target"]; ok {
+	param, templated := store.TemplatedTarget(res.Route)
+	if templated {
+		id = res.Params[param]
+	} else if b, ok := res.Route.Bindings["target"]; ok {
 		id = b.Artifact
 	}
 	t, err := s.Store.Artifact(ctx, id)
 	if err != nil {
 		return t, err
 	}
+	if templated && t.Kind != store.KindData {
+		return t, store.ErrNotFound
+	}
 	if t.ID != res.Route.Page && (t.Kind != store.KindData || t.App != res.Route.Page) {
 		return t, store.ErrNotFound
 	}
 	return t, nil
+}
+
+// mayCreate reports whether p may create an instance on a live route.
+func mayCreate(rt store.Route, p *sitePrincipal) bool {
+	if !admitted(rt, p) {
+		return false
+	}
+	switch rt.Create {
+	case "admins":
+		return p.User.Role == store.RoleAdmin
+	case "signed-in", "public":
+		return p.User.Role == store.RoleAdmin || p.User.Role == store.RoleMember
+	}
+	return false
+}
+
+// liveRoute resolves the live route of path on a site request's host.
+func (s *Server) liveRoute(ctx context.Context, r *http.Request, path string) (routing.Resolution, bool, error) {
+	host := s.siteHost(r.Host)
+	routes, err := s.Store.Routes(ctx, host)
+	if err != nil {
+		return routing.Resolution{}, false, err
+	}
+	res, ok := routing.Resolve(servedRoutes(routes), host, path)
+	return res, ok && res.Route.Live && !res.Fallback, nil
 }
 
 // openSiteView answers POST /_site/views {path}: the shell of a live route
@@ -322,31 +358,35 @@ func (s *Server) liveTarget(ctx context.Context, res routing.Resolution) (store.
 func (s *Server) openSiteView(w http.ResponseWriter, r *http.Request) {
 	var in struct {
 		Path string `json:"path"`
+		Link string `json:"link"` // a share link's token, from ?k=
 	}
 	if err := httpx.Read(w, r, &in, 4<<10); err != nil {
 		httpx.Fail(w, 400, "invalid_request", "Send {path}")
 		return
 	}
 	ctx := r.Context()
-	host := s.siteHost(r.Host)
-	routes, err := s.Store.Routes(ctx, host)
+	res, ok, err := s.liveRoute(ctx, r, in.Path)
 	if err != nil {
 		unavailable(w, err)
 		return
 	}
-	res, ok := routing.Resolve(servedRoutes(routes), host, in.Path)
-	if !ok || !res.Route.Live || res.Fallback {
+	if !ok {
 		httpx.Fail(w, 404, "not_found", "No live route here")
-		return
-	}
-	t, err := s.liveTarget(ctx, res)
-	if err != nil {
-		httpx.Fail(w, 404, "not_found", "This route's app has nothing to open")
 		return
 	}
 	p, err := s.siteResolve(r)
 	if err != nil {
 		unavailable(w, err)
+		return
+	}
+	t, err := s.liveTarget(ctx, res)
+	if err != nil {
+		if _, templated := store.TemplatedTarget(res.Route); templated {
+			httpx.JSON(w, 404, map[string]any{"error": httpx.Failure{Code: "no_instance", Message: "There is nothing here yet"},
+				"create": res.Route.Create != "", "mayCreate": mayCreate(res.Route, p)})
+			return
+		}
+		httpx.Fail(w, 404, "not_found", "This route's app has nothing to open")
 		return
 	}
 	if p == nil {
@@ -356,6 +396,21 @@ func (s *Server) openSiteView(w http.ResponseWriter, r *http.Request) {
 	if !admitted(res.Route, p) {
 		httpx.Fail(w, 403, "not_granted", "You do not have access to this")
 		return
+	}
+	if in.Link != "" {
+		_, evs, err := s.Store.RTRedeemLink(ctx, t.ID, in.Link, p.ID())
+		if errors.Is(err, store.ErrNotFound) {
+			httpx.Fail(w, 403, "link_invalid", "This share link has expired or was revoked")
+			return
+		}
+		if err != nil {
+			s.fail(w, err)
+			return
+		}
+		if len(evs) > 0 {
+			s.publish(evs)
+			s.reviewViews(ctx, t.ID)
+		}
 	}
 	n := 0
 	if res.Route.Version != nil {
@@ -373,6 +428,63 @@ func (s *Server) openSiteView(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	httpx.OK(w, viewOut{View: v, Secret: v.Secret, URL: u, Origin: origin, Level: v.Level.String(), Caps: grantedCaps(v), Asks: asks})
+}
+
+// createInstance answers POST /_site/instances {path}: on a live route
+// whose target is named in the path, a person the route's create policy
+// admits gets a new, empty data artifact for its app, which they own.
+// Its id is random, so knowing the URL pattern reveals no instance.
+func (s *Server) createInstance(w http.ResponseWriter, r *http.Request) {
+	var in struct {
+		Path string `json:"path"`
+	}
+	if err := httpx.Read(w, r, &in, 4<<10); err != nil {
+		httpx.Fail(w, 400, "invalid_request", "Send {path}")
+		return
+	}
+	ctx := r.Context()
+	res, ok, err := s.liveRoute(ctx, r, in.Path)
+	if err != nil {
+		unavailable(w, err)
+		return
+	}
+	param, templated := store.TemplatedTarget(res.Route)
+	if !ok || !templated || res.Route.Create == "" {
+		httpx.Fail(w, 404, "not_found", "Nothing can be created here")
+		return
+	}
+	p, err := s.siteResolve(r)
+	if err != nil {
+		unavailable(w, err)
+		return
+	}
+	if p == nil {
+		httpx.Fail(w, 401, "login_required", "Sign in to create one")
+		return
+	}
+	if !mayCreate(res.Route, p) {
+		httpx.Fail(w, 403, "not_granted", "You cannot create one here")
+		return
+	}
+	app, err := s.Store.Artifact(ctx, res.Route.Page)
+	if err != nil {
+		s.fail(w, err)
+		return
+	}
+	title := firstNonEmpty(p.User.DisplayName, "Someone") + ", " + s.Store.Now().Format("2 Jan 2006") // the shell shows "<app> · <title>"
+	b := make([]byte, 10)
+	_, _ = rand.Read(b) // never fails (crypto/rand)
+	id := "i-" + strings.ToLower(base32.StdEncoding.WithPadding(base32.NoPadding).EncodeToString(b))
+	a, evs, err := s.Store.CreateArtifact(ctx, id, store.ArtifactInput{Title: title, Kind: store.KindData, App: app.ID, Project: app.Project}, p.User.ID)
+	if err != nil {
+		s.fail(w, err)
+		return
+	}
+	s.publish(evs)
+	params := maps.Clone(res.Params)
+	params[param] = a.ID
+	path, _ := routing.FillPath(res.Route.Path, params)
+	httpx.JSON(w, http.StatusCreated, map[string]string{"id": a.ID, "path": path})
 }
 
 // shellBoot is what the shell page starts from.

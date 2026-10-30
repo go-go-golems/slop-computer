@@ -5,6 +5,7 @@ import (
 	"database/sql"
 	"encoding/json"
 	"regexp"
+	"slices"
 	"strings"
 	"time"
 
@@ -73,6 +74,44 @@ func TemplateParams(t string) []string {
 		out = append(out, m[1])
 	}
 	return out
+}
+
+// TemplatedTarget returns the path parameter a live route's target is
+// named by: /blocks/:db with target {db} gives "db".
+func TemplatedTarget(r Route) (string, bool) {
+	b, ok := r.Bindings["target"]
+	if !ok || !strings.HasPrefix(b.Artifact, "{") {
+		return "", false
+	}
+	names := TemplateParams(b.Artifact)
+	if len(names) != 1 {
+		return "", false
+	}
+	return names[0], true
+}
+
+// validTemplatedTarget checks the bindings that name a {param}: only a live
+// route's target, exactly one placeholder, one the path has.
+func validTemplatedTarget(r *Route) error {
+	for name, b := range r.Bindings {
+		if !strings.ContainsAny(b.Artifact, "{}") {
+			continue
+		}
+		if name != "target" || !r.Live {
+			return invalidf("binding %s: only a live route's target can be named in the path (--bind 'target={db}')", name)
+		}
+		names := TemplateParams(b.Artifact)
+		if len(names) != 1 || b.Artifact != "{"+names[0]+"}" {
+			return invalidf("a target named in the path is one {param}, such as {db}")
+		}
+		if !slices.Contains(strings.Split(r.Path, "/"), ":"+names[0]) {
+			return invalidf("target uses {%s}, but the path %s has no :%s", names[0], r.Path, names[0])
+		}
+		if b.Version != nil {
+			return invalidf("a target named in the path has no version")
+		}
+	}
+	return nil
 }
 
 // validPageFrom checks a page-from template against its route's path: only
@@ -153,6 +192,12 @@ func (r *Route) validate() error {
 	}
 	if r.Bindings == nil {
 		r.Bindings = map[string]Binding{}
+	}
+	if err := validTemplatedTarget(r); err != nil {
+		return err
+	}
+	if _, templated := TemplatedTarget(*r); r.Create != "" && !templated {
+		return invalidf("create needs a target named in the path, such as /blocks/:db with --bind 'target={db}'")
 	}
 	if r.PageFrom != "" {
 		if r.Live {
@@ -236,6 +281,9 @@ func setRoute(ctx context.Context, s *Store, tx db, r Route, note, actor string)
 		}
 	}
 	for name, b := range r.Bindings {
+		if strings.HasPrefix(b.Artifact, "{") {
+			continue // checked by validate; filled when the route is opened
+		}
 		a, err := getArtifact(ctx, tx, b.Artifact)
 		if err != nil || a.Kind != KindData {
 			return Route{}, nil, invalidf("binding %s: %q is not a data artifact", name, b.Artifact)

@@ -146,7 +146,13 @@ func describeRoute(r *client.Route) string {
 		if b, ok := r.Bindings["target"]; ok {
 			t = b.Artifact
 		}
+		if strings.HasPrefix(t, "{") {
+			t = fmt.Sprintf("the %s data named by :%s", r.Page, t[1:len(t)-1])
+		}
 		out += fmt.Sprintf(" live on %s for %s", t, firstNonEmpty(r.Access, "public"))
+		if r.Create != "" {
+			out += ", created by " + r.Create
+		}
 	}
 	return out
 }

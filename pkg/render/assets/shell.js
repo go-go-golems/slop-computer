@@ -11,6 +11,7 @@
   const meEl = document.getElementById("me");
   const RENEW_MS = 45 * 60 * 1000;
   let view = null;
+  let signedIn = false;
 
   const call = async (method, url, body) => {
     const r = await fetch(url, {
@@ -20,20 +21,45 @@
     });
     return { status: r.status, body: await r.json().catch(() => ({})) };
   };
+  // A share link's token arrives as ?k=; it is sent once, then taken out
+  // of the address bar so it is not bookmarked, shared or sent as a Referer.
+  const params = new URLSearchParams(location.search);
+  let link = params.get("k") || "";
+  if (link) {
+    params.delete("k");
+    const q = params.toString();
+    history.replaceState(history.state, "", location.pathname + (q ? "?" + q : "") + location.hash);
+  }
   const here = () => location.pathname + location.search;
-  const signIn = () => "/_site/login?return=" + encodeURIComponent(here());
+  // signIn keeps a share link that has not been used yet across the handoff.
+  const signIn = () => {
+    const back = here() + (link ? (location.search ? "&" : "?") + "k=" + encodeURIComponent(link) : "");
+    return "/_site/login?return=" + encodeURIComponent(back);
+  };
   const el = (tag, props, ...kids) => {
     const e = Object.assign(document.createElement(tag), props);
     e.append(...kids);
     return e;
   };
 
-  // say shows a message instead of the app, with an optional link.
-  const say = (text, link, label) => {
+  // say shows a message instead of the app, with an optional link or
+  // button (a function).
+  const say = (text, action, label) => {
     frame.hidden = true;
     note.hidden = false;
-    note.replaceChildren(text, ...(link ? [" ", el("a", { href: link, textContent: label })] : []));
+    const more = typeof action === "function"
+      ? el("button", { type: "button", className: "shell-btn primary", textContent: label, onclick: action })
+      : action ? el("a", { href: action, textContent: label }) : null;
+    note.replaceChildren(el("div", {}, el("p", { textContent: text }), ...(more ? [more] : [])));
   };
+
+  // create makes a new instance of this route's app and goes there.
+  async function create() {
+    const { status, body } = await call("POST", "/_site/instances", { path: location.pathname });
+    if (status === 201) return location.assign(body.path);
+    if (status === 401) return say("Sign in to create one.", signIn(), "Sign in");
+    say(body.error?.message || "It could not be created.");
+  }
 
   const fromFrame = (e) => {
     if (!view || e.source !== frame.contentWindow || e.origin !== view.origin) return false;
@@ -44,7 +70,8 @@
 
   async function me() {
     const { body } = await call("GET", "/_site/me");
-    if (body.kind === "user") {
+    signedIn = body.kind === "user";
+    if (signedIn) {
       const out = el("button", { type: "button", className: "shell-link", textContent: "Sign out" });
       out.onclick = async () => { await call("POST", "/_site/logout", {}); location.reload(); };
       meEl.replaceChildren(el("span", { textContent: body.name || "Signed in" }), out);
@@ -54,12 +81,19 @@
   }
 
   async function open(keepFrame) {
-    const { status, body } = await call("POST", "/_site/views", { path: location.pathname });
-    if (status === 401) return say("Sign in to open this.", signIn(), "Sign in");
+    const { status, body } = await call("POST", "/_site/views", { path: location.pathname, link });
+    if (status === 401) return say(link ? "Sign in to open what was shared with you." : "Sign in to open this.", signIn(), "Sign in");
+    if (body.error?.code === "no_instance") {
+      if (body.mayCreate) return say("There is nothing here yet.", create, "Create a new one");
+      if (body.create && !signedIn) return say("There is nothing here yet. Sign in to create one.", signIn(), "Sign in");
+      return say("There is nothing here.");
+    }
+    if (body.error?.code === "link_invalid") { link = ""; return say("This share link has expired or was revoked.", here(), "Try without it"); }
     if (status === 403) return say("You do not have access to this.");
     if (status !== 200) return say(body.error?.message || "This could not be opened.");
     const old = view;
     view = body;
+    link = "";
     if (keepFrame && old) {
       view.url = old.url;
     } else {
@@ -140,6 +174,5 @@
   });
   addEventListener("pagehide", () => { if (view) close(view); });
   setInterval(renew, RENEW_MS);
-  me();
-  open(false);
+  me().finally(() => open(false)); // open needs to know whether someone is signed in
 })();

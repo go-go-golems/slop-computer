@@ -7,6 +7,7 @@ import (
 	"time"
 
 	"github.com/go-go-golems/slop-computer/pkg/httpx"
+	"github.com/go-go-golems/slop-computer/pkg/routing"
 	"github.com/go-go-golems/slop-computer/pkg/rt"
 	"github.com/go-go-golems/slop-computer/pkg/store"
 	"github.com/pkg/errors"
@@ -39,14 +40,15 @@ func levelCap(role string) rt.Level {
 }
 
 // levelOf is a person's level on a target: admins administer every target,
-// the creator owns it, and grants give the rest.
+// its creator owns it (a member too: an instance they created on a site),
+// and grants give the rest, capped by role.
 func (s *Server) levelOf(ctx context.Context, u store.User, t store.Artifact) rt.Level {
 	subjects := subjectsOf(u)
 	if subjects == nil {
 		return rt.LevelNone
 	}
 	if t.CreatedBy != nil && *t.CreatedBy == u.ID {
-		return min(rt.LevelOwner, levelCap(u.Role))
+		return rt.LevelOwner // a member owns the instances they created
 	}
 	best := rt.LevelNone
 	if u.Role == store.RoleAdmin {
@@ -84,6 +86,8 @@ func (s *Server) accessRoutes(m *http.ServeMux) {
 	m.HandleFunc("GET /api/rt/targets/{t}/access", s.guard(admin, scopeRW, s.targetAccess))
 	m.HandleFunc("PUT /api/rt/targets/{t}/grants/{subject}", s.guard(admin, scopeRW, s.putGrant))
 	m.HandleFunc("DELETE /api/rt/targets/{t}/grants/{subject}", s.guard(admin, scopeRW, s.deleteGrant))
+	m.HandleFunc("POST /api/rt/targets/{t}/links", s.guard(admin, scopeRW, s.postLink))
+	m.HandleFunc("DELETE /api/rt/targets/{t}/links/{id}", s.guard(admin, scopeRW, s.deleteLink))
 }
 
 type accessGrant struct {
@@ -102,8 +106,42 @@ type accessView struct {
 
 type accessRoute struct {
 	Host   string `json:"host"`
-	Path   string `json:"path"`
+	Path   string `json:"path"` // the route's path, filled with the target where it names it
 	Access string `json:"access"`
+	URL    string `json:"url"`
+}
+
+// liveRoutesOf lists the live routes that open t: a route whose path names
+// its target (/blocks/:db) for any data artifact of its app, a fixed target
+// binding, or the app on itself.
+func (s *Server) liveRoutesOf(ctx context.Context, t store.Artifact) []accessRoute {
+	out := []accessRoute{}
+	rs, err := s.Store.Routes(ctx, "")
+	if err != nil {
+		return out
+	}
+	app := t.ID
+	if t.App != "" {
+		app = t.App
+	}
+	for _, r := range rs {
+		if !r.Live || r.Page != app {
+			continue
+		}
+		path := r.Path
+		if param, ok := store.TemplatedTarget(r); ok {
+			if t.Kind != store.KindData {
+				continue
+			}
+			if path, ok = routing.FillPath(r.Path, map[string]string{param: t.ID}); !ok {
+				continue
+			}
+		} else if b, ok := r.Bindings["target"]; (ok && b.Artifact != t.ID) || (!ok && t.ID != app) {
+			continue
+		}
+		out = append(out, accessRoute{Host: r.Host, Path: path, Access: r.Access, URL: s.siteOrigin(r.Host) + path})
+	}
+	return out
 }
 
 // targetAccess answers "who has access to this": who may open it (owner,
@@ -139,21 +177,16 @@ func (s *Server) targetAccess(w http.ResponseWriter, r *http.Request) {
 		views = append(views, accessView{View: v.ID, Principal: v.User, Name: v.Name, Kind: v.Kind, Level: v.Level.String(), Since: v.Created})
 	}
 	slices.SortFunc(views, func(a, b accessView) int { return a.Since.Compare(b.Since) })
-	routes := []accessRoute{}
-	if rs, err := s.Store.Routes(ctx, ""); err == nil {
-		app := t.ID
-		if t.App != "" {
-			app = t.App
-		}
-		for _, rt := range rs {
-			if !rt.Live || rt.Page != app {
-				continue
-			}
-			if b, ok := rt.Bindings["target"]; (ok && b.Artifact == t.ID) || (!ok && t.ID == app) {
-				routes = append(routes, accessRoute{Host: rt.Host, Path: rt.Path, Access: rt.Access})
-			}
-		}
+	links, err := s.Store.RTLinks(ctx, t.ID)
+	if err != nil {
+		unavailable(w, err)
+		return
 	}
+	if links == nil {
+		links = []store.Link{}
+	}
+	out["links"] = links
+	routes := s.liveRoutesOf(ctx, t)
 	out["grants"], out["views"], out["routes"] = grants, views, routes
 	httpx.OK(w, out)
 }
@@ -191,4 +224,52 @@ func (s *Server) deleteGrant(w http.ResponseWriter, r *http.Request) {
 	s.publish(evs)
 	s.reviewViews(r.Context(), t)
 	httpx.OK(w, map[string]bool{"removed": true})
+}
+
+// postLink makes a share link: {level: view|interact, days?}. The token is
+// in the answer only, with the URLs of the live routes that open the target.
+func (s *Server) postLink(w http.ResponseWriter, r *http.Request) {
+	var in struct {
+		Level string `json:"level"`
+		Days  int    `json:"days"`
+	}
+	if err := httpx.Read(w, r, &in, 1024); err != nil || in.Days < 0 || in.Days > 3650 {
+		httpx.Fail(w, 400, "invalid_request", "Send {level, days?}; days is 0 (no expiry) to 3650")
+		return
+	}
+	ctx := r.Context()
+	t, err := s.Store.Artifact(ctx, r.PathValue("t"))
+	if err != nil {
+		s.fail(w, err)
+		return
+	}
+	var expires *time.Time
+	if in.Days > 0 {
+		e := s.Store.Now().Add(time.Duration(in.Days) * 24 * time.Hour)
+		expires = &e
+	}
+	token, link, evs, err := s.Store.RTCreateLink(ctx, t.ID, in.Level, expires, actor(r))
+	if err != nil {
+		s.fail(w, err)
+		return
+	}
+	s.publish(evs)
+	urls := []string{}
+	for _, lr := range s.liveRoutesOf(ctx, t) {
+		urls = append(urls, lr.URL+"?k="+token)
+	}
+	httpx.JSON(w, http.StatusCreated, map[string]any{"link": link, "token": token, "urls": urls})
+}
+
+// deleteLink revokes a share link and the grants people got through it.
+func (s *Server) deleteLink(w http.ResponseWriter, r *http.Request) {
+	t := r.PathValue("t")
+	evs, err := s.Store.RTRevokeLink(r.Context(), t, r.PathValue("id"), actor(r))
+	if err != nil {
+		s.fail(w, err)
+		return
+	}
+	s.publish(evs)
+	s.reviewViews(r.Context(), t)
+	httpx.OK(w, map[string]bool{"revoked": true})
 }

@@ -422,3 +422,170 @@ func TestSitePagesIsolated(t *testing.T) {
 		t.Fatalf("/_site/ allows other origins: %v", hdr)
 	}
 }
+
+// A route can name its target in the path: /board/:db opens any
+// workspace of board, nothing else; signed-in people create their own
+// instances and own them (SLOP-011 phase 3).
+func TestInstances(t *testing.T) {
+	h, manuel := liveSetup(t)
+	ctx := context.Background()
+	route := map[string]any{"host": "site.test", "path": "/board/:db", "page": "board", "live": true, "access": "signed-in", "create": "signed-in",
+		"bindings": map[string]any{"target": map[string]any{"artifact": "{db}"}}}
+	if code := manuel.do("PUT", "/api/routes", route, nil); code != 200 {
+		t.Fatalf("templated route: %d", code)
+	}
+	for name, bad := range map[string]map[string]any{
+		"not live":      {"host": "site.test", "path": "/z/:db", "page": "board", "bindings": map[string]any{"target": map[string]any{"artifact": "{db}"}}},
+		"unknown param": {"host": "site.test", "path": "/z/:db", "page": "board", "live": true, "bindings": map[string]any{"target": map[string]any{"artifact": "{x}"}}},
+		"prefixed":      {"host": "site.test", "path": "/z/:db", "page": "board", "live": true, "bindings": map[string]any{"target": map[string]any{"artifact": "ws-{db}"}}},
+		"other binding": {"host": "site.test", "path": "/z/:db", "page": "board", "live": true, "bindings": map[string]any{"notes": map[string]any{"artifact": "{db}"}}},
+		"create, fixed": {"host": "site.test", "path": "/z", "page": "board", "live": true, "create": "signed-in"},
+	} {
+		if code := manuel.do("PUT", "/api/routes", bad, nil); code != 400 {
+			t.Errorf("%s: %d", name, code)
+		}
+	}
+
+	site := h.handoff(manuel, "/")
+	if _, v, code := site.siteView("/board/ws"); code != 200 || v["level"] != "owner" {
+		t.Fatalf("an existing workspace: %d %v", code, v)
+	}
+	// The app itself, or another app's data, is not an instance.
+	h.pushFiles(h.token(manuel.id(), store.ScopeRead, store.ScopeWrite), "other", map[string]any{"title": "Other", "kind": "data"}, nil, map[string]string{"a.md": "x"})
+	for _, p := range []string{"/board/board", "/board/other"} {
+		var out map[string]any
+		if code := site.json("POST", "/_site/views", map[string]any{"path": p}, &out); code != 404 || out["error"].(map[string]any)["code"] != "no_instance" {
+			t.Fatalf("%s: %d %v", p, code, out)
+		}
+	}
+
+	// A member creates one, owns it, and nobody else gets in without a grant.
+	alexB := h.signIn("alex")
+	if _, err := h.st.SetUserRole(ctx, alexB.id(), store.RoleMember); err != nil {
+		t.Fatal(err)
+	}
+	alex := h.handoff(h.signIn("alex"), "/")
+	var miss map[string]any
+	if code := alex.json("POST", "/_site/views", map[string]any{"path": "/board/new"}, &miss); code != 404 || miss["mayCreate"] != true {
+		t.Fatalf("an unknown instance: %d %v", code, miss)
+	}
+	var made struct{ ID, Path string }
+	if code := alex.json("POST", "/_site/instances", map[string]any{"path": "/board/new"}, &made); code != 201 || !strings.HasPrefix(made.ID, "i-") || made.Path != "/board/"+made.ID {
+		t.Fatalf("create: %d %+v", code, made)
+	}
+	a, err := h.st.Artifact(ctx, made.ID)
+	if err != nil || a.Kind != store.KindData || a.App != "board" || a.CreatedBy == nil || *a.CreatedBy != alexB.id() {
+		t.Fatalf("the instance %+v %v", a, err)
+	}
+	vc, v, code := alex.siteView(made.Path)
+	if code != 200 || v["level"] != "owner" {
+		t.Fatalf("the creator: %d %v", code, v)
+	}
+	if _, e := vc.rpc("db.write", map[string]any{"path": "notes/n1", "op": "set", "body": map[string]any{"by": "alex"}}); e != "" {
+		t.Fatalf("the owner could not write: %s", e)
+	}
+	if _, _, code := alex.siteView("/board/ws"); code != 403 {
+		t.Fatalf("someone else's workspace: %d", code)
+	}
+
+	// The create policy: admins only keeps members out; no policy, no create.
+	route["create"] = "admins"
+	if code := manuel.do("PUT", "/api/routes", route, nil); code != 200 {
+		t.Fatal(code)
+	}
+	if code := alex.json("POST", "/_site/instances", map[string]any{"path": "/board/new"}, nil); code != 403 {
+		t.Fatalf("create by a member under admins: %d", code)
+	}
+	delete(route, "create")
+	if code := manuel.do("PUT", "/api/routes", route, nil); code != 200 {
+		t.Fatal(code)
+	}
+	if code := site.json("POST", "/_site/instances", map[string]any{"path": "/board/new"}, nil); code != 404 {
+		t.Fatalf("create without a policy: %d", code)
+	}
+	anon := &siteBrowser{h: h}
+	route["create"] = "signed-in"
+	_ = manuel.do("PUT", "/api/routes", route, nil)
+	if code := anon.json("POST", "/_site/instances", map[string]any{"path": "/board/new"}, nil); code != 401 {
+		t.Fatalf("create signed out: %d", code)
+	}
+}
+
+// A share link gives whoever opens it its level, as a grant via the link;
+// revoking the link takes those grants away (SLOP-011 phase 3).
+func TestShareLinks(t *testing.T) {
+	h, manuel := liveSetup(t)
+	ctx := context.Background()
+	route := map[string]any{"host": "site.test", "path": "/board/team", "page": "board", "live": true, "access": "signed-in",
+		"bindings": map[string]any{"target": map[string]any{"artifact": "ws"}}}
+	if code := manuel.do("PUT", "/api/routes", route, nil); code != 200 {
+		t.Fatalf("route: %d", code)
+	}
+	var made struct {
+		Link  map[string]any `json:"link"`
+		Token string         `json:"token"`
+		URLs  []string       `json:"urls"`
+	}
+	if code := manuel.do("POST", "/api/rt/targets/ws/links", map[string]any{"level": "interact", "days": 7}, &made); code != 201 ||
+		made.Token == "" || len(made.URLs) != 1 || made.URLs[0] != "http://site.test/board/team?k="+made.Token {
+		t.Fatalf("link: %d %+v", code, made)
+	}
+	if code := manuel.do("POST", "/api/rt/targets/ws/links", map[string]any{"level": "admin"}, nil); code != 400 {
+		t.Fatalf("an admin link: %d", code)
+	}
+
+	alexB := h.signIn("alex")
+	if _, err := h.st.SetUserRole(ctx, alexB.id(), store.RoleMember); err != nil {
+		t.Fatal(err)
+	}
+	alex := h.handoff(h.signIn("alex"), "/")
+	if _, _, code := alex.siteView("/board/team"); code != 403 {
+		t.Fatalf("without the link: %d", code)
+	}
+	open := func(token string) (map[string]any, int) {
+		var v map[string]any
+		code := alex.json("POST", "/_site/views", map[string]any{"path": "/board/team", "link": token}, &v)
+		return v, code
+	}
+	if v, code := open("nope"); code != 403 || v["error"].(map[string]any)["code"] != "link_invalid" {
+		t.Fatalf("a wrong token: %d %v", code, v)
+	}
+	if v, code := open(made.Token); code != 200 || v["level"] != "interact" {
+		t.Fatalf("with the link: %d %v", code, v)
+	}
+	// The grant stays: no link needed next time.
+	_, v, code := alex.siteView("/board/team")
+	if code != 200 || v["level"] != "interact" {
+		t.Fatalf("after the link: %d %v", code, v)
+	}
+	// A link never lowers a grant someone already has.
+	if c := manuel.do("PUT", "/api/rt/targets/ws/grants/"+alexB.id(), map[string]any{"level": "admin"}, nil); c != 200 {
+		t.Fatal(c)
+	}
+	if v, code := open(made.Token); code != 200 || v["level"] != "admin" {
+		t.Fatalf("a link lowered a grant: %d %v", code, v)
+	}
+	_ = manuel.do("DELETE", "/api/rt/targets/ws/grants/"+alexB.id(), nil, nil)
+	_, _ = open(made.Token)
+
+	var acc struct {
+		Grants []map[string]any `json:"grants"`
+		Links  []map[string]any `json:"links"`
+	}
+	if code := manuel.do("GET", "/api/rt/targets/ws/access", nil, &acc); code != 200 || len(acc.Links) != 1 || len(acc.Grants) != 1 || acc.Grants[0]["via"] != made.Link["id"] {
+		t.Fatalf("access: %d %+v", code, acc)
+	}
+	id := made.Link["id"].(string)
+	if code := manuel.do("DELETE", "/api/rt/targets/ws/links/"+id, nil, nil); code != 200 {
+		t.Fatalf("revoke: %d", code)
+	}
+	if _, _, code := alex.siteView("/board/team"); code != 403 {
+		t.Fatalf("after revoking the link: %d", code)
+	}
+	if _, code := open(made.Token); code != 403 {
+		t.Fatalf("a revoked link: %d", code)
+	}
+	if code := manuel.do("DELETE", "/api/rt/targets/ws/links/"+id, nil, nil); code != 404 {
+		t.Fatalf("revoking twice: %d", code)
+	}
+}
