@@ -27,3 +27,7 @@ Phases 1-2 implemented: serveFile with content/place classes (fixes page-relativ
 ## 2026-10-30
 
 Phase 3 (4b5076b), seed pinning (e3d7bd8), help topic + storefront v2 sources (2004edf); verified locally (page 3.1 KB, catalog script 99.8 KB gz cached, covers ~30 KB at 640; conformance 51/51 and 20/20). Diary step 5.
+
+## 2026-10-30
+
+Branch task/fast-sites-and-sign-in pushed; PR https://github.com/go-go-golems/slop-computer/pull/5 opened (SLOP-012 + SLOP-013). Remaining: merge, deploy, push storefront v2, re-run import push, measure on the cluster; manual sign-in check on the cluster.
