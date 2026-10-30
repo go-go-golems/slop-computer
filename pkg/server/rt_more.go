@@ -3,6 +3,7 @@ package server
 import (
 	"context"
 	"encoding/json"
+	"fmt"
 	"io"
 	"net/http"
 	"regexp"
@@ -692,19 +693,29 @@ func (s *Server) listApps(w http.ResponseWriter, r *http.Request) {
 }
 
 // approveApp approves the slop permissions an app version asks for. Only a
-// browser session can approve: no token, no app.
+// browser session can approve: no token, no app. The request names the
+// permissions the admin was shown, and they must be exactly the version's.
 func (s *Server) approveApp(w http.ResponseWriter, r *http.Request) {
 	var in struct {
-		Version int `json:"version"`
+		Version     int      `json:"version"`
+		Permissions []string `json:"permissions"`
 	}
-	if err := httpx.Read(w, r, &in, 1<<10); err != nil {
-		httpx.Fail(w, 400, "invalid_request", "Send {version}")
+	if err := httpx.Read(w, r, &in, 4<<10); err != nil || in.Permissions == nil {
+		httpx.Fail(w, 400, "invalid_request", "Send {version, permissions}")
 		return
 	}
 	id := r.PathValue("id")
 	caps, v, err := s.appCaps(r.Context(), id, in.Version)
 	if err != nil {
 		s.fail(w, err)
+		return
+	}
+	shown := slices.Clone(in.Permissions)
+	slices.Sort(shown)
+	asked := slices.Clone(caps.Permission)
+	slices.Sort(asked)
+	if !slices.Equal(slices.Compact(shown), slices.Compact(asked)) {
+		httpx.Fail(w, 409, "conflict", fmt.Sprintf("Version %d asks for other permissions than those shown; reopen it and review them again", v.N))
 		return
 	}
 	a, err := s.Store.RTApprove(r.Context(), id, v.N, caps.Permission, actor(r))

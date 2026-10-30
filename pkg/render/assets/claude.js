@@ -170,7 +170,7 @@
   }
   var hello = null;
   var helloWaiters = [];
-  var lastRev = 0;
+  var lastRev = -1;
   var connected = false;
   var streamGen = 0;
   var terminal = "";
@@ -203,7 +203,7 @@
     (async function loop() {
       while (gen === streamGen && !terminal) {
         try {
-          const url = "/_rt/events" + (lastRev ? "?after=" + lastRev : "");
+          const url = "/_rt/events" + (lastRev >= 0 ? "?after=" + lastRev : "");
           const r = await fetch(url, { headers: { Authorization: "Bearer " + secret }, credentials: "omit", cache: "no-store" });
           if (r.status === 401) {
             setConnected(false);
@@ -261,7 +261,7 @@
     switch (type) {
       case "hello":
         hello = ev;
-        if (!lastRev) lastRev = ev.rev;
+        if (lastRev < 0) lastRev = ev.rev;
         setConnected(true);
         resolveHello(hello);
         emit("hello", ev);
@@ -276,7 +276,8 @@
         emit("terminal", "revoked");
         return;
       case "reload":
-        location.reload();
+        post({ type: "reload", version: ev.version });
+        setTimeout(() => location.reload(), framed ? 5e3 : 0);
         return;
     }
     emit(type, ev);
@@ -1693,4 +1694,5 @@
   } catch {
     window.claude = claude;
   }
+  if (boot.mode === "app") void connect();
 })();

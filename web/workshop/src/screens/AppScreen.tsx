@@ -92,6 +92,27 @@ export function AppScreen({ target, version, args }: { target: string; version?:
           return
         case 'compose': setAsk({ kind: 'compose', id: String(m.id), anchor: m.anchor, text: String(m.text ?? '') }); return
         case 'permissions': setAsk({ kind: 'permissions', id: String(m.id) }); return
+        case 'reload': {
+          // The app published version n: reopen the view on it (a new frame
+          // URL), and keep a pinned ?v= in the Workshop's URL in step.
+          const n = Number(m.version)
+          if (!Number.isInteger(n) || n <= v.version) return
+          void (async () => {
+            try {
+              const nv = await openView({ target, version: version ? n : undefined }).unwrap()
+              if (cancelled) { closeView(nv.view); return }
+              closeView(v.view)
+              viewRef.current = nv
+              setView(nv)
+              if (version) {
+                const q = new URLSearchParams(location.search)
+                q.set('v', String(n))
+                history.replaceState(history.state, '', location.pathname + '?' + q.toString())
+              }
+            } catch (e) { setProblem(errorText(e)) }
+          })()
+          return
+        }
         case 'navigate':
           if (typeof m.target === 'string' && /^[a-z0-9][a-z0-9-]{0,62}$/.test(m.target)) navigate(runPath(m.target))
           return
@@ -163,7 +184,7 @@ export function AppScreen({ target, version, args }: { target: string; version?:
           return true
         } catch (e) { toast(errorText(e), true); return false }
       }} /> : null}
-      {approving && app && view ? <ApproveDialog app={app} n={view.version} onClose={() => setApproving(false)} /> : null}
+      {approving && app && view ? <ApproveDialog app={app} n={view.version} asks={view.asks ?? []} onClose={() => setApproving(false)} /> : null}
     </div>
   )
 }
@@ -228,10 +249,10 @@ function AskDialog({ ask, app, onAnswer, onConsent, onComment }: {
 }
 
 // ApproveDialog lists the slop permissions an app version asks for, in
-// plain words. Approval is per version; the app reopens with them.
-export function ApproveDialog({ app, n, onClose }: { app: AppInfo; n: number; onClose: () => void }) {
+// plain words: `asks` comes from that version's view, not from main. The
+// server approves only if they are still exactly the version's permissions.
+export function ApproveDialog({ app, n, asks, onClose }: { app: AppInfo; n: number; asks: string[]; onClose: () => void }) {
   const [approve, { isLoading }] = useApproveAppMutation()
-  const asks = app.permissions ?? []
   return (
     <div className="modal" onClick={e => { if (e.target === e.currentTarget) onClose() }}>
       <div className="dialog" role="dialog" aria-label="Approve app">
@@ -244,7 +265,7 @@ export function ApproveDialog({ app, n, onClose }: { app: AppInfo; n: number; on
           <p className="muted" style={{ margin: 0, fontSize: 'var(--fs-xs)' }}>{`An app never sees or changes people, tokens or the audit log. Everything it changes is logged as “app ${app.artifact}@${n}”.`}</p>
         </div>
         <footer><Button onClick={onClose}>Cancel</Button><Button variant="primary" disabled={isLoading} onClick={async () => {
-          try { await approve({ id: app.artifact, version: n }).unwrap(); toast(`${app.title} v${n} is approved; reopen it to use them.`); onClose(); location.reload() } catch (e) { toast(errorText(e), true) }
+          try { await approve({ id: app.artifact, version: n, permissions: asks }).unwrap(); toast(`${app.title} v${n} is approved; reopen it to use them.`); onClose(); location.reload() } catch (e) { toast(errorText(e), true) }
         }}>{`Approve v${n}`}</Button></footer>
       </div>
     </div>

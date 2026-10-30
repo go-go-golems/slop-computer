@@ -49,7 +49,13 @@ func (vc *viewClient) req(method, path string, body io.Reader) *http.Request {
 // stream connects the view's stream and returns once hello arrived.
 func (vc *viewClient) stream() map[string]any {
 	vc.h.t.Helper()
-	resp, err := http.DefaultClient.Do(vc.req("GET", "/_rt/events", nil))
+	return vc.streamFrom("/_rt/events")
+}
+
+// streamFrom connects to a stream URL (with ?after= to resume).
+func (vc *viewClient) streamFrom(path string) map[string]any {
+	vc.h.t.Helper()
+	resp, err := http.DefaultClient.Do(vc.req("GET", path, nil))
 	if err != nil || resp.StatusCode != 200 {
 		vc.h.t.Fatalf("stream: %v %v", err, resp)
 	}
@@ -120,6 +126,35 @@ func (vc *viewClient) rpc(method string, args any) (map[string]any, string) {
 	}
 	m, _ := out.Result.(map[string]any)
 	return m, ""
+}
+
+// A view that saw rev 0 (an empty target) and reconnects with after=0 gets
+// the writes made while it was away.
+func TestRuntimeResumeFromZero(t *testing.T) {
+	h := newHarness(t, store.RoleAdmin)
+	manuel := h.signIn("manuel")
+	tok := h.token(manuel.id(), store.ScopeRead, store.ScopeWrite)
+	manifest := map[string]any{"capabilities": map[string]any{"db": map[string]any{}}}
+	h.pushFiles(tok, "notes", map[string]any{"title": "Notes", "kind": "page"}, manifest,
+		map[string]string{"index.html": "<!doctype html><html><head><title>n</title></head><body>n</body></html>"})
+	h.pushFiles(tok, "ws0", map[string]any{"title": "Empty", "kind": "data", "app": "notes"}, nil, map[string]string{"readme.md": "x"})
+
+	a := h.openView(manuel, "ws0")
+	if hello := a.stream(); hello["rev"].(float64) != 0 {
+		t.Fatalf("hello on an empty target %v", hello)
+	}
+	if _, e := a.rpc("db.subscribe", map[string]any{"sub": "s1", "path": "tasks", "coll": true}); e != "" {
+		t.Fatalf("subscribe %s", e)
+	}
+	// Another view writes while a is between streams; a resumes from 0.
+	b := h.openView(manuel, "ws0")
+	if _, e := b.rpc("db.write", map[string]any{"path": "tasks/t1", "op": "set", "body": map[string]any{"n": 1}}); e != "" {
+		t.Fatalf("set %s", e)
+	}
+	a.streamFrom("/_rt/events?after=0")
+	if ev := a.next("doc"); ev.Data["path"] != "tasks/t1" {
+		t.Fatalf("resumed doc %v", ev)
+	}
 }
 
 func TestRuntimeViews(t *testing.T) {
@@ -253,7 +288,13 @@ func TestRuntimeViews(t *testing.T) {
 		t.Fatalf("unapproved slop %d", resp.StatusCode)
 	}
 	_ = resp.Body.Close()
-	if code := manuel.do("POST", "/api/apps/tracker/approve", map[string]any{"version": 1}, &out); code != 200 {
+	if code := manuel.do("POST", "/api/apps/tracker/approve", map[string]any{"version": 1, "permissions": []string{}}, &out); code != 409 {
+		t.Fatalf("approve with other permissions shown %d %v", code, out)
+	}
+	if code := manuel.do("POST", "/api/apps/tracker/approve", map[string]any{"version": 1}, &out); code != 400 {
+		t.Fatalf("approve without permissions %d %v", code, out)
+	}
+	if code := manuel.do("POST", "/api/apps/tracker/approve", map[string]any{"version": 1, "permissions": []string{"routes:read"}}, &out); code != 200 {
 		t.Fatalf("approve %d %v", code, out)
 	}
 	c := h.openView(manuel, "ws1")

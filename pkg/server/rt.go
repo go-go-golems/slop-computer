@@ -392,6 +392,9 @@ func (s *Server) viewEvents(w http.ResponseWriter, r *http.Request) {
 	ctx := r.Context()
 	ch := v.Attach()
 	defer v.Detach(ch)
+	// after is the rev a reconnecting view saw last; 0 is a valid resume
+	// point (the target was empty), so its presence, not its value, counts.
+	resume := r.URL.Query().Has("after")
 	after, _ := strconv.ParseInt(r.URL.Query().Get("after"), 10, 64)
 	head, err := s.Store.RTHead(ctx, v.Target)
 	if err != nil {
@@ -428,7 +431,7 @@ func (s *Server) viewEvents(w http.ResponseWriter, r *http.Request) {
 	if writeSSE(w, "hello", 0, s.hello(ctx, v, head)) != nil {
 		return
 	}
-	if after > 0 && after < head && catchUp(after) != nil {
+	if resume && after >= 0 && after < head && catchUp(after) != nil {
 		return
 	}
 	for _, room := range s.roomsOf(v) {

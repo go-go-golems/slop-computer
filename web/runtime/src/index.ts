@@ -66,3 +66,9 @@ try {
 } catch {
   (window as unknown as { claude: unknown }).claude = claude;
 }
+
+// In the Workshop, connect at boot rather than at the first use(): the
+// shell opened a view for this page already, and its stream carries the
+// reload after a publish to every open page, including pages that never
+// call use().
+if (boot.mode === "app") void connect();

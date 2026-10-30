@@ -130,7 +130,9 @@ function renew(): Promise<boolean> {
 
 let hello: Hello | null = null;
 let helloWaiters: Array<(h: Hello | null) => void> = [];
-let lastRev = 0;
+// lastRev is the newest target rev this view has seen; -1 until the first
+// hello, so a resume from rev 0 (an empty target) still catches up.
+let lastRev = -1;
 let connected = false;
 let streamGen = 0;
 let terminal = "";
@@ -168,7 +170,7 @@ function startStream() {
   (async function loop() {
     while (gen === streamGen && !terminal) {
       try {
-        const url = "/_rt/events" + (lastRev ? "?after=" + lastRev : "");
+        const url = "/_rt/events" + (lastRev >= 0 ? "?after=" + lastRev : "");
         const r = await fetch(url, { headers: { Authorization: "Bearer " + secret }, credentials: "omit", cache: "no-store" });
         if (r.status === 401) {
           setConnected(false);
@@ -228,7 +230,7 @@ function dispatch(type: string, ev: any) {
   switch (type) {
     case "hello":
       hello = ev as Hello;
-      if (!lastRev) lastRev = ev.rev;
+      if (lastRev < 0) lastRev = ev.rev;
       setConnected(true);
       resolveHello(hello);
       emit("hello", ev);
@@ -243,7 +245,11 @@ function dispatch(type: string, ev: any) {
       emit("terminal", "revoked");
       return;
     case "reload":
-      location.reload();
+      // The app published a new version. This frame's URL names the old
+      // one, so the shell reopens the view on the new version; a plain
+      // reload is the fallback when no shell answers.
+      post({ type: "reload", version: ev.version });
+      setTimeout(() => location.reload(), framed ? 5000 : 0);
       return;
   }
   emit(type, ev);

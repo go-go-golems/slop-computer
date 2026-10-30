@@ -81,8 +81,8 @@ export const slopApi = createApi({
       query: body => ({ url: 'tokens', method: 'POST', body }),
     }),
     revokeToken: b.mutation<void, string>({ query: id => ({ url: `tokens/${id}`, method: 'DELETE' }) }),
-    approveApp: b.mutation<Approval, { id: string; version: number }>({
-      query: ({ id, version }) => ({ url: `apps/${id}/approve`, method: 'POST', body: { version } }),
+    approveApp: b.mutation<Approval, { id: string; version: number; permissions: string[] }>({
+      query: ({ id, version, permissions }) => ({ url: `apps/${id}/approve`, method: 'POST', body: { version, permissions } }),
       invalidatesTags: ['App'],
     }),
     openView: b.mutation<ViewInfo, { target: string; version?: number }>({ query: body => ({ url: 'rt/views', method: 'POST', body }) }),
