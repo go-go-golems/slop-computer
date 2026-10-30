@@ -1031,3 +1031,64 @@ without one get a summary card. Nothing runs a page except the main preview.
   1. `GOWORK=off go test ./pkg/server -run TestCovers -count=1`
   2. `cd web/workshop && npx tsc --noEmit -p .`
   3. Open the Artifacts screen locally and check that no iframes load.
+
+## Step 11: Storefront v2 on the cluster, and covers pinned to numbered versions
+
+The user asked whether the storefront on `site.*` could change now. It could:
+storefront v2 only needs what sha-ec4c4c9 already serves, namely `?w=`,
+the manifest `files` key and `/_r/` data scripts. I made two changes on the
+cluster:
+- pushed storefront and storefront-entry v2 from `various/storefront-v2/`;
+- re-ran the francois import push, so covers link to numbered media versions.
+
+The front page now loads one data script instead of four, and its covers are
+scaled, immutable content URLs. It reaches network idle in 2.3 s from an empty
+browser cache, against 13 s on the first, cold run of the same probe. These are
+the last phase 4 and importer tasks.
+
+### Prompt Context
+**User prompt (verbatim):** "ok, but now we can also change the storefront app that is served on site.* no?"
+**Assistant interpretation:** Do the outstanding SLOP-012 cluster step: publish storefront v2 and pin its cover links.
+**Inferred user intent:** The public front page should get the speed-ups, not just the Workshop.
+**Commit (code):** N/A (cluster content). Cluster versions: storefront v2, storefront-entry v2, francois-catalog v3.
+
+### What I did
+- Compared the cluster with the v2 sources:
+  - The cluster had v1 of both pages; v2 was derived from v1 (`boutique.css` sha `66b1738814` on both sides).
+  - `diff` of `index.html`: `boutique.css?v=2`; covers through `slop.image(u, 640)` with `slop.srcset(u, [320…1280])` and `sizes`; the first 6 covers `fetchpriority="high"`, the rest lazy; the monogram fallback also catches images that failed before the listener was attached.
+  - The manifests move the media shards from `reads` to `files`.
+- Pushed from a scratch copy (`$S/sf-push/`), so no folder state was written into the repo. `slop push $S/sf-push/<page> --server https://slop.yolo.scapegoat.dev -m "…"` gave `pushed storefront v2 · 2 files · 34 KB` and `pushed storefront-entry v2 · 2 files · 40 KB`. The routes `/` and `/apps/:id` follow main.
+- Chose the seed. Of `fr-api2` and `fr-api3`, only `fr-api3` matches the cluster's `francois-catalog` v2: 104 of 104 files identical, against 70 of 104 for `fr-api2`.
+- `slop import francois push --dir fr-api3 --server https://slop.yolo.scapegoat.dev` gave `pushed 1 versions; 4 unchanged, 113 already imported`, which is francois-catalog v3 with pinned links.
+- Measured with `scripts/01-measure-site.py`, and in a clean Chromium with `scratchpad/probe/site.cjs`, which counts image bytes, monograms and errors and takes screenshots.
+
+### What worked
+
+| | Before | After v2 | After pinning |
+|---|---|---|---|
+| Data scripts on `/` | catalog + 3 media (≈172 KB gz) | catalog only (99819 B gz) | catalog v3 only (99732 B gz) |
+| Cover URL | `/_d/…/main/…` | `/_d/…/main/…?w=480` | `/_d/francois-media-2/1/…?w=480` |
+| Cover cache | `max-age=60, swr` | `max-age=60, swr` | `max-age=31536000, immutable` |
+| `/` to network idle, empty browser | n/a | 13.4 s cold, 5.6 s warm server | 2.3 s |
+| `/apps/agent-gym-works` | n/a | 9.5 s cold, 2.7 s warm | 1.0 s |
+
+- Covers on first view: 22 image requests, 433 KB, all 200, no console errors.
+- 6 monograms are visible, which matches the 6 listed catalog records without a cover (`listed 100 without cover 6`).
+- A screenshot of `/` shows the catalogue with scaled covers.
+
+### What didn't work
+- No failures. The 13 s first run was the server building thumbnails on first request (two decode slots); later runs reuse the stored copies.
+
+### What I learned
+- The import push is idempotent: matching release ids and unchanged data are skipped, so re-running it changed only what pinning altered, the catalog.
+- The "cold" cost of thumbnails falls on the first visitor of each width. On a fresh deploy that is a few seconds for the front page, once.
+
+### What should be done in the future
+- Phase 5, the per-host index, stays optional; it is SLOP-012's only open task.
+- When francois data is re-extracted, push it the same way. Links are pinned automatically.
+
+### Code review instructions
+- No code. Check the live site with `python3 -I ttmp/2026/10/30/SLOP-012*/scripts/01-measure-site.py`.
+
+### Technical details
+- Cluster artifacts: storefront v2, storefront-entry v2, francois-catalog v3; media shards unchanged at v1.

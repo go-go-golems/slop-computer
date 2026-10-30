@@ -65,3 +65,7 @@ Workshop thumbnails: GET /api/covers (any record with page + cover) and version 
 
 - /home/manuel/workspaces/2026-10-28/slop-computer/slop-computer/pkg/server/covers.go — listCovers, coverOf
 - /home/manuel/workspaces/2026-10-28/slop-computer/slop-computer/web/workshop/src/components/organisms/WatchRight.tsx — VersionShot, VersionSummary
+
+## 2026-10-30
+
+Cluster: storefront and storefront-entry v2 pushed; francois import re-pushed (catalog v3) so covers are numbered, immutable URLs. Front page: one data script, 2.3 s to network idle from an empty browser cache.
