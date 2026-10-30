@@ -565,11 +565,11 @@ func (s *Server) serveSandbox(w http.ResponseWriter, r *http.Request, label stri
 	}
 	m := appPath.FindStringSubmatch(p)
 	if m == nil {
-		if dm := dataPath.FindStringSubmatch(p); dm != nil && s.sandboxReads(ctx, app, dm[1]) {
+		if dm := dataPath.FindStringSubmatch(p); dm != nil && s.sandboxReads(r, app, dm[1]) {
 			s.serveData(w, r, dm)
 			return
 		}
-		if rm := recordsPath.FindStringSubmatch(p); rm != nil && s.sandboxReads(ctx, app, rm[1]) {
+		if rm := recordsPath.FindStringSubmatch(p); rm != nil && s.sandboxReads(r, app, rm[1]) {
 			s.serveRecords(w, r, rm)
 			return
 		}
@@ -603,18 +603,7 @@ func (s *Server) serveSandbox(w http.ResponseWriter, r *http.Request, label stri
 	if !slicesContains(s.origins(), parent) {
 		parent = s.origins()[0]
 	}
-	var res *routing.Resolution
-	routePath := q.Get("path")
-	if !strings.HasPrefix(routePath, "/") {
-		routePath = "/"
-	}
-	if host := q.Get("host"); host != "" {
-		if routes, err := s.Store.Routes(ctx, host); err == nil {
-			if rr, ok := routing.Resolve(routes, host, routePath); ok {
-				res = &rr
-			}
-		}
-	}
+	res, routePath := s.previewRoute(ctx, q)
 	body, err := s.renderPage(ctx, v, res, q.Get("host"), routePath, mode, parent, s.runtimeBoot(target, v, caps))
 	if err != nil {
 		httpx.Fail(w, 404, "not_found", err.Error())
@@ -655,10 +644,50 @@ func (s *Server) runtimeBoot(target string, v store.Version, caps rt.Caps) *rend
 	return &render.Runtime{Target: target, App: v.Artifact, Version: v.N, Caps: names}
 }
 
-// sandboxReads reports whether the app reads a data artifact, by its
-// manifest or a route to it on any site host: its files and records are
-// served on the app's origin.
-func (s *Server) sandboxReads(ctx context.Context, app, data string) bool {
+// previewRoute is the route a preview shows its page under: ?host= and
+// ?path= of a sandbox URL, resolved as a visitor's request would be (nil
+// without a host), and the path, "/" when none is given.
+func (s *Server) previewRoute(ctx context.Context, q url.Values) (*routing.Resolution, string) {
+	path := q.Get("path")
+	if !strings.HasPrefix(path, "/") {
+		path = "/"
+	}
+	host := q.Get("host")
+	if host == "" {
+		return nil, path
+	}
+	routes, err := s.Store.Routes(ctx, host)
+	if err != nil {
+		return nil, path
+	}
+	if rr, ok := routing.Resolve(routes, host, path); ok {
+		return &rr, path
+	}
+	return nil, path
+}
+
+// sandboxReads reports whether a sandbox serves data's files and records:
+// the page version the request comes from reads it, or main does, or a site
+// route serving the app does. The Referer (/v/<n>/…?host=&path=, sent in
+// full within the origin) names the version, so a preview of an older
+// version gets what that version reads. It grants nothing new: the label
+// serves every version of the app, each rendered with its own data.
+func (s *Server) sandboxReads(r *http.Request, app, data string) bool {
+	ctx := r.Context()
+	if ref, err := url.Parse(r.Referer()); err == nil && strings.EqualFold(ref.Host, r.Host) {
+		if m := appPath.FindStringSubmatch(ref.Path); m != nil {
+			n, _ := strconv.Atoi(m[1])
+			if v, err := s.Store.Version(ctx, app, n); err == nil {
+				var route *store.Route
+				if res, _ := s.previewRoute(ctx, ref.Query()); res != nil {
+					route = &res.Route
+				}
+				if s.reads(ctx, v, route)[data] {
+					return true
+				}
+			}
+		}
+	}
 	v, err := s.Store.Version(ctx, app, 0)
 	if err == nil && s.reads(ctx, v, nil)[data] {
 		return true

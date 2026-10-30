@@ -5,9 +5,11 @@ import (
 	"compress/gzip"
 	"image"
 	"image/color"
+	"image/jpeg"
 	"image/png"
 	"io"
 	"net/http"
+	"net/url"
 	"strings"
 	"testing"
 
@@ -198,5 +200,149 @@ func TestThumbnails(t *testing.T) {
 	_, recs, _ := h.fetch("site.test", "/_r/pics/1.js", nil)
 	if !strings.Contains(string(recs), `"height":500`) || !strings.Contains(string(recs), `"width":800`) {
 		t.Fatalf("records lack sizes:\n%.600s", recs)
+	}
+}
+
+// A preview of an older page version gets the records and files that
+// version reads, though main no longer reads them (SLOP-012 review): the
+// page's Referer names the version. Without it, or naming a version that
+// does not read the data, nothing is served.
+func TestPreviewReadsItsVersion(t *testing.T) {
+	h := newHarness(t, store.RoleAdmin)
+	manuel := h.signIn("manuel")
+	tok := h.token(manuel.id(), store.ScopeRead, store.ScopeWrite)
+	h.pushFiles(tok, "notes", map[string]any{"title": "Notes", "kind": "data"}, nil, map[string]string{"a.json": `{"title":"A"}`, "x.png": pngOf(t, 10, 10, false)})
+	page := map[string]string{"index.html": "<!doctype html><title>p</title>"}
+	h.pushFiles(tok, "board", map[string]any{"title": "Board", "kind": "page"}, map[string]any{"reads": map[string]string{"notes": "notes"}}, page)
+	h.pushFiles(tok, "board", nil, map[string]any{}, page) // main reads nothing now
+
+	var su map[string]any
+	if code := manuel.do("GET", "/api/sandbox-url?artifact=board&n=1", nil, &su); code != 200 {
+		t.Fatalf("sandbox url %d %v", code, su)
+	}
+	u, _ := url.Parse(su["url"].(string))
+	if _, body, _ := h.fetch(u.Host, u.RequestURI(), nil); !strings.Contains(string(body), `src="/_r/notes/1.js"`) {
+		t.Fatalf("v1 preview does not load its records:\n%s", body)
+	}
+	from := func(n string) map[string]string {
+		return map[string]string{"Referer": "http://" + u.Host + "/v/" + n + "/"}
+	}
+	for _, c := range []struct {
+		path string
+		hdr  map[string]string
+		want int
+	}{
+		{"/_r/notes/1.js", from("1"), 200},
+		{"/_d/notes/1/x.png", from("1"), 200},
+		{"/_r/notes/1.js", nil, 404},
+		{"/_r/notes/1.js", from("2"), 404},
+		{"/_r/notes/1.js", map[string]string{"Referer": "http://elsewhere.test/v/1/"}, 404},
+	} {
+		if code, _, _ := h.fetch(u.Host, c.path, c.hdr); code != c.want {
+			t.Errorf("%s from %v: %d, want %d", c.path, c.hdr, code, c.want)
+		}
+	}
+}
+
+// withOrientation puts an EXIF APP1 segment naming orientation o (big
+// endian, one IFD0 entry) right after a JPEG's SOI marker.
+func withOrientation(jpg []byte, o uint16) []byte {
+	tiff := []byte{'M', 'M', 0, 42, 0, 0, 0, 8, 0, 1, 0x01, 0x12, 0, 3, 0, 0, 0, 1, byte(o >> 8), byte(o), 0, 0, 0, 0, 0, 0, 0, 0}
+	seg := append([]byte("Exif\x00\x00"), tiff...)
+	app1 := append([]byte{0xFF, 0xE1, byte((len(seg) + 2) >> 8), byte(len(seg) + 2)}, seg...)
+	return append(append(append([]byte{}, jpg[:2]...), app1...), jpg[2:]...)
+}
+
+// A phone photo stored sideways with EXIF orientation 6 is shown turned
+// right; its thumbnail and its record's size are as shown (SLOP-012 review).
+func TestThumbnailOrientation(t *testing.T) {
+	// 640×320 as stored: red on the left half, blue on the right, noisy so
+	// a copy is smaller than the original. Shown, it is 320×640, red on top.
+	img := image.NewNRGBA(image.Rect(0, 0, 640, 320))
+	seed := uint32(7)
+	for y := 0; y < 320; y++ {
+		for x := 0; x < 640; x++ {
+			seed = seed*1664525 + 1013904223
+			n := uint8(seed >> 26) // 0-63
+			c := color.NRGBA{R: 192 + n, G: n, B: n, A: 255}
+			if x >= 320 {
+				c = color.NRGBA{R: n, G: n, B: 192 + n, A: 255}
+			}
+			img.SetNRGBA(x, y, c)
+		}
+	}
+	var buf bytes.Buffer
+	if err := jpeg.Encode(&buf, img, &jpeg.Options{Quality: 95}); err != nil {
+		t.Fatal(err)
+	}
+	h := newHarness(t, store.RoleAdmin)
+	manuel := h.signIn("manuel")
+	tok := h.token(manuel.id(), store.ScopeRead, store.ScopeWrite)
+	h.pushFiles(tok, "photos", map[string]any{"title": "Photos", "kind": "data"}, nil, map[string]string{"phone.jpg": string(withOrientation(buf.Bytes(), 6))})
+	h.pushFiles(tok, "roll", map[string]any{"title": "Roll", "kind": "page"}, map[string]any{"reads": map[string]string{"photos": "photos"}},
+		map[string]string{"index.html": "<!doctype html><title>roll</title>"})
+	manuel.do("PUT", "/api/routes", map[string]any{"host": "site.test", "path": "/roll", "page": "roll"}, nil)
+
+	code, body, hdr := h.fetch("site.test", "/_d/photos/1/phone.jpg?w=160", nil)
+	if code != 200 || hdr.Get("Content-Type") != "image/jpeg" {
+		t.Fatalf("thumbnail %d %v", code, hdr)
+	}
+	thumb, err := jpeg.Decode(bytes.NewReader(body))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if b := thumb.Bounds(); b.Dx() != 160 || b.Dy() != 320 {
+		t.Fatalf("thumbnail is %v, want 160×320 as shown", b)
+	}
+	top, bottom := thumb.At(80, 40), thumb.At(80, 280)
+	if r, _, b, _ := top.RGBA(); r < b {
+		t.Errorf("top is %v, want red", top)
+	}
+	if r, _, b, _ := bottom.RGBA(); b < r {
+		t.Errorf("bottom is %v, want blue", bottom)
+	}
+	if _, recs, _ := h.fetch("site.test", "/_r/photos/1.js", nil); !strings.Contains(string(recs), `"height":640`) || !strings.Contains(string(recs), `"width":320`) {
+		t.Fatalf("record size not as shown:\n%.600s", recs)
+	}
+}
+
+// orient matches the EXIF table, built here from two plain moves: mirror
+// left-right and turn right (2: mirror; 3: turn twice; 4: mirror, turn
+// twice; 5: mirror, turn left (top-bottom mirrored, turned right); 6: turn right; 7: mirror, turn
+// right; 8: turn three times).
+func TestOrient(t *testing.T) {
+	src := image.NewNRGBA(image.Rect(0, 0, 3, 2))
+	for i := range src.Pix {
+		src.Pix[i] = uint8(i)
+	}
+	mirror := func(m *image.NRGBA) *image.NRGBA {
+		w, h := m.Bounds().Dx(), m.Bounds().Dy()
+		out := image.NewNRGBA(image.Rect(0, 0, w, h))
+		for y := 0; y < h; y++ {
+			for x := 0; x < w; x++ {
+				out.SetNRGBA(x, y, m.NRGBAAt(w-1-x, y))
+			}
+		}
+		return out
+	}
+	right := func(m *image.NRGBA) *image.NRGBA { // the top row becomes the right column
+		w, h := m.Bounds().Dx(), m.Bounds().Dy()
+		out := image.NewNRGBA(image.Rect(0, 0, h, w))
+		for y := 0; y < h; y++ {
+			for x := 0; x < w; x++ {
+				out.SetNRGBA(h-1-y, x, m.NRGBAAt(x, y))
+			}
+		}
+		return out
+	}
+	want := map[int]*image.NRGBA{
+		1: src, 2: mirror(src), 3: right(right(src)), 4: right(right(mirror(src))),
+		5: right(right(right(mirror(src)))), 6: right(src), 7: right(mirror(src)), 8: right(right(right(src))),
+	}
+	for o := 1; o <= 8; o++ {
+		got := orient(src, o)
+		if got.Bounds() != want[o].Bounds() || !bytes.Equal(got.Pix, want[o].Pix) {
+			t.Errorf("orientation %d: %v %v, want %v %v", o, got.Bounds(), got.Pix, want[o].Bounds(), want[o].Pix)
+		}
 	}
 }
