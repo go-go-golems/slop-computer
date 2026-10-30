@@ -245,7 +245,7 @@ func (s *Server) login(w http.ResponseWriter, r *http.Request) {
 	target, err := s.Config.OIDC.AuthURL(r.Context(), state, nonce, verifier, "", "")
 	if err != nil {
 		log.Warn().Err(err).Msg("OIDC discovery failed")
-		http.Redirect(w, r, "/?login_error=provider_unavailable", http.StatusSeeOther)
+		s.signInFailed(w, r, "provider_unavailable", ret)
 		return
 	}
 	s.setCookie(w, s.flowCookie(), binding, 600)
@@ -258,32 +258,40 @@ func (s *Server) callback(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	q := r.URL.Query()
-	fail := func(code string) {
-		s.setCookie(w, s.flowCookie(), "", -1)
-		http.Redirect(w, r, "/?login_error="+code, http.StatusSeeOther)
+	state := q.Get("state")
+	// Until the flow is consumed, "Continue signing in" leads to where the
+	// sign-in was going, read by state: it starts a new flow and trusts
+	// nothing of this one.
+	started := func() string {
+		if state == "" {
+			return "/"
+		}
+		ret, _ := s.Store.LoginFlowReturn(r.Context(), state)
+		return ret
 	}
 	if q.Get("error") != "" {
-		fail("denied")
+		s.signInFailed(w, r, "denied", started())
 		return
 	}
 	c, err := r.Cookie(s.flowCookie())
-	if err != nil || c.Value == "" || q.Get("state") == "" || q.Get("code") == "" {
-		fail("flow_missing")
+	if err != nil || c.Value == "" || state == "" || q.Get("code") == "" {
+		s.signInFailed(w, r, "flow_missing", started())
 		return
 	}
-	flow, err := s.Store.ConsumeLoginFlow(r.Context(), q.Get("state"), store.Hash(c.Value))
+	flow, err := s.Store.ConsumeLoginFlow(r.Context(), state, store.Hash(c.Value))
 	if err != nil {
-		fail("flow_invalid")
+		s.signInFailed(w, r, "flow_invalid", started())
 		return
 	}
 	id, idToken, err := s.Config.OIDC.Exchange(r.Context(), q.Get("code"), flow.Verifier, flow.Nonce)
 	if err != nil {
 		log.Warn().Err(err).Msg("OIDC exchange failed")
-		fail("exchange_failed")
+		s.signInFailed(w, r, "exchange_failed", flow.ReturnPath)
 		return
 	}
 	if err = s.signIn(w, r, id, store.RolePending, idToken); err != nil {
-		fail("account_unavailable")
+		log.Error().Err(err).Msg("sign in")
+		s.signInFailed(w, r, "account_unavailable", flow.ReturnPath)
 		return
 	}
 	s.setCookie(w, s.flowCookie(), "", -1)
@@ -291,6 +299,39 @@ func (s *Server) callback(w http.ResponseWriter, r *http.Request) {
 }
 
 // signIn provisions the user and starts a browser session.
+// signInProblem is what a failed sign-in tells the person, by failure code.
+type signInProblem struct {
+	Status  int
+	Title   string
+	Explain string
+}
+
+var signInProblems = map[string]signInProblem{
+	"provider_unavailable": {http.StatusServiceUnavailable, "The sign-in service is not reachable",
+		"slop could not reach the identity provider. Try again in a minute."},
+	"denied": {http.StatusForbidden, "Sign-in was cancelled",
+		"The identity provider did not sign you in. If you cancelled, you can start again."},
+	"flow_missing": {http.StatusBadRequest, "This sign-in started in another browser",
+		"You finished signing in in a different browser from the one that started it, or this browser blocked a cookie. Continue to sign in here."},
+	"flow_invalid": {http.StatusBadRequest, "This sign-in link was already used or has expired",
+		"A sign-in link works once, for 10 minutes. Start again."},
+	"exchange_failed": {http.StatusBadGateway, "The identity provider refused the sign-in",
+		"Start again. If it keeps happening, tell an administrator: the server log has the details."},
+	"account_unavailable": {http.StatusServiceUnavailable, "Your account could not be loaded",
+		"Try again in a minute. If it keeps happening, tell an administrator."},
+}
+
+// signInFailed shows the sign-in problem page where the failure happened, so
+// no other page has to understand it, and logs the failure. ret is where
+// "Continue signing in" leads.
+func (s *Server) signInFailed(w http.ResponseWriter, r *http.Request, code, ret string) {
+	p := signInProblems[code]
+	ret = safeReturn(ret)
+	log.Info().Str("code", code).Str("client", s.clientAddress(r)).Str("return", ret).Msg("sign-in failed")
+	s.setCookie(w, s.flowCookie(), "", -1)
+	s.render(w, p.Status, "sign-in-problem", map[string]any{"Code": code, "Problem": p, "Continue": "/auth/login?return=" + url.QueryEscape(ret)})
+}
+
 func (s *Server) signIn(w http.ResponseWriter, r *http.Request, id store.Identity, role, idToken string) error {
 	u, err := s.Store.UpsertIdentity(r.Context(), id, role)
 	if err != nil {

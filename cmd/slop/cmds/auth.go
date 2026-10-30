@@ -6,6 +6,7 @@ import (
 	"context"
 	"fmt"
 	"io"
+	"net/http"
 	"os"
 	"os/exec"
 	"runtime"
@@ -158,28 +159,56 @@ func (c *authLogin) device(ctx context.Context, a in, out middlewares.Processor,
 		name = name[:80]
 	}
 	api := client.New(origin, "", hostOption(a.S("host"))...)
-	dc, err := api.DeviceAuthorize(ctx, name, a.L("scopes"), days)
-	if err != nil {
-		return err
+	for {
+		dc, err := api.DeviceAuthorize(ctx, name, a.L("scopes"), days)
+		if err != nil {
+			return err
+		}
+		fmt.Fprintf(os.Stderr, "To authorize this terminal, open\n  %s\nand check that it shows the code  %s  (expires in %d minutes).\n",
+			dc.VerificationURIComplete, dc.UserCode, dc.ExpiresIn/60)
+		if shouldOpenBrowser(a.B("no-browser")) && strings.HasPrefix(dc.VerificationURIComplete, origin+"/") {
+			_ = openBrowser(dc.VerificationURIComplete)
+		}
+		fmt.Fprintf(os.Stderr, "Open it in a browser where you are signed in to %s as an admin.\nWaiting for approval...\n", origin)
+		tok, err := pollDevice(ctx, api, dc)
+		if errors.Is(err, errCodeExpired) && askAgain() {
+			continue
+		}
+		if err != nil {
+			return err
+		}
+		return saveLogin(ctx, out, origin, entryFor(tok.Token, tok.User, tok.Info, a.S("host")), !a.B("no-default"))
 	}
-	fmt.Fprintf(os.Stderr, "To authorize this terminal, open\n  %s\nand check that it shows the code  %s  (expires in %d minutes).\n",
-		dc.VerificationURIComplete, dc.UserCode, dc.ExpiresIn/60)
-	if shouldOpenBrowser(a.B("no-browser")) && strings.HasPrefix(dc.VerificationURIComplete, origin+"/") {
-		_ = openBrowser(dc.VerificationURIComplete)
+}
+
+var errCodeExpired = errors.New("the code expired; run slop auth login again")
+
+// askAgain offers a new code after one expired, when someone is at the
+// terminal to answer.
+func askAgain() bool {
+	if !term.IsTerminal(int(os.Stdin.Fd())) || !term.IsTerminal(int(os.Stderr.Fd())) { // #nosec G115 -- a file descriptor fits in int
+		return false
 	}
-	fmt.Fprintln(os.Stderr, "Waiting for approval...")
-	tok, err := pollDevice(ctx, api, dc)
-	if err != nil {
-		return err
-	}
-	return saveLogin(ctx, out, origin, entryFor(tok.Token, tok.User, tok.Info, a.S("host")), !a.B("no-default"))
+	fmt.Fprint(os.Stderr, "The code expired. Get a new one? [Y/n] ")
+	line, _ := bufio.NewReader(os.Stdin).ReadString('\n')
+	answer := strings.ToLower(strings.TrimSpace(line))
+	return answer == "" || answer == "y" || answer == "yes"
 }
 
 // pollDevice polls until the login is approved, denied or expired. Ctrl-C
-// cancels ctx and stops it.
+// cancels ctx and stops it. A server that does not answer (network trouble,
+// 5xx, 429: a restart or a deploy) is waited for: the code lives in the
+// database and survives it.
 func pollDevice(ctx context.Context, api *client.Client, dc client.DeviceCode) (client.DeviceToken, error) {
 	interval := max(time.Duration(dc.Interval)*time.Second, devicePollFloor)
 	deadline := time.Now().Add(time.Duration(dc.ExpiresIn) * time.Second)
+	warned := false
+	waiting := func(why string) {
+		if !warned {
+			fmt.Fprintln(os.Stderr, "slop: "+why+"; still waiting")
+			warned = true
+		}
+	}
 	for {
 		select {
 		case <-ctx.Done():
@@ -197,14 +226,16 @@ func pollDevice(ctx context.Context, api *client.Client, dc client.DeviceCode) (
 		case client.IsCode(err, "access_denied"):
 			return tok, errors.New("the login was denied in the browser")
 		case client.IsCode(err, "expired_token"):
-			return tok, errors.New("the code expired; run slop auth login again")
+			return tok, errCodeExpired
+		case errors.As(err, &apiErr) && (apiErr.Status >= 500 || apiErr.Status == http.StatusTooManyRequests):
+			waiting("the server is not answering (" + apiErr.Code + ")")
 		case errors.As(err, &apiErr):
 			return tok, err
-		default: // network trouble: keep trying until the code expires
-			fmt.Fprintln(os.Stderr, "slop: "+err.Error()+"; retrying")
+		default: // network trouble
+			waiting(err.Error())
 		}
 		if time.Now().After(deadline) {
-			return tok, errors.New("the code expired; run slop auth login again")
+			return tok, errCodeExpired
 		}
 	}
 }

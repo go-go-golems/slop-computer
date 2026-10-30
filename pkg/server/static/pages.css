@@ -9,6 +9,8 @@ h1{font-size:22px;margin:0 0 12px}
 input{font:inherit;padding:8px 10px;border:1px solid var(--line);flex:1}
 button{font:inherit;padding:8px 14px;border:1px solid var(--ink);background:#fff;cursor:pointer}
 button.primary{background:var(--ink);color:#fff}
+a.button{display:inline-block;padding:8px 14px;border:1px solid var(--ink);background:#fff;color:var(--ink);text-decoration:none}
+a.button.primary{background:var(--ink);color:#fff}
 .people{display:flex;flex-wrap:wrap;gap:8px;margin:12px 0}
 .person{display:flex;align-items:center;gap:8px}
 .person small{color:var(--muted)}

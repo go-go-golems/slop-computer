@@ -32,6 +32,15 @@ RETURNING binding_hash,nonce,verifier,return_path`, now, Hash(state), binding, n
 	return f, notFound(err)
 }
 
+// LoginFlowReturn is the return path a sign-in was started for, found by its
+// state whether or not the flow was consumed or expired, while the row is
+// kept. It authorizes nothing: callers only offer a fresh sign-in to it.
+func (s *Store) LoginFlowReturn(ctx context.Context, state string) (string, error) {
+	var p string
+	err := s.db().row(ctx, `SELECT return_path FROM login_flows WHERE state_hash=?`, Hash(state)).Scan(&p)
+	return p, notFound(err)
+}
+
 type Session struct {
 	Hash      []byte
 	UserID    string
