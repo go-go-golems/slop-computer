@@ -175,7 +175,7 @@ func (s *Server) devicePage(w http.ResponseWriter, r *http.Request) {
 			d, err = s.Store.DeviceRequest(r.Context(), code, s.requestOrigin(r))
 		}
 		if !ok || errors.Is(err, store.ErrNotFound) {
-			data["Problem"] = "This code is invalid or has expired."
+			data["Problem"] = "This code is invalid or has expired. Check that the whole link was copied, or type the code the terminal shows."
 		} else if err != nil {
 			unavailable(w, err)
 			return
@@ -203,7 +203,7 @@ func (s *Server) deviceDecide(w http.ResponseWriter, r *http.Request) {
 	d, err := s.Store.DeviceRequest(r.Context(), code, origin)
 	if !ok || errors.Is(err, store.ErrNotFound) {
 		s.deviceLimiter.take("lookup:"+actor(r), 30, time.Hour)
-		s.render(w, http.StatusNotFound, "device", map[string]any{"Me": me(r), "CSRF": principal(r.Context()).Session.CSRF, "Problem": "This code is invalid or has expired."})
+		s.render(w, http.StatusNotFound, "device", map[string]any{"Me": me(r), "CSRF": principal(r.Context()).Session.CSRF, "Problem": "This code is invalid or has expired. Check that the whole link was copied, or type the code the terminal shows."})
 		return
 	}
 	if err != nil {

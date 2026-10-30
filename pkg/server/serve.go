@@ -3,6 +3,7 @@ package server
 import (
 	"context"
 	"encoding/json"
+	"github.com/go-go-golems/slop-computer/pkg/blobs"
 	"io/fs"
 	"net/http"
 	"net/url"
@@ -74,6 +75,9 @@ func (s *Server) records(ctx context.Context, artifact string, n int) ([]records
 			p, _ := rec["path"].(string)
 			rec["src"] = "/_d/" + artifact + "/" + strconv.Itoa(v.N) + "/" + p
 			rec["type"], rec["size"] = v.Files[p].Type, v.Files[p].Size
+			if w, h, ok := s.imageSize(v.Files[p]); ok {
+				rec["width"], rec["height"] = w, h
+			}
 		}
 	}
 	s.recCache.put(key, out)
@@ -84,6 +88,9 @@ func (s *Server) records(ctx context.Context, artifact string, n int) ([]records
 type pageManifest struct {
 	Reads  map[string]string `json:"reads"`
 	Tokens string            `json:"tokens"`
+	// Files names data artifacts whose files the page links to without
+	// reading their records (covers, galleries): served, not loaded.
+	Files []string `json:"files"`
 }
 
 // ResolvedBinding is a binding with the concrete version it means now.
@@ -133,7 +140,7 @@ func (s *Server) renderPage(ctx context.Context, page store.Version, res *routin
 		return nil, err
 	}
 	var route *store.Route
-	boot := render.Boot{Route: render.RouteInfo{Host: host, Path: reqPath, Params: map[string]string{}}, Data: map[string][]records.Record{},
+	boot := render.Boot{Route: render.RouteInfo{Host: host, Path: reqPath, Params: map[string]string{}}, Data: map[string]any{},
 		Version: render.VersionInfo{Artifact: page.Artifact, N: page.N}, Mode: mode, ParentOrigin: parent, Runtime: runtime}
 	if res != nil {
 		route = &res.Route
@@ -173,11 +180,7 @@ func (s *Server) renderPage(ctx context.Context, page store.Version, res *routin
 			}
 			continue
 		}
-		rs, _, err := s.records(ctx, b.Artifact, b.N)
-		if err != nil {
-			continue
-		}
-		boot.Data[name] = rs
+		boot.Data[name] = render.NewDataRef(b.Artifact, b.N)
 	}
 	return render.Inject(src, boot), nil
 }
@@ -200,9 +203,19 @@ func (s *Server) serveSlopAsset(w http.ResponseWriter, r *http.Request) {
 		http.NotFound(w, r)
 		return
 	}
-	w.Header().Set("Content-Type", "text/javascript; charset=utf-8")
-	w.Header().Set("Cache-Control", "no-cache")
-	_, _ = w.Write(b)
+	// ?h= names the content (render.AssetURL): cached for good; a bare or
+	// stale URL is a place.
+	class := placeURL
+	if h := r.URL.Query().Get("h"); h != "" && h == render.AssetHash(name) {
+		class = contentURL
+	}
+	w.Header().Set("Cache-Control", s.cacheControl(r, class))
+	w.Header().Set("ETag", `"`+render.AssetHash(name)+`"`)
+	if etagMatch(r.Header.Get("If-None-Match"), `"`+render.AssetHash(name)+`"`) {
+		w.WriteHeader(http.StatusNotModified)
+		return
+	}
+	writeBody(w, r, http.StatusOK, "text/javascript; charset=utf-8", b)
 }
 
 // frameAncestors lets the Workshop (on any main-host origin) frame a page.
@@ -210,11 +223,18 @@ func (s *Server) frameAncestors(w http.ResponseWriter) {
 	w.Header().Set("Content-Security-Policy", "frame-ancestors 'self' "+strings.Join(s.origins(), " "))
 }
 
-func (s *Server) writePage(w http.ResponseWriter, status int, body []byte) {
-	w.Header().Set("Content-Type", "text/html; charset=utf-8")
-	w.Header().Set("Cache-Control", "no-store")
-	w.WriteHeader(status)
-	_, _ = w.Write(body)
+// writePage writes a rendered page: a document, revalidated on every use by
+// an ETag of its body, so an unchanged page costs a 304.
+func (s *Server) writePage(w http.ResponseWriter, r *http.Request, status int, body []byte) {
+	tag := `"` + blobs.Sum(body)[:32] + `"`
+	h := w.Header()
+	h.Set("Cache-Control", "no-cache")
+	h.Set("ETag", tag)
+	if status == http.StatusOK && etagMatch(r.Header.Get("If-None-Match"), tag) {
+		w.WriteHeader(http.StatusNotModified)
+		return
+	}
+	writeBody(w, r, status, "text/html; charset=utf-8", body)
 }
 
 func notFoundPage(w http.ResponseWriter) {
@@ -225,12 +245,15 @@ func notFoundPage(w http.ResponseWriter) {
 
 var versionPath = regexp.MustCompile(`^/_v/([a-z0-9][a-z0-9-]{0,62})/([0-9]+)/(.+)$`)
 
+// recordsPath is /_r/<artifact>/<n>.js: a data version's records as a script.
+var recordsPath = regexp.MustCompile(`^/_r/([a-z0-9][a-z0-9-]{0,62})/([0-9]+)\.js$`)
+
 // dataPath is /_d/<artifact>/<n or main>/<file>: a file of a data artifact
 // that a page reads (records give image files a src there).
 var dataPath = regexp.MustCompile(`^/_d/([a-z0-9][a-z0-9-]{0,62})/(main|[0-9]+)/(.+)$`)
 
-// serveData serves a file of a data version. Numbered versions never change;
-// main may move, so it is revalidated (by ETag) on every use.
+// serveData serves a file of a data version: a numbered version is a content
+// URL, main a place URL (it moves with each push).
 func (s *Server) serveData(w http.ResponseWriter, r *http.Request, m []string) {
 	n := 0
 	if m[2] != "main" {
@@ -243,19 +266,10 @@ func (s *Server) serveData(w http.ResponseWriter, r *http.Request, m []string) {
 		return
 	}
 	if n == 0 {
-		w.Header().Set("Cache-Control", "no-cache")
-		file, err := s.Blobs.Open(f.SHA256)
-		if err != nil {
-			unavailable(w, err)
-			return
-		}
-		defer func() { _ = file.Close() }()
-		w.Header().Set("Content-Type", f.Type)
-		w.Header().Set("ETag", `"`+f.SHA256+`"`)
-		http.ServeContent(w, r, "", zeroTime, file)
+		s.serveFile(w, r, f, placeURL)
 		return
 	}
-	s.serveBlob(w, r, f)
+	s.serveFile(w, r, f, contentURL)
 }
 
 // reads lists the data artifacts a page version reads under a route.
@@ -263,6 +277,11 @@ func (s *Server) reads(ctx context.Context, v store.Version, route *store.Route)
 	out := map[string]bool{}
 	for _, b := range s.bindings(ctx, v, route) {
 		out[b.Artifact] = true
+	}
+	var m pageManifest
+	_ = store.ManifestOf(v, &m)
+	for _, a := range m.Files {
+		out[a] = true
 	}
 	return out
 }
@@ -362,24 +381,40 @@ func (s *Server) serveSite(w http.ResponseWriter, r *http.Request) {
 		}
 		return false
 	}
-	// /_d/<artifact>/<n>/<file>: a file of data some routed page reads.
-	if m := dataPath.FindStringSubmatch(r.URL.Path); m != nil {
+	// readByRoute: a data artifact some routed page reads (its files and
+	// records are public with the page).
+	readByRoute := func(data string) bool {
 		for _, rt := range public {
 			n := 0
 			if rt.Version != nil {
 				n = *rt.Version
 			}
-			if v, err := s.Store.Version(ctx, rt.Page, n); err == nil && s.reads(ctx, v, &rt)[m[1]] {
-				s.serveData(w, r, m)
-				return
+			if v, err := s.Store.Version(ctx, rt.Page, n); err == nil && s.reads(ctx, v, &rt)[data] {
+				return true
 			}
 		}
 		// Then the pages page-from routes admit, which costs a lookup per page.
 		for _, rt := range public {
-			if rt.PageFrom != "" && s.pageFromReads(ctx, rt, m[1]) {
-				s.serveData(w, r, m)
-				return
+			if rt.PageFrom != "" && s.pageFromReads(ctx, rt, data) {
+				return true
 			}
+		}
+		return false
+	}
+	// /_d/<artifact>/<n>/<file>: a file of data some routed page reads.
+	if m := dataPath.FindStringSubmatch(r.URL.Path); m != nil {
+		if readByRoute(m[1]) {
+			s.serveData(w, r, m)
+			return
+		}
+		notFoundPage(w)
+		return
+	}
+	// /_r/<artifact>/<n>.js: the records of data some routed page reads.
+	if m := recordsPath.FindStringSubmatch(r.URL.Path); m != nil {
+		if readByRoute(m[1]) {
+			s.serveRecords(w, r, m)
+			return
 		}
 		notFoundPage(w)
 		return
@@ -393,7 +428,7 @@ func (s *Server) serveSite(w http.ResponseWriter, r *http.Request) {
 		}
 		v, err := s.Store.Version(ctx, m[1], n)
 		if f, ok := v.Files[m[3]]; err == nil && ok {
-			s.serveBlob(w, r, f)
+			s.serveFile(w, r, f, classOfVersion(n))
 			return
 		}
 		notFoundPage(w)
@@ -407,7 +442,7 @@ func (s *Server) serveSite(w http.ResponseWriter, r *http.Request) {
 		if ok && !res.Fallback {
 			if v, missing, err := s.target(ctx, res); err == nil && !missing {
 				if f, found := fileFor(v, r.URL.Path); found {
-					s.serveBlob(w, r, f)
+					s.serveFile(w, r, f, placeURL) // the page's path, not its version
 					return
 				}
 			}
@@ -416,7 +451,8 @@ func (s *Server) serveSite(w http.ResponseWriter, r *http.Request) {
 			if rr, rok := routing.Resolve(public, host, ref.Path); rok {
 				if v, _, err := s.target(ctx, rr); err == nil {
 					if f, found := fileFor(v, r.URL.Path); found {
-						s.serveBlob(w, r, f)
+						w.Header().Add("Vary", "Referer") // which page's file depends on the page
+						s.serveFile(w, r, f, placeURL)
 						return
 					}
 				}
@@ -444,7 +480,7 @@ func (s *Server) serveSite(w http.ResponseWriter, r *http.Request) {
 	if res.Fallback || res.Missing {
 		status = http.StatusNotFound
 	}
-	s.writePage(w, status, body)
+	s.writePage(w, r, status, body)
 }
 
 // sandboxLabel extracts the label from s<label>.<sandbox domain>.
@@ -529,8 +565,12 @@ func (s *Server) serveSandbox(w http.ResponseWriter, r *http.Request, label stri
 	}
 	m := appPath.FindStringSubmatch(p)
 	if m == nil {
-		if dm := dataPath.FindStringSubmatch(p); dm != nil {
-			s.serveSandboxData(w, r, app, dm)
+		if dm := dataPath.FindStringSubmatch(p); dm != nil && s.sandboxReads(r, app, dm[1]) {
+			s.serveData(w, r, dm)
+			return
+		}
+		if rm := recordsPath.FindStringSubmatch(p); rm != nil && s.sandboxReads(r, app, rm[1]) {
+			s.serveRecords(w, r, rm)
 			return
 		}
 		notFoundPage(w)
@@ -544,7 +584,7 @@ func (s *Server) serveSandbox(w http.ResponseWriter, r *http.Request, label stri
 	}
 	if rest := m[2]; rest != "" && rest != "index.html" {
 		if f, ok := fileFor(v, "/"+rest); ok {
-			s.serveBlob(w, r, f)
+			s.serveFile(w, r, f, classOfVersion(n))
 			return
 		}
 		notFoundPage(w)
@@ -563,24 +603,13 @@ func (s *Server) serveSandbox(w http.ResponseWriter, r *http.Request, label stri
 	if !slicesContains(s.origins(), parent) {
 		parent = s.origins()[0]
 	}
-	var res *routing.Resolution
-	routePath := q.Get("path")
-	if !strings.HasPrefix(routePath, "/") {
-		routePath = "/"
-	}
-	if host := q.Get("host"); host != "" {
-		if routes, err := s.Store.Routes(ctx, host); err == nil {
-			if rr, ok := routing.Resolve(routes, host, routePath); ok {
-				res = &rr
-			}
-		}
-	}
+	res, routePath := s.previewRoute(ctx, q)
 	body, err := s.renderPage(ctx, v, res, q.Get("host"), routePath, mode, parent, s.runtimeBoot(target, v, caps))
 	if err != nil {
 		httpx.Fail(w, 404, "not_found", err.Error())
 		return
 	}
-	s.writePage(w, http.StatusOK, body)
+	s.writePage(w, r, http.StatusOK, body)
 }
 
 // staticRuntime is the runtime boot of an app page bound to a target on a
@@ -615,14 +644,53 @@ func (s *Server) runtimeBoot(target string, v store.Version, caps rt.Caps) *rend
 	return &render.Runtime{Target: target, App: v.Artifact, Version: v.N, Caps: names}
 }
 
-// serveSandboxData serves data files the app reads, by its manifest or a
-// route to it on any site host.
-func (s *Server) serveSandboxData(w http.ResponseWriter, r *http.Request, app string, m []string) {
+// previewRoute is the route a preview shows its page under: ?host= and
+// ?path= of a sandbox URL, resolved as a visitor's request would be (nil
+// without a host), and the path, "/" when none is given.
+func (s *Server) previewRoute(ctx context.Context, q url.Values) (*routing.Resolution, string) {
+	path := q.Get("path")
+	if !strings.HasPrefix(path, "/") {
+		path = "/"
+	}
+	host := q.Get("host")
+	if host == "" {
+		return nil, path
+	}
+	routes, err := s.Store.Routes(ctx, host)
+	if err != nil {
+		return nil, path
+	}
+	if rr, ok := routing.Resolve(routes, host, path); ok {
+		return &rr, path
+	}
+	return nil, path
+}
+
+// sandboxReads reports whether a sandbox serves data's files and records:
+// the page version the request comes from reads it, or main does, or a site
+// route serving the app does. The Referer (/v/<n>/…?host=&path=, sent in
+// full within the origin) names the version, so a preview of an older
+// version gets what that version reads. It grants nothing new: the label
+// serves every version of the app, each rendered with its own data.
+func (s *Server) sandboxReads(r *http.Request, app, data string) bool {
 	ctx := r.Context()
+	if ref, err := url.Parse(r.Referer()); err == nil && strings.EqualFold(ref.Host, r.Host) {
+		if m := appPath.FindStringSubmatch(ref.Path); m != nil {
+			n, _ := strconv.Atoi(m[1])
+			if v, err := s.Store.Version(ctx, app, n); err == nil {
+				var route *store.Route
+				if res, _ := s.previewRoute(ctx, ref.Query()); res != nil {
+					route = &res.Route
+				}
+				if s.reads(ctx, v, route)[data] {
+					return true
+				}
+			}
+		}
+	}
 	v, err := s.Store.Version(ctx, app, 0)
-	if err == nil && s.reads(ctx, v, nil)[m[1]] {
-		s.serveData(w, r, m)
-		return
+	if err == nil && s.reads(ctx, v, nil)[data] {
+		return true
 	}
 	for _, host := range s.Config.SiteHosts {
 		routes, err := s.Store.Routes(ctx, host)
@@ -630,13 +698,37 @@ func (s *Server) serveSandboxData(w http.ResponseWriter, r *http.Request, app st
 			continue
 		}
 		for _, rt := range routes {
-			if (rt.Page == app || s.admits(ctx, rt, app)) && s.reads(ctx, v, &rt)[m[1]] {
-				s.serveData(w, r, m)
-				return
+			if (rt.Page == app || s.admits(ctx, rt, app)) && s.reads(ctx, v, &rt)[data] {
+				return true
 			}
 		}
 	}
-	notFoundPage(w)
+	return false
+}
+
+// serveRecords serves /_r/<artifact>/<n>.js: one data version's records as
+// a script that hands them to window.slop. A version never changes, so the
+// script is a content URL.
+func (s *Server) serveRecords(w http.ResponseWriter, r *http.Request, m []string) {
+	n, _ := strconv.Atoi(m[2])
+	if n == 0 {
+		notFoundPage(w)
+		return
+	}
+	rs, _, err := s.records(r.Context(), m[1], n)
+	if err != nil {
+		notFoundPage(w)
+		return
+	}
+	ref := render.NewDataRef(m[1], n)
+	tag := `"` + string(ref) + `"`
+	w.Header().Set("ETag", tag)
+	w.Header().Set("Cache-Control", s.cacheControl(r, contentURL))
+	if etagMatch(r.Header.Get("If-None-Match"), tag) {
+		w.WriteHeader(http.StatusNotModified)
+		return
+	}
+	writeBody(w, r, http.StatusOK, "text/javascript; charset=utf-8", render.RecordsScript(ref, rs))
 }
 
 // slopProxy is the slop capability: /_rt/api/… on the target origin runs the

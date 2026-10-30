@@ -3,9 +3,12 @@ import { useAgentsQuery, useArtifactsQuery, useProjectsQuery, useThreadsQuery, u
 import type { Artifact } from '../../api/types'
 import { boot, csrfToken } from '../../app/boot'
 import { ago, cx, plural } from '../../app/format'
+import { projectGroups } from '../../app/groups'
 import { useVersionBy } from '../../app/hooks'
 import { navigate, runPath, SCREEN_NAMES, SCREENS, watchPath, type Location, type ScreenName } from '../../app/router'
 import { useAppSelector } from '../../app/store'
+import { LinkButton } from '../atoms'
+import { ArtifactDialog, inScope, ProjectDialog, ProjectPicker, useProjectScope } from './Projects'
 
 const kindLabel = (a: Artifact) => (a.kind === 'data' ? a.type || 'data' : 'page')
 
@@ -19,6 +22,7 @@ async function signOut() {
 // and who you are (prototype app.js drawBar).
 export function TopBar({ loc, artifact, onScreen }: { loc: Location; artifact?: Artifact; onScreen: (s: ScreenName) => void }) {
   const [menu, setMenu] = useState<'art' | 'more' | 'apps' | null>(null)
+  const [dialog, setDialog] = useState<'artifact' | 'project' | null>(null)
   const { data: agents = [] } = useAgentsQuery()
   const live = useAppSelector(s => s.ui.live)
   const me = boot().me.user
@@ -41,7 +45,9 @@ export function TopBar({ loc, artifact, onScreen }: { loc: Location; artifact?: 
           <span className="ptitle">{artifact?.id ?? 'Pick one'}</span>
           <span className="caret">▾</span>
         </button>
-        {menu === 'art' ? <ArtifactMenu current={artifact?.id} onPick={id => { setMenu(null); navigate(watchPath(id)) }} /> : null}
+        {menu === 'art' ? <ArtifactMenu current={artifact} onPick={id => { setMenu(null); navigate(watchPath(id)) }} onDialog={d => { setMenu(null); setDialog(d) }} /> : null}
+        {dialog === 'artifact' && artifact ? <ArtifactDialog a={artifact} onClose={() => setDialog(null)} /> : null}
+        {dialog === 'project' ? <ProjectDialog onClose={() => setDialog(null)} /> : null}
       </div>
       {loc.screen === 'watch' && artifact ? <VersionPill a={artifact} n={loc.n} /> : null}
       <div className="seg" role="tablist" aria-label="Screens">
@@ -111,24 +117,30 @@ function AppsMenu({ current, onPick }: { current?: string; onPick: (target: stri
   )
 }
 
-function ArtifactMenu({ current, onPick }: { current?: string; onPick: (id: string) => void }) {
+// ArtifactMenu lists the artifacts of the project scope, by project, and
+// edits the current artifact or starts a project.
+function ArtifactMenu({ current, onPick, onDialog }: { current?: Artifact; onPick: (id: string) => void; onDialog: (d: 'artifact' | 'project') => void }) {
   const { data: arts = [] } = useArtifactsQuery()
   const { data: projects = [] } = useProjectsQuery()
-  const groups = [...projects.map(p => ({ id: p.id as string | null, name: p.name })), { id: null, name: 'No project' }]
+  const [scope, setScope] = useProjectScope()
+  const groups = projectGroups(arts.filter(a => inScope(a, scope)), projects)
   return (
     <div className="menu" role="menu" onClick={e => e.stopPropagation()}>
-      {groups.map(g => {
-        const items = arts.filter(a => a.project === g.id)
-        if (!items.length) return null
+      <div className="mhead"><span>Project</span><ProjectPicker id="menuProject" /></div>
+      {groups.map(({ items, ...g }) => {
         return [
           <div key={'g' + g.id} className="grp">{g.name}</div>,
           ...items.map(a => (
-            <button type="button" key={a.id} className={a.id === current ? 'on' : ''} role="menuitem" onClick={() => onPick(a.id)}>
+            <button type="button" key={a.id} className={a.id === current?.id ? 'on' : ''} role="menuitem" onClick={() => onPick(a.id)}>
               <span className="code">{kindLabel(a)}</span><span className="t">{a.id}</span><small>{`v${a.main} · ${a.title}`}</small>
             </button>
           )),
         ]
       })}
+      {!groups.length ? <p className="mnote">{'Nothing in this project yet. '}<LinkButton onClick={() => setScope(null)}>Show all projects</LinkButton></p> : null}
+      <div className="grp" />
+      {current ? <button type="button" className="act" role="menuitem" onClick={() => onDialog('artifact')}><span className="t">{`Title and project of ${current.id}…`}</span></button> : null}
+      <button type="button" className="act" role="menuitem" onClick={() => onDialog('project')}><span className="t">New project…</span></button>
       <p className="mnote">A new artifact starts with its first push: slop push ./folder -a name, or Push a file on the Artifacts screen.</p>
     </div>
   )

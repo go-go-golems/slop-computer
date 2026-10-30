@@ -1,0 +1,202 @@
+<!doctype html>
+<html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Catalogue · slop.boutique</title>
+<link rel="stylesheet" href="boutique.css?v=2">
+<style>
+  .entry { display: flex; flex-direction: column; gap: 18px; padding-top: 56px; max-width: 1000px; }
+  .entry .sb-h1 { font-size: 52px; line-height: 54px; }
+  .entry-cover { border-radius: 3px; overflow: hidden; background: var(--table); }
+  .entry-cover img { width: 100%; height: auto; max-height: 540px; object-fit: cover; }
+  .badges { display: flex; flex-wrap: wrap; gap: 6px; }
+  .sb-badge.ea { background: #F6E6D4; }
+  .sb-badge.cap { background: var(--table); color: var(--muted); }
+  .sb-badge.feat { background: var(--ink); color: var(--wall); }
+  /* boutique.css's .site-footer padding shorthand drops .page's side padding */
+  .site-footer.page { padding-left: max(var(--pad), env(safe-area-inset-left,0px)); padding-right: max(var(--pad), env(safe-area-inset-right,0px)); }
+  .gallery { display: grid; grid-template-columns: repeat(auto-fill, minmax(180px, 1fr)); gap: 12px; }
+  .gallery a { display: block; border: 1px solid var(--line); border-radius: 3px; overflow: hidden; background: var(--table); }
+  .gallery img { width: 100%; height: 160px; object-fit: contain; }
+  .releases { display: flex; flex-direction: column; border-top: 1px solid var(--ink); }
+  .release { display: grid; grid-template-columns: 96px 1fr auto; gap: 16px; padding: 14px 0; border-bottom: 1px solid var(--line); align-items: baseline; }
+  .release .ver { font: 15px var(--mono); }
+  .release .meta { color: var(--muted); font-size: 14px; line-height: 20px; }
+  .release .caps { display: flex; flex-wrap: wrap; gap: 6px; justify-content: flex-end; }
+  .release.latest .ver { font-weight: 500; }
+  .prose pre { background: var(--plinth); padding: 12px 14px; border-radius: 3px; overflow: auto; font: 14px/20px var(--mono); margin: 0 0 12px; }
+  .prose pre code { background: none; padding: 0; font: inherit; }
+  .prose img { border-radius: 3px; margin: 10px 0; }
+  .prose h2, .prose h3, .prose h4 { letter-spacing: -.01em; }
+  .prose blockquote { margin: 0 0 12px; padding: 2px 0 2px 14px; border-left: 2px solid var(--line); color: var(--muted); }
+  .prose ol { margin: 0 0 12px; padding-left: 20px; }
+  @media (max-width: 700px) { .release { grid-template-columns: 1fr; gap: 2px; } .release .caps { justify-content: flex-start; } .entry .sb-h1 { font-size: 34px; line-height: 36px; } }
+</style>
+</head><body><div class="sb-app">
+<header class="site-header page"><a class="site-wordmark" href="/">slop.boutique</a><p class="site-statement">A lab for computation and intelligence as material and medium.</p>
+<nav class="site-nav"><a href="/" aria-current="page" style="color:var(--ink)">Apps</a><a href="/journal">Journal</a><a href="/about">About</a><a class="site-support" href="/pricing"><span class="support-desktop">Support the lab</span><span class="support-mobile">Support</span></a></nav></header>
+<main class="sb-main page"><article class="entry" id="rec"></article></main>
+<footer class="site-footer page">
+  <div class="footer-brand"><span class="site-wordmark">slop.boutique</span><span>Run by Manuel and Ramon.</span></div>
+  <div><a href="/">Apps</a><a href="/journal">Journal</a><a href="/about">About</a></div>
+  <div><a href="/journal">RSS</a><a href="/press">Press</a><a href="/pricing">Support the lab</a></div>
+  <div class="footer-type"><span>Set in ABC Areal.</span><span>For humans.</span></div>
+</footer>
+</div>
+<script>
+(function () {
+  const esc = s => String(s == null ? '' : s).replace(/[&<>"]/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]));
+  // bodies were written for the public boutique, where media is absolute.
+  const fix = u => String(u || '').replace(/^https?:\/\/slop\.boutique/i, '');
+  // Images slop serves (/_d/…) come scaled to the width they are shown at.
+  const img = (u, w) => u.startsWith('/_d/') ? slop.image(u, w) : u;
+  const srcset = (u, ws) => u.startsWith('/_d/') ? slop.srcset(u, ws) : '';
+  const RUNTIME = ['db', 'user', 'room', 'comments', 'assets', 'artifact', 'files'];
+  const latestRelease = r => {
+    const rels = r.releases || [];
+    return rels.find(x => x.version === r.latest) || rels.slice().sort((a, b) => (b.n || 0) - (a.n || 0))[0] || null;
+  };
+  const day = d => new Date(d).toLocaleDateString('en-GB', { day: 'numeric', month: 'long', year: 'numeric', timeZone: 'UTC' });
+  const shortDay = d => new Date(d).toLocaleDateString('en-GB', { day: 'numeric', month: 'short', year: 'numeric', timeZone: 'UTC' });
+
+  // ---------------------------------------------------------------- markdown
+  // Small renderer: headings, paragraphs, emphasis, links, images, lists,
+  // blockquotes, rules, inline code and fenced code. Everything is escaped
+  // first, so a record body can never inject HTML.
+  function inline(text) {
+    return esc(text)
+      .replace(/!\[([^\]]*)\]\(([^)\s]+)(?:\s+"[^"]*")?\)/g, (m, alt, url) =>
+        `<img src="${img(fix(url), 960)}" srcset="${srcset(fix(url), [640, 960, 1280])}" sizes="(max-width: 760px) 100vw, 760px" alt="${alt}" loading="lazy" decoding="async">`)
+      .replace(/\[([^\]]+)\]\(([^)\s]+)(?:\s+"[^"]*")?\)/g, (m, label, url) => {
+        const u = fix(url);
+        return /^https?:/i.test(u)
+          ? `<a href="${u}" target="_blank" rel="noopener">${label}</a>`
+          : `<a href="${u}">${label}</a>`;
+      })
+      .replace(/`([^`]+)`/g, '<code>$1</code>')
+      .replace(/\*\*([^*]+)\*\*/g, '<strong>$1</strong>')
+      .replace(/(^|[^*])\*([^*\n]+)\*/g, '$1<em>$2</em>')
+      .replace(/(^|[\s(])_([^_\n]+)_(?=[\s).,;:!?]|$)/g, '$1<em>$2</em>');
+  }
+
+  function markdown(src) {
+    const lines = String(src || '').replace(/<!--[\s\S]*?-->/g, '').replace(/\r\n?/g, '\n').split('\n');
+    let html = '', para = [], i = 0;
+    const flush = () => { if (para.length) { html += '<p>' + inline(para.join(' ')) + '</p>'; para = []; } };
+
+    while (i < lines.length) {
+      const line = lines[i];
+
+      const fence = /^\s*```(\S*)\s*$/.exec(line);
+      if (fence) {
+        flush();
+        i++;
+        const code = [];
+        while (i < lines.length && !/^\s*```\s*$/.test(lines[i])) code.push(lines[i++]);
+        i++;
+        const cls = fence[1] ? ` class="language-${esc(fence[1])}"` : '';
+        html += `<pre><code${cls}>${esc(code.join('\n'))}</code></pre>`;
+        continue;
+      }
+
+      if (/^\s*$/.test(line)) { flush(); i++; continue; }
+
+      const heading = /^(#{1,6})\s+(.*)$/.exec(line);
+      if (heading) {
+        flush();
+        const level = heading[1].length;
+        html += `<h${level}>${inline(heading[2])}</h${level}>`;
+        i++;
+        continue;
+      }
+
+      if (/^\s*([-*+])\s+/.test(line)) {
+        flush();
+        html += '<ul>';
+        while (i < lines.length && /^\s*([-*+])\s+/.test(lines[i])) {
+          html += '<li>' + inline(lines[i].replace(/^\s*[-*+]\s+/, '')) + '</li>';
+          i++;
+        }
+        html += '</ul>';
+        continue;
+      }
+
+      if (/^\s*\d+[.)]\s+/.test(line)) {
+        flush();
+        html += '<ol>';
+        while (i < lines.length && /^\s*\d+[.)]\s+/.test(lines[i])) {
+          html += '<li>' + inline(lines[i].replace(/^\s*\d+[.)]\s+/, '')) + '</li>';
+          i++;
+        }
+        html += '</ol>';
+        continue;
+      }
+
+      if (/^\s*>\s?/.test(line)) {
+        flush();
+        const quote = [];
+        while (i < lines.length && /^\s*>\s?/.test(lines[i])) quote.push(lines[i++].replace(/^\s*>\s?/, ''));
+        html += '<blockquote><p>' + inline(quote.join(' ')) + '</p></blockquote>';
+        continue;
+      }
+
+      if (/^\s*(-{3,}|\*{3,}|_{3,})\s*$/.test(line)) { flush(); html += '<hr>'; i++; continue; }
+
+      para.push(line);
+      i++;
+    }
+    flush();
+    return html;
+  }
+  window.catalogMarkdown = markdown;
+
+  // ------------------------------------------------------------------- page
+  (async () => {
+    const el = document.getElementById('rec');
+    const id = (slop.route.params || {}).id;
+    const rows = await slop.data.catalog.list();
+    const r = rows.find(x => x.id === id) || rows.find(x => x.francoisId === id);
+    if (!r) {
+      el.innerHTML = `<p class="sb-kicker">Catalogue</p><h1 class="sb-h1">No app called “${esc(id || '')}”.</h1><p class="sb-text"><a class="u" href="/">See the whole catalogue</a>${id ? ` · <a class="u" href="/experiments/${encodeURIComponent(id)}">look for an experiment called “${esc(id)}”</a>` : ''}</p>`;
+      return;
+    }
+    document.title = r.title + ' · slop.boutique';
+
+    const rel = latestRelease(r);
+    const caps = rel ? (rel.capabilities || []).filter(c => RUNTIME.includes(c)) : [];
+    const early = r.earlyAccessUntil && new Date(r.earlyAccessUntil).getTime() > Date.now();
+    const cover = r.cover && r.cover.src ? r.cover : null;
+    const gallery = (r.gallery || []).filter(g => g && g.src);
+    const releases = (r.releases || []).slice().sort((a, b) => (b.n || 0) - (a.n || 0));
+    const releaseHref = r.page ? '/r/' + encodeURIComponent(r.page) : null;
+
+    el.innerHTML = `
+      <p class="sb-kicker"><a class="tlink quiet" href="/">Catalogue</a> · <span class="sb-version">${esc(r.id)}</span>${r.featured ? ' · featured' : ''}</p>
+      <div class="sb-row">
+        <h1 class="sb-h1">${esc(r.title)}</h1>
+        ${releaseHref ? `<a class="site-button" href="${releaseHref}">Open release${r.latest ? ' · v' + esc(r.latest) : ''}</a>` : (r.latest ? `<span class="site-button" style="opacity:.55">No page for v${esc(r.latest)}</span>` : '')}
+      </div>
+      <p class="sb-text">${esc(r.description)}</p>
+      ${(r.featured || early || caps.length || (r.tags && r.tags.length)) ? `<div class="badges">
+        ${r.featured ? '<span class="sb-badge feat">Featured</span>' : ''}
+        ${early ? `<span class="sb-badge ea" title="Early access until ${esc(day(r.earlyAccessUntil))}">Early access until ${esc(shortDay(r.earlyAccessUntil))}</span>` : ''}
+        ${caps.map(c => `<span class="sb-badge cap" title="The latest release needs the ${esc(c)} runtime">needs ${esc(c)}</span>`).join('')}
+        ${(r.tags || []).map(t => `<span class="sb-badge" style="background:var(--plinth)">${esc(t)}</span>`).join('')}
+      </div>` : ''}
+      ${cover ? `<div class="entry-cover"><img src="${esc(img(fix(cover.src), 1280))}" srcset="${esc(srcset(fix(cover.src), [640, 960, 1280, 1920]))}" sizes="(max-width: 1100px) 100vw, 1100px" alt="${esc(cover.alt || r.title)}" fetchpriority="high" decoding="async"></div>` : ''}
+      <div class="prose sb-prose">${markdown(r.body)}</div>
+      ${gallery.length ? `<p class="final-label" style="margin-top:16px">Gallery</p><div class="gallery">${gallery.map(g => `<a href="${esc(fix(g.src))}" target="_blank" rel="noopener"><img src="${esc(img(fix(g.src), 320))}" srcset="${esc(srcset(fix(g.src), [320, 640]))}" sizes="180px" alt="${esc(g.alt || r.title)}" loading="lazy" decoding="async"></a>`).join('')}</div>` : ''}
+      <div style="margin-top:20px">
+        <p class="final-label">Releases</p>
+        <div class="releases">
+          ${releases.length ? releases.map(x => `<div class="release${x.version === r.latest ? ' latest' : ''}">
+            <span class="ver">${esc(x.version)}</span>
+            <div><div>${x.state === 'withdrawn' ? 'withdrawn' : 'published'} · ${x.publishedAt ? esc(shortDay(x.publishedAt)) : ''}${x.freeSample ? ' · free sample' : ''}</div>${x.changelog ? `<div class="meta">${esc(x.changelog)}</div>` : ''}</div>
+            <div class="caps">${(x.capabilities || []).filter(c => RUNTIME.includes(c)).map(c => `<span class="sb-badge cap">${esc(c)}</span>`).join('')}</div>
+          </div>`).join('') : '<p class="muted small">No releases yet.</p>'}
+        </div>
+      </div>
+      ${releaseHref ? `<div class="sb-row" style="margin-top:8px"><a class="site-button" href="${releaseHref}">Open the release${r.latest ? ' · v' + esc(r.latest) : ''}</a><span class="muted small">Page artifact “${esc(r.page)}”, latest release.</span></div>` : '<p class="muted small">This record has no release page in the import.</p>'}
+    `;
+  })();
+})();
+</script>
+</body></html>

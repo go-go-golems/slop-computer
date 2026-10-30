@@ -21,6 +21,8 @@ topics:
       description: 'Workshop tools: pages that run with API grants'
     - slug: collaboration
       description: Live shared editing, presence and review
+    - slug: performance
+      description: Load time, caching, compression and resource size
 docTypes:
     - slug: design-doc
       description: Structured rationale and architecture notes

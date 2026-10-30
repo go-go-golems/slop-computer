@@ -234,20 +234,7 @@ func (s *Server) getFile(w http.ResponseWriter, r *http.Request) {
 		httpx.Fail(w, 404, "not_found", "No such file in this version")
 		return
 	}
-	s.serveBlob(w, r, f)
-}
-
-func (s *Server) serveBlob(w http.ResponseWriter, r *http.Request, f store.FileEntry) {
-	file, err := s.Blobs.Open(f.SHA256)
-	if err != nil {
-		unavailable(w, err)
-		return
-	}
-	defer func() { _ = file.Close() }()
-	w.Header().Set("Content-Type", f.Type)
-	w.Header().Set("ETag", `"`+f.SHA256+`"`)
-	w.Header().Set("Cache-Control", "private, max-age=31536000, immutable")
-	http.ServeContent(w, r, "", zeroTime, file)
+	s.serveFile(w, r, f, contentURL)
 }
 
 func (s *Server) missingBlobs(w http.ResponseWriter, r *http.Request) {

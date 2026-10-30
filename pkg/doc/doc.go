@@ -36,7 +36,7 @@ func Topic(slug string) (string, string, bool) {
 		if end := strings.Index(text[4:], "\n---\n"); end >= 0 {
 			for _, line := range strings.Split(text[4:4+end], "\n") {
 				if v, found := strings.CutPrefix(line, "Title: "); found {
-					title = strings.TrimSpace(v)
+					title = strings.Trim(strings.TrimSpace(v), `"`) // quoted when it holds ": "
 				}
 			}
 			text = text[4+end+5:]

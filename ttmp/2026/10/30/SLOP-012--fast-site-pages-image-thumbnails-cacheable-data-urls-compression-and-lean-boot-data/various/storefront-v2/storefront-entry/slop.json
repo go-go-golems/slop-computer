@@ -1,0 +1,15 @@
+{
+  "artifact": "storefront-entry",
+  "kind": "page",
+  "project": "francois",
+  "reads": {
+    "catalog": "francois-catalog"
+  },
+  "title": "Catalogue entry",
+  "tokens": "lab-tokens",
+  "files": [
+    "francois-media",
+    "francois-media-2",
+    "francois-media-3"
+  ]
+}

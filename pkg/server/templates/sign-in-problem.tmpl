@@ -1,0 +1,7 @@
+{{define "sign-in-problem"}}{{template "head" "Sign-in problem"}}{{template "banner" .}}
+<main class="card">
+<h1>{{.Problem.Title}}</h1>
+<p>{{.Problem.Explain}}</p>
+<p><a class="button primary" href="{{.Continue}}">Continue signing in</a></p>
+<p class="note">Code: <code>{{.Code}}</code></p>
+</main>{{template "foot"}}{{end}}

@@ -140,7 +140,7 @@ var _ glazed.GlazeCommand = (*gcBlobsCmd)(nil)
 
 func newGCBlobs() *gcBlobsCmd {
 	return &gcBlobsCmd{glazed.NewCommandDescription("gc-blobs",
-		glazed.WithShort("Remove blobs that no version references"),
+		glazed.WithShort("Remove blobs that no version references, and their derived files"),
 		glazed.WithLong("Lists (with --dry-run) or removes blob files that no version references and that are older than --grace. "+
 			"Young unreferenced blobs are kept, because a push uploads its blobs before it stores the version."),
 		dbFlags(
@@ -178,6 +178,19 @@ func (c *gcBlobsCmd) RunIntoGlazeProcessor(ctx context.Context, v *values.Values
 	if err != nil {
 		return err
 	}
+	// Derived files (gzipped copies, thumbnails) go with their blob.
+	removed := map[string]bool{}
+	for _, g := range gone {
+		removed[g.SHA256] = true
+	}
+	derived, err := bl.CollectDerived(func(sum string) bool {
+		_, ok := bl.Stat(sum)
+		return ok && !removed[sum]
+	}, dry)
+	if err != nil {
+		return err
+	}
+	gone = append(gone, derived...)
 	action := "removed"
 	if dry {
 		action = "would remove"

@@ -24,14 +24,19 @@ func TestDataFiles(t *testing.T) {
 	manuel.do("PUT", "/api/routes", map[string]any{"host": "site.test", "path": "/gallery", "page": "gallery"}, nil)
 
 	code, body, _ := h.get("site.test", "/gallery", "")
-	if code != 200 || !strings.Contains(body, `"src":"/_d/media/1/files/med_1.png"`) || strings.Contains(body, "PNG fake") {
+	if code != 200 || !strings.Contains(body, `<script src="/_r/media/1.js">`) {
 		t.Fatalf("gallery %d %s", code, body)
+	}
+	code, body, _ = h.get("site.test", "/_r/media/1.js", "")
+	if code != 200 || !strings.Contains(body, `"src":"/_d/media/1/files/med_1.png"`) || strings.Contains(body, "PNG fake") {
+		t.Fatalf("gallery records %d %s", code, body)
 	}
 	code, body, hdr := h.get("site.test", "/_d/media/1/files/med_1.png", "")
 	if code != 200 || body != "\x89PNG fake" || !strings.Contains(hdr.Get("Cache-Control"), "immutable") {
 		t.Fatalf("data file %d %q %v", code, body, hdr)
 	}
-	if code, _, hdr = h.get("site.test", "/_d/media/main/files/med_1.png", ""); code != 200 || hdr.Get("Cache-Control") != "no-cache" {
+	// main is a place: fresh for a minute on a site host, then revalidated.
+	if code, _, hdr = h.get("site.test", "/_d/media/main/files/med_1.png", ""); code != 200 || hdr.Get("Cache-Control") != "public, max-age=60, stale-while-revalidate=86400" {
 		t.Fatalf("data file at main %d %v", code, hdr)
 	}
 	// Data no public route reads, and the manifest, stay private.
@@ -47,6 +52,12 @@ func TestDataFiles(t *testing.T) {
 	host := u.Host
 	if code, body, _ = h.get(host, "/_d/private/1/files/p.png", ""); code != 200 || body != "secret" {
 		t.Fatalf("preview data file %d %q", code, body)
+	}
+	if code, body, _ = h.get(host, "/_r/private/1.js", ""); code != 200 || !strings.HasPrefix(body, `slop.records("private@1",`) {
+		t.Fatalf("preview records %d %q", code, body)
+	}
+	if code, _, _ = h.get(host, "/_r/media/1.js", ""); code != 404 {
+		t.Fatalf("preview of unrelated records %d", code)
 	}
 	if code, _, _ = h.get(host, "/_d/media/1/files/med_1.png", ""); code != 404 {
 		t.Fatalf("preview of unrelated data %d", code)

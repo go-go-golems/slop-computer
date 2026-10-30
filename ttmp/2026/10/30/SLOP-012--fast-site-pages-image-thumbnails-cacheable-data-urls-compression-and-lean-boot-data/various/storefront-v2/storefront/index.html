@@ -1,0 +1,90 @@
+<!doctype html>
+<html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Catalogue · slop.boutique</title>
+<link rel="stylesheet" href="boutique.css?v=2">
+<style>
+  .apps { --cols: 3; padding-top: 8px; }
+  .apps .sb-cover { aspect-ratio: 8/5; background: var(--table); }
+  .apps .sb-description { display: -webkit-box; -webkit-line-clamp: 3; -webkit-box-orient: vertical; overflow: hidden; }
+  .card-head { display: flex; align-items: baseline; justify-content: space-between; gap: 10px; min-width: 0; }
+  .card-head .sb-title { flex: 1; min-width: 0; }
+  .badges { display: flex; flex-wrap: wrap; gap: 6px; }
+  .sb-badge.ea { background: #F6E6D4; }
+  .sb-badge.cap { background: var(--table); color: var(--muted); }
+  .sb-badge.feat { background: var(--ink); color: var(--wall); }
+  .apps .sb-chips { margin-top: 0; }
+  /* boutique.css's .site-footer padding shorthand drops .page's side padding */
+  .site-footer.page { padding-left: max(var(--pad), env(safe-area-inset-left,0px)); padding-right: max(var(--pad), env(safe-area-inset-right,0px)); }
+  .fallback { width: 100%; height: 100%; display: grid; place-items: center; background: var(--table); color: var(--faint); font-size: 34px; letter-spacing: -.03em; }
+  @media (max-width: 1100px) { .apps { --cols: 2; } }
+  @media (max-width: 700px) { .apps { --cols: 1; } }
+</style>
+</head><body><div class="sb-app">
+<header class="site-header page"><a class="site-wordmark" href="/">slop.boutique</a><p class="site-statement">A lab for computation and intelligence as material and medium.</p>
+<nav class="site-nav"><a href="/" aria-current="page" style="color:var(--ink)">Apps</a><a href="/journal">Journal</a><a href="/about">About</a><a class="site-support" href="/pricing"><span class="support-desktop">Support the lab</span><span class="support-mobile">Support</span></a></nav></header>
+<main class="sb-main page">
+  <section class="sb-intro"><h1 class="sb-h1">The catalogue</h1><p class="sb-text">Every app the lab has released, imported from francois. <span id="count"></span></p></section>
+  <div class="sb-grid apps" id="grid"></div>
+</main>
+<footer class="site-footer page">
+  <div class="footer-brand"><span class="site-wordmark">slop.boutique</span><span>Run by Manuel and Ramon.</span></div>
+  <div><a href="/">Apps</a><a href="/journal">Journal</a><a href="/about">About</a></div>
+  <div><a href="/journal">RSS</a><a href="/press">Press</a><a href="/pricing">Support the lab</a></div>
+  <div class="footer-type"><span>Set in ABC Areal.</span><span>For humans.</span></div>
+</footer>
+</div>
+<script>
+(function () {
+  const esc = s => String(s == null ? '' : s).replace(/[&<>"]/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]));
+  // record media urls are absolute to the public boutique; the import serves the
+  // same files on this host, so drop the origin.
+  const fix = u => String(u || '').replace(/^https?:\/\/slop\.boutique/i, '');
+  // Images slop serves (/_d/…) come scaled to the width the card needs.
+  const img = (u, w) => u.startsWith('/_d/') ? slop.image(u, w) : u;
+  const srcset = u => u.startsWith('/_d/') ? slop.srcset(u, [320, 480, 640, 960, 1280]) : '';
+  const RUNTIME = ['db', 'user', 'room', 'comments', 'assets', 'artifact', 'files'];
+  const latestRelease = r => {
+    const rels = r.releases || [];
+    return rels.find(x => x.version === r.latest) || rels.slice().sort((a, b) => (b.n || 0) - (a.n || 0))[0] || null;
+  };
+  const day = d => new Date(d).toLocaleDateString('en-GB', { day: 'numeric', month: 'short', year: 'numeric', timeZone: 'UTC' });
+
+  (async () => {
+    const grid = document.getElementById('grid');
+    const rows = (await slop.data.catalog.list()).filter(r => r.visibility === 'listed');
+    rows.sort((a, b) =>
+      (b.featured ? 1 : 0) - (a.featured ? 1 : 0) ||
+      ((a.sortOrder == null ? 0 : a.sortOrder) - (b.sortOrder == null ? 0 : b.sortOrder)) ||
+      String(a.title).localeCompare(String(b.title), 'en'));
+    document.getElementById('count').textContent = rows.length + ' apps';
+
+    const now = Date.now();
+    grid.innerHTML = rows.map((r, i) => {
+      const cover = r.cover && r.cover.src ? r.cover : null;
+      const rel = latestRelease(r);
+      const caps = rel ? (rel.capabilities || []).filter(c => RUNTIME.includes(c)) : [];
+      const early = r.earlyAccessUntil && new Date(r.earlyAccessUntil).getTime() > now;
+      const mono = (String(r.title || '?').split(/\s+/).map(w => w[0]).join('').slice(0, 2) || '?').toUpperCase();
+      return `<a class="sb-card" href="/apps/${encodeURIComponent(r.id)}">
+        <div class="sb-cover">${cover ? `<img class="cover" src="${esc(img(fix(cover.src), 640))}" srcset="${esc(srcset(fix(cover.src)))}" sizes="(max-width: 700px) 100vw, (max-width: 1100px) 50vw, 33vw" alt="${esc(cover.alt || r.title)}" ${i < 6 ? 'fetchpriority="high"' : 'loading="lazy"'} decoding="async">` : ''}<span class="fallback"${cover ? ' hidden' : ''} aria-hidden="true">${esc(mono)}</span></div>
+        <div class="card-head"><h3 class="sb-title">${esc(r.title)}</h3><span class="sb-version">${r.latest ? 'v' + esc(r.latest) : 'no release'}</span></div>
+        <p class="sb-description">${esc(r.description)}</p>
+        ${(r.featured || early || caps.length) ? `<div class="badges">${r.featured ? '<span class="sb-badge feat">Featured</span>' : ''}${early ? `<span class="sb-badge ea" title="Early access until ${esc(day(r.earlyAccessUntil))}">Early access</span>` : ''}${caps.map(c => `<span class="sb-badge cap" title="The latest release needs the ${esc(c)} runtime">needs ${esc(c)}</span>`).join('')}</div>` : ''}
+        ${(r.tags && r.tags.length) ? `<div class="sb-chips">${r.tags.map(t => `<span class="muted">#${esc(t)}</span>`).join('')}</div>` : ''}
+      </a>`;
+    }).join('');
+
+    // A missing cover shows the monogram; an image can fail before this runs.
+    grid.querySelectorAll('img.cover').forEach(img => {
+      const fallback = () => {
+        img.hidden = true;
+        const fb = img.nextElementSibling;
+        if (fb) fb.hidden = false;
+      };
+      if (img.complete && !img.naturalWidth) fallback();
+      else img.addEventListener('error', fallback, { once: true });
+    });
+  })();
+})();
+</script>
+</body></html>

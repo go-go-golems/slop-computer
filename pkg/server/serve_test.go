@@ -57,10 +57,22 @@ func TestServeSiteAndSandbox(t *testing.T) {
 	manuel.do("PUT", "/api/routes", map[string]any{"host": "site.test", "path": "/secret", "page": "secret", "access": "admins"}, nil)
 
 	code, body, hdr := h.get("site.test", "/journal/routes-not-templates", "")
-	if code != 200 || !strings.Contains(body, `"record":"posts/routes-not-templates.md"`) || !strings.Contains(body, `"title":"Routes, not templates"`) ||
-		!strings.Contains(body, `\u003cstrong\u003etable\u003c/strong\u003e`) || !strings.Contains(body, `<style data-slop="tokens">html:root{--ink:#1a1a1a;--radius:0}</style></head>`) ||
+	if code != 200 || !strings.Contains(body, `"record":"posts/routes-not-templates.md"`) || !strings.Contains(body, `<script src="/_r/journal/1.js"></script>`) ||
+		!strings.Contains(body, `<style data-slop="tokens">html:root{--ink:#1a1a1a;--radius:0}</style></head>`) ||
 		strings.Contains(body, "bridge.js") {
 		t.Fatalf("site page %d %s", code, body)
+	}
+	// The records are a script the page loads: a content URL.
+	code, script, shdr := h.get("site.test", "/_r/journal/1.js", "")
+	if code != 200 || !strings.HasPrefix(script, `slop.records("journal@1",`) || !strings.Contains(script, `"title":"Routes, not templates"`) ||
+		!strings.Contains(script, `\u003cstrong\u003etable\u003c/strong\u003e`) || shdr.Get("Cache-Control") != "public, max-age=31536000, immutable" ||
+		shdr.Get("ETag") != `"journal@1"` || !strings.HasPrefix(shdr.Get("Content-Type"), "text/javascript") {
+		t.Fatalf("records script %d %v %.200s", code, shdr, script)
+	}
+	for _, p := range []string{"/_r/journal/0.js", "/_r/journal/9.js", "/_r/secret/1.js"} {
+		if code, _, _ = h.get("site.test", p, ""); code != 404 {
+			t.Fatalf("%s: %d", p, code)
+		}
 	}
 	if !strings.Contains(hdr.Get("Content-Security-Policy"), "frame-ancestors") {
 		t.Fatalf("csp %v", hdr)

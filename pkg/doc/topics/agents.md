@@ -53,6 +53,12 @@ for managing people and for imports that keep authors. The token is stored in
 `~/.config/slop/` (mode 600), and every later command uses it.
 `slop auth status --check` shows which token is in use.
 
+Open the link in a browser where you are signed in as an admin. If you sign
+in from a different browser than the one the link opened in, slop shows a
+page saying so, with *Continue signing in*: it signs you in there and brings
+you to the approval form. The CLI keeps waiting while the server restarts,
+and offers a new code when one expires.
+
 To run several agents, give each one its own login, so their work is labelled
 separately and each can be revoked on its own:
 
@@ -158,7 +164,8 @@ The francois catalogue lives in project `francois`:
 
 The storefront at https://site.your-slop-server/ is the pages `storefront` and
 `storefront-entry`; `slop pull storefront` is the quickest example of a page that
-reads data.
+reads data. `slop help site-pages` explains scaled images (`?w=`), `reads`
+and `files`, and what browsers cache.
 
 If the Workshop is ever broken, `https://your-slop-server/_/` (safe mode) can still
 move routes and revoke tokens.

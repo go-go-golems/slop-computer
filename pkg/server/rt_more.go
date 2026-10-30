@@ -396,20 +396,27 @@ func (s *Server) serveAsset(w http.ResponseWriter, r *http.Request, target, id s
 		notFoundPage(w)
 		return
 	}
-	file, err := s.Blobs.Open(a.SHA256)
+	v, err := s.variant(r, store.FileEntry{SHA256: a.SHA256, Type: a.ContentType, Size: a.Size}) // ?w=, gzip
 	if err != nil {
 		unavailable(w, err)
 		return
 	}
-	defer func() { _ = file.Close() }()
-	w.Header().Set("Content-Type", a.ContentType)
-	w.Header().Set("X-Content-Type-Options", "nosniff")
-	w.Header().Set("Content-Security-Policy", "sandbox; default-src 'none'")
+	defer func() { _ = v.Close() }()
+	h := w.Header()
+	h.Set("Content-Type", v.Type)
+	h.Set("X-Content-Type-Options", "nosniff")
+	h.Set("Content-Security-Policy", "sandbox; default-src 'none'")
 	// Revalidated on every use (a cheap 304 by ETag): a deleted asset is
 	// gone for good, not served from the browser's cache.
-	w.Header().Set("Cache-Control", "private, no-cache")
-	w.Header().Set("ETag", `"`+a.SHA256+`"`)
-	http.ServeContent(w, r, "", zeroTime, file)
+	h.Set("Cache-Control", "private, no-cache")
+	h.Set("ETag", `"`+v.Tag+`"`)
+	if v.Encoding != "" {
+		h.Set("Content-Encoding", v.Encoding)
+	}
+	if compressible(a.ContentType) {
+		h.Add("Vary", "Accept-Encoding")
+	}
+	http.ServeContent(w, r, "", zeroTime, v)
 }
 
 func (s *Server) rpcAssetsList(ctx context.Context, v *rt.View, _ json.RawMessage) (any, error) {

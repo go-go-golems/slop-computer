@@ -7,6 +7,7 @@
 package seed
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
 	"fmt"
@@ -172,12 +173,23 @@ func Push(ctx context.Context, dir string, f *File, o Options) (Result, error) {
 			}
 		}
 	}
-	// Data first, so pages that read it find it.
+	// Data first, so pages that read it find it; among data, what other
+	// data links to first, so those links can name its version (pinLinks).
 	order := append([]Artifact(nil), f.Artifacts...)
-	sort.SliceStable(order, func(i, j int) bool { return order[i].Kind == "data" && order[j].Kind != "data" })
+	rank := func(a Artifact) int {
+		switch {
+		case a.Kind != "data":
+			return 2
+		case linksToData(dir, a):
+			return 1
+		}
+		return 0
+	}
+	sort.SliceStable(order, func(i, j int) bool { return rank(order[i]) < rank(order[j]) })
 	viewers := map[string]string{}
+	mains := map[string]int{} // main version of each artifact pushed so far
 	for _, art := range order {
-		if err := pushArtifact(ctx, dir, art, o, as, authors, &res, logf); err != nil {
+		if err := pushArtifact(ctx, dir, art, o, as, authors, mains, &res, logf); err != nil {
 			return res, err
 		}
 		if art.Viewer != "" {
@@ -237,7 +249,7 @@ func authorMap(ctx context.Context, f *File, api *client.Client) (map[Identity]s
 }
 
 func pushArtifact(ctx context.Context, dir string, art Artifact, o Options, as func(string) (*client.Client, error),
-	authors map[Identity]string, res *Result, logf func(string, ...any)) error {
+	authors map[Identity]string, mains map[string]int, res *Result, logf func(string, ...any)) error {
 	existing, err := o.Admin.Artifact(ctx, art.ID)
 	exists := err == nil && existing.Latest > 0
 	if err != nil && !client.IsNotFound(err) {
@@ -246,6 +258,7 @@ func pushArtifact(ctx context.Context, dir string, art Artifact, o Options, as f
 	if exists && o.SkipExisting {
 		logf("%s exists (v%d), skipped\n", art.ID, existing.Latest)
 		res.Skipped += len(art.Versions)
+		mains[art.ID] = existing.Main
 		return nil
 	}
 	have := map[string]bool{}
@@ -272,7 +285,7 @@ func pushArtifact(ctx context.Context, dir string, art Artifact, o Options, as f
 		if err != nil {
 			return err
 		}
-		tree, err := UploadDir(ctx, author, VersionDir(dir, art.ID, ver.N))
+		tree, err := UploadDir(ctx, author, VersionDir(dir, art.ID, ver.N), mains)
 		if err != nil {
 			return errors.Wrapf(err, "%s v%d", art.ID, ver.N)
 		}
@@ -298,6 +311,7 @@ func pushArtifact(ctx context.Context, dir string, art Artifact, o Options, as f
 		}
 		main = out.Artifact.Main
 	}
+	mains[art.ID] = main
 	return nil
 }
 
@@ -331,15 +345,28 @@ func pushThread(ctx context.Context, t Thread, as func(string) (*client.Client, 
 }
 
 // UploadDir uploads a directory's files (only those the server lacks) and
-// returns its tree.
-func UploadDir(ctx context.Context, api *client.Client, dir string) (map[string]string, error) {
+// returns its tree. pin, when set, rewrites the text files on the way (see
+// pinLinks); the directory itself is not changed.
+func UploadDir(ctx context.Context, api *client.Client, dir string, pin map[string]int) (map[string]string, error) {
 	tree := map[string]string{}
 	paths := map[string]string{}
+	pinned := map[string][]byte{}
 	err := filepath.WalkDir(dir, func(p string, d fs.DirEntry, err error) error {
 		if err != nil || d.IsDir() {
 			return err
 		}
 		rel, _ := filepath.Rel(dir, p)
+		if len(pin) > 0 && isText(p) {
+			b, err := os.ReadFile(p) // #nosec G304 -- files of the seed directory
+			if err != nil {
+				return err
+			}
+			if out := pinLinks(b, pin); !bytes.Equal(out, b) {
+				sum := blobs.Sum(out)
+				tree[filepath.ToSlash(rel)], pinned[sum] = sum, out
+				return nil
+			}
+		}
 		sum, err := blobs.SumFile(p)
 		if err != nil {
 			return err
@@ -351,8 +378,11 @@ func UploadDir(ctx context.Context, api *client.Client, dir string) (map[string]
 	if err != nil {
 		return nil, err
 	}
-	sums := make([]string, 0, len(paths))
+	sums := make([]string, 0, len(paths)+len(pinned))
 	for s := range paths {
+		sums = append(sums, s)
+	}
+	for s := range pinned {
 		sums = append(sums, s)
 	}
 	sort.Strings(sums)
@@ -361,9 +391,11 @@ func UploadDir(ctx context.Context, api *client.Client, dir string) (map[string]
 		return nil, err
 	}
 	for _, s := range missing {
-		b, err := os.ReadFile(paths[s]) // #nosec G304 -- files of the seed directory
-		if err != nil {
-			return nil, err
+		b, ok := pinned[s]
+		if !ok {
+			if b, err = os.ReadFile(paths[s]); err != nil { // #nosec G304 -- files of the seed directory
+				return nil, err
+			}
 		}
 		if err = api.PutBlob(ctx, s, b); err != nil {
 			return nil, err

@@ -91,6 +91,12 @@ export const slopApi = createApi({
     consentView: b.mutation<Record<string, string>, { view: string; states: Record<string, string> }>({
       query: ({ view, states }) => ({ url: `rt/views/${view}/consent`, method: 'POST', body: states }),
     }),
+    putProject: b.mutation<Project, { id: string; name: string; brief?: string }>({ query: ({ id, ...body }) => ({ url: `projects/${id}`, method: 'PUT', body }) }),
+    // updateArtifact changes what an artifact is called, the project it is
+    // in (null: none) and, for data, the page that shows one record.
+    updateArtifact: b.mutation<Artifact, { id: string; title?: string; project?: string | null; viewer?: string }>({
+      query: ({ id, ...body }) => ({ url: `artifacts/${id}`, method: 'PATCH', body }),
+    }),
     createArtifact: b.mutation<Artifact, { id: string; title: string; kind: 'page' | 'data'; app?: string; project?: string | null }>({
       query: body => ({ url: 'artifacts', method: 'POST', body }),
       invalidatesTags: ['App'],
@@ -137,7 +143,7 @@ export const {
   useProjectsQuery, useArtifactsQuery, useVersionsQuery, useFileQuery, useRecordsQuery, useRoutesQuery, useRouteLogQuery,
   useResolveQuery, useThreadsQuery, useSandboxUrlQuery, useAgentsQuery, useUsersQuery, useTokensQuery, useAuditQuery,
   useSetRouteMutation, useRemoveRouteMutation, useUndoRouteMutation, useCreateThreadMutation, useReplyMutation,
-  useResolveThreadMutation, useSetRoleMutation, useCreateTokenMutation, useRevokeTokenMutation, usePushMutation,
+  useResolveThreadMutation, useSetRoleMutation, usePutProjectMutation, useUpdateArtifactMutation, useCreateTokenMutation, useRevokeTokenMutation, usePushMutation,
   useAppsQuery, useApproveAppMutation, useOpenViewMutation, useRenewViewMutation, useCloseViewMutation, useConsentViewMutation,
   useCreateArtifactMutation,
 } = slopApi
