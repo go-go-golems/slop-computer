@@ -130,8 +130,12 @@ func grantedCaps(v *rt.View) map[string]any {
 				continue
 			}
 		case "assets":
-			if v.Level < rt.LevelInteract {
-				continue
+			if v.Level < rt.LevelInteract || v.Role == store.RoleVisitor {
+				continue // visitors store no files: they answer to nobody
+			}
+		case "comments":
+			if v.Role == store.RoleVisitor {
+				continue // a thread needs an author who signed in
 			}
 		case "sample":
 			if v.Role != store.RoleAdmin {
@@ -857,6 +861,7 @@ type profile struct {
 	Avatar string `json:"avatar,omitempty"`
 	Color  string `json:"color"`
 	Email  string `json:"email,omitempty"`
+	Guest  bool   `json:"guest,omitempty"` // an anonymous visitor
 }
 
 func hue(id string) string {
@@ -869,6 +874,10 @@ func hue(id string) string {
 
 func profileOf(v *rt.View, u store.User) profile {
 	p := profile{ID: u.ID, Color: hue(u.ID)}
+	if store.IsVisitor(u.ID) {
+		p.Name, p.Guest = "Guest", true // no avatar and no email to show
+		return p
+	}
 	if v.Caps.Scopes["profile"] {
 		p.Name, p.Avatar = u.DisplayName, "/_slop/avatar/"+u.ID+".svg"
 	}
@@ -886,10 +895,11 @@ func (s *Server) userInfo(ctx context.Context, v *rt.View) map[string]any {
 			"assets.write": v.Level >= rt.LevelInteract, "files.write": v.Level >= rt.LevelAdmin, "people.add": false,
 		}}
 	if v.Caps.Declared["user"] {
-		if u, err := s.Store.User(ctx, v.User); err == nil {
+		if u, err := s.viewer(ctx, v.User); err == nil {
 			out["profile"] = profileOf(v, u)
 		}
 		out["id"] = v.User
+		out["guest"] = store.IsVisitor(v.User)
 	}
 	return out
 }
@@ -910,6 +920,11 @@ func (s *Server) rpcUserProfiles(ctx context.Context, v *rt.View, raw json.RawMe
 	for _, u := range us {
 		if slices.Contains(a.IDs, u.ID) {
 			out[u.ID] = profileOf(v, u)
+		}
+	}
+	for _, id := range a.IDs {
+		if store.IsVisitor(id) {
+			out[id] = profileOf(v, visitorUser(id))
 		}
 	}
 	return out, nil

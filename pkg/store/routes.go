@@ -181,8 +181,11 @@ func (r *Route) validate() error {
 	if r.Access == "signed-in" && !r.Live {
 		return invalidf("access signed-in needs a live route: a static page has no viewer to check")
 	}
-	if r.Create != "" && r.Create != "admins" && r.Create != "signed-in" && r.Create != "public" {
-		return invalidf("create must be admins, signed-in or public")
+	if r.Create == "public" {
+		return invalidf("visitors cannot create instances: create is signed-in or admins")
+	}
+	if r.Create != "" && r.Create != "admins" && r.Create != "signed-in" {
+		return invalidf("create must be admins or signed-in")
 	}
 	if r.Live && r.Path == "*" {
 		return invalidf("the fallback cannot be live: give the live route a path")

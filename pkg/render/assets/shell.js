@@ -12,6 +12,7 @@
   const RENEW_MS = 45 * 60 * 1000;
   let view = null;
   let signedIn = false;
+  let kind = "none"; // none, visitor or user: who /_site/me said this is
 
   const call = async (method, url, body) => {
     const r = await fetch(url, {
@@ -70,14 +71,18 @@
 
   async function me() {
     const { body } = await call("GET", "/_site/me");
-    signedIn = body.kind === "user";
-    if (signedIn) {
+    kind = body.kind;
+    signedIn = kind === "user";
+    if (body.kind === "visitor") {
+      meEl.replaceChildren(el("span", { textContent: "Guest" }), el("a", { href: signIn(), textContent: "Sign in" }));
+    } else if (signedIn) {
       const out = el("button", { type: "button", className: "shell-link", textContent: "Sign out" });
       out.onclick = async () => { await call("POST", "/_site/logout", {}); location.reload(); };
       meEl.replaceChildren(el("span", { textContent: body.name || "Signed in" }), out);
     } else {
       meEl.replaceChildren(el("a", { href: signIn(), textContent: "Sign in" }));
     }
+    return body;
   }
 
   async function open(keepFrame) {
@@ -94,6 +99,7 @@
     const old = view;
     view = body;
     link = "";
+    if (kind === "none") me(); // opening a public route made this browser a guest
     if (keepFrame && old) {
       view.url = old.url;
     } else {
@@ -118,16 +124,17 @@
     fetch(`/_site/views/${v.view}`, { method: "DELETE", credentials: "same-origin", keepalive: true }).catch(() => {});
   }
 
-  // ask shows a dialog; resolves true for ok.
-  function ask(title, text, ok) {
+  // ask shows a dialog: true for ok, false for the other button, null when
+  // dismissed.
+  function ask(title, text, ok, no = "Cancel") {
     return new Promise((resolve) => {
       const done = (yes) => { box.remove(); resolve(yes); };
-      const cancel = el("button", { type: "button", className: "shell-btn", textContent: "Cancel", onclick: () => done(false) });
+      const cancel = el("button", { type: "button", className: "shell-btn", textContent: no, onclick: () => done(false) });
       const go = el("button", { type: "button", className: "shell-btn primary", textContent: ok, onclick: () => done(true) });
       const box = el("div", { className: "shell-modal" },
         el("div", { className: "shell-dialog", role: "dialog", ariaLabel: title },
           el("h2", { textContent: title }), el("p", { textContent: text }), el("footer", {}, cancel, go)));
-      box.onclick = (e) => { if (e.target === box) done(false); };
+      box.onclick = (e) => { if (e.target === box) done(null); };
       document.body.append(box);
       go.focus();
     });
@@ -174,5 +181,15 @@
   });
   addEventListener("pagehide", () => { if (view) close(view); });
   setInterval(renew, RENEW_MS);
-  me().finally(() => open(false)); // open needs to know whether someone is signed in
+  // offer asks once whether to keep what this person did as a guest before
+  // signing in; dismissing the dialog asks again next time.
+  async function offer(claim) {
+    const what = [claim.docs ? `${claim.docs} of your own ${claim.docs === 1 ? "entry" : "entries"}` : "", claim.grants ? `access to ${claim.grants} ${claim.grants === 1 ? "thing" : "things"}` : ""].filter(Boolean).join(" and ");
+    const yes = await ask("Keep what you did as a guest?", `Before you signed in, you used this site as a guest: ${what}. Keep it in your account?`, "Keep it", "Leave it");
+    if (yes === null) return;
+    await call("POST", "/_site/claim", { keep: yes });
+    if (yes) await open(false);
+  }
+
+  me().then((m) => { open(false); if (m?.claim) offer(m.claim); }, () => open(false)); // open needs to know whether someone is signed in
 })();

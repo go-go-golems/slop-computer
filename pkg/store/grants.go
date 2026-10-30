@@ -52,6 +52,12 @@ func (s *Store) RTGrants(ctx context.Context, target string) ([]Grant, error) {
 	return scanAll(rows, err, func(r *sql.Rows) (Grant, error) { return scanGrant(r) })
 }
 
+// SubjectGrants lists the grants one subject holds, on every target.
+func (s *Store) SubjectGrants(ctx context.Context, subject string) ([]Grant, error) {
+	rows, err := s.db().query(ctx, `SELECT `+grantColumns+` FROM rt_grants WHERE subject=? ORDER BY target_id`, subject)
+	return scanAll(rows, err, func(r *sql.Rows) (Grant, error) { return scanGrant(r) })
+}
+
 // RTGrantsFor lists the grants a target gives any of subjects.
 func (s *Store) RTGrantsFor(ctx context.Context, target string, subjects []string) ([]Grant, error) {
 	if len(subjects) == 0 {

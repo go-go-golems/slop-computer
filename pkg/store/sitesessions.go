@@ -15,6 +15,9 @@ type SiteSession struct {
 	Host      string
 	Principal string // usr_… or vis_…
 	ExpiresAt time.Time
+	// FromVisitor is the visitor this person was on the host before they
+	// signed in, until they keep or drop what the visitor did.
+	FromVisitor string
 }
 
 const (
@@ -24,14 +27,22 @@ const (
 )
 
 // CreateSiteSession starts a session for principal on host and returns its
-// token; only the token's digest is stored.
-func (s *Store) CreateSiteSession(ctx context.Context, host, principal string) (string, SiteSession, error) {
+// token; only the token's digest is stored. fromVisitor is the visitor a
+// person signed in over, or "".
+func (s *Store) CreateSiteSession(ctx context.Context, host, principal, fromVisitor string) (string, SiteSession, error) {
 	token := RandomHex(32)
 	now := s.Now()
-	ss := SiteSession{Hash: Hash(token), Host: host, Principal: principal, ExpiresAt: now.Add(SiteSessionIdle)}
-	_, err := s.db().exec(ctx, `INSERT INTO site_sessions(token_hash,host,principal,created_at,last_seen_at,expires_at) VALUES(?,?,?,?,?,?)`,
-		ss.Hash, host, principal, now, now, ss.ExpiresAt)
+	ss := SiteSession{Hash: Hash(token), Host: host, Principal: principal, ExpiresAt: now.Add(SiteSessionIdle), FromVisitor: fromVisitor}
+	_, err := s.db().exec(ctx, `INSERT INTO site_sessions(token_hash,host,principal,created_at,last_seen_at,expires_at,from_visitor) VALUES(?,?,?,?,?,?,?)`,
+		ss.Hash, host, principal, now, now, ss.ExpiresAt, nullable(fromVisitor))
 	return token, ss, err
+}
+
+// SettleFromVisitor forgets the visitor a session signed in over, once its
+// person kept or dropped what the visitor did.
+func (s *Store) SettleFromVisitor(ctx context.Context, hash []byte) error {
+	_, err := s.db().exec(ctx, `UPDATE site_sessions SET from_visitor=NULL WHERE token_hash=?`, hash)
+	return err
 }
 
 // ResolveSiteSession returns a usable session of host and slides its idle
@@ -39,9 +50,11 @@ func (s *Store) CreateSiteSession(ctx context.Context, host, principal string) (
 func (s *Store) ResolveSiteSession(ctx context.Context, host, token string) (SiteSession, error) {
 	ss := SiteSession{Hash: Hash(token), Host: host}
 	var created time.Time
+	var from *string
 	now := s.Now()
-	err := s.db().row(ctx, `SELECT principal,created_at FROM site_sessions
-WHERE token_hash=? AND host=? AND revoked_at IS NULL AND expires_at > ?`, ss.Hash, host, now).Scan(&ss.Principal, &created)
+	err := s.db().row(ctx, `SELECT principal,created_at,from_visitor FROM site_sessions
+WHERE token_hash=? AND host=? AND revoked_at IS NULL AND expires_at > ?`, ss.Hash, host, now).Scan(&ss.Principal, &created, &from)
+	ss.FromVisitor = deref(from)
 	if err != nil {
 		return ss, notFound(err)
 	}

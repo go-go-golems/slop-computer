@@ -163,7 +163,7 @@ func (s *Server) rpcRoomEmit(_ context.Context, v *rt.View, raw json.RawMessage)
 	if len(data) == 0 {
 		data = json.RawMessage("null")
 	}
-	ev := rt.Out{Type: "room", Data: map[string]any{"room": a.Room, "topic": a.Topic, "data": data, "peer": v.ID, "by": by, "kind": v.Kind, "guest": false}}
+	ev := rt.Out{Type: "room", Data: map[string]any{"room": a.Room, "topic": a.Topic, "data": data, "peer": v.ID, "by": by, "kind": v.Kind, "guest": store.IsVisitor(v.User)}}
 	for _, o := range s.views.Of(v.Target) {
 		if o.In(a.Room) {
 			o.Send(ev)

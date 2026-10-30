@@ -12,10 +12,12 @@ import (
 	"net/url"
 	"slices"
 	"strings"
+	"time"
 
 	"github.com/go-go-golems/slop-computer/pkg/httpx"
 	"github.com/go-go-golems/slop-computer/pkg/render"
 	"github.com/go-go-golems/slop-computer/pkg/routing"
+	"github.com/go-go-golems/slop-computer/pkg/rt"
 	"github.com/go-go-golems/slop-computer/pkg/store"
 	"github.com/pkg/errors"
 	"github.com/rs/zerolog/log"
@@ -76,6 +78,43 @@ type sitePrincipal struct {
 
 func (p *sitePrincipal) ID() string { return p.Session.Principal }
 
+// visitor reports whether p is an anonymous visitor.
+func (p *sitePrincipal) visitor() bool { return p != nil && p.User.Role == store.RoleVisitor }
+
+// visitorUser is a visitor as the runtime sees people: no users row, the
+// role nobody is stored with, and "Guest" for a name.
+func visitorUser(id string) store.User {
+	return store.User{ID: id, Role: store.RoleVisitor, DisplayName: "Guest"}
+}
+
+// newVisitor starts a visitor on a site host: a visitor id and a site
+// session. One address makes a limited number an hour.
+func (s *Server) newVisitor(w http.ResponseWriter, r *http.Request) (*sitePrincipal, error) {
+	if !s.siteLimits.take("visitor:"+s.clientAddress(r), visitorsPerHour, time.Hour) {
+		return nil, errTooMany
+	}
+	id, err := s.Store.CreateVisitor(r.Context())
+	if err != nil {
+		return nil, err
+	}
+	token, ss, err := s.Store.CreateSiteSession(r.Context(), s.siteHost(r.Host), id, "")
+	if err != nil {
+		return nil, err
+	}
+	s.setSiteCookie(w, token, int(store.SiteSessionAbsolute.Seconds()))
+	return &sitePrincipal{Session: ss, User: visitorUser(id)}, nil
+}
+
+// Limits on site hosts (guide 6.11), per address or principal.
+const (
+	visitorsPerHour = 30  // new visitors per client address
+	opensPerHour    = 120 // views opened per principal
+	instancesPerDay = 50  // instances created per member
+	claimDocsAtMost = 2000
+)
+
+var errTooMany = errors.New("too many requests")
+
 // siteResolve finds the site session of a request, nil without one. A
 // disabled user's session counts as none.
 func (s *Server) siteResolve(r *http.Request) (*sitePrincipal, error) {
@@ -89,6 +128,13 @@ func (s *Server) siteResolve(r *http.Request) (*sitePrincipal, error) {
 	}
 	if err != nil {
 		return nil, err
+	}
+	if store.IsVisitor(ss.Principal) {
+		ok, err := s.Store.TouchVisitor(r.Context(), ss.Principal)
+		if err != nil || !ok {
+			return nil, err
+		}
+		return &sitePrincipal{Session: ss, User: visitorUser(ss.Principal)}, nil
 	}
 	u, err := s.Store.User(r.Context(), ss.Principal)
 	if errors.Is(err, store.ErrNotFound) {
@@ -138,7 +184,8 @@ func (s *Server) siteLiveRoutes() *http.ServeMux {
 	m.HandleFunc("POST /_site/views", s.shellOnly(s.openSiteView))
 	m.HandleFunc("POST /_site/instances", s.shellOnly(s.createInstance))
 	m.HandleFunc("POST /_site/views/{v}/renew", s.shellOnly(s.siteOwnView(s.renewView)))
-	m.HandleFunc("POST /_site/views/{v}/consent", s.shellOnly(s.siteOwnView(s.consentView)))
+	m.HandleFunc("POST /_site/views/{v}/consent", s.shellOnly(s.siteOwnView(s.signedInOnly(s.consentView))))
+	m.HandleFunc("POST /_site/claim", s.shellOnly(s.siteClaim))
 	m.HandleFunc("DELETE /_site/views/{v}", s.shellOnly(s.siteOwnView(s.closeView)))
 	m.HandleFunc("/_site/", func(w http.ResponseWriter, r *http.Request) { httpx.Fail(w, 404, "not_found", "Unknown site route") })
 	return m
@@ -182,8 +229,130 @@ func (s *Server) siteMe(w http.ResponseWriter, r *http.Request) {
 		httpx.OK(w, map[string]any{"kind": "none"})
 		return
 	}
-	httpx.OK(w, map[string]any{"kind": "user", "id": p.User.ID, "name": p.User.DisplayName, "role": p.User.Role})
+	if p.visitor() {
+		httpx.OK(w, map[string]any{"kind": "visitor", "id": p.ID(), "name": p.User.DisplayName})
+		return
+	}
+	out := map[string]any{"kind": "user", "id": p.User.ID, "name": p.User.DisplayName, "role": p.User.Role}
+	if c := s.claimable(r.Context(), p); c != nil {
+		out["claim"] = c
+	}
+	httpx.OK(w, out)
 }
+
+// signedInOnly refuses visitors: what asks consent (models, comments) is
+// for people who signed in.
+func (s *Server) signedInOnly(h http.HandlerFunc) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		if p := principal(r.Context()); p == nil || p.User.Role == store.RoleVisitor {
+			httpx.Fail(w, 403, "not_granted", "Sign in for this")
+			return
+		}
+		h(w, r)
+	}
+}
+
+// claimable is what the visitor a person signed in over left behind:
+// private documents and grants. Nothing left settles the offer.
+func (s *Server) claimable(ctx context.Context, p *sitePrincipal) map[string]int {
+	vis := p.Session.FromVisitor
+	if vis == "" {
+		return nil
+	}
+	docs, err1 := s.Store.PrivateDocs(ctx, vis)
+	grants, err2 := s.Store.SubjectGrants(ctx, vis)
+	if err1 != nil || err2 != nil {
+		return nil
+	}
+	if len(docs) == 0 && len(grants) == 0 {
+		_ = s.Store.SettleFromVisitor(ctx, p.Session.Hash)
+		return nil
+	}
+	places := map[string]bool{}
+	for _, d := range docs {
+		places[d.Target] = true
+	}
+	for _, g := range grants {
+		places[g.Target] = true
+	}
+	return map[string]int{"docs": len(docs), "grants": len(grants), "places": len(places)}
+}
+
+// siteClaim answers POST /_site/claim {keep}: the person keeps what the
+// visitor they signed in over did (its private documents, copied where
+// they have none, and its grants), or leaves it to expire. Either way the
+// offer is settled.
+func (s *Server) siteClaim(w http.ResponseWriter, r *http.Request) {
+	var in struct {
+		Keep bool `json:"keep"`
+	}
+	if err := httpx.Read(w, r, &in, 1024); err != nil {
+		httpx.Fail(w, 400, "invalid_request", "Send {keep}")
+		return
+	}
+	ctx := r.Context()
+	p, err := s.siteResolve(r)
+	if err != nil {
+		unavailable(w, err)
+		return
+	}
+	if p == nil || p.visitor() || p.Session.FromVisitor == "" {
+		httpx.Fail(w, 404, "not_found", "There is nothing to keep")
+		return
+	}
+	vis, user := p.Session.FromVisitor, p.User.ID
+	kept := 0
+	if in.Keep {
+		docs, err := s.Store.PrivateDocs(ctx, vis)
+		if err != nil {
+			unavailable(w, err)
+			return
+		}
+		if len(docs) > claimDocsAtMost {
+			docs = docs[:claimDocsAtMost]
+		}
+		for _, d := range docs {
+			path := "data/users/" + user + "/" + strings.TrimPrefix(d.Path, "data/users/"+vis+"/")
+			ch, err := s.Store.RTWrite(ctx, d.Target, path, rt.CollOf(path), user, func(cur *store.RTDoc) ([]byte, error) {
+				if cur != nil {
+					return nil, errKeepMine
+				}
+				return d.Body, nil
+			})
+			if errors.Is(err, errKeepMine) {
+				continue
+			}
+			if err != nil {
+				s.fail(w, err)
+				return
+			}
+			s.rtPublish(ch)
+			kept++
+		}
+		evs, err := s.Store.MoveGrants(ctx, vis, user, user)
+		if err != nil {
+			s.fail(w, err)
+			return
+		}
+		s.publish(evs)
+		for _, ev := range evs {
+			s.reviewViews(ctx, ev.Artifact)
+		}
+		if err = s.Store.ClaimVisitor(ctx, vis, user); err != nil {
+			unavailable(w, err)
+			return
+		}
+		_ = s.Store.Audit(ctx, user, "visitor.claim", vis, map[string]any{"docs": kept, "grants": len(evs)})
+	}
+	if err := s.Store.SettleFromVisitor(ctx, p.Session.Hash); err != nil {
+		unavailable(w, err)
+		return
+	}
+	httpx.OK(w, map[string]any{"kept": in.Keep, "docs": kept})
+}
+
+// errKeepMine skips a claimed document the person already has.
+var errKeepMine = errors.New("the person has this document")
 
 // siteLogin starts a handoff: the main host signs the person in (if it has
 // to) and sends them back with a one-time code.
@@ -234,7 +403,12 @@ func (s *Server) siteCallback(w http.ResponseWriter, r *http.Request) {
 		_, _ = w.Write([]byte(`<!doctype html><title>Sign-in link expired</title><p style="font:14px Arial;padding:24px">This sign-in link was already used or has expired. <a href="/_site/login">Sign in again</a>.</p>`))
 		return
 	}
-	token, _, err := s.Store.CreateSiteSession(r.Context(), host, user)
+	from := ""
+	if old, err := s.siteResolve(r); err == nil && old.visitor() {
+		from = old.ID()
+		_ = s.Store.RevokeSiteSession(r.Context(), old.Session.Hash)
+	}
+	token, _, err := s.Store.CreateSiteSession(r.Context(), host, user, from)
 	if err != nil {
 		unavailable(w, err)
 		return
@@ -296,8 +470,10 @@ func admitted(rt store.Route, p *sitePrincipal) bool {
 	switch rt.Access {
 	case "admins":
 		return p.User.Role == store.RoleAdmin
-	case "signed-in", "public":
+	case "signed-in":
 		return p.User.Role == store.RoleAdmin || p.User.Role == store.RoleMember
+	case "public":
+		return p.User.Role == store.RoleAdmin || p.User.Role == store.RoleMember || p.visitor()
 	}
 	return false
 }
@@ -335,7 +511,7 @@ func mayCreate(rt store.Route, p *sitePrincipal) bool {
 	switch rt.Create {
 	case "admins":
 		return p.User.Role == store.RoleAdmin
-	case "signed-in", "public":
+	case "signed-in":
 		return p.User.Role == store.RoleAdmin || p.User.Role == store.RoleMember
 	}
 	return false
@@ -389,8 +565,23 @@ func (s *Server) openSiteView(w http.ResponseWriter, r *http.Request) {
 		httpx.Fail(w, 404, "not_found", "This route's app has nothing to open")
 		return
 	}
+	if p == nil && res.Route.Access == "public" && (in.Link != "" || s.levelOf(ctx, visitorUser(store.VisitorPrefix+"new"), t) > rt.LevelNone) {
+		p, err = s.newVisitor(w, r) // only where a visitor gets in at all
+		if errors.Is(err, errTooMany) {
+			httpx.Fail(w, 429, "rate_limited", "Too many new visitors from here; try again later or sign in")
+			return
+		}
+		if err != nil {
+			unavailable(w, err)
+			return
+		}
+	}
 	if p == nil {
 		httpx.Fail(w, 401, "login_required", "Sign in to open this")
+		return
+	}
+	if !s.siteLimits.take("open:"+p.ID(), opensPerHour, time.Hour) {
+		httpx.Fail(w, 429, "rate_limited", "Too many opens; try again in a while")
 		return
 	}
 	if !admitted(res.Route, p) {
@@ -458,12 +649,16 @@ func (s *Server) createInstance(w http.ResponseWriter, r *http.Request) {
 		unavailable(w, err)
 		return
 	}
-	if p == nil {
+	if p == nil || p.visitor() {
 		httpx.Fail(w, 401, "login_required", "Sign in to create one")
 		return
 	}
 	if !mayCreate(res.Route, p) {
 		httpx.Fail(w, 403, "not_granted", "You cannot create one here")
+		return
+	}
+	if p.User.Role != store.RoleAdmin && !s.siteLimits.take("create:"+p.ID(), instancesPerDay, 24*time.Hour) {
+		httpx.Fail(w, 429, "rate_limited", "You created many today; try again tomorrow")
 		return
 	}
 	app, err := s.Store.Artifact(ctx, res.Route.Page)

@@ -589,3 +589,189 @@ func TestShareLinks(t *testing.T) {
 		t.Fatalf("revoking twice: %d", code)
 	}
 }
+
+// guestSetup: an app that declares everything a guest might want, and its
+// workspace on a public live route.
+func guestSetup(t *testing.T) (*harness, *browser) {
+	h, manuel := liveSetup(t)
+	tok := h.token(manuel.id(), store.ScopeRead, store.ScopeWrite)
+	h.pushFiles(tok, "board", map[string]any{"title": "Board", "kind": "page"}, map[string]any{"capabilities": map[string]any{
+		"db": map[string]any{}, "user": map[string]any{"scopes": []string{"profile"}}, "room": map[string]any{},
+		"assets": map[string]any{}, "comments": map[string]any{}, "downloads": true}},
+		map[string]string{"index.html": "<!doctype html><title>board</title>"})
+	route := map[string]any{"host": "site.test", "path": "/board/team", "page": "board", "live": true, "access": "public",
+		"bindings": map[string]any{"target": map[string]any{"artifact": "ws"}}}
+	if code := manuel.do("PUT", "/api/routes", route, nil); code != 200 {
+		t.Fatalf("public route: %d", code)
+	}
+	return h, manuel
+}
+
+// Someone who is not signed in opens a public live route as a guest: a
+// visitor id and a site session, at most interact, without files,
+// comments or models (SLOP-011 phase 4).
+func TestVisitors(t *testing.T) {
+	h, manuel := guestSetup(t)
+	anon := &siteBrowser{h: h}
+	if _, _, code := anon.siteView("/board/team"); code != 401 || anon.cookie != "" {
+		t.Fatalf("a public route nobody granted *anyone: %d, cookie %q", code, anon.cookie)
+	}
+	if code := manuel.do("PUT", "/api/rt/targets/ws/grants/*anyone", map[string]any{"level": "admin"}, nil); code != 200 {
+		t.Fatal(code)
+	}
+	vc, v, code := anon.siteView("/board/team")
+	if code != 200 || anon.cookie == "" || v["level"] != "interact" {
+		t.Fatalf("a guest: %d %v", code, v)
+	}
+	caps := v["caps"].(map[string]any)
+	for _, c := range []string{"assets", "comments", "sample", "artifact", "slop"} {
+		if _, ok := caps[c]; ok {
+			t.Errorf("a guest got %s: %v", c, caps)
+		}
+	}
+	for _, c := range []string{"db", "user", "room", "downloads"} {
+		if _, ok := caps[c]; !ok {
+			t.Errorf("a guest has no %s: %v", c, caps)
+		}
+	}
+	vis := v["user"].(string)
+	if !store.IsVisitor(vis) {
+		t.Fatalf("the view's user %q", vis)
+	}
+	hello := vc.stream()
+	me := hello["me"].(map[string]any)
+	if me["id"] != vis || me["guest"] != true || me["profile"].(map[string]any)["name"] != "Guest" {
+		t.Fatalf("user info %v", me)
+	}
+	if out, e := vc.rpc("user.profiles", map[string]any{"ids": []string{vis}}); e != "" || out[vis].(map[string]any)["guest"] != true {
+		t.Fatalf("profiles %v %s", out, e)
+	}
+	if _, e := vc.rpc("db.write", map[string]any{"path": "data/users/" + vis + "/draft", "op": "set", "body": map[string]any{"x": 1}}); e != "" {
+		t.Fatalf("a guest's own document: %s", e)
+	}
+	var who map[string]any
+	if anon.json("GET", "/_site/me", nil, &who); who["kind"] != "visitor" || who["id"] != vis {
+		t.Fatalf("me %v", who)
+	}
+	// The same cookie is the same guest; consent and creating are for
+	// people who signed in.
+	if _, v2, _ := anon.siteView("/board/team"); v2["user"] != vis {
+		t.Fatalf("a second open: %v", v2)
+	}
+	if code := anon.json("POST", "/_site/views/"+v["view"].(string)+"/consent", map[string]any{"comments": "granted"}, nil); code != 403 {
+		t.Fatalf("a guest's consent: %d", code)
+	}
+	route := map[string]any{"host": "site.test", "path": "/board/:db", "page": "board", "live": true, "access": "public", "create": "signed-in",
+		"bindings": map[string]any{"target": map[string]any{"artifact": "{db}"}}}
+	if code := manuel.do("PUT", "/api/routes", route, nil); code != 200 {
+		t.Fatal(code)
+	}
+	if code := anon.json("POST", "/_site/instances", map[string]any{"path": "/board/new"}, nil); code != 401 {
+		t.Fatalf("a guest creates: %d", code)
+	}
+	route["create"] = "public"
+	if code := manuel.do("PUT", "/api/routes", route, nil); code != 400 {
+		t.Fatalf("create public: %d", code)
+	}
+	// A route for signed-in people keeps guests out.
+	_ = manuel.do("PUT", "/api/routes", map[string]any{"host": "site.test", "path": "/board/team", "page": "board", "live": true, "access": "signed-in",
+		"bindings": map[string]any{"target": map[string]any{"artifact": "ws"}}}, nil)
+	if _, _, code := anon.siteView("/board/team"); code != 403 {
+		t.Fatalf("a guest on a signed-in route: %d", code)
+	}
+	var acc struct{ Grants []map[string]any }
+	manuel.do("GET", "/api/rt/targets/ws/access", nil, &acc)
+	if len(acc.Grants) != 1 || acc.Grants[0]["name"] != "anyone, signed in or not" {
+		t.Fatalf("grants %v", acc.Grants)
+	}
+}
+
+// One address makes a limited number of guests an hour.
+func TestVisitorLimit(t *testing.T) {
+	h, manuel := guestSetup(t)
+	_ = manuel.do("PUT", "/api/rt/targets/ws/grants/*anyone", map[string]any{"level": "view"}, nil)
+	for i := 0; i < visitorsPerHour; i++ {
+		if _, _, code := (&siteBrowser{h: h}).siteView("/board/team"); code != 200 {
+			t.Fatalf("guest %d: %d", i, code)
+		}
+	}
+	if _, _, code := (&siteBrowser{h: h}).siteView("/board/team"); code != 429 {
+		t.Fatalf("one guest too many: %d", code)
+	}
+}
+
+// handoffOver signs b in on a site browser that already has a cookie (a
+// guest's), as the shell's Sign in does.
+func (h *harness) handoffOver(sb *siteBrowser, b *browser, ret string) {
+	h.t.Helper()
+	resp, err := b.c.Get(h.ts.URL + "/auth/handoff?host=site.test&return=" + url.QueryEscape(ret))
+	if err != nil || resp.StatusCode != 303 {
+		h.t.Fatalf("handoff: %v %v", err, resp)
+	}
+	loc, _ := url.Parse(resp.Header.Get("Location"))
+	before := sb.cookie
+	if code, _, _ := sb.req("GET", loc.RequestURI(), nil, nil); code != 303 || sb.cookie == before {
+		h.t.Fatalf("callback: %d", code)
+	}
+}
+
+// A guest who signs in is offered what they did as a guest, and keeps it
+// only by saying so.
+func TestVisitorClaim(t *testing.T) {
+	h, manuel := guestSetup(t)
+	ctx := context.Background()
+	_ = manuel.do("PUT", "/api/rt/targets/ws/grants/*anyone", map[string]any{"level": "view"}, nil)
+	var link struct{ Token string }
+	if code := manuel.do("POST", "/api/rt/targets/ws/links", map[string]any{"level": "interact"}, &link); code != 201 {
+		t.Fatal(code)
+	}
+	sb := &siteBrowser{h: h}
+	var v map[string]any
+	if code := sb.json("POST", "/_site/views", map[string]any{"path": "/board/team", "link": link.Token}, &v); code != 200 || v["level"] != "interact" {
+		t.Fatalf("a guest with a link: %d %v", code, v)
+	}
+	vis := v["user"].(string)
+	u, _ := url.Parse(v["url"].(string))
+	vc := &viewClient{h: h, host: u.Host, secret: v["secret"].(string), id: v["view"].(string)}
+	vc.stream()
+	if _, e := vc.rpc("db.write", map[string]any{"path": "data/users/" + vis + "/draft", "op": "set", "body": map[string]any{"x": 1}}); e != "" {
+		t.Fatal(e)
+	}
+
+	alexB := h.signIn("alex")
+	alex := alexB.id()
+	if _, err := h.st.SetUserRole(ctx, alex, store.RoleMember); err != nil {
+		t.Fatal(err)
+	}
+	h.handoffOver(sb, h.signIn("alex"), "/board/team")
+	var me struct {
+		Kind  string
+		Claim map[string]int
+	}
+	if sb.json("GET", "/_site/me", nil, &me); me.Kind != "user" || me.Claim["docs"] != 1 || me.Claim["grants"] != 1 || me.Claim["places"] != 1 {
+		t.Fatalf("the offer: %+v", me)
+	}
+	var out map[string]any
+	if code := sb.json("POST", "/_site/claim", map[string]any{"keep": true}, &out); code != 200 || out["docs"] != float64(1) {
+		t.Fatalf("keep: %d %v", code, out)
+	}
+	if d, err := h.st.RTDoc(ctx, "ws", "data/users/"+alex+"/draft"); err != nil || string(d.Body) != `{"x":1}` {
+		t.Fatalf("the kept document: %v %s", err, d.Body)
+	}
+	if gs, _ := h.st.SubjectGrants(ctx, alex); len(gs) != 1 || gs[0].Level != "interact" {
+		t.Fatalf("the kept grant: %v", gs)
+	}
+	if gs, _ := h.st.SubjectGrants(ctx, vis); len(gs) != 0 {
+		t.Fatalf("the guest kept its grant: %v", gs)
+	}
+	me.Claim = nil
+	if sb.json("GET", "/_site/me", nil, &me); me.Claim != nil {
+		t.Fatalf("offered twice: %+v", me)
+	}
+	if code := sb.json("POST", "/_site/claim", map[string]any{"keep": true}, nil); code != 404 {
+		t.Fatalf("claim twice: %d", code)
+	}
+	if _, v, code := sb.siteView("/board/team"); code != 200 || v["level"] != "interact" || v["user"] != alex {
+		t.Fatalf("after keeping: %d %v", code, v)
+	}
+}

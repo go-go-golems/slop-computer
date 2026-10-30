@@ -24,6 +24,8 @@ func subjectsOf(u store.User) []string {
 	switch u.Role {
 	case store.RoleAdmin, store.RoleMember:
 		return []string{u.ID, store.SubjectSignedIn, store.SubjectAnyone}
+	case store.RoleVisitor:
+		return []string{u.ID, store.SubjectAnyone}
 	}
 	return nil
 }
@@ -35,6 +37,8 @@ func levelCap(role string) rt.Level {
 		return rt.LevelOwner
 	case store.RoleMember:
 		return rt.LevelAdmin
+	case store.RoleVisitor:
+		return rt.LevelInteract
 	}
 	return rt.LevelNone
 }
@@ -66,6 +70,14 @@ func (s *Server) levelOf(ctx context.Context, u store.User, t store.Artifact) rt
 	return min(best, levelCap(u.Role))
 }
 
+// viewer is the person or visitor a view belongs to.
+func (s *Server) viewer(ctx context.Context, id string) (store.User, error) {
+	if store.IsVisitor(id) {
+		return visitorUser(id), nil
+	}
+	return s.Store.User(ctx, id)
+}
+
 // reviewViews closes a target's views whose person's level is no longer
 // the view's: the page asks its shell to renew, and the new view carries
 // the new level (or none).
@@ -75,7 +87,7 @@ func (s *Server) reviewViews(ctx context.Context, target string) {
 		return
 	}
 	for _, v := range s.views.Of(target) {
-		u, err := s.Store.User(ctx, v.User)
+		u, err := s.viewer(ctx, v.User)
 		if err != nil || s.levelOf(ctx, u, t) != v.Level {
 			s.views.Close(v, true)
 		}
@@ -154,6 +166,12 @@ func (s *Server) targetAccess(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	names := map[string]string{store.SubjectSignedIn: "everyone signed in", store.SubjectAnyone: "anyone, signed in or not"}
+	guest := func(id string) string {
+		if n, ok := names[id]; ok || !store.IsVisitor(id) {
+			return n
+		}
+		return "a guest"
+	}
 	if us, err := s.Store.Users(ctx); err == nil {
 		for _, u := range us {
 			names[u.ID] = u.DisplayName
@@ -170,7 +188,7 @@ func (s *Server) targetAccess(w http.ResponseWriter, r *http.Request) {
 	}
 	grants := []accessGrant{}
 	for _, g := range gs {
-		grants = append(grants, accessGrant{Grant: g, Name: names[g.Subject]})
+		grants = append(grants, accessGrant{Grant: g, Name: guest(g.Subject)})
 	}
 	views := []accessView{}
 	for _, v := range s.views.Of(t.ID) {
