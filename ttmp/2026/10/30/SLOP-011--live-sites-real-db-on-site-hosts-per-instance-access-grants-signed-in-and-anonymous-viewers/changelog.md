@@ -24,3 +24,12 @@ Phase 1: live routes on site hosts for admins signed in by handoff; site shell; 
 
 - /home/manuel/workspaces/2026-10-28/slop-computer/slop-computer/pkg/render/assets/shell.js — the site shell
 - /home/manuel/workspaces/2026-10-28/slop-computer/slop-computer/pkg/server/live.go — handoff, /_site/ API, shell
+
+## 2026-10-30
+
+Phase 2 (3d5c8bc): rt_grants and the member role (migration 009, SQLite runner switches foreign keys off and checks them), levelOf with role caps, access API and slop access CLI, admin-only sample/publish/slop perms, CSP sandbox for non-shell pages on hosts with live routes
+
+### Related Files
+
+- /home/manuel/workspaces/2026-10-28/slop-computer/slop-computer/pkg/server/access.go — levelOf, reviewViews and the access API
+- /home/manuel/workspaces/2026-10-28/slop-computer/slop-computer/pkg/server/live.go — siteHeaders sandboxes non-shell pages on live hosts

@@ -335,3 +335,137 @@ consent dialog.
   ```
 
 - Shell CSP: `default-src 'self'; script-src 'self'; style-src 'self'; img-src 'self' data:; connect-src 'self'; frame-src <scheme>://*.<sandbox>; frame-ancestors 'self' <main origins>; base-uri 'none'; form-action 'self'`.
+
+## Step 4: Phase 2, grants, members, and pages sandboxed on live hosts
+
+Phase 2 lets someone other than an admin open a live app. A person can now be
+a `member`. A target holds explicit grants (`rt_grants`) for a person, for
+everyone signed in, or for anyone. A person's level on a target is the
+highest that their role, authorship and grants give them, capped by their
+role. Admins inspect and change grants through `GET /api/rt/targets/{t}/access`
+and `slop access ls|grant|revoke`. Members get no models, no publishing and no
+`slop` permissions, whatever their level.
+
+One correction to my earlier reasoning changed the order of work. I had
+treated the site host as admin-authored. On the cluster it serves francois
+releases, which are third-party code, on the same origin as the shell and its
+`/_site/` API. So D8 (CSP `sandbox` on every non-shell page of a host with a
+live route) is in this phase, not deferred. It is a precondition for
+publishing Blocks on `site.slop.yolo.scapegoat.dev`.
+
+### Prompt Context
+**User prompt (verbatim):** see Step 3 ("Ok, build 011. …"; "can you publish blocks on site.slop.yolo.scapegoat.dev too once you are done?").
+**Assistant interpretation:** The second phase of the guide: grants, the member role, the access API and CLI, the capability policy, and the CSP sandbox.
+**Inferred user intent:** Ramon or another member can be let in and given one app, without being able to use models or the Workshop as an admin.
+**Commit (code):** 3d5c8bc — "SLOP-011 phase 2: grants, member role, access API and CLI, CSP sandbox for site pages"
+
+### What I did
+- **Migration 009** (`009_grants.sql`):
+  - SQLite rebuilds `users` so its role CHECK admits `member`, and recreates `users_email`. Postgres drops and re-adds `users_role_check`.
+  - Both create `rt_grants(target_id → artifacts, subject, level CHECK, via, created_by, created_at, PK(target_id, subject))`.
+- **Migration runner** (`pkg/store/store.go`), on SQLite only:
+  - `PRAGMA foreign_keys=OFF` before the transaction, re-enabled by a defer.
+  - `PRAGMA foreign_key_check` before commit; any row fails the migration ("migrations left a broken foreign key in %s").
+  - `Migrate` now calls `migrate(ctx, until)`, so a test can stop at 008.
+- **Store:**
+  - `RoleMember`.
+  - `pkg/store/grants.go`: `ValidSubject` (`usr_…`, `vis_…`, `*signed-in`, `*anyone`), `RTGrants`, `RTGrantsFor`, `RTSetGrant` (upsert, audit `access.grant`) and `RTRemoveGrant` (audit `access.revoke`).
+  - Both publish `access.changed`.
+- **Server, `pkg/server/access.go`:**
+  - `subjectsOf`, `levelCap` (admin up to owner, member up to admin), `levelOf`, and `reviewViews`, which closes a target's views whose level changed so the shell renews them.
+  - The access API, admin-only through `guard(admin, scopeRW)`.
+  - `putGrant` refuses a `usr_` id that does not exist.
+  - The listing names `*signed-in` and `*anyone` in plain words.
+- **Capability policy** (`rt.go`, `rt_more.go`, `rt_sample.go`). `View` carries `Role`:
+  - `sample` (including `sample.limits`), `artifact.publish` and the `slop` permissions require the admin role;
+  - `assets` (and `userInfo`'s `assets.write`) require level ≥ interact.
+- **Live hosts:**
+  - `admitted` lets members in on `signed-in` and `public` routes.
+  - `siteHeaders`: when a host has any live route, every page that is not the shell gets `Content-Security-Policy: frame-ancestors …; sandbox allow-scripts allow-forms allow-popups allow-popups-to-escape-sandbox allow-modals allow-downloads` and `Access-Control-Allow-Origin: *`; `serveShell` drops the ACAO.
+  - `runtime.js` gives a page memory-backed `localStorage` and `sessionStorage` when touching them throws, which is what an opaque origin does.
+- **CLI:** `cmd/slop/cmds/access.go` (`ls`, `grant`, `revoke`), the client methods in `pkg/client/access.go`, and a `live` column in `route list`.
+- **Workshop:** the role select has `member`. A pending person gets "Let in as member" (primary) and "as admin". `home.tmpl` tells members the Workshop is not for them.
+- **Tests:**
+  - `TestGrantsAndMembers`, `TestMemberCapabilityPolicy` and `TestSitePagesIsolated` in `live_test.go`.
+  - `TestUsersRebuildKeepsReferences` in `pkg/store/migrate_internal_test.go`.
+
+### Why
+- **Cap by role, not just max of grants.** A mistaken `owner` grant to a member must not make them more than an admin of that target. Owner on a target means "may manage its access", which phase 5's share dialog relies on.
+- **Admins are admin on every target, not owner.** Owner stays meaningful (the creator, or an explicit grant), while admins can still do everything through the Workshop.
+- **Capabilities follow the role, not only the level.** `sample` spends the server's model budget and `slop` permissions reach the kernel. Decision 2 says members get no `sample`. A level-only check would hand both to any member with an admin grant.
+- **Sandbox the pages, not the shell.** The shell is ours and needs the site origin for its cookie and `/_site/`. Everything else on that host, including francois releases, gets an opaque origin, so it can neither read the shell's cookie-bearing API nor script the shell's window. `ACAO: *` keeps those pages' own `fetch` calls to `/_d/` and `/_r/` working from the opaque origin. Those files are public anyway, and no credentials are sent.
+- **Only on hosts with a live route.** A host with no live route has nothing to protect, and its releases keep real `localStorage`.
+
+### What worked
+- `GOWORK=off go test ./...` passes; Postgres (`TEST_DATABASE_URL=… go test ./pkg/store/... ./pkg/server/...`) passes; `make lint` reports `0 issues.`; `tsc` is clean.
+- `TestGrantsAndMembers`:
+  - a member without a grant gets 403;
+  - with `*signed-in view` they open the view, with no `sample` or `assets`;
+  - after `interact` they can `db.write`;
+  - an `owner` grant gives a member `admin`, not owner;
+  - the access listing names grants;
+  - revoking closes their view, and the next open is 403;
+  - an unknown `usr_` gives 400, and a malformed subject gives 400.
+- `TestMemberCapabilityPolicy`: an admin-level member gets `assets` but not `sample`, `artifact` or `slop`; an admin gets all of them.
+- `TestSitePagesIsolated`: no sandbox without a live route; with one, pages get `sandbox allow…` and `ACAO *`; the shell is not sandboxed; `/_site/` has no ACAO.
+- `TestUsersRebuildKeepsReferences`: after 009, a session and a token made under 008 still resolve, and `PRAGMA foreign_keys` is back on. I checked that the test can fail: with the runner's foreign-key switch removed, the migration fails with `FOREIGN KEY constraint failed`.
+- On the local server:
+  - 009 applied to the scratch database (`schema_migrations` lists it), both users are kept, and `foreign_key_check` is empty.
+  - `slop access grant ws-team '*signed-in' view` → `ls` shows owner, the grant, my open view and the live route → `revoke` works. `grant … usr_nope view` → `invalid_request: No such person`; `grant … boss` → `a level is view, interact, admin or owner`.
+  - `route list --output-fields host,path,page,access,live` shows `/blocks/team … admins true`.
+- The storefront on `site.localhost:18140`, now sandboxed because `/blocks/team` is live, renders with no console errors: `/` showed 94 covers in 588 ms, and `/apps/blocks` showed its "No app called blocks" page, which is right because Blocks is not in the francois catalog.
+
+### What didn't work
+- In `grantedCaps`, `sample` came back for members: the block that adds per-capability options re-added it. Options are now added only for capabilities still in `out`.
+- `TestSitePagesIsolated` first passed for the wrong reason. It looked for "sandbox" in the CSP, which matched `frame-src http://*.sandbox.test` on the shell. It now looks for `sandbox allow`.
+- The local CLI token was stale (`token_invalid`). I signed in with local mode and minted a 7-day token through `POST /api/tokens` with the session's CSRF.
+- `slop access ls --output json`: `unknown flag: --output`. Glazed uses `--output-fields` and `--format`.
+
+### What I learned
+- SQLite rebuilds of a parent table are only safe with foreign keys off and a `foreign_key_check` afterwards. With them on, `DROP TABLE users` either fails or cascades into sessions and tokens, depending on the schema. `PRAGMA foreign_keys` is a no-op inside a transaction, so the switch has to sit outside it.
+- An opaque-origin page throws on `localStorage` access, not on `window.localStorage` being undefined. The shim has to try it and fall back.
+
+### What was tricky to build
+- **Where the trust line runs on a site host.** Phase 1 left a gap: any page on the host could call `/_site/views` with the visitor's cookie and receive a view secret. Making the shell the only page with the real origin closes the gap. The cost is that releases on a live host lose persistent storage.
+- **Closing views on a grant change.** A view's level is fixed when it opens. `reviewViews` compares each open view's level with `levelOf` now and closes those that differ (up or down). The shell renews, and the new view carries the new caps. Closing only on demotion would leave a promoted member without the capabilities they were just given.
+
+### What warrants a second pair of eyes
+- **`siteHeaders` CSP vs. what francois releases need.** `allow-same-origin` is deliberately absent. Releases that use `localStorage`, `IndexedDB`, cookies or service workers lose persistence on a live host. Check this before publishing Blocks on the cluster's site host. The alternative is a separate host just for live routes.
+- **`levelOf` errors.** A store error reading grants falls back to role and authorship (logged), which fails closed for members.
+- **`ACAO: *` on site pages.** It makes them readable cross-origin. They are already public pages, and no credentials flow, but it is a new header on that host.
+
+### What should be done in the future
+- Phase 3: `/blocks/:db` with `routing.Fill` in `liveTarget`, `create` policy and `POST /_site/instances`, share links (`rt_links`, `?k=`).
+- Tell the user about the storage trade-off before publishing Blocks on `site.slop.yolo.scapegoat.dev`.
+
+### Code review instructions
+- Read in this order:
+  1. `pkg/server/access.go`;
+  2. the `grantedCaps` and `newView` hunks in `rt.go`;
+  3. `siteHeaders` in `live.go`;
+  4. the storage shim at the top of `runtime.js`;
+  5. the runner change in `pkg/store/store.go` with both `009_grants.sql`.
+- Validate:
+  1. `GOWORK=off go test ./pkg/server -run 'TestGrants|TestMember|TestSitePages' -count=1`
+  2. `GOWORK=off go test ./pkg/store -run TestUsersRebuild -count=1`
+  3. Locally: `slop access grant <target> '*signed-in' view`, and `curl -sI http://site.localhost:<port>/` shows the sandbox CSP.
+
+### Technical details
+- The level, in pseudocode:
+
+  ```text
+  levelOf(u, t):
+    pending/disabled            → none
+    u created t                 → min(owner, cap(role))
+    base = admin if role=admin else none
+    best = max(base, grants for {u.id, *signed-in, *anyone} on t)
+    → min(best, cap(role))      cap: admin→owner, member→admin
+  ```
+
+- The capabilities a view gets, by role and level:
+
+  | | member, view | member, interact+ | admin |
+  |---|---|---|---|
+  | db, user, room, comments | per level | per level | all |
+  | assets | no | yes | yes |
+  | sample, artifact.publish, slop perms | no | no | yes |
