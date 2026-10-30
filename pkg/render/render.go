@@ -6,9 +6,13 @@ package render
 
 import (
 	"bytes"
+	"crypto/sha256"
 	"embed"
+	"encoding/hex"
 	"encoding/json"
+	"io/fs"
 	"regexp"
+	"sync"
 
 	"github.com/go-go-golems/slop-computer/pkg/records"
 )
@@ -59,6 +63,30 @@ type VersionInfo struct {
 	N        int    `json:"n"`
 }
 
+// AssetHash is the short content hash of an embedded asset ("" when there is
+// none); AssetURL names the asset with it, so the URL is a content URL.
+func AssetHash(name string) string {
+	assetHashes.once.Do(func() {
+		assetHashes.m = map[string]string{}
+		entries, _ := fs.ReadDir(Assets, "assets")
+		for _, e := range entries {
+			if b, err := fs.ReadFile(Assets, "assets/"+e.Name()); err == nil {
+				sum := sha256.Sum256(b)
+				assetHashes.m[e.Name()] = hex.EncodeToString(sum[:])[:12]
+			}
+		}
+	})
+	return assetHashes.m[name]
+}
+
+// AssetURL is /_slop/<name>?h=<hash>.
+func AssetURL(name string) string { return "/_slop/" + name + "?h=" + AssetHash(name) }
+
+var assetHashes struct {
+	once sync.Once
+	m    map[string]string
+}
+
 var (
 	headOpen  = regexp.MustCompile(`(?i)<head(\s[^>]*)?>`)
 	headClose = regexp.MustCompile(`(?i)</head\s*>`)
@@ -74,15 +102,15 @@ func Inject(page []byte, boot Boot) []byte {
 	var head bytes.Buffer
 	head.WriteString(`<script type="application/json" id="slop-boot">`)
 	head.Write(raw)
-	head.WriteString(`</script><script src="/_slop/runtime.js"></script>`)
+	head.WriteString(`</script><script src="` + AssetURL("runtime.js") + `"></script>`)
 	// claude.js is the first script a page runs anywhere but the public site,
 	// so window.claude.use exists (and resolves null where nothing is served).
 	if boot.Mode != ModeSite || boot.Runtime != nil {
-		head.WriteString(`<script src="/_slop/claude.js"></script>`)
+		head.WriteString(`<script src="` + AssetURL("claude.js") + `"></script>`)
 	}
 	switch boot.Mode {
 	case ModePreview, ModeThumb:
-		head.WriteString(`<script src="/_slop/bridge.js"></script>`)
+		head.WriteString(`<script src="` + AssetURL("bridge.js") + `"></script>`)
 	}
 	tail := ""
 	if boot.Tokens != nil {

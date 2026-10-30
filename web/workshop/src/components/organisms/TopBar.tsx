@@ -3,6 +3,7 @@ import { useAgentsQuery, useArtifactsQuery, useProjectsQuery, useThreadsQuery, u
 import type { Artifact } from '../../api/types'
 import { boot, csrfToken } from '../../app/boot'
 import { ago, cx, plural } from '../../app/format'
+import { projectGroups } from '../../app/groups'
 import { useVersionBy } from '../../app/hooks'
 import { navigate, runPath, SCREEN_NAMES, SCREENS, watchPath, type Location, type ScreenName } from '../../app/router'
 import { useAppSelector } from '../../app/store'
@@ -114,12 +115,9 @@ function AppsMenu({ current, onPick }: { current?: string; onPick: (target: stri
 function ArtifactMenu({ current, onPick }: { current?: string; onPick: (id: string) => void }) {
   const { data: arts = [] } = useArtifactsQuery()
   const { data: projects = [] } = useProjectsQuery()
-  const groups = [...projects.map(p => ({ id: p.id as string | null, name: p.name })), { id: null, name: 'No project' }]
   return (
     <div className="menu" role="menu" onClick={e => e.stopPropagation()}>
-      {groups.map(g => {
-        const items = arts.filter(a => a.project === g.id)
-        if (!items.length) return null
+      {projectGroups(arts, projects).map(({ items, ...g }) => {
         return [
           <div key={'g' + g.id} className="grp">{g.name}</div>,
           ...items.map(a => (

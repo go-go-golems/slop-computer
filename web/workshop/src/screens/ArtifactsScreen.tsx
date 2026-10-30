@@ -2,6 +2,7 @@ import { useMemo, useState } from 'react'
 import { errorText, useAppsQuery, useArtifactsQuery, useCreateArtifactMutation, useProjectsQuery, usePushMutation, useRecordsQuery, useThreadsQuery, useVersionsQuery } from '../api/slopApi'
 import type { Artifact, Version } from '../api/types'
 import { ago, isAgent, plural } from '../app/format'
+import { projectGroups } from '../app/groups'
 import { useReaders, useRoutesUsing, useVersionBy } from '../app/hooks'
 import { navigate, runPath, watchPath } from '../app/router'
 import { toast } from '../app/store'
@@ -20,12 +21,9 @@ export function ArtifactsScreen() {
   const [pushing, setPushing] = useState(false)
   const [creating, setCreating] = useState(false)
   const groups = useMemo(() => {
-    const ids = [...projects.map(p => p.id), null]
-    return ids.map(id => ({
-      id,
-      project: projects.find(p => p.id === id),
-      items: arts.filter(a => a.project === id && (kind === 'all' || a.kind === kind) && (!q.trim() || (a.id + ' ' + a.title).toLowerCase().includes(q.trim().toLowerCase()))),
-    })).filter(g => g.items.length)
+    const needle = q.trim().toLowerCase()
+    const shown = arts.filter(a => (kind === 'all' || a.kind === kind) && (!needle || (a.id + ' ' + a.title).toLowerCase().includes(needle)))
+    return projectGroups(shown, projects)
   }, [arts, projects, q, kind])
   return (
     <div className="split">
@@ -40,7 +38,7 @@ export function ArtifactsScreen() {
         <div className="tilebody"><div className="scroll" id="agrid">
           <div className="agrid">
             {groups.map(g => [
-              <div key={'h' + g.id} className="grp-h"><b>{g.project?.name ?? 'No project'}</b><span>{plural(g.items.length, 'artifact') + (g.project?.brief ? ' · ' + g.project.brief : '')}</span></div>,
+              <div key={'h' + g.id} className="grp-h"><b>{g.name}</b><span>{plural(g.items.length, 'artifact') + (g.project?.brief ? ' · ' + g.project.brief : '')}</span></div>,
               ...g.items.map(a => <ArtifactCard key={a.id} a={a} />),
             ])}
           </div>

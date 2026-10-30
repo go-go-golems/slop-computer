@@ -31,7 +31,8 @@ func TestDataFiles(t *testing.T) {
 	if code != 200 || body != "\x89PNG fake" || !strings.Contains(hdr.Get("Cache-Control"), "immutable") {
 		t.Fatalf("data file %d %q %v", code, body, hdr)
 	}
-	if code, _, hdr = h.get("site.test", "/_d/media/main/files/med_1.png", ""); code != 200 || hdr.Get("Cache-Control") != "no-cache" {
+	// main is a place: fresh for a minute on a site host, then revalidated.
+	if code, _, hdr = h.get("site.test", "/_d/media/main/files/med_1.png", ""); code != 200 || hdr.Get("Cache-Control") != "public, max-age=60, stale-while-revalidate=86400" {
 		t.Fatalf("data file at main %d %v", code, hdr)
 	}
 	// Data no public route reads, and the manifest, stay private.

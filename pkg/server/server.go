@@ -7,6 +7,7 @@ package server
 
 import (
 	"context"
+	"golang.org/x/sync/singleflight"
 	"io/fs"
 	"net"
 	"net/http"
@@ -99,6 +100,7 @@ type Server struct {
 	samples       samples
 	recCache      recordCache
 	site          siteCache
+	derived       singleflight.Group // derived-file builds, by name (files.go)
 }
 
 func New(cfg Config, st *store.Store, bl *blobs.Blobs) *Server {

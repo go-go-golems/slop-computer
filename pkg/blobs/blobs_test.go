@@ -1,6 +1,7 @@
 package blobs
 
 import (
+	"io"
 	"os"
 	"testing"
 	"time"
@@ -36,5 +37,38 @@ func TestCollect(t *testing.T) {
 		if _, ok := b.Stat(sum); ok != want {
 			t.Fatalf("%s present=%v, want %v", sum[:8], ok, want)
 		}
+	}
+}
+
+// Derived files live outside blobs/ (Collect never sees them) and go with
+// their blob.
+func TestDerived(t *testing.T) {
+	b, err := Open(t.TempDir())
+	if err != nil {
+		t.Fatal(err)
+	}
+	keep, _ := b.Put([]byte("kept"))
+	drop, _ := b.Put([]byte("dropped"))
+	for _, sum := range []string{keep, drop} {
+		if _, err = b.PutDerived(sum+".gz", func(w io.Writer) error { _, err := w.Write([]byte("z")); return err }); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if _, ok := b.Derived(keep + ".gz"); !ok {
+		t.Fatal("derived file missing")
+	}
+	if _, err = b.PutDerived("../escape", func(io.Writer) error { return nil }); err == nil {
+		t.Fatal("an invalid name was accepted")
+	}
+	got, err := b.Collect(map[string]bool{keep: true, drop: true}, time.Now(), true)
+	if err != nil || len(got) != 0 {
+		t.Fatalf("Collect saw derived files: %v %v", got, err)
+	}
+	gone, err := b.CollectDerived(func(sum string) bool { return sum == keep }, false)
+	if err != nil || len(gone) != 1 || gone[0].SHA256 != drop+".gz" {
+		t.Fatalf("CollectDerived: %v %v", gone, err)
+	}
+	if _, ok := b.Derived(keep + ".gz"); !ok {
+		t.Fatal("the kept blob's derived file was removed")
 	}
 }
