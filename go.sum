@@ -108,8 +108,8 @@ github.com/fsnotify/fsnotify v1.10.1 h1:b0/UzAf9yR5rhf3RPm9gf3ehBPpf0oZKIjtpKrx5
 github.com/fsnotify/fsnotify v1.10.1/go.mod h1:TLheqan6HD6GBK6PrDWyDPBaEV8LspOxvPSjC+bVfgo=
 github.com/go-chi/chi/v5 v5.3.2 h1:5YQkICvTCSZ25hoRsyJazN0scjzKGiu4VAUc7H1o1nY=
 github.com/go-chi/chi/v5 v5.3.2/go.mod h1:R+tYY2hNuVUUjxoPtqUdgBqevM9s9njzkTLutVsOCto=
-github.com/go-go-golems/geppetto v0.13.12 h1:TyKwPh6o8n+BHeozs4TmCoCGHrl/cZpUze56gTjGS/o=
-github.com/go-go-golems/geppetto v0.13.12/go.mod h1:/aPbgwrNbo76pBWZi//iyALXAXGSwOPYX587ti/AR5A=
+github.com/go-go-golems/geppetto v0.13.13 h1:7uUx9r5HWo5kESzRL6UTcw3M6eshR7hTstUmd3SQLrM=
+github.com/go-go-golems/geppetto v0.13.13/go.mod h1:/aPbgwrNbo76pBWZi//iyALXAXGSwOPYX587ti/AR5A=
 github.com/go-go-golems/glazed v1.4.4 h1:FP8axuwUdSlkOi1n6SX/3gBgqi7wzFwIe4FXsL9vdGE=
 github.com/go-go-golems/glazed v1.4.4/go.mod h1:S+Mzjyb/ligWEnWOgPDD7DnyxFQItIFNbB0VQqHXoLs=
 github.com/go-go-golems/logcopter v0.1.1 h1:/zrfmA7057hZyBoes+X9EpASP+aZQJx3kip89eRQqXM=
