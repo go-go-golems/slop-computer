@@ -116,3 +116,90 @@ The guide designs one fix per problem, using data the server already stores.
 ### Technical details
 
 - Device code lifetime 10 min (`store.DeviceTTL`), poll interval 5 s (`deviceInterval`), flow lifetime 10 min, flow cookie 600 s, expired flows deleted after one more hour.
+
+## Step 2: Implementation: the problem page, destination recovery, and a patient CLI
+
+This step implemented all three phases of the guide in one focused commit. Failed sign-ins now render a problem page at `/auth/callback` (or `/auth/login`) itself, with *Continue signing in* leading to the path the sign-in was started for, read from `login_flows` by `state`. `slop auth login` waits through 5xx and 429 answers, says once that it is still waiting, tells the person which browser to use, and offers a new code when one expires (only at a terminal). The device page explains a wrong code.
+
+### Prompt Context
+
+**User prompt (verbatim):** "Ok, do SLOP-12 and SLOP-13"
+
+**Assistant interpretation:** Implement both tickets' designs, SLOP-013 first (smaller, and the user said "Before implementing, let's tackle that token thing"), on a new branch from `origin/main`.
+
+**Inferred user intent:** Working sign-in error handling and fast site pages, deployed after review.
+
+**Commit (code):** 5141af5 — "SLOP-013: visible, recoverable sign-in failures; CLI login waits through restarts"
+
+### What I did
+
+- **Branch:** `git switch -c task/fast-sites-and-sign-in` from `task/slop-geppetto-sample`, then `git rebase origin/main`. The old branch had only ticket docs beyond the merged PR #4.
+- **`pkg/store/sessions.go`:** `LoginFlowReturn(ctx, state)`, a `SELECT return_path FROM login_flows WHERE state_hash=?`.
+- **`pkg/server/auth.go`:**
+  - the `signInProblem` type and the `signInProblems` table with six codes;
+  - `signInFailed(w, r, code, ret)`, which logs `sign-in failed` with the code, client and return path, clears the flow cookie, and renders `sign-in-problem` with `Continue = /auth/login?return=<safeReturn(ret)>`;
+  - `login` calls it for `provider_unavailable`;
+  - `callback` calls it for all five of its failures. Until the flow is consumed, the return path comes from `started()` (the `LoginFlowReturn` lookup); after that, from `flow.ReturnPath`;
+  - `account_unavailable` now logs the `signIn` error.
+- **`pkg/server/templates/sign-in-problem.tmpl`:** title, explanation, *Continue signing in*, and the code.
+- **`pkg/server/static/pages.css`:** `a.button` and `a.button.primary`.
+- **`pkg/server/device.go`:** both "invalid or expired" messages add "Check that the whole link was copied, or type the code the terminal shows."
+- **`cmd/slop/cmds/auth.go`:**
+  - `pollDevice` treats `*client.Error` with status ≥ 500 or 429 as transient, and so are network errors. It prints one "still waiting" line;
+  - `errCodeExpired` is a sentinel;
+  - `device()` loops: on `errCodeExpired`, `askAgain()` offers `[Y/n]` when stdin and stderr are terminals;
+  - a hint line names the origin to be signed in to.
+- **`pkg/doc/topics/agents.md`:** a paragraph on the browser to use, the problem page, and restarts.
+- **Tests:**
+  - `pkg/server/signin_test.go` `TestSignInProblems` (a fake IdP, `logout_test.go` pattern) covers:
+    - `flow_missing` → 400, continue to `/device?code=ABCD-EFGH`;
+    - an unknown state → `/`;
+    - `flow_invalid` with a wrong cookie → `/watch/storefront`;
+    - `denied` → 403 → `/routes`;
+    - a stored `//evil.example/x` → `/`;
+    - provider discovery down → 503 → `/site`;
+    - no `Location` header on failures.
+  - `cmd/slop/cmds/auth_test.go` `TestPollDeviceWaitsThroughRestarts`: 503, 503, 429, pending, then a token; a 403 stops the wait; 503 at the deadline gives "the code expired".
+
+### Why
+
+- **The `started()` closure** keeps the "before consume, read by state; after consume, use the flow" rule in one place in `callback`.
+- **A sentinel for expiry** lets `device()` decide on renewal without string matching.
+
+### What worked
+
+- `go test ./pkg/server/ ./cmd/... ./pkg/store/... -count=1`: all ok.
+- `make lint` (golangci-lint): `0 issues.`
+- **Mutation check:** replacing the `LoginFlowReturn` lookup with `"/"` fails the test with `signin_test.go:99: flow_missing continues to "/"`. Restored from a scratchpad copy; the test passes again.
+
+### What didn't work
+
+- `gofmt -l cmd/slop/cmds/` listed `auth.go` after the scripted edit: I had added the `net/http` import out of order. Fixed with `gofmt -w`.
+- The editor diagnostics reported `go: go.work requires go >= 1.26.6 (running go 1.25.5)` for the new test files. That is the language server's Go version, not the build: `go test` uses the toolchain that `go.work` selects and passed.
+
+### What I learned
+
+- **The `denied` path also has a `state`.** So "cancelled" can continue to the right place, not only the cookie failures.
+
+### What was tricky to build
+
+- **Asserting the *Continue* href in the test.** `html/template` escapes `&` in attribute values. The helper unescapes `&amp;` before parsing the URL, then reads `return` from the query.
+
+### What warrants a second pair of eyes
+
+- `signInFailed` renders with the status from the table (400, 403, 502, 503). Check the cluster's Traefik passes 5xx bodies through (guide section 9).
+- **`askAgain` reads one line from stdin.** It is only reached at a terminal.
+
+### What should be done in the future
+
+- After deploy: retry the user's scenario on the cluster (open the device link in a signed-out browser, finish in another).
+
+### Code review instructions
+
+- `pkg/server/auth.go`: `signInProblems`, `signInFailed`, `callback`.
+- `cmd/slop/cmds/auth.go`: `device`, `pollDevice`, `askAgain`.
+- Run `go test ./pkg/server/ -run TestSignInProblems` and `go test ./cmd/slop/cmds/ -run TestPollDevice`.
+
+### Technical details
+
+- No `/?login_error=` redirect remains: `grep -n login_error pkg/server/auth.go` finds nothing.
