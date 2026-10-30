@@ -1,9 +1,9 @@
-import { useEffect, useMemo, useState } from 'react'
+import { useEffect, useMemo, useState, type ReactNode } from 'react'
 import { errorText, useFileQuery, usePushMutation, useRecordsQuery, useRoutesQuery, useThreadsQuery } from '../../api/slopApi'
 import type { Artifact, Rec, Version } from '../../api/types'
 import { boot } from '../../app/boot'
 import { toast } from '../../app/store'
-import { cx, plural } from '../../app/format'
+import { cx, kb, plural } from '../../app/format'
 import { useReaders } from '../../app/hooks'
 import { Button, Count, Empty } from '../atoms'
 import { PreviewStage, type Device } from './PreviewStage'
@@ -37,13 +37,7 @@ export function RecordsPane(p: RecordsProps) {
   useEffect(() => { if (selected !== p.rec) p.onRec(selected) }, [selected]) // keep the selection valid
   useEffect(() => setEditing(null), [a.id, v.n])
   const open = threads.filter(t => !t.resolved && t.anchor?.record)
-  const cols: [string, string][] = a.type === 'post' ? [['title', 'Title'], ['date', 'Date'], ['tags', 'Tags']] : [['no', 'No'], ['title', 'Title'], ['kind', 'Kind'], ['date', 'Date']]
-  const cell = (r: Rec, k: string) => {
-    const x = r[k]
-    if (Array.isArray(x)) return x.join(', ')
-    if (k === 'no' && x != null) return String(x).padStart(3, '0')
-    return x == null ? '' : String(x)
-  }
+  const cols = useMemo(() => columns(a, recs), [a, recs])
   return (
     <div className="dsplit">
       <div className="dlist">
@@ -55,13 +49,13 @@ export function RecordsPane(p: RecordsProps) {
           </div>
           <div className="scroll">
             <table className="rt">
-              <thead><tr>{cols.map(([, l]) => <th key={l}>{l}</th>)}<th /></tr></thead>
+              <thead><tr>{cols.map(c => <th key={c.key}>{c.label}</th>)}<th /></tr></thead>
               <tbody>
                 {sorted.map(r => {
                   const n = open.filter(t => t.anchor!.record === r.path).length
                   return (
                     <tr key={r.path} className={cx('click', r.id === selected && 'on')} onClick={() => p.onRec(r.id)}>
-                      {cols.map(([k]) => <td key={k} className={k === 'title' ? '' : 'dim'}>{cell(r, k)}</td>)}
+                      {cols.map(c => <td key={c.key} className={c.main ? '' : 'dim'}>{c.cell(r, a, v)}</td>)}
                       <td>{n ? <Count n={n} bad /> : null}</td>
                     </tr>
                   )
@@ -71,9 +65,52 @@ export function RecordsPane(p: RecordsProps) {
           </div>
         </>}
       </div>
-      <div className="dright"><ViewerPreview a={a} rec={selected} device={p.device} onOpenSite={p.onOpenSite} /></div>
+      <div className="dright">{!a.viewer && isImage(sorted.find(r => r.id === selected))
+        ? <ImagePreview a={a} v={v} r={sorted.find(r => r.id === selected)!} />
+        : <ViewerPreview a={a} rec={selected} device={p.device} onOpenSite={p.onOpenSite} />}</div>
     </div>
   )
+}
+
+interface Column { key: string; label: string; main?: boolean; cell: (r: Rec, a: Artifact, v: Version) => ReactNode }
+
+const known: Record<string, string> = { no: 'No', kind: 'Kind', date: 'Date', tags: 'Tags', type: 'Type', status: 'Status', visibility: 'Visibility' }
+const hidden = new Set(['id', 'path', 'title', 'body', 'html', 'file', 'src', 'size', 'width', 'height', 'summary', 'description'])
+
+// text is a field as a cell shows it: lists joined, timestamps as their date.
+const text = (x: unknown) => Array.isArray(x) ? x.join(', ') : x == null || typeof x === 'object' ? '' : String(x).replace(/^(\d{4}-\d\d-\d\d)T[\d:.]+(Z|[+-][\d:]+)$/, '$1')
+const isImage = (r?: Rec) => r?.file === true && /^image\/(jpeg|png|webp|gif)/.test(String(r.type))
+
+// fileURL is a version's file on the main host, where /_d/ is not served;
+// images take ?w= (SLOP-012).
+const fileURL = (a: Artifact, v: Version, r: Rec, w?: number) =>
+  `/api/artifacts/${a.id}/versions/${v.n}/files/${String(r.path).split('/').map(encodeURIComponent).join('/')}${w ? `?w=${w}` : ''}`
+
+// columns picks what the records have: posts their title, date and tags;
+// files (when most records are files) a thumbnail and their size; other
+// records a name and up to three short fields, familiar ones first.
+function columns(a: Artifact, recs: Rec[]): Column[] {
+  const name: Column = { key: 'title', label: 'Title', main: true, cell: r => text(r.title) || r.id }
+  if (a.type === 'post') return [name, ...['date', 'tags'].map(k => ({ key: k, label: known[k], cell: (r: Rec) => text(r[k]) }))]
+  if (recs.filter(r => r.file === true).length * 2 > recs.length) return [
+    { key: 'thumb', label: '', cell: (r, a, v) => isImage(r) ? <img className="rthumb" src={fileURL(a, v, r, 160)} alt="" loading="lazy" decoding="async" /> : null },
+    { ...name, label: 'File', cell: r => <span className="brk">{r.path.split('/').pop()}</span> },
+    { key: 'size', label: 'Size', cell: r => r.file === true ? <span className="nowrap">{[r.width ? `${r.width}×${r.height}` : '', kb(Number(r.size))].filter(Boolean).join(' · ')}</span> : '' },
+  ]
+  const seen = new Map<string, number>()
+  for (const r of recs) for (const [k, x] of Object.entries(r)) if (!hidden.has(k) && typeof x !== 'boolean' && text(x) && text(x).length <= 40) seen.set(k, (seen.get(k) ?? 0) + 1)
+  const keys = [...seen.keys()].sort((x, y) => (x in known ? 0 : 1) - (y in known ? 0 : 1) || seen.get(y)! - seen.get(x)!).slice(0, 3)
+  return [name, ...keys.map(k => ({ key: k, label: known[k] ?? k, cell: (r: Rec) => k === 'no' && r[k] != null ? text(r[k]).padStart(3, '0') : text(r[k]) }))]
+}
+
+// ImagePreview shows a file record that is an image when no viewer page is set.
+function ImagePreview({ a, v, r }: { a: Artifact; v: Version; r: Rec }) {
+  return <>
+    <div className="pane-head"><h2>{r.path}</h2><span className="note">{[r.width ? `${r.width}×${r.height}` : '', String(r.type)].filter(Boolean).join(' · ')}</span><span className="sp" />
+      <a className="btn sm" href={fileURL(a, v, r)} target="_blank" rel="noreferrer">Original</a></div>
+    <div className="imgstage"><img src={fileURL(a, v, r, 960)} alt={r.path} /></div>
+    <p className="empty" style={{ flex: 'none' }}>{`Pages link to it as ${String(r.src)}; set a viewer page to see a record through one.`}</p>
+  </>
 }
 
 // ViewerPreview shows a record through the page that displays one record
