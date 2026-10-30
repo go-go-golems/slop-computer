@@ -1,7 +1,7 @@
 ---
 Title: 'Live preview in Pinup: the compiled app page with real data beside the canvas'
 Ticket: SLOP-007
-Status: active
+Status: complete
 Topics:
     - tools
     - frontend
@@ -11,7 +11,7 @@ Owners: []
 RelatedFiles: []
 ExternalSources: []
 Summary: ""
-LastUpdated: 2026-10-29T11:39:40.968538764-04:00
+LastUpdated: 2026-10-30T17:49:15.794393002-04:00
 WhatFor: ""
 WhenToUse: ""
 ---

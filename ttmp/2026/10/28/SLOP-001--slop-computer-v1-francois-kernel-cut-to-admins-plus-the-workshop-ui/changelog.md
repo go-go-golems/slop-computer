@@ -79,3 +79,7 @@ Phase 7: blob GC, HSTS + Workshop CSP, server limits, Dockerfile (tested on Post
 
 - /home/manuel/workspaces/2026-10-28/slop-computer/slop-computer/Dockerfile — image
 - /home/manuel/workspaces/2026-10-28/slop-computer/slop-computer/doc/production.md — operator guide
+
+## 2026-10-30
+
+Closed in the 2026-10-30 cleanup: its work shipped; SLOP-001's two leftovers (compose with postgres+zitadel, MCP tools) were deferred/optional.

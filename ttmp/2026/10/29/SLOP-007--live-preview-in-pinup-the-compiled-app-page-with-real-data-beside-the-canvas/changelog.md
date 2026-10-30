@@ -7,3 +7,7 @@
 ## 2026-10-29
 
 Live preview panel in Pinup (3dee0ab): compiled app page with real data in an allow-scripts srcdoc iframe; 29 browser checks; e2e on local server; help topic
+
+## 2026-10-30
+
+Closed in the 2026-10-30 cleanup: its work shipped; SLOP-001's two leftovers (compose with postgres+zitadel, MCP tools) were deferred/optional.

@@ -1,7 +1,7 @@
 ---
 Title: 'slop.computer v1: francois kernel cut to admins, plus the Workshop UI'
 Ticket: SLOP-001
-Status: active
+Status: complete
 Topics:
     - backend
     - frontend
@@ -17,7 +17,7 @@ RelatedFiles:
       Note: fake API surface the server must answer
 ExternalSources: []
 Summary: ""
-LastUpdated: 2026-10-28T14:43:46.233073765-04:00
+LastUpdated: 2026-10-30T17:49:15.601162285-04:00
 WhatFor: ""
 WhenToUse: ""
 ---

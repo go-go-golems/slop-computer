@@ -14,13 +14,13 @@
 - [x] Phase C [code]: `slop import francois extract|push`, `slop db import-francois-admins`, DB + API sources, census, fixture test (7ba914e, 35a62f8)
 - [x] Phase B [code]: gitops/kustomize/slop + Vault policies/roles + bootstrap-slop-secrets.sh (hetzner-k3s branch slop/test-deployment 5eaf707, not pushed)
 - [x] Phase B [code]: ZITADEL slop-web client (terraform branch slop/zitadel-client abc678a, not pushed)
-- [ ] Phase C: extract real data (studio API) → census.md; push into a local slop; agent builds catalog/journal pages on it
+- [x] Phase C: extract real data and build pages on it. Closed: slop import francois runs on the cluster (114 artifacts, catalog, media, storefront).
 - [ ] Ask the owner of terraform commit 04fd555 (Slop sandbox client, applied but unpushed) how envs/slop should land
-- [ ] Phase B [operator]: push/merge the two branches, terraform apply, bootstrap secrets + Vault roles, set image tag, apply Argo app, first admin
+- [x] Phase B [operator]: branches, terraform, secrets, Vault roles, image tag, Argo app, first admin. Closed: the cluster runs slop at slop.yolo.scapegoat.dev under Argo CD with admins signed in.
 - [ ] Phase C [operator]: rehearse francois restore (db + blobs); DB-source import (real HTML for paid releases)
 - [ ] Phase E [operator]: slop blobs in backups; decide on teardown
 - [x] Remote deploy: image sha-cb68898, ZITADEL slop-web (terraform #38), Vault, gitops #397/#398, Argo app — live at https://slop.yolo.scapegoat.dev
 - [x] francois admins (Manuel, Ramon) imported as slop admins; E2E test admin left out
 - [x] Real import on the cluster (108 artifacts) and the agent storefront at https://site.slop.yolo.scapegoat.dev/
-- [ ] Merge PR #2, then bump the gitops image tag (sign-out fix on the cluster)
+- [x] Merge PR #2, then bump the gitops image tag. Closed: PR #2 merged 2026-10-29; the cluster has had several image bumps since (latest sha-ec4c4c9).
 - [ ] Next ticket from the agent NOTES: route-by-record, per-route data projections, route conflict warnings, --output json, document /_d/ and /_v/
