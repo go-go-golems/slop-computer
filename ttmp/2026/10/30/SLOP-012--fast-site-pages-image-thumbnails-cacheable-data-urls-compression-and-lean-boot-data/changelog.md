@@ -39,3 +39,11 @@ Workshop records table derives its columns from the records; image files get ?w=
 ### Related Files
 
 - /home/manuel/workspaces/2026-10-28/slop-computer/slop-computer/web/workshop/src/components/organisms/DataPanes.tsx — columns, fileURL, ImagePreview
+
+## 2026-10-30
+
+Workshop project UI: a project scope shared by the artifact menu and Artifacts screen, New/Edit project, and Move… (title, project, viewer) on artifacts (dfd2ade)
+
+### Related Files
+
+- /home/manuel/workspaces/2026-10-28/slop-computer/slop-computer/web/workshop/src/components/organisms/Projects.tsx — project scope, ProjectDialog, ArtifactDialog

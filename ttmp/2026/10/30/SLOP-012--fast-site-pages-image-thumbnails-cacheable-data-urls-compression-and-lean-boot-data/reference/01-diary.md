@@ -696,3 +696,103 @@ follow-up work rather than build it unasked.
 - Column rule: posts → `[Title, Date, Tags]`. More than half files → `[thumb, File, Size]`. Otherwise → `[Title] + top 3` of the non-hidden fields with short, non-boolean values.
 - `hidden` = id, path, title, body, html, file, src, size, width, height, summary, description.
 - Thumbnail URL: `/api/artifacts/francois-media-3/versions/1/files/files/med_f565d5e727a5cfbe72561bfc.jpg?w=160`. The cache class is private because this is the main host (`TestCacheClassesAndCompression`, "Off the site host, everything is private").
+
+## Step 7: Projects in the Workshop: a scope, new projects, moving artifacts
+
+Step 6 found that projects existed only for the CLI. `slop projects put`
+created them, and only an admin `PATCH /api/artifacts/{id}` moved an existing
+artifact. The Workshop showed one long list grouped by project, with no way to
+switch, create or move. The user asked for it in PR #5. This step adds three
+things on top of the endpoints that already exist; the server is unchanged:
+- a project scope that narrows both artifact lists;
+- a dialog to create or edit a project;
+- a dialog to change an artifact's title, project and viewer.
+
+I verified it in the browser on the local server:
+- created "The lab" and moved `blocks` and `pinup` into it;
+- switched the scope;
+- edited the project's brief.
+
+SQLite shows each change. `tsc` and the server tests pass.
+
+### Prompt Context
+**User prompt (verbatim):** "Sure, #5. commit at appropriate intervals and keep a detailed diary as you work (using the diary format from the skill)"
+**Assistant interpretation:** Build the offered Workshop project UI (switcher, New project, Move to project) in PR #5, with commits and a diary entry.
+**Inferred user intent:** Using projects should not need the CLI. A person in the Workshop should see, choose and organise projects.
+**Commit (code):** dfd2ade — "SLOP-012: projects in the Workshop: a project scope, new project, move an artifact"
+
+### What I did
+- `web/workshop/src/api/slopApi.ts`: two mutations, `putProject` (`PUT projects/{id}` `{name, brief}`) and `updateArtifact` (`PATCH artifacts/{id}` `{title?, project?: string|null, viewer?}`). Like the existing mutations they invalidate nothing; `api/events.ts` already maps `project.updated` and `artifact.updated` to invalidations.
+- `web/workshop/src/app/ui.ts`: `UIState.project: string | null` (null means all, `''` means no project), read from `localStorage['slop:workshop:project']` at start and written by `projectPicked`.
+- New `web/workshop/src/components/organisms/Projects.tsx`:
+  - `useProjectScope()` and `inScope(a, scope)`;
+  - `ProjectPicker` (a select: "All projects · N", each project with its count, "No project · N");
+  - `ProjectDialog` (create, or edit name and brief; the id follows the name until edited and is fixed once the project exists; shows the equivalent `slop projects put` command);
+  - `ArtifactDialog` (title, project with "A new project…", and viewer for data; sends only the fields that changed).
+- `web/workshop/src/components/organisms/TopBar.tsx`: `ArtifactMenu` gets a "Project" picker row and filters by scope. It shows "Nothing in this project yet. Show all projects" when empty, and gains two actions, "Title and project of <current>…" and "New project…". TopBar renders the dialogs, so they outlive the menu.
+- `web/workshop/src/screens/ArtifactsScreen.tsx`:
+  - toolbar: `ProjectPicker` and "New project…";
+  - group headers: "Edit project" for real projects;
+  - each card: wrapped in `.acell` with a "Move…" button beside it, visible on hover, on focus and always on touch;
+  - an empty state with "Show all projects";
+  - `PushDialog` and `NewTargetDialog` default their Project select to the scope.
+- `web/workshop/src/styles/workshop.css`: `.menu .mhead`, `.menu .mhead + .grp`, `.menu .grp:empty`, `.menu .mnote .link`, `.grp-h .link`, `.acell`, `.acell > .amove`.
+
+### Why
+- **A scope, not a separate screen.** The two places that list artifacts (menu, Artifacts screen) share one choice, so switching project in one switches the other. It is kept per browser (`localStorage`), like other Workshop conveniences. "All projects" is the first option and every empty state links back, so a scope cannot hide work unnoticed.
+- **"Move…" is a sibling of the card button.** `.acard` is a `<button>`, and a button inside a button is invalid HTML; the card stays one big click target.
+- **The viewer is in the same dialog.** Step 6's image preview tells people to "set a viewer page", and nothing in the Workshop could. It is the same PATCH, so one dialog for an artifact's metadata stays simple.
+- **No server change.** `PUT /api/projects/{id}` validates the id (`ValidArtifactID`) and the name; `PATCH` validates the project through the FK. Both already publish events.
+
+### What worked
+- Artifacts screen before: options `["All projects · 21", "Demo project · 7", "No project · 14"]`, groups `Demo project, No project`.
+- New project "The lab": the id field derived `the-lab`. After Create, the scope was `the-lab` and the empty state read "No artifacts in The lab yet. Show all projects".
+- Move… on `blocks` and `pinup`, choosing The lab:
+  - toasts "blocks moved to The lab." and "pinup moved to The lab.";
+  - groups became `Demo project (7)`, `The lab (2) · Experiments with Blocks and Pinup.`, `No project (12)`;
+  - the scoped list showed `["blocks", "pinup"]`;
+  - the artifact menu followed the scope: items `blocks, pinup`, plus the two actions.
+- Edit project: the name was prefilled and `#projId` disabled. A changed brief showed in the header after the `project.updated` event.
+- The `s12-data` dialog showed Title, Project and Viewer (11 options: None plus 10 pages).
+- SQLite: `the-lab|The lab|Experiments with Blocks and Pinup. Ask before routing.`, `blocks|the-lab`, `pinup|the-lab`.
+- `npx tsc --noEmit -p .` was clean, and `GOWORK=off go test ./pkg/web/... ./pkg/server/...` reported `ok`.
+
+### What didn't work
+- No failures in this step's code.
+- The browser console showed errors during the checks; I attribute both to the card previews, not to this change:
+  - 404s for `/_d/francois-media/main/files/…png?w=4…` and `/_d/francois-media-2/main/…`. The local server holds only `francois-media-3`, but the storefront preview asks for the other shards.
+  - `TypeError: Cannot assign to read only property 'claude' of object '#<Window>'` at `_slop/claude.js:1695/1698`, inside sandbox iframes of page thumbnails.
+- One audit query failed with `Error: in prepare, no such column: target`. I had guessed a column name; not needed.
+
+### What I learned
+- The "No agent listens on <project>" line under Comments follows the artifact's project. Moving `blocks` changes which `slop comments wait -p` hears its comments, which is why the dialog says the project decides "whose agents hear its comments".
+- The Workshop has no browser tests of its own (`package.json` has only `tsc`). `web/rt-conformance` covers the page runtime, not Workshop screens.
+
+### What was tricky to build
+- **Sentinels in one select.** `null` (all) and `''` (no project) share a `<select>` with project ids. "All" uses `*`, and "a new project" in the artifact dialog uses `*new`. Neither can be a project id (`ValidArtifactID` allows lowercase letters, digits and `-`), so they cannot collide, while an id like `all` stays valid.
+- **Dialogs owned by the menu.** The menu closes on any document click, so a dialog rendered inside it would unmount at once. `ArtifactMenu` reports `onDialog('artifact'|'project')`, and `TopBar` owns the dialog state.
+- **Scope after a nested create.** Creating a project from inside the artifact dialog must not switch the scope, which would hide the artifact being edited. `ProjectDialog` switches the scope only when no `onSaved` callback is given.
+
+### What warrants a second pair of eyes
+- **A remembered scope can hide artifacts.** The scope persists across visits, so someone may come back to a narrowed list. The picker is always visible with counts, and the empty states offer "Show all projects". Is that enough, or should the scope reset per session?
+- **Projects cannot be deleted** (no endpoint). A mistyped project stays; it can only be renamed.
+- **`viewer` is not checked by the server.** It accepts any string; the dialog offers only existing pages.
+
+### What should be done in the future
+- The `window.claude` read-only error in thumbnail iframes deserves its own look. It predates this step, but it is noisy.
+- Possibly: project delete (or archive) once projects are used.
+- Possibly: `slop artifacts set <id> --project` in the CLI, with the same PATCH.
+- On the local server, `blocks` and `pinup` are now in project "The lab". This is test state on the local server only.
+
+### Code review instructions
+- Start with `web/workshop/src/components/organisms/Projects.tsx`.
+- Then read `ArtifactMenu` in `TopBar.tsx`, `ArtifactsScreen` (toolbar, `.acell`, empty state) in `ArtifactsScreen.tsx`, `projectPicked` in `app/ui.ts`, and the two mutations in `api/slopApi.ts`.
+- Validate:
+  1. `cd web/workshop && npx tsc --noEmit -p .`
+  2. `go generate ./pkg/web && go build -tags embed ./cmd/slop`
+  3. On a local server: Artifacts → New project…, then Move… on a card, then switch the picker and open the artifact menu.
+
+### Technical details
+- Scope state: `ui.project: string | null`, persisted as JSON under `slop:workshop:project`.
+- The rule: `inScope = a => scope == null || (a.project ?? '') === scope`.
+- `updateArtifact` sends only changed fields, e.g. `{"project": "the-lab"}` or `{"project": null}` for no project. The server takes `project` as `*json.RawMessage`, so an explicit `null` clears it (`pkg/server/kernel.go`, `patchArtifact`).
