@@ -176,3 +176,105 @@ In the same step:
 | `/_v/<a>/<n>/<f>` | content | immutable | yes |
 | sandbox `/v/<n>/<f>` | content | immutable | yes |
 | `/_blob/<id>` (runtime asset) | an id that can be deleted | `private, no-cache` | yes |
+
+## Step 2: The intern guide, built on one rule per concern
+
+This step wrote the design and implementation guide. The user asked for "consistent, elegant, simple, expressive", so I organised the design as four rules, each decided in one place:
+
+1. **Cache class by what the URL names.** Content, Place and Document, set in one `serveFile` plus `writePage`.
+2. **`?w=` on any image URL.** Variants in a derived store beside the blobs.
+3. **gzip for text.** Explicit in handlers, never a mux-wide middleware.
+4. **Data bindings as content-addressed scripts.** `/_r/<artifact>/<n>.js` keeps `slop.data.<name>.all` synchronous.
+
+The storefront changes then shrink to `slop.image` and `slop.srcset` and one manifest key (`files`). In the same step the GitOps PR was merged and the new build rolled out. The cluster now runs `sha-2ac2611`.
+
+### Prompt Context
+
+**User prompt (verbatim):** see Step 1 (the SLOP-012 request).
+
+**Assistant interpretation:** Design only. Every rule should apply on every host and URL that serves bytes, not only to the storefront.
+
+**Inferred user intent:** A small number of general mechanisms that make every site page fast, which the storefront then uses with minimal page changes.
+
+**Commit (docs):** see the changelog entry for this step.
+
+### What I did
+
+- **Read** the rest of the serving path:
+  - `serveSlopAsset` and `writePage` (`serve.go:196-218`);
+  - `records.IsText` / `Parse` (`pkg/records/records.go:72-90`);
+  - `Blobs.PutReader`, `Stat`, `Missing`, `Collect` (`pkg/blobs/blobs.go:80-190`);
+  - every `Cache-Control` and `ServeContent` call in `pkg/server`;
+  - `serveAsset` (`rt_more.go:392-413`);
+  - `gc-blobs` (`cmd/slop/cmds/db.go:138-146`);
+  - the event constants (`pkg/store/events.go:25-41`);
+  - Workshop `DataShot` (`ArtifactsScreen.tsx:86-94`).
+- **Checked usage:**
+  - which pages read `.all`: `grep` found only Pinup's `96-slop-app.js:268`;
+  - `golang.org/x/sync` is in `go.mod` (for `singleflight`); `golang.org/x/image` is not.
+- **Wrote the guide**: `design-doc/01-intern-guide-serving-site-pages-fast.md`, 673 lines. It has:
+  - orientation (hosts, versions vs `main`, bindings, records, rendering, a table of every URL that serves bytes);
+  - the measurements explained;
+  - principles;
+  - the four rules with Go/JS pseudocode;
+  - the storefront after the change, with a weight table and a request-flow diagram;
+  - the Workshop grouping fix;
+  - API and file reference, phases, tests, risks, open questions and a glossary.
+- **Fixed one reference after writing:** the event constants are `EvRouteSet`, `EvRouteRemoved`, `EvVersionCreated` and `EvRefMoved` in `pkg/store/events.go`, not in `routes.go`.
+- **Tasks:** phases 1–5 and an open-questions task. **Index:** filled. **Related files:** `serve.go`, `kernel.go`, `runtime.js`.
+- **Deploy follow-up:**
+  - `gh pr view 401`: `MERGED 2026-10-30T19:26:33Z`.
+  - `/healthz` 200 and `/readyz` `{"status":"ready"}`.
+  - `/_slop/claude.js` is now served (63,716 bytes), so the SLOP-009 build is live.
+  - Re-measured: same weights, 11.56 s for the HTML this time.
+- **Token:** the second device login failed with `http_503: no available server` during the rollout. A third login (`LNTS-MNVX`) is waiting for approval.
+
+### Why
+
+- **Classes, not file types.** The bug (page-relative CSS cached immutable) came from treating "a file from a version" as content although the URL does not name the version. Deciding by what the URL names fixes the bug and every future case.
+- **Synchronous data scripts instead of `fetch`.** They keep `.all` synchronous for Pinup apps, are cached by the browser at a content URL, and are shared between the storefront and every `/apps/<id>` page.
+- **JPEG/PNG thumbnails, not WebP.** The standard library encodes them, and at thumbnail sizes JPEG is small. A WebP encoder would need cgo or WebAssembly.
+- **Explicit gzip.** SSE streams must not be buffered and media byte ranges must not be compressed; a middleware would have to special-case both.
+- **Derived files outside `blobs/`.** `Blobs.Collect` deletes unreferenced files under `blobs/`.
+
+### What worked
+
+- Every claim in the guide's current-state sections was checked against the code or measured on the cluster.
+- The rollout of `sha-2ac2611` succeeded: health and readiness are good.
+
+### What didn't work
+
+- `slop auth login` (second attempt) exited with `http_503: no available server`, while the pod was being replaced after PR #401 merged. Restarted the login.
+
+### What I learned
+
+- **The new build changes nothing on the storefront's path.** Same weights, as expected: SLOP-009 did not touch site serving.
+- **The page's own time varies widely on this link** (1.7 s to 11.6 s for the same 670 KB). The design should cut bytes, not tune the server.
+
+### What was tricky to build
+
+- **Keeping `.all` synchronous while moving data out of the HTML.** The order is boot JSON, then `runtime.js` (defines `slop.records` and `all` as a getter), then the `/_r/` scripts (fill the registry), then the page's scripts. That order is guaranteed only for synchronous scripts in `<head>`, which is where `Inject` already writes.
+
+### What warrants a second pair of eyes
+
+- **The Place freshness value** (60 s with a one-day `stale-while-revalidate`). It trades how quickly an edit shows up against revalidation traffic.
+- **`public` on the site host.** Correct for public pages. SLOP-011 (live sites) would need `private` for per-viewer responses. The class function is the one place to change.
+- **Memory for resizing** under the 512 Mi limit. Two slots plus the 50 MP guard should hold; test with `GOMEMLIMIT`.
+
+### What should be done in the future
+
+- Confirm the Workshop dropdown cause on the cluster once the token works.
+- Decide the open questions in section 14, then implement phase 1.
+
+### Code review instructions
+
+- Read the guide's section 2.5 table against `grep -n "Cache-Control" pkg/server/*.go`.
+- Validate: `docmgr doctor --ticket SLOP-012 --stale-after 30`.
+
+### Technical details
+
+- Expected weights after all phases (guide section 9):
+  - HTML about 1.5 KB gzipped;
+  - catalog script about 70 KB gzipped, cached;
+  - about 40 KB per visible cover;
+  - all covers about 3.5 MB instead of 76 MB.

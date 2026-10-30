@@ -10,22 +10,33 @@ Topics:
 DocType: index
 Intent: long-term
 Owners: []
-RelatedFiles: []
+RelatedFiles:
+    - Path: repo://pkg/render/assets/runtime.js
+      Note: window.slop data API and the new helpers
+    - Path: repo://pkg/server/kernel.go
+      Note: serveBlob, becomes serveFile
+    - Path: repo://pkg/server/serve.go
+      Note: serveSite, serveData, records, writePage
 ExternalSources: []
-Summary: ""
+Summary: 'Make site pages fast and correct: three cache classes decided by what a URL names, ?w= thumbnails on any image URL, gzip for text, and data bindings as cacheable scripts.'
 LastUpdated: 2026-10-30T15:10:26.536411404-04:00
-WhatFor: ""
-WhenToUse: ""
+WhatFor: Landing page for SLOP-012
+WhenToUse: Start here for site performance and caching
 ---
 
 # Fast site pages: image thumbnails, cacheable data URLs, compression and lean boot data
 
 ## Overview
 
-<!-- Provide a brief overview of the ticket, its goals, and current status -->
+The storefront on the test cluster (`site.slop.yolo.scapegoat.dev/`) loads slowly: 76 MB of full-size covers, a 670 KB uncompressed `no-store` HTML page that inlines 664 KB of data (three bindings unused), and `main` data URLs revalidated on every visit. Page-relative files such as `/boutique.css` are also cached `immutable` for a year at a URL that does not change (a correctness bug). This ticket designs one consistent fix: cache classes by what a URL names, `?w=` thumbnails, gzip, and data as content-addressed scripts.
+
+Status: design written; implementation not started. Open questions are in the guide, section 14.
 
 ## Key Links
 
+- **Intern guide (start here)**: [design-doc/01-intern-guide-serving-site-pages-fast.md](./design-doc/01-intern-guide-serving-site-pages-fast.md)
+- **Diary**: [reference/01-diary.md](./reference/01-diary.md)
+- **Measurement**: [scripts/01-measure-site.py](./scripts/01-measure-site.py)
 - **Related Files**: See frontmatter RelatedFiles field
 - **External Sources**: See frontmatter ExternalSources field
 
