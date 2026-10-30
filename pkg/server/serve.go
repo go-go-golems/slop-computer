@@ -222,11 +222,6 @@ func (s *Server) serveSlopAsset(w http.ResponseWriter, r *http.Request) {
 	writeBody(w, r, http.StatusOK, typ, b)
 }
 
-// frameAncestors lets the Workshop (on any main-host origin) frame a page.
-func (s *Server) frameAncestors(w http.ResponseWriter) {
-	w.Header().Set("Content-Security-Policy", "frame-ancestors 'self' "+strings.Join(s.origins(), " "))
-}
-
 // writePage writes a rendered page: a document, revalidated on every use by
 // an ETag of its body, so an unchanged page costs a 304.
 func (s *Server) writePage(w http.ResponseWriter, r *http.Request, status int, body []byte) {
@@ -367,7 +362,6 @@ func (s *Server) serveSite(w http.ResponseWriter, r *http.Request) {
 		s.serveSlopAsset(w, r)
 		return
 	}
-	s.frameAncestors(w)
 	ctx := r.Context()
 	host := strings.ToLower(r.Host)
 	routes, err := s.Store.Routes(ctx, host)
@@ -375,6 +369,7 @@ func (s *Server) serveSite(w http.ResponseWriter, r *http.Request) {
 		unavailable(w, err)
 		return
 	}
+	s.siteHeaders(w, routes)
 	// public: the static routes anyone sees. Live routes run their app on
 	// its target's origin, so they make no files or data public here.
 	public := routes[:0:0]

@@ -32,6 +32,7 @@ type View struct {
 	Version int       `json:"version"`
 	User    string    `json:"user"`
 	Name    string    `json:"-"`
+	Role    string    `json:"-"` // the viewer's role: admin, member (visitor later); policy beyond levels
 	Level   Level     `json:"-"`
 	Caps    Caps      `json:"-"`
 	Perms   []string  `json:"permissions"` // approved slop permissions

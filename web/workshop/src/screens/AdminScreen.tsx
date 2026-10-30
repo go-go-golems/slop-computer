@@ -36,7 +36,7 @@ function People() {
   return <>
     <div className="pane-head"><h2>People</h2><span className="note">{local
       ? 'Local mode: anyone who signs in with a nickname lands here with the local role. There are no plans, no billing and no other roles.'
-      : 'Anyone who signs in lands here as pending and sees nothing until an admin lets them in. There are no plans, no billing and no other roles.'}</span></div>
+      : 'Anyone who signs in lands here as pending and sees nothing until an admin lets them in. Admins use the Workshop; members only open the apps shared with them on site hosts.'}</span></div>
     <div className="tablewrap"><table className="rt">
       <thead><tr>{['Name', 'Email', 'Role', 'Last seen', 'Since', ''].map(t => <th key={t}>{t}</th>)}</tr></thead>
       <tbody>
@@ -44,10 +44,10 @@ function People() {
           <tr key={u.id}>
             <td><span style={{ marginRight: 8 }}><Avatar name={u.name} /></span>{u.name}{u.id === me ? <span className="muted"> (you)</span> : null}</td>
             <td className="dim">{u.email || (u.issuer === 'local' ? 'local nickname' : '')}</td>
-            <td>{u.id === me ? u.role : <Select aria-label={'Role of ' + u.name} value={u.role} onChange={r => change(u.id, u.name, r)} options={['admin', 'pending', 'disabled'].map(r => ({ value: r, label: r }))} />}</td>
+            <td>{u.id === me ? u.role : <Select aria-label={'Role of ' + u.name} value={u.role} onChange={r => change(u.id, u.name, r)} options={['admin', 'member', 'pending', 'disabled'].map(r => ({ value: r, label: r }))} />}</td>
             <td className="dim">{ago(u.lastSeenAt ?? u.lastLoginAt)}</td>
             <td className="dim">{ago(u.createdAt)}</td>
-            <td>{u.role === 'pending' ? <Button small variant="primary" onClick={() => change(u.id, u.name, 'admin')}>Let in as admin</Button> : null}</td>
+            <td>{u.role === 'pending' ? <span className="tags"><Button small variant="primary" onClick={() => change(u.id, u.name, 'member')}>Let in as member</Button><Button small onClick={() => change(u.id, u.name, 'admin')}>as admin</Button></span> : null}</td>
           </tr>
         ))}
       </tbody>

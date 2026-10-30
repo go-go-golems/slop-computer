@@ -1,7 +1,7 @@
 // The server's JSON, written by hand to match the Go structs in pkg/store,
 // pkg/routing and pkg/server. Times are RFC 3339 strings.
 
-export type Role = 'admin' | 'pending' | 'disabled'
+export type Role = 'admin' | 'member' | 'pending' | 'disabled'
 
 export interface MeUser { id: string; name: string; email: string; role: Role; local: boolean }
 export interface Me { user: MeUser; csrfToken?: string }

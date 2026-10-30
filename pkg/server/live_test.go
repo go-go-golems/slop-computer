@@ -248,3 +248,177 @@ func TestLiveRouteRules(t *testing.T) {
 		t.Fatalf("live app files on the site: %d", code)
 	}
 }
+
+// siteView opens a view through the shell's endpoint and connects it.
+func (sb *siteBrowser) siteView(path string) (*viewClient, map[string]any, int) {
+	sb.h.t.Helper()
+	var v map[string]any
+	code := sb.json("POST", "/_site/views", map[string]any{"path": path}, &v)
+	if code != 200 {
+		return nil, v, code
+	}
+	u, _ := url.Parse(v["url"].(string))
+	vc := &viewClient{h: sb.h, host: u.Host, secret: v["secret"].(string), id: v["view"].(string)}
+	vc.stream()
+	return vc, v, code
+}
+
+// Members open what grants give them, never more than admin, and a grant
+// change closes the views it changes (SLOP-011 phase 2).
+func TestGrantsAndMembers(t *testing.T) {
+	h, manuel := liveSetup(t)
+	ctx := context.Background()
+	route := map[string]any{"host": "site.test", "path": "/board/team", "page": "board", "live": true, "access": "signed-in",
+		"bindings": map[string]any{"target": map[string]any{"artifact": "ws"}}}
+	if code := manuel.do("PUT", "/api/routes", route, nil); code != 200 {
+		t.Fatalf("route: %d", code)
+	}
+	alexB := h.signIn("alex") // local mode makes everyone an admin first
+	alex := alexB.id()
+	if _, err := h.st.SetUserRole(ctx, alex, store.RoleMember); err != nil {
+		t.Fatal(err)
+	}
+	site := h.handoff(h.signIn("alex"), "/board/team")
+	if _, v, code := site.siteView("/board/team"); code != 403 {
+		t.Fatalf("a member without a grant: %d %v", code, v)
+	}
+
+	grant := func(subject, level string) {
+		t.Helper()
+		var out map[string]any
+		if code := manuel.do("PUT", "/api/rt/targets/ws/grants/"+url.PathEscape(subject), map[string]any{"level": level}, &out); code != 200 {
+			t.Fatalf("grant %s %s: %d %v", subject, level, code, out)
+		}
+	}
+	grant("*signed-in", "view")
+	vc, v, code := site.siteView("/board/team")
+	if code != 200 || v["level"] != "view" {
+		t.Fatalf("a member with *signed-in view: %d %v", code, v)
+	}
+	caps := v["caps"].(map[string]any)
+	if _, ok := caps["db"]; !ok {
+		t.Fatalf("caps %v", caps)
+	}
+	if _, e := vc.rpc("db.write", map[string]any{"path": "notes/n1", "op": "set", "body": map[string]any{"by": "alex"}}); e == "" {
+		t.Fatal("a viewer wrote")
+	}
+
+	// A higher grant closes the view; the new one has the new level.
+	grant(alex, "interact")
+	vc.next("revoked")
+	vc, v, _ = site.siteView("/board/team")
+	if v["level"] != "interact" {
+		t.Fatalf("after interact: %v", v)
+	}
+	if _, e := vc.rpc("db.write", map[string]any{"path": "notes/n1", "op": "set", "body": map[string]any{"by": "alex"}}); e != "" {
+		t.Fatalf("an interact member could not write: %s", e)
+	}
+
+	// Members are capped at admin, and get neither models nor publishing.
+	grant(alex, "owner")
+	vc.next("revoked")
+	_, v, _ = site.siteView("/board/team")
+	if v["level"] != "admin" {
+		t.Fatalf("an owner grant to a member: %v", v)
+	}
+
+	// Who has access: the grants, the views open now, the live routes.
+	var acc struct {
+		Grants []map[string]any `json:"grants"`
+		Views  []map[string]any `json:"views"`
+		Routes []map[string]any `json:"routes"`
+	}
+	if code := manuel.do("GET", "/api/rt/targets/ws/access", nil, &acc); code != 200 || len(acc.Grants) != 2 || len(acc.Views) != 1 || len(acc.Routes) != 1 {
+		t.Fatalf("access %d %+v", code, acc)
+	}
+	for _, g := range acc.Grants {
+		if g["subject"] == alex && g["name"] != "alex" {
+			t.Fatalf("grant names %v", acc.Grants)
+		}
+	}
+
+	// Taking grants away closes the view and the door.
+	for _, sub := range []string{alex, "*signed-in"} {
+		if code := manuel.do("DELETE", "/api/rt/targets/ws/grants/"+url.PathEscape(sub), nil, nil); code != 200 {
+			t.Fatalf("revoke %s: %d", sub, code)
+		}
+	}
+	if _, _, code := site.siteView("/board/team"); code != 403 {
+		t.Fatalf("after revoking: %d", code)
+	}
+	if code := manuel.do("PUT", "/api/rt/targets/ws/grants/usr_nobody", map[string]any{"level": "view"}, nil); code != 400 {
+		t.Fatalf("a grant to nobody: %d", code)
+	}
+	if code := manuel.do("PUT", "/api/rt/targets/ws/grants/bob", map[string]any{"level": "view"}, nil); code != 400 {
+		t.Fatalf("a malformed subject: %d", code)
+	}
+}
+
+// Members get no models and do not publish, whatever their level.
+func TestMemberCapabilityPolicy(t *testing.T) {
+	h := newHarness(t, store.RoleAdmin)
+	manuel := h.signIn("manuel")
+	tok := h.token(manuel.id(), store.ScopeRead, store.ScopeWrite)
+	h.pushFiles(tok, "pad", map[string]any{"title": "Pad", "kind": "page"},
+		map[string]any{"capabilities": map[string]any{"db": map[string]any{}, "sample": map[string]any{}, "artifact": map[string]any{}, "assets": map[string]any{}}},
+		map[string]string{"index.html": "<!doctype html><title>pad</title>"})
+	route := map[string]any{"host": "site.test", "path": "/pad", "page": "pad", "live": true, "access": "signed-in"}
+	if code := manuel.do("PUT", "/api/routes", route, nil); code != 200 {
+		t.Fatalf("route: %d", code)
+	}
+	alexB := h.signIn("alex")
+	if _, err := h.st.SetUserRole(context.Background(), alexB.id(), store.RoleMember); err != nil {
+		t.Fatal(err)
+	}
+	if code := manuel.do("PUT", "/api/rt/targets/pad/grants/"+alexB.id(), map[string]any{"level": "admin"}, nil); code != 200 {
+		t.Fatalf("grant: %d", code)
+	}
+	vc, v, code := h.handoff(h.signIn("alex"), "/pad").siteView("/pad")
+	if code != 200 {
+		t.Fatalf("member view: %d %v", code, v)
+	}
+	caps := v["caps"].(map[string]any)
+	for _, c := range []string{"sample", "artifact"} {
+		if _, ok := caps[c]; ok {
+			t.Errorf("a member was granted %s: %v", c, caps)
+		}
+	}
+	if _, ok := caps["assets"]; !ok {
+		t.Errorf("an admin-level member has no assets: %v", caps)
+	}
+	if _, e := vc.rpc("artifact.publish", map[string]any{"html": "<!doctype html><title>x</title>"}); e == "" {
+		t.Error("a member published")
+	}
+	// The admin's own view of the same app has them.
+	_, v, _ = h.handoff(manuel, "/pad").siteView("/pad")
+	if caps := v["caps"].(map[string]any); caps["sample"] == nil || caps["artifact"] == nil {
+		t.Errorf("admin caps %v", caps)
+	}
+}
+
+// A site host that runs live apps serves its other pages with an opaque
+// origin (decision D8); the shell and /_site/ are not sandboxed.
+func TestSitePagesIsolated(t *testing.T) {
+	h := newHarness(t, store.RoleAdmin)
+	manuel := h.signIn("manuel")
+	tok := h.token(manuel.id(), store.ScopeRead, store.ScopeWrite)
+	h.pushFiles(tok, "home", map[string]any{"title": "Home", "kind": "page"}, nil, map[string]string{"index.html": "<!doctype html><title>home</title>"})
+	manuel.do("PUT", "/api/routes", map[string]any{"host": "site.test", "path": "/", "page": "home"}, nil)
+	anon := &siteBrowser{h: h}
+	if _, _, hdr := anon.req("GET", "/", nil, nil); strings.Contains(hdr.Get("Content-Security-Policy"), "sandbox allow") {
+		t.Fatalf("a host without live apps sandboxes its pages: %s", hdr.Get("Content-Security-Policy"))
+	}
+	h.pushFiles(tok, "board", map[string]any{"title": "Board", "kind": "page"}, map[string]any{"capabilities": map[string]any{"db": map[string]any{}}},
+		map[string]string{"index.html": "<!doctype html><title>board</title>"})
+	manuel.do("PUT", "/api/routes", map[string]any{"host": "site.test", "path": "/board", "page": "board", "live": true, "access": "admins"}, nil)
+	_, _, hdr := anon.req("GET", "/", nil, nil)
+	if csp := hdr.Get("Content-Security-Policy"); !strings.Contains(csp, "sandbox allow-scripts") || strings.Contains(csp, "allow-same-origin") || hdr.Get("Access-Control-Allow-Origin") != "*" {
+		t.Fatalf("an isolated page: %v", hdr)
+	}
+	if _, _, hdr = anon.req("GET", "/board", nil, nil); strings.Contains(hdr.Get("Content-Security-Policy"), "sandbox allow") || hdr.Get("Access-Control-Allow-Origin") != "" {
+		t.Fatalf("the shell is sandboxed: %v", hdr)
+	}
+	if _, _, hdr = anon.req("GET", "/_site/me", nil, nil); hdr.Get("Access-Control-Allow-Origin") != "" {
+		t.Fatalf("/_site/ allows other origins: %v", hdr)
+	}
+}

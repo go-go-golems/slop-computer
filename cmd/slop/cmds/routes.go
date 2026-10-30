@@ -73,7 +73,7 @@ func (c *routeListCmd) RunIntoGlazeProcessor(ctx context.Context, v *values.Valu
 		}
 		b, _ := json.Marshal(r.Bindings)
 		if err := out.AddRow(ctx, types.NewRow(types.MRP("host", r.Host), types.MRP("path", r.Path), types.MRP("page", r.Page), types.MRP("page_from", r.PageFrom), types.MRP("version", ver),
-			types.MRP("record", r.Record), types.MRP("bindings", string(b)), types.MRP("access", r.Access))); err != nil {
+			types.MRP("record", r.Record), types.MRP("bindings", string(b)), types.MRP("access", r.Access), types.MRP("live", r.Live))); err != nil {
 			return err
 		}
 	}

@@ -132,6 +132,7 @@ func Register(root *cobra.Command) error {
 		{"site", "The public URLs of a site host (the $site index)", siteCommands()},
 		{"comments", "Wait for, list and answer comments", commentCommands()},
 		{"projects", "List and edit projects", projectCommands()},
+		{"access", "Who may open an app's data on live routes: grants, and who has it open", accessCommands()},
 		{"dev", "Development helpers", []glazed.Command{newDevSeed()}},
 	}
 	for _, g := range groups {

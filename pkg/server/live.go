@@ -7,6 +7,7 @@ import (
 	"html/template"
 	"net/http"
 	"net/url"
+	"slices"
 	"strings"
 
 	"github.com/go-go-golems/slop-computer/pkg/httpx"
@@ -250,6 +251,26 @@ func (s *Server) siteLogout(w http.ResponseWriter, r *http.Request) {
 	httpx.OK(w, map[string]bool{"ok": true})
 }
 
+// isolated is the CSP sandbox a site host that runs live apps serves its
+// other pages with (decision D8): an opaque origin, so no page on the host
+// can send the visitor's site cookie, read the shell or open views as the
+// visitor. Scripts, forms, popups, dialogs and downloads still work; Web
+// Storage does not, and the runtime gives such pages memory storage.
+const isolated = "sandbox allow-scripts allow-forms allow-popups allow-popups-to-escape-sandbox allow-modals allow-downloads"
+
+// siteHeaders sets what every site response but the shell and /_site/
+// carries: who may frame it, the sandbox when the host runs live apps, and
+// open CORS (everything served here is public, and isolated pages fetch it
+// from an opaque origin).
+func (s *Server) siteHeaders(w http.ResponseWriter, routes []store.Route) {
+	csp := "frame-ancestors 'self' " + strings.Join(s.origins(), " ")
+	if slices.ContainsFunc(routes, func(rt store.Route) bool { return rt.Live }) {
+		csp += "; " + isolated
+	}
+	w.Header().Set("Content-Security-Policy", csp)
+	w.Header().Set("Access-Control-Allow-Origin", "*")
+}
+
 // servedRoutes are the routes a site host answers: static public routes,
 // and every live route (its access decides who may open the app).
 func servedRoutes(routes []store.Route) []store.Route {
@@ -262,7 +283,8 @@ func servedRoutes(routes []store.Route) []store.Route {
 	return out
 }
 
-// admitted reports whether a live route's access lets p open its app.
+// admitted reports whether a live route's access lets p try to open its
+// app; the level they get on the target (grants) decides what follows.
 func admitted(rt store.Route, p *sitePrincipal) bool {
 	if p == nil {
 		return false
@@ -271,7 +293,7 @@ func admitted(rt store.Route, p *sitePrincipal) bool {
 	case "admins":
 		return p.User.Role == store.RoleAdmin
 	case "signed-in", "public":
-		return p.User.Role == store.RoleAdmin
+		return p.User.Role == store.RoleAdmin || p.User.Role == store.RoleMember
 	}
 	return false
 }
@@ -399,6 +421,7 @@ func (s *Server) serveShell(w http.ResponseWriter, r *http.Request, res routing.
 		return
 	}
 	sandbox := s.Config.PublicURL.Scheme + "://*." + s.Config.SandboxDomain
+	w.Header().Del("Access-Control-Allow-Origin")
 	w.Header().Set("Content-Security-Policy", "default-src 'self'; script-src 'self'; style-src 'self'; img-src 'self' data:; connect-src 'self'; frame-src "+sandbox+
 		"; frame-ancestors 'self' "+strings.Join(s.origins(), " ")+"; base-uri 'none'; form-action 'self'")
 	w.Header().Set("Referrer-Policy", "same-origin")

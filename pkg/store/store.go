@@ -223,10 +223,32 @@ func Migrations(d Dialect) ([]string, error) {
 
 // Migrate applies embedded migrations in order and refuses to run when an
 // applied migration's contents changed.
-func (s *Store) Migrate(ctx context.Context) ([]string, error) {
+//
+// On SQLite, foreign keys are off while migrations run and checked before
+// they commit: changing a table that others refer to means rebuilding it,
+// and SQLite ignores PRAGMA foreign_keys inside a transaction. The store
+// holds one connection, so the pragma applies to the transaction below.
+func (s *Store) Migrate(ctx context.Context) ([]string, error) { return s.migrate(ctx, "") }
+
+// migrate applies migrations up to and including until ("" all of them).
+func (s *Store) migrate(ctx context.Context, until string) ([]string, error) {
 	names, err := Migrations(s.Dialect)
 	if err != nil {
 		return nil, err
+	}
+	if until != "" {
+		for i, n := range names {
+			if n == until {
+				names = names[:i+1]
+				break
+			}
+		}
+	}
+	if s.Dialect == SQLite {
+		if _, err := s.DB.ExecContext(ctx, `PRAGMA foreign_keys=OFF`); err != nil {
+			return nil, errors.Wrap(err, "pause foreign keys")
+		}
+		defer func() { _, _ = s.DB.ExecContext(context.WithoutCancel(ctx), `PRAGMA foreign_keys=ON`) }()
 	}
 	applied := []string{}
 	err = s.InTx(ctx, func(tx db) error {
@@ -266,6 +288,16 @@ func (s *Store) Migrate(ctx context.Context) ([]string, error) {
 				return err
 			}
 			applied = append(applied, name)
+		}
+		if s.Dialect == SQLite && len(applied) > 0 {
+			var table string
+			err := tx.row(ctx, `PRAGMA foreign_key_check`).Scan(&table)
+			if err == nil {
+				return errors.Errorf("migrations left a broken foreign key in %s", table)
+			}
+			if !errors.Is(err, sql.ErrNoRows) {
+				return err
+			}
 		}
 		return nil
 	})

@@ -221,6 +221,7 @@ func (s *Server) routes() *http.ServeMux {
 	s.previewRoutes(m)
 	s.streamRoutes(m)
 	s.rtRoutes(m)
+	s.accessRoutes(m)
 	s.siteRoutes(m)
 	m.HandleFunc("/api/", func(w http.ResponseWriter, r *http.Request) { httpx.Fail(w, 404, "not_found", "Unknown API route") })
 	s.workshopRoutes(m)

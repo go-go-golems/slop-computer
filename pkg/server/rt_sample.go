@@ -89,7 +89,7 @@ func (s *Server) sampleView(w http.ResponseWriter, r *http.Request) *rt.View {
 		httpx.Fail(w, 503, "sampling_disabled", "This server has no model worker (--pi-worker)")
 	case grantedCaps(v)["sample"] == nil:
 		httpx.Fail(w, 403, "not_declared", "This app does not declare sample")
-	case v.Level < rt.LevelAdmin:
+	case v.Level < rt.LevelAdmin || v.Role != store.RoleAdmin:
 		httpx.Fail(w, 403, "not_granted", "Only admins can use models")
 	case s.needConsent(r.Context(), v, "sample") != nil:
 		httpx.Fail(w, 403, "not_granted", "The viewer has not allowed sample")
@@ -247,7 +247,7 @@ func (s *Server) cancelSample(w http.ResponseWriter, r *http.Request, callID str
 func (s *Server) rpcSampleLimits(_ context.Context, v *rt.View, _ json.RawMessage) (any, error) {
 	out := map[string]any{"maxPromptBytes": rt.MaxPromptBytes, "tools": map[string]int{"maxCount": 16},
 		"modelTiers": []string{"inherit", "quick", "default", "complex"}, "models": []piworker.Model{}, "available": false}
-	if s.Config.Sample == nil || v.Level < rt.LevelAdmin {
+	if s.Config.Sample == nil || v.Level < rt.LevelAdmin || v.Role != store.RoleAdmin {
 		return out, nil
 	}
 	out["available"] = true
