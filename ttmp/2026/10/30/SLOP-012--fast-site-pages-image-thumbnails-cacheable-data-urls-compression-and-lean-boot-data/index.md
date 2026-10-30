@@ -1,7 +1,7 @@
 ---
 Title: 'Fast site pages: image thumbnails, cacheable data URLs, compression and lean boot data'
 Ticket: SLOP-012
-Status: active
+Status: complete
 Topics:
     - architecture
     - backend
@@ -19,7 +19,7 @@ RelatedFiles:
       Note: serveSite, serveData, records, writePage
 ExternalSources: []
 Summary: 'Make site pages fast and correct: three cache classes decided by what a URL names, ?w= thumbnails on any image URL, gzip for text, and data bindings as cacheable scripts.'
-LastUpdated: 2026-10-30T15:10:26.536411404-04:00
+LastUpdated: 2026-10-30T18:54:59.397386808-04:00
 WhatFor: Landing page for SLOP-012
 WhenToUse: Start here for site performance and caching
 ---

@@ -16,5 +16,5 @@
 - [x] Static publish (guide 6.9 C). Closed as superseded: SLOP-005 publishes Pinup apps as compiled page artifacts. <!-- t:col4 -->
 - [ ] Scripted Playwright test of tool mode against slop serve --local (slop1.js) <!-- t:dly6 -->
 - [x] Schedule PruneDocTombstones. Closed as obsolete: migration 007 dropped the docs tables; documents live in the SLOP-009 runtime store. <!-- t:n9jy -->
-- [ ] Deploy Pinup and Blocks to the cluster: make pinup-push and make blocks-push against slop.yolo, approve the apps (the cluster has pinup v1 from before capabilities; its apps list is empty). <!-- t:zf91 -->
+- [x] Deploy Pinup and Blocks to the cluster: done 2026-10-30, blocks v1, pinup v2 and pinup-player v2 pushed with make blocks-push / pinup-push. Pinup v2's slop permissions wait for an admin's Apps > Approve in the Workshop (the endpoint refuses API tokens). <!-- t:zf91 -->
 - [x] PR #3 review: no lost revs on the docs stream, no put/delete deadlock (2fe5f5a) <!-- t:jj1v -->

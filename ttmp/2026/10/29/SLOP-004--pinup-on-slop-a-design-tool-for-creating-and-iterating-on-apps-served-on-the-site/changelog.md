@@ -20,3 +20,7 @@ PR #3 review fixes (2fe5f5a): the docs stream catches up from the table when an 
 
 - /home/manuel/workspaces/2026-10-28/slop-computer/slop-computer/pkg/server/docs.go — docEvents catch-up on a rev gap
 - /home/manuel/workspaces/2026-10-28/slop-computer/slop-computer/pkg/store/docs.go — DeleteDoc lock order
+
+## 2026-10-30
+
+Closed: Pinup and Blocks are on the cluster (blocks v1, pinup v2, pinup-player v2). Left as backlog in tasks.md: restoring a saved version into the live documents, and a scripted Playwright test of tool mode.

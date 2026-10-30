@@ -1,7 +1,7 @@
 ---
 Title: 'Pinup on slop: a design tool for creating and iterating on apps served on the site'
 Ticket: SLOP-004
-Status: active
+Status: complete
 Topics:
     - tools
     - collaboration
@@ -31,7 +31,7 @@ RelatedFiles:
       Note: The host contract Pinup expects
 ExternalSources: []
 Summary: ""
-LastUpdated: 2026-10-29T09:36:32.01387812-04:00
+LastUpdated: 2026-10-30T18:54:59.297816108-04:00
 WhatFor: ""
 WhenToUse: ""
 ---
