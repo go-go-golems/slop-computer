@@ -2,10 +2,13 @@ package server
 
 import (
 	"io"
+	"io/fs"
 	"net/http"
+	"os"
 	"strings"
 	"testing"
 
+	"github.com/go-go-golems/glazed/pkg/help"
 	"github.com/go-go-golems/slop-computer/pkg/doc"
 	"github.com/go-go-golems/slop-computer/pkg/store"
 )
@@ -62,5 +65,24 @@ func TestHelpForAdmins(t *testing.T) {
 	_ = resp.Body.Close()
 	if resp.StatusCode != http.StatusForbidden {
 		t.Fatalf("pending: %d", resp.StatusCode)
+	}
+}
+
+// Every help topic loads into the CLI's help system: front matter that YAML
+// cannot parse (an unquoted ": " in a title) drops a topic silently.
+func TestHelpTopicsLoad(t *testing.T) {
+	hs := help.NewHelpSystem()
+	if err := doc.AddDocToHelpSystem(hs); err != nil {
+		t.Fatal(err)
+	}
+	entries, _ := fs.ReadDir(os.DirFS("../doc/topics"), ".")
+	for _, e := range entries {
+		slug := strings.TrimSuffix(e.Name(), ".md")
+		if _, err := hs.GetSectionWithSlug(slug); err != nil {
+			t.Errorf("topic %s does not load: %v", slug, err)
+		}
+		if title, _, ok := doc.Topic(slug); !ok || title == "" || strings.HasPrefix(title, `"`) {
+			t.Errorf("topic %s title %q", slug, title)
+		}
 	}
 }

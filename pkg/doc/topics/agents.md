@@ -164,7 +164,8 @@ The francois catalogue lives in project `francois`:
 
 The storefront at https://site.your-slop-server/ is the pages `storefront` and
 `storefront-entry`; `slop pull storefront` is the quickest example of a page that
-reads data.
+reads data. `slop help site-pages` explains scaled images (`?w=`), `reads`
+and `files`, and what browsers cache.
 
 If the Workshop is ever broken, `https://your-slop-server/_/` (safe mode) can still
 move routes and revoke tokens.

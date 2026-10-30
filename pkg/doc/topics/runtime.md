@@ -1,5 +1,5 @@
 ---
-Title: The artifact runtime: apps, targets, and their data
+Title: "The artifact runtime: apps, targets, and their data"
 Slug: runtime
 Short: How apps run on slop (window.claude), where their state lives, and how an agent reads and writes it with slop data and slop room.
 Topics:
