@@ -775,3 +775,77 @@ func TestVisitorClaim(t *testing.T) {
 		t.Fatalf("after keeping: %d %v", code, v)
 	}
 }
+
+// The owner of an instance shares it from the site: view or interact to
+// everyone signed in or anyone, links, and taking grants away; others
+// cannot (SLOP-011 phase 5, decision 5).
+func TestOwnerShares(t *testing.T) {
+	h, manuel := liveSetup(t)
+	ctx := context.Background()
+	route := map[string]any{"host": "site.test", "path": "/board/:db", "page": "board", "live": true, "access": "signed-in", "create": "signed-in",
+		"bindings": map[string]any{"target": map[string]any{"artifact": "{db}"}}}
+	if code := manuel.do("PUT", "/api/routes", route, nil); code != 200 {
+		t.Fatal(code)
+	}
+	member := func(nick string) *siteBrowser {
+		b := h.signIn(nick)
+		if _, err := h.st.SetUserRole(ctx, b.id(), store.RoleMember); err != nil {
+			t.Fatal(err)
+		}
+		return h.handoff(h.signIn(nick), "/")
+	}
+	alex, bo := member("alex"), member("bo")
+	var made struct{ ID, Path string }
+	if code := alex.json("POST", "/_site/instances", map[string]any{"path": "/board/new"}, &made); code != 201 {
+		t.Fatal(code)
+	}
+	if code := bo.json("POST", "/_site/access", map[string]any{"path": made.Path}, nil); code != 403 {
+		t.Fatalf("someone else's access: %d", code)
+	}
+	if _, _, code := bo.siteView(made.Path); code != 403 {
+		t.Fatalf("before sharing: %d", code)
+	}
+	if code := alex.json("POST", "/_site/grants", map[string]any{"path": made.Path, "subject": "*signed-in", "level": "view"}, nil); code != 200 {
+		t.Fatalf("share: %d", code)
+	}
+	if _, v, code := bo.siteView(made.Path); code != 200 || v["level"] != "view" {
+		t.Fatalf("after sharing: %d %v", code, v)
+	}
+	for name, body := range map[string]map[string]any{
+		"admin level": {"path": made.Path, "subject": "*signed-in", "level": "admin"},
+		"one person":  {"path": made.Path, "subject": "usr_x", "level": "view"},
+	} {
+		if code := alex.json("POST", "/_site/grants", body, nil); code != 400 {
+			t.Errorf("%s: %d", name, code)
+		}
+	}
+	var link struct {
+		Link map[string]any
+		URL  string
+	}
+	if code := alex.json("POST", "/_site/links", map[string]any{"path": made.Path, "level": "interact", "days": 30}, &link); code != 201 ||
+		!strings.HasPrefix(link.URL, "http://site.test"+made.Path+"?k=") {
+		t.Fatalf("link: %d %+v", code, link)
+	}
+	k := link.URL[strings.Index(link.URL, "k=")+2:]
+	var v map[string]any
+	if code := bo.json("POST", "/_site/views", map[string]any{"path": made.Path, "link": k}, &v); code != 200 || v["level"] != "interact" {
+		t.Fatalf("bo by link: %d %v", code, v)
+	}
+	var acc struct {
+		Grants []map[string]any
+		Links  []map[string]any
+	}
+	if code := alex.json("POST", "/_site/access", map[string]any{"path": made.Path}, &acc); code != 200 || len(acc.Grants) != 2 || len(acc.Links) != 1 {
+		t.Fatalf("access: %d %+v", code, acc)
+	}
+	if code := alex.json("POST", "/_site/links/"+acc.Links[0]["id"].(string)+"/revoke", map[string]any{"path": made.Path}, nil); code != 200 {
+		t.Fatalf("revoke: %d", code)
+	}
+	if code := alex.json("POST", "/_site/grants", map[string]any{"path": made.Path, "subject": "*signed-in", "level": ""}, nil); code != 200 {
+		t.Fatalf("unshare: %d", code)
+	}
+	if _, _, code := bo.siteView(made.Path); code != 403 {
+		t.Fatalf("after unsharing: %d", code)
+	}
+}

@@ -8,12 +8,13 @@ import { isAgent } from '../app/format'
 import { Avatar, Button, Empty, Tabs } from '../components/atoms'
 import { PreviewStage, type Device } from '../components/organisms/PreviewStage'
 import { RecordsPane, TokensEditor } from '../components/organisms/DataPanes'
+import { AccessPane, OpenLive, liveApp } from '../components/organisms/Access'
 import { CommentsPane, ConsolePane, VersionsPane, threadNumbers, type Pending } from '../components/organisms/WatchLeft'
 import { FilesPane, Filmstrip, PageToolbar, VisitLine, DeviceSeg, pinupPath, recWord, usePreviewContext } from '../components/organisms/WatchRight'
 import type { FromPreview, Pin } from '../preview/bridge-protocol'
 import type { SiteTarget } from './SiteScreen'
 
-type LTab = 'comments' | 'versions' | 'console'
+type LTab = 'comments' | 'versions' | 'console' | 'access'
 type RTab = 'preview' | 'compare' | 'files' | 'records'
 
 interface Props {
@@ -132,6 +133,20 @@ export function WatchScreen({ a, n, onOpenSite, onAddRoute }: Props) {
   }
 
   if (isLoading) return <div className="split"><section className="tile main"><Empty>Loading {a.id}…</Empty></section></div>
+  // Live data (an instance made on a site) keeps no versions: its database
+  // is the content, so Access is what there is to see.
+  if (!v && liveApp(a)) return (
+    <div className="split">
+      <section className="tile side" style={{ width: sideW }}>
+        <div className="dstrip"><Tabs value="access" onChange={() => {}} tabs={[{ key: 'access', label: 'Access' }]} /></div>
+        <div className="tilebody"><AccessPane a={a} /></div>
+      </section>
+      <section className="tile main">
+        <Empty>{`${a.id} is live data of ${a.app}: it keeps no versions, only its database.`}</Empty>
+        <div className="row" style={{ padding: '0 14px' }}><OpenLive target={a.id} /></div>
+      </section>
+    </div>
+  )
   if (!v) return <div className="split"><section className="tile main"><Empty>{`${a.id} has no versions yet. Push one: slop push ./folder -a ${a.id}`}</Empty></section></div>
 
   const open = threads.filter(t => !t.resolved).length
@@ -142,6 +157,10 @@ export function WatchScreen({ a, n, onOpenSite, onAddRoute }: Props) {
   const tab = rtabs.some(t => t.key === rtab) ? rtab : rtabs[0].key
   const canPoint = isData ? !!rec && a.type !== 'tokens' : tab === 'preview'
   const pointLabel = isData ? (rec ? `Comment on ${rec}` : `Select a ${recWord(a)} to comment on it`) : tab === 'preview' ? 'Comment on the page' : 'Open Preview to comment'
+  const runsLive = liveApp(a, v.manifest)
+  const ltabs: { key: LTab; label: string; count?: number; bad?: boolean }[] = [{ key: 'comments', label: 'Comments', count: open, bad: true }, { key: 'versions', label: 'Versions', count: versions.length },
+    ...(runsLive ? [{ key: 'access' as const, label: 'Access' }] : []), { key: 'console', label: 'Console' }]
+  const lt = ltabs.some(t => t.key === ltab) ? ltab : 'comments'
   const left = cmpLeft ?? Math.max(1, v.n - 1)
   const openSite = (host: string, path: string) => onOpenSite({ host, path })
   // After a save the newest version is the one to look at.
@@ -172,11 +191,12 @@ export function WatchScreen({ a, n, onOpenSite, onAddRoute }: Props) {
     <div className="split">
       <section className="tile side" id="wSide" ref={side} style={{ width: sideW }}>
         <div className="dstrip">
-          <Tabs value={ltab} onChange={setLtab} tabs={[{ key: 'comments', label: 'Comments', count: open, bad: true }, { key: 'versions', label: 'Versions', count: versions.length }, { key: 'console', label: 'Console' }]} />
+          <Tabs value={lt} onChange={setLtab} tabs={ltabs} />
         </div>
         <div className="tilebody" id="wLeft">
-          {ltab === 'versions' ? <VersionsPane a={a} versions={versions} current={v.n} routes={routes} onSelect={selectVersion} />
-            : ltab === 'console' ? <ConsolePane />
+          {lt === 'access' ? <AccessPane a={a} />
+            : lt === 'versions' ? <VersionsPane a={a} versions={versions} current={v.n} routes={routes} onSelect={selectVersion} />
+            : lt === 'console' ? <ConsolePane />
               : <CommentsPane a={a} v={v} threads={threads} pending={pending} picking={picking} canPoint={canPoint} pointLabel={pointLabel}
                 focus={focus} missing={tab === 'preview' ? missing : new Set()} showResolved={showResolved} replyOpen={replyOpen}
                 onStartPick={startPick} onCancel={() => setPending(null)} onPosted={t => { setPending(null); setFocus(t.id) }}
@@ -187,7 +207,7 @@ export function WatchScreen({ a, n, onOpenSite, onAddRoute }: Props) {
       <section className="tile main">
         <div className="dstrip"><Tabs value={tab} onChange={k => { setRtab(k); setPicking(false) }} tabs={rtabs} /></div>
         {isData
-          ? <div className="toolbar" id="wTool"><div className="addr"><span>{a.type}</span><span className="ro">{a.type === 'tokens' ? 'tokens.json' : `v${v.n}`}</span></div>{tab === 'records' ? <DeviceSeg device={device} onChange={setDevice} /> : null}{a.type === 'pinup' ? <Button onClick={() => navigate(pinupPath(a.id))}>Open in Pinup</Button> : null}</div>
+          ? <div className="toolbar" id="wTool"><div className="addr"><span>{a.type}</span><span className="ro">{a.type === 'tokens' ? 'tokens.json' : `v${v.n}`}</span></div>{tab === 'records' ? <DeviceSeg device={device} onChange={setDevice} /> : null}{a.type === 'pinup' ? <Button onClick={() => navigate(pinupPath(a.id))}>Open in Pinup</Button> : null}{runsLive ? <OpenLive target={a.id} /> : null}</div>
           : <PageToolbar a={a} versions={versions} v={v} ctx={ctx} rtab={tab} device={device} cmpLeft={left} onDevice={setDevice} onSample={setSample} onCmpLeft={setCmpLeft} onOpenSite={openSite} />}
         <VisitLine a={a} v={v} routes={routes} onAddRoute={() => onAddRoute(a.id)} />
         <div className="tilebody" id="wRight">{body}</div>

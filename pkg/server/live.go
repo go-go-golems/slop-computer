@@ -187,6 +187,7 @@ func (s *Server) siteLiveRoutes() *http.ServeMux {
 	m.HandleFunc("POST /_site/views/{v}/consent", s.shellOnly(s.siteOwnView(s.signedInOnly(s.consentView))))
 	m.HandleFunc("POST /_site/claim", s.shellOnly(s.siteClaim))
 	m.HandleFunc("DELETE /_site/views/{v}", s.shellOnly(s.siteOwnView(s.closeView)))
+	s.siteAccessRoutes(m)
 	m.HandleFunc("/_site/", func(w http.ResponseWriter, r *http.Request) { httpx.Fail(w, 404, "not_found", "Unknown site route") })
 	return m
 }
@@ -695,7 +696,7 @@ var shellPage = template.Must(template.New("shell").Parse(`<!doctype html>
 <title>{{.Title}}</title><link rel="stylesheet" href="{{.CSS}}">
 <script type="application/json" id="slop-shell">{{.Boot}}</script>
 </head><body>
-<header class="shell-bar"><b class="shell-title">{{.Title}}</b><span class="shell-sp"></span><span class="shell-me" id="me"></span></header>
+<header class="shell-bar"><b class="shell-title">{{.Title}}</b><span class="shell-sp"></span><button type="button" class="shell-btn" id="share" hidden>Share</button><span class="shell-me" id="me"></span></header>
 <main class="shell-main"><iframe id="app" title="{{.Title}}" sandbox="allow-scripts allow-same-origin allow-forms allow-popups allow-modals allow-downloads" allow="clipboard-read; clipboard-write"></iframe>
 <div class="shell-note" id="note">Opening…</div></main>
 <script src="{{.JS}}"></script>

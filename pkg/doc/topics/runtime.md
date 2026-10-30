@@ -43,6 +43,14 @@ unchanged.
 New targets: Artifacts ▸ *New with an app…*, or
 `POST /api/artifacts {"id", "title", "kind": "data", "app"}`.
 
+## Live on a site
+
+A route on a site host can run an app live instead of serving a static page:
+`slop route set /blocks/:db blocks --bind 'target={db}' --live --access
+signed-in`. Signed-in people and guests then open it with their own level,
+from grants (`slop access grant`) and share links (`slop access link`). See
+`slop help live-sites`.
+
 ## Reading and writing an app's data: slop data
 
 The same verbs as Claude's ArtifactData tool, through the same rules and

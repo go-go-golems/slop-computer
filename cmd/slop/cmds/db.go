@@ -85,8 +85,8 @@ func (c *usersCmd) RunIntoGlazeProcessor(ctx context.Context, v *values.Values, 
 		if users, err = st.Users(ctx); err != nil {
 			return err
 		}
-	case "promote", "disable", "pending":
-		role := map[string]string{"promote": store.RoleAdmin, "disable": store.RoleDisabled, "pending": store.RolePending}[c.action]
+	case "promote", "member", "disable", "pending":
+		role := map[string]string{"promote": store.RoleAdmin, "member": store.RoleMember, "disable": store.RoleDisabled, "pending": store.RolePending}[c.action]
 		target, err := findUser(ctx, st, a)
 		if err != nil {
 			return err
@@ -126,6 +126,7 @@ func dbCommands() ([]glazed.Command, []glazed.Command) {
 	users := []glazed.Command{
 		&usersCmd{glazed.NewCommandDescription("list", glazed.WithShort("List users"), dbFlags()), "list"},
 		&usersCmd{glazed.NewCommandDescription("promote", glazed.WithShort("Make a user an admin (bootstraps the first admin)"), dbFlags(who...)), "promote"},
+		&usersCmd{glazed.NewCommandDescription("member", glazed.WithShort("Make a user a member: they open what is shared with them on sites, not the Workshop"), dbFlags(who...)), "member"},
 		&usersCmd{glazed.NewCommandDescription("disable", glazed.WithShort("Disable a user and revoke their sessions and tokens"), dbFlags(who...)), "disable"},
 		&usersCmd{glazed.NewCommandDescription("pending", glazed.WithShort("Set a user back to pending"), dbFlags(who...)), "pending"},
 	}

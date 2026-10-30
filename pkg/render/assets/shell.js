@@ -9,10 +9,12 @@
   const frame = document.getElementById("app");
   const note = document.getElementById("note");
   const meEl = document.getElementById("me");
+  const shareEl = document.getElementById("share");
   const RENEW_MS = 45 * 60 * 1000;
   let view = null;
   let signedIn = false;
   let kind = "none"; // none, visitor or user: who /_site/me said this is
+  let role = "";
 
   const call = async (method, url, body) => {
     const r = await fetch(url, {
@@ -72,6 +74,7 @@
   async function me() {
     const { body } = await call("GET", "/_site/me");
     kind = body.kind;
+    role = body.role || "";
     signedIn = kind === "user";
     if (body.kind === "visitor") {
       meEl.replaceChildren(el("span", { textContent: "Guest" }), el("a", { href: signIn(), textContent: "Sign in" }));
@@ -100,6 +103,7 @@
     view = body;
     link = "";
     if (kind === "none") me(); // opening a public route made this browser a guest
+    shareEl.hidden = !(view.level === "owner" || role === "admin");
     if (keepFrame && old) {
       view.url = old.url;
     } else {
@@ -139,6 +143,62 @@
       go.focus();
     });
   }
+
+  // share is the owner's dialog: who may open this, and links to it. Owners
+  // give view or interact; more is for admins in the Workshop.
+  async function share() {
+    const body = el("div", { className: "shell-share" });
+    const close = el("button", { type: "button", className: "shell-btn", textContent: "Done" });
+    const box = el("div", { className: "shell-modal" },
+      el("div", { className: "shell-dialog wide", role: "dialog", ariaLabel: "Share" }, el("h2", { textContent: "Share " + boot.title }), body, el("footer", {}, close)));
+    const done = () => box.remove();
+    close.onclick = done;
+    box.onclick = (e) => { if (e.target === box) done(); };
+    document.body.append(box);
+    const path = location.pathname;
+    const levels = [["", "No"], ["view", "Can view"], ["interact", "Can edit"]];
+    const said = { view: "Can view", interact: "Can edit", admin: "Admin", owner: "Owner" };
+    const select = (value, onchange) => {
+      const s = el("select", { className: "shell-sel" }, ...levels.map(([v, t]) => el("option", { value: v, textContent: t, selected: v === value })));
+      s.onchange = () => onchange(s.value);
+      return s;
+    };
+    const render = async () => {
+      const { status, body: a } = await call("POST", "/_site/access", { path });
+      if (status !== 200) return body.replaceChildren(el("p", { textContent: a.error?.message || "Sharing is not available." }));
+      const level = (sub) => a.grants.find((g) => g.subject === sub)?.level || "";
+      const grant = async (subject, lv) => {
+        const r = await call("POST", "/_site/grants", { path, subject, level: lv });
+        if (r.status !== 200) alert(r.body.error?.message || "That did not work.");
+        render();
+      };
+      const people = a.grants.filter((g) => g.subject[0] !== "*").map((g) =>
+        el("div", { className: "shell-line" }, el("span", { textContent: (g.name || g.subject) + (g.via ? " (by link)" : "") }), el("span", { className: "shell-dim", textContent: said[g.level] || g.level }),
+          el("button", { type: "button", className: "shell-link", textContent: "Remove", onclick: () => grant(g.subject, "") })));
+      const out = el("div", { className: "shell-made" });
+      const make = el("button", { type: "button", className: "shell-btn", textContent: "Make a link" });
+      const lv = select("view", () => {});
+      lv.querySelector('option[value=""]').remove();
+      make.onclick = async () => {
+        const r = await call("POST", "/_site/links", { path, level: lv.value, days: 30 });
+        if (r.status !== 201) return alert(r.body.error?.message || "No link was made.");
+        const input = el("input", { className: "shell-url", readOnly: true, value: r.body.url });
+        const copy = el("button", { type: "button", className: "shell-btn primary", textContent: "Copy", onclick: async () => { await navigator.clipboard.writeText(r.body.url).catch(() => input.select()); copy.textContent = "Copied"; } });
+        out.replaceChildren(input, copy, el("p", { className: "shell-dim", textContent: "Shown once. It works for 30 days, for whoever opens it." }));
+      };
+      const links = a.links.map((l) =>
+        el("div", { className: "shell-line" }, el("span", { textContent: `Link ${l.id.slice(4, 10)}` }), el("span", { className: "shell-dim", textContent: said[l.level] }),
+          el("button", { type: "button", className: "shell-link", textContent: "Revoke", onclick: async () => { await call("POST", `/_site/links/${l.id}/revoke`, { path }); render(); } })));
+      body.replaceChildren(
+        el("div", { className: "shell-line" }, el("span", { textContent: "Everyone signed in" }), select(level("*signed-in"), (v) => grant("*signed-in", v))),
+        el("div", { className: "shell-line" }, el("span", { textContent: "Anyone, guests too" }), select(level("*anyone"), (v) => grant("*anyone", v))),
+        ...(people.length ? [el("h3", { textContent: "People" }), ...people] : []),
+        el("h3", { textContent: "Links" }), ...links,
+        el("div", { className: "shell-line" }, lv, make), out);
+    };
+    render();
+  }
+  shareEl.onclick = share;
 
   const what = { sample: "Claude (sample): it sends text you see to a model, as you", comments: "comments: it writes threads as you" };
 
