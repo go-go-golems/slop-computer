@@ -597,3 +597,33 @@ Geppetto PR #443 fixes both. It is open; the user merges.
 
 - **geppetto commits:** `5026a890`, `d8873cf4` on `task/pi-adaptive-thinking`, pushed to `wesen`; PR #443.
 - **Scratch:** `$S/pismoke/go.mod` now has `replace github.com/go-go-golems/geppetto => …/geppetto`; the originals are `go.mod.bak` and `go.sum.bak`.
+
+## Step 9: geppetto v0.13.13 released and pinned in slop
+
+PR #443 was merged, and I released it as v0.13.13 and pinned it in slop. The local test server on 18140 now runs a build with it, and the llm-chat browser check passes.
+
+### Prompt Context
+
+**User prompt (verbatim):** "it's merged"
+
+**Assistant interpretation:** Tag and release #443, then pin it in slop, as agreed in step 8.
+
+### Evidence and commits
+
+- **geppetto:**
+  - `git pull --ff-only origin main` gave `5e864aae Merge pull request #443`;
+  - local and remote tags match; `svu patch` gives v0.13.13;
+  - `make tag-patch` and `make release` printed `* [new tag] v0.13.13 -> v0.13.13`, and `go list -m …@v0.13.13` resolves through `proxy.golang.org`.
+- **slop:**
+  - `GOWORK=off go get github.com/go-go-golems/geppetto@v0.13.13 && go mod tidy`;
+  - `go build ./...` and `go test ./pkg/piworker/... ./cmd/...` pass, and the lefthook pre-commit (test, lint) passed;
+  - commit `6835198`.
+- **Local server:**
+  - `$S/slop19` (`GOWORK=off -tags embed`), with `rt1/run-tmux.sh` switched to it;
+  - restarted in tmux `slop:server`; the window had closed with the old process, so I recreated it with `tmux new-window -d -t slop -n server "$S/rt1/run-tmux.sh; exec zsh"`;
+  - `$S/chatcheck/check.mjs` passed: one `roll_dice({"n":3,"sides":6})` call and a follow-up listing "6 6 6", on the default tier, in 52,777 ms. glm-5.3's latency varies widely, as seen in step 3.
+
+### Remaining requirements and next action
+
+- A live check of adaptive thinking needs a working Kimi or Anthropic credential; Kimi rejected the key in step 8.
+- **Older open items:** kg55 (live Codex check, with the user's go-ahead); y2l5 (`--models pi` as the default, the Node worker out of the image); dqib (catalog and env-key coverage). The slop branch is not pushed.
