@@ -469,3 +469,135 @@ publishing Blocks on `site.slop.yolo.scapegoat.dev`.
   | db, user, room, comments | per level | per level | all |
   | assets | no | yes | yes |
   | sample, artifact.publish, slop perms | no | no | yes |
+
+## Step 5: Phase 3, instances named in the path, and share links
+
+A live route can now name its target in the path: `/blocks/:db` with
+`--bind 'target={db}'` opens any Blocks workspace by its id, and nothing that
+is not a Blocks workspace. On a path with nothing behind it, the shell offers
+"Create a new one" to whoever the route's create policy admits. That creates
+an empty data artifact with a random `i-…` id, owned by its creator, and goes
+there. An admin can make a share link to any target. Whoever opens the link
+(signed in, and admitted by the route) gets the link's level as a grant
+recorded "via" the link. Revoking the link takes those grants away.
+
+On the local server:
+1. `site.localhost:18140/blocks/new` showed "There is nothing here yet. Sign in to create one."
+2. After the handoff: "Create a new one".
+3. Clicking it landed on `/blocks/i-tmtocfaazmgvi6ip`, an empty Blocks workspace.
+4. `slop access link i-tmtocfaazmgvi6ip --level interact --days 7` printed the URL.
+5. Ramon, a member, opened it signed out, signed in, and was in at `interact`. The token survived the handoff and left the address bar.
+
+### Prompt Context
+**User prompt (verbatim):** see Step 3.
+**Assistant interpretation:** Phase 3 of the guide: templated target bindings, the create policy with `POST /_site/instances`, and share links with their API and CLI.
+**Inferred user intent:** Anyone let in can start their own Blocks workspace on the site and share it with a link, without an admin creating artifacts by hand.
+**Commit (code):** 5cbdbdc — "SLOP-011 phase 3: targets named in the path, instances, share links"
+
+### What I did
+- **Routes** (`pkg/store/routes.go`): `TemplatedTarget(r)` returns the path parameter a target names. `validTemplatedTarget` admits a `{param}` only:
+  - in the `target` binding,
+  - on a live route,
+  - as exactly one placeholder,
+  - for a parameter the path has,
+  - with no version.
+
+  `create` now requires a templated target, and `SetRoute` skips its existence check for templated bindings.
+- **`liveTarget`** fills the target from `res.Params`. A templated route only opens data artifacts whose `app` is the routed page; `/blocks/blocks` (the app itself) is not an instance.
+- **`openSiteView`:**
+  - resolves the principal first;
+  - answers a missing instance with `404 {error: {code: "no_instance"}, create, mayCreate}`;
+  - redeems `link` (the `?k=` token) before opening the view. An unknown, revoked or expired token gives `403 link_invalid`.
+- **`createInstance`** (`POST /_site/instances {path}`, behind `shellOnly`):
+  - requires a live templated route with a create policy, a principal, and `mayCreate` (admitted, and the policy's role);
+  - creates `i-<16 base32>` with `app` = the page, the app's project, `created_by` = the person, and title "<name>, <date>";
+  - returns `201 {id, path}`.
+- **`levelOf`:** a creator is owner whatever their role, so a member owns the instances they create. Grants are still capped at admin for members.
+- **Share links:**
+  - Migration `010_links.sql`: `rt_links(id lnk_…, target_id, token_hash UNIQUE, level view|interact, created_by, created_at, expires_at, revoked_at)`.
+  - `pkg/store/links.go`: `RTLinks`, `RTCreateLink`, `RTRevokeLink` (also deletes grants `via` the link) and `RTRedeemLink`, which never lowers an existing grant.
+  - API: `POST /api/rt/targets/{t}/links {level, days}` → `{link, token, urls}`, and `DELETE …/links/{id}`.
+  - `targetAccess` lists links and the live routes with their concrete URLs (`liveRoutesOf`).
+- **CLI:** `slop access link <target> --level --days` and `slop access unlink <target> <id>`. `access ls` shows links (active / until / expired / revoked) and route URLs. `describeRoute` reads "live on the blocks data named by :db for signed-in, created by signed-in".
+- **Shell** (`shell.js`):
+  - takes `?k=` out of the URL at load and sends it with the first open;
+  - keeps it in the sign-in return while unused;
+  - shows "Create a new one" or "Sign in to create one" for `no_instance`;
+  - runs `me()` before `open()`, so it knows whether someone is signed in.
+- **Workshop** (`RoutesScreen.tsx`): a templated target shows as "named in the path (:db)", plus a "New ones" switch (no one / signed in / admins).
+- **Tests:** `TestInstances`, `TestShareLinks`, and the race fix in `rt_test.go` (below).
+
+### Why
+- **Only `{param}`, not `ws-{db}`.** A prefix would need the created id to fit the template. One placeholder covers the use (`/blocks/:db`) and keeps creation, link URLs and listing simple.
+- **Random ids for instances.** Decision 3 is `/blocks/:db`. With a guessable id, anyone who knows the pattern could find instances once phase 4 lets visitors in. A grant still decides access, but unguessable ids keep the existence of instances private too.
+- **Creators own, even members.** Decision 5 is that owners manage access from the site. A member capped at admin on their own instance could never share it. The cap still stops grants from making a member owner of someone else's target.
+- **Link → grant, not link → view.** The link is redeemed once, and the person keeps their level without the token, so the token can leave the URL. The grant's `via` names the link, so revoking the link can find and remove exactly those grants.
+- **Never lower.** Someone with `admin` who opens a `view` link must not drop to `view`.
+
+### What worked
+- `GOWORK=off go test ./...` passes (server run three times in a row after the race fix), as do Postgres store and server tests; `make lint` reports `0 issues.`; `tsc` is clean.
+- `TestInstances`:
+  - five invalid templated routes give 400 (not live, unknown param, prefixed, another binding, create on a fixed target);
+  - `/board/ws` opens, and the owner (Manuel created it) gets owner;
+  - `/board/board` and another app's data give `no_instance`;
+  - a member gets `mayCreate`, creates `i-…` at `/board/i-…` with `created_by` set, opens it as owner and writes;
+  - the member gets 403 on someone else's workspace;
+  - `create: admins` gives the member 403, no policy gives 404, and signed out gives 401.
+- `TestShareLinks`:
+  - the link URL is `http://site.test/board/team?k=<token>`; an `admin` link gives 400;
+  - without the link, 403; a wrong token, `link_invalid`; with it, `interact`, which stays without the link;
+  - an existing `admin` grant is not lowered;
+  - the access listing shows one link and the grant `via` it;
+  - revoking gives 403 for the person and for the token; revoking twice gives 404.
+- Mutation checks:
+  - dropping the "templated targets are data" check fails `TestInstances` (`/board/board: 200`);
+  - dropping the never-lower check fails `TestShareLinks` ("a link lowered a grant").
+- Browser (Playwright, local server): the create flow and the link flow described above. `slop access ls i-tmtocfaazmgvi6ip` then showed the owner, Ramon's grant "by share link lnk_a9fd…", the link "until 2026-11-06", both open views, and the route URL.
+
+### What didn't work
+- `TestInstances` first expected `admin` for Manuel on `/board/ws`. He created `ws`, so owner is right; the test was wrong.
+- A full `go test ./...` run panicked: `send on closed channel` at `rt_test.go:78`. The test helper's SSE reader read `vc.events` at send and close time. A reconnect on the same `viewClient` replaced the channel, and the old reader closed the new one. This was pre-existing (`streamFrom` is from SLOP-009) and depends on timing; it showed up now because more tests reconnect. Each reader now owns its channel.
+- `gofmt` on `pkg/client/access.go` after replacing a struct with `Links []Link` (alignment).
+- In Playwright, signing in with `fetch('/auth/local')` from the main host's page failed ("Failed to fetch"). Using `context.request.post(…, {form})`, which shares the cookie jar, works.
+- The first instance's title came out as "Claude Blocks · Claude Blocks · manuel" in the shell bar, because the instance title repeated the app's title. New instances are titled "<name>, <date>".
+
+### What I learned
+- A share-link token in a URL has three leaks to close: the address bar (bookmarks and copy), `Referer` (the shell's policy is `same-origin`, and the app runs elsewhere), and the sign-in round trip. The shell removes it at load, but has to carry it through the handoff until it is redeemed.
+- Opening a view and creating an instance both need "who is this" before "what is this". Resolving the principal first lets a missing instance answer with `mayCreate`.
+
+### What was tricky to build
+- **The shell's first screen depends on two answers.** `no_instance` with `create` but `mayCreate: false` means either "sign in" or "you may not", and only `/_site/me` tells which. `me()` runs first, which costs one request on load.
+- **Revoking a link vs. grants that already exist.** A grant created via a link and later raised by an admin keeps `via` (the upsert in `RTSetGrant` writes `via = ""`, so an admin's explicit grant clears it). Revoking the link only removes grants still marked as coming from it.
+
+### What warrants a second pair of eyes
+- **`createInstance` has no quota yet.** A member can create instances without limit. Phase 4 adds quotas and a limiter. Until then, `create: signed-in` should only be set where members are trusted.
+- **`RTRedeemLink` audits as the redeemer** (`actor = subject`). That is accurate (they used the link), but the audit log then shows a member "granting" themselves; the `via` field explains it.
+- **`liveRoutesOf` reads all routes of all hosts** per access listing and per link. Fine at this size.
+
+### What should be done in the future
+- Phase 4: visitors (`vis_…`), access `public` for the signed-out, quotas and a limiter (instances per principal), garbage collection, and the explicit claim.
+- Phase 5: the Workshop Access panel, owners sharing from the site (a share dialog in the shell for owners), and help pages.
+
+### Code review instructions
+- Read in this order:
+  1. `createInstance`, `liveTarget`, `mayCreate` and `openSiteView` in `pkg/server/live.go`;
+  2. `pkg/store/links.go`;
+  3. `TemplatedTarget` and `validTemplatedTarget` in `pkg/store/routes.go`;
+  4. `postLink`, `deleteLink` and `liveRoutesOf` in `access.go`;
+  5. the top of `shell.js` (the token handling).
+- Validate:
+  1. `GOWORK=off go test ./pkg/server -run 'TestInstances|TestShareLinks' -count=1`
+  2. Locally: `slop route set /blocks/:db blocks --bind 'target={db}' --live --access signed-in --create signed-in --host site.localhost:<port>`, open `/blocks/new`, create, then `slop access link <id> --level interact`.
+
+### Technical details
+- The flow:
+
+  ```text
+  GET /blocks/new                → shell
+  POST /_site/views {path}       → 404 {error:{code:no_instance}, create:true, mayCreate:true}
+  POST /_site/instances {path}   → 201 {id: i-tmtocfaazmgvi6ip, path: /blocks/i-tmtocfaazmgvi6ip}
+  location.assign(path) → shell → POST /_site/views → view (owner)
+
+  slop access link <id> --level interact --days 7  → http://site…/blocks/<id>?k=<48 hex>
+  shell: strip ?k= → POST /_site/views {path, link} → RTRedeemLink → grant(via=lnk_…) → view (interact)
+  ```

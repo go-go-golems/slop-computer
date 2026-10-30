@@ -33,3 +33,12 @@ Phase 2 (3d5c8bc): rt_grants and the member role (migration 009, SQLite runner s
 
 - /home/manuel/workspaces/2026-10-28/slop-computer/slop-computer/pkg/server/access.go — levelOf, reviewViews and the access API
 - /home/manuel/workspaces/2026-10-28/slop-computer/slop-computer/pkg/server/live.go — siteHeaders sandboxes non-shell pages on live hosts
+
+## 2026-10-30
+
+Phase 3 (5cbdbdc): live targets named in the path (/blocks/:db), create policy and POST /_site/instances (random i- ids, creator owns), share links (rt_links, migration 010, slop access link/unlink, ?k= redeemed into a grant via the link); test helper SSE race fixed
+
+### Related Files
+
+- /home/manuel/workspaces/2026-10-28/slop-computer/slop-computer/pkg/render/assets/shell.js — no_instance and create screens, ?k= kept across sign-in and stripped
+- /home/manuel/workspaces/2026-10-28/slop-computer/slop-computer/pkg/store/links.go — share links: create, revoke (with their grants), redeem without lowering
