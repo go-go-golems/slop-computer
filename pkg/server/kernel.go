@@ -31,6 +31,7 @@ func (s *Server) kernelRoutes(m *http.ServeMux) {
 	m.HandleFunc("GET /api/artifacts", s.guardPerm(admin, scopeRW, "artifacts:read", s.listArtifacts))
 	m.HandleFunc("POST /api/artifacts", s.guardPerm(admin, scopeRW, "versions:push", s.createArtifact))
 	m.HandleFunc("GET /api/artifacts/{id}", s.guardPerm(admin, scopeRW, "artifacts:read", s.getArtifact))
+	m.HandleFunc("GET /api/covers", s.guardPerm(admin, scopeRW, "artifacts:read", s.listCovers))
 	m.HandleFunc("PATCH /api/artifacts/{id}", s.guard(admin, scopeRW, s.patchArtifact))
 	m.HandleFunc("GET /api/artifacts/{id}/versions", s.guardPerm(admin, scopeRW, "versions:read", s.listVersions))
 	m.HandleFunc("POST /api/artifacts/{id}/versions", s.guardPerm(admin, scopeRW, "versions:push", s.push))

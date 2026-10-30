@@ -191,7 +191,7 @@ export function WatchScreen({ a, n, onOpenSite, onAddRoute }: Props) {
           : <PageToolbar a={a} versions={versions} v={v} ctx={ctx} rtab={tab} device={device} cmpLeft={left} onDevice={setDevice} onSample={setSample} onCmpLeft={setCmpLeft} onOpenSite={openSite} />}
         <VisitLine a={a} v={v} routes={routes} onAddRoute={() => onAddRoute(a.id)} />
         <div className="tilebody" id="wRight">{body}</div>
-        <Filmstrip a={a} versions={versions} current={v.n} routes={routes} ctx={ctx} onSelect={selectVersion} />
+        <Filmstrip a={a} versions={versions} current={v.n} routes={routes} onSelect={selectVersion} />
       </section>
     </div>
   )
