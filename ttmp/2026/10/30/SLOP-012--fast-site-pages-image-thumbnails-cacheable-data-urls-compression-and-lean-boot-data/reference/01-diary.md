@@ -462,3 +462,128 @@ This step implemented the first two phases on the branch `task/fast-sites-and-si
 | `/_d/<a>/main/…`, page-relative files, `/_slop/x.js` without the hash | place | `public, max-age=60, stale-while-revalidate=86400` |
 | pages | document | `no-cache` + ETag |
 | `/_blob/<id>` | its own | `private, no-cache` |
+
+## Step 5: Phases 3 and 4: data scripts, pinned links, storefront v2, help; verified locally
+
+This step finished the code:
+- **Phase 3:** data bindings load as `/_r/<artifact>/<n>.js` content scripts (`.all` stays synchronous); the manifest gets a `files` key.
+- **Importer decision:** seed pushes pin `/_d/<a>/main/` links to the version pushed.
+- **Help:** the `site-pages` topic, plus a fix for help topics that never loaded.
+- **Storefront v2:** both pages written, and tested on the local server against a copy of the cluster's catalog and one media shard. Both runtime conformance suites still pass on the new build.
+
+### Prompt Context
+
+**User prompt (verbatim):** see Step 4 ("Ok, do SLOP-12 and SLOP-13").
+
+**Assistant interpretation:** Phases 3–4. The storefront push and the cluster measurement wait for the deploy, because v2 calls `slop.image`, which the deployed server does not serve yet.
+
+**Inferred user intent:** The storefront fast on the cluster.
+
+**Commit (code):**
+- 4b5076b — "SLOP-012 phase 3: data as cacheable scripts; manifest files key"
+- e3d7bd8 — "SLOP-012: seed pushes pin data links to the version pushed"
+- 2004edf — "SLOP-012: help topic site-pages; help topics with ': ' in titles load again; storefront v2 sources"
+
+### What I did
+
+- **`pkg/render/render.go`:**
+  - `Boot.Data` is `map[string]any`;
+  - `DataRef` (`"<artifact>@<n>"`, `NewDataRef`, `Script()`);
+  - `RecordsScript(ref, rows)` → `slop.records("<ref>",[…]);` with `<` escaped;
+  - `Inject` writes one `<script src="/_r/…">` per distinct ref, sorted by binding name, right after `runtime.js`;
+  - fixed the old no-op escape `ReplaceAll(raw, "<", "<")` to `<` (harmless before, because `json.Marshal` escapes `<`).
+- **`pkg/server/serve.go`:**
+  - `renderPage` puts refs in the boot (the site index stays inline);
+  - `recordsPath` and `serveRecords` (ETag `"<ref>"`, 304, content class, gzip);
+  - `serveSite` shares one `readByRoute(data)` between `/_d/` and `/_r/`;
+  - the sandbox uses `sandboxReads(ctx, app, data)` for both (replaces `serveSandboxData`);
+  - `pageManifest.Files`, added to `reads()`.
+- **`runtime.js`:** a `store` registry, `slop.records(ref, rows)`, and `all` as an enumerable getter, so inline arrays (older boots, Pinup's preview shim) still work. Checked in node: a ref and an inline binding both resolve; `get('b')` works.
+- **`pkg/seed/pin.go`:** `pinLinks`, `isText`, `linksToData`.
+  - `Push` ranks data that other data links to first, and keeps `mains`.
+  - `UploadDir(ctx, api, dir, pin)` rewrites text files in memory; the seed directory is unchanged.
+  - `pushArtifact` records each artifact's main.
+  - `extract.go` comment updated.
+- **Help:**
+  - `pkg/doc/topics/site-pages.md` (new);
+  - `agents.md` points to it;
+  - titles with `: ` quoted in `runtime.md` and `site-pages.md`;
+  - `doc.Topic` strips the quotes;
+  - `TestHelpTopicsLoad` loads every topic into a glazed `HelpSystem`.
+- **Tests:**
+  - `TestServeSiteAndSandbox`, `TestDataFiles` and `TestThumbnails` moved from inline records to `/_r/`, plus 404s for `/_r/<a>/0.js`, an unknown version, an unread artifact, and the sandbox;
+  - `TestInject` checks the script order and `RecordsScript`;
+  - a `files` case (no `/_r/`, files served; unread data 404);
+  - `TestSeedPinsDataLinks` (catalog listed before media still gets `/_d/media/1/`, the seed dir is unchanged, media v2 → catalog v2 with `/_d/media/2/`).
+- **Local server** (`slop21`, built with `go generate ./pkg/web` and `go build -tags embed`; tmux window `slop:server` recreated):
+  - `s12` test page: title `ok 3 1200x750` (sync `.all`, sizes); `?w=480` gives a 480×300 JPEG of 52,792 bytes from a 2.6 MB PNG; on reload the runtime, data script and image have `transfer=0`.
+  - `PW_CHROMIUM=…/chromium_headless_shell-1234/… NODE_PATH=$S/pw/node_modules node web/rt-conformance/run.mjs http://localhost:18140` → 51 ok, `all passed`; the `rt-sample` suite → 20 ok, `all passed`.
+- **Storefront v2:**
+  - `slop pull` of `storefront`, `storefront-entry`, `francois-catalog` (v2), `francois-media-3` and `lab-tokens` from the cluster;
+  - edited the pages: `files` instead of media `reads`, `boutique.css?v=2`, `slop.image`/`slop.srcset` only for `/_d/` URLs, `fetchpriority="high"` for the first six cards; on the entry page the cover at 1280, gallery at 320/640, Markdown images at 960;
+  - pushed copies (without `project`) to the local server, routes `/` and `/apps/:id`.
+- **Measured locally** (script updated to follow `/_r/` and read headers case-insensitively):
+  ```text
+  page http://site.localhost:18140/: 200, 3164 bytes on the wire, 7099 raw, 3131 if gzipped, 0.02s
+    cache-control: no-cache  content-encoding: gzip  etag: "d616e7b05f6179d3adce2053c77ad3f1"
+    revalidation: 304
+    boot block: 514 bytes
+      data.catalog: 104 records from /_r/francois-catalog/1.js, 99819 bytes on the wire (gzip), cache-control=public, max-age=31536000, immutable
+    covers: 94
+    first cover …/med_fc427b42fb1d4fdb36e63b71.webp: 200 285314 bytes image/webp …
+    first cover …/med_fc427b42fb1d4fdb36e63b71.webp?w=640: 200 30057 bytes image/jpeg …
+  ```
+- **v2 sources** stored in `various/storefront-v2/{storefront,storefront-entry}/`.
+
+### Why
+
+- **Pin at push time, not in the importer's extract step.** The version numbers are only known when pushing. Doing it in `seed.Push` makes it work for any seed (the dev seed too), and keeps the extracted directory reproducible.
+- **`files` instead of serving any data a page's records link to.** Gating stays a declaration in the manifest, readable without parsing records.
+
+### What worked
+
+- All tests (`GOWORK=off go test ./...`), `make lint` (`0 issues`), both conformance suites, and the browser checks above.
+- **Mutation check for the help test:** removing the quotes from `runtime.md`'s title fails `TestHelpTopicsLoad` with `topic runtime does not load: section not found`.
+
+### What didn't work
+
+- **After phase 3, three tests failed as expected:**
+  - `TestDataFiles`: `import_test.go:28: gallery 200 … "data":{"media":"media@1"} … <script src="/_r/media/1.js">`;
+  - `TestServeSiteAndSandbox`: `serve_test.go:63: site page 200 …`;
+  - `TestThumbnails`: `files_test.go:188: records lack sizes`;
+  - and `pkg/render/render_test.go:11:40: cannot use map[string][]records.Record{…} … as map[string]any value`.
+
+  All assumed inline records; updated to `/_r/`.
+- **`serve_test.go:74: /_r/lab-tokens/1.js: 200`.** I expected a 404, but `lab-tokens` is read (`$tokens`), so its records are as public as its `/_d/` files. My expectation was wrong; the test now uses an unread artifact.
+- **Conformance run, first try:** `Error: Cannot find module 'playwright'` (wrong `NODE_PATH`). Then `browserType.launch: Executable doesn't exist at …/chromium_headless_shell-1248/…`. Fixed with `NODE_PATH=$S/pw/node_modules` (found in this session's transcript) and `PW_CHROMIUM` pointing at the installed `chromium_headless_shell-1234`.
+- **Measurement script on the new shape:** `AttributeError: 'str' object has no attribute 'get'` (data refs), and `etag: None` (I copied headers into a `dict`, which is case-sensitive). Rewritten.
+- **Storefront v2 locally:** covers whose media shard was not copied showed their alt text instead of the monogram. With `fetchpriority` (eager) images, some fail before the page attaches its `error` listener. The page now also applies the fallback to images that are already `complete` with `naturalWidth` 0. Result: 12 failed covers replaced, 18 monograms shown.
+- **`slop help site-pages` → `Unknown help topic`; so did `slop help runtime`.** `slop help --list` showed only `agents` and `pinup`: the `: ` inside an unquoted `Title:` is invalid YAML, and the topic is dropped silently. Fixed and tested (above).
+
+### What I learned
+
+- **The storefront page is in project `francois`.** I had told the user it was in "No project" (Step 1 of this ticket's conversation); the pulled `slop.json` says `"project": "francois"`.
+- **The catalog script is 99.8 KB gzipped** (the guide estimated about 70 KB). It is downloaded once and shared by `/` and every `/apps/<id>`.
+
+### What was tricky to build
+
+- **Pinning without changing the seed directory,** while keeping `UploadDir`'s missing-blob upload. Rewritten files are hashed and uploaded from memory (`pinned` map); unchanged files keep the streaming path.
+- **Order among data artifacts.** A one-level rank (data that links to other data goes after data that does not) is enough for the importer: media shards have no links, and catalog and journal link to them.
+
+### What warrants a second pair of eyes
+
+- **`linksToData` reads every text file of every version** of each data artifact once per push (the francois catalog: 104 files). Fine at this size.
+- **Pinning rewrites links in page versions too** (pushed after data). Already imported releases are skipped by their key, so only new releases are affected.
+
+### What should be done in the future
+
+- Merge and deploy, then push `various/storefront-v2/*` to the cluster, re-run `slop import francois push` (pins the catalog's media links), and measure with `scripts/01-measure-site.py`.
+
+### Code review instructions
+
+- `git show 4b5076b e3d7bd8 2004edf`.
+- `go test ./pkg/server/ -run 'TestServeSiteAndSandbox|TestDataFiles|TestThumbnails|TestSeedPins|TestHelp'` and `go test ./pkg/render/`.
+
+### Technical details
+
+- Inject order: boot JSON, `runtime.js?h=`, `/_r/` scripts (sorted by binding name, deduplicated), `claude.js?h=` (apps), `bridge.js?h=` (previews), then the page's own head.

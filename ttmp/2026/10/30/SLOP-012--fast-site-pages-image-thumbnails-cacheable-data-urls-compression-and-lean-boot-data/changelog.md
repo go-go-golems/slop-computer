@@ -23,3 +23,7 @@ Open questions decided (guide 14.1): ladder 160-1920, Place 60s + SWR, no WebP, 
 ## 2026-10-30
 
 Phases 1-2 implemented: serveFile with content/place classes (fixes page-relative immutable bug), document ETag + gzip, hashed runtime assets, derived store + gc, Workshop grouping (3e3aacb); ?w= thumbnails, image sizes in records, slop.image/srcset (b050095). Diary step 4.
+
+## 2026-10-30
+
+Phase 3 (4b5076b), seed pinning (e3d7bd8), help topic + storefront v2 sources (2004edf); verified locally (page 3.1 KB, catalog script 99.8 KB gz cached, covers ~30 KB at 640; conformance 51/51 and 20/20). Diary step 5.
