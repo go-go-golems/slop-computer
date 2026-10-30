@@ -19,3 +19,7 @@ Uploaded the intern guide to reMarkable: /ai/2026/10/30/SLOP-012/SLOP-012 Fast s
 ## 2026-10-30
 
 Open questions decided (guide 14.1): ladder 160-1920, Place 60s + SWR, no WebP, importer writes numbered media URLs (new task). Cluster token restored; dropdown data checked (111 francois + 3 no project).
+
+## 2026-10-30
+
+Phases 1-2 implemented: serveFile with content/place classes (fixes page-relative immutable bug), document ETag + gzip, hashed runtime assets, derived store + gc, Workshop grouping (3e3aacb); ?w= thumbnails, image sizes in records, slop.image/srcset (b050095). Diary step 4.

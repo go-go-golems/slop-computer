@@ -350,3 +350,115 @@ The user left the open questions to me. I recorded the decisions in the guide (n
 ### Technical details
 
 - Token: `tok_64be4cf3dac0527e2d93ff9a`, 7 days, created by `slop auth login --server https://slop.yolo.scapegoat.dev --days 7 --name "claude-code slop-012" --no-browser`.
+
+## Step 4: Phases 1 and 2: cache classes, gzip, and thumbnails
+
+This step implemented the first two phases on the branch `task/fast-sites-and-sign-in` (from `origin/main`).
+- **Phase 1** routes every stored file through one `serveFile` with two URL classes, which fixes the page-relative cache bug. Pages get an ETag and `no-cache` instead of `no-store`, text is gzipped, runtime assets are named by a content hash, and the Workshop groups artifacts by the projects they name.
+- **Phase 2** adds `?w=` thumbnails on every image URL, image sizes in records, and `slop.image`/`slop.srcset`.
+
+### Prompt Context
+
+**User prompt (verbatim):** "Ok, do SLOP-12 and SLOP-13"
+
+**Assistant interpretation:** Implement SLOP-012's phases after SLOP-013, with tests at each phase.
+
+**Inferred user intent:** A fast storefront and a sound caching model, ready to deploy.
+
+**Commit (code):**
+- 3e3aacb — "SLOP-012 phase 1: cache classes by what a URL names, document ETags, gzip"
+- b050095 — "SLOP-012 phase 2: ?w= thumbnails on any image URL, image sizes in records"
+
+### What I did
+
+- **`pkg/server/files.go` (new):**
+  - `urlClass` (`contentURL`, `placeURL`), `classOfVersion(n)` (0 = main = place), `cacheControl(r, c)` (public on site hosts, private elsewhere), `isSiteHost`;
+  - `serveFile(w, r, f, class)`;
+  - `variant`, which picks a thumbnail, then a gzipped copy, then the stored file;
+  - `derive(name, build)` with `s.derived` (singleflight), `gzipBlob`, `compressible`, `acceptsGzip`, `writeBody` (pooled in-memory gzip) and `etagMatch`.
+- **`pkg/blobs/derived.go` (new):** `Derived(name)`, `PutDerived(name, write)` (temp file and rename), `CollectDerived(kept, dryRun)`. Names must match `^[0-9a-f]{64}(\.[a-z0-9]+)+$`, stored under `derived/<sha[:2]>/`.
+- **Callers moved to `serveFile`:**
+  - `getFile` (API) → content;
+  - `serveData`: number → content, `main` → place;
+  - `/_v/` → class by version;
+  - page-relative files on a site → place, plus `Vary: Referer` for the referer-resolved branch;
+  - sandbox `/v/<n>/<file>` → class by version.
+  - `serveBlob` is deleted.
+- **`writePage(w, r, status, body)`:** ETag = first 32 hex characters of sha256(body), `no-cache`, 304 on a match, `writeBody` gzip.
+- **`render.AssetHash`/`AssetURL`:** 12-character sha256 of each embedded asset, computed once. `Inject` writes `/_slop/<name>?h=<hash>`. `serveSlopAsset` treats a matching `h` as content and anything else as place, and adds an ETag, 304 and gzip.
+- **`gc-blobs`:** `CollectDerived` with `kept` = still stored and not removed in this run, so a dry run lists derived files correctly too.
+- **Workshop:** `web/workshop/src/app/groups.ts` `projectGroups(arts, projects)` builds the groups from the artifacts' own projects, with "No project" last. `ArtifactMenu` (`TopBar.tsx`) and `ArtifactsScreen` use it.
+- **`pkg/server/thumbs.go` (new):**
+  - ladder `160…1920`, `snapWidth`, `thumbable` (jpeg, png, webp);
+  - `thumb(f, width)` looks for `<sha>.w<W>.jpg|png|same` and otherwise builds once under `s.thumbSlots` (2);
+  - `makeThumb`: `DecodeConfig` → original if not wider or over 50 MP; `draw.CatmullRom` into NRGBA; JPEG q80 if `Opaque()`, else PNG (best compression); a `.same` marker if not smaller;
+  - `imageSize` for records (also GIF).
+  - WebP decoding via `golang.org/x/image/webp`; dependency `golang.org/x/image v0.47.0` (`go get` also raised `x/sys` to v0.49.0).
+- **`serveAsset` (`/_blob/<id>`)** uses `variant` (so `?w=` and gzip), keeping `private, no-cache`.
+- **`records()`** adds `width`/`height` to image file records.
+- **`runtime.js`:** `slop.image(src, w)` and `slop.srcset(src, widths)`. Checked in node with `vm`: `/_d/a/1/x.webp?w=480` and `/a.jpg?v=2&w=320 320w, /a.jpg?v=2&w=640 640w`.
+- **Tests:**
+  - `TestCacheClassesAndCompression` (`pkg/server/files_test.go`):
+    - page ETag, 304 and gzip, and the page naming the hashed runtime;
+    - page-relative CSS is place with `Vary: Referer`, and new bytes appear after a push (the bug's regression test);
+    - `/_v/` is content and gzipped, a range request is not gzipped, hashed vs bare `/_slop/`, API files private.
+  - `TestThumbnails`:
+    - 800×500 → `?w=480` is a 480×300 JPEG, immutable, ETag `.w480`, kept in `derived/`;
+    - `?w=500` → 640; transparent → PNG; 100 px → the original bytes;
+    - `main` → place; `?w=` on text ignored; records carry sizes.
+  - `TestDerived` (`pkg/blobs`): `Collect` ignores `derived/`, an invalid name is refused, `CollectDerived` keeps live blobs' files.
+  - `TestDataFiles` updated for the new `main` header.
+
+### Why
+
+- **One function writes stored bytes,** so the class rule cannot drift between handlers again (the bug came from one handler choosing its own header).
+- **`Vary: Referer` only on the referer branch.** There the same URL means different files for different pages. A shared cache must not mix them, but the rest of the site keeps its hit rate.
+- **The `.same` marker.** "The original is better" is remembered without storing a copy.
+
+### What worked
+
+- `GOWORK=off go test ./... -count=1`: all ok after each phase.
+- `make lint`: `0 issues` after each phase.
+- `npx tsc --noEmit -p .` in `web/workshop`: clean.
+
+### What didn't work
+
+- `TestDataFiles` failed after phase 1: `import_test.go:35: data file at main 200 map[… Cache-Control:[public, max-age=60, stale-while-revalidate=86400] …]`. The test encoded the old `no-cache`; updated to the new class.
+- `make lint`: `pkg/server/kernel.go:240:1: File is not properly formatted (gofmt)` after deleting `serveBlob`. Fixed with `gofmt -w`.
+- `go test ./pkg/blobs/`: `pkg/blobs/blobs_test.go:59:45: undefined: io`. Added the import.
+- `npx tsc`: `src/screens/ArtifactsScreen.tsx(25,12): error TS2304: Cannot find name 'projectGroups'`. My scripted import insertion matched the wrong line; fixed. The group heading now uses `g.name`.
+- **`TestThumbnails` first run:** the "thumbnail" was the original PNG (`Content-Type:[image/png] … Content-Length:[5576]`, 800×500). My test image was a smooth gradient, which PNG compresses to 5.5 KB, so the JPEG copy was larger and the server rightly served the original. The test now uses deterministic noise, like a photo.
+
+### What I learned
+
+- **"Never serve a larger copy" matters in practice.** Flat graphics and screenshots compress better as the original PNG than as any JPEG thumbnail.
+- **`http.ServeContent` handles `If-None-Match` and ranges for variants as well.** The derived file is just another `*os.File`.
+
+### What was tricky to build
+
+- **Gzip and ranges.** A range over gzipped bytes is meaningless to a browser expecting the identity encoding. `variant` uses the gzipped copy only when there is no `Range` header, and the test checks that a range request gets plain bytes (206, `body`).
+- **Dry-run accuracy for `gc-blobs`.** In a dry run, `Collect` does not delete, so `CollectDerived` would see the source blobs still present. The command passes `kept = stored && !removed-in-this-run`.
+
+### What warrants a second pair of eyes
+
+- **`cacheControl` decides `public` by host.** A per-viewer response on a site host (SLOP-011) would need `private`.
+- **Decoding cost and memory** under the pod's 512 Mi limit (two slots, 50 MP). Not load-tested.
+- **`imageSize` opens every image** of a data version once per `artifact@n` when records are built. For the francois media (692 images) that is 692 header reads on first render after a push.
+
+### What should be done in the future
+
+- Phase 3 (data scripts, `files` key), phase 4 (storefront v2, importer, docs), deploy and measure.
+
+### Code review instructions
+
+- `pkg/server/files.go`, `pkg/server/thumbs.go`, `pkg/blobs/derived.go`; the callers via `git show 3e3aacb -- pkg/server/serve.go`.
+- `go test ./pkg/server/ -run 'TestCacheClasses|TestThumbnails'` and `go test ./pkg/blobs/`.
+
+### Technical details
+
+| URL | Class | Site host header |
+|---|---|---|
+| `/_d/<a>/<n>/…`, `/_v/<a>/<n>/…`, `/v/<n>/…`, `/_slop/x.js?h=<hash>` | content | `public, max-age=31536000, immutable` |
+| `/_d/<a>/main/…`, page-relative files, `/_slop/x.js` without the hash | place | `public, max-age=60, stale-while-revalidate=86400` |
+| pages | document | `no-cache` + ETag |
+| `/_blob/<id>` | its own | `private, no-cache` |
