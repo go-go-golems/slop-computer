@@ -31,3 +31,11 @@ Phase 3 (4b5076b), seed pinning (e3d7bd8), help topic + storefront v2 sources (2
 ## 2026-10-30
 
 Branch task/fast-sites-and-sign-in pushed; PR https://github.com/go-go-golems/slop-computer/pull/5 opened (SLOP-012 + SLOP-013). Remaining: merge, deploy, push storefront v2, re-run import push, measure on the cluster; manual sign-in check on the cluster.
+
+## 2026-10-30
+
+Workshop records table derives its columns from the records; image files get ?w=160 thumbnails and a large preview when no viewer is set (addd400)
+
+### Related Files
+
+- /home/manuel/workspaces/2026-10-28/slop-computer/slop-computer/web/workshop/src/components/organisms/DataPanes.tsx — columns, fileURL, ImagePreview
