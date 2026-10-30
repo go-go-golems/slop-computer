@@ -1,13 +1,14 @@
 import { useMemo, useState } from 'react'
 import { errorText, useAppsQuery, useArtifactsQuery, useCreateArtifactMutation, useProjectsQuery, usePushMutation, useRecordsQuery, useThreadsQuery, useVersionsQuery } from '../api/slopApi'
-import type { Artifact, Version } from '../api/types'
+import type { Artifact, Project, Version } from '../api/types'
 import { ago, isAgent, plural } from '../app/format'
 import { projectGroups } from '../app/groups'
 import { useReaders, useRoutesUsing, useVersionBy } from '../app/hooks'
 import { navigate, runPath, watchPath } from '../app/router'
 import { toast } from '../app/store'
-import { Button, Count, IconButton, Seg, Select, Tag } from '../components/atoms'
+import { Button, Count, IconButton, LinkButton, Seg, Select, Tag } from '../components/atoms'
 import { Thumb } from '../components/organisms/PreviewStage'
+import { ArtifactDialog, inScope, ProjectDialog, ProjectPicker, useProjectScope } from '../components/organisms/Projects'
 import { usePreviewContext } from '../components/organisms/WatchRight'
 
 type Kind = 'all' | 'page' | 'data'
@@ -20,32 +21,48 @@ export function ArtifactsScreen() {
   const [kind, setKind] = useState<Kind>('all')
   const [pushing, setPushing] = useState(false)
   const [creating, setCreating] = useState(false)
+  const [scope, setScope] = useProjectScope()
+  const [project, setProject] = useState<Project | 'new' | null>(null)
+  const [moving, setMoving] = useState<Artifact | null>(null)
   const groups = useMemo(() => {
     const needle = q.trim().toLowerCase()
-    const shown = arts.filter(a => (kind === 'all' || a.kind === kind) && (!needle || (a.id + ' ' + a.title).toLowerCase().includes(needle)))
+    const shown = arts.filter(a => inScope(a, scope) && (kind === 'all' || a.kind === kind) && (!needle || (a.id + ' ' + a.title).toLowerCase().includes(needle)))
     return projectGroups(shown, projects)
-  }, [arts, projects, q, kind])
+  }, [arts, projects, q, kind, scope])
+  const scoped = scope != null ? projects.find(p => p.id === scope) : undefined
   return (
     <div className="split">
       <section className="tile main">
         <div className="toolbar">
           <input className="filter" type="search" placeholder="Find an artifact" aria-label="Find an artifact" value={q} onChange={e => setQ(e.target.value)} />
           <Seg label="Kind" value={kind} onChange={setKind} options={[['all', 'All'], ['page', 'Pages'], ['data', 'Data']]} />
+          <ProjectPicker id="artsProject" />
           <span className="sp" />
+          <Button onClick={() => setProject('new')}>New project…</Button>
           <Button onClick={() => setCreating(true)}>New with an app…</Button>
           <Button variant="primary" onClick={() => setPushing(true)}>Push a file…</Button>
         </div>
         <div className="tilebody"><div className="scroll" id="agrid">
           <div className="agrid">
             {groups.map(g => [
-              <div key={'h' + g.id} className="grp-h"><b>{g.name}</b><span>{plural(g.items.length, 'artifact') + (g.project?.brief ? ' · ' + g.project.brief : '')}</span></div>,
-              ...g.items.map(a => <ArtifactCard key={a.id} a={a} />),
+              <div key={'h' + g.id} className="grp-h"><b>{g.name}</b><span>{plural(g.items.length, 'artifact') + (g.project?.brief ? ' · ' + g.project.brief : '')}</span>
+                {g.project ? <LinkButton onClick={() => setProject(g.project!)}>Edit project</LinkButton> : null}</div>,
+              ...g.items.map(a => (
+                <div key={a.id} className="acell">
+                  <ArtifactCard a={a} />
+                  <button type="button" className="amove" title={`Title and project of ${a.id}`} onClick={() => setMoving(a)}>Move…</button>
+                </div>
+              )),
             ])}
           </div>
+          {!groups.length ? <p className="empty">{scope == null ? 'No artifacts match.' : `No artifacts in ${scoped?.name ?? 'no project'}${q || kind !== 'all' ? ' match' : ' yet'}. `}
+            {scope != null ? <LinkButton onClick={() => setScope(null)}>Show all projects</LinkButton> : null}</p> : null}
         </div></div>
       </section>
       {pushing ? <PushDialog onClose={() => setPushing(false)} /> : null}
       {creating ? <NewTargetDialog onClose={() => setCreating(false)} /> : null}
+      {project ? <ProjectDialog project={project === 'new' ? undefined : project} onClose={() => setProject(null)} /> : null}
+      {moving ? <ArtifactDialog a={moving} onClose={() => setMoving(null)} /> : null}
     </div>
   )
 }
@@ -99,7 +116,8 @@ function PushDialog({ onClose }: { onClose: () => void }) {
   const [target, setTarget] = useState(arts[0]?.id ?? '__new')
   const [newId, setNewId] = useState('')
   const [kind, setKind] = useState('page')
-  const [project, setProject] = useState(projects[0]?.id ?? '')
+  const [scope] = useProjectScope()
+  const [project, setProject] = useState(scope ?? projects[0]?.id ?? '') // new artifacts go to the project in view
   const [files, setFiles] = useState<FileList | null>(null)
   const [paste, setPaste] = useState('')
   const [msg, setMsg] = useState('')
@@ -178,7 +196,8 @@ function NewTargetDialog({ onClose }: { onClose: () => void }) {
   const { data: projects = [] } = useProjectsQuery()
   const [app, setApp] = useState(apps[0]?.artifact ?? '')
   const [name, setName] = useState('')
-  const [project, setProject] = useState(projects[0]?.id ?? '')
+  const [scope] = useProjectScope()
+  const [project, setProject] = useState(scope ?? projects[0]?.id ?? '')
   const [err, setErr] = useState('')
   const [create, { isLoading }] = useCreateArtifactMutation()
   const id = name.trim().toLowerCase().replace(/[^a-z0-9-]+/g, '-').replace(/^-|-$/g, '')
