@@ -6,6 +6,7 @@ import (
 	"strconv"
 
 	"github.com/go-go-golems/slop-computer/pkg/httpx"
+	"github.com/go-go-golems/slop-computer/pkg/rt"
 	"github.com/go-go-golems/slop-computer/pkg/store"
 )
 
@@ -55,8 +56,10 @@ func (s *Server) patchUser(w http.ResponseWriter, r *http.Request) {
 	}
 	_ = s.Store.Audit(r.Context(), actor(r), "user.role", id, map[string]any{"name": u.DisplayName, "from": before.Role, "to": u.Role})
 	if u.Role != before.Role {
-		// Grants act as their user: a changed role ends them.
-		_ = s.Store.RevokeGrants(r.Context(), "", u.ID)
+		// Views act as their user: a changed role ends them.
+		for _, v := range s.views.Where(func(v *rt.View) bool { return v.User == u.ID }) {
+			s.views.Close(v, true)
+		}
 	}
 	s.event(r, store.EvUserRole, map[string]any{"user": u, "from": before.Role})
 	httpx.OK(w, u)

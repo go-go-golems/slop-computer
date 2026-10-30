@@ -1,0 +1,177 @@
+<!doctype html>
+<html><head><meta charset="utf-8"><title>Sample conformance</title>
+<style>body{font:13px/1.5 ui-monospace,monospace;margin:16px}.ok{color:#176f2c}.bad{color:#b3261e}small{color:#666}</style></head>
+<body>
+<h1 style="font-size:16px">Sample conformance</h1>
+<p id="status">running…</p>
+<ol id="list"></ol>
+<pre id="results" hidden></pre>
+<script>
+// Exercises sample against a real model through the Pi worker: turns,
+// streaming, page tools (several per round, chained over rounds, failing),
+// cancellation, JSON, explicit models and effort, the cache and limits.
+// Model answers vary, so checks look for facts only a tool could supply.
+const results = [];
+const list = document.getElementById("list");
+function report(name, ok, detail) {
+  results.push({ name, ok, detail: detail === undefined ? "" : String(detail) });
+  const li = document.createElement("li");
+  li.className = ok ? "ok" : "bad";
+  li.innerHTML = "";
+  li.textContent = (ok ? "✓ " : "✗ ") + name;
+  if (detail) { const s = document.createElement("small"); s.textContent = " — " + String(detail).slice(0, 300); li.appendChild(s); }
+  list.appendChild(li);
+}
+async function check(name, fn) {
+  const t0 = performance.now();
+  try {
+    const [ok, detail] = await fn();
+    report(name, !!ok, (detail ?? "") + ` (${Math.round(performance.now() - t0)} ms)`);
+  } catch (e) {
+    report(name, false, (e && e.code || "") + " " + (e && e.message) + (e && e.text ? " · partial: " + e.text.slice(0, 80) : ""));
+  }
+}
+const code = async (p) => { try { await p; return "resolved"; } catch (e) { return e && e.code; } };
+
+(async () => {
+  const sample = await claude.use("sample");
+  report("sample resolves", !!sample);
+  if (!sample) return finish();
+  const lim = await sample.limits();
+  await check("limits() lists Pi's models, lunaroute among them", async () => {
+    const ids = (lim.models || []).map((m) => m.provider + "/" + m.id);
+    return [lim.available && ids.some((x) => x.startsWith("lunaroute/")), ids.filter((x) => x.startsWith("lunaroute/")).join(", ")];
+  });
+  await check("a string prompt answers (tier quick)", async () => {
+    const r = await sample("Reply with exactly the word: pong", { modelTier: "quick", cache: false });
+    return [/pong/i.test(r.text) && r.modelTierApplied === "quick", r.text];
+  });
+  await check("multi-turn: an earlier turn is remembered", async () => {
+    const r = await sample([
+      { role: "user", content: "My secret word is ZEPHYRINE. Just say ok." },
+      { role: "assistant", content: "ok" },
+      { role: "user", content: "What is my secret word? Answer with the word only." },
+    ], { modelTier: "quick", cache: false });
+    return [/zephyrine/i.test(r.text), r.text];
+  });
+  await check("turns must end with a user turn (invalid_request)", async () => {
+    const c = await code(sample([{ role: "user", content: "hi" }, { role: "assistant", content: "yo" }]));
+    return [c === "invalid_request", c];
+  });
+  await check("onText streams the whole text so far, ending at the result", async () => {
+    const seen = [];
+    const r = await sample("Count from 1 to 30, comma separated, nothing else.", { modelTier: "quick", onText: (u) => seen.push(u) });
+    const last = seen.filter((u) => u.text !== "Thinking…").at(-1);
+    return [seen.length > 1 && last && last.text === r.text && seen.every((u) => typeof u.delta === "string"), seen.length + " updates"];
+  });
+  await check("one page tool: the answer uses its result", async () => {
+    let calls = 0;
+    const r = await sample("What is the temperature in Oslo right now? Use the tool, then answer with the number.", {
+      modelTier: "default",
+      tools: [{ name: "get_temperature", description: "Current temperature in Celsius for a city.",
+        inputSchema: { type: "object", properties: { city: { type: "string" } }, required: ["city"] },
+        execute: ({ city }) => { calls++; return { city, celsius: 17.25 }; } }],
+    });
+    return [calls >= 1 && /17[.,]25/.test(r.text), `${calls} call(s): ${r.text}`];
+  });
+  await check("several tools in one turn", async () => {
+    const used = new Set();
+    const r = await sample("Use the tools to compute 1234+4321 and 37*41. Report both results as plain numbers.", {
+      modelTier: "default",
+      tools: [
+        { name: "add", description: "Adds two integers.", inputSchema: { type: "object", properties: { a: { type: "integer" }, b: { type: "integer" } }, required: ["a", "b"] },
+          execute: ({ a, b }) => { used.add("add"); return { sum: a + b }; } },
+        { name: "multiply", description: "Multiplies two integers.", inputSchema: { type: "object", properties: { a: { type: "integer" }, b: { type: "integer" } }, required: ["a", "b"] },
+          execute: ({ a, b }) => { used.add("multiply"); return { product: a * b }; } },
+      ],
+    });
+    return [used.has("add") && used.has("multiply") && /5555/.test(r.text) && /1517/.test(r.text), [...used].join("+") + ": " + r.text];
+  });
+  await check("chained tools over several rounds", async () => {
+    const order = [];
+    const r = await sample("Which city does user u-77 live in? Look up the user first, then the city by its id. Answer with the city name.", {
+      modelTier: "default",
+      tools: [
+        { name: "get_user", description: "Looks up a user by id; returns their cityId.", inputSchema: { type: "object", properties: { id: { type: "string" } }, required: ["id"] },
+          execute: ({ id }) => { order.push("user:" + id); return { id, cityId: "c-9134" }; } },
+        { name: "get_city", description: "Looks up a city by cityId; returns its name.", inputSchema: { type: "object", properties: { cityId: { type: "string" } }, required: ["cityId"] },
+          execute: ({ cityId }) => { order.push("city:" + cityId); return cityId === "c-9134" ? { name: "Quillmarsh" } : { error: "unknown city" }; } },
+      ],
+    });
+    return [order[0] === "user:u-77" && order.includes("city:c-9134") && /quillmarsh/i.test(r.text), order.join(" → ") + ": " + r.text];
+  });
+  await check("a throwing tool reaches the model as an error", async () => {
+    let tries = 0;
+    const r = await sample("Call the fetch_price tool for item X1. If it fails, say the word UNAVAILABLE.", {
+      modelTier: "default",
+      tools: [{ name: "fetch_price", description: "Price of an item.", inputSchema: { type: "object", properties: { item: { type: "string" } } },
+        execute: () => { tries++; throw new Error("price service is down"); } }],
+    });
+    return [tries >= 1 && /unavailable/i.test(r.text), `${tries} tries: ${r.text}`];
+  });
+  await check("a tool gets an AbortSignal and an aborted call rejects cancelled", async () => {
+    const ctrl = new AbortController();
+    let sig = null;
+    const p = sample("Call the slow tool with n=1, then answer.", {
+      modelTier: "default", signal: ctrl.signal,
+      tools: [{ name: "slow", description: "A slow tool.", inputSchema: { type: "object", properties: { n: { type: "integer" } } },
+        execute: (_i, ctx) => { sig = ctx.signal; ctrl.abort(); return new Promise((r) => setTimeout(() => r(1), 3000)); } }],
+    });
+    const c = await code(p);
+    return [c === "cancelled" && sig instanceof AbortSignal, c];
+  });
+  await check("abort while streaming rejects cancelled with the partial text", async () => {
+    const ctrl = new AbortController();
+    let err = null;
+    try {
+      await sample("Write 40 numbered lines about rivers.", { modelTier: "quick", signal: ctrl.signal,
+        onText: (u) => { if (u.text.length > 20) ctrl.abort(); } });
+    } catch (e) { err = e; }
+    return [err && err.code === "cancelled" && typeof err.text === "string" && err.text.length > 0, err && (err.code + " " + (err.text || "").length + " chars")];
+  });
+  await check("sample.json parses a JSON reply", async () => {
+    const v = await sample.json('Return a JSON object {"planet": "Mars", "moons": 2} and nothing else.', { modelTier: "quick", cache: false });
+    return [v && v.planet === "Mars" && v.moons === 2, JSON.stringify(v)];
+  });
+  await check("an explicit model is applied (lunaroute/glm-5.3-flash)", async () => {
+    const r = await sample("Say hi.", { model: "lunaroute/glm-5.3-flash", modelTier: "complex", cache: false });
+    return [r.modelApplied === "lunaroute/glm-5.3-flash", r.modelApplied + ": " + r.text];
+  });
+  await check("an explicit model with effort high (lunaroute/deepseek-4.1-flash)", async () => {
+    const r = await sample("What is 17 squared? Number only.", { model: "lunaroute/deepseek-4.1-flash", effort: "high", cache: false });
+    return [/289/.test(r.text) && r.modelApplied === "lunaroute/deepseek-4.1-flash", r.text];
+  });
+  await check("tier complex with effort low", async () => {
+    const r = await sample("Name one primary color. One word.", { modelTier: "complex", effort: "low", cache: false });
+    return [r.text.trim().length > 0 && r.modelTierApplied === "complex", r.text];
+  });
+  await check("the cache replays an identical call", async () => {
+    const a = await sample("Give one random 5-letter English word.", { modelTier: "quick" });
+    const t = performance.now();
+    const b = await sample("Give one random 5-letter English word.", { modelTier: "quick" });
+    return [a === b && performance.now() - t < 50, a.text];
+  });
+  await check("cache: false asks again", async () => {
+    const a = await sample("Say the word apple.", { modelTier: "quick" });
+    const b = await sample("Say the word apple.", { modelTier: "quick", cache: false });
+    return [a !== b, ""];
+  });
+  await check("an unknown model falls back to the tier", async () => {
+    const r = await sample("Say ok.", { model: "nope/does-not-exist", modelTier: "quick", cache: false });
+    return [!r.modelApplied && r.modelTierApplied === "quick", r.text];
+  });
+  await check("images without the declaration reject images_unavailable", async () => {
+    const c = await code(sample("What is this?", { images: [new Blob(["x"], { type: "image/png" })] }));
+    return [c === "images_unavailable", c];
+  });
+  finish();
+})();
+
+function finish() {
+  const failed = results.filter((r) => !r.ok).length;
+  document.getElementById("status").textContent = `${results.length - failed}/${results.length} passed`;
+  document.getElementById("results").textContent = JSON.stringify(results);
+  document.title = "done";
+}
+</script>
+</body></html>

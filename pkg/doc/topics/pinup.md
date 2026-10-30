@@ -7,7 +7,8 @@ Topics:
 - docs
 - agents
 Commands:
-- docs
+- data
+- room
 - comments
 - pull
 - route
@@ -17,12 +18,14 @@ ShowPerDefault: true
 SectionType: GeneralTopic
 ---
 
-Pinup is the screen-design tool in the Workshop (Tools ▸ Pinup). A **design**
-is a data artifact of type `pinup`, such as `design-pace-club`, with two halves:
+Pinup is the screen-design tool in the Workshop (Apps ▸ Pinup). It is an app
+on slop's runtime (`slop help runtime`). A **design** is a data artifact whose
+app is `pinup`, such as `design-pace-club`, opened at `/run/design-pace-club`.
+It has two halves:
 
-- **Live documents**, the working copy people edit right now. Read and write
-  them with `slop docs`. Changes show up in every open Pinup tab within a
-  second.
+- **Live documents**, the working copy people edit right now: the design's
+  db. Read and write them with `slop data`. Changes show up in every open
+  Pinup tab within a second.
 - **Versions**, snapshots made with *Save version* in Pinup. They are what
   `slop pull` gives you and what published prototypes serve.
 
@@ -38,10 +41,10 @@ inbox/<id>     HTML or a step for the first open editor tab to apply (then it de
 ```
 
 ```sh
-slop docs ls design-pace-club nodes/          # paths and revs
-slop docs get design-pace-club meta/file      # pages and tokens
-slop docs get design-pace-club feedback/<id>  # one review item
-slop docs watch design-pace-club              # every change and who is looking, as JSON lines
+slop data list design-pace-club nodes             # every layer, with versions
+slop data get design-pace-club meta/file          # pages and tokens
+slop data get design-pace-club feedback/<id>      # one review item
+slop room watch design-pace-club                  # who is looking (and you join as a peer), as JSON lines
 ```
 
 Omit any layer field you don't need; Pinup fills in defaults. Colours are
@@ -62,7 +65,7 @@ cat > h1.json <<'JSON'
 { "html": "<div data-name=\"Settings\" style=\"width:390px;height:844px;background:#fff;display:flex;flex-direction:column;gap:12px;padding:24px\"><h2 style=\"margin:0;font:700 24px Inter\">Settings</h2></div>",
   "name": "Settings", "x": 2000, "y": 0 }
 JSON
-slop docs put design-pace-club inbox/h1 h1.json
+slop data set design-pace-club inbox/h1 --file h1.json
 ```
 
 The importer understands these attributes:
@@ -97,18 +100,18 @@ When `feedback` names an item (`#n`), the item becomes `done` with your
 half a second apart, so people can follow along.
 
 **An editor tab must be open.** Steps wait in `inbox/` until someone has the
-design open in Pinup. Use `slop docs watch` to see who is there; an agent
-that is waiting shows as "Claude".
+design open in Pinup. Use `slop room watch` to see who is there; it also
+makes you a peer of kind `agent` that the tabs show.
 
 ## The loop
 
 ```sh
 slop comments wait -a design-pace-club
 #   Pinup's "Send to Claude" and "Hand off" open threads on the design.
-slop docs ls design-pace-club feedback/
-slop docs get …
+slop data list design-pace-club feedback
+slop data get …
 #   decide the smallest change that addresses each item
-slop docs put design-pace-club inbox/s1 step.json
+slop data set design-pace-club inbox/s1 --file step.json
 slop comments reply <thread> "Done in step #1"
 ```
 
@@ -128,16 +131,17 @@ slop comments reply <thread> "Done in step #1"
 *Publish prototype* in Pinup does this for you. By hand:
 
 ```sh
-slop route set /proto/pace-club/:screen pinup-player --bind design=design-pace-club
-slop route set /proto/pace-club         pinup-player --bind design=design-pace-club
+slop route set /proto/pace-club/:screen pinup-player --bind target=design-pace-club
+slop route set /proto/pace-club         pinup-player --bind target=design-pace-club
 ```
 
-- **What it serves.** `pinup-player` presents the design's **saved version**,
+- **What it serves.** `pinup-player` runs in the runtime's static mode: its db
+  is the `db.json` of the design's **saved version**, read-only. It presents it,
   following its `main`, at `/proto/pace-club/<screen>`, where the screen is
   the frame name as a slug.
 - **Updating it.** Saving a new version updates the prototype.
 - **What becomes public.** The route makes the saved version public:
-  `file.json`, the pages and `handoff.md`. Feedback stays in the live documents.
+  `file.json`, `db.json`, the pages and `handoff.md`. Feedback stays in the live documents.
 
 ## Pinup apps: designs that are real pages
 

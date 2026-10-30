@@ -38,17 +38,7 @@ const (
 	EvTokenRevoked    = "token.revoked"
 	EvAgentWaiting    = "agent.waiting"
 	EvAgentLeft       = "agent.left"
-	EvToolEnabled     = "tool.enabled"
-	EvToolDisabled    = "tool.disabled"
-	// Ephemeral (Seq 0), on a design's docs stream only: a live document
-	// changed, or a peer's presence did.
-	EvDoc      = "doc"
-	EvPresence = "presence"
 )
-
-// DocStreamOnly reports whether an event type belongs on a docs stream
-// (GET /api/docs/{artifact}/events) and not on the kernel event stream.
-func DocStreamOnly(typ string) bool { return typ == EvDoc || typ == EvPresence }
 
 func appendEvent(ctx context.Context, d db, now time.Time, typ, project, artifact, actor string, payload any) (Event, error) {
 	raw, err := json.Marshal(payload)

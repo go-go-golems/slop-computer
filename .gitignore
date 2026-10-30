@@ -14,3 +14,6 @@ web/workshop/dist/
 /pkg/web/workshop/
 /web/workshop/node_modules/
 /web/workshop/dist/
+
+# slop push link files (server, artifact, base): local state
+.slop/

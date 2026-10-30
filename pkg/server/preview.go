@@ -16,14 +16,10 @@ func (s *Server) previewRoutes(m *http.ServeMux) {
 	m.HandleFunc("GET /api/artifacts/{id}/versions/{n}/records", s.guardPerm(admin, scopeRW, "versions:read", s.versionRecords))
 }
 
-// sandboxURL mints the preview URL of a version: its own origin under the
-// sandbox domain, with an unguessable label. ?host=&path= give a route
-// context; mode is preview or thumb.
+// sandboxURL is the preview URL of a version: /v/<n>/ on its artifact's own
+// origin under the sandbox domain. ?host=&path= give a route context; mode
+// is preview, thumb or app.
 func (s *Server) sandboxURL(w http.ResponseWriter, r *http.Request) {
-	if s.Config.SandboxDomain == "" {
-		httpx.Fail(w, 503, "no_sandbox", "This server has no sandbox domain (--sandbox-domain)")
-		return
-	}
 	q := r.URL.Query()
 	artifact := q.Get("artifact")
 	n, err := strconv.Atoi(q.Get("n"))
@@ -39,23 +35,22 @@ func (s *Server) sandboxURL(w http.ResponseWriter, r *http.Request) {
 		storeFail(w, err)
 		return
 	}
-	label, err := s.Store.SandboxLabel(r.Context(), artifact, n)
-	if err != nil {
-		unavailable(w, err)
-		return
+	mode := q.Get("mode")
+	if mode == "" {
+		mode = "preview"
 	}
-	p := q.Get("path")
-	if !strings.HasPrefix(p, "/") {
-		p = "/"
-	}
-	params := url.Values{"parent": {s.requestOrigin(r)}}
-	for _, k := range []string{"mode", "host"} {
+	extra := url.Values{}
+	for _, k := range []string{"host", "path"} {
 		if v := q.Get(k); v != "" {
-			params.Set(k, v)
+			extra.Set(k, v)
 		}
 	}
-	u := url.URL{Scheme: s.Config.PublicURL.Scheme, Host: label + "." + s.Config.SandboxDomain, Path: p, RawQuery: params.Encode()}
-	httpx.OK(w, map[string]any{"url": u.String(), "origin": u.Scheme + "://" + u.Host, "artifact": artifact, "n": n})
+	u, origin, err := s.targetURL(r.Context(), r, artifact, n, mode, extra)
+	if err != nil {
+		s.rtHTTPFail(w, err)
+		return
+	}
+	httpx.OK(w, map[string]any{"url": u, "origin": origin, "artifact": artifact, "n": n})
 }
 
 // resolveRoute answers what a visitor would get at host+path.

@@ -6,16 +6,16 @@ import { slopApi } from './slopApi'
 import { isAgent } from '../app/format'
 import type { SlopEvent } from './types'
 
-type Tag = TagDescription<'User' | 'Token' | 'Audit' | 'Project' | 'Artifact' | 'Version' | 'Route' | 'RouteLog' | 'Thread' | 'Agent' | 'Records' | 'Tool'>
+type Tag = TagDescription<'User' | 'Token' | 'Audit' | 'Project' | 'Artifact' | 'Version' | 'Route' | 'RouteLog' | 'Thread' | 'Agent' | 'Records' | 'App'>
 type Payload = Record<string, unknown>
 
 const art = (e: SlopEvent) => e.artifact ?? (e.payload.artifact as string | undefined) ?? ''
 
 // What each event makes stale. Every change reaches the cache through here.
 const INVALIDATES: Record<string, (e: SlopEvent) => Tag[]> = {
-  'artifact.created': () => [{ type: 'Artifact', id: 'LIST' }],
-  'artifact.updated': e => [{ type: 'Artifact', id: 'LIST' }, { type: 'Version', id: art(e) }],
-  'version.created': e => [{ type: 'Version', id: art(e) }, { type: 'Artifact', id: 'LIST' }, { type: 'Route', id: 'LIST' }, 'Audit', 'Tool'],
+  'artifact.created': () => [{ type: 'Artifact', id: 'LIST' }, 'App'],
+  'artifact.updated': e => [{ type: 'Artifact', id: 'LIST' }, { type: 'Version', id: art(e) }, 'App'],
+  'version.created': e => [{ type: 'Version', id: art(e) }, { type: 'Artifact', id: 'LIST' }, { type: 'Route', id: 'LIST' }, 'Audit', 'App'],
   'ref.moved': e => [{ type: 'Version', id: art(e) }, { type: 'Artifact', id: 'LIST' }, { type: 'Route', id: 'LIST' }],
   'route.set': () => [{ type: 'Route', id: 'LIST' }, 'RouteLog', 'Audit'],
   'route.removed': () => [{ type: 'Route', id: 'LIST' }, 'RouteLog', 'Audit'],
@@ -28,8 +28,6 @@ const INVALIDATES: Record<string, (e: SlopEvent) => Tag[]> = {
   'token.revoked': () => ['Token', 'Audit'],
   'agent.waiting': () => ['Agent'],
   'agent.left': () => ['Agent'],
-  'tool.enabled': () => ['Tool', 'Audit'],
-  'tool.disabled': () => ['Tool', 'Audit'],
 }
 
 // describe is the console line for an event, or null for none.
@@ -45,8 +43,6 @@ function describe(e: SlopEvent): string | null {
     case 'thread.resolved': return `${(p.thread as Payload)?.resolved === false ? 'reopened' : 'resolved'} a thread on ${e.artifact}`
     case 'agent.waiting': return `slop comments wait${p.artifact ? ` -a ${p.artifact}` : p.project ? ` -p ${p.project}` : ''}`
     case 'agent.left': return 'stopped waiting'
-    case 'tool.enabled': return `enabled the tool ${e.artifact} at v${p.version}`
-    case 'tool.disabled': return `disabled the tool ${e.artifact}`
     default: return null
   }
 }

@@ -1,0 +1,12 @@
+{
+  "title": "Claude Blocks",
+  "kind": "page",
+  "capabilities": {
+    "db": {},
+    "user": { "scopes": ["profile"] },
+    "room": { "topics": { "ops": "interact" } },
+    "sample": { "images": true },
+    "assets": {},
+    "downloads": true
+  }
+}

@@ -16,6 +16,7 @@ export interface Artifact {
   kind: 'page' | 'data'
   type?: string
   viewer?: string
+  app?: string
   project: string | null
   createdBy: string | null
   createdAt: string
@@ -178,13 +179,34 @@ export interface SlopEvent {
 
 export interface ApiError { code: string; message: string }
 
-// Tools: pushed pages that run inside the Workshop with a grant.
-export interface Tool { artifact: string; version: number; permissions: string[]; title: string; icon: string; enabledBy: string; enabledAt: string }
-export interface ToolView {
+// Apps: pages whose slop.json declares runtime capabilities. A target is
+// the app itself or a data artifact that names it (artifact.app).
+export interface Approval { app: string; version: number; permissions: string[]; approvedBy: string; approvedAt: string }
+export interface AppInfo {
   artifact: string
+  title: string
   project: string | null
-  enabled: Tool | null
-  latest: { n: number; title: string; icon?: string; permissions: string[] | null; newPermissions: string[]; error?: string }
+  main: number
+  latest: number
+  caps: string[]
+  permissions: string[] | null
+  approved: Approval | null
+  targets: string[] | null
+  error?: string
+  labels: Record<string, string>
 }
-export interface ToolList { tools: ToolView[]; permissions: Record<string, string> }
-export interface ToolGrant { grant: string; expiresAt: string; permissions: string[]; n: number; try: boolean; user: { id: string; name: string }; people?: Record<string, { id: string; name: string }> }
+
+// A view: one open app page with its secret (handed to the frame only).
+export interface ViewInfo {
+  view: string
+  secret: string
+  url: string
+  origin: string
+  target: string
+  app: string
+  version: number
+  level: string
+  caps: Record<string, unknown>
+  asks?: string[]
+  expiresAt: string
+}

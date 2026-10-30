@@ -1,4 +1,4 @@
-.PHONY: lint fmt-check test test-postgres build web generate run-local dev-backend dev-frontend pinup pinup-push
+.PHONY: lint fmt-check test test-postgres build web generate run-local dev-backend dev-frontend pinup pinup-push runtime runtime-test piworker conformance blocks blocks-push
 
 lint:
 	GOWORK=off golangci-lint run -v
@@ -12,6 +12,32 @@ test:
 # Runs the store and server tests against Postgres as well as SQLite.
 test-postgres:
 	TEST_DATABASE_URL=$${TEST_DATABASE_URL:-postgres://postgres:postgres@127.0.0.1:5432/postgres?sslmode=disable} GOWORK=off go test ./...
+
+# The page runtime (window.claude): web/runtime → pkg/render/assets/claude.js,
+# committed because the server embeds it.
+runtime:
+	cd web/runtime && pnpm install --frozen-lockfile && pnpm check && node build.mjs
+
+runtime-test:
+	cd web/runtime && node --test --experimental-strip-types test/*.test.ts
+
+# The Pi model worker (web/piworker/dist/worker.js) for slop serve --pi-worker.
+piworker:
+	cd web/piworker && pnpm install --frozen-lockfile && pnpm check && node build.mjs
+
+# The browser conformance suites against a running local server
+# (SLOP_SERVER, default http://localhost:8080), apps pushed as rt-conformance
+# and rt-sample; needs playwright on NODE_PATH.
+conformance:
+	node web/rt-conformance/run.mjs $${SLOP_SERVER:-http://localhost:8080} rt-conformance
+	node web/rt-conformance/run.mjs $${SLOP_SERVER:-http://localhost:8080} rt-sample
+
+# Claude Blocks (web/blocks): the upstream files, checked, plus slop.json.
+blocks:
+	web/blocks/build.sh
+
+blocks-push: blocks
+	$(SLOP) push web/blocks/dist -a blocks --title "Claude Blocks" -m "Claude Blocks $$(git rev-parse --short HEAD)"
 
 # Builds the Workshop into pkg/web/workshop (served from disk by plain builds).
 web generate:

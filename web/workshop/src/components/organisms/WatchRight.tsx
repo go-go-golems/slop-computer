@@ -2,7 +2,7 @@ import { useMemo } from 'react'
 import { errorText, useFileQuery, useRecordsQuery, useSetRouteMutation } from '../../api/slopApi'
 import type { Artifact, RouteView, Version } from '../../api/types'
 import { toast } from '../../app/store'
-import { navigate, toolPath } from '../../app/router'
+import { navigate, runPath } from '../../app/router'
 import { cx, kb, plural } from '../../app/format'
 import { shortHost, useReaders, useVersionBy } from '../../app/hooks'
 import { Button, Field, Seg, Select } from '../atoms'
@@ -43,7 +43,7 @@ export function pinupDesign(m: Record<string, unknown> | undefined): string | nu
   const p = m?.pinup as { design?: unknown } | undefined
   return typeof p?.design === 'string' ? p.design : null
 }
-export const pinupPath = (design: string) => `${toolPath('pinup')}?file=${encodeURIComponent(design)}`
+export const pinupPath = (design: string) => `${runPath('pinup')}?file=${encodeURIComponent(design)}`
 
 export function PageToolbar(p: {
   a: Artifact; versions: Version[]; v: Version; ctx: PreviewContext; rtab: string; device: Device; cmpLeft: number
@@ -68,7 +68,7 @@ export function PageToolbar(p: {
         </Field>
       ) : null}
       {ctx.route && ctx.host && ctx.path ? <Button onClick={() => p.onOpenSite(ctx.host!, ctx.path!)}>Open in Site</Button> : null}
-      {p.v.manifest && 'tool' in p.v.manifest ? <Button onClick={() => navigate(toolPath(p.a.id, p.v.n))}>Open as tool</Button> : null}
+      {p.v.manifest && 'capabilities' in p.v.manifest ? <Button onClick={() => navigate(runPath(p.a.id, p.v.n))}>Open as app</Button> : null}
       {pinupDesign(p.v.manifest) ? <Button title={`This page is compiled from ${pinupDesign(p.v.manifest)}`} onClick={() => navigate(pinupPath(pinupDesign(p.v.manifest)!))}>Edit in Pinup</Button> : null}
     </div>
   )

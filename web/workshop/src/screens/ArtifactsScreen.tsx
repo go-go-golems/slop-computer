@@ -1,9 +1,9 @@
 import { useMemo, useState } from 'react'
-import { errorText, useArtifactsQuery, useProjectsQuery, usePushMutation, useRecordsQuery, useThreadsQuery, useVersionsQuery } from '../api/slopApi'
+import { errorText, useAppsQuery, useArtifactsQuery, useCreateArtifactMutation, useProjectsQuery, usePushMutation, useRecordsQuery, useThreadsQuery, useVersionsQuery } from '../api/slopApi'
 import type { Artifact, Version } from '../api/types'
 import { ago, isAgent, plural } from '../app/format'
 import { useReaders, useRoutesUsing, useVersionBy } from '../app/hooks'
-import { navigate, watchPath } from '../app/router'
+import { navigate, runPath, watchPath } from '../app/router'
 import { toast } from '../app/store'
 import { Button, Count, IconButton, Seg, Select, Tag } from '../components/atoms'
 import { Thumb } from '../components/organisms/PreviewStage'
@@ -18,6 +18,7 @@ export function ArtifactsScreen() {
   const [q, setQ] = useState('')
   const [kind, setKind] = useState<Kind>('all')
   const [pushing, setPushing] = useState(false)
+  const [creating, setCreating] = useState(false)
   const groups = useMemo(() => {
     const ids = [...projects.map(p => p.id), null]
     return ids.map(id => ({
@@ -33,6 +34,7 @@ export function ArtifactsScreen() {
           <input className="filter" type="search" placeholder="Find an artifact" aria-label="Find an artifact" value={q} onChange={e => setQ(e.target.value)} />
           <Seg label="Kind" value={kind} onChange={setKind} options={[['all', 'All'], ['page', 'Pages'], ['data', 'Data']]} />
           <span className="sp" />
+          <Button onClick={() => setCreating(true)}>New with an app…</Button>
           <Button variant="primary" onClick={() => setPushing(true)}>Push a file…</Button>
         </div>
         <div className="tilebody"><div className="scroll" id="agrid">
@@ -45,6 +47,7 @@ export function ArtifactsScreen() {
         </div></div>
       </section>
       {pushing ? <PushDialog onClose={() => setPushing(false)} /> : null}
+      {creating ? <NewTargetDialog onClose={() => setCreating(false)} /> : null}
     </div>
   )
 }
@@ -164,6 +167,48 @@ function PushDialog({ onClose }: { onClose: () => void }) {
           <span style={{ color: 'var(--accent)', fontSize: 'var(--fs-xs)' }}>{err}</span>
         </div>
         <footer><Button onClick={onClose}>Cancel</Button><Button variant="primary" disabled={isLoading} onClick={doPush}>Push</Button></footer>
+      </div>
+    </div>
+  )
+}
+
+// NewTargetDialog creates a data artifact that an app runs: a Blocks
+// workspace, a Pinup design. Its state lives in its own db; the app's
+// version and rules come from the app.
+function NewTargetDialog({ onClose }: { onClose: () => void }) {
+  const { data: apps = [] } = useAppsQuery()
+  const { data: projects = [] } = useProjectsQuery()
+  const [app, setApp] = useState(apps[0]?.artifact ?? '')
+  const [name, setName] = useState('')
+  const [project, setProject] = useState(projects[0]?.id ?? '')
+  const [err, setErr] = useState('')
+  const [create, { isLoading }] = useCreateArtifactMutation()
+  const id = name.trim().toLowerCase().replace(/[^a-z0-9-]+/g, '-').replace(/^-|-$/g, '')
+  const go = async () => {
+    setErr('')
+    if (!app) return setErr('Pick an app.')
+    if (!id) return setErr('Give it a name.')
+    try {
+      await create({ id, title: name.trim() || id, kind: 'data', app, project: project || null }).unwrap()
+      toast(`${id} runs ${app}.`)
+      onClose()
+      navigate(runPath(id))
+    } catch (e) { setErr(errorText(e)) }
+  }
+  return (
+    <div className="modal" onClick={e => { if (e.target === e.currentTarget) onClose() }}>
+      <div className="dialog" role="dialog" aria-label="New with an app">
+        <header><h2>New with an app</h2><IconButton aria-label="Close" onClick={onClose}>×</IconButton></header>
+        <div className="form">
+          <div className="kv">
+            <span>App</span><Select id="newApp" aria-label="App" value={app} onChange={setApp} options={apps.map(a => ({ value: a.artifact, label: `${a.title} · ${a.artifact} v${a.main}` }))} />
+            <span>Name</span><input className="inp" id="newName" placeholder="e.g. ws-team" value={name} onChange={e => setName(e.target.value)} />
+            <span>Project</span><Select id="newProj" aria-label="Project" value={project} onChange={setProject} options={[...projects.map(p => ({ value: p.id, label: p.name })), { value: '', label: 'No project' }]} />
+          </div>
+          <span className="muted" style={{ fontSize: 'var(--fs-xs)' }}>A data artifact with its own documents, room and assets, opened with the app at /run/{id || 'name'}.</span>
+          <span style={{ color: 'var(--accent)', fontSize: 'var(--fs-xs)' }}>{err}</span>
+        </div>
+        <footer><Button onClick={onClose}>Cancel</Button><Button variant="primary" disabled={isLoading || !apps.length} onClick={go}>Create</Button></footer>
       </div>
     </div>
   )
