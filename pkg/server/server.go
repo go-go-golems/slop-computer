@@ -101,11 +101,12 @@ type Server struct {
 	recCache      recordCache
 	site          siteCache
 	derived       singleflight.Group // derived-file builds, by name (files.go)
+	thumbSlots    chan struct{}      // concurrent image decodes (thumbs.go)
 }
 
 func New(cfg Config, st *store.Store, bl *blobs.Blobs) *Server {
 	s := &Server{Config: cfg, Store: st, Blobs: bl, Events: events.New(), deviceLimiter: newLimiter(), waiters: newWaiters(),
-		views: rt.NewRegistry(), joined: map[string][]string{}}
+		views: rt.NewRegistry(), joined: map[string][]string{}, thumbSlots: make(chan struct{}, thumbSlots)}
 	s.views.OnClose = s.roomClosed
 	s.mux = s.routes()
 	go func() {

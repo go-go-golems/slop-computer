@@ -93,10 +93,16 @@ type fileVariant struct {
 	Type, Tag, Encoding string
 }
 
-// variant picks what to send for f: a gzipped copy of text when the browser
-// takes gzip (not for range requests), otherwise the stored file. Derived
+// variant picks what to send for f: a scaled copy of an image for ?w=
+// (thumbs.go), a gzipped copy of text when the browser takes gzip (not for
+// range requests), otherwise the stored file. Derived
 // files are built once, beside the blobs.
 func (s *Server) variant(r *http.Request, f store.FileEntry) (fileVariant, error) {
+	if width, ok := snapWidth(r.URL.Query().Get("w")); ok && thumbable(f.Type) {
+		if v, ok := s.thumb(f, width); ok {
+			return v, nil
+		}
+	}
 	if compressible(f.Type) && f.Size > minGzipBytes && acceptsGzip(r) && r.Header.Get("Range") == "" {
 		if p, err := s.derive(f.SHA256+".gz", func(out io.Writer) error { return s.gzipBlob(f.SHA256, out) }); err == nil {
 			file, err := os.Open(p) // #nosec G304 -- a derived file path, validated by blobs

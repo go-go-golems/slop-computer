@@ -75,6 +75,9 @@ func (s *Server) records(ctx context.Context, artifact string, n int) ([]records
 			p, _ := rec["path"].(string)
 			rec["src"] = "/_d/" + artifact + "/" + strconv.Itoa(v.N) + "/" + p
 			rec["type"], rec["size"] = v.Files[p].Type, v.Files[p].Size
+			if w, h, ok := s.imageSize(v.Files[p]); ok {
+				rec["width"], rec["height"] = w, h
+			}
 		}
 	}
 	s.recCache.put(key, out)

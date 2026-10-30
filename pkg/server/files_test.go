@@ -3,6 +3,9 @@ package server
 import (
 	"bytes"
 	"compress/gzip"
+	"image"
+	"image/color"
+	"image/png"
 	"io"
 	"net/http"
 	"strings"
@@ -105,5 +108,83 @@ func TestCacheClassesAndCompression(t *testing.T) {
 	// Off the site host, everything is private.
 	if _, _, hdr = h.fetch(h.ts.Listener.Addr().String(), "/api/artifacts/shop/versions/1/files/style.css", map[string]string{"Authorization": "Bearer " + tok}); hdr.Get("Cache-Control") != "private, max-age=31536000, immutable" {
 		t.Fatalf("API file %v", hdr)
+	}
+}
+
+// pngOf is a w×h PNG of noise, like a photo (a smooth gradient compresses
+// so well that no copy is smaller), transparent on the left half if alpha.
+func pngOf(t *testing.T, w, h int, alpha bool) string {
+	t.Helper()
+	img := image.NewNRGBA(image.Rect(0, 0, w, h))
+	seed := uint32(1)
+	for y := 0; y < h; y++ {
+		for x := 0; x < w; x++ {
+			seed = seed*1664525 + 1013904223
+			a := uint8(255)
+			if alpha && x < w/2 {
+				a = 0
+			}
+			img.SetNRGBA(x, y, color.NRGBA{R: uint8(seed >> 24), G: uint8(seed >> 16), B: uint8(seed >> 8), A: a})
+		}
+	}
+	var buf bytes.Buffer
+	if err := png.Encode(&buf, img); err != nil {
+		t.Fatal(err)
+	}
+	return buf.String()
+}
+
+// Any image URL takes ?w= (SLOP-012): scaled to a ladder width, never
+// enlarged, JPEG when opaque and PNG when not, built once, with the cache
+// class of the URL it came from.
+func TestThumbnails(t *testing.T) {
+	h := newHarness(t, store.RoleAdmin)
+	manuel := h.signIn("manuel")
+	tok := h.token(manuel.id(), store.ScopeRead, store.ScopeWrite)
+	h.pushFiles(tok, "pics", map[string]any{"title": "Pics", "kind": "data"}, nil, map[string]string{
+		"big.png": pngOf(t, 800, 500, false), "clear.png": pngOf(t, 800, 500, true), "tiny.png": pngOf(t, 100, 60, false), "notes.txt": "hello"})
+	h.pushFiles(tok, "album", map[string]any{"title": "Album", "kind": "page"}, map[string]any{"reads": map[string]string{"pics": "pics"}},
+		map[string]string{"index.html": "<!doctype html><title>album</title>"})
+	manuel.do("PUT", "/api/routes", map[string]any{"host": "site.test", "path": "/album", "page": "album"}, nil)
+
+	decoded := func(b []byte) image.Config {
+		t.Helper()
+		cfg, _, err := image.DecodeConfig(bytes.NewReader(b))
+		if err != nil {
+			t.Fatal(err)
+		}
+		return cfg
+	}
+	code, body, hdr := h.fetch("site.test", "/_d/pics/1/big.png?w=480", nil)
+	if cfg := decoded(body); code != 200 || hdr.Get("Content-Type") != "image/jpeg" || cfg.Width != 480 || cfg.Height != 300 ||
+		hdr.Get("Cache-Control") != "public, max-age=31536000, immutable" || !strings.HasSuffix(hdr.Get("ETag"), `.w480"`) {
+		t.Fatalf("thumbnail %d %v %v", code, hdr, cfg)
+	}
+	sum := strings.TrimSuffix(strings.Trim(hdr.Get("ETag"), `"`), ".w480")
+	if _, ok := h.srv.Blobs.Derived(sum + ".w480.jpg"); !ok {
+		t.Fatal("the thumbnail was not kept")
+	}
+	if _, body, _ = h.fetch("site.test", "/_d/pics/1/big.png?w=500", nil); decoded(body).Width != 640 {
+		t.Fatalf("?w=500 snaps to %d", decoded(body).Width)
+	}
+	if _, body, hdr = h.fetch("site.test", "/_d/pics/1/clear.png?w=320", nil); hdr.Get("Content-Type") != "image/png" || decoded(body).Width != 320 {
+		t.Fatalf("transparent thumbnail %v", hdr)
+	}
+	// Smaller than the width asked for: the original, as it is.
+	tiny := pngOf(t, 100, 60, false)
+	if _, body, hdr = h.fetch("site.test", "/_d/pics/1/tiny.png?w=480", nil); string(body) != tiny || hdr.Get("Content-Type") != "image/png" {
+		t.Fatalf("no enlargement %v", hdr)
+	}
+	// main is a place, thumbnails too; ?w= means nothing for text.
+	if _, _, hdr = h.fetch("site.test", "/_d/pics/main/big.png?w=480", nil); hdr.Get("Cache-Control") != "public, max-age=60, stale-while-revalidate=86400" || hdr.Get("Content-Type") != "image/jpeg" {
+		t.Fatalf("thumbnail at main %v", hdr)
+	}
+	if _, body, _ = h.fetch("site.test", "/_d/pics/1/notes.txt?w=480", nil); string(body) != "hello" {
+		t.Fatalf("?w= on text: %q", body)
+	}
+	// Records of images carry their size.
+	_, page, _ := h.fetch("site.test", "/album", nil)
+	if !strings.Contains(string(page), `"height":500`) || !strings.Contains(string(page), `"width":800`) {
+		t.Fatalf("records lack sizes:\n%.600s", page)
 	}
 }
