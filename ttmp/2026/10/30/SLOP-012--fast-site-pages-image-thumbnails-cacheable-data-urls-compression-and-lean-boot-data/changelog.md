@@ -56,3 +56,12 @@ Review fixes: sandbox previews authorize /_r/ and /_d/ by the version named in t
 
 - /home/manuel/workspaces/2026-10-28/slop-computer/slop-computer/pkg/server/serve.go — sandboxReads, previewRoute
 - /home/manuel/workspaces/2026-10-28/slop-computer/slop-computer/pkg/server/thumbs.go — jpegOrientation, orient, makeThumb
+
+## 2026-10-30
+
+Workshop thumbnails: GET /api/covers (any record with page + cover) and version summaries replace live page iframes on cards and the Versions strip (4626897)
+
+### Related Files
+
+- /home/manuel/workspaces/2026-10-28/slop-computer/slop-computer/pkg/server/covers.go — listCovers, coverOf
+- /home/manuel/workspaces/2026-10-28/slop-computer/slop-computer/web/workshop/src/components/organisms/WatchRight.tsx — VersionShot, VersionSummary

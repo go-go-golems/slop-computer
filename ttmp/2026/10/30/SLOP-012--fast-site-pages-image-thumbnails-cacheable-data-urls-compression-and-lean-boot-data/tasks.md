@@ -9,4 +9,4 @@
 - [ ] Phase 5 (optional): per-host index of servable artifacts <!-- t:dtvc -->
 - [x] Decide open questions (guide section 14): ladder, Place freshness, WebP output, importer numbered URLs <!-- t:5kk9 -->
 - [ ] Importer: seed pushes pin /_d/<media>/main/ links to numbered versions (e3d7bd8, deployed). Left: re-run slop import francois push on the cluster. <!-- t:452h -->
-- [ ] Workshop thumbnails load whole pages: the Watch versions strip and every Artifacts card are live iframes of the page (craftkit-workbench: 9.8 MB HTML, 25 s to load in a clean Chromium, loaded twice on /watch). Show a live thumb only under a size limit; otherwise a static card (or the catalog cover for imported pages). <!-- t:qvoy -->
+- [x] Workshop thumbnails no longer run pages: catalog covers (GET /api/covers) or a version summary; the main preview is the only live frame (4626897). Stored screenshots were considered and declined. <!-- t:qvoy -->
