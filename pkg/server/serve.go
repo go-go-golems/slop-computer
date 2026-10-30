@@ -88,6 +88,9 @@ func (s *Server) records(ctx context.Context, artifact string, n int) ([]records
 type pageManifest struct {
 	Reads  map[string]string `json:"reads"`
 	Tokens string            `json:"tokens"`
+	// Files names data artifacts whose files the page links to without
+	// reading their records (covers, galleries): served, not loaded.
+	Files []string `json:"files"`
 }
 
 // ResolvedBinding is a binding with the concrete version it means now.
@@ -137,7 +140,7 @@ func (s *Server) renderPage(ctx context.Context, page store.Version, res *routin
 		return nil, err
 	}
 	var route *store.Route
-	boot := render.Boot{Route: render.RouteInfo{Host: host, Path: reqPath, Params: map[string]string{}}, Data: map[string][]records.Record{},
+	boot := render.Boot{Route: render.RouteInfo{Host: host, Path: reqPath, Params: map[string]string{}}, Data: map[string]any{},
 		Version: render.VersionInfo{Artifact: page.Artifact, N: page.N}, Mode: mode, ParentOrigin: parent, Runtime: runtime}
 	if res != nil {
 		route = &res.Route
@@ -177,11 +180,7 @@ func (s *Server) renderPage(ctx context.Context, page store.Version, res *routin
 			}
 			continue
 		}
-		rs, _, err := s.records(ctx, b.Artifact, b.N)
-		if err != nil {
-			continue
-		}
-		boot.Data[name] = rs
+		boot.Data[name] = render.NewDataRef(b.Artifact, b.N)
 	}
 	return render.Inject(src, boot), nil
 }
@@ -246,6 +245,9 @@ func notFoundPage(w http.ResponseWriter) {
 
 var versionPath = regexp.MustCompile(`^/_v/([a-z0-9][a-z0-9-]{0,62})/([0-9]+)/(.+)$`)
 
+// recordsPath is /_r/<artifact>/<n>.js: a data version's records as a script.
+var recordsPath = regexp.MustCompile(`^/_r/([a-z0-9][a-z0-9-]{0,62})/([0-9]+)\.js$`)
+
 // dataPath is /_d/<artifact>/<n or main>/<file>: a file of a data artifact
 // that a page reads (records give image files a src there).
 var dataPath = regexp.MustCompile(`^/_d/([a-z0-9][a-z0-9-]{0,62})/(main|[0-9]+)/(.+)$`)
@@ -275,6 +277,11 @@ func (s *Server) reads(ctx context.Context, v store.Version, route *store.Route)
 	out := map[string]bool{}
 	for _, b := range s.bindings(ctx, v, route) {
 		out[b.Artifact] = true
+	}
+	var m pageManifest
+	_ = store.ManifestOf(v, &m)
+	for _, a := range m.Files {
+		out[a] = true
 	}
 	return out
 }
@@ -374,24 +381,40 @@ func (s *Server) serveSite(w http.ResponseWriter, r *http.Request) {
 		}
 		return false
 	}
-	// /_d/<artifact>/<n>/<file>: a file of data some routed page reads.
-	if m := dataPath.FindStringSubmatch(r.URL.Path); m != nil {
+	// readByRoute: a data artifact some routed page reads (its files and
+	// records are public with the page).
+	readByRoute := func(data string) bool {
 		for _, rt := range public {
 			n := 0
 			if rt.Version != nil {
 				n = *rt.Version
 			}
-			if v, err := s.Store.Version(ctx, rt.Page, n); err == nil && s.reads(ctx, v, &rt)[m[1]] {
-				s.serveData(w, r, m)
-				return
+			if v, err := s.Store.Version(ctx, rt.Page, n); err == nil && s.reads(ctx, v, &rt)[data] {
+				return true
 			}
 		}
 		// Then the pages page-from routes admit, which costs a lookup per page.
 		for _, rt := range public {
-			if rt.PageFrom != "" && s.pageFromReads(ctx, rt, m[1]) {
-				s.serveData(w, r, m)
-				return
+			if rt.PageFrom != "" && s.pageFromReads(ctx, rt, data) {
+				return true
 			}
+		}
+		return false
+	}
+	// /_d/<artifact>/<n>/<file>: a file of data some routed page reads.
+	if m := dataPath.FindStringSubmatch(r.URL.Path); m != nil {
+		if readByRoute(m[1]) {
+			s.serveData(w, r, m)
+			return
+		}
+		notFoundPage(w)
+		return
+	}
+	// /_r/<artifact>/<n>.js: the records of data some routed page reads.
+	if m := recordsPath.FindStringSubmatch(r.URL.Path); m != nil {
+		if readByRoute(m[1]) {
+			s.serveRecords(w, r, m)
+			return
 		}
 		notFoundPage(w)
 		return
@@ -542,8 +565,12 @@ func (s *Server) serveSandbox(w http.ResponseWriter, r *http.Request, label stri
 	}
 	m := appPath.FindStringSubmatch(p)
 	if m == nil {
-		if dm := dataPath.FindStringSubmatch(p); dm != nil {
-			s.serveSandboxData(w, r, app, dm)
+		if dm := dataPath.FindStringSubmatch(p); dm != nil && s.sandboxReads(ctx, app, dm[1]) {
+			s.serveData(w, r, dm)
+			return
+		}
+		if rm := recordsPath.FindStringSubmatch(p); rm != nil && s.sandboxReads(ctx, app, rm[1]) {
+			s.serveRecords(w, r, rm)
 			return
 		}
 		notFoundPage(w)
@@ -628,14 +655,13 @@ func (s *Server) runtimeBoot(target string, v store.Version, caps rt.Caps) *rend
 	return &render.Runtime{Target: target, App: v.Artifact, Version: v.N, Caps: names}
 }
 
-// serveSandboxData serves data files the app reads, by its manifest or a
-// route to it on any site host.
-func (s *Server) serveSandboxData(w http.ResponseWriter, r *http.Request, app string, m []string) {
-	ctx := r.Context()
+// sandboxReads reports whether the app reads a data artifact, by its
+// manifest or a route to it on any site host: its files and records are
+// served on the app's origin.
+func (s *Server) sandboxReads(ctx context.Context, app, data string) bool {
 	v, err := s.Store.Version(ctx, app, 0)
-	if err == nil && s.reads(ctx, v, nil)[m[1]] {
-		s.serveData(w, r, m)
-		return
+	if err == nil && s.reads(ctx, v, nil)[data] {
+		return true
 	}
 	for _, host := range s.Config.SiteHosts {
 		routes, err := s.Store.Routes(ctx, host)
@@ -643,13 +669,37 @@ func (s *Server) serveSandboxData(w http.ResponseWriter, r *http.Request, app st
 			continue
 		}
 		for _, rt := range routes {
-			if (rt.Page == app || s.admits(ctx, rt, app)) && s.reads(ctx, v, &rt)[m[1]] {
-				s.serveData(w, r, m)
-				return
+			if (rt.Page == app || s.admits(ctx, rt, app)) && s.reads(ctx, v, &rt)[data] {
+				return true
 			}
 		}
 	}
-	notFoundPage(w)
+	return false
+}
+
+// serveRecords serves /_r/<artifact>/<n>.js: one data version's records as
+// a script that hands them to window.slop. A version never changes, so the
+// script is a content URL.
+func (s *Server) serveRecords(w http.ResponseWriter, r *http.Request, m []string) {
+	n, _ := strconv.Atoi(m[2])
+	if n == 0 {
+		notFoundPage(w)
+		return
+	}
+	rs, _, err := s.records(r.Context(), m[1], n)
+	if err != nil {
+		notFoundPage(w)
+		return
+	}
+	ref := render.NewDataRef(m[1], n)
+	tag := `"` + string(ref) + `"`
+	w.Header().Set("ETag", tag)
+	w.Header().Set("Cache-Control", s.cacheControl(r, contentURL))
+	if etagMatch(r.Header.Get("If-None-Match"), tag) {
+		w.WriteHeader(http.StatusNotModified)
+		return
+	}
+	writeBody(w, r, http.StatusOK, "text/javascript; charset=utf-8", render.RecordsScript(ref, rs))
 }
 
 // slopProxy is the slop capability: /_rt/api/… on the target origin runs the

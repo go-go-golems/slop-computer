@@ -182,9 +182,21 @@ func TestThumbnails(t *testing.T) {
 	if _, body, _ = h.fetch("site.test", "/_d/pics/1/notes.txt?w=480", nil); string(body) != "hello" {
 		t.Fatalf("?w= on text: %q", body)
 	}
+	// A page that only links to the images names them in files: served,
+	// but their records are not loaded.
+	h.pushFiles(tok, "covers", map[string]any{"title": "Covers", "kind": "page"}, map[string]any{"files": []string{"pics"}},
+		map[string]string{"index.html": "<!doctype html><title>covers</title>"})
+	manuel.do("PUT", "/api/routes", map[string]any{"host": "site.test", "path": "/covers", "page": "covers"}, nil)
+	h.pushFiles(tok, "pics2", map[string]any{"title": "Unread", "kind": "data"}, nil, map[string]string{"x.png": pngOf(t, 10, 10, false)})
+	if _, page, _ := h.fetch("site.test", "/covers", nil); strings.Contains(string(page), "/_r/") || strings.Contains(string(page), `"pics"`) {
+		t.Fatalf("files loaded records:\n%s", page)
+	}
+	if code, _, _ := h.fetch("site.test", "/_d/pics2/1/x.png", nil); code != 404 {
+		t.Fatalf("unread data served: %d", code)
+	}
 	// Records of images carry their size.
-	_, page, _ := h.fetch("site.test", "/album", nil)
-	if !strings.Contains(string(page), `"height":500`) || !strings.Contains(string(page), `"width":800`) {
-		t.Fatalf("records lack sizes:\n%.600s", page)
+	_, recs, _ := h.fetch("site.test", "/_r/pics/1.js", nil)
+	if !strings.Contains(string(recs), `"height":500`) || !strings.Contains(string(recs), `"width":800`) {
+		t.Fatalf("records lack sizes:\n%.600s", recs)
 	}
 }

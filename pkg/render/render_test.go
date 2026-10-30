@@ -8,13 +8,22 @@ import (
 )
 
 func TestInject(t *testing.T) {
-	boot := Boot{Mode: ModePreview, Data: map[string][]records.Record{"posts": {{"id": "x", "title": "</script><script>alert(1)</script>"}}}, Tokens: &records.Tokens{Colors: map[string]string{"ink": "#000"}}}
+	boot := Boot{Mode: ModePreview, Data: map[string]any{"posts": []records.Record{{"id": "x", "title": "</script><script>alert(1)</script>"}}, "pics": NewDataRef("media", 3)},
+		Tokens: &records.Tokens{Colors: map[string]string{"ink": "#000"}}}
 	out := string(Inject([]byte("<!doctype html><html><head><title>t</title></head><body>hi</body></html>"), boot))
 	if !strings.HasPrefix(out, `<!doctype html><html><head><script type="application/json" id="slop-boot">`) {
 		t.Fatal(out)
 	}
 	if strings.Contains(out, "</script><script>alert") {
 		t.Fatal("boot JSON must not close its script element")
+	}
+	// A data version is a script after the runtime, before the page's own.
+	if !strings.Contains(out, `<script src="`+AssetURL("runtime.js")+`"></script><script src="/_r/media/3.js"></script>`) || !strings.Contains(out, `"pics":"media@3"`) {
+		t.Fatal(out)
+	}
+	script := string(RecordsScript(NewDataRef("media", 3), []records.Record{{"id": "x", "title": "</script>"}}))
+	if script != `slop.records("media@3",[{"id":"x","title":"\u003c/script\u003e"}]);`+"\n" {
+		t.Fatalf("records script %q", script)
 	}
 	if !strings.Contains(out, `/_slop/bridge.js`) || !strings.Contains(out, `<style data-slop="tokens">html:root{--ink:#000}</style></head>`) {
 		t.Fatal(out)
