@@ -881,7 +881,7 @@ than the displayed ones.
 - **WebP and PNG.** Their EXIF orientation is not read. Browsers honour it in those formats too, but it is rare.
 
 ### What should be done in the future
-- Reply on the two review threads once the user agrees. I have not posted to GitHub.
+- Reply on the two review threads: done after the user agreed (discussion_r4428657262, discussion_r4428657477).
 - If derived formats ever change again, add a version to the derived key.
 
 ### Code review instructions
