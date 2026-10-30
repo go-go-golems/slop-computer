@@ -42,3 +42,11 @@ Phase 3 (5cbdbdc): live targets named in the path (/blocks/:db), create policy a
 
 - /home/manuel/workspaces/2026-10-28/slop-computer/slop-computer/pkg/render/assets/shell.js — no_instance and create screens, ?k= kept across sign-in and stripped
 - /home/manuel/workspaces/2026-10-28/slop-computer/slop-computer/pkg/store/links.go — share links: create, revoke (with their grants), redeem without lowering
+
+## 2026-10-30
+
+Phase 4 (722c158): visitors (vis_, migration 011) on public live routes, capped at interact without assets/comments/models; limits on visitors, opens and instances; hourly sweep of idle visitors; explicit claim on sign-in
+
+### Related Files
+
+- /home/manuel/workspaces/2026-10-28/slop-computer/slop-computer/pkg/store/visitors.go — visitors, private docs, moving grants, sweep

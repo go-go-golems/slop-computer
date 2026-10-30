@@ -601,3 +601,137 @@ On the local server:
   slop access link <id> --level interact --days 7  → http://site…/blocks/<id>?k=<48 hex>
   shell: strip ?k= → POST /_site/views {path, link} → RTRedeemLink → grant(via=lnk_…) → view (interact)
   ```
+
+## Step 6: Phase 4, guests on public live routes
+
+Someone who is not signed in can now open a live route whose access is
+`public`, if a grant to `*anyone` or a share link lets them in. They become a
+**visitor**: an id `vis_…` and a site session, with no row in `users`. Apps
+see them as "Guest" with `guest: true`. They get at most `interact`, and no
+files, comments, consent, models or publishing. They cannot create instances.
+
+Abuse limits are in place:
+- 30 new visitors per address an hour;
+- 120 view opens per principal an hour;
+- 50 instances per member a day.
+
+Visitors unseen for 90 days are swept with their sessions, grants and private
+documents. A guest who signs in is offered what they did as a guest (their
+private documents and grants). It is kept only if they say so (decision 6).
+
+On the local server, a fresh browser opening `/blocks/i-tmtocfaazmgvi6ip`
+(with `*anyone interact`) got the bar "Guest · Sign in", and Blocks ran live
+("Shared · live") in its frame.
+
+### Prompt Context
+**User prompt (verbatim):** see Step 3.
+**Assistant interpretation:** Phase 4 of the guide: visitors, guest-aware runtime, quotas and limits, garbage collection, and the explicit claim.
+**Inferred user intent:** A Blocks workspace can be shown to people without accounts, safely: they can look or edit as allowed, but cannot run up costs or fill the server.
+**Commit (code):** 722c158 — "SLOP-011 phase 4: guests on public live routes, limits, sweep, claim"
+
+### What I did
+- **Migration `011_visitors.sql`:** `visitors(id, created_at, last_seen_at, claimed_by → users)`, plus `site_sessions.from_visitor`.
+- **Store:**
+  - `pkg/store/visitors.go`: `VisitorPrefix`, `IsVisitor` and `RoleVisitor` (never stored); `CreateVisitor` and `TouchVisitor`.
+  - `PrivateDocs(id)`: `data/users/<id>/…` across targets, matched with `substr`, not `LIKE`, because `_` is a wildcard in `LIKE`.
+  - `MoveGrants(from, to)`, which keeps the higher level; `ClaimVisitor`; and `SweepVisitors(idle)`, which deletes sessions, grants, private docs and the row, with one audit entry `visitor.expire`.
+  - `SubjectGrants(subject)`.
+  - `CreateSiteSession` takes `fromVisitor`; `SettleFromVisitor`.
+  - Routes refuse `create: public` ("visitors cannot create instances").
+- **Server, `live.go`:**
+  - `siteResolve` turns a `vis_` session into `visitorUser(id)` after `TouchVisitor`.
+  - `newVisitor` (rate-limited per address).
+  - `openSiteView` makes a visitor only on a `public` route where a link is present or `*anyone` gives a level, then limits opens per principal.
+  - `admitted("public")` admits visitors.
+  - `createInstance` sends visitors to sign in and limits members per day.
+  - `siteMe` reports `visitor`, or `user` with a `claim` summary.
+  - `signedInOnly` guards site consent.
+  - `siteCallback` records the visitor a person signed in over and revokes the visitor's session.
+  - `siteClaim`: `{keep: true}` copies private docs to `data/users/<usr>/…` where the person has none (through `RTWrite`, published to open views), moves grants and marks the visitor claimed. Either answer settles the offer.
+- **`access.go`:**
+  - `subjectsOf(visitor)` = `{id, *anyone}` and `levelCap(visitor)` = interact.
+  - `viewer(id)` resolves people or visitors; `reviewViews` uses it.
+  - The listing names visitor grants "a guest".
+- **Runtime:**
+  - `grantedCaps` drops `assets` and `comments` for visitors.
+  - `profileOf` gives visitors `{name: "Guest", guest: true}`, with no avatar or email.
+  - `userInfo` adds `guest`; `user.profiles` answers `vis_` ids.
+  - `room.emit` and `AsPeer` set `guest` (in `pkg/rt` by prefix, since `rt` does not import `store`).
+- **Server loop:** `SweepVisitors(VisitorIdle)` hourly, next to the view sweep. A `siteLimits` limiter sits on the server.
+- **Shell:**
+  - shows "Guest · Sign in";
+  - refreshes `me` after the first open that made this browser a guest;
+  - offers the claim in a dialog ("Keep it" / "Leave it"; dismissing asks again next time, so `ask` now returns `null` for dismissal).
+- **Tests:**
+  - `TestVisitors`, `TestVisitorLimit` and `TestVisitorClaim` (with a `handoffOver` helper that signs in over a guest cookie);
+  - `TestSweepVisitors` in the store.
+
+### Why
+- **No `users` rows for visitors** (guide 6.5). The people list stays the people let in, visitors expire, and none of the foreign keys to `users` matter: visitors get no consents, comments, assets, versions or authorship, and `rt_docs.updated_by`, audit and event actors have no foreign key.
+- **Visitors never create.** Decision 1 is that signed-in people create instances. It also removes the need for visitor-owned artifacts (`artifacts.created_by` references `users`) and for collecting abandoned anonymous instances.
+- **Create a visitor only where it gets in.** A public route with no `*anyone` grant and no link would mint a visitor and a session for nothing. `openSiteView` first asks `levelOf` for a fresh visitor.
+- **The claim copies, it does not move.** The guest's documents stay where they were until the sweep, so a mistaken "Keep it" loses nothing. Documents the person already has win: the guest's copy is skipped.
+- **Limits in memory.** The guide's limiter was per-process already (`deviceLimiter`). One replica serves the cluster, and a restart resetting counters is acceptable for abuse limits.
+
+### What worked
+- `GOWORK=off go test ./...`, Postgres (`./pkg/store/... ./pkg/server/...`), `make lint` (`0 issues.`) and `tsc` all pass.
+- `TestVisitors`:
+  - with no `*anyone` grant, a guest gets 401 and no cookie;
+  - with `*anyone admin`, a guest gets `interact`, has `db`, `user`, `room` and `downloads`, and lacks `assets`, `comments`, `sample`, `artifact` and `slop`;
+  - hello's `me` is `{id: vis_…, guest: true, profile.name: Guest}`, and `user.profiles` marks the id `guest`;
+  - the guest writes its own `data/users/<vis>/draft`; `/_site/me` says `visitor`; a second open is the same visitor;
+  - consent gives 403, create gives 401, and `create: public` gives 400;
+  - a `signed-in` route gives the guest 403;
+  - the listing names `*anyone`.
+- `TestVisitorLimit`: 30 guests from one address get in; the 31st gets 429.
+- `TestVisitorClaim`:
+  - a guest with an `interact` link writes a private draft;
+  - after signing in over it, `me.claim` = `{docs: 1, grants: 1, places: 1}`;
+  - keeping copies the draft to `data/users/<alex>/draft` (`{"x":1}`) and moves the grant (Alex `interact`, the guest none);
+  - there is no second offer, a second claim gives 404, and Alex then opens at `interact`.
+- `TestSweepVisitors`: after `VisitorIdle + 1h`, the old visitor and its grant and private doc are gone, and a fresh one stays.
+- Mutation check: capping visitors at owner instead of interact fails `TestVisitors` (`a guest: … level:admin`).
+- Browser: the guest flow described above.
+
+### What didn't work
+- `TestVisitorClaim` reported "offered twice". The server was right: the test decoded the second `/_site/me` into the same struct, and `json.Unmarshal` leaves a field the reply omits (`claim`) as it was. The test now resets it.
+- `pkg/rt/views.go` cannot use `store.IsVisitor`: `rt` does not import `store`. It uses the `vis_` prefix, with a comment.
+- Lint: `predeclared` on a test variable named `real`, and gofmt on the `const` block in `live.go`.
+- My first CLI call passed `--server` through a zsh variable (`$X`), which zsh does not split, so it arrived as one argument (`unknown flag: --server http://…`).
+
+### What I learned
+- `json.Unmarshal` into a reused struct is a trap for "this field is gone now" assertions.
+- With SameSite=Strict, the visitor cookie set on the shell's first same-origin `fetch` is the one used for everything after. The shell must refresh its own "who am I" after that first open, because `/_site/me` ran before the cookie existed.
+
+### What was tricky to build
+- **One person, two principals, one cookie.** Signing in over a guest replaces the cookie. The visitor has to be remembered on the new session (`from_visitor`), not looked up from the old cookie later, and the old visitor session revoked so it cannot be reused.
+- **The claim and open views.** Copied documents go through `RTWrite` and `rtPublish`, so the person's open views see them arrive. Moved grants go through `reviewViews` for each target, so the person's views reopen at the new level.
+
+### What warrants a second pair of eyes
+- **`TouchVisitor` on every site request of a visitor** is one write each. That is fine at this scale, and could be throttled later.
+- **`clientAddress` behind the cluster's proxy** needs `TrustProxyHeaders` on. Otherwise every visitor shares the proxy's address, and the 30-per-hour limit applies to the whole site.
+- **`siteClaim` caps at 2000 documents** per claim, and copies them one write each.
+
+### What should be done in the future
+- Phase 5: the Workshop Access panel, an "Open live" link, owners sharing from the shell, and the help pages (`live-sites`, runtime).
+- Check `TrustProxyHeaders` in the cluster config before publishing a public route.
+
+### Code review instructions
+- Read in this order:
+  1. `newVisitor`, `siteResolve`, `openSiteView`, `siteMe`, `claimable`, `siteClaim` and `siteCallback` in `pkg/server/live.go`;
+  2. `pkg/store/visitors.go`;
+  3. the visitor branches in `access.go` and `rt.go`.
+- Validate:
+  1. `GOWORK=off go test ./pkg/server -run TestVisitor -count=1`
+  2. Locally: `slop route set /blocks/:db blocks --bind 'target={db}' --live --access public --create signed-in`, `slop access grant <id> '*anyone' interact`, then open the URL in a private window.
+
+### Technical details
+- What a principal gets:
+
+  | | visitor | member | admin |
+  |---|---|---|---|
+  | subjects | id, `*anyone` | id, `*signed-in`, `*anyone` | same |
+  | level cap | interact | admin (owner of what they create) | owner |
+  | assets, comments | no | interact+ / yes | yes |
+  | sample, publish, slop | no | no | yes |
+  | create instances | no | by policy, 50/day | by policy |
