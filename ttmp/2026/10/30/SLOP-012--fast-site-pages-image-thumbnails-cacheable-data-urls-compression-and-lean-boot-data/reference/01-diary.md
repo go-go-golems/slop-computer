@@ -278,3 +278,75 @@ The storefront changes then shrink to `slop.image` and `slop.srcset` and one man
   - catalog script about 70 KB gzipped, cached;
   - about 40 KB per visible cover;
   - all covers about 3.5 MB instead of 76 MB.
+
+## Step 3: Open questions decided; the cluster token and the dropdown data
+
+The user left the open questions to me. I recorded the decisions in the guide (new section 14.1) and added the importer change as a task. In the same step the device login finally completed. With a working token I checked the data behind the Workshop dropdown: the cluster's projects and artifacts are consistent. The remaining question is whether the menu still hides the francois group on the new build.
+
+### Prompt Context
+
+**User prompt (verbatim):** "then create a new ticket and Create  a detailed analysis / design / implementation guide … You chose the best cases. Also, when I logged in with the link, i first opened in the wrong browser, then took it to another browser, and it redirected with \"flow_missing\" but that then didn't show an error or even a warning, i just happened to catch it from the corner of myh eye. Before implementing, let's tackle that token thing. Also, I merged the  deploy PR" (the full prompt is recorded in SLOP-013's diary, Step 1).
+
+**Mid-step prompt (verbatim):** "I approved the last token again I think maybe it was just the link that I copy pasted wrong from the first browser"
+
+**Assistant interpretation:** Decide SLOP-012's open questions. The sign-in problem becomes its own ticket (SLOP-013).
+
+**Inferred user intent:** Unblock SLOP-012's implementation with decisions, and fix sign-in first.
+
+**Commit (docs):** see the changelog.
+
+### What I did
+
+- **Guide section 14.1:**
+  - ladder 160–1920 kept;
+  - Place freshness 60 s with one-day SWR;
+  - no WebP output;
+  - the importer writes numbered `/_d/<media>/<n>/` URLs (media pushed first, then the catalog rewritten).
+- **Tasks:** checked the open-questions task; added the importer task.
+- **Token:** the third device login (`LNTS-MNVX`) completed. `slop auth status` shows `tok_64be4cf3dac0527e2d93ff9a`, admin, read/write/admin, expiring 2026-11-06.
+- **Dropdown data:**
+  - `slop projects list` → one project `francois` ("francois import").
+  - `slop artifacts list --format json` → 114 artifacts: 111 with project `francois`, 3 without.
+  - `GET /api/artifacts` returns `project` as `'francois'` or `null`. This matches what `ArtifactMenu` expects.
+
+### Why
+
+- **Each decision picks the option that adds no mechanism:**
+  - the ladder already bounds disk;
+  - 60 s keeps edits visible;
+  - JPEG and PNG need no dependency;
+  - numbered URLs make covers Content, so no special case is needed.
+
+### What worked
+
+- The token works.
+- The projects and artifacts data are consistent.
+
+### What didn't work
+
+- Nothing new in this step.
+
+### What I learned
+
+- **The dropdown's data is fine on the new build.** So the "only No project" view was either the old build or the client: a failed or loading projects query, or the menu's scroll position.
+- **The grouping fix in phase 1 is still right.** It makes the menu independent of the projects query.
+
+### What was tricky to build
+
+- N/A (decisions and checks only).
+
+### What warrants a second pair of eyes
+
+- **The importer change rewrites URLs inside records.** It must leave non-media URLs and external links untouched.
+
+### What should be done in the future
+
+- Ask the user to re-check the dropdown on `sha-2ac2611`.
+
+### Code review instructions
+
+- Guide section 14.1; `docmgr task list --ticket SLOP-012`.
+
+### Technical details
+
+- Token: `tok_64be4cf3dac0527e2d93ff9a`, 7 days, created by `slop auth login --server https://slop.yolo.scapegoat.dev --days 7 --name "claude-code slop-012" --no-browser`.

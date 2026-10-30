@@ -7,4 +7,5 @@
 - [ ] Phase 3: /_r/<artifact>/<n>.js data scripts, Inject references, runtime.js registry (.all stays sync), manifest files key <!-- t:0pa7 -->
 - [ ] Phase 4: storefront v2 and storefront-entry v2, site-pages help topic, agents.md; measure on the cluster <!-- t:ngh2 -->
 - [ ] Phase 5 (optional): per-host index of servable artifacts <!-- t:dtvc -->
-- [ ] Decide open questions (guide section 14): ladder, Place freshness, WebP output, importer numbered URLs <!-- t:5kk9 -->
+- [x] Decide open questions (guide section 14): ladder, Place freshness, WebP output, importer numbered URLs <!-- t:5kk9 -->
+- [ ] Importer: push media first, then rewrite catalog cover/gallery src to numbered /_d/<media>/<n>/ URLs; re-run the push on the cluster <!-- t:452h -->

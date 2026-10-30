@@ -15,3 +15,7 @@ Ticket created. Baseline measured on the cluster (76 MB of covers, 670 KB no-sto
 ## 2026-10-30
 
 Uploaded the intern guide to reMarkable: /ai/2026/10/30/SLOP-012/SLOP-012 Fast site pages intern guide.pdf (remarquee: OK: uploaded).
+
+## 2026-10-30
+
+Open questions decided (guide 14.1): ladder 160-1920, Place 60s + SWR, no WebP, importer writes numbered media URLs (new task). Cluster token restored; dropdown data checked (111 francois + 3 no project).

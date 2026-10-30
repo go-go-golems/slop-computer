@@ -663,6 +663,18 @@ Only if per-request route walking shows up in the measurements after phases 1–
 3. **WebP output.** Is it ever wanted? It needs a non-standard encoder dependency.
 4. **The importer.** Should it rewrite catalog cover URLs to numbered versions (content class) after pushing the media artifacts? It would need a second pass once version numbers are known.
 
+### 14.1 Decisions (2026-10-30)
+
+The user asked me to pick ("You chose the best cases"):
+
+1. **Ladder: keep 160–1920.** `srcset` lets the browser pick the smallest width that fits, so the large rungs cost nothing unless a wide or high-DPI screen asks for them. Disk use is bounded at seven copies per image.
+2. **Place freshness: 60 s** with a one-day `stale-while-revalidate`. Edits show within a minute, and repeat visits never wait on revalidation.
+3. **No WebP output.** JPEG and PNG from the standard library are enough at thumbnail sizes. No new encoder dependency.
+4. **The importer writes numbered URLs.**
+   - `slop import francois push` pushes the media artifacts first, then rewrites `cover.src` and `gallery[].src` in the catalog records to `/_d/<media>/<n>/…` before pushing the catalog.
+   - Covers then use the Content class, so the browser never revalidates them.
+   - The cluster's catalog is fixed by re-running the import push. The import is idempotent, and only the catalog gets a new version.
+
 ## 15. Glossary
 
 - **Content URL**: names bytes that can never change (a version number or a hash in the URL).
