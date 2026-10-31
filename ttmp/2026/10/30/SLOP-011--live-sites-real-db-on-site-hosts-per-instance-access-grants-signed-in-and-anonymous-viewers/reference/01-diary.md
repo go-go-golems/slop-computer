@@ -1042,3 +1042,30 @@ route undo ~22:36 /blocks/:db is now (none)
 sandboxed:  boutique.css?v=2  referer=null  → 404 (HTML)   self.origin = "null"
 restored:   boutique.css?v=2  referer=https://site.slop.yolo.scapegoat.dev/ → 200
 ```
+
+## Step 11: Blocks live on apps.slop.yolo.scapegoat.dev (milestone)
+
+Blocks runs live on its own site host, and `site.slop` is unchanged:
+styled, with no sandbox.
+
+**User prompt (verbatim):** "yes" (to merging #405 and deploying). The
+auto-mode classifier refused my `gh pr merge` as "Production Deploy", so the
+user ran it: `gh pr merge 405 --repo wesen/2026-03-27--hetzner-k3s --merge`.
+
+- **GitOps:** #405 merged as `db7f304`. Argo CD synced in about 220 s, and the deployment args gained `--site-host=apps.slop.yolo.scapegoat.dev`. `rollout status` reported "successfully rolled out".
+- **TLS:** `slop-tls` is Ready, with SANs `*.sbx…`, `apps.slop…`, `site.slop…` and `slop.yolo…`, valid until 2027-01-29.
+- **Route:** `slop route set '/blocks/:db' blocks --host apps.slop.yolo.scapegoat.dev --bind 'target={db}' --live --access signed-in --create signed-in` returned `→ blocks@main live on the blocks data named by :db for signed-in, created by signed-in`.
+- **Headers:**
+  - `apps/blocks/new`: 200 with the shell CSP;
+  - `apps/`: 404 with the sandbox;
+  - `site/`: 200, `frame-ancestors` only;
+  - `site/blocks/new`: 404.
+- **Browser** (`$S/probe/apps-prod.cjs`):
+  - the storefront: origin `https://site.slop.yolo.scapegoat.dev`, body font `"ABC Areal", …`, stylesheets with 304, 14 and 1 rules, 94 covers. This is the computed-style check that Step 10 asked for.
+  - `apps/blocks/new`: "There is nothing here yet. Sign in to create one."; no page errors.
+- **Sign-in hop:**
+  - `apps/_site/login?return=/blocks/new` gives 303 to `https://slop.yolo.scapegoat.dev/auth/handoff?host=apps.slop.yolo.scapegoat.dev&…` and sets `__Host-slop_site_state` (Lax, 600 s);
+  - the main host answers that with 303 to `/auth/login?return=…`, accepting the new host.
+
+  A full signed-in round trip needs the real login provider, so it was not run headless.
+- **Next:** the user signs in at `https://apps.slop.yolo.scapegoat.dev/blocks/new` and creates a workspace. Ramon gets the admin or member role in Admin ▸ People.
