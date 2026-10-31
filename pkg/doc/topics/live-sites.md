@@ -132,10 +132,13 @@ signed in becomes a **guest**: an id `vis_…` and a site cookie. Apps see
 ## The rest of the site
 
 A host with a live route serves its other pages with a CSP `sandbox` (an
-opaque origin), so no page there can use a visitor's site session. Their
-`fetch` calls to `/_d/` and `/_r/` still work; `localStorage` becomes
-memory-only on that host. Put releases that need persistent storage on a
-host without live routes.
+opaque origin), so no page there can use a visitor's site session. Explicit
+`/_d/`, `/_r/` and `/_v/` URLs still work. Relative files do not: a
+sandboxed page sends no `Referer`, so `style.css` from `/` or from
+`/r/weft` no longer finds its page. `localStorage` becomes memory-only.
+
+Give live apps a site host of their own (another `--site-host`), and keep
+static pages and releases on a host without live routes.
 
 ## In the Workshop
 

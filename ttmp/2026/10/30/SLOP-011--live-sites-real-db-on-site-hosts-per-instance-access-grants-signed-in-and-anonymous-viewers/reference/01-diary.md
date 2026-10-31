@@ -936,3 +936,109 @@ trade-off.
   - the storefront probe: 94 covers, 22 shown, network idle in 3808 ms, 22 images and 433 KB with no non-200, and no console errors.
 - **Correction to Step 4:** `siteHeaders` sends `Access-Control-Allow-Origin: *` on every site page, not only on hosts with a live route. Only the CSP `sandbox` depends on a live route. Those pages are public and no credentials flow, so this is harmless.
 - **Next:** with the user's yes to the trade-off (or a separate host), set `/blocks/:db` live on the cluster (`--access signed-in --create signed-in`), and let Ramon in as admin or member.
+
+## Step 10: Blocks live on site.slop broke the storefront's CSS; route undone, a separate host proposed
+
+The user accepted the D8 trade-off, so I set `/blocks/:db` live on
+`site.slop.yolo.scapegoat.dev`. The Blocks shell worked. The storefront,
+however, rendered without its stylesheet: under the sandbox the page's
+relative files no longer resolve. I undid the route after about 5 minutes,
+which restored the site. I then proposed a separate site host for live apps
+(GitOps PR #405, not merged).
+
+The trade-off I described to the user (memory-only `localStorage`) was
+incomplete. D8 also breaks every relative file of a static page whose file
+lookup depends on `Referer`, and on this host that is most of them.
+
+### Prompt Context
+
+**User prompt (verbatim):** "yes"
+
+**Assistant interpretation:** A yes to the question at the end of Step 9:
+accept that site.slop's other pages become sandboxed, and set `/blocks/:db`
+live there for signed-in people, who may also create workspaces.
+
+**Inferred user intent:** Have Blocks usable on the public site for Ramon
+and other signed-in people, without breaking what the site already serves.
+
+### What I did
+
+- Built the CLI from `33e6657` into the scratchpad (`slop-prod`). It talks to the main host with the stored login.
+- **Mistake:** a one-liner meant to show the stored CLI login without its secret only masked top-level keys, so it printed the production API token into the session transcript. It is in no file or commit. The user should revoke that token in the Workshop.
+- `slop artifacts list` shows `blocks` ("Claude Blocks", page, main 1).
+- `slop route set '/blocks/:db' blocks --bind 'target={db}' --live --access signed-in --create signed-in` returned `→ blocks@main live on the blocks data named by :db for signed-in, created by signed-in`.
+- Headers checked with curl:
+  - `/blocks/new`: 200, the shell CSP (`frame-src https://*.sbx…`), `shell.js` and `shell.css`;
+  - `/`, `/apps/blockout-studio` and `/r/nothing-here`: `sandbox allow-scripts allow-forms allow-popups allow-popups-to-escape-sandbox allow-modals allow-downloads`;
+  - `/_site/me`: `{"kind":"none"}`.
+- Browser (`$S/probe/blocks-prod.cjs`): `/blocks/new` and `/blocks/ws-nope` show "There is nothing here yet. Sign in to create one." The one 404 in the console is the shell's open call, which is how it learns there is no instance.
+- Browser (`$S/probe/site.cjs /`): 94 covers, no console errors. The screenshot, however, showed an **unstyled** page: default serif type, no grid.
+- `curl $B/boutique.css?v=2` returned 404. With `-H "Referer: $B/"` it returned 200.
+- `$S/probe/ref.cjs` showed the sandboxed page at `self.origin === "null"`, with `referer=null` on both `boutique.css` and `/_r/francois-catalog/3.js`.
+- Ran `slop route undo '/blocks/:db'`, which reported `is now (none)`. Then:
+  - the CSP on `/` is back to `frame-ancestors` only;
+  - `ref.cjs` shows `referer="https://site.slop.yolo.scapegoat.dev/"`, `boutique.css` 200, and the origin back to the site's.
+- Local experiment (`$S/reftest/srv.py`, `$S/probe/reftest.cjs`): a `sandbox allow-scripts` page with `Referrer-Policy` unset, `unsafe-url`, `no-referrer-when-downgrade` or `origin`. Chrome sent no `Referer` on its stylesheet request in every case.
+- Proposed a separate site host. GitOps branch `slop/apps-host`, PR #405 (`wesen/2026-03-27--hetzner-k3s`):
+  - a second `--site-host=apps.slop.yolo.scapegoat.dev`;
+  - an ingress rule and a TLS host for it;
+  - the name added to the `slop-tls` certificate.
+
+  `getent hosts apps.slop.yolo.scapegoat.dev` already gives `91.98.46.169`, the node, through the `*.yolo` wildcard.
+- Corrected `pkg/doc/topics/live-sites.md` § "The rest of the site": relative files break; give live apps their own host.
+
+### Why
+
+- I undid the route rather than fixing forward, because the public storefront and every release with relative assets were broken for anyone visiting.
+- A separate host needs no code and matches the doc's existing advice for releases. It also keeps the D8 sandbox where it is meant to apply: only on a host whose other pages could otherwise use a visitor's session.
+
+### What worked
+
+- `slop route undo` restored the site in one step.
+- Relative files on `site.slop` were back as soon as the route was gone. Cached HTML wasn't a factor, because the CSP is set per response from the route table.
+
+### What didn't work
+
+- The D8 assumption that static pages only lose persistent storage. In `serveSite` (`pkg/server/serve.go`), a page's relative files are found in two ways:
+  - by resolving the file's own path to a route, which works for `/apps/:id`-style patterns;
+  - otherwise through the `Referer` (`// relative links from /pricing to style.css arrive as /style.css; from /r/weft as /r/style.css`).
+
+  A document with an opaque origin sends no `Referer`, so the second path fails. The storefront at `/` depends on it, as do releases at `/r/:page`.
+- My earlier local verification ("the storefront under the sandbox", Step 7) checked covers and console errors, not styling. A missing stylesheet logs no console error, because the 404 arrives as an HTML page.
+- `Referrer-Policy` can't restore the header (local experiment above).
+
+### What I learned
+
+- In Chrome, a CSP-sandboxed document without `allow-same-origin` sends no `Referer` at all, whatever the `Referrer-Policy`.
+- My probes should measure styling too (for example, a computed style on `body`), not only console errors.
+
+### What was tricky to build
+
+- Nothing new was built. The tricky part was seeing the failure: the page loaded, 94 covers counted, no errors were logged, and only the screenshot showed it.
+
+### What warrants a second pair of eyes
+
+- `route set --live` on a host that also serves public static pages silently changes those pages. A guard is worth considering: refuse, or warn and require `--force`, when the host has public non-live routes.
+- PR #405: ingress and certificate for the new name; the server loops over `SiteHosts` everywhere, and `site.slop` stays first.
+
+### What should be done in the future
+
+- Once the user approves the deploy and #405 is merged: `slop route set /blocks/:db blocks --host apps.slop.yolo.scapegoat.dev --bind 'target={db}' --live --access signed-in --create signed-in`, then a browser check of the shell, and of the storefront on `site.slop` (styled).
+- Ramon needs the admin or member role. The user sets it in Admin ▸ People.
+- Add a computed-style check to the site probes.
+- Decide on the guard against mixing live and static routes on one host.
+
+### Code review instructions
+
+- `pkg/doc/topics/live-sites.md` § "The rest of the site".
+- `pkg/server/serve.go` `serveSite`, the `path.Ext` branch: Referer-based file lookup.
+- GitOps: `gitops/kustomize/slop/{deployment,ingress,certificate}.yaml` on `slop/apps-host`.
+
+### Technical details
+
+```text
+route set  22:31  /blocks/:db → blocks@main live (signed-in, create signed-in)
+route undo ~22:36 /blocks/:db is now (none)
+sandboxed:  boutique.css?v=2  referer=null  → 404 (HTML)   self.origin = "null"
+restored:   boutique.css?v=2  referer=https://site.slop.yolo.scapegoat.dev/ → 200
+```
