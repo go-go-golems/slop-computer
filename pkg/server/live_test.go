@@ -16,7 +16,11 @@ import (
 // harness's jar keys cookies by URL, not by Host), Host and Origin.
 type siteBrowser struct {
 	h      *harness
-	cookie string
+	cookie string // the site session
+	state  string // the sign-in state cookie, while a sign-in runs
+	// strict withholds the session cookie, as a browser does on a
+	// cross-site navigation (SameSite=Strict); the state cookie is Lax.
+	strict bool
 }
 
 func (sb *siteBrowser) req(method, path string, body any, hdr map[string]string) (int, []byte, http.Header) {
@@ -34,8 +38,11 @@ func (sb *siteBrowser) req(method, path string, body any, hdr map[string]string)
 	if method != http.MethodGet {
 		req.Header.Set("Origin", "http://site.test")
 	}
-	if sb.cookie != "" {
+	if sb.cookie != "" && !sb.strict {
 		req.AddCookie(&http.Cookie{Name: "slop_site_dev", Value: sb.cookie})
+	}
+	if sb.state != "" {
+		req.AddCookie(&http.Cookie{Name: "slop_site_state_dev", Value: sb.state})
 	}
 	for k, v := range hdr {
 		if v == "" {
@@ -50,8 +57,14 @@ func (sb *siteBrowser) req(method, path string, body any, hdr map[string]string)
 	}
 	defer func() { _ = resp.Body.Close() }()
 	for _, c := range resp.Cookies() {
-		if c.Name == "slop_site_dev" {
+		switch c.Name {
+		case "slop_site_dev":
 			sb.cookie = c.Value
+		case "slop_site_state_dev":
+			sb.state = c.Value
+			if c.MaxAge < 0 {
+				sb.state = ""
+			}
 		}
 	}
 	b, _ := io.ReadAll(resp.Body)
@@ -68,12 +81,26 @@ func (sb *siteBrowser) json(method, path string, body any, out any) int {
 	return code
 }
 
-// handoff signs b in on site.test the way the shell's Sign in does: the main
-// host hands over a one-time code, the site's callback turns it into a
-// site session.
+// handoff signs b in on site.test the way the shell's Sign in does, in a
+// new site browser.
 func (h *harness) handoff(b *browser, ret string) *siteBrowser {
 	h.t.Helper()
-	resp, err := b.c.Get(h.ts.URL + "/auth/handoff?host=site.test&return=" + url.QueryEscape(ret))
+	sb := &siteBrowser{h: h}
+	h.signInOn(sb, b, ret, false)
+	return sb
+}
+
+// signInOn runs the sign-in: the site starts it (state cookie), the main
+// host hands over a one-time code, the site's callback turns it into a
+// site session. crossSite withholds the session cookie at the callback.
+func (h *harness) signInOn(sb *siteBrowser, b *browser, ret string, crossSite bool) {
+	h.t.Helper()
+	code, _, hdr := sb.req("GET", "/_site/login?return="+url.QueryEscape(ret), nil, nil)
+	start, _ := url.Parse(hdr.Get("Location"))
+	if code != 303 || start.Path != "/auth/handoff" || sb.state == "" {
+		h.t.Fatalf("site login: %d %s", code, start)
+	}
+	resp, err := b.c.Get(h.ts.URL + start.RequestURI())
 	if err != nil || resp.StatusCode != 303 {
 		h.t.Fatalf("handoff: %v %v", err, resp)
 	}
@@ -81,12 +108,13 @@ func (h *harness) handoff(b *browser, ret string) *siteBrowser {
 	if loc.Host != "site.test" || loc.Path != "/_site/callback" {
 		h.t.Fatalf("handoff went to %s", loc)
 	}
-	sb := &siteBrowser{h: h}
-	code, _, hdr := sb.req("GET", loc.RequestURI(), nil, nil)
-	if code != 303 || hdr.Get("Location") != ret || sb.cookie == "" {
+	before := sb.cookie
+	sb.strict = crossSite
+	code, _, hdr = sb.req("GET", loc.RequestURI(), nil, nil)
+	sb.strict = false
+	if code != 303 || hdr.Get("Location") != ret || sb.cookie == "" || sb.cookie == before || sb.state != "" {
 		h.t.Fatalf("callback: %d %v", code, hdr)
 	}
-	return sb
 }
 
 // liveSetup: an app (board), a workspace that runs it (ws), and a live
@@ -125,12 +153,16 @@ func TestLiveRouteForAdmins(t *testing.T) {
 
 	// The handoff: signed out on the main host, it signs in first.
 	nobody := &http.Client{CheckRedirect: func(*http.Request, []*http.Request) error { return http.ErrUseLastResponse }}
-	resp, _ := nobody.Get(h.ts.URL + "/auth/handoff?host=site.test&return=/board/team")
+	state := "&state=" + strings.Repeat("a", 32)
+	resp, _ := nobody.Get(h.ts.URL + "/auth/handoff?host=site.test&return=/board/team" + state)
 	if resp.StatusCode != 303 || !strings.HasPrefix(resp.Header.Get("Location"), "/auth/login?return=%2Fauth%2Fhandoff%3F") {
 		t.Fatalf("signed-out handoff: %d %s", resp.StatusCode, resp.Header.Get("Location"))
 	}
-	if resp, _ = manuel.c.Get(h.ts.URL + "/auth/handoff?host=evil.test&return=/"); resp.StatusCode != 400 {
+	if resp, _ = manuel.c.Get(h.ts.URL + "/auth/handoff?host=evil.test&return=/" + state); resp.StatusCode != 400 {
 		t.Fatalf("handoff to an unknown host: %d", resp.StatusCode)
+	}
+	if resp, _ = manuel.c.Get(h.ts.URL + "/auth/handoff?host=site.test&return=/"); resp.StatusCode != 400 {
+		t.Fatalf("a handoff the site did not start: %d", resp.StatusCode)
 	}
 	site := h.handoff(manuel, "/board/team")
 	var me map[string]any
@@ -196,24 +228,44 @@ func TestLiveRouteForAdmins(t *testing.T) {
 	}
 }
 
-// A handoff code works once, on its host, and returns only to site paths.
+// A handoff code works once, on its host, in the browser that started the
+// sign-in, and returns only to site paths.
 func TestHandoffCodes(t *testing.T) {
 	h, manuel := liveSetup(t)
-	resp, _ := manuel.c.Get(h.ts.URL + "/auth/handoff?host=site.test&return=" + url.QueryEscape("//evil.test/x"))
-	loc, _ := url.Parse(resp.Header.Get("Location"))
-	sb := &siteBrowser{h: h}
-	if code, _, hdr := sb.req("GET", loc.RequestURI(), nil, nil); code != 303 || hdr.Get("Location") != "/" {
-		t.Fatalf("a foreign return path: %d %s", code, hdr.Get("Location"))
+	// code starts a sign-in on sb and returns the callback the main host
+	// sends it to.
+	code := func(sb *siteBrowser, ret string) string {
+		t.Helper()
+		_, _, hdr := sb.req("GET", "/_site/login?return="+url.QueryEscape(ret), nil, nil)
+		start, _ := url.Parse(hdr.Get("Location"))
+		resp, _ := manuel.c.Get(h.ts.URL + start.RequestURI())
+		loc, _ := url.Parse(resp.Header.Get("Location"))
+		return loc.RequestURI()
 	}
-	if code, _, _ := (&siteBrowser{h: h}).req("GET", loc.RequestURI(), nil, nil); code != 400 {
-		t.Fatalf("a used code: %d", code)
+	sb := &siteBrowser{h: h}
+	cb := code(sb, "//evil.test/x")
+	// Another browser (no state cookie, or another one) cannot use the code.
+	other := &siteBrowser{h: h}
+	if c, _, _ := other.req("GET", cb, nil, nil); c != 400 {
+		t.Fatalf("a code in another browser: %d", c)
+	}
+	other.state = strings.Repeat("b", 32)
+	if c, _, _ := other.req("GET", cb, nil, nil); c != 400 {
+		t.Fatalf("a code with another state: %d", c)
+	}
+	if c, _, hdr := sb.req("GET", cb, nil, nil); c != 303 || hdr.Get("Location") != "/" {
+		t.Fatalf("a foreign return path: %d %s", c, hdr.Get("Location"))
+	}
+	if c, _, _ := sb.req("GET", cb, nil, nil); c != 400 {
+		t.Fatalf("a used code: %d", c)
 	}
 	// A code is for the host it was made for.
-	if err := h.st.SaveHandoff(context.Background(), "abc", manuel.id(), "other.test", "/"); err != nil {
+	st := strings.Repeat("c", 32)
+	if err := h.st.SaveHandoff(context.Background(), "abc", manuel.id(), "other.test", "/", st); err != nil {
 		t.Fatal(err)
 	}
-	if code, _, _ := (&siteBrowser{h: h}).req("GET", "/_site/callback?code=abc", nil, nil); code != 400 {
-		t.Fatalf("a code for another host: %d", code)
+	if c, _, _ := (&siteBrowser{h: h, state: st}).req("GET", "/_site/callback?code=abc", nil, nil); c != 400 {
+		t.Fatalf("a code for another host: %d", c)
 	}
 }
 
@@ -305,7 +357,9 @@ func TestGrantsAndMembers(t *testing.T) {
 
 	// A higher grant closes the view; the new one has the new level.
 	grant(alex, "interact")
-	vc.next("revoked")
+	if ev := vc.next("access"); ev.Data["level"] != "interact" {
+		t.Fatalf("access event %v", ev.Data)
+	}
 	vc, v, _ = site.siteView("/board/team")
 	if v["level"] != "interact" {
 		t.Fatalf("after interact: %v", v)
@@ -316,8 +370,8 @@ func TestGrantsAndMembers(t *testing.T) {
 
 	// Members are capped at admin, and get neither models nor publishing.
 	grant(alex, "owner")
-	vc.next("revoked")
-	_, v, _ = site.siteView("/board/team")
+	vc.next("access")
+	vc, v, _ = site.siteView("/board/team")
 	if v["level"] != "admin" {
 		t.Fatalf("an owner grant to a member: %v", v)
 	}
@@ -338,11 +392,19 @@ func TestGrantsAndMembers(t *testing.T) {
 	}
 
 	// Taking grants away closes the view and the door.
-	for _, sub := range []string{alex, "*signed-in"} {
+	revoke := func(sub string) {
+		t.Helper()
 		if code := manuel.do("DELETE", "/api/rt/targets/ws/grants/"+url.PathEscape(sub), nil, nil); code != 200 {
 			t.Fatalf("revoke %s: %d", sub, code)
 		}
 	}
+	revoke(alex)
+	if ev := vc.next("access"); ev.Data["level"] != "view" { // *signed-in still lets alex view
+		t.Fatalf("after removing alex's grant: %v", ev.Data)
+	}
+	vc, _, _ = site.siteView("/board/team")
+	revoke("*signed-in")
+	vc.next("revoked") // no access left: the page stops
 	if _, _, code := site.siteView("/board/team"); code != 403 {
 		t.Fatalf("after revoking: %d", code)
 	}
@@ -700,21 +762,6 @@ func TestVisitorLimit(t *testing.T) {
 	}
 }
 
-// handoffOver signs b in on a site browser that already has a cookie (a
-// guest's), as the shell's Sign in does.
-func (h *harness) handoffOver(sb *siteBrowser, b *browser, ret string) {
-	h.t.Helper()
-	resp, err := b.c.Get(h.ts.URL + "/auth/handoff?host=site.test&return=" + url.QueryEscape(ret))
-	if err != nil || resp.StatusCode != 303 {
-		h.t.Fatalf("handoff: %v %v", err, resp)
-	}
-	loc, _ := url.Parse(resp.Header.Get("Location"))
-	before := sb.cookie
-	if code, _, _ := sb.req("GET", loc.RequestURI(), nil, nil); code != 303 || sb.cookie == before {
-		h.t.Fatalf("callback: %d", code)
-	}
-}
-
 // A guest who signs in is offered what they did as a guest, and keeps it
 // only by saying so.
 func TestVisitorClaim(t *testing.T) {
@@ -743,7 +790,7 @@ func TestVisitorClaim(t *testing.T) {
 	if _, err := h.st.SetUserRole(ctx, alex, store.RoleMember); err != nil {
 		t.Fatal(err)
 	}
-	h.handoffOver(sb, h.signIn("alex"), "/board/team")
+	h.signInOn(sb, h.signIn("alex"), "/board/team", true) // a cross-site return: only the Lax state cookie
 	var me struct {
 		Kind  string
 		Claim map[string]int

@@ -230,6 +230,7 @@
       case "compose": post({ id: m.id, opened: false }); return; // no comments on the site yet
       case "permissions": post({ id: m.id }); return;
       case "reload": await open(false); return; // the route serves the new version
+      case "reopen": await open(false); return; // access changed: a new view, a fresh frame
       case "args": {
         const q = new URLSearchParams();
         for (const [k, v] of Object.entries(m.args || {})) if (typeof v === "string" && v) q.set(k, v);

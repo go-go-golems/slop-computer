@@ -73,24 +73,25 @@ func (s *Store) RevokeSiteSession(ctx context.Context, hash []byte) error {
 }
 
 // SaveHandoff stores a one-time code that signs user in on host and leads
-// to returnPath there.
-func (s *Store) SaveHandoff(ctx context.Context, code, user, host, returnPath string) error {
+// to returnPath there, for the browser holding state.
+func (s *Store) SaveHandoff(ctx context.Context, code, user, host, returnPath, state string) error {
 	now := s.Now()
 	if _, err := s.db().exec(ctx, `DELETE FROM site_handoffs WHERE expires_at < ?`, now.Add(-time.Hour)); err != nil {
 		return err
 	}
-	_, err := s.db().exec(ctx, `INSERT INTO site_handoffs(code_hash,user_id,host,return_path,expires_at) VALUES(?,?,?,?,?)`,
-		Hash(code), user, host, returnPath, now.Add(HandoffTTL))
+	_, err := s.db().exec(ctx, `INSERT INTO site_handoffs(code_hash,user_id,host,return_path,expires_at,state) VALUES(?,?,?,?,?,?)`,
+		Hash(code), user, host, returnPath, now.Add(HandoffTTL), state)
 	return err
 }
 
 // ConsumeHandoff uses a code once, on the host it was made for, before it
-// expires: the user it signs in and where to go.
-func (s *Store) ConsumeHandoff(ctx context.Context, code, host string) (string, string, error) {
+// expires, by the browser holding its state: the user it signs in and where
+// to go.
+func (s *Store) ConsumeHandoff(ctx context.Context, code, host, state string) (string, string, error) {
 	var user, returnPath string
 	now := s.Now()
 	err := s.db().row(ctx, `UPDATE site_handoffs SET consumed_at=?
-WHERE code_hash=? AND host=? AND consumed_at IS NULL AND expires_at > ?
-RETURNING user_id,return_path`, now, Hash(code), host, now).Scan(&user, &returnPath)
+WHERE code_hash=? AND host=? AND state=? AND state<>'' AND consumed_at IS NULL AND expires_at > ?
+RETURNING user_id,return_path`, now, Hash(code), host, state, now).Scan(&user, &returnPath)
 	return user, returnPath, notFound(err)
 }

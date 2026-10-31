@@ -79,18 +79,29 @@ func (s *Server) viewer(ctx context.Context, id string) (store.User, error) {
 }
 
 // reviewViews closes a target's views whose person's level is no longer
-// the view's: the page asks its shell to renew, and the new view carries
-// the new level (or none).
+// the view's: a view that lost access is revoked, and one whose level
+// changed is told to reopen with the new level.
 func (s *Server) reviewViews(ctx context.Context, target string) {
 	t, err := s.Store.Artifact(ctx, target)
 	if err != nil {
 		return
 	}
 	for _, v := range s.views.Of(target) {
-		u, err := s.viewer(ctx, v.User)
-		if err != nil || s.levelOf(ctx, u, t) != v.Level {
-			s.views.Close(v, true)
+		level := rt.LevelNone
+		if u, err := s.viewer(ctx, v.User); err == nil {
+			level = s.levelOf(ctx, u, t)
 		}
+		if level == v.Level {
+			continue
+		}
+		if level == rt.LevelNone {
+			s.views.Close(v, true) // access ended: the page stops
+			continue
+		}
+		// The page asks its shell to reopen it; the new view has the new
+		// level and capabilities.
+		v.Send(rt.Out{Type: "access", Data: map[string]any{"level": level.String()}})
+		s.views.Close(v, false)
 	}
 }
 

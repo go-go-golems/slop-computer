@@ -113,6 +113,17 @@ export function AppScreen({ target, version, args }: { target: string; version?:
           })()
           return
         }
+        case 'reopen':
+          // Access changed: a new view with the new level, in a fresh frame.
+          void (async () => {
+            try {
+              const nv = await openView({ target, version }).unwrap()
+              if (cancelled) { closeView(nv.view); return }
+              viewRef.current = nv
+              setView(nv)
+            } catch (e) { setProblem(errorText(e)) }
+          })()
+          return
         case 'navigate':
           if (typeof m.target === 'string' && /^[a-z0-9][a-z0-9-]{0,62}$/.test(m.target)) navigate(runPath(m.target))
           return

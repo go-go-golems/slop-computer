@@ -46,6 +46,23 @@ func (s *Server) setSiteCookie(w http.ResponseWriter, value string, maxAge int) 
 	http.SetCookie(w, &http.Cookie{Name: s.siteCookie(), Value: value, Path: "/", MaxAge: maxAge, HttpOnly: true, Secure: s.Config.Secure(), SameSite: http.SameSiteStrictMode})
 }
 
+// The sign-in state cookie binds a handoff to the browser that started it
+// on the site, and carries the guest it was (if any) across the main host:
+// SameSite=Lax, so a cross-site return still sends it, where the session
+// cookie (Strict) may be withheld. __Host- in production, so no other host
+// can set it.
+func (s *Server) siteStateCookie() string {
+	if s.Config.Secure() {
+		return "__Host-slop_site_state"
+	}
+	return "slop_site_state_dev"
+}
+
+func (s *Server) setSiteState(w http.ResponseWriter, value string, maxAge int) {
+	// #nosec G124 -- Secure follows the public scheme, as for the main session.
+	http.SetCookie(w, &http.Cookie{Name: s.siteStateCookie(), Value: value, Path: "/", MaxAge: maxAge, HttpOnly: true, Secure: s.Config.Secure(), SameSite: http.SameSiteLaxMode})
+}
+
 // siteOrigin is a site host's origin, with the public URL's scheme.
 func (s *Server) siteOrigin(host string) string {
 	return s.Config.PublicURL.Scheme + "://" + strings.ToLower(host)
@@ -358,7 +375,13 @@ var errKeepMine = errors.New("the person has this document")
 // siteLogin starts a handoff: the main host signs the person in (if it has
 // to) and sends them back with a one-time code.
 func (s *Server) siteLogin(w http.ResponseWriter, r *http.Request) {
-	q := url.Values{"host": {s.siteHost(r.Host)}, "return": {siteReturn(r.URL.Query().Get("return"))}}
+	state := store.RandomHex(16)
+	cookie := state
+	if p, err := s.siteResolve(r); err == nil && p.visitor() {
+		cookie += "." + p.ID() // the guest this browser was, offered after sign-in
+	}
+	s.setSiteState(w, cookie, int((10 * time.Minute).Seconds()))
+	q := url.Values{"host": {s.siteHost(r.Host)}, "return": {siteReturn(r.URL.Query().Get("return"))}, "state": {state}}
 	http.Redirect(w, r, s.origins()[0]+"/auth/handoff?"+q.Encode(), http.StatusSeeOther)
 }
 
@@ -374,6 +397,11 @@ func (s *Server) handoff(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	ret := siteReturn(q.Get("return"))
+	state := q.Get("state")
+	if len(state) != 32 {
+		http.Error(w, "start signing in from the site", http.StatusBadRequest)
+		return
+	}
 	p, err := s.resolve(r)
 	if err != nil {
 		unavailable(w, err)
@@ -388,7 +416,7 @@ func (s *Server) handoff(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	code := store.RandomHex(24)
-	if err = s.Store.SaveHandoff(r.Context(), code, p.User.ID, host, ret); err != nil {
+	if err = s.Store.SaveHandoff(r.Context(), code, p.User.ID, host, ret, state); err != nil {
 		unavailable(w, err)
 		return
 	}
@@ -397,16 +425,24 @@ func (s *Server) handoff(w http.ResponseWriter, r *http.Request) {
 
 func (s *Server) siteCallback(w http.ResponseWriter, r *http.Request) {
 	host := s.siteHost(r.Host)
-	user, ret, err := s.Store.ConsumeHandoff(r.Context(), r.URL.Query().Get("code"), host)
+	state, guest := "", ""
+	if c, err := r.Cookie(s.siteStateCookie()); err == nil {
+		state, guest, _ = strings.Cut(c.Value, ".")
+	}
+	s.setSiteState(w, "", -1)
+	user, ret, err := s.Store.ConsumeHandoff(r.Context(), r.URL.Query().Get("code"), host, state)
 	if err != nil {
 		w.Header().Set("Content-Type", "text/html; charset=utf-8")
 		w.WriteHeader(http.StatusBadRequest)
-		_, _ = w.Write([]byte(`<!doctype html><title>Sign-in link expired</title><p style="font:14px Arial;padding:24px">This sign-in link was already used or has expired. <a href="/_site/login">Sign in again</a>.</p>`))
+		_, _ = w.Write([]byte(`<!doctype html><title>Sign-in link expired</title><p style="font:14px Arial;padding:24px">This sign-in link was already used, has expired, or was started in another browser. <a href="/_site/login">Sign in again</a>.</p>`))
 		return
 	}
 	from := ""
+	if store.IsVisitor(guest) {
+		from = guest
+	}
 	if old, err := s.siteResolve(r); err == nil && old.visitor() {
-		from = old.ID()
+		from = old.ID() // the session cookie, when the return was same-site
 		_ = s.Store.RevokeSiteSession(r.Context(), old.Session.Hash)
 	}
 	token, _, err := s.Store.CreateSiteSession(r.Context(), host, user, from)
