@@ -915,3 +915,24 @@ Codex reviewed PR #8 and raised two findings. Both were real, and both are fixed
     → main /auth/handoff?host&return&state         SaveHandoff(code, user, host, ret, state)
     → site /_site/callback?code                    cookie state must equal the handoff's; from = cookie guest
   ```
+
+## Step 9: Merged and deployed (milestone)
+
+PR #8 is merged as `1128a04`, and its image runs on the cluster. The live
+features are deployed, but no live route is set there yet. Publishing Blocks
+on `site.slop.yolo.scapegoat.dev` waits for the user to accept the D8
+trade-off.
+
+**User prompt (verbatim):** "addrses code review comments, merge, deploy" (Step 8).
+
+- **CI:** both review threads were answered. `release / publish` passed on `95e8bca`; PR #8 was merged with a merge commit, `1128a04`.
+- **Image:** `publish-image` run 41152020573 succeeded, and `ghcr.io/go-go-golems/slop-computer:sha-1128a04` exists.
+- **GitOps:** PR #404 (`wesen/2026-03-27--hetzner-k3s`, commit `f15b549`, a one-line image bump in `gitops/kustomize/slop/deployment.yaml`) passed `validate` in 18 s and was merged as `4bdba2f`. #403 (`sha-5b14471`) was closed as superseded, since `1128a04` includes #6.
+- **Rollout:** the image changed after about 40 s, and `kubectl -n slop rollout status deploy/slop` reported "successfully rolled out". The logs show `Applied migration` for 008_live_sites, 009_grants, 010_links, 011_visitors and 012_handoff_state on Postgres, then "slop serving".
+- **Smoke checks:**
+  - `https://slop.yolo.scapegoat.dev/healthz` gives 200, and the site `/` gives 200 with `frame-ancestors` and no sandbox (no live route yet);
+  - `/_site/me` gives `{"kind":"none"}`;
+  - `/auth/handoff` without `state` gives 400;
+  - the storefront probe: 94 covers, 22 shown, network idle in 3808 ms, 22 images and 433 KB with no non-200, and no console errors.
+- **Correction to Step 4:** `siteHeaders` sends `Access-Control-Allow-Origin: *` on every site page, not only on hosts with a live route. Only the CSP `sandbox` depends on a live route. Those pages are public and no credentials flow, so this is harmless.
+- **Next:** with the user's yes to the trade-off (or a separate host), set `/blocks/:db` live on the cluster (`--access signed-in --create signed-in`), and let Ramon in as admin or member.

@@ -8,3 +8,4 @@
 - [x] Phase 4: anonymous visitors (vis_ ids), guest peers, quotas, rate limits, garbage collection, claiming <!-- t:kkxe -->
 - [x] Phase 5: Workshop Access panel, Open live link, runtime.md and live-sites help, optional slop data snapshot <!-- t:idyk -->
 - [x] Decide open questions (guide section 12.2): create policy, member sample budget, URL shape, membership, owner sharing, visitor claim <!-- t:e6xd -->
+- [ ] Publish Blocks live on site.slop.yolo.scapegoat.dev (needs the user's yes to the D8 sandbox trade-off, or a separate host) <!-- t:gc27 -->

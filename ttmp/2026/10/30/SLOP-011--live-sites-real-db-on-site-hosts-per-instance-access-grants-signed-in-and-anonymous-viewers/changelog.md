@@ -59,3 +59,7 @@ Phase 5 (76291b1): Workshop Access tab and Open live, owner Share dialog on the 
 
 - /home/manuel/workspaces/2026-10-28/slop-computer/slop-computer/pkg/server/siteaccess.go — owners share from the site
 - /home/manuel/workspaces/2026-10-28/slop-computer/slop-computer/web/workshop/src/components/organisms/Access.tsx — Workshop Access panel
+
+## 2026-10-30
+
+Merged PR #8 (1128a04) and deployed sha-1128a04 via GitOps #404; migrations 008-012 applied on Postgres; #403 superseded
