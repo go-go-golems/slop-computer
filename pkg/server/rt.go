@@ -96,18 +96,6 @@ func (s *Server) rtTarget(ctx context.Context, id string, n int) (store.Artifact
 	return t, caps, v, err
 }
 
-// levelOf is a person's level on a target: its creator is the owner, every
-// admin an admin (slop's only role that opens apps).
-func levelOf(u store.User, t store.Artifact) rt.Level {
-	switch {
-	case u.Role != store.RoleAdmin:
-		return rt.LevelNone
-	case t.CreatedBy != nil && *t.CreatedBy == u.ID:
-		return rt.LevelOwner
-	}
-	return rt.LevelAdmin
-}
-
 // approved is the slop permissions an admin approved for this app version:
 // all it asks for, or none.
 func (s *Server) approved(ctx context.Context, app string, n int, caps rt.Caps) []string {
@@ -142,9 +130,20 @@ func grantedCaps(v *rt.View) map[string]any {
 				continue
 			}
 		case "assets":
-			if v.Level < rt.LevelAdmin {
-				continue
+			if v.Level < rt.LevelInteract || v.Role == store.RoleVisitor {
+				continue // visitors store no files: they answer to nobody
 			}
+		case "comments":
+			if v.Role == store.RoleVisitor {
+				continue // a thread needs an author who signed in
+			}
+		case "sample":
+			if v.Role != store.RoleAdmin {
+				continue // models spend the server's credentials: admins only
+			}
+		}
+		if name == "artifact" && v.Role != store.RoleAdmin {
+			continue // publishing replaces the app for everyone
 		}
 		out[name] = map[string]any{}
 	}
@@ -156,10 +155,10 @@ func grantedCaps(v *rt.View) map[string]any {
 		sort.Strings(scopes)
 		out["user"] = map[string]any{"scopes": scopes}
 	}
-	if v.Caps.Declared["comments"] {
+	if _, ok := out["comments"]; ok {
 		out["comments"] = map[string]any{"composer_only": v.Caps.Composer}
 	}
-	if v.Caps.Declared["sample"] {
+	if _, ok := out["sample"]; ok {
 		out["sample"] = map[string]any{"images": v.Caps.Images}
 	}
 	if _, ok := out["slop"]; ok {
@@ -177,7 +176,7 @@ func (s *Server) targetURL(ctx context.Context, r *http.Request, target string, 
 	if err != nil {
 		return "", "", err
 	}
-	q := url.Values{"mode": {mode}, "parent": {s.requestOrigin(r)}}
+	q := url.Values{"mode": {mode}, "parent": {s.parentOrigin(r)}}
 	for k, vs := range extra {
 		q[k] = vs
 	}
@@ -200,16 +199,17 @@ func (s *Server) newView(ctx context.Context, u store.User, target string, n int
 	if err != nil {
 		return nil, nil, err
 	}
-	level := levelOf(u, t)
+	level := s.levelOf(ctx, u, t)
 	if level == rt.LevelNone {
 		return nil, nil, rtErr("not_granted", "You cannot open this")
 	}
-	perms := s.approved(ctx, v.Artifact, v.N, caps)
-	var asks []string
-	if perms == nil {
-		asks = caps.Permission
+	var perms, asks []string
+	if u.Role == store.RoleAdmin { // the slop API is the admin's own
+		if perms = s.approved(ctx, v.Artifact, v.N, caps); perms == nil {
+			asks = caps.Permission
+		}
 	}
-	view := s.views.Open(&rt.View{Target: t.ID, App: v.Artifact, Version: v.N, User: u.ID, Name: u.DisplayName,
+	view := s.views.Open(&rt.View{Target: t.ID, App: v.Artifact, Version: v.N, User: u.ID, Name: u.DisplayName, Role: u.Role,
 		Level: level, Caps: caps, Perms: perms, Kind: kind})
 	return view, asks, nil
 }
@@ -861,6 +861,7 @@ type profile struct {
 	Avatar string `json:"avatar,omitempty"`
 	Color  string `json:"color"`
 	Email  string `json:"email,omitempty"`
+	Guest  bool   `json:"guest,omitempty"` // an anonymous visitor
 }
 
 func hue(id string) string {
@@ -873,6 +874,10 @@ func hue(id string) string {
 
 func profileOf(v *rt.View, u store.User) profile {
 	p := profile{ID: u.ID, Color: hue(u.ID)}
+	if store.IsVisitor(u.ID) {
+		p.Name, p.Guest = "Guest", true // no avatar and no email to show
+		return p
+	}
 	if v.Caps.Scopes["profile"] {
 		p.Name, p.Avatar = u.DisplayName, "/_slop/avatar/"+u.ID+".svg"
 	}
@@ -887,13 +892,14 @@ func (s *Server) userInfo(ctx context.Context, v *rt.View) map[string]any {
 	out := map[string]any{"isOwner": v.Level == rt.LevelOwner, "canEdit": v.Level >= rt.LevelAdmin,
 		"can": map[string]bool{
 			"data.write":   v.Caps.Rules.CanWrite("__probe__/__probe__", "", v.Level),
-			"assets.write": v.Level >= rt.LevelAdmin, "files.write": v.Level >= rt.LevelAdmin, "people.add": false,
+			"assets.write": v.Level >= rt.LevelInteract, "files.write": v.Level >= rt.LevelAdmin, "people.add": false,
 		}}
 	if v.Caps.Declared["user"] {
-		if u, err := s.Store.User(ctx, v.User); err == nil {
+		if u, err := s.viewer(ctx, v.User); err == nil {
 			out["profile"] = profileOf(v, u)
 		}
 		out["id"] = v.User
+		out["guest"] = store.IsVisitor(v.User)
 	}
 	return out
 }
@@ -914,6 +920,11 @@ func (s *Server) rpcUserProfiles(ctx context.Context, v *rt.View, raw json.RawMe
 	for _, u := range us {
 		if slices.Contains(a.IDs, u.ID) {
 			out[u.ID] = profileOf(v, u)
+		}
+	}
+	for _, id := range a.IDs {
+		if store.IsVisitor(id) {
+			out[id] = profileOf(v, visitorUser(id))
 		}
 	}
 	return out, nil

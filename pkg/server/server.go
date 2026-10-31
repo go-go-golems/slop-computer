@@ -102,16 +102,28 @@ type Server struct {
 	site          siteCache
 	derived       singleflight.Group // derived-file builds, by name (files.go)
 	thumbSlots    chan struct{}      // concurrent image decodes (thumbs.go)
+	siteMux       *http.ServeMux     // /_site/ on site hosts (live.go)
+	siteLimits    *limiter           // visitors, opens and instances on site hosts (live.go)
 }
 
 func New(cfg Config, st *store.Store, bl *blobs.Blobs) *Server {
-	s := &Server{Config: cfg, Store: st, Blobs: bl, Events: events.New(), deviceLimiter: newLimiter(), waiters: newWaiters(),
+	s := &Server{Config: cfg, Store: st, Blobs: bl, Events: events.New(), deviceLimiter: newLimiter(), siteLimits: newLimiter(), waiters: newWaiters(),
 		views: rt.NewRegistry(), joined: map[string][]string{}, thumbSlots: make(chan struct{}, thumbSlots)}
 	s.views.OnClose = s.roomClosed
 	s.mux = s.routes()
+	s.siteMux = s.siteLiveRoutes()
 	go func() {
+		var swept time.Time
 		for now := range time.Tick(5 * time.Second) {
 			s.views.Sweep(now)
+			if now.Sub(swept) > time.Hour {
+				swept = now
+				if n, err := s.Store.SweepVisitors(context.Background(), store.VisitorIdle); err != nil {
+					log.Warn().Err(err).Msg("sweep visitors")
+				} else if n > 0 {
+					log.Info().Int("visitors", n).Msg("expired visitors")
+				}
+			}
 		}
 	}()
 	return s
@@ -219,6 +231,7 @@ func (s *Server) routes() *http.ServeMux {
 	s.previewRoutes(m)
 	s.streamRoutes(m)
 	s.rtRoutes(m)
+	s.accessRoutes(m)
 	s.siteRoutes(m)
 	m.HandleFunc("/api/", func(w http.ResponseWriter, r *http.Request) { httpx.Fail(w, 404, "not_found", "Unknown API route") })
 	s.workshopRoutes(m)

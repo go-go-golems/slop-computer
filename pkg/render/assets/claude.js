@@ -275,6 +275,12 @@
         setConnected(false);
         emit("terminal", "revoked");
         return;
+      case "access":
+        streamGen++;
+        setConnected(false);
+        post({ type: "reopen" });
+        setTimeout(() => location.reload(), framed ? 5e3 : 0);
+        return;
       case "reload":
         post({ type: "reload", version: ev.version });
         setTimeout(() => location.reload(), framed ? 5e3 : 0);

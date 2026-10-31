@@ -38,6 +38,7 @@ const (
 	EvTokenRevoked    = "token.revoked"
 	EvAgentWaiting    = "agent.waiting"
 	EvAgentLeft       = "agent.left"
+	EvAccessChanged   = "access.changed"
 )
 
 func appendEvent(ctx context.Context, d db, now time.Time, typ, project, artifact, actor string, payload any) (Event, error) {

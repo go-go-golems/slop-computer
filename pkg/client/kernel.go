@@ -64,6 +64,8 @@ type Route struct {
 	Bindings  map[string]Binding `json:"bindings,omitempty"`
 	Record    string             `json:"record,omitempty"`
 	Access    string             `json:"access,omitempty"`
+	Live      bool               `json:"live,omitempty"`
+	Create    string             `json:"create,omitempty"`
 	ChangedAt time.Time          `json:"changedAt,omitempty"`
 	Note      string             `json:"note,omitempty"`
 }

@@ -32,6 +32,7 @@ type View struct {
 	Version int       `json:"version"`
 	User    string    `json:"user"`
 	Name    string    `json:"-"`
+	Role    string    `json:"-"` // the viewer's role: admin, member (visitor later); policy beyond levels
 	Level   Level     `json:"-"`
 	Caps    Caps      `json:"-"`
 	Perms   []string  `json:"permissions"` // approved slop permissions
@@ -404,7 +405,8 @@ func (v *View) AsPeer(room string) (Peer, bool) {
 	if !ok {
 		return Peer{}, false
 	}
-	p := Peer{Peer: v.ID, Kind: v.Kind, Presence: m.Presence, UpdatedAt: m.At}
+	// Guest: an anonymous visitor (store.VisitorPrefix; rt does not import store).
+	p := Peer{Peer: v.ID, Kind: v.Kind, Guest: strings.HasPrefix(v.User, "vis_"), Presence: m.Presence, UpdatedAt: m.At}
 	if v.Caps.Declared["user"] && v.User != "" {
 		by := v.User
 		p.By = &by

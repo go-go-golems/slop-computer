@@ -1,6 +1,7 @@
 import { createApi, fetchBaseQuery, type FetchBaseQueryError } from '@reduxjs/toolkit/query/react'
 import { csrfToken } from '../app/boot'
 import type {
+  AccessInfo, NewLink,
   Agent, Anchor, Artifact, AuditEntry, Comment, Project, PushRequest, PushResult, Rec, Resolved, Route, RouteLogEntry,
   RouteView, SandboxURL, Thread, Token, User, Version, AppInfo, Approval, ViewInfo,
 } from './types'
@@ -20,7 +21,7 @@ const baseQuery = fetchBaseQuery({
 export const slopApi = createApi({
   reducerPath: 'slopApi',
   baseQuery,
-  tagTypes: ['User', 'Token', 'Audit', 'Project', 'Artifact', 'Version', 'Route', 'RouteLog', 'Thread', 'Agent', 'Records', 'App'],
+  tagTypes: ['User', 'Token', 'Audit', 'Project', 'Artifact', 'Version', 'Route', 'RouteLog', 'Thread', 'Agent', 'Records', 'App', 'Access'],
   endpoints: b => ({
     projects: b.query<Project[], void>({ query: () => 'projects', providesTags: ['Project'] }),
     artifacts: b.query<Artifact[], void>({ query: () => 'artifacts', providesTags: [{ type: 'Artifact', id: 'LIST' }] }),
@@ -93,6 +94,19 @@ export const slopApi = createApi({
     consentView: b.mutation<Record<string, string>, { view: string; states: Record<string, string> }>({
       query: ({ view, states }) => ({ url: `rt/views/${view}/consent`, method: 'POST', body: states }),
     }),
+    access: b.query<AccessInfo, string>({ query: t => `rt/targets/${encodeURIComponent(t)}/access`, providesTags: (_r, _e, t) => [{ type: 'Access', id: t }] }),
+    putGrant: b.mutation<void, { target: string; subject: string; level: string }>({
+      query: ({ target, subject, level }) => ({ url: `rt/targets/${encodeURIComponent(target)}/grants/${encodeURIComponent(subject)}`, method: 'PUT', body: { level } }),
+    }),
+    removeGrant: b.mutation<void, { target: string; subject: string }>({
+      query: ({ target, subject }) => ({ url: `rt/targets/${encodeURIComponent(target)}/grants/${encodeURIComponent(subject)}`, method: 'DELETE' }),
+    }),
+    createLink: b.mutation<NewLink, { target: string; level: string; days: number }>({
+      query: ({ target, ...body }) => ({ url: `rt/targets/${encodeURIComponent(target)}/links`, method: 'POST', body }),
+    }),
+    revokeLink: b.mutation<void, { target: string; id: string }>({
+      query: ({ target, id }) => ({ url: `rt/targets/${encodeURIComponent(target)}/links/${encodeURIComponent(id)}`, method: 'DELETE' }),
+    }),
     putProject: b.mutation<Project, { id: string; name: string; brief?: string }>({ query: ({ id, ...body }) => ({ url: `projects/${id}`, method: 'PUT', body }) }),
     // updateArtifact changes what an artifact is called, the project it is
     // in (null: none) and, for data, the page that shows one record.
@@ -147,5 +161,5 @@ export const {
   useSetRouteMutation, useRemoveRouteMutation, useUndoRouteMutation, useCreateThreadMutation, useReplyMutation,
   useResolveThreadMutation, useSetRoleMutation, usePutProjectMutation, useUpdateArtifactMutation, useCreateTokenMutation, useRevokeTokenMutation, usePushMutation,
   useAppsQuery, useApproveAppMutation, useOpenViewMutation, useRenewViewMutation, useCloseViewMutation, useConsentViewMutation,
-  useCreateArtifactMutation,
+  useCreateArtifactMutation, useAccessQuery, usePutGrantMutation, useRemoveGrantMutation, useCreateLinkMutation, useRevokeLinkMutation,
 } = slopApi

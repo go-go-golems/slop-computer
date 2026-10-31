@@ -244,6 +244,16 @@ function dispatch(type: string, ev: any) {
       setConnected(false);
       emit("terminal", "revoked");
       return;
+    case "access":
+      // This person's access changed but did not end: the view closed so a
+      // new one carries the new level and capabilities. The shell reopens
+      // the frame; a plain reload (which asks the shell to renew) is the
+      // fallback when no shell answers.
+      streamGen++;
+      setConnected(false);
+      post({ type: "reopen" });
+      setTimeout(() => location.reload(), framed ? 5000 : 0);
+      return;
     case "reload":
       // The app published a new version. This frame's URL names the old
       // one, so the shell reopens the view on the new version; a plain

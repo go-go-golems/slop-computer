@@ -60,7 +60,10 @@ func (vc *viewClient) streamFrom(path string) map[string]any {
 		vc.h.t.Fatalf("stream: %v %v", err, resp)
 	}
 	vc.h.t.Cleanup(func() { _ = resp.Body.Close() })
-	vc.events = make(chan sseEvent, 64)
+	// Each connection's reader owns its channel: a reconnect replaces
+	// vc.events, and the old reader must not send on or close the new one.
+	events := make(chan sseEvent, 64)
+	vc.events = events
 	go func() {
 		sc := bufio.NewScanner(resp.Body)
 		sc.Buffer(make([]byte, 1<<20), 1<<20)
@@ -75,11 +78,11 @@ func (vc *viewClient) streamFrom(path string) map[string]any {
 			case line == "" && typ != "":
 				ev := sseEvent{Type: typ}
 				_ = json.Unmarshal([]byte(data), &ev.Data)
-				vc.events <- ev
+				events <- ev
 				typ, data = "", ""
 			}
 		}
-		close(vc.events)
+		close(events)
 	}()
 	return vc.next("hello").Data
 }

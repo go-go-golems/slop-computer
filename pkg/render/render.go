@@ -20,7 +20,7 @@ import (
 	"github.com/go-go-golems/slop-computer/pkg/records"
 )
 
-//go:embed assets/*.js
+//go:embed assets/*.js assets/*.css
 var Assets embed.FS
 
 // Modes a page is served in.

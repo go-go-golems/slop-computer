@@ -3,6 +3,22 @@
    render.js runtime(). */
 (function () {
   'use strict';
+  // On a site host that runs live apps, pages have an opaque origin (a CSP
+  // sandbox), where Web Storage throws. Pages get memory storage instead:
+  // they keep working, and what they store lasts until the page is left.
+  ['localStorage', 'sessionStorage'].forEach(function (name) {
+    try { if (window[name]) return; } catch (e) { /* opaque origin */ }
+    var m = new Map();
+    var mem = {
+      getItem: function (k) { return m.has(String(k)) ? m.get(String(k)) : null; },
+      setItem: function (k, v) { m.set(String(k), String(v)); },
+      removeItem: function (k) { m.delete(String(k)); },
+      clear: function () { m.clear(); },
+      key: function (i) { return Array.from(m.keys())[i] || null; },
+    };
+    Object.defineProperty(mem, 'length', { get: function () { return m.size; } });
+    try { Object.defineProperty(window, name, { value: mem, configurable: true }); } catch (e) { /* leave it */ }
+  });
   var el = document.getElementById('slop-boot');
   var D = {};
   try { D = JSON.parse(el ? el.textContent : '{}'); } catch (e) { D = {}; }

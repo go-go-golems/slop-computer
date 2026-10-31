@@ -73,7 +73,7 @@ func (c *routeListCmd) RunIntoGlazeProcessor(ctx context.Context, v *values.Valu
 		}
 		b, _ := json.Marshal(r.Bindings)
 		if err := out.AddRow(ctx, types.NewRow(types.MRP("host", r.Host), types.MRP("path", r.Path), types.MRP("page", r.Page), types.MRP("page_from", r.PageFrom), types.MRP("version", ver),
-			types.MRP("record", r.Record), types.MRP("bindings", string(b)), types.MRP("access", r.Access))); err != nil {
+			types.MRP("record", r.Record), types.MRP("bindings", string(b)), types.MRP("access", r.Access), types.MRP("live", r.Live))); err != nil {
 			return err
 		}
 	}
@@ -99,7 +99,7 @@ func (c *routeSetCmd) Run(ctx context.Context, v *values.Values) error {
 		return err
 	}
 	r := client.Route{Host: host, Path: a.S("path"), Page: page, PageFrom: a.S("page-from"), Version: ver, Record: a.S("record"), Access: firstNonEmpty(a.S("access"), "public"), Note: a.S("note"),
-		Bindings: map[string]client.Binding{}}
+		Live: a.B("live"), Create: a.S("create"), Bindings: map[string]client.Binding{}}
 	for _, b := range a.L("bind") {
 		name, ref, ok := strings.Cut(b, "=")
 		if !ok {
@@ -137,10 +137,24 @@ func describeRoute(r *client.Route) string {
 	if r.PageFrom != "" {
 		return fmt.Sprintf("%s in %s's project, else %s@main", r.PageFrom, r.Page, r.Page)
 	}
-	if r.Version == nil {
-		return r.Page + "@main"
+	out := r.Page + "@main"
+	if r.Version != nil {
+		out = fmt.Sprintf("%s v%d", r.Page, *r.Version)
 	}
-	return fmt.Sprintf("%s v%d", r.Page, *r.Version)
+	if r.Live {
+		t := r.Page
+		if b, ok := r.Bindings["target"]; ok {
+			t = b.Artifact
+		}
+		if strings.HasPrefix(t, "{") {
+			t = fmt.Sprintf("the %s data named by :%s", r.Page, t[1:len(t)-1])
+		}
+		out += fmt.Sprintf(" live on %s for %s", t, firstNonEmpty(r.Access, "public"))
+		if r.Create != "" {
+			out += ", created by " + r.Create
+		}
+	}
+	return out
 }
 
 type routeUndoCmd struct {
@@ -181,7 +195,11 @@ func routeCommands() []glazed.Command {
 		&routeListCmd{glazed.NewCommandDescription("list", glazed.WithShort("List routes (all hosts unless --host)"), glazed.WithFlags(common...))},
 		&routeSetCmd{glazed.NewCommandDescription("set", glazed.WithShort("Point a path at a page: artifact (follows main) or artifact@<version>"),
 			glazed.WithLong("Examples:\n  slop route set /pricing pricing@7\n  slop route set /journal/:slug journal-post --record 'posts/{slug}.md' --bind posts=journal\n"+
-				"  slop route set /r/:page release-missing --page-from '{page}'\n\n"+
+				"  slop route set /r/:page release-missing --page-from '{page}'\n"+
+				"  slop route set /blocks/team blocks --bind target=ws-team --live --access admins\n\n"+
+				"--live runs the page, an app, against its target (--bind target=…, else the page itself) on the\n"+
+				"site: the site serves a shell that opens the app for whoever --access admits (admins, signed-in,\n"+
+				"or public). See slop help live-sites.\n\n"+
 				"--page-from serves the page a template names, filled from the path's :params, among the pages of\n"+
 				"the given page's project; the given page is served (404) when it names none. Every page of that\n"+
 				"project whose id fits the template becomes public on the host."),
@@ -189,7 +207,10 @@ func routeCommands() []glazed.Command {
 				flag("record", "Record pattern filled from params, e.g. posts/{slug}.md"),
 				flag("page-from", "Page template filled from params, e.g. {page} or release-{page}; page is then the else page"),
 				list("bind", "Data binding name=artifact[@version] (repeatable)"),
-				flag("access", "public (default) or admins"), flag("note", "Why, for the route log"))...))},
+				boolean("live", "Run the app live against its target on the site (see slop help live-sites)"),
+				flag("access", "public (default), signed-in (live routes) or admins"),
+				flag("create", "Live routes whose target comes from the path: who may create an instance (admins, signed-in, public)"),
+				flag("note", "Why, for the route log"))...))},
 		&routeUndoCmd{glazed.NewCommandDescription("undo", glazed.WithShort("Restore a route to its state before its last change"),
 			glazed.WithFlags(append(common, arg("path", "Path pattern"))...)), false},
 		&routeUndoCmd{glazed.NewCommandDescription("rm", glazed.WithShort("Remove a route"),

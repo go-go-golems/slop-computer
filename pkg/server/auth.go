@@ -210,9 +210,11 @@ func (s *Server) sameOrigin(r *http.Request) bool {
 	return site == "" || site == "same-origin"
 }
 
-// safeReturn keeps post-login redirects on local paths.
+// safeReturn keeps post-login redirects on local paths. Of /auth/, only a
+// handoff to a site host is a place to return to.
 func safeReturn(p string) string {
-	if p == "" || !strings.HasPrefix(p, "/") || strings.HasPrefix(p, "//") || strings.HasPrefix(p, "/\\") || strings.HasPrefix(p, "/auth/") {
+	if p == "" || !strings.HasPrefix(p, "/") || strings.HasPrefix(p, "//") || strings.HasPrefix(p, "/\\") ||
+		(strings.HasPrefix(p, "/auth/") && !strings.HasPrefix(p, "/auth/handoff?")) {
 		return "/"
 	}
 	u, err := url.Parse(p)
@@ -225,6 +227,7 @@ func safeReturn(p string) string {
 func (s *Server) authRoutes(m *http.ServeMux) {
 	m.HandleFunc("GET /auth/login", s.login)
 	m.HandleFunc("GET /auth/callback", s.callback)
+	m.HandleFunc("GET /auth/handoff", s.handoff)
 	m.HandleFunc("POST /auth/logout", s.guard(session, noToken, s.logout))
 	if s.Config.Local != nil {
 		s.localRoutes(m)

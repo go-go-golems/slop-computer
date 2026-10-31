@@ -8,16 +8,19 @@ import (
 	"github.com/pkg/errors"
 )
 
-// Roles. Anyone who signs in is pending until an admin lets them in.
+// Roles. Anyone who signs in is pending until an admin lets them in, as an
+// admin (the Workshop and everything) or a member (live sites, at the
+// levels grants give them; no Workshop).
 const (
 	RoleAdmin    = "admin"
+	RoleMember   = "member"
 	RolePending  = "pending"
 	RoleDisabled = "disabled"
 )
 
-// ValidRole reports whether role is one of the three roles.
+// ValidRole reports whether role is one of the four roles.
 func ValidRole(role string) bool {
-	return role == RoleAdmin || role == RolePending || role == RoleDisabled
+	return role == RoleAdmin || role == RoleMember || role == RolePending || role == RoleDisabled
 }
 
 type User struct {
@@ -88,10 +91,11 @@ func (s *Store) UsersByIssuer(ctx context.Context, issuer string) ([]User, error
 }
 
 // SetUserRole changes a role. Moving away from admin revokes the user's
-// sessions and tokens, so a demoted or disabled user loses access at once.
+// sessions (main and site hosts) and tokens, so a demoted or disabled user
+// loses access at once.
 func (s *Store) SetUserRole(ctx context.Context, id, role string) (User, error) {
 	if !ValidRole(role) {
-		return User{}, errors.New("role must be admin, pending or disabled")
+		return User{}, errors.New("role must be admin, member, pending or disabled")
 	}
 	var out User
 	err := s.InTx(ctx, func(tx db) error {
@@ -109,6 +113,9 @@ func (s *Store) SetUserRole(ctx context.Context, id, role string) (User, error) 
 					return err
 				}
 				if _, err := tx.exec(ctx, `UPDATE api_tokens SET revoked_at=? WHERE user_id=? AND revoked_at IS NULL`, now, id); err != nil {
+					return err
+				}
+				if _, err := tx.exec(ctx, `UPDATE site_sessions SET revoked_at=? WHERE principal=? AND revoked_at IS NULL`, now, id); err != nil {
 					return err
 				}
 			}

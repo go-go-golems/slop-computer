@@ -1,7 +1,7 @@
 // The server's JSON, written by hand to match the Go structs in pkg/store,
 // pkg/routing and pkg/server. Times are RFC 3339 strings.
 
-export type Role = 'admin' | 'pending' | 'disabled'
+export type Role = 'admin' | 'member' | 'pending' | 'disabled'
 
 export interface MeUser { id: string; name: string; email: string; role: Role; local: boolean }
 export interface Me { user: MeUser; csrfToken?: string }
@@ -54,7 +54,11 @@ export interface Route {
   version: number | null
   bindings: Record<string, Binding> | null
   record?: string
-  access: 'public' | 'admins'
+  // Who sees the route on the site. A live route runs its app against its
+  // target there, for whoever access admits; signed-in is for live routes.
+  access: 'public' | 'signed-in' | 'admins'
+  live?: boolean
+  create?: '' | 'admins' | 'signed-in' | 'public'
   changedBy: string | null
   changedAt: string
 }
@@ -210,3 +214,14 @@ export interface ViewInfo {
   asks?: string[]
   expiresAt: string
 }
+
+// Who may open a target live, and who has it open (GET rt/targets/{t}/access).
+export interface AccessGrant { subject: string; level: string; name?: string; via?: string; createdAt: string }
+export interface AccessLink { id: string; level: string; createdAt: string; expiresAt: string | null; revokedAt: string | null }
+export interface AccessView { view: string; principal: string; name: string; kind: string; level: string; since: string }
+export interface AccessRoute { host: string; path: string; access: string; url: string }
+export interface AccessInfo {
+  target: string; app: string; owner?: { id: string; name: string }
+  grants: AccessGrant[]; links: AccessLink[]; views: AccessView[]; routes: AccessRoute[]
+}
+export interface NewLink { link: AccessLink; token: string; urls: string[] }

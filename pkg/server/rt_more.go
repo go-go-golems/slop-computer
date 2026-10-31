@@ -163,7 +163,7 @@ func (s *Server) rpcRoomEmit(_ context.Context, v *rt.View, raw json.RawMessage)
 	if len(data) == 0 {
 		data = json.RawMessage("null")
 	}
-	ev := rt.Out{Type: "room", Data: map[string]any{"room": a.Room, "topic": a.Topic, "data": data, "peer": v.ID, "by": by, "kind": v.Kind, "guest": false}}
+	ev := rt.Out{Type: "room", Data: map[string]any{"room": a.Room, "topic": a.Topic, "data": data, "peer": v.ID, "by": by, "kind": v.Kind, "guest": store.IsVisitor(v.User)}}
 	for _, o := range s.views.Of(v.Target) {
 		if o.In(a.Room) {
 			o.Send(ev)
@@ -460,7 +460,7 @@ func (s *Server) rpcArtifactPublish(ctx context.Context, v *rt.View, raw json.Ra
 	if err != nil {
 		return nil, err
 	}
-	if v.Level < rt.LevelAdmin {
+	if v.Level < rt.LevelAdmin || v.Role != store.RoleAdmin {
 		return nil, rtErr("not_writer", "only editors publish")
 	}
 	if !strings.HasPrefix(strings.ToLower(strings.TrimSpace(a.HTML)), "<!doctype") {
@@ -543,7 +543,7 @@ func (s *Server) agentDB(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	u := me(r)
-	wr := writer{user: u.ID, level: levelOf(u, t), rules: caps.Rules}
+	wr := writer{user: u.ID, level: s.levelOf(ctx, u, t), rules: caps.Rules}
 	if in.AsLevel != "" {
 		l, ok := rt.ParseLevel(in.AsLevel)
 		if !ok || l > wr.level || l == rt.LevelSelf {

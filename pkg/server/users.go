@@ -34,7 +34,7 @@ func (s *Server) patchUser(w http.ResponseWriter, r *http.Request) {
 		Role string `json:"role"`
 	}
 	if err := httpx.Read(w, r, &in, 1024); err != nil || !store.ValidRole(in.Role) {
-		httpx.Fail(w, 400, "invalid_request", "role must be admin, pending or disabled")
+		httpx.Fail(w, 400, "invalid_request", "role must be admin, member, pending or disabled")
 		return
 	}
 	if id == actor(r) && in.Role != store.RoleAdmin {
