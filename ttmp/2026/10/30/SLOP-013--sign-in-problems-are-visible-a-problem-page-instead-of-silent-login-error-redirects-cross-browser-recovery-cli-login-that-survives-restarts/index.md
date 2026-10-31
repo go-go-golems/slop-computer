@@ -1,7 +1,7 @@
 ---
 Title: 'Sign-in problems are visible: a problem page instead of silent login_error redirects, cross-browser recovery, CLI login that survives restarts'
 Ticket: SLOP-013
-Status: active
+Status: complete
 Topics:
     - auth
     - backend
@@ -16,7 +16,7 @@ RelatedFiles:
       Note: login and callback redirect failures to /?login_error=
 ExternalSources: []
 Summary: 'Make sign-in failures visible and recoverable: one problem page instead of silent /?login_error= redirects, destination recovered from the flow row, failures logged, and a CLI device login that waits through server restarts.'
-LastUpdated: 2026-10-30T15:40:57.668907485-04:00
+LastUpdated: 2026-10-30T18:54:59.494615939-04:00
 WhatFor: Landing page for SLOP-013
 WhenToUse: Start here for sign-in and device-login failures
 ---

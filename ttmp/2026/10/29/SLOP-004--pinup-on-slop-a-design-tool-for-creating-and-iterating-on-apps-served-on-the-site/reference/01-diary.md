@@ -403,3 +403,31 @@ stream, live doc event with rev r:
     r >  last+1    send Docs(after=last); last = max(last, r)
 ready after replay: max(after, max replayed rev, head)
 ```
+
+## Step 5: Pinup and Blocks on the cluster; ticket closed
+
+The user asked to "push pinup and blocks and close 004". I built both apps
+from `main` (5b14471) and pushed them to slop.yolo with the repo's make
+targets. Pinup v2 asks for slop API permissions. Approving them is
+deliberately not possible with an API token, so that click is the user's.
+The ticket is closed, with two backlog items left in its tasks.
+
+### Prompt Context
+**User prompt (verbatim):** "close 012 013, push pinup and blocks and close 004. What's 012 and 004 site / per host stuff?"
+**Assistant interpretation:** Deploy Pinup and Blocks to the cluster, close SLOP-004, SLOP-012 and SLOP-013, and explain the remaining per-host items.
+**Inferred user intent:** Wrap up finished tickets and make the tools usable on the test deployment.
+**Commit (code):** N/A (cluster content). Bookkeeping: 687673a.
+
+### What I did
+- `make blocks` built `web/blocks/dist` (10 upstream files + `slop.json`). `make pinup` ran `npm ci` in `web/pinup/vendor` and built `slop` (784 KB, 18 modules).
+- With `SLOP_SERVER=https://slop.yolo.scapegoat.dev`, ran `make blocks-push SLOP=$S/slop21`, which gave `pushed blocks v1 (new artifact) · 10 files · 730 KB`.
+- `make pinup-push SLOP=$S/slop21` gave `pushed pinup v2 · 1 files · 784 KB` and `pushed pinup-player v2`.
+- `GET /api/apps` lists `blocks` (assets, db, downloads, room, sample, user), `pinup` (adds `slop`; asks `artifacts:read, routes:read, routes:write, threads:write, versions:push, versions:read`; approved: none) and `pinup-player` (db, user).
+
+### What didn't work
+- Approving Pinup v2 from here is not possible: `POST /api/apps/{id}/approve` is guarded with `noToken` (`pkg/server/rt.go:39`). An admin approves it in the Workshop (Apps ▸ Approve v2…). Until then `claude.use("slop")` is null in Pinup, while everything else works.
+
+### What should be done in the future
+- The user approves Pinup v2 in the Workshop.
+- `sample` (Ask Claude, the AI in Blocks and Pinup) stays off on the cluster until SLOP-010 phase 7.
+- Backlog left in this ticket's tasks: restoring a saved version into the live documents, and a scripted Playwright test of tool mode.

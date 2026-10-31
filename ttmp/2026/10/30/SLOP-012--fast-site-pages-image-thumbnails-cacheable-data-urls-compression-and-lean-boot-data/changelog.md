@@ -69,3 +69,7 @@ Workshop thumbnails: GET /api/covers (any record with page + cover) and version 
 ## 2026-10-30
 
 Cluster: storefront and storefront-entry v2 pushed; francois import re-pushed (catalog v3) so covers are numbered, immutable URLs. Front page: one data script, 2.3 s to network idle from an empty browser cache.
+
+## 2026-10-30
+
+Closed: phases 1-4 shipped and are live (sha-ec4c4c9, storefront v2, pinned covers), plus the Workshop covers (sha-5b14471 via hetzner-k3s #403). Phase 5, a per-host index of servable artifacts, stays as optional backlog in tasks.md.
