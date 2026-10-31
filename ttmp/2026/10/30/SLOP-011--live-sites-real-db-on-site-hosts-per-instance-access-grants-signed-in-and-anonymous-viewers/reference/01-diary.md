@@ -841,3 +841,77 @@ from the server.
   | 4 | new OIDC users | stay pending; admins let them in as member or admin | phase 2 |
   | 5 | owners share from the site | yes: the Share dialog, view or edit, groups and links | phase 5 |
   | 6 | guest data on sign-in | offered, kept only on yes | phase 4 |
+
+## Step 8: PR #8 review, reopening on access changes and binding sign-in to the browser
+
+Codex reviewed PR #8 and raised two findings. Both were real, and both are fixed in
+7d2e8b8.
+
+1. **A level change killed the open app.** `reviewViews` closed a changed view with `revoked`. The runtime treats that as terminal: no more RPCs or streams until a manual reload. My Step 4 note assumed "the shell renews", which was wrong. Now a change that keeps access sends a new `access` event. The runtime posts `reopen` to its shell, and the site shell and the Workshop's `/run` open a new view in a fresh frame. Losing access still sends `revoked`.
+2. **A guest could be lost on sign-in.** When the sign-in returns cross-site, the browser withholds the site's `SameSite=Strict` cookie at `/_site/callback`, so the guest was not found and the claim was never offered. Now `/_site/login` sets a `SameSite=Lax` state cookie (`__Host-` in production) holding a random state and the guest id, and passes the state through `/auth/handoff`. The handoff row stores it (migration 012), and the callback consumes a code only with the matching cookie. This also closes login CSRF on the callback: a code made in one browser does not sign in another.
+
+### Prompt Context
+**User prompt (verbatim):** "addrses code review comments, merge, deploy"
+**Assistant interpretation:** Fix the review findings on PR #8 and reply on the threads. Then merge PR #8, wait for the image, and merge the GitOps PR to deploy (explicitly asked this time).
+**Inferred user intent:** Ship SLOP-011 to the cluster.
+**Commit (code):** 7d2e8b8 — "SLOP-011: PR #8 review: reopen on access changes, bind sign-in to the browser"
+
+### What I did
+- `web/runtime/src/transport.ts`: a `case "access"` that stops the stream, posts `reopen`, and falls back to `location.reload()`. Rebuilt `pkg/render/assets/claude.js` with `node build.mjs`.
+- `pkg/server/access.go`, `reviewViews`: same level → nothing; none → `Close(v, true)`; otherwise `Send({type: "access", level})` then `Close(v, false)`.
+- `shell.js` handles `reopen` with `open(false)`. `AppScreen.tsx` handles `reopen` with a new view and a new frame.
+- `pkg/server/live.go`:
+  - `siteStateCookie` and `setSiteState`;
+  - `siteLogin` mints the state and records the guest;
+  - `handoff` requires a 32-character `state` ("start signing in from the site");
+  - `siteCallback` reads and clears the state cookie, passes the state to `ConsumeHandoff`, and takes `from` from the cookie's guest (or from the session cookie when it is present).
+- `pkg/store/sitesessions.go`: `SaveHandoff(…, state)`. `ConsumeHandoff(…, state)` matches `state=? AND state<>''`, so a wrong state does not consume the code.
+- Tests:
+  - `siteBrowser` tracks the state cookie and can withhold the session cookie (`strict`), as a cross-site navigation does;
+  - `signInOn` runs the real flow through `/_site/login`;
+  - `TestHandoffCodes` covers: no state, another state, a foreign return, reuse, and another host;
+  - `TestVisitorClaim` signs in cross-site;
+  - `TestGrantsAndMembers` expects `access` with the new level on changes, and `revoked` only when no access is left.
+
+### Why
+- **A new event instead of making `revoked` recoverable.** `revoked` means "stop" to every runtime already deployed and to claude.ai-style pages. A distinct event keeps that meaning and lets the shell decide how to reopen.
+- **A fresh frame, not just a new secret.** Capabilities can change with the level (`assets` at interact). A page's namespaces are memoized at `use()`, so a new document is the honest way to show new capabilities.
+- **A state cookie, not a longer-lived session cookie.** Lax only matters for top-level GETs, and the state cookie unlocks nothing but one callback with a matching code made within the last minute.
+
+### What worked
+- `GOWORK=off go test ./...`, Postgres, `make lint` (`0 issues.`), `tsc` for the Workshop and the runtime, and the runtime's tests (3 pass).
+- Mutation check: ignoring the state cookie's guest fails `TestVisitorClaim` (`the offer: {Kind:user Claim:map[]}`).
+- Browser (local server): Ramon had the instance open at `interact` (`can("data.write")` true). After `slop access grant … view`, the frame was a new document (my marker was gone), `can("data.write")` was false, and reads still worked.
+
+### What didn't work
+- The first browser run showed no change. `*anyone interact` still gave Ramon `interact`, so lowering his own grant changed nothing; that was correct. After revoking `*anyone`, the change showed.
+- `user.can()` returns a promise, so my first probe printed `{}`.
+- Lint: staticcheck wanted a tagged switch on `level`, and `exhaustive` then wanted every `rt.Level` case. An `if` chain satisfies both.
+- The first `TestGrantsAndMembers` update expected `revoked` after removing Alex's grant, but `*signed-in` still let him view, so the event was `access` (level `view`). The test now reopens in between.
+
+### What I learned
+- A runtime event name is a contract with every page already deployed. Changing behavior means a new name, not a new meaning for an old one.
+- `SameSite=Strict` on the site cookie and a sign-in that crosses sites means the callback must not depend on the session cookie for anything.
+
+### What was tricky to build
+- Keeping the code unconsumed on a wrong state. The `UPDATE … WHERE state=?` leaves the row alone, so an attacker's browser cannot burn a victim's code.
+
+### What warrants a second pair of eyes
+- The `access` fallback `location.reload()` after 5 s, for shells that do not handle `reopen` (older Workshop bundles in open tabs). The reload asks the shell to renew, which fails and reopens.
+- `handoff` now refuses requests without `state`. Any bookmark or tool that went straight to `/auth/handoff` must start at `/_site/login` instead.
+
+### What should be done in the future
+- Merge PR #8, deploy, and then ask whether to publish Blocks on the cluster's site host (the D8 trade-off).
+
+### Code review instructions
+- Read `siteLogin`, `handoff` and `siteCallback` in `live.go`, then `reviewViews` in `access.go` and `case "access"` in `web/runtime/src/transport.ts`.
+- Validate: `GOWORK=off go test ./pkg/server -run 'TestHandoffCodes|TestVisitorClaim|TestGrantsAndMembers' -count=1`.
+
+### Technical details
+- The sign-in:
+
+  ```text
+  shell Sign in → GET /_site/login?return=/x     Set-Cookie state=<32 hex>[.vis_…] (Lax, 10 min)
+    → main /auth/handoff?host&return&state         SaveHandoff(code, user, host, ret, state)
+    → site /_site/callback?code                    cookie state must equal the handoff's; from = cookie guest
+  ```
