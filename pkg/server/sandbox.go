@@ -203,4 +203,3 @@ func inject(page []byte, boot any) []byte {
 	}
 	return append(head.Bytes(), page...)
 }
-

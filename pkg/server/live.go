@@ -545,4 +545,3 @@ func (s *Server) serveShell(w http.ResponseWriter, r *http.Request) {
 	_ = shellPage.Execute(w, map[string]any{"Title": title, "CSS": assetURL("shell.css"), "JS": assetURL("shell.js"),
 		"Boot": template.JS(boot)})
 }
-
