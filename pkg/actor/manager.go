@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"log"
 	"path"
+	"slices"
 	"sort"
 	"strconv"
 	"strings"
@@ -53,6 +54,7 @@ func New(k *kernel.Kernel) *Manager {
 	k.Activate = m.activate
 	k.OnActivated = m.onActivated
 	k.Subscribe(m.onCommit)
+	m.followSystem()
 	return m
 }
 
@@ -175,6 +177,9 @@ func (m *Manager) Get(ctx context.Context, id string) (*Actor, error) {
 	m.actors[id] = a
 	m.mu.Unlock()
 	go a.loop()
+	if a.followsSystem() {
+		m.queueSystem(a) // catch up with what happened while it was stopped
+	}
 	return a, nil
 }
 
@@ -418,8 +423,16 @@ func (m *Manager) activate(ctx context.Context, t *store.Turn, r kernel.Running)
 	}
 	// Reactors start at the current head: they follow what happens next.
 	for _, name := range a.keys("on") {
-		if _, err := t.Exec(store.CallerKernel, `INSERT INTO _cursors (name, source, epoch, rev) VALUES (?, 'self', ?, ?) ON CONFLICT DO NOTHING`,
-			name, st.Epoch(), t.Rev-1); err != nil {
+		source, epoch, rev := "self", st.Epoch(), t.Rev-1
+		if strings.HasPrefix(name, "system:") {
+			head, err := m.K.Sys.LogHead(ctx)
+			if err != nil {
+				return err
+			}
+			source, epoch, rev = "system", 0, head
+		}
+		if _, err := t.Exec(store.CallerKernel, `INSERT INTO _cursors (name, source, epoch, rev) VALUES (?, ?, ?, ?) ON CONFLICT DO NOTHING`,
+			name, source, epoch, rev); err != nil {
 			return err
 		}
 	}
@@ -438,12 +451,15 @@ func (m *Manager) Call(ctx context.Context, storeID, action string, args any, vi
 	if a == nil {
 		return nil, fail("not_found", "%s has no actor", storeID)
 	}
-	f := a.fn("actions", action)
-	if f == nil {
+	if !slices.Contains(a.keys("actions"), action) {
 		return nil, fail("not_found", "%s has no action %q", storeID, action)
 	}
 	return a.send(ctx, &event{kind: "action", name: action, visitor: vis, via: via,
 		run: func(a *Actor, cx *goja.Object) (goja.Value, error) {
+			f := a.fn("actions", action)
+			if f == nil {
+				return nil, fail("not_found", "%s has no action %q", storeID, action)
+			}
 			return f(goja.Undefined(), cx, a.toJS(args))
 		}})
 }
@@ -490,13 +506,9 @@ func (m *Manager) MatchRoute(ctx context.Context, storeID, method, p string) (*A
 	if err != nil || a == nil {
 		return nil, Route{}, false
 	}
-	routes, _ := a.def.Get("http").(*goja.Object)
-	if routes == nil {
-		return nil, Route{}, false
-	}
 	best := Route{}
 	bestScore := -1
-	for _, key := range routes.Keys() {
+	for _, key := range a.keys("http") {
 		meth, pat, ok := strings.Cut(key, " ")
 		if !ok || (meth != method && meth != "*" && !(meth == "GET" && method == "HEAD")) {
 			continue
@@ -505,15 +517,8 @@ func (m *Manager) MatchRoute(ctx context.Context, storeID, method, p string) (*A
 		if !ok || score <= bestScore {
 			continue
 		}
-		r := Route{Key: key, Level: "view", Params: params}
-		if o, ok := routes.Get(key).(*goja.Object); ok {
-			if v := o.Get("level"); v != nil && !goja.IsUndefined(v) {
-				r.Level = v.String()
-			}
-			if v := o.Get("audience"); v != nil && !goja.IsUndefined(v) {
-				r.Audience = v.String()
-			}
-		}
+		r := a.routes[key]
+		r.Params = params
 		best, bestScore = r, score
 	}
 	return a, best, bestScore >= 0
@@ -558,20 +563,12 @@ func matchPattern(pat, p string) (map[string]string, int, bool) {
 // Serve runs a matched route as an event and returns its response.
 func (m *Manager) Serve(ctx context.Context, a *Actor, route Route, req Req, vis Visitor) (*Res, error) {
 	req.Params = route.Params
-	routes, _ := a.def.Get("http").(*goja.Object)
-	o, _ := routes.Get(route.Key).(*goja.Object)
-	var f goja.Callable
-	if o != nil {
-		f, _ = goja.AssertFunction(o.Get("run"))
-	}
-	if f == nil {
-		f, _ = goja.AssertFunction(routes.Get(route.Key))
-	}
-	if f == nil {
-		return nil, fail("actor_error", "route %s has no run", route.Key)
-	}
 	v, err := a.send(ctx, &event{kind: "http", name: route.Key, visitor: vis, via: "http",
 		run: func(a *Actor, cx *goja.Object) (goja.Value, error) {
+			f := a.fn("http", route.Key)
+			if f == nil {
+				return nil, fail("actor_error", "route %s has no run", route.Key)
+			}
 			return f(goja.Undefined(), cx, a.toJS(req))
 		}})
 	if err != nil {
@@ -672,7 +669,7 @@ func (a *Actor) react(cx *goja.Object) error {
 	ctx := t.Context()
 	for _, name := range a.keys("on") {
 		f := a.fn("on", name)
-		if f == nil {
+		if f == nil || strings.HasPrefix(name, "system:") {
 			continue
 		}
 		rows, err := t.Query(store.CallerKernel, `SELECT rev FROM _cursors WHERE name = ? AND source = 'self'`, name)

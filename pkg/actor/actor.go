@@ -106,15 +106,21 @@ type Actor struct {
 
 	vm  *goja.Runtime
 	def *goja.Object
+	// groups and routes are the definition's shape as Go data, read once at
+	// build: other goroutines (callers, the commit and system-log
+	// followers) consult them; only the actor's goroutine touches def.
+	groups map[string][]string
+	routes map[string]Route
 
 	inbox chan *event
 	stop  chan struct{}
 	cur   *turn
 	parks int
 
-	mu      sync.Mutex
-	crashes []time.Time
-	reactor bool // a reactor event is queued
+	mu        sync.Mutex
+	crashes   []time.Time
+	reactor   bool // a reactor event is queued
+	sysQueued bool // a system reactor event is queued
 }
 
 // LogLine is one line of an actor's log.
@@ -180,7 +186,31 @@ func build(m *Manager, st *store.Store, run kernel.Running, files map[string][]b
 	if a.def == nil {
 		return nil, fail("actor_error", "%s did not call defineActor", entry)
 	}
+	a.readShape()
 	return a, nil
+}
+
+// readShape copies the definition's group keys and route options to Go.
+func (a *Actor) readShape() {
+	a.groups, a.routes = map[string][]string{}, map[string]Route{}
+	for _, group := range []string{"actions", "on", "every", "alarms", "http"} {
+		if obj, ok := a.def.Get(group).(*goja.Object); ok {
+			a.groups[group] = obj.Keys()
+		}
+	}
+	routes, _ := a.def.Get("http").(*goja.Object)
+	for _, key := range a.groups["http"] {
+		r := Route{Key: key, Level: "view"}
+		if o, ok := routes.Get(key).(*goja.Object); ok {
+			if v := o.Get("level"); v != nil && !goja.IsUndefined(v) {
+				r.Level = v.String()
+			}
+			if v := o.Get("audience"); v != nil && !goja.IsUndefined(v) {
+				r.Audience = v.String()
+			}
+		}
+		a.routes[key] = r
+	}
 }
 
 // requirer gives actor.js CommonJS require of other .js files in its tree.
@@ -656,15 +686,8 @@ func (a *Actor) fn(group, name string) goja.Callable {
 	return f
 }
 
-// keys lists the own keys of def.<group>.
-func (a *Actor) keys(group string) []string {
-	v := a.def.Get(group)
-	obj, ok := v.(*goja.Object)
-	if !ok || v == nil {
-		return nil
-	}
-	return obj.Keys()
-}
+// keys lists the own keys of def.<group> (any goroutine).
+func (a *Actor) keys(group string) []string { return a.groups[group] }
 
 // send queues an event and waits for its result.
 func (a *Actor) send(ctx context.Context, ev *event) (any, error) {

@@ -24,6 +24,9 @@ var migrations embed.FS
 type DB struct {
 	*sql.DB
 	Now func() time.Time
+	// OnLog is called after every committed transaction (the log may have
+	// grown); the actor manager wakes system: reactors with it.
+	OnLog func()
 }
 
 // ErrNotFound is returned when a row does not exist.
@@ -187,7 +190,61 @@ func (d *DB) Tx(ctx context.Context, fn func(tx *sql.Tx) error) error {
 	if err := fn(tx); err != nil {
 		return err
 	}
-	return tx.Commit()
+	if err := tx.Commit(); err != nil {
+		return err
+	}
+	if d.OnLog != nil {
+		d.OnLog()
+	}
+	return nil
+}
+
+// LogHead is the newest system log revision (0 when the log is empty).
+func (d *DB) LogHead(ctx context.Context) (int64, error) {
+	var rev int64
+	err := d.QueryRowContext(ctx, `SELECT COALESCE(MAX(rev), 0) FROM _log`).Scan(&rev)
+	return rev, err
+}
+
+// LogAfter returns the system log commits after rev, oldest first, with
+// their changes.
+func (d *DB) LogAfter(ctx context.Context, rev int64, limit int) ([]LogEntry, error) {
+	rows, err := d.QueryContext(ctx, `SELECT rev, at, principal, via, summary FROM _log WHERE rev > ? ORDER BY rev LIMIT ?`, rev, limit)
+	if err != nil {
+		return nil, err
+	}
+	out := []LogEntry{}
+	at := map[int64]int{}
+	for rows.Next() {
+		var e LogEntry
+		if err := rows.Scan(&e.Rev, &e.At, &e.Principal, &e.Via, &e.Summary); err != nil {
+			rows.Close()
+			return nil, err
+		}
+		at[e.Rev] = len(out)
+		out = append(out, e)
+	}
+	rows.Close()
+	if err := rows.Err(); err != nil || len(out) == 0 {
+		return out, err
+	}
+	ch, err := d.QueryContext(ctx, `SELECT rev, kind, key, op, COALESCE(before, ''), COALESCE(after, '') FROM _changes
+		WHERE rev > ? AND rev <= ? ORDER BY rev, seq`, rev, out[len(out)-1].Rev)
+	if err != nil {
+		return nil, err
+	}
+	defer ch.Close()
+	for ch.Next() {
+		var r int64
+		var c Change
+		if err := ch.Scan(&r, &c.Kind, &c.Key, &c.Op, &c.Before, &c.After); err != nil {
+			return nil, err
+		}
+		if i, ok := at[r]; ok {
+			out[i].Changes = append(out[i].Changes, c)
+		}
+	}
+	return out, ch.Err()
 }
 
 func nullStr(s string) any {
