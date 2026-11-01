@@ -176,3 +176,109 @@ without exposing the editor or the workspace itself.
   ops, folding to the page `page_p7sq` titled "FOOBAR".
 - Upload: `remarquee upload bundle <guide> --name "SLOP3-003 Blocks publishing guide" --remote-dir "/ai/2026/11/01/SLOP3-003" --toc-depth 2 --non-interactive`
   answered `OK: uploaded SLOP3-003 Blocks publishing guide.pdf -> /ai/2026/11/01/SLOP3-003`.
+
+## Step 2: B1, the libraries and the two server changes
+
+Phase B1 built everything the reader needs except the app itself: the two
+server changes (`req.base`, a store handle's `rev()`), the vendored editor
+libraries, and the four libraries of `apps/blocks-site/lib`: the fold, the
+site model, the renderer and the stylesheet. The exit test,
+`TestBlocksSiteLibs`, runs them in a goja actor against a fixture
+workspace and checks the HTML block by block. It passed: goja folds the
+same 46 ops as Node and renders a 10 kB home page. Commit `843de56`.
+
+### Prompt Context
+
+**User prompt (verbatim):** see Step 1.
+
+**Assistant interpretation:** Implement phase B1 of the guide.
+
+**Inferred user intent:** A server-side renderer that shows exactly what
+the editor shows.
+
+### What I did
+
+- `pkg/actor/manager.go`: `Req.Base` (`json:"base"`); `pkg/server/actors.go`
+  sets it from `res.m.Base`. `pkg/actor/modules.go`: `rev()` on the
+  `use('stores').open()` handle returns `ts.Head()`.
+- Copied `hypha.js`, `fruit.js`, `blocks-kit.js` from slop-computer
+  `web/blocks/src` (commit 9cf5485) into `apps/blocks-site/vendor/`, with
+  their three upstream checksum lines (`sha256sum -c SHA256SUMS` passes)
+  and a README.
+- `lib/blocks.js` loads them; `lib/fold.js` ports `Net.load`, `owns`,
+  `hash32`, `roleOf`, `ensurePeer`; `lib/site.js` ports `Pages` and adds
+  scope (`root`), slugs and the home page; `lib/render.js` renders blocks,
+  prose, the page layout, the admin page and the static file set;
+  `lib/style.js` is the stylesheet.
+- `scripts/02-render-fixture.mjs` builds the fixture workspace (written to
+  `pkg/server/testdata/blocks-site-fixture.json`), loads the libraries
+  through a copy of the actor's `require`, renders the live and static
+  pages to a directory and runs ten checks.
+- `pkg/server/b1_test.go`: `blocksWorkspace` (puts the fixture into a
+  `blocks` store with `docs.set`) and `TestBlocksSiteLibs`.
+
+### Why
+
+- The renderer's prose tokenizer copies the editor's regular expression
+  source from `vendor/blocks-kit.js` at build time of `render.js`, so the
+  grammar is the same; only the compile-per-call differs.
+- The fixture exercises each rule of the fold: content only in the
+  checkpoint, an overwritten text, a forged op, a writer's own op, a chunk
+  older than the margin, a page outside the scope.
+
+### What worked
+
+- goja ran all three vendored libraries unchanged, including the prose
+  grammar's lookbehind `(?<=\s)`.
+- The Go test passed on its first run; `-v` confirmed it did the work:
+  `rev 2, 46 ops, index.html 10420 bytes`.
+
+### What didn't work
+
+- The first harness run failed in `blocks-kit.js` with
+  `TypeError: Cannot read properties of undefined (reading 'POS')`.
+  `hypha.js` ends with
+  `if (typeof module !== "undefined" && module.exports) module.exports = Hypha; else root.Hypha = Hypha;`,
+  and the actor's `require` passes a `module`, so no global was set.
+  `lib/blocks.js` now installs it: `globalThis.Hypha = globalThis.Hypha || require('../vendor/hypha.js')`.
+- One harness check failed on a wrong expectation: from `care/index.html`
+  the home page is `../`, not `./`.
+- The first screenshot showed the sidebar links in the accent colour: the
+  rule `a:not(.mention):not(.pagelink):not(.brand)` beat `.side a`. It is
+  now scoped to `article a`.
+
+### What I learned
+
+- In the fixture, `stat skeins` resolves `skeins` from the page scope
+  (`weft.skeins`), because `viewBase("weft.ui.19")` is `weft`. Values for
+  a page's formulas belong under the page.
+
+### What was tricky to build
+
+- Lists: the editor stores each bullet as its own block; HTML needs one
+  `<ul>` around a run of them. `blocks()` groups consecutive items of the
+  same list kind, and nested items go inside their `<li>`.
+
+### What warrants a second pair of eyes
+
+- `render.js` escapes every workspace string with `esc()`, including
+  attributes; the CSP is the second line of defence. Review every template
+  literal in `block()`, `prose()` and `adminPage()` for an unescaped
+  interpolation.
+
+### What should be done in the future
+
+- Nothing for B1.
+
+### Code review instructions
+
+- `apps/blocks-site/lib/fold.js` side by side with `blocks.js` `Net.load`.
+- `GOWORK=off go test ./pkg/server -run TestBlocksSiteLibs -count=1 -v`.
+- `node scripts/02-render-fixture.mjs <repo> <out>` and open `<out>/static/index.html`.
+
+### Technical details
+
+- Fixture peers: Ada is `usr_ada`, Mallory `usr_mallory`; Mallory's chunk
+  holds one op under her own peer and one under Ada's (`FORGED BY MALLORY`).
+- Static output for the fixture with `root: weft`: `index.html`,
+  `care/index.html`, `faq/index.html`.
