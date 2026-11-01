@@ -31,3 +31,13 @@ Uploaded the revised guide as 'SLOP3-001 slop v3 core design guide v2' to /ai/20
 ## 2026-11-01
 
 P0 implemented: slop serve, system.db schema and migrations, local sign-in, sessions with CSRF, device login, tokens, verb table with HTTP door and generated CLI; tests and a manual device-login run pass.
+
+## 2026-11-01
+
+P1 implemented (9f454de): stores on SQLite with turns and a log, documents with contract queries, files/snapshots/refs, the SQL authorizer, access with traces, the kernel, store/docs/files/sql/grant/import verbs, eval on goja, and CLI push/pull/eval/import/export. Guide corrected: trusted_schema stays on; files.blobs and snap.new; typed CSV import.
+
+### Related Files
+
+- /home/manuel/code/wesen/2026-10-31--slop-v3/pkg/store/sqlpolicy.go — the SQL authorizer
+- /home/manuel/code/wesen/2026-10-31--slop-v3/pkg/store/turn.go — turns and commits
+- /home/manuel/code/wesen/2026-10-31--slop-v3/pkg/verbs/eval.go — eval programs

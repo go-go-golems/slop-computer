@@ -673,3 +673,329 @@ server: tmux session slop3, data in scratchpad/v3run/data, listen 127.0.0.1:1830
 hosts:  slop.localhost:18300 (main), apps.localhost:18300 (live),
         site.localhost:18300 (static), *.sbx.localhost:18300 (sandbox)
 ```
+
+## Step 8: P1, stores, documents, files, the SQL policy, verbs and eval
+
+P1 is done (code commit `9f454de`). A store is now a real SQLite file under
+`<data>/stores/<id>/store.db`. Every write goes through a turn, and a turn
+that changes anything becomes one commit with one rev and a log entry.
+Documents, tree and asset files, snapshots, refs and app tables all live in
+the store. Access is checked once, by `access.Checker`, and every denial
+carries a trace.
+
+The exit test from the guide passes twice. In `pkg/server/p1_test.go`,
+through HTTP, one `eval` program:
+- creates a store;
+- imports a CSV;
+- writes the rows as documents in one commit;
+- queries them;
+- pushes a folder twice;
+- lists the snapshots.
+
+The export → import round trip gives an identical bundle, app tables,
+triggers and AUTOINCREMENT included. By hand, against the real binary, push,
+pull, rollback, the importers, eval, and `store export --folder` / `import
+folder` all work.
+
+### Prompt Context
+
+**User prompt (verbatim):** "1. monthly
+2. yes
+
+Now implement, commit at appropriate intervals and keep a detailed diary as
+you work (using the diary format from the skill)"
+
+**Assistant interpretation:** Continue the phased implementation from the
+guide. P1 is stores, verbs and eval.
+
+**Inferred user intent:** An agent with a token can create stores, load
+data, query it and push content with one CLI or one eval program.
+
+### What I did
+
+- **`pkg/rt` and `pkg/blobs`** were copied from slop-computer, with their
+  tests and testdata. `github.com/pkg/errors` was replaced by stdlib
+  wrapping.
+- **`pkg/store`** (new):
+  - `store.go`: the schema from Appendix B. `Open` uses one writer
+    connection (`*sql.Conn`, `MaxOpenConns 1`) carrying the authorizer, the
+    `slop_*` functions and `SQLITE_LIMIT_ATTACHED=0`, plus a read-only pool
+    for reads.
+  - `turn.go`: `Store.Do(ctx, who, fn)`:
+    - holds a mutex, runs `BEGIN IMMEDIATE`, rev = max + 1;
+    - runs `fn`, then collects doc/file/meta changes plus the app tables the
+      authorizer saw written;
+    - writes `_log`/`_changes` and commits;
+    - calls `OnCommit` outside the lock;
+    - rolls back on any error or panic.
+  - `docs.go`:
+    - `SetDoc`, with `ifVersion`;
+    - `UpdateDoc`, a deep merge through `rt.Merge`;
+    - `DeleteDoc`, which leaves a tombstone with the version incremented;
+    - `RestoreDoc`, for imports;
+    - the 25k-document quota, counted once per turn;
+    - `Query`: SQL selects the collection, then `rt.Query.Apply` filters
+      and sorts;
+    - `DocsSince`, `Collections`.
+  - `files.go`:
+    - `PutFile` and `PutBlob`, which references an existing blob;
+    - `RemoveFile`;
+    - `Snapshot`: a canonical tree hash over sorted `path\tsha256` lines.
+      It is a no-op when the ref already points at an identical tree.
+    - `MoveRef`, `Ref` (a name or a number), `SnapshotFiles`;
+    - `Log` and `RecentLog`.
+  - `export.go`: `Bundle` holds meta, docs (with versions), files, the app
+    schema and table rows.
+    - `AppSchema` uses `pragma_table_list` to drop FTS shadow tables.
+    - `Restore` order: tables, then rows, then indexes, views and triggers,
+      then an FTS `rebuild` for external content, then docs and files.
+  - `sqlpolicy.go`: the authorizer for five callers (kernel, actor,
+    migration, admin-read, admin-write), and the `slop_principal/level/now`
+    functions.
+- **`pkg/system/stores.go`:** the stores registry (`AddStore`,
+  `StoreByID`, `Stores`, `StoresGranted`, `RemoveStore`) and grants
+  (`Grants`, `SetGrant`, `RemoveGrant`). Each write logs to the system log.
+- **`pkg/access/check.go`:**
+  - `AudienceOf`, with a `Subscribed` hook that billing fills in at P5;
+  - `Matches`, for grant subjects;
+  - `Checker.Level`: owner, then admin, then the best matching grant,
+    capped by audience and then by token scopes (read → view, write and
+    admin → owner);
+  - `Checker.Can`, which returns a `Decision` with a trace. A store you
+    hold no level on reads as `not_found`.
+- **`pkg/kernel/kernel.go`:**
+  - opens stores lazily by id;
+  - `CreateStore` writes the registry row, the file and the meta in a first
+    commit;
+  - `DeleteStore`;
+  - `Subscribe`, which fans every commit out;
+  - a `Rules` hook that returns the defaults until P2 reads app manifests.
+- **Verbs**, all through `Env.open`, which checks the level, opens the
+  store and attaches the trace on denial:
+  - `store.ls/new/rm/meta/export`;
+  - `docs.get/ls/query/set/update/rm`, with batches of up to 500 in one
+    commit and app rules checked per path;
+  - `files.ls/cat/put/rm/push/blobs`, `snap.new/ls`, `ref.ls/move`;
+  - `grant.ls/set/rm` (you cannot grant above your own level), `log.show`;
+  - `sql.query/exec` (admin-only, run through the authorizer in a turn) and
+    `sql.schema`;
+  - `import.docs/table/files/folder`;
+  - `eval`.
+- **`eval`** (`pkg/verbs/eval.go`):
+  - a fresh goja runtime per call;
+  - every verb mounted as `slop.<group>.<verb>(args)`, synchronous and
+    calling `verbs.Call` as the same principal with via `eval` (the log
+    shows `eval:tok_…`);
+  - verb errors thrown as JS `Error`s with `.code` and `.trace`; an
+    uncaught one keeps its code;
+  - console capture, which is returned with the error too;
+  - a 60 s interrupt and context cancellation;
+  - `readOnly`.
+- **CLI** (`cmd/slop/cmds/extra.go`):
+  - `push <dir>`: hashes first; on `missing_blobs` it uploads those through
+    `files.blobs` in 32 MiB chunks and repeats;
+  - `pull <store> <dir> --at`;
+  - `eval -f/-e/--args/--read-only`, with logs on stderr;
+  - `import docs|table|files|folder`, which read local files;
+  - `store export --folder`;
+  - `files cat`, which writes raw bytes.
+
+  Where a verb has the same name, these replace the generated commands.
+- **`pkg/client/folder.go`:** `ReadDir`, `Push`, `Pull`, `ExportFolder` and
+  `ImportFolder`, using the folder format: `store.json` (authoritative:
+  meta, the file index, the schema), `docs.jsonl`, `tree/`, `assets/`,
+  `schema.sql` (for people to read) and `tables/<name>.jsonl`.
+- **The guide:**
+  - §4.6 now keeps `trusted_schema` at its default (see below);
+  - §12.2 lists `files.blobs` and `snap.new`;
+  - §15 explains typed CSV cells and the hashes-first push;
+  - the layout puts the SQL policy in `pkg/store`.
+
+### Why
+
+- **One writer connection per store:** the authorizer and the `slop_*`
+  functions are per connection. One writer guarded by a mutex means "the
+  turn in progress" is a single pointer (`Store.cur`) that the authorizer
+  and the functions can read. Readers use a separate read-only pool, so
+  reads never wait on a turn.
+- **Recording table writes in the authorizer:** the authorizer sees every
+  INSERT, UPDATE and DELETE target while statements are prepared. Recording
+  them there gives the commit a list of tables changed without parsing SQL.
+- **Queries in Go:** `rt.Query.Apply` is v2's tested contract semantics.
+  Selecting by `coll` in SQL and then applying in Go kept the semantics
+  exact. Translating to `json_extract` is an optimization for later.
+- **`eval` in the verbs package:** it needs the verb table. The kernel does
+  not need verbs, so `Env` holds `*kernel.Kernel` directly, and the P0
+  placeholder interface is gone.
+
+### What worked
+
+- The authorizer approach. The tests show:
+  - migrations create app tables, indexes, triggers and views;
+  - actors write app tables but not `_*`;
+  - `CREATE TEMP`, `ATTACH`, `PRAGMA writable_schema`, `COMMIT` and
+    `DROP TABLE` from actors are all denied;
+  - recursive CTEs are allowed;
+  - admin reads cannot write.
+- Restoring tables before triggers: the round-trip test checks that the
+  audit trigger did not fire on restored rows (2 audit rows, not 4), and
+  that AUTOINCREMENT continues from 3.
+- The idempotent snapshot: the second, unchanged `slop push` answered
+  `n: 1` with no new rev.
+- The trace on denial. Bob's failed write explains itself: `audience
+  member` / `grant @member view on library (direct)` / `rule books/2:
+  write needs interact` / `view < interact`.
+
+### What didn't work
+
+- **`go vet ./pkg/store`:** `undefined: sqlite3.SQLITE_RECURSIVE`.
+  mattn/go-sqlite3 comments that constant out, so I defined
+  `sqliteRecursive = 33` locally.
+- **`trusted_schema=OFF` broke the guide's own example.** The first store
+  test failed with `unsafe use of slop_principal()`. With
+  `trusted_schema=OFF`, only functions flagged `SQLITE_INNOCUOUS` may run
+  from the schema (defaults, views, triggers), and mattn's `RegisterFunc`
+  cannot set that flag. The guide asked for both `trusted_schema=OFF`
+  (§4.6) and `CREATE VIEW … WHERE owner = slop_principal()`. I kept
+  SQLite's default and documented why the authorizer is the guard instead.
+- **AUTOINCREMENT was denied:** `not authorized` on `CREATE TABLE entries
+  (id INTEGER PRIMARY KEY AUTOINCREMENT, …)`. A temporary deny logger
+  showed `action=2 a1="sqlite_sequence"`: SQLite creates `sqlite_sequence`
+  itself. The authorizer now allows that one `CREATE_TABLE` for
+  migrations. Later updates to `sqlite_sequence` are not authorized
+  separately; the round-trip test inserts into an AUTOINCREMENT table under
+  admin-write without trouble.
+- **Queries returned nothing for numbers:** `where year >= 2000` matched no
+  documents in the first eval test. v2's `rt.compare` ranks `float64`, but
+  v3 decodes bodies with `UseNumber`, so values were `json.Number`. `rt`
+  now normalizes with `numify` in `compare`, `sameKind` and `canon`.
+- **Panic in `evalError`:** `invalid memory address or nil pointer
+  dereference`. `obj.Get("trace")` returns nil when the property is absent,
+  and `.Export()` on nil panics. Fixed with a guard.
+- **A rejected write:** my first `Write` of `cmd/slop/cmds/extra.go` was
+  rejected ("File has not been read yet"), and the build still had the stub.
+  I restored the content from the session transcript after reading the
+  file.
+- **Two `eval` commands:** the generated root `eval` and the hand-written
+  one were both added. `addExtraCommands` now removes the generated one.
+- **Found by hand with the binary:**
+  - CSV import stored `year` as `"2004"`, so the eval query found 0 rows.
+    The contract compares only same-type values, so this was correct but
+    useless. `import.docs` now types CSV cells that round-trip exactly, and
+    `--raw` turns that off.
+  - Eval errors printed `not_found: not_found: …`, because the JS message
+    repeated the code. The message no longer carries it.
+- **Wrong tests of mine:** `data/users/<id>/notes/n1` has five segments,
+  so it is a collection path; and I asked `audit` for an `id` column it
+  does not have.
+
+### What I learned
+
+- In mattn/go-sqlite3, `RegisterAuthorizer` passes four arguments: action,
+  arg1, arg2 and the database name; the trigger or view name is dropped.
+  For `ALTER TABLE` the table name is arg2.
+- Statements inside a trigger body are authorized when the outer statement
+  is prepared. So the trigger in the round-trip test, which inserts into
+  `audit`, is checked as the caller of the outer insert.
+- `pragma_table_list` (SQLite 3.37+) tells shadow tables apart from virtual
+  tables. That is what makes FTS5 exportable without copying its internal
+  tables.
+- goja: a native function that panics with a `*goja.Object` throws it as a
+  JS exception. `obj.Get` returns nil, not undefined, for absent
+  properties.
+
+### What was tricky to build
+
+- **The order of a restore:** creating triggers before inserting rows
+  would fire them on every restored row. Creating indexes first would
+  slow the inserts. The order is tables, then rows, then
+  indexes/views/triggers, then an FTS rebuild.
+- **The pushes:** they had to be cheap for the CLI (send only missing
+  blobs), possible from eval (no hashing in JS), and safe (hashes verified
+  on upload; `PutBlob` checks that the blob exists at the declared size).
+  That gave three entry shapes: a hash only, inline `text`, inline `data`.
+- **Counting documents:** the quota check `count(*)` per write was O(n²) on
+  a big import. The turn now counts once and tracks additions. A deletion
+  before the first count must not subtract, because the count already
+  excludes the deleted row.
+
+### What warrants a second pair of eyes
+
+- `trusted_schema` stays on. The argument rests on three points: schema
+  only enters through migrations under the authorizer; the `slop_*`
+  functions have no side effects; and store files are opened only by the
+  kernel. Check `pkg/store/sqlpolicy.go`.
+- **The token scope cap** (`access.scopeCap`): read → view, write → owner.
+  A write-scoped token can therefore act as the person's full level,
+  including `grant.set` and `store.rm`. That matches "scopes say what the
+  token may do; levels say where" but deserves review.
+- **`store.rm` for admins** needs only `admin` level (admins are admin on
+  every store), so admins can delete anyone's store.
+- `sql.query` goes through a turn on the writer (to get the authorizer)
+  and holds the store's lock for the length of the query.
+
+### What should be done in the future
+
+- Blob garbage collection: the guide's refcount (`blob_refs`) or a scan of
+  every store. Nothing is collected yet.
+- Translate queries to SQL with `json_extract`. The current approach loads
+  a collection per query and is fine up to the 25k-document quota.
+- `import.folder` sends its blobs in the request body (96 MiB limit). Large
+  stores need `files.blobs` chunking there too, once the store exists.
+- `store.fork`, `log.watch` (streaming) and the `--sqlite` export.
+- P2 replaces `Kernel.Rules` with the owner app's manifest rules and
+  enforces D9 (only admins push app code).
+
+### Code review instructions
+
+- Start with `pkg/store/turn.go` (the turn and commit), then
+  `pkg/store/sqlpolicy.go` and `pkg/access/check.go`.
+- Then `pkg/verbs/env.go` (`open`, the one access path for verbs),
+  `pkg/verbs/docs.go`, `pkg/verbs/files.go` (`push`) and
+  `pkg/verbs/eval.go`.
+- Validate:
+  - `GOWORK=off go test ./...`
+  - `GOWORK=off go vet ./...`
+  - by hand: `slop serve --local`, then `slop push`, `slop eval -f`,
+    `slop store export --folder`, `slop import folder`.
+
+### Technical details
+
+The exit program (from `TestEvalProgram`):
+
+```js
+slop.store.new({ id: 'inbox' });
+slop.files.put({ store: 'inbox', path: 'books.csv', text: args.csv });
+const rows = slop.files.cat({ store: 'inbox', path: 'books.csv', as: 'csv' });
+slop.store.new({ id: 'library' });
+slop.docs.set({ store: 'library', batch: rows.map(r => (
+  { path: 'books/' + r.isbn, data: { title: r.title, year: Number(r.year) } })) });
+const recent = slop.docs.query({ store: 'library', coll: 'books',
+  where: [['year', '>=', 2000]], orderBy: 'year', desc: true });
+slop.files.push({ store: 'library', message: 'site', files: [
+  { path: 'index.html', text: '<h1>Library</h1>' }, { path: 'style.css', text: 'h1 { color: red }' }] });
+```
+
+The run by hand (scratch data directory and scratch credentials; the user's
+real credentials file was not touched):
+
+```text
+$ slop push site --store demo -m first        → n: 1, rev: 2
+$ slop push site --store demo -m unchanged    → n: 1 (no rev: identical tree)
+$ slop push site --store demo -m navy         → n: 2, rev: 3
+$ slop ref move demo main 1                   → rev: 4
+$ slop files cat demo css/site.css --at main  → h1{color:teal}
+$ slop import docs books.csv --store demo --coll books --id isbn → imported: 3
+$ slop eval -f q.js --args '{"store":"demo"}' → found 2 / Newer (2019), New (2004)
+$ slop eval -e 'slop.docs.get({store:"demo", path:"books/999"})'
+error: not_found: no document books/999
+$ slop store export demo --folder exported && slop import folder exported --store demo-copy
+→ docs: 3, files: 2, tables: 0; demo-copy refs {main: 1}
+```
+
+The authorizer denial that revealed AUTOINCREMENT:
+
+```text
+DENY action=2 a1="sqlite_sequence" a2="" db="main"
+CREATE TABLE entries (id INTEG… not authorized
+```

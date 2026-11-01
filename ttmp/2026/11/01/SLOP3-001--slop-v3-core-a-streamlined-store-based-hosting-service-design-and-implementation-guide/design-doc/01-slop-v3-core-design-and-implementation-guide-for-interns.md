@@ -565,12 +565,22 @@ Rules that apply to every caller:
 - no writes to `_*` or `sqlite_*` tables;
 - no `PRAGMA` except read-only introspection (`table_info`, `index_list` and
   similar);
-- connections set `trusted_schema=OFF` and `SQLITE_LIMIT_ATTACHED=0`.
+- the writer connection sets `SQLITE_LIMIT_ATTACHED=0`.
+
+`trusted_schema` stays at SQLite's default (on). Turning it off would forbid
+`slop_principal()` in views, triggers and column defaults, because only
+functions flagged `SQLITE_INNOCUOUS` may run from the schema then, and
+mattn/go-sqlite3 cannot set that flag. The authorizer is the guard instead:
+schema only enters a store through migrations, every statement in a view or
+trigger body is authorized when the outer statement is prepared, and the
+`slop_*` functions have no side effects. Store files are only ever opened by
+the kernel; an imported SQLite export is copied table by table, never opened
+as-is.
 
 Pages never send SQL in the core: they read documents and call actor actions.
 The slop-v3 lab already implements this policy in JavaScript; read
-`lab/src/kernel/sqlite.js` before writing the Go version in
-`pkg/sqlpolicy`.
+`lab/src/kernel/sqlite.js` before changing the Go version in
+`pkg/store/sqlpolicy.go`.
 
 Three SQL functions are bound to the acting person before each statement, so
 views written in migrations can filter by who is asking:
@@ -1727,8 +1737,8 @@ Errors carry a code from one shared set:
 | `whoami` | `whoami` |
 | `store` | `ls`, `new`, `rm`, `meta`, `export`, `fork` |
 | `docs` | `get`, `ls`, `query`, `set`, `update`, `rm` |
-| `files` | `ls`, `cat`, `put`, `rm`, `push`, `pull` |
-| `snap`, `ref` | `snap.ls`, `ref.ls`, `ref.move` |
+| `files` | `ls`, `cat`, `put`, `rm`, `push`, `blobs` (`pull` is CLI-side: `files.ls` plus `files.cat`) |
+| `snap`, `ref` | `snap.new`, `snap.ls`, `ref.ls`, `ref.move` |
 | `app` | `ls`, `status`, `activate`, `logs` |
 | `actor`, `alarm` | `actor.call`, `alarm.ls`, `alarm.fire` |
 | `sql` (admin) | `query`, `exec`, `schema` |
@@ -1958,6 +1968,16 @@ without reading code.
   | `slop import docs <file> --store <id> --coll books --id isbn` | JSON array, JSONL or CSV | documents, in one turn per 500 |
   | `slop import table <file> --store <id> --table books` | CSV or JSONL | rows; the table must exist (from a migration) |
   | `slop import files <dir> --store <id> [--zone assets]` | a folder | tree files (then `slop snap`), or assets |
+- **CSV cells are typed** by `import docs` when their text round-trips
+  exactly: `42` and `1.5` become numbers, `true` and `false` booleans, and
+  `007` stays a string. `--raw` keeps every cell a string. (Contract queries
+  only compare values of the same type, so `year >= 2000` never matches the
+  string `"2004"`.)
+- **Pushes send hashes first.** `files.push` takes a manifest of
+  `{path, sha256, size}` and answers `missing_blobs` with the hashes it lacks;
+  the CLI uploads those with `files.blobs` in 32 MiB chunks and repeats the
+  push. An `eval` program cannot hash, so a manifest entry may instead carry
+  its content inline as `text` or base64 `data`.
 - **Transforms** are `eval` programs (section 12.5). The importers move bytes
   and rows; anything that reshapes data is a program you can read and rerun.
 - **From v2:** add one command to slop-computer, `slop export --folder` per
@@ -2215,8 +2235,8 @@ pkg/system/             system.db: migrations, people, sessions, tokens, stores,
                         grants, links, bindings, mounts, origins, policy, llm,
                         subscriptions, schedules, system log
 pkg/store/              store.db: open, schema, turn API, docs, files, log,
-                        snapshots, refs, export
-pkg/sqlpolicy/          authorizer, slop_* functions, migration runner
+                        snapshots, refs, export; sqlpolicy.go: the
+                        authorizer and the slop_* functions
 pkg/rt/                 contract semantics (copied from slop-computer)
 pkg/blobs/              content-addressed files (copied from slop-computer)
 pkg/kernel/             open-store LRU, turn loops, fan-out, scheduler
