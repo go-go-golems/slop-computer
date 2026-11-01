@@ -43,6 +43,9 @@ type Visitor struct {
 	// Payer is who an LLM call is charged to: the visitor when they are a
 	// person, the store's owner for alarms and reactors (guide §9.2).
 	Payer string `json:"-"`
+	// Scopes are the token's scopes when the visitor came with a token
+	// (nil for sessions): trusted modules act with them, no more.
+	Scopes []string `json:"-"`
 }
 
 // Error is an actor failure with a code (permission_denied, actor_error…).

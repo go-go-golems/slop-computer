@@ -41,6 +41,9 @@ type Manager struct {
 	LLM       llm.Backend // the sample backend (nil: no LLM)
 	Secret    func(ctx context.Context, app, name string) (string, error)
 	Platform  func(a *Actor) goja.Value
+	Trusted   func(ctx context.Context, app, module string) bool // app.trust
+
+	modules map[string]Module // the registry (Register)
 }
 
 // New makes the actor manager and hooks it into the kernel (activation,
@@ -293,6 +296,9 @@ func (m *Manager) VisitorOf(ctx context.Context, p *access.Principal, storeID st
 	}
 	if p != nil && p.Person != nil {
 		v.Payer = p.Person.ID // a visitor without an id is never charged
+	}
+	if p != nil && p.Kind == access.KindToken {
+		v.Scopes = append([]string{}, p.Scopes...) // modules act with the token's scopes, no more
 	}
 	m.withLLM(ctx, &v)
 	return v

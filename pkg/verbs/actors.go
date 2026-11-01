@@ -3,9 +3,11 @@ package verbs
 import (
 	"context"
 	"errors"
+	"slices"
 
 	"github.com/go-go-golems/slop/pkg/access"
 	"github.com/go-go-golems/slop/pkg/actor"
+	"github.com/go-go-golems/slop/pkg/apps"
 	"github.com/go-go-golems/slop/pkg/rt"
 	"github.com/go-go-golems/slop/pkg/system"
 )
@@ -61,6 +63,64 @@ func init() {
 					return nil, err
 				}
 				return map[string]any{"store": r.Store, "app": r.App, "n": r.N, "broken": r.Broken}, nil
+			}},
+		&Verb{Name: "app.trust", Doc: "Trust an app with a Go module it declares in app.json slop.modules (system, workshop); restarts its actors.", Scope: Admin, AdminOnly: true,
+			Args: []Arg{{Name: "app", Type: "string", Pos: 1, Required: true}, {Name: "module", Type: "string", Pos: 2, Required: true}},
+			Run: func(ctx context.Context, e *Env, p *access.Principal, a Args) (any, error) {
+				app, mod := a.S("app"), a.S("module")
+				if !apps.Modules[mod] {
+					return nil, Errf("invalid_argument", "no module %q (system, workshop)", mod)
+				}
+				r, err := e.K.Running(ctx, app)
+				if err != nil || r.Manifest == nil {
+					return nil, Errf("not_found", "%s is not an app (no app.json)", app)
+				}
+				if !slices.Contains(r.Manifest.Slop.Modules, mod) {
+					return nil, Errf("invalid_argument", "%s does not declare %s in app.json slop.modules", app, mod)
+				}
+				if err := e.Sys.TrustModule(ctx, p.ID(), p.ViaLabel(), app, mod); err != nil {
+					return nil, err
+				}
+				e.A.RestartApp(app) // use() is evaluated at start
+				return map[string]any{"app": app, "module": mod, "trusted": true}, nil
+			}},
+		&Verb{Name: "app.untrust", Doc: "Withdraw an app's trust with a Go module; restarts its actors.", Scope: Admin, AdminOnly: true,
+			Args: []Arg{{Name: "app", Type: "string", Pos: 1, Required: true}, {Name: "module", Type: "string", Pos: 2, Required: true}},
+			Run: func(ctx context.Context, e *Env, p *access.Principal, a Args) (any, error) {
+				app, mod := a.S("app"), a.S("module")
+				err := e.Sys.UntrustModule(ctx, p.ID(), p.ViaLabel(), app, mod)
+				if errors.Is(err, system.ErrNotFound) {
+					return nil, Errf("not_found", "%s is not trusted with %s", app, mod)
+				}
+				if err != nil {
+					return nil, err
+				}
+				e.A.RestartApp(app)
+				return map[string]any{"app": app, "module": mod, "trusted": false}, nil
+			}},
+		&Verb{Name: "app.modules", Doc: "The Go modules apps can use, and which apps are trusted with them (one app: what it declares and is trusted with).", Scope: Read,
+			Args: []Arg{{Name: "app", Type: "string", Pos: 1}},
+			Run: func(ctx context.Context, e *Env, p *access.Principal, a Args) (any, error) {
+				reg := []map[string]any{}
+				for _, m := range e.A.Modules() {
+					reg = append(reg, map[string]any{"name": m.Name, "doc": m.Doc})
+				}
+				trust, err := e.Sys.AppModules(ctx, a.S("app"))
+				if err != nil {
+					return nil, err
+				}
+				out := map[string]any{"modules": reg, "trusted": trust}
+				if app := a.S("app"); app != "" {
+					if _, _, err := e.open(ctx, p, app, rt.LevelView, "reading"); err != nil {
+						return nil, err
+					}
+					declared := []string{}
+					if r, err := e.K.Running(ctx, app); err == nil && r.Manifest != nil {
+						declared = append(declared, r.Manifest.Slop.Modules...)
+					}
+					out["app"], out["declared"] = app, declared
+				}
+				return out, nil
 			}},
 		&Verb{Name: "alarm.ls", Doc: "List a store's alarms.", Scope: Read,
 			Args: []Arg{storeArg},

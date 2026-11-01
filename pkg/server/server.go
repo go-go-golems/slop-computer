@@ -107,6 +107,7 @@ func New(cfg *config.Config, sys *system.DB, env *verbs.Env) *Server {
 		}
 		env.A.Secret = func(ctx context.Context, app, name string) (string, error) { return sys.Secret(ctx, key, app, name) }
 		env.A.Platform = s.platformModule
+		s.registerModules()
 		env.A.RoomEmit = s.actorEmit
 		env.A.RoomPeers = func(store string) []rt.Peer {
 			out := []rt.Peer{}

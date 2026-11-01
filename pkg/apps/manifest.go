@@ -33,6 +33,7 @@ type Slop struct {
 	Fetch    []string        `json:"fetch,omitempty"`    // origins the actor may request
 	Secrets  []string        `json:"secrets,omitempty"`  // secret names the actor may read
 	Platform []string        `json:"platform,omitempty"` // stores.create, mounts.set, grants.set
+	Modules  []string        `json:"modules,omitempty"`  // Go modules the actor uses once an admin trusts the app with them
 }
 
 // Read is one read alias: the store type it expects.
@@ -42,6 +43,10 @@ type Read struct {
 
 // Platform capabilities an app may ask for.
 var Platform = map[string]bool{"stores.create": true, "mounts.set": true, "grants.set": true}
+
+// Modules are the Go modules an app may declare (registered by the server;
+// each needs an admin's app.trust before use() returns it).
+var Modules = map[string]bool{"system": true, "workshop": true}
 
 // Parse reads and checks app.json.
 func Parse(raw []byte) (*Manifest, error) {
@@ -62,6 +67,11 @@ func Parse(raw []byte) (*Manifest, error) {
 	for _, p := range m.Slop.Platform {
 		if !Platform[p] {
 			return nil, fmt.Errorf("app.json: slop.platform: unknown %q", p)
+		}
+	}
+	for _, name := range m.Slop.Modules {
+		if !Modules[name] {
+			return nil, fmt.Errorf("app.json: slop.modules: unknown %q", name)
 		}
 	}
 	for alias, r := range m.Slop.Reads {

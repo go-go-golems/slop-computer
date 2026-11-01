@@ -59,6 +59,10 @@ func (a *Actor) module(name string) goja.Value {
 		if len(a.run.Manifest.Slop.Platform) > 0 && a.m.Platform != nil && a.m.allowedAny(a, "platform") {
 			return a.m.Platform(a)
 		}
+	default:
+		if v := a.trustedModule(name); v != nil {
+			return v
+		}
 	}
 	return goja.Null()
 }
