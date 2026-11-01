@@ -2404,3 +2404,301 @@ Stores     store.ls --all, grant.ls/set/rm, link.ls/new/rm
 Sites      mount.ls, mount.set, mount.rm, mount.undo
 Explain    explain.can
 ```
+
+## Step 16: P8, deploy from source (slop.boutique, the francois apps, Blocks, Pinup)
+
+P8 deploys everything from its source folders with the v3 CLI; nothing is
+imported from v2. Four groups of sources are built into folders by ticket
+scripts and pushed with `slop push`:
+- slop.boutique, from `slop-computer/examples/seed`, becomes one static
+  store with 65 files;
+- the seven francois examples become seven apps;
+- Claude Blocks and Pinup become two app stores with five instances;
+- the journal example becomes the store `journal`.
+
+Two gaps in v3 core turned up on the way and are fixed in commit
+`5b6505d`:
+- a static site had no not-found page: the client-side fallback served
+  the front page for any missing path;
+- a page that closed stayed in its rooms' presence for two minutes.
+
+All three browser checks pass against the demo server:
+- `05-p8-boutique-e2e.mjs`: every boutique route, the 404 page, every
+  francois app;
+- `06-p8-sample-e2e.mjs`: sample on the real Pi worker
+  (lunaroute/deepseek-4.1-flash:high), as a guest and as the admin;
+- `09-p8-blocks-pinup-e2e.mjs`: two guests in a Blocks workspace, a
+  members-only workspace, and the admin designing in Pinup with Claude
+  while a guest watches.
+
+### Prompt Context
+
+**User prompt (verbatim):** the verification request is in Step 9; "no v2
+bridge ? we don't need backwards compatibility." is in Step 11. During
+this step: "also remember to commit at appropriate intervals and keep a
+detailed diary as you work (using the diary format from the skill)".
+
+**Assistant interpretation:** Build each site and app from the folder it
+lives in, adapt it to v3 where it relied on v2 (in the build, not in
+core), push it with the CLI, and check it in a browser as the people its
+grants name, including guests.
+
+**Inferred user intent:** v3 must host what v2 hosted, starting from the
+sources rather than from v2's data, so that v2 can be retired.
+
+**Commit (code):** `5b6505d` — "P8: deploy from source — static notFound
+page, presence follows the stream, build and deploy scripts".
+
+### What I did
+
+Core (commit `5b6505d`):
+- `pkg/apps/manifest.go`: `app.json` gains `notFound`, a relative path in
+  the tree, checked like `page` and `actor`.
+- `pkg/server/site.go`: when the manifest names a `notFound` page, a
+  missing path on a static host gets that page with status 404 and
+  `Cache-Control: no-store`, instead of the client-side fallback.
+- `pkg/rt/views.go`: `AsPeer` lists a view only while its stream is
+  attached.
+- `pkg/server/views.go`: `announceRooms(v)` runs when a stream attaches
+  and again when it ends, so the view's rooms hear it arrive and leave.
+- `pkg/server/p8_test.go`: `TestStaticNotFoundPage` and
+  `TestPresenceLeavesWithStream`.
+- `.gitignore`: `web/piworker/dist/`.
+
+Scripts (in `scripts/`):
+
+| Script | What it does |
+|---|---|
+| `02-build-boutique.py` | seed → one static site folder (see Technical details) |
+| `03-build-francois.py` | each francois example → `index.html` + `app.json` |
+| `04-deploy-sources.sh` | store new, push, grant, mount for the boutique and francois apps |
+| `05-p8-boutique-e2e.mjs` | Playwright: boutique routes and the francois apps, as a guest |
+| `06-p8-sample-e2e.mjs` | Playwright: sample on the real model, guest and admin |
+| `07-build-blocks-pinup.sh` | Blocks (checked against `SHA256SUMS`) and upstream Pinup → app folders |
+| `08-deploy-blocks-pinup.sh` | the two apps, five instances, mounts, policy |
+| `09-p8-blocks-pinup-e2e.mjs` | Playwright: Blocks with two guests, Pinup with admin and guest |
+
+The demo server:
+- runs from `$S/v3run/slop.yaml`, with static hosts `site.localhost:18300`
+  and `boutique.localhost:18300`, live host `apps.localhost:18300`,
+  `llm: pi`, and all three model tiers set to
+  `lunaroute/deepseek-4.1-flash:high`;
+- starts from a fresh data directory (the P7 one is kept as `data.p7`);
+- uses the Pi worker built offline: `pnpm install --offline
+  --frozen-lockfile`, then `pnpm run build`, giving `dist/worker.js` of
+  14.5 kB. The worker reads Pi's own configuration; I did not open it.
+
+Policy and budgets:
+- `sample` is on for members, subscribers and admins on every francois app
+  that declares it, on Blocks and on Pinup;
+- `sample` is on for guests on polis and Blocks;
+- LLM budgets: `@admin` unlimited, `@member` 200,000 tokens a month,
+  `@guest` 20,000.
+
+The instances:
+
+| Store | App | Grants |
+|---|---|---|
+| ws-lobby, ws-scratch | blocks | @guest interact |
+| ws-team | blocks | @member interact |
+| pin-scratch | pinup | @guest interact, @member admin |
+| pin-review | pinup | @guest view, @member interact |
+
+### Why
+
+- **Render the boutique at build time.** v2 rendered a route by injecting
+  boot data into the page: records, route params, tokens CSS. v3's static
+  host serves files only, by design (guide §11.1), so the build does that
+  rendering once:
+  - a route with a `:param` becomes one directory per matching record;
+  - the data artifacts become `_data/<artifact>.json`;
+  - `_slop/page.js` defines the small `window.slop` the pages use.
+
+  The pages use only `slop.data[alias].list()/get(id)` and
+  `slop.route.params/path`, and they fall back when `window.slop` is
+  missing. So the shim is about thirty lines, and the pages are not edited.
+- **Route version pins are kept.** `/pricing` pins version 5 while version
+  7 exists. The live site serves 5, so the build does too.
+- **`notFound` in core.** v2's `*` route had a page of its own. Without
+  one, `/press` (linked from every footer) returned the front page with
+  status 200. A site of real pages needs a real 404, and the change is a
+  few lines.
+- **Upstream Pinup, not v2's slop layer.** `web/pinup/slop/js` adds
+  Workshop publishing through v2's management permissions
+  (`versions:push`, `routes:write`). v3 has no Workshop. The upstream
+  page, byte-identical to the published artifact (sha256
+  `531ef701b5c1417e…`), uses only the contract, which v3 serves.
+- **Members get `admin` on pin-scratch.** Pinup lets a viewer design only
+  when `user.canEdit()` is true, and the contract defines that as the admin
+  level. Guests are capped at `interact` (guide §7.3), so on Pinup they
+  view, present and leave feedback.
+- **Presence follows the stream.** The contract says presence is "cleared
+  when you leave". A view is kept for `IdleGrace` (two minutes) so that a
+  reconnect can resume it. Keeping it is right, but listing it as a peer
+  during that time is not.
+
+### What worked
+
+```text
+$ node 05-p8-boutique-e2e.mjs various/p8-deploy
+ok   /: 200, shows "Tessellate": true, --accent #2340D8
+ok   /apps/orbits/: 200, shows "Bodies in orbit around one sun": true, --accent #2340D8
+ok   /journal/comments-as-prompts/: 200, shows "Pointing at the layout is easy": true, --accent #2340D8
+… (/journal/, /pricing/, /about/, /play/orbits/, /play/type/, /play/pomodoro/ likewise)
+ok   /press/kit: 404, path "/press/kit", font "ABC Areal", "Helvetica Neue",
+ok   front page → Orbits: http://boutique.localhost:18300/apps/orbits/
+ok   live /f/polis/: 200, app frame text 1524 chars
+ok   live /f/lattice-deck/: 200, app frame text 4875 chars
+ok   live /f/rag-workbench/: 200, app frame text 4598 chars
+ok   live /f/tabula-workbench/: 200, app frame text 7696 chars
+ok   static /f/lattice-phantasmagoria/: 200, 2 canvas
+ok   static /f/lattice-rift/: 200, 1 canvas
+all passed
+
+$ node 06-p8-sample-e2e.mjs
+ok   guest on polis: {"text":"slop ok"}
+ok   admin on capabilities (Capabilities Share Admin Sign out): {"text":"slop ok"}
+
+$ node 09-p8-blocks-pinup-e2e.mjs various/p8-deploy
+ok   blocks: each guest sees two peers (self and the other)
+ok   blocks: guest B sees guest A's page "Lobby notes 20:09:09"
+ok   blocks: guest B opens it and reads the block
+ok   blocks: no console errors
+ok   blocks: when guest A leaves, guest B is alone at once
+ok   blocks: a guest at ws-team is asked to sign in, no app loads (0 app frames)
+ok   pinup: the admin's design has 128 nodes
+ok   pinup: the guest sees 128 nodes, view only: true
+ok   pinup: Claude added a heading "Slop 200909" (sample on the real model)
+ok   pinup: the guest sees Claude's change live
+all passed
+```
+
+`slop llm usage` after the sample check showed the admin at 65 tokens used,
+from `@admin`. `go vet ./...` and `go test ./... -count=1` passed
+(`pkg/server` 3.0 s). The screenshots are in `various/p8-deploy/`.
+
+### What didn't work
+
+1. The first boutique build wrote `apps/orbits/index.html/index.html`.
+   `write_page` took a file path and used it as a directory. It now takes
+   the directory; the 404 page is the one case that writes a named file.
+2. `04-deploy-sources.sh` printed `? files sent`: `slop push -o json`
+   returns `{"files", "n", "removed", "rev"}`, with no `sent`. Fixed.
+3. The capabilities app logged `Failed to load resource: … 404`. It links
+   `/static/style.css`, francois's own stylesheet (`pkg/web/static`).
+   `03-build-francois.py` now copies any `/static/<file>` a page links into
+   the app and makes the link relative.
+4. `TestStaticNotFoundPage` expected `files.put` to refuse an `app.json`
+   with `"notFound": "../x.html"`. It got 200: a manifest is parsed when a
+   snapshot is run (`kernel.manifest`, which records it as broken), not
+   when it is written. The test now checks `apps.Parse` directly.
+5. The Blocks exploration timed out on `getByText('New page', {exact:
+   true})`: the button's text is "+ New page". I used
+   `locator('button', {hasText: 'New page'})` instead.
+6. Two guests showed four presence avatars in Blocks. Reading the peers
+   from the frame first returned `"timeout"`, because `onPeers` delivers
+   `{peers: […]}`, not an array. Read correctly, it showed three peers
+   with two pages open. The third was the guest of my previous run,
+   closed a minute earlier and kept by `IdleGrace`. That led to the
+   presence fix.
+7. `TestPresenceLeavesWithStream` first failed with `no peers event
+   within 3s`: view B never entered a room, and announcements go only to
+   views in the room. The runtime enters the lobby when the page sets
+   presence, so the test does the same. Without the fix the test fails
+   (`FAIL … 3.047s`); with it, it passes in 0.03 s.
+8. Restoring the fix with `sed 's/if !ok {/if !ok || v.ch == nil {/'`
+   also changed two other `if !ok {` lines in `pkg/rt/views.go` (in
+   `Close` and `SetPresence`). `git diff` showed it; I restored those two
+   lines by number before committing.
+9. The ws-team check counted frames and found 2 for a refused guest. The
+   shell keeps an empty iframe element. The check now counts frames on
+   the sandbox host and looks for "Sign in to open this".
+
+### What I learned
+
+- v3's static host treats a missing extension-less path as a client-side
+  route and serves the entry page with 200. That suits a single-page app
+  and is wrong for a site of pages, so `notFound` switches it off.
+- A 404 page is served at every depth. Its relative URLs therefore have to
+  become absolute (`_404/boutique.css`).
+- Pinup uses room presence only, while Blocks sends its ops on the `ops`
+  topic, which is opened to `interact`. Pinup's editing depends on the
+  admin level, Blocks' on `interact`.
+
+### What was tricky to build
+
+- **Peers and reconnects.** A view is kept after its stream drops so that
+  a reconnect resumes it with its secret and its rooms. Presence must still
+  drop at once. `AsPeer` now looks at `v.ch` under the view's lock. The
+  stream handler announces after `Attach` and again after `Detach`. The
+  announcement on attach also reaches the view itself; it is queued behind
+  `hello` and is harmless, because a peers event carries the whole list.
+- **One record pattern per route.** `/apps/:slug` with record
+  `experiments/{slug}.json` becomes a regular expression over every data
+  record's path. Each match gives a directory and the record as boot data.
+
+### What warrants a second pair of eyes
+
+- `AsPeer` hides every view without a stream. Today every view streams. A
+  future view that works only through RPC, such as an agent session, would
+  not appear as a peer.
+- The boutique's data is compiled into the site. Changing an experiment
+  means running `02-build-boutique.py` and pushing again.
+- francois's capabilities manifest declares `files: {project: "local"}`.
+  v3 accepts it, and `use("files")` gives null. The page hides the feature.
+
+### What should be done in the future
+
+- The site app of guide §5.6 (deferred) could serve routes and data
+  stores at request time, replacing the build-time rendering.
+- Blocks' agent protocol (the "README for Claude" in `index.html`, where
+  an agent writes turns under `data/users/me/blocks`) was not exercised
+  here. On v3 it would go through `slop docs`.
+
+### Code review instructions
+
+- Start with `pkg/server/site.go` (the `notFound` branch),
+  `pkg/rt/views.go` (`AsPeer`) and `pkg/server/views.go`
+  (`announceRooms`), then `pkg/server/p8_test.go`.
+- Validate:
+  - `GOWORK=off go test ./pkg/server -run 'TestStaticNotFoundPage|TestPresenceLeavesWithStream' -count=1`;
+  - to redeploy: run scripts 02, 03 and 07 into a deploy folder, then 04
+    and 08 with `SLOP_CREDENTIALS` naming an admin login on a scratch
+    path;
+  - then the three Playwright scripts.
+
+### Technical details
+
+How the boutique's routes become files (from `seed.json`):
+
+| Route | Page (version) | Files |
+|---|---|---|
+| `/` | front-page (latest) | `index.html`, `boutique.css` |
+| `/apps/:slug` | app-page, record `experiments/{slug}.json` | `apps/<slug>/index.html` × 14 |
+| `/pricing` | pricing (pinned v5) | `pricing/index.html` |
+| `/about`, `/journal`, `/play/*` | latest | `<path>/index.html` |
+| `/journal/:slug` | journal-post, record `posts/{slug}.md` | `journal/<slug>/index.html` × 8 |
+| `*` | not-found | `404.html` (+ `_404/boutique.css`), named by `app.json` `notFound` |
+
+Each page gets three things before `</head>`:
+- `<script id="slop-boot" type="application/json">` with `{reads, route,
+  record, tokens}`;
+- `<script src="/_slop/page.js">`;
+- `<style data-slop="tokens">html:root{--accent:…}</style>`.
+
+Records follow v2's `pkg/records`:
+- Markdown: front matter, `body`, `html` (python-markdown with `extra`)
+  and `minutes`;
+- JSON: its fields;
+- every record: `id` (the file's base name) and `path`.
+
+Where everything is served:
+
+```text
+boutique.localhost:18300/            boutique (static)
+apps.localhost:18300/f/<app>/        polis, capabilities, lattice-deck, rag-workbench, tabula-workbench
+site.localhost:18300/f/<app>/        lattice-phantasmagoria, lattice-rift (no capabilities)
+apps.localhost:18300/b/<id>/         Blocks workspaces (type blocks, createApp blocks)
+apps.localhost:18300/p/<id>/         Pinup files (type design, createApp pinup)
+apps.localhost:18300/x/<id>/         any store (the agents' playground; Step 17)
+```

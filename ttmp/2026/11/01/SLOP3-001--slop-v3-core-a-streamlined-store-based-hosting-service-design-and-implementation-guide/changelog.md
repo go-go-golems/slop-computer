@@ -104,3 +104,13 @@ P7 (64ff450): back office on the main host (seven surfaces, lab design system, e
 
 - /home/manuel/code/wesen/2026-10-31--slop-v3/ttmp/2026/11/01/SLOP3-001--slop-v3-core-a-streamlined-store-based-hosting-service-design-and-implementation-guide/scripts/01-p7-backoffice-e2e.mjs — P7 exit run
 - /home/manuel/code/wesen/2026-10-31--slop-v3/web/admin/src/views.jsx — the back office surfaces
+
+## 2026-11-01
+
+P8 (5b6505d): deployed from source with the CLI — slop.boutique (seed → one static store with app.json notFound), the francois apps, Claude Blocks and Pinup with guest instances; presence now follows the view's stream
+
+### Related Files
+
+- /home/manuel/code/wesen/2026-10-31--slop-v3/pkg/rt/views.go — AsPeer lists only views with a stream
+- /home/manuel/code/wesen/2026-10-31--slop-v3/pkg/server/site.go — notFound page for static sites
+- /home/manuel/code/wesen/2026-10-31--slop-v3/ttmp/2026/11/01/SLOP3-001--slop-v3-core-a-streamlined-store-based-hosting-service-design-and-implementation-guide/scripts/02-build-boutique.py — the boutique rendered at build time
