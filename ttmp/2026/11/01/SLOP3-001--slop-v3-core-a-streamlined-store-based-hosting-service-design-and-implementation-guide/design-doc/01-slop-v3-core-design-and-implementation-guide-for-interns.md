@@ -1328,13 +1328,15 @@ allowances, no time limits.
 CREATE TABLE llm_access (
   subject TEXT PRIMARY KEY,      -- 'usr_…' or 'vis_…' (a person), or '@member' etc.
   allowed INTEGER NOT NULL,      -- 0 or 1
-  budget_tokens INTEGER,         -- NULL = no limit
+  budget_tokens INTEGER,         -- per calendar month; NULL = no limit
   changed_by TEXT, changed_at INTEGER NOT NULL);
 
 CREATE TABLE llm_usage (
-  person TEXT PRIMARY KEY,       -- 'usr_…' or 'vis_…'
+  person TEXT NOT NULL,          -- 'usr_…' or 'vis_…'
+  period TEXT NOT NULL,          -- '2026-11': the calendar month, UTC
   used_tokens INTEGER NOT NULL DEFAULT 0,   -- input + output, all models
-  reset_at INTEGER, updated_at INTEGER NOT NULL);
+  updated_at INTEGER NOT NULL,
+  PRIMARY KEY (person, period));
 ```
 
 ```text
@@ -1342,7 +1344,7 @@ llmFor(person):
   row := llm_access[person.id]                     # a personal setting wins
       or llm_access['@' + audienceOf(person)]      # else the audience default
   if row is nil or not row.allowed: return {allowed: false}
-  used := llm_usage[person.id].used_tokens or 0
+  used := llm_usage[person.id, period(now)].used_tokens or 0   # this month
   if row.budget_tokens is NULL: return {allowed: true, remaining: unlimited}
   return {allowed: true, budget: row.budget_tokens,
           remaining: max(0, row.budget_tokens - used)}
@@ -1352,8 +1354,13 @@ llmFor(person):
   to subscribers and the `@member` row to members, so you can give members
   none and subscribers two million tokens.
 - **Seed values:** `@admin` allowed with no limit; everyone else off.
-- **Resetting is manual:** `slop llm reset usr_…` sets `used_tokens` to 0 and
-  records `reset_at`. Section 20 asks whether a monthly reset is wanted.
+  Guests may be given access too (`slop llm set @guest on --budget 20000`),
+  but only guests with an id can be charged, so on static hosts guests never
+  call the LLM.
+- **Budgets are monthly.** Usage is counted per calendar month (UTC), so a
+  new month starts every budget from zero without any job running. Old
+  months stay in the table as history. `slop llm reset usr_…` sets the
+  current month's usage to 0 by hand.
 
 ### 9.2 Who pays for a call
 
@@ -1376,8 +1383,9 @@ sample(input, opts) during a turn with visitor v:
   if llm.remaining <= 0:    fail quota_exceeded "token budget used up"
   -- the turn ends here; the call runs outside any transaction --
   resp := backend.Complete(ctx, input, opts, onDelta)    # streams deltas to pages
-  UPDATE llm_usage SET used_tokens = used_tokens + resp.in + resp.out
-     WHERE person = payer                                 # system.db, one statement
+  INSERT INTO llm_usage (person, period, used_tokens, updated_at)
+    VALUES (payer, period(now), resp.in + resp.out, now)
+    ON CONFLICT DO UPDATE SET used_tokens = used_tokens + excluded.used_tokens
   return {text: resp.text, usage: {input: resp.in, output: resp.out}}
 ```
 
@@ -2126,7 +2134,7 @@ Two decision records appear where they matter most: policy per app (section
 - **Options considered:** francois's plans; rate limits; access plus a
   budget.
 - **Decision:** per person or per audience: allowed or not, a total token
-  budget, and a usage ledger. Resets are manual.
+  budget per calendar month, and a usage ledger by month.
 - **Rationale:** it is the smallest rule that still prevents runaway spend.
 - **Consequences:** no per-app or per-day budgets. If those are ever needed,
   they are new rows in the same tables.
@@ -2425,13 +2433,9 @@ previous phase's exit test passes.
 - The binary is `slop`. During the cut-over, v2's CLI is installed as `slop2`
   if both are needed on one machine (P8).
 
-**Still open:**
-
-1. Should LLM budgets reset monthly, or stay manual? (Section 9.1 proposes
-   manual.)
-2. Should guests ever get LLM access? The proposal is off by default, with
-   the option for an admin to turn on `@guest`. Only guests with an id can
-   be charged.
+- LLM budgets are monthly (section 9.1).
+- Guests may be given LLM access (`@guest`), charged to their guest id. The
+  seed leaves it off.
 
 ## Appendix A. `system.db`
 

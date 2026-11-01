@@ -395,3 +395,98 @@ first, so any notes made on the first copy are kept.
 - **No `--force`:** the first upload, `SLOP3-001 slop v3 core design guide.pdf`, stays as it is.
 - **Guide revision:** `ba21061`.
 - **Next:** answers to the two open questions in §20; then P0.
+
+## Step 6: Last decisions, and how the implementation starts
+
+The user settled the two open questions and asked for the implementation:
+- LLM budgets are monthly;
+- guests may be given LLM access.
+
+Before writing code I recorded both in the guide (6 replacements). I also
+made two implementation choices that differ slightly from the guide's
+wording: the SQLite driver, and how the actor runtime is owned.
+
+### Prompt Context
+
+**User prompt (verbatim):** "1. monthly
+2. yes
+
+Now implement, commit at appropriate intervals and keep a detailed diary as you work (using the diary format from the skill)"
+
+**Assistant interpretation:** Make budgets monthly, allow `@guest` LLM access, then build slop v3 core phase by phase (P0 onwards), committing at phase boundaries and writing a full investigation-format diary entry per step.
+
+**Inferred user intent:** Get a running service as soon as possible, following the guide.
+
+### What I did
+
+- **`edit3.py` (6 replacements) in the guide:**
+  - `llm_usage` gains `period` ('YYYY-MM', UTC), with primary key
+    `(person, period)`;
+  - `llmFor` reads the current month;
+  - the charge is an upsert;
+  - §9.1 says budgets are monthly and that guests may be given access;
+  - D6 now says "per calendar month";
+  - §20 has no open questions left.
+- **Checked the toolchain:** `go version` gives `go1.26.6`; gcc is present
+  and `CGO_ENABLED=1`.
+- **Checked SQLite drivers:**
+  - v2 uses `modernc.org/sqlite v1.54.0`. `grep` over its sources shows
+    `RegisterPreUpdateHook`, `RegisterCommitHook`, `Serialize` and
+    `NewBackup`, but no authorizer API.
+  - `go list -m -versions` reaches `github.com/mattn/go-sqlite3`
+    (latest `v1.14.52`) and `github.com/ncruces/go-sqlite3` (`v0.36.0`).
+
+### Why
+
+- **mattn/go-sqlite3**, as the guide specifies. It has
+  `RegisterAuthorizer`, `RegisterUpdateHook`, `RegisterFunc`, limits and
+  backup. The authorizer is how actor SQL is confined, and how the kernel
+  learns which app tables a turn wrote. modernc cannot do either. The cost is
+  cgo in builds, which this machine supports.
+- **goja directly, without go-go-goja's engine and `runtimeowner`.** In the
+  design each store already has one turn-loop goroutine, and that goroutine
+  is the only code that touches the store's VM. A second ownership layer adds
+  nothing. go-go-goja's module registry would also bring Node-style modules
+  that actors must not have. I'll correct the guide's §6.3 once the actor
+  code exists.
+- **Monthly periods instead of a reset job:** keying usage by month makes the
+  reset automatic, and keeps history for free.
+
+### What worked
+
+- All six replacements applied, and no code line is longer than 92 columns.
+
+### What didn't work
+
+- N/A.
+
+### What I learned
+
+- modernc's pure-Go driver trades away the authorizer. Any design that
+  depends on `sqlite3_set_authorizer` needs mattn or ncruces.
+
+### What was tricky to build
+
+- N/A (decisions only).
+
+### What warrants a second pair of eyes
+
+- Dropping go-go-goja's `runtimeowner`: correct as long as no goroutine
+  other than the store's loop ever calls into its VM. Continuations must go
+  through the inbox.
+
+### What should be done in the future
+
+- P0: the Go module skeleton, config, `system.db`, local sign-in, sessions,
+  tokens, device login, `whoami`.
+
+### Code review instructions
+
+- In the guide: §9.1, D6 and §20.
+
+### Technical details
+
+```text
+python3 -I scratchpad/slop3-edits/edit3.py <design-doc>   -> applied 6
+go list -m -versions github.com/mattn/go-sqlite3          -> ... v1.14.51 v1.14.52
+```
