@@ -147,8 +147,9 @@ the way they do:
   from `pkg/catalog/billing/policy.go`.
 - **go-go-host** (`go-go-golems/go-go-host`): hosts goja sites with one SQLite
   file per site, and swaps a new version in only after its smoke check passes.
-- **go-go-goja** (`go-go-golems/go-go-goja`): the goja runtime factory and the
-  single-owner pattern we use to run actors.
+- **go-go-goja** (`go-go-golems/go-go-goja`): the goja version and the
+  single-owner pattern used to run actors (implemented directly on goja,
+  section 6.3).
 
 ## 3. Orientation: the system in five minutes
 
@@ -838,56 +839,76 @@ change commits first, and the publish commits a minute later in a second turn.
 
 ### 6.3 Running actors on goja
 
-Each active store has one goja runtime, built from a factory per app version
-and owned by one goroutine:
+Each active store has one goja runtime (`github.com/dop251/goja`), built
+from the app version's files and owned by one goroutine. The implementation
+uses goja directly, not go-go-goja's factory and `runtimeowner`: the actor
+needs a turn boundary that those packages do not model (a store transaction
+that ends where the handler awaits real I/O), and one goroutine with an
+inbox gives the same single-owner guarantee with less code.
 
 ```go
-// pkg/actor/factory.go: one factory per (app, version)
-f, err := engine.NewRuntimeFactoryBuilder().
-    WithModules(slopModules(manifest)...).     // the use(name) catalog
-    WithRuntimeInitializers(defineActorInit). // installs defineActor, use, require
-    Build()
-rt, err := f.NewRuntime()                      // *engine.Runtime{VM, Loop, Owner}
+// pkg/actor/actor.go
+type Actor struct {
+    m     *Manager
+    st    *store.Store
+    run   kernel.Running   // app, version n, manifest
+    key   string           // "app@n" it was built from
+    vm    *goja.Runtime
+    def   *goja.Object     // what actor.js passed to defineActor
+    inbox chan *event
+    cur   *turn            // the turn in progress, nil between turns
+    parks int              // handlers waiting on I/O
+}
 ```
 
-These are go-go-goja's types: `engine.NewRuntimeFactoryBuilder` and
-`RuntimeFactory.NewRuntime` in `pkg/engine/factory.go`, and the `Runtime`
-struct with its `VM`, `Loop` and `Owner` fields in `pkg/engine/runtime.go`.
-`runtimeowner.RuntimeOwner.Call(ctx, op, fn)` (`pkg/runtimeowner`) runs a
-function on the runtime's own goroutine. Every turn goes through it.
+`build` makes the runtime: it installs `defineActor`, `use(name)` (the
+module catalog in `modules.go`), CommonJS `require` over the app's own
+`.js` files, `console`, and a `Date.now` that returns the turn's time. Then
+it runs `actor.js`, which must call `defineActor` once.
 
-The turn loop, one goroutine per active store:
+The turn loop (`Actor.loop` and `Actor.handle`):
 
 ```text
 loop:
-  ev := inbox.next()                                # blocks; idle 60 s -> hibernate
-  tx := writer.BeginImmediate()
-  kernel.setTurn(store, ev.principal, now())        # binds slop_principal() etc.
-  result, err := owner.Call(ctx, ev.kind, func(vm) {
-      v := handler(ev)(ctxObject, ev.args)          # may return a promise
-      return v                                      # goja runs queued jobs here
-  })
-  if err != nil or failFault():
-      tx.Rollback(); reply(ev, err); continue
-  changes := kernel.collectChanges()                # docs, files, tables
-  if changes non-empty: rev := writeLog(tx, ev, changes)
-  tx.Commit()
-  release(ev.outputs)                               # replies, room, fan-out
-  if result is a pending promise:                   # awaiting real I/O
-      park(ev, promise)                             # not finished, not failed
+  ev := <-inbox                                  # idle 60 s -> retire
+  store.Do(who(ev), func(t *Turn):               # BEGIN IMMEDIATE
+      a.cur = turn{t}
+      arm a 5 s interrupt
+      v := ev.run(a, ctx)                        # call the handler, or resolve a parked promise
+      root := the handler's root promise (if any)
+      if root is rejected: return error          # rolls this turn back
+  )                                              # COMMIT: one rev if anything changed
+  on error: reply(ev, error); count a crash if it was an interrupt or a panic
+  release(turn.out)                              # room messages, after the commit
+  if root is pending: park(ev, root)             # waiting on I/O: not finished, not failed
+  else: reply(ev, root's value)
 ```
 
-**How an `await` becomes a new turn.** A host operation such as `sample()`
-returns a goja promise and starts its work in a separate goroutine. When the
-work finishes, it does not touch the runtime directly. It posts a
-**continuation event** to the store's inbox. That event's turn resolves the
-promise inside `owner.Call`, and goja then runs the JavaScript after the
-`await`, inside the new transaction. go-go-goja's `runtimebridge` package has
-the helpers for posting work back to the owner.
+**How an `await` becomes a new turn.** A module function that does real
+I/O (`time.sleep`, `fetch`, `stores.call`, `sample`) calls
+`Actor.io(work, settle)`. It creates a goja promise and starts `work` on its
+own goroutine. When `work` returns, that goroutine never touches the
+runtime: it posts a **continuation event** to the inbox. The continuation's
+turn calls `settle`, resolves the promise, and goja runs the JavaScript
+after the `await` immediately, inside the new transaction. The
+continuation event carries a `parent` link to the event whose handler is
+waiting, so its turn knows which root promise to check and whom to reply to
+when that promise settles.
 
-goja runs pending promise jobs when the outermost call from Go returns. That
-gives rule 2 for free: awaiting a promise that is already resolved (such as
-`db` reads inside the actor) stays in the same turn.
+goja runs pending promise jobs before the outermost call from Go returns.
+That gives rule 2 for free: awaiting a promise that is already resolved
+(the `db` and `sql` reads in the actor are synchronous) stays in the same
+turn.
+
+**Failure rules.**
+- A thrown error or a rejected root promise rolls back the current turn
+  only. Turns before the last await already committed; each await on I/O
+  is one commit and one resume point.
+- A turn longer than 5 s is interrupted and rolled back.
+- Three interrupts or panics within a minute mark the actor broken until
+  `slop app restart` or a new version.
+- An actor's log lines (`console.log`, `ctx.log`) are kept by the manager,
+  500 per store, so they outlive the runtime.
 
 ### 6.4 The log is the event system
 
@@ -2070,9 +2091,9 @@ the end.
   stores and actors, section 15 for goja.
 - **go-go-host:** `internal/runtime/supervisor.go` (build, check, then swap)
   and `internal/sitejs/dbguard` (per-site SQLite quotas).
-- **go-go-goja:** a dependency, not a copy. Use `pkg/engine`
-  (`NewRuntimeFactoryBuilder`, `RuntimeFactory.NewRuntime`, `Runtime`),
-  `pkg/runtimeowner` (`RuntimeOwner.Call`, `Post`) and `pkg/runtimebridge`.
+- **go-go-goja:** its goja version is pinned in `go.mod`. The engine,
+  `runtimeowner` and `runtimebridge` packages were the plan, but P3 uses
+  goja directly with one goroutine and an inbox per actor (section 6.3).
 
 **Leave behind:**
 - v2's `pkg/store` (artifacts, versions and the Postgres schema);

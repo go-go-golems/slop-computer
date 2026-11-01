@@ -1229,3 +1229,204 @@ blocks ws-lobby, two guest contexts:
   before: Welcome to Claude Blocks, Lisbon in May, Reading list
   after:  … Reading list, 📄 Guest notes from tab one
 ```
+
+## Step 10: P3, actors on goja (turns across awaits, reactors, alarms, routes)
+
+P3 is done, in commit `34f35c0`. A store whose app names an `actor` in
+`app.json` now runs that `actor.js` on goja, one runtime per active store,
+owned by one goroutine that takes events from an inbox. Every event is one
+store turn. Actions answer `slop call`, `actor.call` and pages'
+`claude.use('slop').actions`. HTTP routes answer on site mounts. Reactors
+follow the log, and alarms fire on time or by hand. Activation runs the
+app's SQL migrations and `setup`, and a version that fails to activate
+leaves the previous one running.
+
+The exit test (`TestActors`) covers everything the plan named for P3. It
+pushes a tracker app with a migration, a `setup`, a synchronous action, an
+action that awaits `time.sleep`, an action that throws after an await, two
+HTTP routes, a reactor on `table:tasks` and an hourly alarm. Then it checks
+each behaviour and the broken-version fallback. `TestPageCallsAction`
+checks the page path: a guest's view calls an action through RPC
+`slop.call`.
+
+### Prompt Context
+
+**User prompt (verbatim):** see Step 6 ("1. monthly 2. yes — Now
+implement, commit at appropriate intervals and keep a detailed diary as you
+work (using the diary format from the skill)") and the verification request
+recorded in Step 9.
+
+**Assistant interpretation:** Build P3 as the guide describes, with tests
+for its exit criteria, and commit it. Then continue to P4.
+
+**Inferred user intent:** Actors are what lets an app keep server-side
+rules (who may write what, derived data, schedules), and the coding-agent
+verification will create apps that use them.
+
+**Commit (code):** `34f35c0` — "P3: actors — goja runtime per store,
+turns across awaits, reactors, alarms, routes, read aliases".
+
+### What I did
+
+- `pkg/actor/actor.go`, the runtime and the turn:
+  - `build` installs `defineActor`, `use`, `require` (the app's own `.js`
+    files), `console` and a turn-time `Date.now`, then runs `actor.js`.
+  - `loop` takes one event at a time and retires the actor after 60 s idle.
+  - `handle` runs the event in `store.Do` (one transaction). A rejected
+    root promise returns an error, so that turn rolls back. Room messages
+    are released after the commit. A pending root promise parks the event.
+  - `io(work, settle)` is the bridge for real I/O. `work` runs on its own
+    goroutine. When it returns, it posts a continuation event whose turn
+    calls `settle` and resolves the promise.
+  - `crashed` counts interrupts and panics. Three within a minute mark the
+    actor broken.
+  - `ctxObject` builds `ctx`: visitor, store, app, event, `now` and `rev`
+    getters, `need(level)`, `needAudience(a)`, `fail(code, msg)`, `log`.
+- `pkg/actor/modules.go`, the `use(name)` catalog:
+  - `sql`: all, one, run, and transaction (a SAVEPOINT).
+  - `db`: documents, collections with where, orderBy and limit.
+  - `files`, `room`, `alarm`, `time` (`sleep` is I/O), `log`.
+  - `stores`: read aliases, with a grant check on `store:<id>`.
+  - `fetch`: an origin allowlist from `slop.fetch`.
+  - `secrets`, `sample` and `platform` go through hooks that P6 fills.
+- `pkg/actor/manager.go`, around the actors:
+  - `activate` runs `sql/*.sql` in name order, recorded in `_migrations`;
+    a migration whose text changed is an error. Then `setup` and `smoke`
+    run in a temporary actor (they must not await). `every` alarms are
+    registered and stale ones dropped, and reactor cursors are initialized.
+  - `onCommit` and `react` deliver the reactor event. The cursor lives in
+    `_cursors`, and commits made by reactors are skipped.
+  - `alarm`, `Fire` and `Start` (a 1 s ticker over `DueSchedules`). Each
+    store's next alarm time is mirrored into `system.db` `schedules`, so
+    the ticker does not open every store.
+  - `MatchRoute` and `Serve` (HTTP routes), `Call` (actions), `Logs`.
+- `pkg/system/bindings.go`: read aliases (`bind.set`) and the schedule
+  mirror.
+- `pkg/verbs/actors.go`: `actor.call`, `app.logs`, `app.restart`,
+  `alarm.ls`, `alarm.fire`, `bind.ls`, `bind.set`, `bind.rm`.
+- `pkg/server/actors.go`: `rpcSlopCall`, `rpcSlopRead`, `serveActorRoute`
+  (level or `public`, audience gates), `actorEmit`.
+- `site.go` and `live.go`: a request on a mount tries an actor route before
+  files (static host) or before the shell (live host).
+- `cmd/slop/cmds/extra.go`: `slop call <store> <action> [json]`.
+- `web/runtime/src/caps.ts`: the `slop` namespace. `actions` is a Proxy
+  over RPC `slop.call`, and `stores.open(alias)` reads through `slop.read`.
+  `claude.js` was rebuilt.
+- Guide §6.3 rewritten to describe what was built (goja directly, not
+  go-go-goja's factory and `runtimeowner`). §2 and §16 adjusted to match.
+
+### Why
+
+- One goroutine per actor with an inbox is the whole single-owner rule.
+  Nothing else may touch the `goja.Runtime`, so I/O goroutines post events
+  instead of resolving promises themselves.
+- The continuation carries a `parent` link to the waiting event. Without
+  it, a continuation turn could not tell whose root promise to inspect, and
+  two parked handlers could settle each other's replies.
+- Reactor delivery is a cursor in the store's own database, advanced in
+  the reactor's own turn. Delivery and its effects commit together, so a
+  crash cannot deliver a commit twice or skip one.
+- Mirroring each store's next alarm time into `system.db` keeps the
+  scheduler from opening every store file once a second.
+
+### What worked
+
+- A probe before writing `handle`: a goja promise resolved from Go runs
+  its `.then` and `await` continuations before the call returns. A
+  continuation turn therefore runs the code after the `await` inside its
+  own transaction, with nothing queued for later.
+- `TestActors` and `TestPageCallsAction` passed on their first run:
+
+```text
+$ GOWORK=off go test ./pkg/server -run 'TestActors|TestPageCallsAction' -v -count=1
+--- PASS: TestActors (0.17s)
+--- PASS: TestPageCallsAction (0.04s)
+```
+
+- The SQL authorizer from P1 needed no change. An actor's attempt to
+  `DELETE FROM _docs` fails with `actor_error`, because actor turns use the
+  `actor` caller.
+
+### What didn't work
+
+- After tidying the test, `app.logs` returned `{"lines": null}` for an
+  actor that had not logged anything:
+
+```text
+--- FAIL: TestActors (0.15s)
+    p3_test.go:200: app.logs = map[lines:<nil>]
+```
+
+  The lines lived on the `Actor` and were lost on every idle retire,
+  restart or new version. They now live in the manager, 500 per store, and
+  `Logs` returns an empty list instead of nil.
+- `go mod tidy` was needed: `goja` and `robfig/cron/v3` were marked
+  `// indirect` although `pkg/actor` imports them directly.
+
+### What I learned
+
+- In goja, a promise rejected in the same call that created it is
+  observable from Go (`Promise.State()`), so "throw after an await of
+  something resolved" can roll back its turn before the commit.
+- A handler that awaits I/O commits once per await. The guide's §11.6 rule
+  ("one commit, one resume point") is what makes this predictable: what ran
+  before the await is durable, and what runs after it is a new turn that
+  can fail on its own.
+
+### What was tricky to build
+
+- **Which turn replies.** The original event, the continuation events
+  and the root promise are three different things. `handle` resolves the
+  target as "the parked event if this is a continuation, else this event".
+  It replies only when the root promise is no longer pending, and it
+  decrements `parks` on every path that ends a park, including errors.
+- **Activation without awaits.** `setup` runs inside the activation turn,
+  together with the migrations and the `app_version` change. An await
+  there would split activation across turns, so a temporary actor runs it
+  and any pending promise fails activation.
+- **Reactors and their own commits.** A reactor that writes a document
+  makes a commit, which would trigger the reactor again. Reactor commits
+  carry `via = reactor` and are skipped by `onCommit`. The cursor still
+  moves past them.
+
+### What warrants a second pair of eyes
+
+- `Actor.handle`'s settle-or-park switch and the `parks` counter. The idle
+  retire refuses to retire an actor with parks above zero.
+- The 5 s interrupt uses `vm.Interrupt` from a timer goroutine, which goja
+  allows. `ClearInterrupt` runs in a defer in the same turn.
+- `stores.open(alias)` checks the `store:<id>` grant at call time, not at
+  bind time. Revoking the grant takes effect on the next call.
+
+### What should be done in the future
+
+- `slop app new` (scaffold) and `slop app lint` (parse the manifest and
+  actor without activating) for coding agents.
+- P6 fills the `Policy`, `Secret`, `Sample` and `Platform` hooks.
+- A per-store limit on parked handlers.
+
+### Code review instructions
+
+- Start with `pkg/actor/actor.go`: `handle`, `io`, `continueWith`. Then
+  read `pkg/actor/manager.go`: `activate`, `react`, `alarm`.
+- `pkg/server/actors.go`: `serveActorRoute`.
+- Validate:
+  - `GOWORK=off go test ./... -count=1`;
+  - by hand: push an app with `actor.js`, then
+    `slop call <store> <action> '{"k":1}'` and `slop app logs <store>`.
+
+### Technical details
+
+```text
+TestActors timeline (tracker):
+  push n=1  -> migration 001, setup inserts "welcome"         count 1
+  add       -> id 2, by usr_…, audience admin                  count 2
+  slow      -> two commits via http: "(draft)", "(published)"  count 4
+  boom      -> conflict, its turn rolled back                  count 4
+  hijack    -> actor_error (DELETE FROM _docs not authorized)
+  reactor   -> stats/tasks.commits == 3
+  alarm.fire tick -> stats/ticks.n == 1
+  push 002_bad (CREATE TABLE _nope) -> n stays 1, broken mentions 002_bad
+  push 002 fixed (ALTER TABLE)      -> n 3, broken ""
+  store tracker-2 (app tracker)     -> own migrations + setup, count 1
+```

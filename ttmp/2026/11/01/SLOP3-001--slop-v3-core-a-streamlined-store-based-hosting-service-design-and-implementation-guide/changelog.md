@@ -50,3 +50,12 @@ P2 implemented (98f3859, e9ae7b3): app.json and running versions, mounts with hi
 
 - /home/manuel/code/wesen/2026-10-31--slop-v3/pkg/server/live.go — live host and handoff
 - /home/manuel/code/wesen/2026-10-31--slop-v3/pkg/server/views.go — the page protocol
+
+## 2026-11-01
+
+P3 actors (34f35c0): goja runtime per store, turns across awaits, migrations and setup on activation, reactors with cursors, alarms, HTTP routes, read aliases, slop call; guide §6.3 rewritten to match
+
+### Related Files
+
+- /home/manuel/code/wesen/2026-10-31--slop-v3/pkg/actor/actor.go — turn loop and the I/O bridge
+- /home/manuel/code/wesen/2026-10-31--slop-v3/pkg/actor/manager.go — activation, reactors, alarms
