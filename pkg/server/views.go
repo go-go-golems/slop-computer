@@ -107,6 +107,9 @@ func grantedCaps(v *rt.View) map[string]any {
 			out["user"] = map[string]any{"scopes": scopes}
 		}
 	}
+	// slop's own namespace: actions, read aliases, the visitor. Every app
+	// view has it; declaring "slop" is not needed.
+	out["slop"] = map[string]any{}
 	return out
 }
 
@@ -408,7 +411,8 @@ func (s *Server) rpcTable() map[string]rpcFunc {
 		"room.join": s.rpcRoomJoin, "room.leave": s.rpcRoomLeave, "room.presence": s.rpcRoomPresence, "room.emit": s.rpcRoomEmit,
 		"assets.list": s.rpcAssetsList, "assets.delete": s.rpcAssetsDelete, "artifact.publish": s.rpcArtifactPublish,
 		"room.canSendToClaudeSession": func(context.Context, *rt.View, json.RawMessage) (any, error) { return false, nil },
-		"permissions.state":           func(_ context.Context, v *rt.View, _ json.RawMessage) (any, error) { return permissionStates(v), nil },
+		"slop.call":                   s.rpcSlopCall, "slop.read": s.rpcSlopRead,
+		"permissions.state": func(_ context.Context, v *rt.View, _ json.RawMessage) (any, error) { return permissionStates(v), nil },
 	}
 }
 
@@ -809,6 +813,9 @@ func (s *Server) userInfo(ctx context.Context, v *rt.View) map[string]any {
 			"data.write":   v.Caps.Rules.CanWrite("__probe__/__probe__", "", v.Level),
 			"assets.write": v.Level >= rt.LevelInteract, "files.write": v.Level >= rt.LevelAdmin, "people.add": false,
 		}}
+	if s.Env.A != nil {
+		out["visitor"] = s.Env.A.VisitorOf(ctx, s.viewPrincipal(ctx, v), v.Target)
+	}
 	if v.Caps.Declared["user"] {
 		out["id"] = v.User
 		out["guest"] = strings.HasPrefix(v.User, "vis_") || v.User == ""

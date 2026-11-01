@@ -15,12 +15,13 @@ import (
 	"github.com/go-go-golems/slop/pkg/client"
 )
 
-// addExtraCommands adds the commands that work with local files: push,
-// pull, eval, the importers, store export --folder and files cat. Where a
+// addExtraCommands adds the commands that work with local files (push,
+// pull, eval, the importers, store export --folder, files cat) and the
+// call shorthand for actor.call. Where a
 // verb of the same name exists, the local command replaces its generated
 // one (and still calls that verb).
 func addExtraCommands(root *cobra.Command) {
-	for _, cmd := range []*cobra.Command{pushCmd(), pullCmd(), evalCmd()} {
+	for _, cmd := range []*cobra.Command{pushCmd(), pullCmd(), evalCmd(), callCmd()} {
 		for _, c := range root.Commands() {
 			if c.Name() == cmd.Name() {
 				root.RemoveCommand(c) // the generated eval
@@ -165,6 +166,34 @@ func evalCmd() *cobra.Command {
 	cmd.Flags().StringVar(&argsJSON, "args", "", "JSON passed to the program as args")
 	cmd.Flags().BoolVar(&readOnly, "read-only", false, "writing verbs throw permission_denied")
 	return cmd
+}
+
+// callCmd is actor.call with the arguments as one JSON value.
+func callCmd() *cobra.Command {
+	return &cobra.Command{
+		Use:   "call <store> <action> [json]",
+		Short: "Call an action of a store's actor",
+		Args:  cobra.RangeArgs(2, 3),
+		RunE: func(cmd *cobra.Command, args []string) error {
+			in := map[string]any{"store": args[0], "action": args[1]}
+			if len(args) == 3 {
+				var v any
+				if err := json.Unmarshal([]byte(args[2]), &v); err != nil {
+					return fmt.Errorf("arguments: %w", err)
+				}
+				in["args"] = v
+			}
+			c, err := resolve()
+			if err != nil {
+				return err
+			}
+			res, err := c.Call("actor.call", in)
+			if err != nil {
+				return err
+			}
+			return print(res)
+		},
+	}
 }
 
 // printLogs writes a program's console output to stderr.

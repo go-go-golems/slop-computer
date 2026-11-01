@@ -86,6 +86,9 @@ func (s *Server) serveStatic(w http.ResponseWriter, r *http.Request) {
 		notFound(w)
 		return
 	}
+	if s.serveActorRoute(w, r, res, nil) {
+		return
+	}
 	as, err := s.Env.K.Store(ctx, res.run.App)
 	if err != nil {
 		notFound(w)

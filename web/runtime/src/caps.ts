@@ -1,7 +1,7 @@
 // The smaller capabilities: user, permissions, comments, assets, downloads,
-// artifact and slop (slop's own: the management API an admin approved).
+// artifact and slop (slop's own: actions, read aliases, the visitor).
 import { limits } from "./limits.ts";
-import { ask, boot, connect, on, post, request as fetchView, rpc, state, type Hello } from "./transport.ts";
+import { ask, boot, connect, post, request as fetchView, rpc, type Hello } from "./transport.ts";
 import { bytes, fail, freeze } from "./util.ts";
 
 // --- user -------------------------------------------------------------------
@@ -270,144 +270,29 @@ export const artifact = Object.freeze({
 
 /** The management API an admin approved for this app version: the old
  *  tool API, same-origin through /_rt/api/. */
+// --- slop -------------------------------------------------------------------
+
+// slop's own namespace (slop v3): the store's actor actions, read aliases,
+// who is visiting, and asking the shell to sign in.
 export function slop(h: Hello) {
-  const perms: string[] = ((h.caps.slop as any)?.permissions as string[]) ?? [];
-  const handlers = new Map<string, Set<(ev: unknown, type: string) => void>>();
-  let streaming = false;
-  let args: Record<string, string> = Object.fromEntries(new URLSearchParams(location.hash.slice(1)));
-  const call = async (method: string, path: string, o: { params?: Record<string, unknown>; body?: unknown; raw?: BodyInit; type?: string; keepalive?: boolean } = {}) => {
-    let url = "/_rt/api" + (path.startsWith("/") ? path : "/" + path);
-    if (o.params) {
-      const q = Object.entries(o.params).filter(([, v]) => v != null).map(([k, v]) => encodeURIComponent(k) + "=" + encodeURIComponent(String(v))).join("&");
-      if (q) url += (url.includes("?") ? "&" : "?") + q;
-    }
-    const init: RequestInit = { method, headers: {}, keepalive: o.keepalive };
-    if (o.raw !== undefined) {
-      (init.headers as Record<string, string>)["Content-Type"] = o.type || "application/octet-stream";
-      init.body = o.raw;
-    } else if (o.body !== undefined) {
-      (init.headers as Record<string, string>)["Content-Type"] = "application/json";
-      init.body = JSON.stringify(o.body);
-    }
-    const r = await fetchView(url, init);
-    const t = await r.text();
-    let body: any = null;
-    try {
-      body = t ? JSON.parse(t) : null;
-    } catch {
-      body = t;
-    }
-    if (!r.ok) {
-      const err = (body && body.error) || {};
-      throw Object.assign(new Error(err.message || "HTTP " + r.status), { status: r.status, code: err.code || "" });
-    }
-    return body;
-  };
-  const sse = (path: string, after: () => unknown, onEv: (type: string, data: unknown, id: number | null) => void) => {
-    let stopped = false;
-    let ctrl: AbortController | null = null;
-    (async function connectLoop() {
-      while (!stopped) {
-        try {
-          const cur = after();
-          let url = "/_rt/api" + path;
-          if (cur) url += (url.includes("?") ? "&" : "?") + "after=" + encodeURIComponent(String(cur));
-          ctrl = new AbortController();
-          const r = await fetchView(url, { signal: ctrl.signal });
-          if (!r.ok || !r.body) throw new Error(path + ": HTTP " + r.status);
-          const reader = r.body.getReader();
-          const dec = new TextDecoder();
-          let buf = "";
-          for (;;) {
-            const x = await reader.read();
-            if (x.done) break;
-            buf += dec.decode(x.value, { stream: true });
-            let i: number;
-            while ((i = buf.indexOf("\n\n")) >= 0) {
-              const block = buf.slice(0, i);
-              buf = buf.slice(i + 2);
-              let type = "message", data = "", id: number | null = null;
-              for (const line of block.split("\n")) {
-                if (line.startsWith("event: ")) type = line.slice(7);
-                else if (line.startsWith("data: ")) data += line.slice(6);
-                else if (line.startsWith("id: ")) id = +line.slice(4) || null;
-              }
-              if (!data) continue;
-              let ev: unknown = data;
-              try {
-                ev = JSON.parse(data);
-              } catch {
-                /* text */
-              }
-              try {
-                onEv(type, ev, id);
-              } catch (e) {
-                console.error(e);
-              }
-            }
-          }
-        } catch (e: any) {
-          if (!stopped) console.warn("slop:", e?.message);
-        }
-        if (!stopped) await new Promise((r) => setTimeout(r, 2000));
-      }
-    })();
-    return () => {
-      stopped = true;
-      ctrl?.abort();
-    };
-  };
-  const api = {
-    get: (path: string, params?: Record<string, unknown>) => call("GET", path, { params }),
-    post: (path: string, body?: unknown) => call("POST", path, { body }),
-    put: (path: string, body?: unknown) => call("PUT", path, { body }),
-    patch: (path: string, body?: unknown) => call("PATCH", path, { body }),
-    del: (path: string, params?: Record<string, unknown>) => call("DELETE", path, { params }),
-    putRaw: (path: string, raw: BodyInit, type?: string) => call("PUT", path, { raw, type }),
-    beacon: (method: string, path: string, body?: unknown) => call(method, path, { body, keepalive: true }).catch(() => {}),
-    on(type: string, h: (ev: unknown, type: string) => void) {
-      let s = handlers.get(type);
-      if (!s) handlers.set(type, (s = new Set()));
-      s.add(h);
-      if (!streaming) {
-        streaming = true;
-        let last = 0;
-        sse("/events", () => last, (t, ev, id) => {
-          if (id) last = id;
-          for (const fn of [...(handlers.get(t) ?? []), ...(handlers.get("*") ?? [])]) fn(ev, t);
-        });
-      }
-      return api;
-    },
-    stream: (path: string, o: { after?: () => unknown; on: (type: string, data: unknown, id: number | null) => void }) => sse(path, o.after ?? (() => 0), o.on),
-    setArgs(a: Record<string, string>) {
-      args = { ...(a ?? {}) };
-      post({ type: "args", args });
-    },
-    can: (perm: string) => perms.includes(perm),
-    get permissions() {
-      return perms.slice();
-    },
-    get user() {
-      return h.me.profile ?? null;
-    },
-    get args() {
-      return args;
-    },
-    get view() {
-      return state.view;
-    },
-    /** Asks the Workshop to open another target (the app on it). */
-    open(target: string) {
-      post({ type: "navigate", target: String(target) });
-    },
-    config: ((h.caps.slop as any)?.config ?? {}) as { siteHosts?: string[]; publicUrl?: string },
-    target: h.target,
-    app: h.app,
-    version: h.version,
-  };
-  on("shell:args", (m: { args: Record<string, string> }) => {
-    args = m.args ?? {};
+  const cfg = (h.caps.slop as Record<string, unknown> | undefined) ?? {};
+  const call = (action: string, args?: unknown) => rpc("slop.call", { action: String(action), args: args ?? {} });
+  const actions = new Proxy({} as Record<string, (args?: unknown) => Promise<unknown>>, {
+    get: (_t, name) => (typeof name === "string" && name !== "then" ? (args?: unknown) => call(name, args) : undefined),
   });
-  return Object.freeze(api);
+  const open = (alias: string) =>
+    freeze({
+      doc: (path: string) => rpc("slop.read", { alias, op: "get", path }),
+      query: (coll: string, query?: unknown) => rpc("slop.read", { alias, op: "query", coll, query: query ?? {} }),
+      file: (path: string) => rpc("slop.read", { alias, op: "file", path }),
+      files: () => rpc("slop.read", { alias, op: "files" }),
+    });
+  return freeze({
+    actions,
+    call,
+    stores: freeze({ open }),
+    visitor: async () => (h.me as Record<string, unknown>).visitor ?? null,
+    signIn: () => post({ type: "signin" }),
+    subscribeUrl: () => String(cfg.subscribeUrl ?? ""),
+  });
 }

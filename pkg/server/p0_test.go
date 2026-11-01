@@ -14,6 +14,7 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/go-go-golems/slop/pkg/actor"
 	"github.com/go-go-golems/slop/pkg/config"
 	"github.com/go-go-golems/slop/pkg/kernel"
 	"github.com/go-go-golems/slop/pkg/system"
@@ -43,7 +44,7 @@ func newHarness(t *testing.T) *harness {
 		t.Fatal(err)
 	}
 	t.Cleanup(k.Close)
-	env := &verbs.Env{Cfg: cfg, Sys: sys, K: k}
+	env := &verbs.Env{Cfg: cfg, Sys: sys, K: k, A: actor.New(k)}
 	srv, err := Build(context.Background(), cfg, sys, env)
 	if err != nil {
 		t.Fatal(err)

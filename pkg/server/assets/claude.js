@@ -583,145 +583,25 @@
     }
   });
   function slop(h) {
-    const perms = h.caps.slop?.permissions ?? [];
-    const handlers2 = /* @__PURE__ */ new Map();
-    let streaming = false;
-    let args = Object.fromEntries(new URLSearchParams(location.hash.slice(1)));
-    const call3 = async (method, path, o = {}) => {
-      let url = "/_rt/api" + (path.startsWith("/") ? path : "/" + path);
-      if (o.params) {
-        const q = Object.entries(o.params).filter(([, v]) => v != null).map(([k, v]) => encodeURIComponent(k) + "=" + encodeURIComponent(String(v))).join("&");
-        if (q) url += (url.includes("?") ? "&" : "?") + q;
-      }
-      const init = { method, headers: {}, keepalive: o.keepalive };
-      if (o.raw !== void 0) {
-        init.headers["Content-Type"] = o.type || "application/octet-stream";
-        init.body = o.raw;
-      } else if (o.body !== void 0) {
-        init.headers["Content-Type"] = "application/json";
-        init.body = JSON.stringify(o.body);
-      }
-      const r = await request(url, init);
-      const t = await r.text();
-      let body = null;
-      try {
-        body = t ? JSON.parse(t) : null;
-      } catch {
-        body = t;
-      }
-      if (!r.ok) {
-        const err = body && body.error || {};
-        throw Object.assign(new Error(err.message || "HTTP " + r.status), { status: r.status, code: err.code || "" });
-      }
-      return body;
-    };
-    const sse = (path, after, onEv) => {
-      let stopped = false;
-      let ctrl = null;
-      (async function connectLoop() {
-        while (!stopped) {
-          try {
-            const cur = after();
-            let url = "/_rt/api" + path;
-            if (cur) url += (url.includes("?") ? "&" : "?") + "after=" + encodeURIComponent(String(cur));
-            ctrl = new AbortController();
-            const r = await request(url, { signal: ctrl.signal });
-            if (!r.ok || !r.body) throw new Error(path + ": HTTP " + r.status);
-            const reader = r.body.getReader();
-            const dec = new TextDecoder();
-            let buf = "";
-            for (; ; ) {
-              const x = await reader.read();
-              if (x.done) break;
-              buf += dec.decode(x.value, { stream: true });
-              let i;
-              while ((i = buf.indexOf("\n\n")) >= 0) {
-                const block = buf.slice(0, i);
-                buf = buf.slice(i + 2);
-                let type = "message", data = "", id = null;
-                for (const line of block.split("\n")) {
-                  if (line.startsWith("event: ")) type = line.slice(7);
-                  else if (line.startsWith("data: ")) data += line.slice(6);
-                  else if (line.startsWith("id: ")) id = +line.slice(4) || null;
-                }
-                if (!data) continue;
-                let ev = data;
-                try {
-                  ev = JSON.parse(data);
-                } catch {
-                }
-                try {
-                  onEv(type, ev, id);
-                } catch (e) {
-                  console.error(e);
-                }
-              }
-            }
-          } catch (e) {
-            if (!stopped) console.warn("slop:", e?.message);
-          }
-          if (!stopped) await new Promise((r) => setTimeout(r, 2e3));
-        }
-      })();
-      return () => {
-        stopped = true;
-        ctrl?.abort();
-      };
-    };
-    const api2 = {
-      get: (path, params) => call3("GET", path, { params }),
-      post: (path, body) => call3("POST", path, { body }),
-      put: (path, body) => call3("PUT", path, { body }),
-      patch: (path, body) => call3("PATCH", path, { body }),
-      del: (path, params) => call3("DELETE", path, { params }),
-      putRaw: (path, raw, type) => call3("PUT", path, { raw, type }),
-      beacon: (method, path, body) => call3(method, path, { body, keepalive: true }).catch(() => {
-      }),
-      on(type, h2) {
-        let s = handlers2.get(type);
-        if (!s) handlers2.set(type, s = /* @__PURE__ */ new Set());
-        s.add(h2);
-        if (!streaming) {
-          streaming = true;
-          let last = 0;
-          sse("/events", () => last, (t, ev, id) => {
-            if (id) last = id;
-            for (const fn of [...handlers2.get(t) ?? [], ...handlers2.get("*") ?? []]) fn(ev, t);
-          });
-        }
-        return api2;
-      },
-      stream: (path, o) => sse(path, o.after ?? (() => 0), o.on),
-      setArgs(a) {
-        args = { ...a ?? {} };
-        post({ type: "args", args });
-      },
-      can: (perm) => perms.includes(perm),
-      get permissions() {
-        return perms.slice();
-      },
-      get user() {
-        return h.me.profile ?? null;
-      },
-      get args() {
-        return args;
-      },
-      get view() {
-        return state.view;
-      },
-      /** Asks the Workshop to open another target (the app on it). */
-      open(target) {
-        post({ type: "navigate", target: String(target) });
-      },
-      config: h.caps.slop?.config ?? {},
-      target: h.target,
-      app: h.app,
-      version: h.version
-    };
-    on("shell:args", (m) => {
-      args = m.args ?? {};
+    const cfg = h.caps.slop ?? {};
+    const call3 = (action, args) => rpc("slop.call", { action: String(action), args: args ?? {} });
+    const actions = new Proxy({}, {
+      get: (_t, name) => typeof name === "string" && name !== "then" ? (args) => call3(name, args) : void 0
     });
-    return Object.freeze(api2);
+    const open = (alias) => freeze({
+      doc: (path) => rpc("slop.read", { alias, op: "get", path }),
+      query: (coll, query2) => rpc("slop.read", { alias, op: "query", coll, query: query2 ?? {} }),
+      file: (path) => rpc("slop.read", { alias, op: "file", path }),
+      files: () => rpc("slop.read", { alias, op: "files" })
+    });
+    return freeze({
+      actions,
+      call: call3,
+      stores: freeze({ open }),
+      visitor: async () => h.me.visitor ?? null,
+      signIn: () => post({ type: "signin" }),
+      subscribeUrl: () => String(cfg.subscribeUrl ?? "")
+    });
   }
 
   // src/diff.ts

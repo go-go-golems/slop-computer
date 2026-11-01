@@ -14,6 +14,7 @@ import (
 	"github.com/go-go-golems/slop/pkg/config"
 	"github.com/go-go-golems/slop/pkg/httpx"
 	"github.com/go-go-golems/slop/pkg/ids"
+	"github.com/go-go-golems/slop/pkg/rt"
 	"github.com/go-go-golems/slop/pkg/system"
 	"github.com/go-go-golems/slop/pkg/verbs"
 )
@@ -49,6 +50,18 @@ func New(cfg *config.Config, sys *system.DB, env *verbs.Env) *Server {
 	s.rt.views.OnClose = s.roomClosed
 	if env != nil && env.K != nil {
 		env.K.Subscribe(s.publish)
+	}
+	if env != nil && env.A != nil {
+		env.A.RoomEmit = s.actorEmit
+		env.A.RoomPeers = func(store string) []rt.Peer {
+			out := []rt.Peer{}
+			for _, v := range s.rt.views.Of(store) {
+				if p, ok := v.AsPeer(""); ok {
+					out = append(out, p)
+				}
+			}
+			return out
+		}
 	}
 	s.mainRoutes(s.main)
 	s.Static = http.HandlerFunc(s.serveStatic)
@@ -103,6 +116,9 @@ func (s *Server) mainRoutes(m *http.ServeMux) {
 // ListenAndServe runs the server until ctx ends.
 func (s *Server) ListenAndServe(ctx context.Context) error {
 	srv := &http.Server{Addr: s.Cfg.Listen, Handler: s, ReadHeaderTimeout: 10 * time.Second}
+	if s.Env.A != nil {
+		s.Env.A.Start(ctx)
+	}
 	go func() {
 		t := time.NewTicker(time.Minute)
 		defer t.Stop()

@@ -32,6 +32,11 @@ type Kernel struct {
 
 	mc manifestCache
 
+	// Activate runs migrations and the actor's setup inside activation;
+	// OnActivated hears that a store moved to a new version (P3, actors).
+	Activate    Activator
+	OnActivated func(store string, r Running)
+
 	subMu sync.RWMutex
 	subs  map[int]func(*store.Commit)
 	subN  int

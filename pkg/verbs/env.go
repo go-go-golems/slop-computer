@@ -7,6 +7,7 @@ import (
 	"strings"
 
 	"github.com/go-go-golems/slop/pkg/access"
+	"github.com/go-go-golems/slop/pkg/actor"
 	"github.com/go-go-golems/slop/pkg/config"
 	"github.com/go-go-golems/slop/pkg/kernel"
 	"github.com/go-go-golems/slop/pkg/rt"
@@ -19,6 +20,7 @@ type Env struct {
 	Cfg *config.Config
 	Sys *system.DB
 	K   *kernel.Kernel
+	A   *actor.Manager
 }
 
 // open checks that p holds need on a store and opens it. A denial carries

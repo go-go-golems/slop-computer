@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"strconv"
+	"strings"
 	"sync"
 
 	"github.com/go-go-golems/slop/pkg/apps"
@@ -25,6 +26,8 @@ type manifestCache struct {
 	mu sync.Mutex
 	m  map[string]*apps.Manifest // app@n
 	e  map[string]string         // app@n → parse error
+
+	failed map[string]string // store@n → why activation failed
 }
 
 // Running resolves the app a store runs, activating the store first when
@@ -54,12 +57,54 @@ func (k *Kernel) Running(ctx context.Context, id string) (Running, error) {
 	}
 	r.N = n
 	r.Manifest, r.Broken = k.manifest(ctx, as, n)
-	if s.MetaInt("app_version") != n {
-		if err := k.activate(ctx, s, r); err != nil {
-			return r, err
+	cur := s.MetaInt("app_version")
+	if cur == n {
+		return r, nil
+	}
+	if r.Broken == "" {
+		if failed := k.failedActivation(id, n); failed != "" {
+			r.Broken = failed
+		} else if err := k.activate(ctx, s, r); err != nil {
+			k.recordFailure(id, n, err.Error())
+			r.Broken = "activation of " + r.App + "@" + strconv.FormatInt(n, 10) + " failed: " + err.Error()
+		} else {
+			return r, nil
 		}
 	}
+	// Broken: the store keeps running the version it ran before.
+	if cur > 0 {
+		r.N = cur
+		r.Manifest, _ = k.manifest(ctx, as, cur)
+	}
 	return r, nil
+}
+
+// failedActivation reports an earlier failure to activate store at n (so a
+// broken version is not retried on every request).
+func (k *Kernel) failedActivation(id string, n int64) string {
+	k.mc.mu.Lock()
+	defer k.mc.mu.Unlock()
+	return k.mc.failed[id+"@"+strconv.FormatInt(n, 10)]
+}
+
+func (k *Kernel) recordFailure(id string, n int64, msg string) {
+	k.mc.mu.Lock()
+	defer k.mc.mu.Unlock()
+	if k.mc.failed == nil {
+		k.mc.failed = map[string]string{}
+	}
+	k.mc.failed[id+"@"+strconv.FormatInt(n, 10)] = msg
+}
+
+// ClearFailure lets a store retry activating its current version.
+func (k *Kernel) ClearFailure(id string) {
+	k.mc.mu.Lock()
+	defer k.mc.mu.Unlock()
+	for key := range k.mc.failed {
+		if strings.HasPrefix(key, id+"@") {
+			delete(k.mc.failed, key)
+		}
+	}
 }
 
 func (k *Kernel) manifest(ctx context.Context, as *store.Store, n int64) (*apps.Manifest, string) {
@@ -99,8 +144,12 @@ func (k *Kernel) manifest(ctx context.Context, as *store.Store, n int64) (*apps.
 	return m, broken
 }
 
-// activate moves a store to its app's snapshot n. Without an actor this is
-// recording the version; P3 adds migrations, setup and the smoke check.
+// Activator runs inside the activation turn, before the version is
+// recorded: migrations, the actor's setup and its smoke check. An error
+// rolls the whole activation back.
+type Activator func(ctx context.Context, t *store.Turn, r Running) error
+
+// activate moves a store to its app's snapshot n in one turn.
 func (k *Kernel) activate(ctx context.Context, s *store.Store, r Running) error {
 	n := strconv.FormatInt(r.N, 10)
 	var from string
@@ -110,8 +159,16 @@ func (k *Kernel) activate(ctx context.Context, s *store.Store, r Running) error 
 			return nil // another request activated it first
 		}
 		t.Summary = "activated " + r.App + "@" + n
+		if k.Activate != nil {
+			if err := k.Activate(ctx, t, r); err != nil {
+				return err
+			}
+		}
 		return t.SetMeta("app_version", n)
 	})
+	if err == nil && c != nil && k.OnActivated != nil {
+		k.OnActivated(s.ID, r)
+	}
 	if err != nil || c == nil {
 		return err
 	}

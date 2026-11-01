@@ -137,10 +137,19 @@ func (s *Server) serveLive(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 		s.siteCall(w, r)
-	case r.Method == http.MethodGet || r.Method == http.MethodHead:
-		s.serveShell(w, r)
 	default:
-		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+		// An actor route on the mount answers first; then the shell.
+		if res, err := s.resolve(r.Context(), r.Host, p); err == nil {
+			pr, _ := s.sitePrincipal(r)
+			if s.serveActorRoute(w, r, res, pr) {
+				return
+			}
+		}
+		if r.Method != http.MethodGet && r.Method != http.MethodHead {
+			http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+			return
+		}
+		s.serveShell(w, r)
 	}
 }
 

@@ -229,6 +229,7 @@
       }
       case "compose": post({ id: m.id, opened: false }); return; // no comments on the site yet
       case "permissions": post({ id: m.id }); return;
+      case "signin": location.assign(signIn()); return; // the page asked: claude.use("slop").signIn()
       case "reload": await open(false); return; // the route serves the new version
       case "reopen": await open(false); return; // access changed: a new view, a fresh frame
       case "args": {
