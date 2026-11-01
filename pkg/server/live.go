@@ -11,6 +11,7 @@ import (
 	"net/http"
 	"net/url"
 	"strings"
+	"time"
 
 	"github.com/go-go-golems/slop/pkg/access"
 	"github.com/go-go-golems/slop/pkg/httpx"
@@ -92,7 +93,11 @@ func (s *Server) sitePrincipal(r *http.Request) (*access.Principal, *system.Sess
 
 // newGuest gives this browser a guest id on this host.
 func (s *Server) newGuest(w http.ResponseWriter, r *http.Request) (*access.Principal, error) {
-	g, err := s.Sys.CreateGuest(r.Context(), s.clientIP(r))
+	ip := s.clientIP(r)
+	if s.Sys.GuestsFrom(r.Context(), ip, time.Now().Add(-time.Hour).UnixMilli()) >= system.GuestsPerHour {
+		return nil, system.ErrTooManyGuests
+	}
+	g, err := s.Sys.CreateGuest(r.Context(), ip)
 	if err != nil {
 		return nil, err
 	}
@@ -170,13 +175,19 @@ func (s *Server) siteCall(w http.ResponseWriter, r *http.Request) {
 		s.siteAccess(w, r)
 	case p == "/_site/grants" && r.Method == http.MethodPost:
 		s.siteGrant(w, r)
+	case p == "/_site/links" && r.Method == http.MethodPost:
+		s.siteLinks(w, r)
+	case strings.HasPrefix(p, "/_site/links/") && strings.HasSuffix(p, "/revoke") && r.Method == http.MethodPost:
+		s.siteRevokeLink(w, r, strings.TrimSuffix(strings.TrimPrefix(p, "/_site/links/"), "/revoke"))
+	case p == "/_site/claim" && r.Method == http.MethodPost:
+		s.siteClaim(w, r)
 	default:
 		httpx.Fail(w, 404, "not_found", "no such site call")
 	}
 }
 
 func (s *Server) siteMe(w http.ResponseWriter, r *http.Request) {
-	p, _ := s.sitePrincipal(r)
+	p, sess := s.sitePrincipal(r)
 	if p == nil {
 		httpx.JSON(w, 200, map[string]any{"kind": "none", "audience": access.AudGuest})
 		return
@@ -185,8 +196,12 @@ func (s *Server) siteMe(w http.ResponseWriter, r *http.Request) {
 	if p.Kind == access.KindGuest {
 		kind = "guest"
 	}
-	httpx.JSON(w, 200, map[string]any{"kind": kind, "id": p.ID(), "name": displayName(p.Person), "role": p.Role(),
-		"audience": s.Env.K.Access.AudienceOf(r.Context(), p)})
+	out := map[string]any{"kind": kind, "id": p.ID(), "name": displayName(p.Person), "role": p.Role(),
+		"audience": s.Env.K.Access.AudienceOf(r.Context(), p)}
+	if c := s.claimable(r, p, sess); c != nil {
+		out["claim"] = c
+	}
+	httpx.JSON(w, 200, out)
 }
 
 func displayName(p *system.Person) string {
@@ -207,6 +222,7 @@ func displayName(p *system.Person) string {
 func (s *Server) siteOpenView(w http.ResponseWriter, r *http.Request) {
 	var in struct {
 		Path string `json:"path"`
+		Link string `json:"link"` // a share link's token, from ?k=
 	}
 	if err := httpx.Read(r, &in, 4<<10); err != nil {
 		httpx.Fail(w, 400, "invalid_argument", "send {path}")
@@ -229,14 +245,25 @@ func (s *Server) siteOpenView(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if p == nil {
-		// Guests get an id when the store gives guests a level, so that
-		// what they write records who wrote it.
-		if d, _, _ := s.Env.K.Access.Can(ctx, nil, res.store, rt.LevelView, "", true); !d.OK {
+		// Guests get an id when the store gives guests a level, or when
+		// they bring a share link, so that what they write records who
+		// wrote it.
+		if d, _, _ := s.Env.K.Access.Can(ctx, nil, res.store, rt.LevelView, "", true); !d.OK && in.Link == "" {
 			httpx.Fail(w, 401, "unauthenticated", "sign in to open this")
 			return
 		}
 		if p, err = s.newGuest(w, r); err != nil {
+			if errors.Is(err, system.ErrTooManyGuests) {
+				httpx.Fail(w, 429, "rate_limited", err.Error())
+				return
+			}
 			failView(w, err)
+			return
+		}
+	}
+	if in.Link != "" {
+		if err := s.redeemLink(ctx, res.store, in.Link, p); err != nil {
+			httpx.Fail(w, 403, "link_invalid", "this share link has expired or was revoked")
 			return
 		}
 	}
@@ -451,7 +478,18 @@ func (s *Server) siteAccess(w http.ResponseWriter, r *http.Request) {
 		}
 		out = append(out, o)
 	}
-	httpx.JSON(w, 200, map[string]any{"store": id, "grants": out, "links": []any{}})
+	links, err := s.Sys.Links(r.Context(), id)
+	if err != nil {
+		failView(w, err)
+		return
+	}
+	live := []system.Link{}
+	for _, l := range links {
+		if l.RevokedAt == 0 && (l.ExpiresAt == 0 || l.ExpiresAt > time.Now().UnixMilli()) {
+			live = append(live, l)
+		}
+	}
+	httpx.JSON(w, 200, map[string]any{"store": id, "grants": out, "links": live})
 }
 
 // siteGrant sets or removes a grant; owners give view or interact here.

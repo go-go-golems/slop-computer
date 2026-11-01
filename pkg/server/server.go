@@ -13,6 +13,7 @@ import (
 
 	"github.com/go-go-golems/slop/pkg/config"
 	"github.com/go-go-golems/slop/pkg/httpx"
+	"github.com/go-go-golems/slop/pkg/identity"
 	"github.com/go-go-golems/slop/pkg/ids"
 	"github.com/go-go-golems/slop/pkg/rt"
 	"github.com/go-go-golems/slop/pkg/system"
@@ -30,11 +31,15 @@ type Server struct {
 	Live, Static, Sandbox http.Handler
 	// oidcLogin starts an OIDC sign-in (nil until OIDC is configured).
 	oidcLogin func(w http.ResponseWriter, r *http.Request, ret string)
+	oidc      *identity.Provider
 }
 
 // Build makes the server with everything the configuration enables.
 func Build(ctx context.Context, cfg *config.Config, sys *system.DB, env *verbs.Env) (*Server, error) {
 	s := New(cfg, sys, env)
+	if err := s.setupOIDC(); err != nil {
+		return nil, err
+	}
 	return s, nil
 }
 
@@ -47,6 +52,7 @@ func New(cfg *config.Config, sys *system.DB, env *verbs.Env) *Server {
 		key = []byte(ids.Secret("key_"))
 	}
 	s.rt = newRT(key)
+	env.AccessChanged = s.reviewViews
 	s.rt.views.OnClose = s.roomClosed
 	if env != nil && env.K != nil {
 		env.K.Subscribe(s.publish)
@@ -128,6 +134,23 @@ func (s *Server) ListenAndServe(ctx context.Context) error {
 				return
 			case now := <-t.C:
 				s.rt.views.Sweep(now)
+			}
+		}
+	}()
+	// Guests unseen for 90 days go, once a day (and once at start).
+	go func() {
+		t := time.NewTicker(24 * time.Hour)
+		defer t.Stop()
+		for {
+			if n, err := s.Env.K.SweepGuests(ctx, system.GuestCutoff(time.Now())); err != nil {
+				log.Printf("guest sweep: %v", err)
+			} else if n > 0 {
+				log.Printf("swept %d guests", n)
+			}
+			select {
+			case <-ctx.Done():
+				return
+			case <-t.C:
 			}
 		}
 	}()

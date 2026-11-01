@@ -21,6 +21,10 @@ type Env struct {
 	Sys *system.DB
 	K   *kernel.Kernel
 	A   *actor.Manager
+
+	// AccessChanged is called after a verb changed who may open a store
+	// (grants, links), so the server can review its open views.
+	AccessChanged func(ctx context.Context, store string)
 }
 
 // open checks that p holds need on a store and opens it. A denial carries

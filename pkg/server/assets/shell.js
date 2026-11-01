@@ -173,7 +173,7 @@
         render();
       };
       const people = a.grants.filter((g) => g.subject[0] !== "@").map((g) =>
-        el("div", { className: "shell-line" }, el("span", { textContent: (g.name || g.subject) + (g.via ? " (by link)" : "") }), el("span", { className: "shell-dim", textContent: said[g.level] || g.level }),
+        el("div", { className: "shell-line" }, el("span", { textContent: (g.name || g.subject) + (g.via && g.via.startsWith("lnk_") ? " (by link)" : "") }), el("span", { className: "shell-dim", textContent: said[g.level] || g.level }),
           el("button", { type: "button", className: "shell-link", textContent: "Remove", onclick: () => grant(g.subject, "") })));
       const out = el("div", { className: "shell-made" });
       const make = el("button", { type: "button", className: "shell-btn", textContent: "Make a link" });

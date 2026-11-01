@@ -33,7 +33,17 @@ type harness struct {
 
 func newHarness(t *testing.T) *harness {
 	t.Helper()
+	return newHarnessWith(t, nil)
+}
+
+// newHarnessWith lets a test change the configuration before the server
+// is built.
+func newHarnessWith(t *testing.T, change func(*config.Config)) *harness {
+	t.Helper()
 	cfg := &config.Config{Local: true, Data: t.TempDir(), Listen: "127.0.0.1:18399", AdminEmails: []string{"admin@example.com"}}
+	if change != nil {
+		change(cfg)
+	}
 	cfg.Defaults()
 	sys, err := system.Open(context.Background(), filepath.Join(cfg.Data, "system.db"))
 	if err != nil {

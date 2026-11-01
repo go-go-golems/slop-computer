@@ -70,7 +70,14 @@ func (s *Server) authRoutes(m *http.ServeMux) {
 	m.HandleFunc("POST /auth/local", s.localSignIn)
 	m.HandleFunc("POST /auth/logout", s.logout)
 	m.HandleFunc("GET /auth/session", s.sessionInfo)
+	m.HandleFunc("GET /auth/callback", s.oidcCallback)
 }
+
+var signInFailedTmpl = template.Must(template.New("failed").Parse(`<!doctype html><meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1"><title>Sign-in problem · slop</title>
+<style>body{font:15px/1.5 Arial,sans-serif;color:#1a1a1a;margin:0;display:grid;place-items:center;min-height:100vh}
+div{border:1px solid #d6d6d6;padding:24px 28px;max-width:360px}h1{font-size:18px;margin:0 0 12px}a{color:#1a1a1a}</style>
+<div><h1>Sign-in did not work</h1><p>{{.Problem}}</p><p><a href="{{.Again}}">Continue signing in</a></p></div>`))
 
 var loginTmpl = template.Must(template.New("login").Parse(`<!doctype html><meta charset="utf-8">
 <meta name="viewport" content="width=device-width,initial-scale=1"><title>Sign in · slop</title>

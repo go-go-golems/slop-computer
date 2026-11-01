@@ -92,6 +92,11 @@ func (c *Checker) AudienceOf(ctx context.Context, p *Principal) Audience {
 
 // Matches reports whether a grant subject names this principal.
 func Matches(subject string, p *Principal, aud Audience) bool {
+	if p != nil && p.Kind == KindStore {
+		// A store's actor holds only the grants made to store:<id>:
+		// cross-store access is always explicit.
+		return subject == p.ID()
+	}
 	switch subject {
 	case "@guest":
 		return aud.AtLeast(AudGuest)
