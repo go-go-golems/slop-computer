@@ -1860,3 +1860,197 @@ The scenario matrix (rows are grants on store `s`, columns are personas):
 vis_… interact       none   inter  none    none    none   admin  owner   none     none
 store:other view     none   none   none    none    none   admin  owner   none     view
 ```
+
+## Step 13: P5, subscriptions (comps and Stripe from francois)
+
+P5 is done in commit `a5e5299`, with one exit item left open. A member
+becomes a subscriber through a comp (an admin's grant until a date) or a
+Stripe subscription. The decision is francois's pure function
+`billing.Policy.Access`, copied unchanged with its table tests. The Stripe
+integration is francois's gateway and service, cut to the subscription
+path and storing into `system.db`. Open views follow audience changes:
+- at once when a role, a comp or the Stripe projection changes;
+- within a minute when a comp or a paid period runs out.
+
+Not done: "one end-to-end run against Stripe's test mode". It needs Stripe
+test keys and a webhook endpoint Stripe can reach, and neither exists in
+this session. Every other P5 exit item is tested with the fake gateway.
+
+### Prompt Context
+
+**User prompt (verbatim):** see Step 6 and Step 11.
+
+**Assistant interpretation:** Build P5 as guide §7.4 specifies: copy
+francois's policy and payments, and port the storage.
+
+**Inferred user intent:** The subscriber audience must be real, with comps
+first and Stripe when configured, because P6's LLM budgets and policy
+columns depend on it.
+
+**Commit (code):** `a5e5299` — "P5: subscriptions — comps and Stripe
+(francois's policy and payments)".
+
+### What I did
+
+- `pkg/billing/policy.go` and `policy_test.go`: copied from
+  `francois@106776a pkg/catalog/billing`. The year-funding and enterprise
+  constants are dropped and `Access` is unchanged.
+- `pkg/billing/stripe/gateway.go`: francois's `Gateway` and `stripeGateway`
+  over stripe-go v86.
+  - The support, year and enterprise branches are removed from
+    `CheckoutRequest`, `session` and `Project`.
+  - The metadata keys are `slop_person` and `slop_deployment`.
+  - `pkg/errors` is replaced by `fmt.Errorf`.
+- `pkg/billing/stripe/service.go`: `Checkout`, `supersede`, `Portal`,
+  `Refresh`, `Ingest`, `Run`, `Drain` (new, so tests and the subscribe page
+  can apply events synchronously), `processOne`, `reconcile` and
+  `ReconcilePerson`. The years and support paths are gone.
+- `pkg/billing/stripe/fake.go`: an in-memory gateway. A webhook body is
+  `{id, type, customer, …}` and the signature must be `fake`.
+- `pkg/system/billing.go`: comps (`GrantComp`, `RevokeComp`, `CompRows`,
+  `Comps`), customers, the subscription projection (upserted only for the
+  same person), checkout attempts (one admitted per person through the
+  existing partial unique index), and the event inbox (`InsertEvent`,
+  `EnqueueRefresh`, `ClaimEvent` with a lease, `CompleteEvent`,
+  `FailEvent`). Postgres `FOR UPDATE SKIP LOCKED` becomes a short SQLite
+  transaction, because there is one writer.
+- `pkg/kernel/billing.go`: `Policy()` (accepted prices and trials from the
+  config) and `Standing(person)`. `kernel.New` sets
+  `Access.Subscribed = Standing(…).Allowed`.
+- `pkg/server/billing.go`:
+  - `setupBilling` reads the key files, and a live key means livemode.
+    `SetBilling` installs any gateway.
+  - `POST /webhooks/stripe`.
+  - `GET /subscribe`: status, a Subscribe button per price, Manage billing.
+    Coming back with `?checkout=` refreshes before the webhook arrives.
+  - `POST /billing/checkout` and `/billing/portal`, form posts with the
+    session's CSRF token.
+- Reviews:
+  - `reviewPerson` runs after role and comp changes (`Env.PersonChanged`)
+    and after the billing worker projects a change (`OnChange`).
+  - `reviewAll` runs on the existing minute ticker.
+- Verbs: `sub.grant` (a date, `30d`, or milliseconds), `sub.revoke`,
+  `sub.ls`, `sub.show`, `billing.checkout`, `billing.portal`,
+  `billing.refresh`.
+
+### Why
+
+- Webhooks only ask for a refresh, and the worker reads the Customer from
+  Stripe before projecting, exactly as in francois. A forged, duplicated or
+  out-of-order event cannot set a state.
+- The minute tick replaces scheduling a timer at the earliest `until`.
+  `NextAccessChange` exists in `system` for a precise timer later, but one
+  pass over the open views each minute meets the exit criterion ("within a
+  minute") with less machinery.
+
+### What worked
+
+```text
+$ GOWORK=off go test ./pkg/server -run 'TestCompsMakeSubscribers|TestStripeSubscription|TestSubscribePage' -count=1 -v
+--- PASS: TestCompsMakeSubscribers (1.45s)
+--- PASS: TestStripeSubscription (0.02s)
+--- PASS: TestSubscribePage (0.01s)
+$ GOWORK=off go test ./... -count=1
+ok pkg/billing  ok pkg/blobs  ok pkg/rt  ok pkg/server (2.908s)  ok pkg/store
+```
+
+- francois's policy tests pass unchanged in the new package.
+- With the fake gateway:
+  - two `billing.checkout` calls return the same Session URL;
+  - after the webhook, the member's view gets `access: interact`;
+  - a duplicate event id is accepted and does nothing, and a forged
+    signature gets 400;
+  - with an open subscription, checkout answers `conflict` (use the
+    portal);
+  - a canceled subscription past `access_until` demotes the member.
+
+### What didn't work
+
+1. The first run of the comp test timed out:
+
+```text
+p5_test.go:116: no access event within 2s
+```
+
+   A trace of `reviewViews` showed it had worked:
+
+```text
+review vgajs… usr_e8f2… view interact     <- comp: event sent
+review vziol… usr_e8f2… interact view     <- revoke: event to the new view
+review vgajs… usr_e8f2… view view         <- the old view: nothing to say
+```
+
+   My test kept listening on the first view after reopening. The shell
+   closes the old view on reopen. The test now has a `page` helper that
+   does what the shell does: on each access event it opens a new view,
+   deletes the old one and follows the new stream.
+2. That exposed a real gap. A view opened at `interact`, demoted
+   (`view`) and promoted back before it reopened was compared against its
+   open level (`interact`), so the promotion sent nothing and the page
+   stayed on "view". `notified.changed(id, open, now)` now compares
+   against the level the view was last told (its open level until then),
+   and closed views are forgotten in `roomClosed`.
+
+### What I learned
+
+- The runtime already handles `access` (`transport.ts`): it posts
+  `reopen` to the shell and reloads as a fallback. The server only has to
+  send the event once per change, which is what `notified` guarantees.
+- Porting francois's inbox to SQLite is simpler than the original. With
+  one writer there are no competing workers, and the lease protects only
+  against the same worker's reentry after a crash.
+
+### What was tricky to build
+
+- **Reopen semantics in tests.** An access event is a request to replace
+  the view, not a level change on it. Any test that follows a view across
+  level changes has to act like the shell.
+- **`billingPortal` used two ways.** It is a form handler, and checkout
+  falls back to it when a subscription is already open. `ParseForm` is
+  idempotent, so the portal re-checks the form and CSRF the same way in
+  both cases.
+
+### What warrants a second pair of eyes
+
+- `upsertSubscriptions` ignores a row that belongs to another person
+  (`WHERE stripe_subscriptions.person = excluded.person`), as francois
+  does. Verify that this never hides a legitimate move.
+- `ClaimEvent` increments `attempts` on claim. A worker that crashes
+  between the claim and the completion retries after the two-minute lease.
+- `reviewAll` checks every open view once a minute: one `Grants` query
+  plus up to two billing queries per view. Fine at the expected scale;
+  `NextAccessChange` is there for a precise timer if needed.
+
+### What should be done in the future
+
+- The Stripe test-mode run: keys, `stripe listen` forwarding to
+  `/webhooks/stripe`, and one real checkout.
+- Billing in the back office (P7): comps, subscriptions, the event inbox.
+- `SetCancelAtPeriodEnd` for operators (ported in the gateway, no verb
+  yet).
+
+### Code review instructions
+
+- `pkg/billing/stripe/service.go` against
+  `francois/pkg/catalog/payments/service.go`.
+- `pkg/system/billing.go` against `francois/pkg/catalog/store/billing.go`.
+- `pkg/server/billing.go`: `reviewPerson`, `reviewAll`, `notified`.
+- Validate:
+  - `GOWORK=off go test ./pkg/billing ./pkg/server -run 'Comps|Stripe|Subscribe|Access' -v`;
+  - by hand: `slop sub grant you@example.com --until 30d`, then
+    `slop sub show you@example.com`.
+
+### Technical details
+
+```text
+person's audience, recomputed on every check:
+  role member + Standing(person).Allowed  -> subscriber
+  Standing = billing.Policy{AcceptedPrices: cfg.stripe.prices, TrialAllowed: cfg.stripe.trials}
+               .Access(Account{Disabled}, Sys.Subscriptions(p), Sys.Comps(p), now)
+
+who re-checks open views:
+  people.role, sub.grant, sub.revoke      -> Env.PersonChanged -> reviewPerson
+  billing worker projected a change       -> Service.OnChange  -> reviewPerson
+  every minute                            -> reviewAll
+  grant.set/rm, link.rm, /_site/grants    -> reviewViews(store)
+```

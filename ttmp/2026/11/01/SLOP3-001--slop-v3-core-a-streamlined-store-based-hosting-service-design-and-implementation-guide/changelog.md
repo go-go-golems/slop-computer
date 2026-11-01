@@ -77,3 +77,12 @@ P4 (4ff910e): OIDC sign-in with PKCE, share links, guest limit/sweep/claim, expl
 
 - /home/manuel/code/wesen/2026-10-31--slop-v3/pkg/server/p4_test.go — P4 exit tests incl. fake OIDC provider
 - /home/manuel/code/wesen/2026-10-31--slop-v3/pkg/server/sitelinks.go — links and the claim on the live host
+
+## 2026-11-01
+
+P5 (a5e5299): comps and Stripe subscriptions from francois (policy unchanged, payments cut to subscriptions, storage in system.db); views follow audience changes. Open: one Stripe test-mode run (no keys in this session)
+
+### Related Files
+
+- /home/manuel/code/wesen/2026-10-31--slop-v3/pkg/billing/stripe/service.go — checkout, webhooks, worker
+- /home/manuel/code/wesen/2026-10-31--slop-v3/pkg/server/billing.go — subscribe page and view reviews
