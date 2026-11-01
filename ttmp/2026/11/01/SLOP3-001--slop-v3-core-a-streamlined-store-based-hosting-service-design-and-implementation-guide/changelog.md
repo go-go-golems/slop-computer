@@ -114,3 +114,11 @@ P8 (5b6505d): deployed from source with the CLI — slop.boutique (seed → one 
 - /home/manuel/code/wesen/2026-10-31--slop-v3/pkg/rt/views.go — AsPeer lists only views with a stream
 - /home/manuel/code/wesen/2026-10-31--slop-v3/pkg/server/site.go — notFound page for static sites
 - /home/manuel/code/wesen/2026-10-31--slop-v3/ttmp/2026/11/01/SLOP3-001--slop-v3-core-a-streamlined-store-based-hosting-service-design-and-implementation-guide/scripts/02-build-boutique.py — the boutique rendered at build time
+
+## 2026-11-01
+
+Agent verification (39b0b76): pi built agent-poll and added journal tags through the CLI; found and fixed user.me() missing guide §10's visitor fields; guests_per_hour config; task 1 escalated via local sign-in (recorded in diary step 17)
+
+### Related Files
+
+- /home/manuel/code/wesen/2026-10-31--slop-v3/web/runtime/src/caps.ts — user.me() carries the visitor
