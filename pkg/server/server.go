@@ -5,6 +5,7 @@ package server
 
 import (
 	"context"
+	"log"
 	"net"
 	"net/http"
 	"strings"
@@ -12,6 +13,7 @@ import (
 
 	"github.com/go-go-golems/slop/pkg/config"
 	"github.com/go-go-golems/slop/pkg/httpx"
+	"github.com/go-go-golems/slop/pkg/ids"
 	"github.com/go-go-golems/slop/pkg/system"
 	"github.com/go-go-golems/slop/pkg/verbs"
 )
@@ -22,6 +24,7 @@ type Server struct {
 	Sys  *system.DB
 	Env  *verbs.Env
 	main *http.ServeMux
+	rt   *rtState
 	// Extra host handlers, set by later phases (live, static, sandbox).
 	Live, Static, Sandbox http.Handler
 	// oidcLogin starts an OIDC sign-in (nil until OIDC is configured).
@@ -37,8 +40,20 @@ func Build(ctx context.Context, cfg *config.Config, sys *system.DB, env *verbs.E
 // New builds a server.
 func New(cfg *config.Config, sys *system.DB, env *verbs.Env) *Server {
 	s := &Server{Cfg: cfg, Sys: sys, Env: env, main: http.NewServeMux()}
+	key, err := cfg.Key()
+	if err != nil {
+		log.Printf("server key: %v (using a temporary one: sandbox labels change on restart)", err)
+		key = []byte(ids.Secret("key_"))
+	}
+	s.rt = newRT(key)
+	s.rt.views.OnClose = s.roomClosed
+	if env != nil && env.K != nil {
+		env.K.Subscribe(s.publish)
+	}
 	s.mainRoutes(s.main)
 	s.Static = http.HandlerFunc(s.serveStatic)
+	s.Live = http.HandlerFunc(s.serveLive)
+	s.Sandbox = http.HandlerFunc(s.serveSandbox)
 	return s
 }
 
@@ -79,6 +94,7 @@ func (s *Server) mainRoutes(m *http.ServeMux) {
 		}
 		httpx.JSON(w, 200, map[string]any{"ok": true})
 	})
+	m.HandleFunc("GET /auth/handoff", s.handoff)
 	s.authRoutes(m)
 	s.deviceRoutes(m)
 	s.apiRoutes(m)
@@ -87,6 +103,18 @@ func (s *Server) mainRoutes(m *http.ServeMux) {
 // ListenAndServe runs the server until ctx ends.
 func (s *Server) ListenAndServe(ctx context.Context) error {
 	srv := &http.Server{Addr: s.Cfg.Listen, Handler: s, ReadHeaderTimeout: 10 * time.Second}
+	go func() {
+		t := time.NewTicker(time.Minute)
+		defer t.Stop()
+		for {
+			select {
+			case <-ctx.Done():
+				return
+			case now := <-t.C:
+				s.rt.views.Sweep(now)
+			}
+		}
+	}()
 	go func() {
 		<-ctx.Done()
 		c, cancel := context.WithTimeout(context.Background(), 5*time.Second)

@@ -51,9 +51,11 @@ type View struct {
 // Out is something a view's stream sends: a target change it filters by
 // its subscriptions, or an event it sends as is.
 type Out struct {
-	Change *Change
-	Type   string
-	Data   any
+	Change  *Change
+	Rev     int64     // a whole commit: its rev, and the doc changes in it
+	Changes []*Change // (possibly none the view can see)
+	Type    string
+	Data    any
 }
 
 // Change is a committed document write. Patch is set when it is small next

@@ -23,6 +23,12 @@ type Change struct {
 	Key     string `json:"key"`
 	Op      string `json:"op"`
 	Version int64  `json:"version,omitempty"`
+
+	// For doc changes, in memory only (never stored): the body written
+	// (nil when deleted) and the one it replaced, so live views can be
+	// sent a patch without reading the store again.
+	Body []byte `json:"-"`
+	Prev []byte `json:"-"`
 }
 
 // Commit is what one turn wrote.

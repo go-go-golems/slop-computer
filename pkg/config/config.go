@@ -2,8 +2,12 @@
 package config
 
 import (
+	"bytes"
+	"crypto/rand"
+	"encoding/hex"
 	"fmt"
 	"os"
+	"path/filepath"
 	"strings"
 
 	"gopkg.in/yaml.v3"
@@ -134,4 +138,27 @@ func contains(list []string, h string) bool {
 		}
 	}
 	return false
+}
+
+// Key returns the server's HMAC key: the secret key file's bytes, or a key
+// generated once into <data>/secret.key.
+func (c *Config) Key() ([]byte, error) {
+	path := c.SecretKey
+	if path == "" {
+		path = filepath.Join(c.Data, "secret.key")
+	}
+	if b, err := os.ReadFile(path); err == nil && len(bytes.TrimSpace(b)) >= 16 {
+		return bytes.TrimSpace(b), nil
+	} else if c.SecretKey != "" {
+		return nil, fmt.Errorf("secret key file %s: missing or shorter than 16 bytes", path)
+	}
+	b := make([]byte, 32)
+	if _, err := rand.Read(b); err != nil {
+		return nil, err
+	}
+	key := []byte(hex.EncodeToString(b))
+	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
+		return nil, err
+	}
+	return key, os.WriteFile(path, key, 0o600)
 }

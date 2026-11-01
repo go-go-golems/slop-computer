@@ -101,7 +101,7 @@ func (t *Turn) DeleteDoc(path string) (bool, error) {
 		version, t.Rev, nullStr(t.Who.ID), t.Now, path); err != nil {
 		return false, err
 	}
-	t.record(Change{Kind: "doc", Key: path, Op: "delete", Version: version})
+	t.record(Change{Kind: "doc", Key: path, Op: "delete", Version: version, Prev: []byte(body.String)})
 	_ = t.addLive(-1)
 	return true, nil
 }
@@ -169,7 +169,11 @@ func (t *Turn) writeDoc(path string, body map[string]any, ifVersion int64, op st
 		path, rt.CollOf(path), string(raw), version, t.Rev, len(raw), nullStr(t.Who.ID), t.Now); err != nil {
 		return 0, err
 	}
-	t.record(Change{Kind: "doc", Key: path, Op: op, Version: version})
+	var prev []byte
+	if cur.Valid {
+		prev = []byte(cur.String)
+	}
+	t.record(Change{Kind: "doc", Key: path, Op: op, Version: version, Body: raw, Prev: prev})
 	return version, nil
 }
 
