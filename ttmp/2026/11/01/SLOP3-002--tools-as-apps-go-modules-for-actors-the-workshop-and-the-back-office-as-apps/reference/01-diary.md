@@ -831,3 +831,142 @@ runtime → shell {type: confirm, confirm} → GET /_site/confirm/cfm_… → di
   → POST /_site/confirm/cfm_… → {approved: true}
 runtime → RPC slop.call (same) → approved (person, view, hash) → verb runs → result
 ```
+
+## Step 8: W7, the back office as an app
+
+The back office now also exists as an ordinary app, `apps/backoffice`,
+built from the same React UI as the built-in one. Installed with three
+commands (push, trust, mount), it runs at `/admin` on the live host. A
+browser test lets a pending person in, grants a comp, and toggles a
+policy cell. Each of these is asked in the shell, and the test declines
+once. Activity then shows them `via app:backoffice`, and a change made
+from the CLI appears without a reload. Commit `da05ae9`.
+
+### Prompt Context
+
+**User prompt (verbatim):** see Step 1. The idea goes back to the user's
+earlier question (verbatim): "how would we manage permissions and such
+through a UI, can we build an app that can also manipulate that by
+accessing a certain system store?"
+
+**Assistant interpretation:** Phase W7: port the back office to an app
+whose API client is one actor action, and check it in a browser.
+
+**Inferred user intent:** The admin UI should be replaceable and
+versionable like any app, without losing audit or safety.
+
+**Commit (code):** `da05ae9` — "W7: the back office as an app
+(apps/backoffice), verified in a browser".
+
+### What I did
+
+- `web/admin/src/api-app.js`: `session()` from `claude.use('user')`
+  (`me().audience === 'admin'` gives the role), `call(verb, args)` →
+  `slop.actions.verb({name, args})`, `hosts()` → `server.hosts`,
+  `signIn()` → `slop.signIn()`, `signOut = null` (the shell's bar signs
+  out), `onChange(fn)` → `db.doc('ui/changed').onSnapshot` (skipping the
+  first snapshot).
+- `web/admin/src/api.js` gained the same `hosts`, `signIn` and
+  `onChange` (no-op); `main.jsx` loads hosts through `hosts()` and shows
+  Sign out only when `signOut` exists; `ui.jsx`'s `useVerb` reloads on
+  `onChange`.
+- `web/admin/build.mjs --app <dir>`: an esbuild plugin resolves
+  `./api.js` to `src/api-app.js`; writes `app.js` and `styles.css` into
+  the app folder.
+- `apps/backoffice/`: `app.json` (user profile scope, db rule for `ui`,
+  `slop.modules: ["system"]`), `actor.js` (`verb` action with
+  `ctx.need('admin')`; `system:*` reactor), `index.html`, and the built
+  `app.js` and `styles.css`.
+- Verb `server.hosts` (read) and `system.hosts()`: the Sites view needs
+  the live and static hosts, which the built-in page gets from its boot
+  data.
+- `pkg/server/w7_test.go` `TestBackofficeApp`; ticket scripts
+  `01-w7-backoffice-e2e.mjs` and `02-w7-builtin-backoffice-smoke.mjs`;
+  screenshots in `various/w7/`.
+- Demo server: rebuilt `./slop`; its tmux session `slop3` had exited, so
+  it was restarted with `tmux new-session -d -s slop3 …/serve.sh`;
+  `slop push apps/backoffice --store backoffice`,
+  `slop app trust backoffice system`,
+  `slop mount set apps.localhost:18300 /admin backoffice`.
+
+### Why
+
+- One UI, two API modules: the views keep calling `call(verb, args)`, so
+  the app version needs no UI changes, and the built-in back office stays
+  the recovery path.
+- `server.hosts` is a verb rather than something passed at build time,
+  so the same `apps/backoffice` works on any server.
+
+### What worked
+
+- `01-w7-backoffice-e2e.mjs`: 10 checks, `all passed` (output below).
+- `02-w7-builtin-backoffice-smoke.mjs`: 3 checks, `all passed`.
+- `GOWORK=off go test ./... -count=1`: all `ok`.
+
+```text
+ok   signed out: only the view request failed (401 POST http://apps.localhost:18300/_site/views)
+ok   the back office app opens at /admin on the live host
+ok   let in: the shell asks "Allow Back office to do this? people.role id=usr_6b480a87136aec427b643d30 role=member Canc…"
+ok   let in: Mira is a member after allowing
+ok   grant comp: allowed in the shell, the row shows the comp
+ok   policy: Cancel leaves the cell off and the app reports confirmation_declined
+ok   policy: Allow turns sample on for guests
+ok   activity: role, comp and policy changes are logged via app:backoffice
+ok   activity: "w7-probe-mvydk4bx" created from the CLI appears without a reload
+ok   signed in: no console errors or failed requests
+```
+
+### What didn't work
+
+- `locator.click: Error: strict mode violation: getByText('Sign in')
+  resolved to 3 elements` (the bar's link, "Sign in to open this.", and
+  the note's link). The script now clicks `#me a:has-text("Sign in")`.
+  Its `finally` block restored the demo state.
+- `FAIL no console errors Failed to load resource: the server responded
+  with a status of 401 (Unauthorized)`. Logging failed responses showed it
+  was `401 POST /_site/views` made while signed out (the store has no
+  grants, so a guest gets no view): expected. The script now checks that
+  this is the only failure before sign-in, and that nothing fails after.
+
+### What I learned
+
+- The runtime retry and the shell dialog work end to end in Chromium: the
+  dialog shows the server's summary ("people.role id=usr_… role=member"),
+  Cancel turns into `confirmation_declined` in the app's toast, and Allow
+  completes the original click with no extra code in the UI.
+
+### What was tricky to build
+
+- Live refresh without polling: the actor's `system:*` reactor writes
+  `ui/changed`, pages subscribe to it, and `useVerb` reloads. The first
+  snapshot must be ignored or every view loads twice at start.
+
+### What warrants a second pair of eyes
+
+- `apps/backoffice/app.js` and `styles.css` are built artifacts committed
+  next to their sources (as `pkg/server/admin` already is); rebuild with
+  `cd web/admin && node build.mjs --app ../../apps/backoffice` after UI
+  changes.
+- Each `system:*` event writes `ui/changed`, so every open view of every
+  surface reloads on any platform change. Fine for an admin tool; a busier
+  tool should filter by kind.
+
+### What should be done in the future
+
+- W8: the Workshop app.
+
+### Code review instructions
+
+- `web/admin/src/api-app.js`, `apps/backoffice/actor.js`,
+  `web/admin/build.mjs`.
+- Run the scripts against a demo server (commands in their headers).
+
+### Technical details
+
+```text
+page (sandbox) call('policy.set', {...})
+  → slop.actions.verb → actor: ctx.need('admin'); system.call('policy.set', args)
+  → verbs.Check ok → confirmation_required (cfm_…) → shell dialog → Allow
+  → retry → policy.set as Ada, via app:backoffice → system log
+  → system:* reactor → ui/changed → every open page's useVerb reloads
+```

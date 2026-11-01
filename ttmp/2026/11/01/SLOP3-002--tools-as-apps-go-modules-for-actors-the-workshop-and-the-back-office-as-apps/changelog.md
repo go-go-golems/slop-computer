@@ -59,3 +59,11 @@ W6 (7f4a42e): confirmations (verbs.Check first, approvals per person/view/call, 
 ### Related Files
 
 - /home/manuel/code/wesen/2026-10-31--slop-v3/pkg/verbs/confirm.go — confirmation book and verb
+
+## 2026-11-01
+
+W7 (da05ae9): back office as an app; browser-verified confirmations and live refresh
+
+### Related Files
+
+- /home/manuel/code/wesen/2026-10-31--slop-v3/apps/backoffice/actor.js — the back office app's actor
