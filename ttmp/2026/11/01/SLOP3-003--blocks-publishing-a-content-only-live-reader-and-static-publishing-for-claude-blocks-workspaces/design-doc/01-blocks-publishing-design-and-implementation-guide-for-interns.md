@@ -334,7 +334,7 @@ Each decision below names the alternative that was rejected and why.
 
 **Links are absolute in the live reader and relative in static output.** The live reader knows the URL it was reached at through a new `req.base` (section 6.1), so it prints `/pub/team-site/getting-started`. Static output cannot know where it will be mounted, so it prints relative links (`getting-started/` from the home page, `../getting-started/` from a page), and each page is written as `<slug>/index.html`. The static host already redirects `/s/team-static/getting-started` to the slash form when `getting-started/index.html` exists (`serveStatic`, `pkg/server/site.go`).
 
-**The site's administration is a JS-free page served by the same actor.** The shell would show the app's `index.html` only for paths no actor route claims, and the reader claims `/` and `/:page`. Rather than special-casing paths, the actor serves `GET /_site` (an admin-only page with two forms) and accepts `POST /_site` (save settings) and `POST /_publish` (publish). Literal route segments beat `:page`, and slugs never start with `_`. The session cookie is `SameSite=Lax` (`pkg/server/auth.go`), so a cross-site form post arrives without a session, as a guest, and fails the `admin` level check before the actor runs. The same operations are actions (`configure`, `publish`, `status`) for the CLI.
+**The site's administration is a JS-free page served by the same actor.** The shell would show the app's `index.html` only for paths no actor route claims, and the reader claims `/` and `/:page`. Rather than special-casing paths, the actor serves `GET /_site` (an admin-only page with two forms) and accepts `POST /_site` (save settings) and `POST /_publish` (publish). Literal route segments beat `:page`, and slugs never start with `_`. The session cookie is `SameSite=Lax` (`pkg/server/auth.go`), which keeps other sites' form posts from carrying it, but the sandbox origins (`*.sbx.<domain>`) are the *same site* as the live host, so an app's page could still post a form with the visitor's session. Section 6.3 closes this for every actor route: an unsafe request that the browser marks as cross-origin is served as a guest, and fails the `admin` level check before the actor runs. The same operations are actions (`configure`, `publish`, `status`) for the CLI.
 
 ### 5.3 The live reader
 
@@ -467,7 +467,7 @@ A reader of a site sees the rendered HTML of the pages in the site's scope, at t
 
 ## 6. Server changes
 
-Two small changes make the app possible. Both are general, not Blocks-specific.
+Three small changes make the app possible. All are general, not Blocks-specific.
 
 ### 6.1 `req.base`: the URL a route was reached at
 
@@ -476,6 +476,10 @@ Two small changes make the app possible. Both are general, not Blocks-specific.
 ### 6.2 `rev()` on a store handle
 
 The handle from `use('stores').open(alias)` gains `rev()`, returning the target's `Store.Head()`. It is the cheapest way to answer "has the bound store changed since I last read it?", which any actor that caches a derived view of another store needs.
+
+### 6.3 Cross-origin posts to actor routes do not carry the session
+
+On the live host, a `POST` (or any method other than `GET` and `HEAD`) to an actor route is served with the session's person only when the browser says it came from the same origin: `Sec-Fetch-Site` is absent or `same-origin`, and `Origin` is absent or the live host's own origin (`crossOrigin`, `pkg/server/live.go`). Otherwise the request is served as a guest. Without this, a page in an app's sandbox, which is same-site with the live host, could submit a form to `/pub/team-site/_publish` and publish as whoever is looking at it. The B3 test checks both a same-site and a cross-site post, and fails if the rule is removed.
 
 ## 7. Implementation plan
 
@@ -558,6 +562,7 @@ Links between pages are relative; there are no other files (the stylesheet is in
 | `pkg/actor/manager.go` | `Req.Base` |
 | `pkg/actor/modules.go` | `rev()` on a store handle |
 | `pkg/server/actors.go` | sets `Base` |
+| `pkg/server/live.go` | `crossOrigin`: unsafe cross-origin requests to actor routes are served as a guest |
 | `pkg/server/b1_test.go` … `b3_test.go` | phase tests |
 | upstream `web/blocks/src/blocks.js` | `Net.load` (fold), `Pages`, `Markdown.page` (the reference walk) |
 | upstream `web/blocks/src/blocks-kit.js` | prose grammar, `numberLabel`, block kinds' positional props |

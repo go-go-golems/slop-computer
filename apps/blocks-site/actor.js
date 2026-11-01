@@ -9,6 +9,14 @@
 //   slop bind set team-site source ws-team
 //   slop grant set ws-team store:team-site view
 //   slop grant set team-site @guest view
+// Static publishing renders every page into a static store through the
+// workshop module, as the person publishing (an admin of that store):
+//   slop app trust blocks-site workshop                       (admin, once)
+//   slop mount set <static host> /s/:id --storeParam id --type site
+//   slop store new team-static --type site
+//   slop grant set team-static @guest view
+//   slop call team-site publish '{"to":"team-static","live":true}'
+// or the forms at <site>/_site.
 const { fold } = require('./lib/fold.js');
 const site = require('./lib/site.js');
 const render = require('./lib/render.js');
@@ -36,6 +44,77 @@ function current() {
   return cache;
 }
 
+const PAGE = /^[A-Za-z_]\w*$/, STORE = /^[a-z0-9][a-z0-9-]{0,62}$/;
+const text = (v, max) => String(v == null ? '' : v).trim().slice(0, max);
+
+function published() {
+  const d = db.doc('site/published').get();
+  return d.exists ? d.data() : null;
+}
+
+// Settings: a title, a home page, a root page (the site is that page and
+// its sub-pages), the static store to publish to. An empty value clears.
+function configure(args) {
+  const cfg = Object.assign({}, settings());
+  const set = (k, v, ok) => { if (v === undefined) return; v = text(v, 120); if (!v) delete cfg[k]; else if (ok(v)) cfg[k] = v; else throw new Error(`invalid ${k}: ${v}`); };
+  set('title', args.title, () => true);
+  set('home', args.home, (v) => PAGE.test(v));
+  set('root', args.root, (v) => PAGE.test(v));
+  set('to', args.to, (v) => STORE.test(v));
+  db.doc('site/config').set(cfg);
+  return cfg;
+}
+
+// Render every page and push them into a static store as the visitor
+// (files.push needs admin there); live moves its main, otherwise only
+// its draft moves, for review in the Workshop.
+async function publish(ctx, to, live) {
+  const w = use('workshop');
+  if (!w) ctx.fail('unavailable', 'this app is not trusted with the workshop module (slop app trust blocks-site workshop)');
+  to = text(to || settings().to, 63);
+  if (!STORE.test(to)) ctx.fail('invalid_argument', 'publishing needs a static store (to)');
+  if (to === ctx.store.id) ctx.fail('invalid_argument', 'a site cannot publish into itself');
+  const c = current(), s = c.site;
+  if (!s.pages.length) ctx.fail('invalid_argument', 'nothing to publish: the site has no pages');
+  const files = render.staticFiles(s);
+  const snap = await w.push(to, files, { message: `${s.pages.length} pages from ${s.source} (rev ${c.rev})` });
+  if (live) await w.publish(to, snap.n);
+  const rec = { to, n: snap.n, live: !!live, at: Date.now(), by: ctx.visitor.id, pages: s.pages.length, rev: c.rev };
+  db.doc('site/published').set(rec);
+  return Object.assign({ files: files.length }, rec);
+}
+
+// application/x-www-form-urlencoded
+function form(body) {
+  const out = {};
+  for (const kv of String(body || '').split('&')) {
+    if (!kv) continue;
+    const i = kv.indexOf('='), dec = (x) => { try { return decodeURIComponent(x.replace(/\+/g, ' ')); } catch (e) { return ''; } };
+    out[dec(i < 0 ? kv : kv.slice(0, i))] = dec(i < 0 ? '' : kv.slice(i + 1));
+  }
+  return out;
+}
+
+// The note above the forms, from the redirect's query: built from known
+// codes and checked values only, never from free text in the URL.
+function note(q) {
+  const to = STORE.test(q.to || '') ? q.to : '', n = /^\d+$/.test(q.n || '') ? q.n : '';
+  if (q.m === 'saved') return { note: 'Settings saved.' };
+  if (q.m === 'published' && to && n) return { note: q.live === '1' ? `Published #${n}: ${to} serves it now.` : `Pushed draft #${n} to ${to}. Review it in the Workshop, then publish it there.` };
+  const why = { permission_denied: `You need to be an admin of ${to || 'the static store'} to publish into it.`, not_found: `There is no store ${to}.`,
+    unavailable: 'Publishing is not set up: an admin runs slop app trust blocks-site workshop.', invalid_argument: 'Name a static store to publish into.' };
+  if (q.e) return { note: why[q.e] || `Publishing failed (${q.e.replace(/[^a-z_]/g, '')}).`, bad: true };
+  return {};
+}
+
+function settingsPage(ctx, req) {
+  let c;
+  try { c = current(); } catch (e) { return page(503, render.bare('Not available', `This site cannot read its workspace: ${e.message || e}`)); }
+  const n = note(req.query || {});
+  const html = render.adminPage(c.site, { base: req.base, source: c.site.source, rev: c.rev, published: published(), note: n.note, bad: n.bad, trusted: !!use('workshop') });
+  return page(200, html);
+}
+
 const isAdmin = (ctx) => ctx.visitor.level === 'admin' || ctx.visitor.level === 'owner';
 const page = (status, html) => ({ status, html, headers: { 'Content-Security-Policy': CSP, 'Cache-Control': 'private, no-cache', 'Referrer-Policy': 'same-origin' } });
 const redirect = (to, status) => ({ status: status || 302, headers: { Location: to, 'Cache-Control': 'no-store' }, text: '' });
@@ -59,7 +138,44 @@ function show(ctx, req, seg) {
 }
 
 defineActor({
+  actions: {
+    status(ctx) {
+      ctx.need('view');
+      const c = current(), s = c.site;
+      return { source: s.source, rev: c.rev, home: s.home, config: settings(), published: published(),
+        pages: s.pages.map((p) => ({ id: p, slug: s.slug(p), title: s.title(p), parent: s.parent(p) })) };
+    },
+    configure(ctx, args) {
+      ctx.need('admin');
+      try { return configure(args || {}); } catch (e) { ctx.fail('invalid_argument', e.message); }
+    },
+    async publish(ctx, args) {
+      ctx.need('admin');
+      return await publish(ctx, (args || {}).to, !!(args || {}).live);
+    },
+  },
   http: {
+    'GET /_site': { level: 'admin', run: settingsPage },
+    'POST /_site': {
+      level: 'admin',
+      run(ctx, req) {
+        try { configure(form(req.body)); } catch (e) { return redirect(req.base + '/_site?e=invalid_argument', 303); }
+        return redirect(req.base + '/_site?m=saved', 303);
+      },
+    },
+    'POST /_publish': {
+      level: 'admin',
+      async run(ctx, req) {
+        const f = form(req.body);
+        try {
+          const r = await publish(ctx, f.to, f.live === '1');
+          if (f.to && f.to !== settings().to) configure({ to: f.to });
+          return redirect(`${req.base}/_site?m=published&n=${r.n}&live=${r.live ? 1 : 0}&to=${r.to}`, 303);
+        } catch (e) {
+          return redirect(`${req.base}/_site?e=${encodeURIComponent(e.code || 'error')}&to=${encodeURIComponent(f.to || '')}`, 303);
+        }
+      },
+    },
     'GET /': { level: 'view', run: (ctx, req) => show(ctx, req, '') },
     'GET /:page': { level: 'view', run: (ctx, req) => show(ctx, req, req.params.page) },
     // deeper paths are no page either (and never fall through to the shell)

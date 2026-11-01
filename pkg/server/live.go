@@ -127,6 +127,17 @@ func (s *Server) sameOrigin(r *http.Request) bool {
 	return true
 }
 
+// crossOrigin reports a request the browser says came from another
+// origin. Sandbox origins are same-site with the live host, so SameSite
+// cookies alone do not keep their pages from posting with a session.
+func (s *Server) crossOrigin(r *http.Request) bool {
+	if sf := r.Header.Get("Sec-Fetch-Site"); sf != "" && sf != "same-origin" {
+		return true
+	}
+	o := r.Header.Get("Origin")
+	return o != "" && o != s.Cfg.Origin(r.Host)
+}
+
 // serveLive serves a live host.
 func (s *Server) serveLive(w http.ResponseWriter, r *http.Request) {
 	p := r.URL.Path
@@ -150,6 +161,9 @@ func (s *Server) serveLive(w http.ResponseWriter, r *http.Request) {
 		// An actor route on the mount answers first; then the shell.
 		if res, err := s.resolve(r.Context(), r.Host, p); err == nil {
 			pr, _ := s.sitePrincipal(r)
+			if pr != nil && r.Method != http.MethodGet && r.Method != http.MethodHead && s.crossOrigin(r) {
+				pr = nil // a form or fetch from another origin (an app's sandbox is same-site) does not act as the person
+			}
 			if s.serveActorRoute(w, r, res, pr) {
 				return
 			}

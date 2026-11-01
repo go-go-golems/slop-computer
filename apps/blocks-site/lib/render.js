@@ -269,7 +269,7 @@ function staticFiles(site) {
 }
 
 // The settings and publishing page (admins only), plain forms.
-function adminPage(site, { base, source, rev, published, note, bad }) {
+function adminPage(site, { base, source, rev, published, note, bad, trusted }) {
   const opts = liveLinks(site, base), c = site.config;
   const pageOpts = (sel, none) => `<option value="">${esc(none)}</option>`
     + site.all.map((p) => `<option value="${esc(p)}"${p === sel ? ' selected' : ''}>${esc(site.title(p))} (${esc(p)})</option>`).join('');
@@ -277,6 +277,7 @@ function adminPage(site, { base, source, rev, published, note, bad }) {
   const body = `<article class="form"><h1 class="title">Settings and publishing</h1>`
     + (note ? `<p class="note${bad ? ' bad' : ''}">${esc(note)}</p>` : '')
     + `<dl class="facts"><dt>Source workspace</dt><dd>${esc(source)} (rev ${esc(rev)})</dd><dt>Published pages</dt><dd>${site.pages.length}</dd>${last}</dl>`
+    + (trusted ? '' : '<p class="note bad">Publishing is not set up: an admin trusts the app with the workshop module (<code>slop app trust blocks-site workshop</code>).</p>')
     + `<form method="post" action="${esc(base)}/_publish"><fieldset><legend>Publish a snapshot</legend>`
     + `<label for="to">Static store</label><input id="to" name="to" value="${esc(c.to || '')}" placeholder="team-static" pattern="[a-z0-9][a-z0-9-]*" required>`
     + `<p class="hint">The pages are rendered now and pushed into this store. You need to be an admin of it.</p>`
