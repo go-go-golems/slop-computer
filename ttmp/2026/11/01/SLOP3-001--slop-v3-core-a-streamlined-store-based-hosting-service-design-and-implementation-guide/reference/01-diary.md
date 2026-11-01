@@ -264,3 +264,121 @@ quoting change in the guide.
 - **Second attempt** (the same command): `OK: uploaded SLOP3-001 slop v3 core design guide.pdf -> /ai/2026/11/01/SLOP3-001`. That proves cloud delivery, not device sync.
 - Checked task 0hh4 and updated the changelog.
 - **Next:** the user answers the open questions in section 20; then P0.
+
+## Step 4: The product owner's answers: guests, lab, Stripe, sign-up, binary name
+
+The user answered the open questions. Four changes followed:
+- the anonymous audience is folded into guest;
+- the lab is reference only, and its design system is the back office's look;
+- francois's Stripe integration is copied into the core;
+- open sign-up and the `slop` / `slop2` naming are accepted.
+
+I applied all of them to the guide in two scripted edit passes (34 exact
+replacements, each asserted to match once) and verified that no stale
+reference remains.
+
+The guide now has four audiences (guest, member, subscriber, admin). A guest
+may or may not have an id, and only guests with an id can write or be
+charged for LLM calls. Subscriptions come from comps and from a Stripe
+projection copied from francois's `pkg/catalog/payments`.
+
+### Prompt Context
+
+**User prompt (verbatim):** "anonymous = guest. 
+
+inbrowser lab is indeed just reference, and design system
+copy stripe as well
+4. yes (zitadel anyway)
+5. just slop again, and indeed slop2 if needed (?) for cut-over."
+
+A follow-up arrived while I was working: "commit at appropriate intervals and keep a detailed diary as you work (using the diary format from the skill, mandatory)"
+
+**Assistant interpretation:**
+- Merge the anonymous audience into guest.
+- Treat the lab as reference, with its design system as the back office's look.
+- Make Stripe part of the core by copying francois's integration.
+- Accept open sign-up, since Zitadel controls account creation.
+- Name the binary `slop`, with v2's CLI as `slop2` during the cut-over.
+- Keep the diary in investigation format, and commit at intervals.
+
+**Inferred user intent:** settle the design so P0 can start. Questions 1
+(monthly budget reset) and 2 (guests and LLM) were not answered and stay
+open.
+
+### What I did
+
+- **Researched francois's Stripe integration** (`106776a`):
+  - `grep -rl -i stripe pkg cmd` led to `pkg/catalog/payments/{gateway,service,year_payment}.go`, `pkg/catalog/store/billing.go` and `pkg/catalog/routes.go`;
+  - `go.mod` has `github.com/stripe/stripe-go/v86 v86.1.1`;
+  - read the `Gateway` interface (`CreateCustomer`, `CreateCheckout`, `RetrieveCheckout`, `ExpireCheckout`, `CreatePortal`, `SubscriptionCustomer`) and the `Service` methods (`Checkout`, `Portal`, `Refresh`, `Ingest`, `Run`, `reconcile`, plus `Support`, `SupportEnterprise`, `FundYear`);
+  - read the routes: `POST /api/billing/checkout`, `/api/billing/portal`, `/webhooks/stripe`;
+  - read the tables: `billing_customers`, `billing_subscriptions`, `checkout_attempts`, `stripe_events` (002) and the price rename (007).
+- **Researched the lab's design system:**
+  - `lab/dist/styles.css` (73,344 bytes) starts with the `form-skate-workbench/tokens.css` header;
+  - `lab/build.mjs` concatenates the workbench tokens and components, the agent components, and `src/ui/lab.css`;
+  - listed the exported components in `lab/src/ui/{ui,dock,views1,views2,views3}.jsx`.
+- **Edit pass 1** (`edit1.py`, 23 replacements):
+  - audiences in §1, §3.2, §3.4 (dropped `@anyone view`), §5.5, §7.1, §7.3 (the ladder and `audienceOf(nil) = guest`), §7.5 (subjects, caps, `matches`), §8.2 (matrix columns), §9.2 (who pays), §11.3 (`resolve`) and D5;
+  - Stripe in §7.4 (the copied integration, a flow diagram, the config block, the new `subscribed()`, what is not copied), §10 (the subscribe page), P5 (merged into one phase with a fake-gateway exit test) and Appendix A (`subscriptions` replaced by `comps` plus the four Stripe tables, ported from francois's DDL);
+  - D10 accepted, with Zitadel;
+  - §20: a "decided" list, with two questions still open.
+- **Edit pass 2** (`edit2.py`, 11 replacements):
+  - the guest definition in §3.2 and Zitadel in §13.1;
+  - a "Look" subsection in §14: where the design system lives, its rules, which lab components to reuse, and which screenshots to compare against;
+  - the reuse map in §16: the francois payments path, and the lab UI and design system;
+  - D3 accepted, as reference for behaviour and look;
+  - P7 styled from `lab/dist/styles.css`;
+  - P8: `slop` / `slop2`, and the shared credentials format;
+  - the `billing` verbs, the `/subscribe` and `/webhooks/stripe` endpoints, and the references.
+- **Checks:** grepped for `anonymous|@anyone|five audiences|P5b|P5a|subscriptions WHERE`; only the intended mentions in the decision records remain. No code line is over 92 columns, there are 92 fences (an even number), and the only backslash outside fences is inside inline code.
+
+### Why
+
+- I kept francois's table shapes for Stripe (renamed `billing_*` to `stripe_*` and `user_id` to `person`), so `store/billing.go` ports almost line for line. Comps got their own table, because francois's `Comp` is a separate input to `Policy.Access` anyway.
+- I left out francois's one-off support payments and its model allowance periods. They aren't subscriptions, and the user asked for trivial LLM budgets.
+- An id-less guest can only read. Every write records a person, and that matches how live hosts already create guest ids on demand.
+
+### What worked
+
+- The exact-match edit scripts made 34 changes in one pass each, with no stray edits. A miss would have stopped the script before writing.
+- francois's billing policy already takes subscriptions and comps as separate lists, so the new `subscribed()` is a direct call.
+
+### What didn't work
+
+- `mkdir -p $S/slop3 && cat > $S/slop3/edit1.py` failed with `mkdir: cannot create directory '.../scratchpad/slop3': File exists`. `slop3` was a 54 MB binary left in the scratchpad from 28 October. Because the `&&` chain stopped, the script was never written, and `python3` then failed with `[Errno 20] Not a directory`. I re-sent the script into `scratchpad/slop3-edits/`.
+
+### What I learned
+
+- The lab's design system survives in the repo only as the built `lab/dist/styles.css`. The source folders were session uploads, so the back office must start from the built file.
+- francois treats a Stripe webhook as a request to refresh, and always re-reads the customer from Stripe. Keep that property when porting: never project webhook payloads directly.
+
+### What was tricky to build
+
+- Merging the anonymous audience into guest without losing the difference that matters: whether we can name the visitor.
+  - The solution keeps a single audience, `guest`, and makes "has an id" a property of the principal, not an audience.
+  - Writes need an id, and so does LLM charging.
+  - Static hosts never create ids; live hosts create one when the store gives guests a level.
+
+### What warrants a second pair of eyes
+
+- Section 7.5: with `@guest` now matching everyone, `@guest interact` on a live host gives every visitor a guest id on first open. That's SLOP-011's existing behaviour, but it should be a conscious choice per store.
+- Appendix A: the Stripe tables use INTEGER milliseconds instead of `timestamptz`. The port of `store/billing.go` must convert consistently.
+- Section 7.4: whether `trials: false` matches how the user wants Stripe trials handled.
+
+### What should be done in the future
+
+- Upload the revised guide (Step 5).
+- Answer the two remaining questions: monthly budget reset, and guests' LLM access.
+
+### Code review instructions
+
+- In the design doc, review §7.3–7.5 (audiences, subjects, caps), §7.4 (Stripe), §14 ("Look"), P5 and P8 in §18, §20, and Appendix A (`comps` and the `stripe_*` tables).
+- `git diff 340eec8 -- ttmp/2026/11/01/SLOP3-001--*/design-doc/` shows every change since the first version.
+
+### Technical details
+
+```text
+python3 -I scratchpad/slop3-edits/edit1.py <design-doc>   -> applied 23
+python3 -I scratchpad/slop3-edits/edit2.py <design-doc>   -> applied 11
+git diff --stat: 1 file changed, 231 insertions(+), 81 deletions(-); doc now 2,711 lines
+```

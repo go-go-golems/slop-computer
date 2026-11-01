@@ -16,10 +16,14 @@ Owners: []
 RelatedFiles:
     - Path: abs:///home/manuel/code/wesen/go-go-golems/francois/pkg/catalog/billing/policy.go
       Note: Subscription decision copied into pkg/billing
+    - Path: abs:///home/manuel/code/wesen/go-go-golems/francois/pkg/catalog/payments/service.go
+      Note: Stripe Checkout, Portal, webhook ingest and worker copied into pkg/billing/stripe
     - Path: abs:///home/manuel/workspaces/2026-10-28/slop-computer/slop-computer/pkg/server/live.go
       Note: SLOP-011 live sites, guests and handoff to port
     - Path: repo://design/slop-v3-design.md
       Note: The full slop-v3 design this guide cuts down
+    - Path: repo://lab/dist/styles.css
+      Note: The Form Skate design system, the back office's look
     - Path: repo://lab/src/kernel/actors.js
       Note: Turns, continuations and reactors to port into pkg/actor
     - Path: repo://lab/src/kernel/sqlite.js
@@ -58,10 +62,9 @@ The everyday loop looks like this:
    them at URLs on your sites. It uses the same commands you would, from the
    CLI, over HTTP, or by sending a JavaScript program to `slop eval`.
 
-People who visit those sites fall into five **audiences**: anonymous readers,
-guests (not signed in, but remembered by a cookie), members (signed in),
-subscribers (members with a standing subscription, as in francois) and
-admins. The service tells every app who is visiting. A back office lets an
+People who visit those sites fall into four **audiences**: guests (anyone
+not signed in), members (signed in), subscribers (members with a standing
+subscription, as in francois) and admins. The service tells every app who is visiting. A back office lets an
 admin decide three things:
 
 - who may open which store, and at what level;
@@ -205,13 +208,15 @@ code, the CLI, the UI and this document.
   has a secret, a stream of events, and an RPC endpoint.
 - **Person.** Someone who acts:
   - a **user**, signed in through OIDC, with an id `usr_…`;
-  - a **guest**, a visitor remembered by a cookie on a live host, `vis_…`.
+  - a **guest**, anyone who is not signed in. On a live host, a guest who
+    needs an identity (to write, or to keep private data) is remembered by a
+    cookie and gets an id `vis_…`; otherwise a guest has no id.
 
   Agents act as the user who made their token.
 - **Role.** A user's standing on the platform: `pending`, `member`, `admin`
   or `disabled`.
-- **Audience.** What kind of visitor someone is right now: `anonymous`,
-  `guest`, `member`, `subscriber` or `admin`. It is computed from the role,
+- **Audience.** What kind of visitor someone is right now: `guest`,
+  `member`, `subscriber` or `admin`. It is computed from the role,
   any subscription and the session; it is never stored.
 - **Level.** What someone may do on one store: `view` < `interact` < `admin`
   < `owner`.
@@ -385,8 +390,7 @@ defineActor({
 ```sh
 slop push ./guestbook -m "first version"          # app store "guestbook", snapshot 1
 slop store new guestbook-main --app guestbook     # a data store running it
-slop grant set guestbook-main @guest interact     # anyone with a session may sign
-slop grant set guestbook-main @anyone view        # anonymous readers may look
+slop grant set guestbook-main @guest interact     # anyone may read and sign
 slop mount set apps.example.com /guestbook guestbook-main
 slop policy set guestbook sample @subscriber on   # AI replies for subscribers
 slop llm set @subscriber on --budget 2000000      # each subscriber: 2M tokens
@@ -707,7 +711,7 @@ site reads blog posts. The core supports this through **read aliases**:
 Who is checked:
 
 - **For a page**, the visitor's own level on the target store. A public
-  catalog is public because it grants `@anyone view`, not because some public
+  catalog is public because it grants `@guest view`, not because some public
   page happens to read it.
 - **For an actor**, the principal is `store:<id>` of the reading store (here
   `store:storefront-main`). Grant that principal `view` on the catalog.
@@ -965,8 +969,9 @@ More detail on each:
 
 - **Users** are kept in `system.db` `people`, with a role (section 7.2).
 - **Guests** are created only when needed: on a live host, when the store
-  would give a guest some level (a grant to `@guest` or `@anyone`, or a share
-  link in the URL).
+  would give a guest some level (a grant to `@guest`, or a share link in
+  the URL). Before that, and on static hosts, a visitor who is not signed in
+  is still a guest, just one without an id.
   - One address may create at most 30 guests an hour. This protects the
     server; it is not a usage quota.
   - Guests unseen for 90 days are deleted, with their grants and private
@@ -994,14 +999,14 @@ them in. `--admin-email` names the first admin.
 ### 7.3 Audiences
 
 An audience is computed for every request and every turn; it is never stored.
-The five audiences form a ladder, where each includes the powers of the ones
+The four audiences form a ladder, where each includes the powers of the ones
 below it:
 
 ```text
-   anonymous  <  guest  <  member  <  subscriber  <  admin
+   guest  <  member  <  subscriber  <  admin
 
-   anonymous   no session at all (static hosts, public HTTP routes)
-   guest       a guest cookie, or a pending user
+   guest       anyone not signed in (with a guest cookie or not), or a
+               pending user
    member      a signed-in user who was let in
    subscriber  a member with standing access (subscription or comp)
    admin       an admin
@@ -1010,7 +1015,7 @@ below it:
 
 ```text
 audienceOf(p, now):
-  if p is nil:                       return anonymous
+  if p is nil:                       return guest      # no id: read-only
   if p.kind == guest:                return guest
   switch p.role:
     case disabled:                   return none
@@ -1033,11 +1038,57 @@ Apps also see them, through `user.me().audience` (section 10).
 "Subscriber" means a member with standing access. As in francois, standing
 access comes from two sources:
 
-- **Complimentary access (comp):** an admin grants a person access until a
+- **Complimentary access (comps):** an admin grants a person access until a
   date: `slop sub grant usr_02… --until 2027-06-30 --note "beta tester"`.
-  Comps are in the core.
-- **Stripe:** a projection of the person's Stripe subscription state, updated
-  by webhooks. This is phase P5b (section 18).
+- **Stripe subscriptions:** a member subscribes through Stripe Checkout from
+  the main host's subscribe page. Stripe's webhooks keep a local projection
+  of the subscription current, and the Customer Portal lets the member change
+  or cancel it.
+
+Both are in the core. The Stripe integration is copied from francois's
+`pkg/catalog/payments`:
+
+- `gateway.go`: the `Gateway` interface over `stripe-go/v86`
+  (`CreateCustomer`, `CreateCheckout`, `RetrieveCheckout`, `ExpireCheckout`,
+  `CreatePortal`, `SubscriptionCustomer`, …). Tests use a fake gateway.
+- `service.go`: `Service`, with:
+  - `Checkout`;
+  - `Portal`;
+  - `Refresh`, called when the browser comes back from Checkout;
+  - `Ingest`, which verifies a webhook's signature and stores the event;
+  - `Run`, a worker that leases pending events, fetches the customer's
+    current state from Stripe and projects it;
+  - `reconcile`.
+
+  Webhooks are treated as requests to refresh, never as the truth.
+- `pkg/catalog/store/billing.go` and the migrations
+  `002_billing_usage.sql` and `007_checkout_price.sql`: the projection's
+  storage, ported from Postgres to `system.db` (Appendix A).
+
+```text
+ member              main host                              Stripe
+   | billing.checkout {price}                                  |
+   | ---------------> ensureCustomer, checkout_attempts row    |
+   |                  CreateCheckout -------------------------> |
+   | <--------------- redirect to the Checkout URL             |
+   | pays ----------------------------------------------------> |
+   |                  <-------- POST /webhooks/stripe (signed)  |
+   |                  Ingest: verify, store event (pending)     |
+   |                  Run: lease it, retrieve the customer,     |
+   |                       project stripe_subscriptions         |
+   |                  re-check the member: now a subscriber     |
+   | back on /subscribe?session=… -> Refresh (beats the webhook)|
+```
+
+```yaml
+# slop.yaml: without this block, only comps exist and the
+# subscribe page says how to ask an admin
+stripe:
+  secret_key_file: /run/secrets/slop/stripe-secret-key
+  webhook_secret_file: /run/secrets/slop/stripe-webhook-secret
+  prices: [price_1Q…]      # accepted recurring prices: the subscriber tier
+  trials: false
+```
 
 The decision itself is francois's pure function, copied unchanged:
 `billing.Policy.Access(account, subs, comps, now) Decision` from
@@ -1048,25 +1099,29 @@ In slop:
 
 ```text
 subscribed(p, now):
-  rows  := SELECT * FROM subscriptions WHERE person = p.id
-  subs  := [projectStripe(r) for r in rows if r.source == 'stripe']
-  comps := [{Until: r.until, Revoked: r.status == 'revoked'}
-            for r in rows if r.source == 'comp']
-  d := billing.Policy{AcceptedPrices: cfg.StripePrices}
-         .Access(billing.Account{Disabled: p.role == 'disabled'}, subs, comps, now)
+  subs  := [toBilling(r) for r in stripe_subscriptions where person = p.id]
+  comps := [{Until: c.until, Revoked: c.revoked_at is not NULL}
+            for c in comps where person = p.id]
+  pol   := billing.Policy{AcceptedPrices: cfg.Stripe.Prices,
+                          TrialAllowed: cfg.Stripe.Trials}
+  d     := pol.Access(billing.Account{Disabled: p.role == 'disabled'},
+                      subs, comps, now)
   return d.Allowed
 ```
 
-We deliberately do not copy francois's plans, daily token allowances,
-members-per-instance limits or early-access windows. In slop, being a
+We deliberately do not copy:
+- francois's plans and daily token allowances (`model_allowance_periods`);
+- members-per-instance limits and early-access windows;
+- its one-off support payments (`Support`, `SupportEnterprise`, `FundYear`,
+  `year_payment.go`). In slop, being a
 subscriber is only an audience. What subscribers get is decided by grants,
 policy and LLM access like everything else.
 
 Audiences change over time: a comp expires, an admin changes a role, a
 subscription lapses. When that happens, open views must notice. The kernel
-re-checks a person's views whenever their role or subscription rows change,
-and schedules a re-check at the earliest `until` among standing comps and
-subscriptions. A view whose level changes is closed and reopened at the new
+re-checks a person's views whenever their role, comps or Stripe projection
+change, and schedules a re-check at the earliest `until` among their comps
+and the `access_until` of their subscriptions. A view whose level changes is closed and reopened at the new
 level, and a view that loses access entirely is told it was revoked. That is
 SLOP-011's `reviewViews` (`slop-computer/pkg/server/access.go`).
 
@@ -1085,13 +1140,14 @@ Levels are the contract's: `view` < `interact` < `admin` < `owner`.
 |---|---|
 | `usr_…`, `vis_…` | that person |
 | `store:<id>` | that store's actor (cross-store reads and calls) |
-| `@anyone` | everyone, including anonymous readers |
-| `@guest` | anyone with a session: guests, members, subscribers, admins |
+| `@guest` | everyone: visitors who are not signed in, and all signed-in people |
 | `@member` | members, subscribers and admins |
 | `@subscriber` | subscribers and admins |
 
-**Caps by audience:** anonymous at most `view`; guests at most `interact`;
-members and subscribers at most `admin`; admins up to `owner`.
+**Caps by audience:** guests at most `interact`; members and subscribers at
+most `admin`; admins up to `owner`. A guest without an id can only read:
+every write records who made it, so on a live host the server gives the
+visitor a guest id first (section 7.1).
 
 ```text
 levelOf(p, aud, store):
@@ -1104,7 +1160,6 @@ levelOf(p, aud, store):
 
 matches(subject, p, aud):
   subject == p.id
-  or subject == '@anyone'
   or (subject == '@guest'      and aud >= guest)
   or (subject == '@member'     and aud >= member)
   or (subject == '@subscriber' and aud >= subscriber)
@@ -1200,12 +1255,12 @@ names and audience), `room`, `downloads`, `files`, `alarm`, `time`, `log` and
 ### 8.2 The matrix
 
 ```text
-  app: guestbook          anonymous  guest  member  subscriber  admin
-  -----------------------------------------------------------------
-  assets                     -         -      on       on        on
-  sample                     -         -      -        on        on
-  user.email                 -         -      -        -         -
-  fetch                      -         -      -        -         -
+  app: guestbook          guest  member  subscriber  admin
+  -----------------------------------------------------
+  assets                     -      on       on        on
+  sample                     -      -        on        on
+  user.email                 -      -        -         -
+  fetch                      -      -        -         -
 ```
 
 - Rows appear only for capabilities the app declares. A capability the app
@@ -1305,7 +1360,8 @@ llmFor(person):
 - **A turn started by a person** (an action, a page call, an HTTP request
   with a session): that person.
 - **A turn started by an alarm or a reactor:** the store's owner.
-- **Anonymous visitors** never call the LLM: there is no one to charge.
+- **A guest without an id** (on a static host, or before a guest cookie is
+  set) never calls the LLM: there is no one to charge.
 
 ### 9.3 The call
 
@@ -1386,8 +1442,9 @@ actors and HTTP routes:
 - **Asking for more:** `(await claude.use('slop')).signIn()` asks the shell to
   start sign-in and return to the same page.
   `(await claude.use('slop')).subscribeUrl()` gives the main host's subscribe
-  page. That page offers Stripe Checkout once phase P5b is in; until then it
-  says how to ask an admin.
+  page. That page offers Stripe Checkout, and the Customer Portal to people
+  who already subscribe. Without Stripe configured, it says how to ask an
+  admin.
 
 ## 11. Serving
 
@@ -1470,12 +1527,12 @@ resolve(host, path, person):
     return 404
   app, n := runningApp(id)                            # activates first if behind
   if kind == static:
-    if not can(anonymous, id, 'tree.read'): return 404   # public = @anyone view
+    if not can(guest, id, 'tree.read'): return 404     # public = @guest view
     if rest == '' and not path.endsWith('/') and app has a page:
       return 308 → path + '/'          # so relative URLs resolve under the mount
   1. an actor http route matches (method, rest)
        -> run it as a turn; its response
-          (as the session's person on live hosts, as anonymous on static hosts)
+          (as the session's person on live hosts; as an id-less guest on static)
   2. static host: rest names a file in app@n's tree -> that file
   3. live host: -> the shell, which opens a view on store id
   4. static host, rest has no extension -> app@n's index.html (client routing)
@@ -1673,6 +1730,7 @@ Errors carry a code from one shared set:
 | `grant`, `link` | `grant.ls`, `grant.set`, `grant.rm`, `link.new`, `link.rm` |
 | `people` (admin) | `ls`, `role`, `guests`, `rm` |
 | `sub` (admin) | `ls`, `grant`, `revoke` |
+| `billing` (members, in a browser session) | `checkout`, `portal` |
 | `policy` (admin) | `ls`, `set` |
 | `llm` (admin) | `ls`, `set`, `usage`, `reset` |
 | `token` | `ls`, `new`, `rm` |
@@ -1781,7 +1839,8 @@ verb list as its description, plus `verb` for single calls.
 ### 13.1 People sign in on the main host
 
 - **OIDC with PKCE**, server-side sessions with CSRF tokens, and an absolute
-  expiry. Port `slop-computer/pkg/server/auth.go` (`resolve`, `guard`,
+  expiry. In production the provider is Zitadel (`https://auth.slop.boutique`,
+  as v2 uses today), and it decides who may create an account. Port `slop-computer/pkg/server/auth.go` (`resolve`, `guard`,
   `authRoutes`, `safeReturn`) and `pkg/identity`. Replace their store calls
   with `system.db`.
 - **Development without OIDC:** `slop serve --local` offers a local sign-in
@@ -1826,6 +1885,36 @@ to `/api/v1/<verb>`, so the UI holds no rules of its own. Build it with Vite,
 React and RTK Query, embedded with `go:embed` (the team's
 `go-web-frontend-embed` pattern). RTK Query's base query posts to the verb
 endpoint.
+
+**Look.** The back office uses the design system the lab was built with: the
+Form Skate Workbench (tokens and components) and the Form Skate Agent
+components.
+
+- **Where it is:** the only copy in this repo is the lab's built stylesheet,
+  `lab/dist/styles.css` (73 KB). It holds the workbench `tokens.css`, the
+  workbench `components/bundle.css`, the agent `components/bundle.css`, and
+  then `lab/src/ui/lab.css`, in the order `lab/build.mjs` lists them. Start
+  from that file. The original design-system folders were uploads to the
+  31 October session and are not in the repo.
+- **The rules:**
+  - a white ground (`--bg`) and one ink (`--ink`, with `--ink-2` for quiet
+    text);
+  - red (`--accent`, `#e2001a`) only for trouble and selection;
+  - Arial in two weights;
+  - 1 px hairlines (`--hair`, `--rule`);
+  - one window holding a dock of tiles, each tile a strip of tabs.
+- **Patterns to reuse,** from the lab's React code:
+  - `lab/src/ui/dock.jsx`: the dock, with drag and drop of tabs and tiles;
+  - `lab/src/ui/ui.jsx`: `Table`, `Trace` (a `can()` trace), `Seg`, `Menu`,
+    `Err`, `Empty`;
+  - `lab/src/ui/views1.jsx`: `StoresView`, `DataView`, `SiteView`;
+  - `lab/src/ui/views2.jsx`: `LogView`, `ActorView`, `CodeView`;
+  - `lab/src/ui/views3.jsx`: `AccessView`, `ConsoleView`, `AgentView`.
+- **What it looks like:** the screenshots in `lab/test/shots/`, for example
+  `06-access.png`, `07-data.png`, `09-actor.png` and `11-stores.png`.
+
+These are patterns, not code to import. The lab talks to an in-browser
+kernel, and the back office talks to `/api/v1`.
 
 | Surface | What you see | What you can do |
 |---|---|---|
@@ -1892,6 +1981,17 @@ the end.
   `pkg/llm` (the backend behind the `Backend` interface).
 - `francois/pkg/catalog/billing/policy.go` and `policy_test.go` →
   `pkg/billing` (the subscription decision, section 7.4).
+- The subscription path of `francois/pkg/catalog/payments` → `pkg/billing/stripe`:
+  - `gateway.go`: the `Gateway` interface over `stripe-go/v86`;
+  - `service.go`: Checkout, Portal, `Refresh`, `Ingest` and the `Run`
+    worker;
+  - the projection storage from `pkg/catalog/store/billing.go`, ported to
+    `system.db`;
+  - the `checkout`, `portal` and `webhook` handlers from
+    `pkg/catalog/routes.go`, which become the `billing.*` verbs and
+    `/webhooks/stripe`.
+
+  Leave out the one-off support payments (section 7.4).
 - From slop-computer, the project tooling: `Makefile`, the lint
   configuration, `lefthook.yml`, the GoReleaser and GitHub workflow files,
   and logcopter generation.
@@ -1926,6 +2026,8 @@ the end.
   - `access.js`: the `can()` trace.
 
   Its journal app, `lab/src/seeds/journal/`, becomes `examples/journal`.
+- **The lab's UI and design system:** `lab/dist/styles.css` and
+  `lab/src/ui/*.jsx` are the back office's look and patterns (section 14).
 - **The slop-v3 design**, `design/slop-v3-design.md`: sections 4–6 for
   stores and actors, section 15 for goja.
 - **go-go-host:** `internal/runtime/supervisor.go` (build, check, then swap)
@@ -1979,13 +2081,14 @@ Two decision records appear where they matter most: policy per app (section
 - **Context:** the slop-v3 design builds an in-browser workbench first, then
   a Go server that must pass the same conformance suite.
 - **Options considered:** workbench first; both in lockstep; Go first.
-- **Decision:** Go first, with the lab as reading material and for
-  experiments.
+- **Decision:** Go first. The lab is reference material only: for behaviour
+  (its kernel) and for the look (its design system and UI patterns).
 - **Rationale:** R1 asks for a service. Two implementations double the cost
   of every change.
 - **Consequences:** the conformance scenarios target the Go server over
-  HTTP. The lab may drift from the server.
-- **Status:** proposed.
+  HTTP. The lab may drift from the server, and nobody needs to keep it in
+  sync.
+- **Status:** accepted (1 November).
 
 ### Decision D4: one owner app per store; reads by alias
 
@@ -2004,7 +2107,9 @@ Two decision records appear where they matter most: policy per app (section
 ### Decision D5: audiences are computed; grants may name them
 
 - **Context:** R5 asks for admins, guests, members and subscribers. v2 had
-  `*signed-in` and `*anyone`; francois had entitlement sources.
+  `*signed-in` and `*anyone`; francois had entitlement sources. The product
+  owner decided (1 November) that anonymous visitors are guests: there is no
+  separate anonymous audience.
 - **Options considered:** store an audience per person; compute it.
 - **Decision:** compute it from role, subscription and session. Grants,
   policy and LLM defaults can name audiences (`@member`, `@subscriber`).
@@ -2071,8 +2176,10 @@ Two decision records appear where they matter most: policy per app (section
 - **Decision:** `signup: open` makes a new user a member. `approval` keeps
   them pending.
 - **Rationale:** "signed in" is meant to be a real audience, as on a forum.
-  Members cannot push code (D9), and LLM access is off unless granted.
-- **Status:** proposed.
+  Members cannot push code (D9), and LLM access is off unless granted. Who
+  may create an account at all is decided by the OIDC provider (Zitadel, as
+  for v2 today), not by slop.
+- **Status:** accepted (1 November).
 
 **What we cut from the slop-v3 design, and why:**
 
@@ -2191,17 +2298,19 @@ previous phase's exit test passes.
   combination, the cross-site guest claim, link redemption, and reopen versus
   revoked.
 
-**P5. Subscriptions (R5).**
-- **P5a:** the `subscriptions` table with comps; copy francois's billing
-  policy and its tests; the subscriber audience; the re-check at `until`;
-  the `sub.*` verbs.
-- **P5b:** the Stripe projection: customers, Checkout, the webhook, and a
-  subscribe page on the main host. Port from francois's catalog billing.
+**P5. Subscriptions: comps and Stripe (R5).**
+- `comps` and the Stripe tables (Appendix A); francois's `billing` policy
+  with its tests; the subscriber audience; the re-check at `until`; the
+  `sub.*` verbs.
+- Copy francois's `payments` package (gateway, service, worker) and port its
+  storage. Add `billing.checkout`, `billing.portal`, `POST /webhooks/stripe`
+  and the subscribe page.
 - **Exit:**
   - granting a comp makes the person a subscriber at once, and their open
-    views reopen;
-  - an expired comp demotes them within a minute;
-  - for P5b, a Stripe test-mode webhook changes their audience.
+    views reopen; an expired comp demotes them within a minute;
+  - with the fake gateway, a webhook for an active subscription makes a
+    member a subscriber, and a cancellation past `access_until` demotes them;
+  - one end-to-end run against Stripe's test mode.
 
 **P6. Policy and LLM (R6, R8, R9).**
 - `app_policy` with its defaults and `policy.*` verbs; `use()` returning
@@ -2219,7 +2328,8 @@ previous phase's exit test passes.
   - an alarm's call is charged to the store's owner.
 
 **P7. Back office (R7).**
-- `web/admin` with the surfaces of section 14, embedded with `go:embed`.
+- `web/admin` with the surfaces of section 14, embedded with `go:embed`,
+  styled from `lab/dist/styles.css` (the Form Skate design system).
 - **Exit:** a Playwright run lets in a member, grants a comp, sets an LLM
   budget, turns a policy cell on, mounts an app, and finds each change in
   Activity.
@@ -2228,6 +2338,11 @@ previous phase's exit test passes.
 - `slop export --folder` in slop-computer, then import the storefront, the
   francois releases, the journal and the Blocks workspaces.
 - Run v3 on its own hosts next to v2, and move sites over one at a time.
+- **CLIs:** v3's binary is `slop`. On a machine that needs both, install v2's
+  CLI as `slop2`. Both read `~/.config/slop/credentials.json`, which keeps
+  v2's format (`{version, default, servers: {<url>: {token, tokenId, name,
+  user, scopes, expiresAt}}}`), so their logins never collide: they are
+  keyed by server URL.
 - **Exit:** the storefront serves from a v3 static host, styled and complete,
   and Blocks runs live with Ramon as a member.
 
@@ -2298,17 +2413,25 @@ previous phase's exit test passes.
 - **Audiences change by time** (expiring comps). The scheduled re-check
   (section 7.4) must be tested with the virtual clock.
 
-**Open questions for the product owner:**
+**Decided by the product owner on 1 November:**
+
+- Anonymous visitors are guests; there is no separate anonymous audience
+  (D5, section 7.3).
+- The lab is reference material, and its design system is the back office's
+  look (D3, section 14).
+- Stripe is copied from francois into the core, next to comps (section 7.4,
+  P5).
+- Sign-up is open; Zitadel decides who can create an account (D10).
+- The binary is `slop`. During the cut-over, v2's CLI is installed as `slop2`
+  if both are needed on one machine (P8).
+
+**Still open:**
 
 1. Should LLM budgets reset monthly, or stay manual? (Section 9.1 proposes
    manual.)
-2. Should guests ever get LLM access? The proposal is no by default, though
-   an admin can set `@guest` on.
-3. Is Stripe (P5b) wanted now, or are comps enough at first?
-4. Is open sign-up (D10) the right default?
-5. Repository and binary name. v3's binary is also `slop`. During the
-   cut-over, keep v2's CLI installed as `slop2`. The credentials file format
-   (keyed by server URL) can be shared.
+2. Should guests ever get LLM access? The proposal is off by default, with
+   the option for an admin to turn on `@guest`. Only guests with an id can
+   be charged.
 
 ## Appendix A. `system.db`
 
@@ -2338,13 +2461,39 @@ CREATE TABLE device_codes (
 CREATE TABLE handoffs (
   code_hash TEXT PRIMARY KEY, person TEXT NOT NULL, host TEXT NOT NULL,
   return_path TEXT NOT NULL, state TEXT NOT NULL, expires_at INTEGER NOT NULL);
-CREATE TABLE subscriptions (
+CREATE TABLE comps (                       -- complimentary access, by an admin
   id TEXT PRIMARY KEY, person TEXT NOT NULL REFERENCES people(id),
-  source TEXT NOT NULL CHECK (source IN ('comp','stripe')),
-  status TEXT NOT NULL,                      -- comp: active|revoked; stripe: its status
-  until INTEGER,                             -- access until (ms since epoch)
-  stripe_subscription TEXT UNIQUE, stripe_customer TEXT, stripe_price TEXT,
-  note TEXT, changed_by TEXT, updated_at INTEGER NOT NULL);
+  until INTEGER NOT NULL, revoked_at INTEGER, note TEXT,
+  created_by TEXT NOT NULL, created_at INTEGER NOT NULL);
+-- Stripe: ported from francois pkg/catalog/store/migrations/002 and 007
+CREATE TABLE stripe_customers (
+  person TEXT PRIMARY KEY REFERENCES people(id),
+  customer_id TEXT NOT NULL UNIQUE, created_at INTEGER NOT NULL);
+CREATE TABLE stripe_subscriptions (
+  subscription_id TEXT PRIMARY KEY, person TEXT NOT NULL REFERENCES people(id),
+  customer_id TEXT NOT NULL, price_id TEXT NOT NULL DEFAULT '',
+  status TEXT NOT NULL, quantity INTEGER NOT NULL DEFAULT 0,
+  item_count INTEGER NOT NULL DEFAULT 0, access_until INTEGER,
+  trial_until INTEGER, cancel_at_period_end INTEGER NOT NULL DEFAULT 0,
+  canceled_at INTEGER, livemode INTEGER NOT NULL DEFAULT 0,
+  refreshed_at INTEGER NOT NULL);
+CREATE TABLE checkout_attempts (
+  id TEXT PRIMARY KEY, person TEXT NOT NULL REFERENCES people(id),
+  price TEXT NOT NULL,
+  state TEXT NOT NULL CHECK (state IN ('pending','open','completed','expired','failed')),
+  session_id TEXT UNIQUE, session_url TEXT, expires_at INTEGER, error_code TEXT,
+  created_at INTEGER NOT NULL, updated_at INTEGER NOT NULL);
+CREATE UNIQUE INDEX checkout_attempts_open ON checkout_attempts (person)
+  WHERE state IN ('pending','open');
+CREATE TABLE stripe_events (
+  event_id TEXT PRIMARY KEY, type TEXT NOT NULL,
+  customer_id TEXT NOT NULL DEFAULT '', subscription_id TEXT NOT NULL DEFAULT '',
+  session_id TEXT NOT NULL DEFAULT '', livemode INTEGER NOT NULL DEFAULT 0,
+  state TEXT NOT NULL DEFAULT 'pending'
+    CHECK (state IN ('pending','processed','ignored','error')),
+  attempts INTEGER NOT NULL DEFAULT 0, lease_token TEXT, lease_until INTEGER,
+  next_attempt_at INTEGER NOT NULL, error_code TEXT, stripe_created_at INTEGER,
+  received_at INTEGER NOT NULL, processed_at INTEGER);
 CREATE TABLE stores (
   id TEXT PRIMARY KEY, type TEXT NOT NULL DEFAULT '', app TEXT,
   owner TEXT NOT NULL, created_at INTEGER NOT NULL, made_by TEXT);
@@ -2492,6 +2641,8 @@ secrets.get(name): string
 | main | `/auth/login`, `/auth/callback`, `/auth/logout` | OIDC sign-in |
 | main | `/auth/device`, `/auth/device/token`, `/device` | agent device login |
 | main | `/auth/handoff` | sign-in for live hosts |
+| main | `/subscribe` | subscribe page: Checkout, or the Customer Portal |
+| main | `POST /webhooks/stripe` | signed Stripe webhooks (section 7.4) |
 | main | `/api/v1/<verb>`, `/api/v1/verbs`, `/api/v1/eval` | the doors |
 | main | `/` | the back office |
 | main | `/healthz`, `/readyz` | probes |
@@ -2550,7 +2701,10 @@ slop-computer (`go-go-golems/slop-computer` at `18f97d4`):
 
 francois (`go-go-golems/francois` at `106776a`):
 - `pkg/catalog/billing/policy.go`, `pkg/catalog/entitlement.go`;
-- `pkg/catalog/store/migrations/002_billing_usage.sql`.
+- `pkg/catalog/payments/gateway.go`, `pkg/catalog/payments/service.go`;
+- `pkg/catalog/store/billing.go`, `pkg/catalog/routes.go`;
+- `pkg/catalog/store/migrations/002_billing_usage.sql`,
+  `007_checkout_price.sql`.
 
 go-go-goja (`go-go-golems/go-go-goja` at `c265ae0`):
 - `pkg/engine/factory.go`, `pkg/engine/runtime.go`;

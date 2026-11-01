@@ -15,3 +15,11 @@ Wrote the intern design and implementation guide for slop v3 core: stores, apps,
 ## 2026-11-01
 
 Uploaded the guide to reMarkable at /ai/2026/11/01/SLOP3-001 (fixed a LaTeX escape in section 11.6 first).
+
+## 2026-11-01
+
+Applied the product owner's answers: anonymous folded into guest; lab is reference plus design system for the back office; francois Stripe integration copied into the core (comps + stripe tables); open sign-up accepted (Zitadel); binary slop, v2 CLI as slop2 for cut-over.
+
+### Related Files
+
+- /home/manuel/code/wesen/2026-10-31--slop-v3/ttmp/2026/11/01/SLOP3-001--slop-v3-core-a-streamlined-store-based-hosting-service-design-and-implementation-guide/design-doc/01-slop-v3-core-design-and-implementation-guide-for-interns.md — Revised guide
