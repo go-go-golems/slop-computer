@@ -6,26 +6,34 @@ import (
 	"errors"
 )
 
-// Binding maps a store's read alias to a real store.
+// Binding maps a store's read alias to a real store. Assets: the store's
+// actor may also read the target's uploaded files.
 type Binding struct {
 	Store  string `json:"store"`
 	Alias  string `json:"alias"`
 	Target string `json:"target"`
+	Assets bool   `json:"assets,omitempty"`
 }
 
 // Binding returns the target of a store's alias.
 func (d *DB) Binding(ctx context.Context, store, alias string) (string, error) {
-	var t string
-	err := d.QueryRowContext(ctx, `SELECT target FROM bindings WHERE store = ? AND alias = ?`, store, alias).Scan(&t)
+	b, err := d.BindingOf(ctx, store, alias)
+	return b.Target, err
+}
+
+// BindingOf returns a store's alias with its settings.
+func (d *DB) BindingOf(ctx context.Context, store, alias string) (Binding, error) {
+	b := Binding{Store: store, Alias: alias}
+	err := d.QueryRowContext(ctx, `SELECT target, assets FROM bindings WHERE store = ? AND alias = ?`, store, alias).Scan(&b.Target, &b.Assets)
 	if errors.Is(err, sql.ErrNoRows) {
-		return "", ErrNotFound
+		return b, ErrNotFound
 	}
-	return t, err
+	return b, err
 }
 
 // Bindings lists a store's aliases.
 func (d *DB) Bindings(ctx context.Context, store string) ([]Binding, error) {
-	rows, err := d.QueryContext(ctx, `SELECT store, alias, target FROM bindings WHERE store = ? ORDER BY alias`, store)
+	rows, err := d.QueryContext(ctx, `SELECT store, alias, target, assets FROM bindings WHERE store = ? ORDER BY alias`, store)
 	if err != nil {
 		return nil, err
 	}
@@ -33,7 +41,7 @@ func (d *DB) Bindings(ctx context.Context, store string) ([]Binding, error) {
 	out := []Binding{}
 	for rows.Next() {
 		var b Binding
-		if err := rows.Scan(&b.Store, &b.Alias, &b.Target); err != nil {
+		if err := rows.Scan(&b.Store, &b.Alias, &b.Target, &b.Assets); err != nil {
 			return nil, err
 		}
 		out = append(out, b)
@@ -44,12 +52,16 @@ func (d *DB) Bindings(ctx context.Context, store string) ([]Binding, error) {
 // SetBinding points a store's alias at a target store.
 func (d *DB) SetBinding(ctx context.Context, actor, via string, b Binding) error {
 	return d.Tx(ctx, func(tx *sql.Tx) error {
-		if _, err := tx.ExecContext(ctx, `INSERT INTO bindings (store, alias, target) VALUES (?, ?, ?)
-			ON CONFLICT (store, alias) DO UPDATE SET target = excluded.target`, b.Store, b.Alias, b.Target); err != nil {
+		if _, err := tx.ExecContext(ctx, `INSERT INTO bindings (store, alias, target, assets) VALUES (?, ?, ?, ?)
+			ON CONFLICT (store, alias) DO UPDATE SET target = excluded.target, assets = excluded.assets`, b.Store, b.Alias, b.Target, b.Assets); err != nil {
 			return err
 		}
-		_, err := Log(ctx, tx, d.NowMs(), actor, via, "bound "+b.Store+" "+b.Alias+" → "+b.Target,
-			Change{Kind: "binding", Key: b.Store + " " + b.Alias, Op: "set", After: b.Target})
+		after := b.Target
+		if b.Assets {
+			after += " (with uploads)"
+		}
+		_, err := Log(ctx, tx, d.NowMs(), actor, via, "bound "+b.Store+" "+b.Alias+" → "+after,
+			Change{Kind: "binding", Key: b.Store + " " + b.Alias, Op: "set", After: after})
 		return err
 	})
 }

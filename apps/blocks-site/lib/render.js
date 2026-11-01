@@ -12,6 +12,30 @@ const esc = (s) => String(s == null ? '' : s).replace(/[&<>"']/g, (c) => ESC[c])
 const COLORS = new Set(['gray', 'brown', 'orange', 'yellow', 'green', 'blue', 'purple', 'pink', 'red']);
 const TONE_BG = { accent: 'orange', good: 'green', bad: 'red', warn: 'yellow', muted: 'gray', you: 'blue' };
 const LISTS = { bullet: 'ul', numbered: 'ol', todo: 'ul' };
+// The editor's cover presets (blocks.js COVERS); a cover may also be an
+// https image, a linear gradient or a hex colour, as in the editor.
+const COVERS = {
+  clay: 'linear-gradient(120deg, #F2C9B4 0%, #E3906F 38%, #C8613F 70%, #8E3E28 100%)',
+  ocean: 'linear-gradient(120deg, #CFE8F2 0%, #7FB6D4 40%, #3C7FA8 75%, #1D4E73 100%)',
+  sage: 'linear-gradient(120deg, #E4EBDC 0%, #B4C7A3 40%, #7F9C71 75%, #4F6B47 100%)',
+  dusk: 'linear-gradient(120deg, #F3D9E4 0%, #C9A5D3 40%, #8A72B8 72%, #3F3A7A 100%)',
+  sand: 'linear-gradient(120deg, #FBF1DF 0%, #EDD3A6 45%, #CFA669 80%, #9C7536 100%)',
+  night: 'linear-gradient(120deg, #2C3242 0%, #1C2030 50%, #3B2F4A 100%)',
+  rose: 'linear-gradient(120deg, #FBE3DF 0%, #F0A9A0 45%, #D06D68 80%, #9A3E43 100%)',
+  mint: 'linear-gradient(120deg, #E1F5EE 0%, #A6DDC8 45%, #5FB59A 80%, #2F7F69 100%)',
+};
+// A cover as a CSS background, from a closed set of shapes only (it goes
+// into a style attribute).
+function coverOf(v) {
+  if (typeof v !== 'string' || !v) return '';
+  if (COVERS[v]) return COVERS[v];
+  if (/^https:\/\/[^\s"'()\\]+$/.test(v)) return `center / cover no-repeat url("${v}")`;
+  if (/^linear-gradient\([#a-z0-9.,%\s()-]+\)$/i.test(v) || /^#[0-9a-f]{3,8}$/i.test(v)) return v;
+  return COVERS.clay;
+}
+const isImage = (r) => r.kind === 'image' || /^image\//.test(r.type || '');
+const sizeOf = (n) => (typeof n !== 'number' ? '' : n < 1024 ? n + ' B' : n < 1048576 ? Math.round(n / 1024) + ' kB' : (n / 1048576).toFixed(1) + ' MB');
+const ASSET = /^[\w.-]{1,64}$/;
 
 /* ---------- prose ---------- */
 // The editor's prose grammar (blocks-kit.js), compiled for each call:
@@ -183,12 +207,36 @@ function block(cx, q, kind) {
     }
     case 'num': case 'date': case 'slider': return labelled(cx, q, tc);
     case 'image': {
+      // https only (the reader's CSP allows https images), or an uploaded file
       const src = prop(cx, q, 'src'), alt = prop(cx, q, 'alt');
-      return typeof src === 'string' && /^https?:\/\//.test(src) ? `<p><img src="${esc(src)}" alt="${esc(typeof alt === 'string' ? alt : '')}" loading="lazy"></p>` : '';
+      const up = typeof src === 'string' && /^\/_blob\/([\w.-]+)$/.exec(src), href = up ? media(cx, up[1]) : typeof src === 'string' && /^https:\/\//.test(src) ? src : '';
+      return href ? `<p><img src="${esc(href)}" alt="${esc(typeof alt === 'string' ? alt : '')}" loading="lazy"></p>` : '';
+    }
+    case 'file': return file(cx, prop(cx, q, 'of'));
+    case 'each': {
+      // a template: its child blocks once per item, the item under its alias (each m in media)
+      const name = String(prop(cx, q, 'as') || 'it'), { items } = F.itemsOf(K, q, 'of', cx.env);
+      return items.slice(0, 200).map((it) => blocks(Object.assign({}, cx, { env: F.aliasWith(cx.env, name, it) }), q)).join('');
     }
   }
   // holes and interactive widgets (buttons, programs, browsers ...) have no place on a read-only page: their child blocks do
   return below(cx, q);
+}
+
+// An uploaded file's address on this site, or '' when uploads are not
+// published (the binding does not share them); every id asked for is noted.
+function media(cx, id) {
+  if (!cx.media || !ASSET.test(id)) return '';
+  cx.seen.add(id);
+  return cx.media(id);
+}
+// A file record as the editor stores it: {name, kind, type, size, url: "/_blob/<id>", id}.
+function file(cx, r) {
+  if (!r || typeof r !== 'object' || r.local || typeof r.id !== 'string') return '';
+  const href = media(cx, r.id), name = typeof r.name === 'string' ? r.name : r.id;
+  if (!href) return '';
+  if (isImage(r)) return `<figure class="file"><img src="${esc(href)}" alt="${esc(name)}" loading="lazy"><figcaption>${esc(name)}</figcaption></figure>`;
+  return `<p><a class="file" href="${esc(href)}">📎 ${esc(name)}</a> <span class="ql">${esc(sizeOf(r.size))}</span></p>`;
 }
 
 function headings(cx, page) {
@@ -206,8 +254,8 @@ function headings(cx, page) {
 
 /* ---------- documents ---------- */
 // opts: {link(page) -> href, home -> href, admin: {source, href} | null, note}
-function context(site, page, link) {
-  return { site, page, link, env: { app: page, al: new Map(), depth: 0 }, linked: new Set() };
+function context(site, page, opts) {
+  return { site, page, link: opts.link, media: opts.media || null, seen: opts.seen || new Set(), env: { app: page, al: new Map(), depth: 0 }, linked: new Set() };
 }
 
 function tree(site, current, link) {
@@ -232,14 +280,15 @@ function layout(site, { title, current, link, home, admin, body }) {
 }
 
 function page(site, n, opts) {
-  const cx = context(site, n, opts.link);
+  const cx = context(site, n, opts);
   const chain = site.chain(n);
   const crumbs = chain.length > 1 ? `<nav class="crumbs" aria-label="Breadcrumb">${chain.slice(0, -1).map((p) => `<a href="${esc(opts.link(p))}">${esc(site.title(p))}</a> / `).join('')}${esc(site.title(n))}</nav>` : '';
   const icon = site.icon(n);
   const body = blocks(cx, n + '.ui');
   const sub = site.kids(n).filter((k) => !cx.linked.has(k));
   const more = sub.length ? `<section class="sub"><h2>Pages in this section</h2>${sub.map((k) => `<a class="pagelink" href="${esc(opts.link(k))}"><span class="i">${esc(site.icon(k) || '📄')}</span><span class="t">${esc(site.title(k))}</span></a>`).join('')}</section>` : '';
-  const main = `${crumbs}<article><h1 class="title">${icon ? `<span class="pi">${esc(icon)}</span>` : ''}${esc(site.title(n))}</h1>${body}</article>${more}`;
+  const cover = coverOf(site.K.valueAt(n + '.cover'));
+  const main = `${cover ? `<div class="cover" style="background: ${esc(cover)}"></div>` : ''}${crumbs}<article><h1 class="title">${icon ? `<span class="pi">${esc(icon)}</span>` : ''}${esc(site.title(n))}</h1>${body}</article>${more}`;
   return layout(site, { title: n === site.home && !site.config.title ? site.title(n) : `${site.title(n)} · ${site.name}`, current: n, link: opts.link, home: opts.home, admin: opts.admin, body: main });
 }
 
@@ -254,29 +303,41 @@ function message(site, title, text, opts) {
   return layout(site, { title, current: '', link: opts.link, home: opts.home, admin: opts.admin, body: `<article><h1 class="title">${esc(title)}</h1><p class="empty">${esc(text)}</p></article>` });
 }
 
-// The live reader's links: absolute, under the mount.
-function liveLinks(site, base) {
-  return { link: (n) => base + '/' + (n === site.home ? '' : site.slug(n)), home: base + '/' };
+// The live reader's links: absolute, under the mount; uploads at _media/<id> when shared.
+function liveLinks(site, base, assets) {
+  return { link: (n) => base + '/' + (n === site.home ? '' : site.slug(n)), home: base + '/', media: assets ? (id) => base + '/_media/' + id : null };
 }
 
-// Static output: index.html for the home page, <slug>/index.html for the rest, relative links.
-function staticFiles(site) {
+// The uploads a site's pages show: what the reader may serve, what a publication copies.
+function mediaOf(site) {
+  const seen = new Set();
+  for (const p of site.pages) page(site, p, { link: () => '', home: '', media: () => '', seen });
+  return seen;
+}
+
+// Static output: index.html for the home page, <slug>/index.html for the
+// rest, relative links; with assets, uploads at media/<id> (noted in seen,
+// for the publication to copy).
+function staticFiles(site, opts) {
+  opts = opts || {};
   return site.pages.map((p) => {
     const up = p === site.home ? '' : '../';
     const link = (n) => (n === site.home ? up || './' : up + site.slug(n) + '/');
-    return { path: p === site.home ? 'index.html' : site.slug(p) + '/index.html', text: page(site, p, { link, home: up || './', admin: null }) };
+    return { path: p === site.home ? 'index.html' : site.slug(p) + '/index.html',
+      text: page(site, p, { link, home: up || './', admin: null, media: opts.assets ? (id) => up + 'media/' + id : null, seen: opts.seen }) };
   });
 }
 
 // The settings and publishing page (admins only), plain forms.
-function adminPage(site, { base, source, rev, published, note, bad, trusted }) {
-  const opts = liveLinks(site, base), c = site.config;
+function adminPage(site, { base, source, rev, published, note, bad, trusted, assets }) {
+  const opts = liveLinks(site, base, false), c = site.config;
   const pageOpts = (sel, none) => `<option value="">${esc(none)}</option>`
     + site.all.map((p) => `<option value="${esc(p)}"${p === sel ? ' selected' : ''}>${esc(site.title(p))} (${esc(p)})</option>`).join('');
   const last = published ? `<dt>Last publication</dt><dd>#${esc(published.n)} to <b>${esc(published.to)}</b> (${published.live ? 'live' : 'draft'}), ${esc(new Date(published.at).toISOString().replace('T', ' ').slice(0, 16))} UTC, ${esc(published.pages)} pages</dd>` : '<dt>Last publication</dt><dd>none yet</dd>';
   const body = `<article class="form"><h1 class="title">Settings and publishing</h1>`
     + (note ? `<p class="note${bad ? ' bad' : ''}">${esc(note)}</p>` : '')
-    + `<dl class="facts"><dt>Source workspace</dt><dd>${esc(source)} (rev ${esc(rev)})</dd><dt>Published pages</dt><dd>${site.pages.length}</dd>${last}</dl>`
+    + `<dl class="facts"><dt>Source workspace</dt><dd>${esc(source)} (rev ${esc(rev)})</dd><dt>Published pages</dt><dd>${site.pages.length}</dd>`
+    + `<dt>Uploaded files</dt><dd>${assets ? 'published with the pages that show them' : `not shared (an admin of ${esc(source)} runs <code>slop bind set &lt;site&gt; source ${esc(source)} --assets</code>)`}</dd>${last}</dl>`
     + (trusted ? '' : '<p class="note bad">Publishing is not set up: an admin trusts the app with the workshop module (<code>slop app trust blocks-site workshop</code>).</p>')
     + `<form method="post" action="${esc(base)}/_publish"><fieldset><legend>Publish a snapshot</legend>`
     + `<label for="to">Static store</label><input id="to" name="to" value="${esc(c.to || '')}" placeholder="team-static" pattern="[a-z0-9][a-z0-9-]*" required>`
@@ -293,4 +354,4 @@ function adminPage(site, { base, source, rev, published, note, bad, trusted }) {
   return layout(site, { title: 'Settings · ' + site.name, current: '', link: opts.link, home: opts.home, admin: { source, href: base + '/_site' }, body });
 }
 
-module.exports = { page, message, bare, staticFiles, liveLinks, adminPage, tokens, esc };
+module.exports = { page, message, bare, staticFiles, liveLinks, mediaOf, adminPage, tokens, esc };

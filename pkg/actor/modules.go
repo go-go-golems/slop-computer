@@ -469,10 +469,11 @@ func (a *Actor) storesModule() goja.Value {
 	_ = o.Set("open", func(alias string) goja.Value {
 		t := a.turn()
 		ctx := t.t.Context()
-		target, err := a.m.K.Sys.Binding(ctx, a.st.ID, alias)
+		b, err := a.m.K.Sys.BindingOf(ctx, a.st.ID, alias)
 		if err != nil {
 			a.throw(fail("not_found", "no binding for %q on %s", alias, a.st.ID))
 		}
+		target := b.Target
 		me := &access.Principal{Kind: access.KindStore, Store: a.st.ID}
 		d, _, err := a.m.K.Access.Can(ctx, me, target, rt.LevelView, "reading", true)
 		a.check(err)
@@ -525,6 +526,33 @@ func (a *Actor) storesModule() goja.Value {
 			return a.toJS(fs)
 		})
 		_ = r.Set("files", files)
+		// assets: the target's uploaded files, described, never read (a
+		// route answers {asset: {from, id}} and the server sends the
+		// bytes); null unless the binding was set with uploads.
+		_ = r.Set("assets", goja.Null())
+		if b.Assets {
+			desc := func(f store.File) map[string]any {
+				return map[string]any{"id": f.Path, "type": f.Type, "size": f.Size, "sha256": f.SHA256}
+			}
+			assets := a.vm.NewObject()
+			_ = assets.Set("get", func(id string) goja.Value {
+				f, err := ts.File(ctx, "assets", id)
+				if err != nil {
+					return goja.Null()
+				}
+				return a.toJS(desc(f))
+			})
+			_ = assets.Set("list", func() goja.Value {
+				fs, err := ts.Files(ctx, "assets", "")
+				a.check(err)
+				out := make([]any, len(fs))
+				for i, f := range fs {
+					out[i] = desc(f)
+				}
+				return a.toJS(out)
+			})
+			_ = r.Set("assets", assets)
+		}
 		// rev is the target's latest rev: whether it changed since a read.
 		_ = r.Set("rev", func() int64 { return ts.Head() })
 		_ = r.Set("log", func(after int64) goja.Value {

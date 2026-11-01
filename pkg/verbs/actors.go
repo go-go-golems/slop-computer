@@ -185,15 +185,20 @@ func init() {
 				return e.Sys.Bindings(ctx, a.S("store"))
 			}},
 		&Verb{Name: "bind.set", Doc: "Point a store's read alias at another store (grant store:<store> view there for actors).", Scope: Write,
-			Args: []Arg{storeArg, {Name: "alias", Type: "string", Pos: 2, Required: true}, {Name: "target", Type: "string", Pos: 3, Required: true}},
+			Args: []Arg{storeArg, {Name: "alias", Type: "string", Pos: 2, Required: true}, {Name: "target", Type: "string", Pos: 3, Required: true},
+				{Name: "assets", Type: "bool", Doc: "also let the store's actor read the target's uploaded files (needs admin on the target)"}},
 			Run: func(ctx context.Context, e *Env, p *access.Principal, a Args) (any, error) {
 				if _, _, err := e.open(ctx, p, a.S("store"), rt.LevelAdmin, "binding"); err != nil {
 					return nil, err
 				}
-				if _, _, err := e.open(ctx, p, a.S("target"), rt.LevelView, "binding to"); err != nil {
+				need, why := rt.LevelView, "binding to"
+				if a.B("assets") {
+					need, why = rt.LevelAdmin, "sharing the uploads of"
+				}
+				if _, _, err := e.open(ctx, p, a.S("target"), need, why); err != nil {
 					return nil, err
 				}
-				b := system.Binding{Store: a.S("store"), Alias: a.S("alias"), Target: a.S("target")}
+				b := system.Binding{Store: a.S("store"), Alias: a.S("alias"), Target: a.S("target"), Assets: a.B("assets")}
 				return b, e.Sys.SetBinding(ctx, p.ID(), p.ViaLabel(), b)
 			}},
 		&Verb{Name: "bind.rm", Doc: "Remove a store's read alias.", Scope: Write,

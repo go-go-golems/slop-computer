@@ -28,6 +28,11 @@ article{max-width:46rem}
 .crumbs{font-size:.85rem;color:var(--muted);margin-bottom:1.5rem}
 .crumbs a{text-decoration:none}
 .crumbs a:hover{text-decoration:underline}
+.cover{height:min(30vh,220px);min-height:120px;margin:-2rem calc(-1 * clamp(1rem,5vw,4rem)) 2rem;border-radius:0}
+figure.file{margin:.8rem 0}
+figure.file img{display:block}
+figcaption{color:var(--muted);font-size:.85rem;margin-top:.3rem}
+a.file{font-weight:500}
 .title{font-size:2.4rem;line-height:1.2;margin:0 0 1.2rem;overflow-wrap:anywhere}
 .pi{margin-right:.4rem}
 article h2{font-size:1.75rem;margin:2rem 0 .5rem;line-height:1.3}

@@ -208,6 +208,10 @@ func (s *Server) serveActorRoute(w http.ResponseWriter, r *http.Request, res *re
 		writeJSONError(w, status, code, msg)
 		return true
 	}
+	if out.Asset != nil {
+		s.serveBoundAsset(w, r, res.store, out.Asset, out.Headers["Cache-Control"])
+		return true
+	}
 	for k, v := range out.Headers {
 		w.Header().Set(k, v)
 	}
@@ -221,6 +225,52 @@ func (s *Server) serveActorRoute(w http.ResponseWriter, r *http.Request, res *re
 	w.WriteHeader(out.Status)
 	_, _ = w.Write(out.Body)
 	return true
+}
+
+// serveBoundAsset sends an uploaded file of a store bound to storeID with
+// uploads, rechecking the binding and the store's read: the actor names
+// the file, the server sends it, so no bytes pass through JavaScript.
+// Like /_blob/ on a sandbox origin, the file is never a page here (a
+// sandboxing CSP), and anything but media is a download.
+func (s *Server) serveBoundAsset(w http.ResponseWriter, r *http.Request, storeID string, ref *actor.AssetRef, cache string) {
+	ctx := r.Context()
+	b, err := s.Sys.BindingOf(ctx, storeID, ref.From)
+	if err != nil || !b.Assets {
+		notFound(w)
+		return
+	}
+	me := &access.Principal{Kind: access.KindStore, Store: storeID}
+	if d, _, err := s.Env.K.Access.Can(ctx, me, b.Target, rt.LevelView, "reading", true); err != nil || !d.OK {
+		notFound(w)
+		return
+	}
+	st, err := s.Env.K.Store(ctx, b.Target)
+	if err != nil {
+		notFound(w)
+		return
+	}
+	f, err := st.File(ctx, "assets", ref.ID)
+	if err != nil {
+		notFound(w)
+		return
+	}
+	if cache == "" {
+		cache = cachePrivate
+	}
+	w.Header().Set("Content-Security-Policy", "sandbox; default-src 'none'")
+	if !isMedia(f.Type) {
+		w.Header().Set("Content-Disposition", "attachment")
+	}
+	s.serveBlob(w, r, st, f, cache)
+}
+
+func isMedia(t string) bool {
+	for _, p := range []string{"image/", "video/", "audio/", "application/pdf"} {
+		if strings.HasPrefix(t, p) {
+			return true
+		}
+	}
+	return false
 }
 
 func writeJSONError(w http.ResponseWriter, status int, code, msg string) {

@@ -9,6 +9,11 @@
 //   slop bind set team-site source ws-team
 //   slop grant set ws-team store:team-site view
 //   slop grant set team-site @guest view
+// Uploaded files (pictures, PDFs) are published only when the binding
+// shares them, which needs admin on the workspace as well:
+//   slop bind set team-site source ws-team --assets
+// The reader then serves the files its pages show at _media/<id>, and a
+// publication copies them to media/<id>.
 // Static publishing renders every page into a static store through the
 // workshop module, as the person publishing (an admin of that store):
 //   slop app trust blocks-site workshop                       (admin, once)
@@ -23,10 +28,11 @@ const render = require('./lib/render.js');
 const db = use('db');
 const stores = use('stores');
 
-const CSP = "default-src 'none'; style-src 'unsafe-inline'; img-src https: data:; form-action 'self'; base-uri 'none'; frame-ancestors 'none'";
+const CSP = "default-src 'none'; style-src 'unsafe-inline'; img-src 'self' https: data:; form-action 'self'; base-uri 'none'; frame-ancestors 'none'";
 
 // The last fold, kept between turns: refolded when the workspace's rev
-// moves, the site model rebuilt when the settings change.
+// moves, the site model rebuilt when the settings (or whether uploads are
+// shared) change. src is this turn's handle on the workspace.
 let cache = null;
 
 function settings() {
@@ -35,13 +41,20 @@ function settings() {
 }
 
 function current() {
-  const src = stores.open('source'), rev = src.rev(), cfg = settings(), key = JSON.stringify(cfg);
+  const src = stores.open('source'), rev = src.rev(), cfg = settings(), key = JSON.stringify(cfg) + (src.assets ? ' +assets' : '');
   if (!cache || cache.source !== src.id || cache.rev !== rev) {
     const r = fold(src);
     cache = { source: src.id, rev, K: r.K, ops: r.ops };
   }
-  if (cache.key !== key) { cache.key = key; cache.site = site.build(cache.K, cfg, src.id); }
+  if (cache.key !== key) { cache.key = key; cache.site = site.build(cache.K, cfg, src.id); cache.media = null; }
+  cache.src = src;
   return cache;
+}
+
+// The uploads the published pages show: the only ones the reader serves.
+function shown(c) {
+  if (!c.media) c.media = c.src.assets ? render.mediaOf(c.site) : new Set();
+  return c.media;
 }
 
 const PAGE = /^[A-Za-z_]\w*$/, STORE = /^[a-z0-9][a-z0-9-]{0,62}$/;
@@ -76,7 +89,12 @@ async function publish(ctx, to, live) {
   if (to === ctx.store.id) ctx.fail('invalid_argument', 'a site cannot publish into itself');
   const c = current(), s = c.site;
   if (!s.pages.length) ctx.fail('invalid_argument', 'nothing to publish: the site has no pages');
-  const files = render.staticFiles(s);
+  const seen = new Set(), files = render.staticFiles(s, { assets: !!c.src.assets, seen });
+  // uploads by hash: the server already holds the bytes, nothing is sent again
+  for (const id of seen) {
+    const a = c.src.assets.get(id);
+    if (a) files.push({ path: 'media/' + id, sha256: a.sha256, size: a.size, type: a.type });
+  }
   const snap = await w.push(to, files, { message: `${s.pages.length} pages from ${s.source} (rev ${c.rev})` });
   if (live) await w.publish(to, snap.n);
   const rec = { to, n: snap.n, live: !!live, at: Date.now(), by: ctx.visitor.id, pages: s.pages.length, rev: c.rev };
@@ -111,7 +129,7 @@ function settingsPage(ctx, req) {
   let c;
   try { c = current(); } catch (e) { return page(503, render.bare('Not available', `This site cannot read its workspace: ${e.message || e}`)); }
   const n = note(req.query || {});
-  const html = render.adminPage(c.site, { base: req.base, source: c.site.source, rev: c.rev, published: published(), note: n.note, bad: n.bad, trusted: !!use('workshop') });
+  const html = render.adminPage(c.site, { base: req.base, source: c.site.source, rev: c.rev, published: published(), note: n.note, bad: n.bad, trusted: !!use('workshop'), assets: !!c.src.assets });
   return page(200, html);
 }
 
@@ -127,8 +145,8 @@ function show(ctx, req, seg) {
     // no binding, or no grant on the workspace: say so to the site's admins only
     return page(503, render.bare('Not available', isAdmin(ctx) ? `This site cannot read its workspace: ${e.message || e}` : 'This site is not available.'));
   }
-  const s = c.site, links = render.liveLinks(s, req.base);
-  const opts = { link: links.link, home: links.home, admin: isAdmin(ctx) ? { source: s.source, href: req.base + '/_site' } : null };
+  const s = c.site, links = render.liveLinks(s, req.base, !!c.src.assets);
+  const opts = { link: links.link, home: links.home, media: links.media, admin: isAdmin(ctx) ? { source: s.source, href: req.base + '/_site' } : null };
   if (!seg) return page(200, s.home ? render.page(s, s.home, opts) : render.message(s, s.name, 'Nothing is published here yet.', opts));
   const n = s.find(seg);
   if (!n) return page(404, render.message(s, 'Not found', 'There is no page here.', opts));
@@ -142,7 +160,7 @@ defineActor({
     status(ctx) {
       ctx.need('view');
       const c = current(), s = c.site;
-      return { source: s.source, rev: c.rev, home: s.home, config: settings(), published: published(),
+      return { source: s.source, rev: c.rev, home: s.home, config: settings(), published: published(), assets: !!c.src.assets,
         pages: s.pages.map((p) => ({ id: p, slug: s.slug(p), title: s.title(p), parent: s.parent(p) })) };
     },
     configure(ctx, args) {
@@ -178,6 +196,16 @@ defineActor({
     },
     'GET /': { level: 'view', run: (ctx, req) => show(ctx, req, '') },
     'GET /:page': { level: 'view', run: (ctx, req) => show(ctx, req, req.params.page) },
+    // an uploaded file a published page shows; the server sends the bytes
+    'GET /_media/:id': {
+      level: 'view',
+      run(ctx, req) {
+        let c;
+        try { c = current(); } catch (e) { return page(503, render.bare('Not available', 'This site is not available.')); }
+        if (!shown(c).has(req.params.id)) return page(404, render.bare('Not found', 'There is no file here.'));
+        return { asset: { from: 'source', id: req.params.id }, headers: { 'Cache-Control': 'private, no-cache' } };
+      },
+    },
     // deeper paths are no page either (and never fall through to the shell)
     'GET /*': { level: 'view', run: (ctx, req) => show(ctx, req, '\u0000') },
   },

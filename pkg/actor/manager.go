@@ -490,6 +490,13 @@ type Res struct {
 	Headers map[string]string `json:"headers"`
 	Type    string            `json:"-"`
 	Body    []byte            `json:"-"`
+	Asset   *AssetRef         `json:"-"` // an uploaded file of a bound store, sent by the server
+}
+
+// AssetRef names an uploaded file of the store bound at alias From.
+type AssetRef struct {
+	From string `json:"from"`
+	ID   string `json:"id"`
 }
 
 // Route is a matched HTTP route of an actor.
@@ -597,6 +604,10 @@ func toRes(v any) *Res {
 		}
 	}
 	switch {
+	case m["asset"] != nil:
+		if a, ok := m["asset"].(map[string]any); ok {
+			res.Asset = &AssetRef{From: fmt.Sprint(a["from"]), ID: fmt.Sprint(a["id"])}
+		}
 	case m["json"] != nil:
 		b, _ := json.Marshal(m["json"])
 		res.Type, res.Body = "application/json", b
