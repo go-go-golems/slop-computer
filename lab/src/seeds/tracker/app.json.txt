@@ -1,0 +1,12 @@
+{
+  "name": "Tracker",
+  "description": "A board of cards. Documents only, no actor, no SQL: the same code runs on the claude.ai artifact contract.",
+  "capabilities": {
+    "db": { "rules": [
+      { "path": "cards", "read": "view", "write": "interact" },
+      { "path": "settings", "read": "view", "write": "admin" }
+    ] },
+    "user": {},
+    "room": { "topics": { "poke": "view" } }
+  }
+}

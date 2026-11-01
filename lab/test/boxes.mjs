@@ -1,0 +1,14 @@
+import { chromium } from 'playwright';
+import http from 'node:http'; import fs from 'node:fs'; import path from 'node:path';
+const root = 'dist';
+const types = { '.html': 'text/html', '.js': 'text/javascript', '.wasm': 'application/wasm', '.css': 'text/css' };
+const srv = http.createServer((q, r) => { const u = decodeURIComponent(q.url.split('?')[0]); const p = path.join(root, u === '/' ? 'index.html' : u); if (!fs.existsSync(p)) { r.writeHead(404); return r.end(); } r.writeHead(200, { 'content-type': types[path.extname(p)] || 'application/octet-stream' }); fs.createReadStream(p).pipe(r); }).listen(0);
+const b = await chromium.launch(); const pg = await (await b.newContext({ viewport: { width: 1440, height: 900 } })).newPage();
+await pg.goto(`http://127.0.0.1:${srv.address().port}/`);
+await pg.waitForSelector('.bar');
+await pg.locator('.dtab .lbl', { hasText: /^Site/ }).first().click();
+await pg.waitForTimeout(2500);
+const r = await pg.evaluate(() => [...document.querySelectorAll('.app, .dock, .dsplit, .dcell, .tile, .dstrip, .tilebody, .viewhost:not([hidden]), .frames, .frame, iframe')].map(e => { const b = e.getBoundingClientRect(); return `${e.className || e.tagName} y=${b.y|0} h=${b.height|0} st=${e.scrollTop} sh=${e.scrollHeight}`; }));
+console.log(r.join('\n'));
+await pg.screenshot({ path: 'test/shots/boxes.png' });
+await b.close(); srv.close();
