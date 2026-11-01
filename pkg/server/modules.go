@@ -22,6 +22,7 @@ type modFunc struct {
 	Verb    string         // the verb it calls
 	Pos     []string       // the verb arguments positional parameters fill
 	Fixed   map[string]any // arguments always passed
+	Default map[string]any // arguments passed unless given
 	Confirm bool           // governance: the person confirms it in the shell (W6)
 }
 
@@ -30,6 +31,8 @@ func (s *Server) registerModules() {
 	s.Env.A.Trusted = s.Sys.Trusted
 	s.Env.A.Register(actor.Module{Name: "system", Doc: "People, grants, links, mounts, policy, LLM budgets, comps, secrets and the system log, as the visitor.",
 		Load: s.systemModule})
+	s.Env.A.Register(actor.Module{Name: "workshop", Doc: "Stores, snapshots, refs and files of any store the visitor may read; push to draft, publish, run drafts.",
+		Load: func(a *actor.Actor) goja.Value { return s.verbModule(a, workshopFuncs) }})
 }
 
 // verbModule builds a module's object from its functions.
@@ -83,6 +86,11 @@ func modArgs(a *actor.Actor, f modFunc, in []goja.Value) map[string]any {
 					}
 				}
 			}
+		}
+	}
+	for k, v := range f.Default {
+		if _, ok := out[k]; !ok {
+			out[k] = v
 		}
 	}
 	for k, v := range f.Fixed {

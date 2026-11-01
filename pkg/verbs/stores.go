@@ -5,10 +5,12 @@ import (
 	"context"
 	"errors"
 	"strings"
+	"time"
 
 	"github.com/go-go-golems/slop/pkg/access"
 	"github.com/go-go-golems/slop/pkg/kernel"
 	"github.com/go-go-golems/slop/pkg/rt"
+	"github.com/go-go-golems/slop/pkg/store"
 	"github.com/go-go-golems/slop/pkg/system"
 )
 
@@ -142,6 +144,45 @@ func init() {
 					return s.Log(ctx, a.I("after", 0), limit)
 				}
 				return s.RecentLog(ctx, limit)
+			}},
+		&Verb{Name: "log.wait", Doc: "Wait for a store's commits after a rev: they return as soon as there is one, or an empty list after the timeout.", Scope: Read,
+			Args: []Arg{{Name: "store", Type: "string", Pos: 1, Required: true}, {Name: "after", Type: "int", Required: true, Doc: "commits after this rev"},
+				{Name: "timeout", Type: "int", Doc: "seconds (default 55, at most 300)"}, {Name: "limit", Type: "int", Doc: "at most this many (default 50)"}},
+			Run: func(ctx context.Context, e *Env, p *access.Principal, a Args) (any, error) {
+				s, _, err := e.open(ctx, p, a.S("store"), rt.LevelView, "reading the log")
+				if err != nil {
+					return nil, err
+				}
+				secs := a.I("timeout", 55)
+				if secs < 0 || secs > 300 {
+					return nil, Errf("invalid_argument", "the timeout is 0 to 300 seconds")
+				}
+				// Subscribe before reading, so a commit in between is not missed.
+				woke := make(chan struct{}, 1)
+				stop := e.K.Subscribe(func(c *store.Commit) {
+					if c.Store == s.ID {
+						select {
+						case woke <- struct{}{}:
+						default:
+						}
+					}
+				})
+				defer stop()
+				timer := time.NewTimer(time.Duration(secs) * time.Second)
+				defer timer.Stop()
+				for {
+					list, err := s.Log(ctx, a.I("after", 0), int(a.I("limit", 50)))
+					if err != nil || len(list) > 0 {
+						return list, err
+					}
+					select {
+					case <-woke:
+					case <-timer.C:
+						return list, nil
+					case <-ctx.Done():
+						return list, nil
+					}
+				}
 			}},
 	)
 }

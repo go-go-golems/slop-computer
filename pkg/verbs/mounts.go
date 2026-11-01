@@ -80,14 +80,15 @@ func init() {
 		&Verb{Name: "app.status", Doc: "The app a store runs: app store, snapshot, manifest, and why it is broken if it is.", Scope: Read,
 			Args: []Arg{{Name: "store", Type: "string", Pos: 1, Required: true}},
 			Run: func(ctx context.Context, e *Env, p *access.Principal, a Args) (any, error) {
-				if _, _, err := e.open(ctx, p, a.S("store"), rt.LevelView, "reading"); err != nil {
+				st, _, err := e.open(ctx, p, a.S("store"), rt.LevelView, "reading")
+				if err != nil {
 					return nil, err
 				}
 				r, err := e.K.Running(ctx, a.S("store"))
 				if err != nil {
 					return nil, err
 				}
-				out := map[string]any{"store": r.Store, "app": r.App, "n": r.N, "broken": r.Broken}
+				out := map[string]any{"store": r.Store, "app": r.App, "ref": st.Meta("app_ref"), "n": r.N, "broken": r.Broken}
 				if m := r.Manifest; m != nil {
 					caps := []string{}
 					for c := range m.Caps.Declared {

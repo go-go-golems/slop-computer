@@ -397,7 +397,7 @@ These are the functions a review or publishing tool needs, all called as the vis
 
 | JavaScript | Verb | Tier |
 |---|---|---|
-| `stores()` | `store.ls` (all) | read |
+| `stores()` / `stores({all: true})` | `store.ls` (visible stores; every store for admins with `all`) | read |
 | `snapshots(store)` | `snap.ls` | read |
 | `refs(store)` | `ref.ls` | read |
 | `files(store, at)` | `files.ls` | read |
@@ -407,6 +407,7 @@ These are the functions a review or publishing tool needs, all called as the vis
 | `moveRef(store, ref, n)` | `ref.move` | publishing |
 | `publish(store, n)` | `ref.move` with `ref: "main"` | publishing |
 | `follow(store, ref)` | `app.follow` (primitive 7) | publishing |
+| `status(store)` | `app.status` (includes the ref it follows) | read |
 | `preview(store, at, parent)` | `preview.url` (primitive 5) | read |
 
 `push` defaults to the `draft` ref so that a tool cannot publish by accident: mounts serve `main`, and only `publish` moves it. D9 still applies: pushing a tree that contains `app.json` needs an admin visitor.

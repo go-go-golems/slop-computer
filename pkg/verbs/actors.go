@@ -9,6 +9,7 @@ import (
 	"github.com/go-go-golems/slop/pkg/actor"
 	"github.com/go-go-golems/slop/pkg/apps"
 	"github.com/go-go-golems/slop/pkg/rt"
+	"github.com/go-go-golems/slop/pkg/store"
 	"github.com/go-go-golems/slop/pkg/system"
 )
 
@@ -97,6 +98,37 @@ func init() {
 				}
 				e.A.RestartApp(app)
 				return map[string]any{"app": app, "module": mod, "trusted": false}, nil
+			}},
+		&Verb{Name: "app.follow", Doc: "Make a store run the snapshot of its app that a ref points at (main by default; draft runs unpublished code).", Scope: Write, AdminOnly: true,
+			Args: []Arg{storeArg, {Name: "ref", Type: "string", Pos: 2, Required: true}},
+			Run: func(ctx context.Context, e *Env, p *access.Principal, a Args) (any, error) {
+				s, d, err := e.open(ctx, p, a.S("store"), rt.LevelAdmin, "changing the app version")
+				if err != nil {
+					return nil, err
+				}
+				r, err := e.K.Running(ctx, s.ID)
+				if err != nil {
+					return nil, err
+				}
+				as, err := e.K.Store(ctx, r.App)
+				if err != nil {
+					return nil, err
+				}
+				ref := a.S("ref")
+				if _, err := as.Ref(ctx, ref); err != nil {
+					return nil, Errf("not_found", "%s has no ref %s", r.App, ref)
+				}
+				if _, err := s.Do(ctx, who(p, d), func(t *store.Turn) error {
+					t.Summary = "follows " + r.App + "@" + ref
+					return t.SetMeta("app_ref", ref)
+				}); err != nil {
+					return nil, storeErr(err)
+				}
+				r, err = e.K.Running(ctx, s.ID) // activates the store at the ref's snapshot
+				if err != nil {
+					return nil, err
+				}
+				return map[string]any{"store": s.ID, "app": r.App, "ref": ref, "n": r.N, "broken": r.Broken}, nil
 			}},
 		&Verb{Name: "app.modules", Doc: "The Go modules apps can use, and which apps are trusted with them (one app: what it declares and is trusted with).", Scope: Read,
 			Args: []Arg{{Name: "app", Type: "string", Pos: 1}},
