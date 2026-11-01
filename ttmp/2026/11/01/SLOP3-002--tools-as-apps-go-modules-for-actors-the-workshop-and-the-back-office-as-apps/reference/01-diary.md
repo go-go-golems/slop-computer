@@ -708,3 +708,126 @@ GET http://p5c1e…24hex.sbx.localhost:18399/
   Content-Security-Policy: frame-ancestors <tool origin> <main> <live…>
   Cache-Control: private, no-store
 ```
+
+## Step 7: W6, confirmations for governance changes made through apps
+
+When an app's actor changes a role, a policy cell, an LLM budget, a comp
+or a secret for the person using it, the call now fails with
+`confirmation_required` until that person allows it. They allow it in the
+shell, which the app cannot draw or click, or from the CLI with
+`slop confirm approve <id>`. The page's runtime asks the shell and repeats
+the call, so app code just awaits. Commit `7f4a42e`.
+
+### Prompt Context
+
+**User prompt (verbatim):** see Step 1. The design goal it serves, from
+the user's previous message (verbatim): "so that we have audit and control
+and don't expose the lower-level data".
+
+**Assistant interpretation:** Phase W6: the confirmation record, the error
+path to the page, the runtime retry, the shell dialog, `/_site/confirm`,
+`confirm.approve`.
+
+**Inferred user intent:** A compromised or buggy tool app must not be able
+to silently change governance state with an admin's authority.
+
+**Commit (code):** `7f4a42e` — "W6: governance calls made through apps
+need the person's confirmation in the shell".
+
+### What I did
+
+- `pkg/verbs/confirm.go`: `Confirmation`, `Confirmations` (`Check`,
+  `Get`, `Approve`), `summarize` (sorted `key=value`, `secret.set`'s
+  `value` shown as `(hidden)`), `Env.Confirmations()` (lazy, `sync.Once`),
+  verb `confirm.approve` (write scope, own confirmations only).
+- `pkg/verbs/verb.go`: `verbs.Check` holds the checks `Call` made before
+  `Run`; `Call` uses it.
+- `pkg/server/modules.go` `callVerb`: for `Confirm` functions, `Check`
+  first, then `Confirmations().Check(person, visitor.View, app, title,
+  verb, args)`; if not approved, `ThrowError(&actor.Error{Code:
+  "confirmation_required", Message: title + " asks to " + summary,
+  Confirm: id})`.
+- The id's path: `actor.Error.Confirm` → `errValue` sets `.confirm` on the
+  JS error → `jsError` reads it back when the action does not catch →
+  `actorFail` → `rtFail.Confirm` → the RPC error's `confirm` field; for
+  `actor.call`, `actorErr` puts it in `Error.Extra` and appends the
+  `slop confirm approve` hint to the message.
+- `pkg/actor`: `Visitor.View`, set by `rpcSlopCall`; `Actor.ThrowError`.
+- `web/runtime/src/transport.ts`: `rpc` keeps `confirm` on the error;
+  `caps.ts`: `slop.call` loops (at most 4 asks): on
+  `confirmation_required` it `ask("confirm", {confirm})`s the shell and
+  repeats, or throws `confirmation_declined`. Rebuilt `claude.js`.
+- `pkg/server/assets/shell.js`: `case "confirm"`; `pkg/server/live.go`:
+  `siteConfirm` (GET shows, POST allows, the signed-in person's only).
+- Tests: `TestConfirmations` (new); `TestSystemModule` now approves before
+  `letIn`.
+
+### Why
+
+- Keying approvals by (person, view, call hash) makes the retry a plain
+  repeat and makes multi-call actions work (each call is confirmed once,
+  then every retry passes). It also confines an approval to the view in
+  which it was given: the test shows the same call from the CLI asks
+  again.
+- The summary is written by the server from the verb and its arguments, so
+  the app cannot describe a change as something else.
+
+### What worked
+
+- `GOWORK=off go test ./pkg/server -run TestConfirmations -count=1`: `ok`
+  on the first run.
+- `GOWORK=off go test ./... -count=1`: all `ok`; runtime tests: 3 pass;
+  `go test -race … -run 'TestConfirmations|TestSystemModule'`: `ok`.
+
+### What didn't work
+
+- After adding confirmations, `TestSystemModule` would have produced
+  `confirmation_required` for the member's `letIn` instead of the verb's
+  "people.role is for admins". Asking someone to allow a call that cannot
+  succeed is wrong, so the static checks were factored out of `verbs.Call`
+  as `verbs.Check` and run before the confirmation.
+
+### What I learned
+
+- The live host's `sameOrigin` guard (`Sec-Fetch-Site` must be
+  `same-origin`, `Origin` must match) is what keeps a sandboxed page from
+  approving its own confirmation: it knows the id from its error, but its
+  requests to the live host carry its own origin. The test sends such a
+  POST and gets 403.
+
+### What was tricky to build
+
+- Carrying a structured field through four error representations
+  (`actor.Error`, a goja `Error` object, `rtFail`, `verbs.Error`). A
+  rejected promise inside an action loses everything but what `jsError`
+  reads back, so `.confirm` had to be set by `errValue` and read by
+  `jsError`.
+
+### What warrants a second pair of eyes
+
+- Confirmations are in memory. A restart forgets pending and approved
+  ones (the person is asked again); several server processes would not
+  share them. slop runs one process.
+- The runtime gives up after four confirmations in one call, to avoid an
+  endless loop if an action makes ever-new governance calls.
+
+### What should be done in the future
+
+- W7 exercises the shell dialog and the runtime retry in a browser.
+
+### Code review instructions
+
+- `pkg/verbs/confirm.go`, `callVerb` in `pkg/server/modules.go`, the
+  `confirm` case in `shell.js`, `slop()` in `web/runtime/src/caps.ts`.
+- `GOWORK=off go test ./pkg/server -run 'TestConfirmations|TestSystemModule' -count=1`.
+
+### Technical details
+
+```text
+page: slop.actions.letIn({id})
+  → RPC slop.call → actor → system.people.setRole → verbs.Check ok
+  → not approved → {error: {code: confirmation_required, confirm: cfm_…, message: "Tool asks to people.role id=… role=member"}}
+runtime → shell {type: confirm, confirm} → GET /_site/confirm/cfm_… → dialog
+  → POST /_site/confirm/cfm_… → {approved: true}
+runtime → RPC slop.call (same) → approved (person, view, hash) → verb runs → result
+```

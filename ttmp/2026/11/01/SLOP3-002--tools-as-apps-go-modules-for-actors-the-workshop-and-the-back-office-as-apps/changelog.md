@@ -51,3 +51,11 @@ W5 (e7d4a7a): inspect previews (random p-labels, per-request access check, bridg
 ### Related Files
 
 - /home/manuel/code/wesen/2026-10-31--slop-v3/pkg/server/preview.go — preview serving
+
+## 2026-11-01
+
+W6 (7f4a42e): confirmations (verbs.Check first, approvals per person/view/call, shell dialog, runtime retry, confirm.approve)
+
+### Related Files
+
+- /home/manuel/code/wesen/2026-10-31--slop-v3/pkg/verbs/confirm.go — confirmation book and verb
