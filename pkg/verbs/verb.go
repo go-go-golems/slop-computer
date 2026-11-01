@@ -40,7 +40,8 @@ type Verb struct {
 	Args      []Arg  `json:"args"`
 	Scope     Scope  `json:"scope"`
 	AdminOnly bool   `json:"adminOnly,omitempty"` // the person must be an admin
-	Run       func(ctx context.Context, e *Env, p *access.Principal, a Args) (any, error) `json:"-"`
+
+	Run func(ctx context.Context, e *Env, p *access.Principal, a Args) (any, error) `json:"-"`
 }
 
 // Group is the part before the dot ("grant" of "grant.set").
@@ -177,7 +178,7 @@ func (e *Error) Error() string { return e.Code + ": " + e.Message }
 // Status is the HTTP status for an error code.
 func (e *Error) Status() int {
 	switch e.Code {
-	case "invalid_argument":
+	case "invalid_argument", "eval_error":
 		return 400
 	case "unauthenticated":
 		return 401
@@ -185,7 +186,7 @@ func (e *Error) Status() int {
 		return 403
 	case "not_found":
 		return 404
-	case "conflict":
+	case "conflict", "missing_blobs":
 		return 409
 	case "quota_exceeded", "rate_limited":
 		return 429

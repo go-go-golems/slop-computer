@@ -10,6 +10,9 @@ import (
 
 // The HTTP door: POST /api/v1/<verb> with the arguments as JSON.
 
+// maxAPIBody fits a 50 MiB tree file as base64, plus its manifest.
+const maxAPIBody = 96 << 20
+
 func (s *Server) apiRoutes(m *http.ServeMux) {
 	m.HandleFunc("GET /api/v1/verbs", func(w http.ResponseWriter, r *http.Request) {
 		httpx.JSON(w, 200, map[string]any{"verbs": verbs.All()})
@@ -48,7 +51,7 @@ func (s *Server) apiCall(w http.ResponseWriter, r *http.Request) {
 	}
 	args := verbs.Args{}
 	if r.ContentLength != 0 {
-		if err := httpx.Read(r, &args, 64<<20); err != nil {
+		if err := httpx.Read(r, &args, maxAPIBody); err != nil {
 			httpx.Fail(w, 400, "invalid_argument", "the body must be a JSON object of arguments")
 			return
 		}

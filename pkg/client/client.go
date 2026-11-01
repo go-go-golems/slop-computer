@@ -118,6 +118,7 @@ type APIError struct {
 	Code    string   `json:"code"`
 	Message string   `json:"message"`
 	Trace   []string `json:"trace,omitempty"`
+	Extra   any      `json:"extra,omitempty"`
 }
 
 func (e *APIError) Error() string {

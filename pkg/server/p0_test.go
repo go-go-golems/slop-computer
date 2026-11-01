@@ -15,6 +15,7 @@ import (
 	"testing"
 
 	"github.com/go-go-golems/slop/pkg/config"
+	"github.com/go-go-golems/slop/pkg/kernel"
 	"github.com/go-go-golems/slop/pkg/system"
 	"github.com/go-go-golems/slop/pkg/verbs"
 )
@@ -25,6 +26,7 @@ type harness struct {
 	ts  *httptest.Server
 	cfg *config.Config
 	sys *system.DB
+	k   *kernel.Kernel
 }
 
 func newHarness(t *testing.T) *harness {
@@ -36,14 +38,19 @@ func newHarness(t *testing.T) *harness {
 		t.Fatal(err)
 	}
 	t.Cleanup(func() { _ = sys.Close() })
-	env := &verbs.Env{Cfg: cfg, Sys: sys}
+	k, err := kernel.New(cfg, sys)
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(k.Close)
+	env := &verbs.Env{Cfg: cfg, Sys: sys, K: k}
 	srv, err := Build(context.Background(), cfg, sys, env)
 	if err != nil {
 		t.Fatal(err)
 	}
 	ts := httptest.NewServer(srv)
 	t.Cleanup(ts.Close)
-	return &harness{t: t, ts: ts, cfg: cfg, sys: sys}
+	return &harness{t: t, ts: ts, cfg: cfg, sys: sys, k: k}
 }
 
 // browser is a cookie-keeping client that sends Host: main.

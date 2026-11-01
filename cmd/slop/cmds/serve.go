@@ -11,6 +11,7 @@ import (
 	"github.com/spf13/cobra"
 
 	"github.com/go-go-golems/slop/pkg/config"
+	"github.com/go-go-golems/slop/pkg/kernel"
 	"github.com/go-go-golems/slop/pkg/server"
 	"github.com/go-go-golems/slop/pkg/system"
 	"github.com/go-go-golems/slop/pkg/verbs"
@@ -69,7 +70,12 @@ func runServer(parent context.Context, cfg *config.Config) error {
 		return err
 	}
 	defer sys.Close()
-	env := &verbs.Env{Cfg: cfg, Sys: sys}
+	k, err := kernel.New(cfg, sys)
+	if err != nil {
+		return err
+	}
+	defer k.Close()
+	env := &verbs.Env{Cfg: cfg, Sys: sys, K: k}
 	srv, err := server.Build(ctx, cfg, sys, env)
 	if err != nil {
 		return err

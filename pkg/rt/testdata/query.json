@@ -1,0 +1,23 @@
+{
+  "docs": [
+    {"path": "tasks/a", "body": {"title": "Alpha", "done": false, "n": 3, "tags": ["x", "y"], "due": "2026-11-02"}},
+    {"path": "tasks/b", "body": {"title": "Beta", "done": true, "n": 1, "tags": ["y"]}},
+    {"path": "tasks/c", "body": {"title": "Gamma", "done": false, "n": 2, "due": "2026-10-30"}},
+    {"path": "tasks/d", "body": {"title": "Delta", "done": false, "n": "7"}}
+  ],
+  "cases": [
+    {"name": "no filters orders by id", "query": {}, "want": ["a", "b", "c", "d"]},
+    {"name": "== bool", "query": {"filters": [{"field": "done", "op": "==", "value": false}]}, "want": ["a", "c", "d"]},
+    {"name": "!= includes only docs with the field", "query": {"filters": [{"field": "due", "op": "!=", "value": "2026-10-30"}]}, "want": ["a"]},
+    {"name": "range matches only the same type", "query": {"filters": [{"field": "n", "op": ">=", "value": 2}]}, "want": ["a", "c"]},
+    {"name": "string range", "query": {"filters": [{"field": "title", "op": "<", "value": "C"}]}, "want": ["a", "b"]},
+    {"name": "in", "query": {"filters": [{"field": "n", "op": "in", "value": [1, 2]}]}, "want": ["b", "c"]},
+    {"name": "not-in excludes missing fields too", "query": {"filters": [{"field": "due", "op": "not-in", "value": ["2026-11-02"]}]}, "want": ["c"]},
+    {"name": "array-contains", "query": {"filters": [{"field": "tags", "op": "array-contains", "value": "y"}]}, "want": ["a", "b"]},
+    {"name": "order asc, missing last", "query": {"order": "due"}, "want": ["c", "a", "b", "d"]},
+    {"name": "order desc, missing last", "query": {"order": "due", "desc": true}, "want": ["a", "c", "b", "d"]},
+    {"name": "numbers before strings", "query": {"order": "n"}, "want": ["b", "c", "a", "d"]},
+    {"name": "limit after order", "query": {"order": "n", "limit": 2}, "want": ["b", "c"]},
+    {"name": "two filters", "query": {"filters": [{"field": "done", "op": "==", "value": false}, {"field": "n", "op": "<", "value": 3}]}, "want": ["c"]}
+  ]
+}
