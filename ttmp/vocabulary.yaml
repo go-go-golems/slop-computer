@@ -21,6 +21,10 @@ topics:
       description: Model access and budgets
     - slug: tools
       description: Admin and authoring tools built as apps (back office, Workshop)
+    - slug: apps
+      description: Apps hosted on slop (Blocks, Pinup, readers)
+    - slug: publishing
+      description: Publishing content as public pages and static sites
 docTypes:
     - slug: design-doc
       description: Structured rationale and architecture notes

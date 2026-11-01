@@ -1,0 +1,178 @@
+---
+Title: Diary
+Ticket: SLOP3-003
+Status: active
+Topics:
+    - architecture
+    - goja
+    - tools
+    - apps
+    - publishing
+DocType: reference
+Intent: long-term
+Owners: []
+RelatedFiles: []
+ExternalSources: []
+Summary: "Chronological record of SLOP3-003: the Blocks publishing guide and the implementation of phases B1 to B4."
+LastUpdated: 2026-11-01T18:01:30.792924484-05:00
+WhatFor: "Reviewing what was built in SLOP3-003, why, and what failed along the way."
+WhenToUse: "When resuming SLOP3-003 or reviewing one of its commits."
+---
+
+# Diary
+
+## Goal
+
+This diary records the work on SLOP3-003: publishing a Claude Blocks
+workspace as web pages, both as a live, content-only reader and as a
+static snapshot pushed to a static store. Each step follows the
+investigation format: what was asked, what was done, what failed, and how
+to review it.
+
+## Step 1: Investigation, the ticket and the design guide
+
+The investigation answered one question before any design: can the
+server fold a Blocks workspace the way the editor does? It can. The
+editor's kernel (`hypha.js`) and the two libraries that register block
+kinds (`fruit.js`, `blocks-kit.js`) load without a DOM, and an actor can
+`require()` them unchanged. The investigation also found that the editor's
+prose tokenizer never returns on text with a bold, italic or struck span
+when called directly, which ruled out reusing the editor's renderer. The
+guide (`design-doc/01-blocks-publishing-design-and-implementation-guide-for-interns.md`)
+was written from these findings and uploaded to reMarkable as "SLOP3-003
+Blocks publishing guide" in `/ai/2026/11/01/SLOP3-003`.
+
+### Prompt Context
+
+**User prompt (verbatim):** "Do both. Create a new docmgr ticket. Create
+a detailed analysis / design / implementation guide that is for a new
+intern, explaining all the parts of the system needed to understand what
+it is, with prose paragraphs and bullet point sand pseudocode and diagrams
+and api references and file references. It should be very clear and
+technical. Store in the ticket and the nupload to remarkable. Then
+implement, ccommit at appropriate intervals and keep a detailed diary as
+you work (using the diary format from the skill)"
+
+"Both" refers to the two options offered in answer to the earlier
+question (verbatim): "how can we publish blocks as a public visible page,
+say ws-team, or my-notes if i were to create it? can we do a blocks
+serving app that renders the content (but not the blocks UI for
+example?)". The two options were a live reader that renders a workspace's
+pages without the editor, and publishing a rendered snapshot to a static
+site.
+
+**Assistant interpretation:** Design and build an app that serves a
+workspace's pages as plain HTML (live) and can push them as files into a
+static store (snapshot), usable by admins and by members for their own
+workspaces.
+
+**Inferred user intent:** Blocks becomes a content tool for slop: people
+write landing pages and descriptions in the editor and publish them
+without exposing the editor or the workspace itself.
+
+### What I did
+
+- `docmgr ticket create-ticket --ticket SLOP3-003 --title "Blocks publishing: a content-only live reader and static publishing for Claude Blocks workspaces" --topics architecture,goja,tools,apps,publishing`
+  (topics `apps` and `publishing` added to the vocabulary).
+- Read the Blocks storage code in slop-computer `web/blocks/src/blocks.js`:
+  `Net.load` (the fold, line 529), `owns` and `hash32`, `Pages` (line 152),
+  `envFor`, `Markdown.page` (the reference walk over a page's blocks), the
+  slash menu (`SLASH`, line 1388) for the list of block kinds, and the
+  constants `CHUNK_OPS`, `MARGIN` (line 503).
+- Read `blocks-kit.js` (prose grammar, `rich`, `toHTML`, the `R.*` block
+  renderers, `H.POS` registration), `fruit.js` (`h`, `kidsOf`, `kindOf`,
+  `prop`) and `hypha.js` (`Kernel`: `receive`, `restore`, `batch`,
+  `checkpoint`; the `performance` guard).
+- Read the slop v3 side: `pkg/actor/actor.go` (`build`, `requirer`,
+  `TurnLimit`), `pkg/actor/modules.go` (`storesModule`, `snap`),
+  `pkg/actor/manager.go` (`MatchRoute`, `Serve`, `toRes`, `Req`),
+  `pkg/server/actors.go` (`serveActorRoute`), `pkg/server/live.go` and
+  `pkg/server/site.go` (actor routes on live and static hosts),
+  `pkg/server/modworkshop.go`, `pkg/verbs/files.go` (`files.push`),
+  `pkg/verbs/stores.go` (`store.new`), `pkg/verbs/actors.go` (`bind.set`),
+  `pkg/rt/query.go`, `pkg/store/store.go` (`Head`), `pkg/system/mounts.go`
+  (`Match.Base`).
+- Looked at the demo workspaces' documents with `slop docs ls ws-team chunks`
+  and checked the ownership hash by hand: `hash32("usr_e41fab4c0f7e823ae90df3cd")`
+  in base 36 is `cm0pbw`, matching the peer `ucm0pbw:you`.
+- Wrote `scripts/01-load-blocks-libs.mjs`: loads the three libraries in a
+  fresh `vm` context, folds five ops, evaluates `{2+3}`, and shows the
+  tokenizer loop in a worker with a 64 MB heap.
+- Wrote the guide (11 sections, two mermaid diagrams, fold and render
+  pseudocode, permission table, API and file references), added tasks B1
+  to B4, related the upstream and server files, uploaded it.
+
+### Why
+
+- The fold must be the editor's fold, or a published page can differ from
+  what its author sees. Vendoring the kernel and porting `Net.load` line by
+  line is the only way to keep that true.
+- A separate `blocks-site` store, bound to the workspace, keeps the
+  workspace private: a guest of the site never gets a read on the
+  workspace, only the HTML the actor renders.
+
+### What worked
+
+- All three libraries load in a context with no `window` or `document`;
+  `globalThis.Hypha`, `Fruit` and `Blocks` appear, and `blocks-kit.js`
+  registers the positional props (`p: ["text"]`) the fold needs.
+- `Fruit.kindOf`, `Fruit.prop` and `Blocks.valueOf` work on a kernel built
+  from ops, without the editor's `envFor` (a minimal `{al: new Map()}` is
+  enough for formulas).
+
+### What didn't work
+
+- The first harness called `Blocks.richHTML(K, path, "Some **bold** and {2+3} and [[about]]", {})`
+  and Node died with `FATAL ERROR: Ineffective mark-compacts near heap limit
+  Allocation failed - JavaScript heap out of memory`. Narrowing it down,
+  `Blocks.tokens("plain")` returns and `Blocks.tokens("Some **bold**")` does
+  not. A copy of the tokenizer with a loop counter printed
+  `LOOP at 5 "**bold**" lastIndex 13`: the recursive call for the bold
+  span's inside resets the shared global `RE.lastIndex` to 0, and the outer
+  `while ((m = RE.exec(s)))` matches the same span again, forever.
+- `docmgr doc relate --file-note "$R/$G:the intern guide"` failed with
+  `malformed --file-note value ".../01-blocks-...mdhe intern guide"`: zsh
+  read `$G:t` as the tail modifier. Braces (`${G}:the`) fixed it.
+
+### What I learned
+
+- An actor's `require` wraps each file in `(function (module, exports, require) {...})`,
+  so a browser IIFE that ends in `(typeof window !== "undefined" ? window : globalThis)`
+  installs its global unchanged.
+- Actor routes are already served on the static host (as a guest, after an
+  `@guest view` check), so the live reader can be mounted on either host.
+- `system.Match` already carries `Base`; the actor's `Req` only needs to
+  pass it on.
+
+### What was tricky to build
+
+- Deciding where the administration page lives. The shell serves the
+  app's `index.html` only for paths no actor route claims, and the reader
+  claims `/` and `/:page`. The design puts administration in the actor as
+  well (`GET /_site`, form posts), which keeps the reader free of
+  JavaScript and relies on `SameSite=Lax` cookies against cross-site posts.
+
+### What warrants a second pair of eyes
+
+- The ownership check trusts the chunk body's `by`, as the editor does.
+  The server-stamped writer of a document is not visible to actors
+  (`snap()` exposes only `exists`, `path`, `id`, `version`, `data`). If the
+  runtime does not force `body.by` to equal the writer, a contributor could
+  forge ops for another person in the editor and in the reader alike.
+
+### What should be done in the future
+
+- Check in the browser whether the editor itself hits the tokenizer loop
+  (phase B4), and report it upstream either way.
+
+### Code review instructions
+
+- Read the guide's sections 4 (fold) and 5.2 (decisions) first.
+- Run `node scripts/01-load-blocks-libs.mjs <slop-computer>/web/blocks/src`.
+
+### Technical details
+
+- Demo data: `ws-team` has one chunk, `chunks/c-ucm0pbw-wv8ldp-0`, five
+  ops, folding to the page `page_p7sq` titled "FOOBAR".
+- Upload: `remarquee upload bundle <guide> --name "SLOP3-003 Blocks publishing guide" --remote-dir "/ai/2026/11/01/SLOP3-003" --toc-depth 2 --non-interactive`
+  answered `OK: uploaded SLOP3-003 Blocks publishing guide.pdf -> /ai/2026/11/01/SLOP3-003`.
