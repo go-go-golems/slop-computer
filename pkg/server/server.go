@@ -5,7 +5,6 @@ package server
 
 import (
 	"context"
-	"errors"
 	"fmt"
 	"log"
 	"net"
@@ -21,6 +20,7 @@ import (
 	"github.com/go-go-golems/slop/pkg/identity"
 	"github.com/go-go-golems/slop/pkg/ids"
 	"github.com/go-go-golems/slop/pkg/llm"
+	"github.com/go-go-golems/slop/pkg/llm/gepp"
 	"github.com/go-go-golems/slop/pkg/rt"
 	"github.com/go-go-golems/slop/pkg/system"
 	"github.com/go-go-golems/slop/pkg/verbs"
@@ -69,26 +69,17 @@ func (s *Server) setupLLM(ctx context.Context) error {
 	case "fake":
 		s.Env.A.LLM = &llm.Fake{}
 	case "pi":
-		pi := s.Cfg.Pi
-		if pi.Worker == "" {
-			return errors.New("llm: pi needs pi.worker (web/piworker/dist/worker.js)")
-		}
-		node := pi.Node
-		if node == "" {
-			node = "node"
-		}
-		agent := pi.AgentDir
+		agent := s.Cfg.Pi.AgentDir
 		if agent == "" {
 			home, _ := os.UserHomeDir()
 			agent = filepath.Join(home, ".pi", "agent")
 		}
-		c, err := llm.Start(ctx, node, pi.Worker, agent, os.TempDir(), pi.Models)
+		b, err := gepp.New(gepp.Config{AgentDir: agent, Tiers: s.Cfg.Pi.Models})
 		if err != nil {
-			return fmt.Errorf("start the Pi worker: %w", err)
+			return fmt.Errorf("load Pi's models from %s: %w", agent, err)
 		}
-		go func() { <-ctx.Done(); _ = c.Close() }()
-		log.Printf("Pi worker ready: %d models", len(c.Models()))
-		s.Env.A.LLM = c
+		log.Printf("Pi models ready (Geppetto): %d", len(b.Models()))
+		s.Env.A.LLM = b
 	default:
 		return fmt.Errorf("unknown llm %q (pi or fake)", s.Cfg.LLM)
 	}

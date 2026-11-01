@@ -54,15 +54,14 @@ type Config struct {
 	OIDC          OIDC   `yaml:"oidc"`
 	Stripe        Stripe `yaml:"stripe"`
 	SecretKey     string `yaml:"secret_key_file"` // HMAC key for sandbox labels and secrets
-	LLM           string `yaml:"llm"`             // "" (off), "pi" (the Pi worker) or "fake"
+	LLM           string `yaml:"llm"`             // "" (off), "pi" (Pi's models through Geppetto) or "fake"
 	Pi            Pi     `yaml:"pi"`
 }
 
-// Pi runs the Pi model worker (web/piworker) for the sample capability.
+// Pi configures the sample capability's models: Pi's agent directory, read
+// by Geppetto's Pi provider (pkg/llm/gepp).
 type Pi struct {
-	Node     string            `yaml:"node"`      // node binary (default "node")
-	Worker   string            `yaml:"worker"`    // web/piworker/dist/worker.js
-	AgentDir string            `yaml:"agent_dir"` // ~/.pi/agent (models, credentials)
+	AgentDir string            `yaml:"agent_dir"` // ~/.pi/agent (models, credentials, settings)
 	Models   map[string]string `yaml:"models"`    // tier (quick, default, complex) -> provider/model
 }
 

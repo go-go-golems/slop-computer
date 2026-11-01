@@ -1,7 +1,7 @@
-// The sample capability: a model call through slop's Pi worker. One call
-// is one streamed POST to /_rt/sample; page tools run here and post their
-// results back; aborting cancels on the server. Only admins sample; any
-// model and effort Pi offers may be named.
+// The sample capability: a model call through slop's model backend. One
+// call is one streamed POST to /_rt/sample; page tools run here and post
+// their results back; aborting cancels on the server. Who may sample, and
+// how many tokens they have left, is the admin's policy and LLM budget.
 import { limits } from "./limits.ts";
 import { consent } from "./caps.ts";
 import { request, rpc, type Hello } from "./transport.ts";

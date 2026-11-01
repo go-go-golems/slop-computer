@@ -19,7 +19,7 @@ import (
 )
 
 func serveCmd() *cobra.Command {
-	var cfgPath, listen, data, llmBackend, piWorker string
+	var cfgPath, listen, data, llmBackend string
 	var local, test bool
 	var admins []string
 	cmd := &cobra.Command{
@@ -47,9 +47,6 @@ func serveCmd() *cobra.Command {
 			if llmBackend != "" {
 				cfg.LLM = llmBackend
 			}
-			if piWorker != "" {
-				cfg.Pi.Worker = piWorker
-			}
 			if cfg.Test && cfg.LLM == "" {
 				cfg.LLM = "fake"
 			}
@@ -63,8 +60,7 @@ func serveCmd() *cobra.Command {
 	cmd.Flags().BoolVar(&local, "local", false, "local sign-in form instead of OIDC (development)")
 	cmd.Flags().BoolVar(&test, "test", false, "test mode: loopback only, X-Slop-As, fake LLM")
 	cmd.Flags().StringArrayVar(&admins, "admin-email", nil, "an email that becomes admin when it signs in (repeatable)")
-	cmd.Flags().StringVar(&llmBackend, "llm", "", "model backend for sample: pi or fake (default: off)")
-	cmd.Flags().StringVar(&piWorker, "pi-worker", "", "the Pi worker script (web/piworker/dist/worker.js), with --llm pi")
+	cmd.Flags().StringVar(&llmBackend, "llm", "", "model backend for sample: pi (Pi's models through Geppetto, from ~/.pi/agent) or fake (default: off)")
 	return cmd
 }
 

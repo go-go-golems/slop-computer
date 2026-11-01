@@ -1,9 +1,8 @@
-// Package llm is the model backend for the sample capability: Pi
-// (github.com/earendil-works/pi) as a model worker, a Node child process
-// (web/piworker) that loads ~/.pi/agent (models, credentials, settings) and
-// speaks JSON lines over stdio. Credentials stay in Pi's files on the
-// server host; pages only see text. Fake is the deterministic backend for
-// tests and --llm fake.
+// Package llm is the model backend interface for the sample capability.
+// gepp implements it on Geppetto with Pi's agent directory (~/.pi/agent:
+// models, credentials, settings); credentials stay in Pi's files on the
+// server host, and pages only see text. Fake is the deterministic backend
+// for tests and --llm fake.
 //
 // Copied from slop-computer pkg/piworker (itself ported from
 // github.com/go-go-golems/francois pkg/piworker).
