@@ -3,6 +3,7 @@ package server
 import (
 	"context"
 	"errors"
+	"io"
 	"net/http"
 	"path"
 	"strconv"
@@ -125,6 +126,23 @@ func (s *Server) serveStatic(w http.ResponseWriter, r *http.Request) {
 			http.Redirect(w, r, r.URL.Path+"/", http.StatusPermanentRedirect)
 			return
 		}
+	}
+	// A site with a not-found page has no client-side routes: a missing
+	// path gets that page, with a 404.
+	if m := res.run.Manifest; m != nil && m.NotFound != "" {
+		if f, err := as.SnapshotFile(ctx, res.run.N, m.NotFound); err == nil {
+			w.Header().Set("Cache-Control", "no-store")
+			w.Header().Set("X-Content-Type-Options", "nosniff")
+			w.Header().Set("Content-Type", f.Type)
+			if file, err := as.Blobs.Open(f.SHA256); err == nil {
+				defer file.Close()
+				w.WriteHeader(http.StatusNotFound)
+				_, _ = io.Copy(w, file)
+				return
+			}
+		}
+		notFound(w)
+		return
 	}
 	// Client-side routes: a path without an extension gets the entry page.
 	if path.Ext(name) == "" {

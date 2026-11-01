@@ -405,7 +405,10 @@ func (v *View) AsPeer(room string) (Peer, bool) {
 	v.mu.Lock()
 	defer v.mu.Unlock()
 	m, ok := v.rooms[room]
-	if !ok {
+	// A peer is someone with the page open now: a view whose stream went
+	// away is kept for IdleGrace, so a reconnect resumes it, but it is
+	// nobody's peer meanwhile.
+	if !ok || v.ch == nil {
 		return Peer{}, false
 	}
 	// Guest: an anonymous visitor (store.VisitorPrefix; rt does not import store).

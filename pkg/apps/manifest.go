@@ -17,11 +17,12 @@ const File = "app.json"
 
 // Manifest is a parsed app.json.
 type Manifest struct {
-	Title string `json:"title,omitempty"`
-	Page  string `json:"page,omitempty"`  // the HTML entry (default index.html when present)
-	Actor string `json:"actor,omitempty"` // the server entry, actor.js
-	Type  string `json:"type,omitempty"`  // the store type this app runs on and creates
-	Slop  Slop   `json:"slop"`
+	Title    string `json:"title,omitempty"`
+	Page     string `json:"page,omitempty"`     // the HTML entry (default index.html when present)
+	NotFound string `json:"notFound,omitempty"` // static sites: the page a missing path gets, with a 404
+	Actor    string `json:"actor,omitempty"`    // the server entry, actor.js
+	Type     string `json:"type,omitempty"`     // the store type this app runs on and creates
+	Slop     Slop   `json:"slop"`
 
 	Caps rt.Caps `json:"-"`
 }
@@ -53,7 +54,7 @@ func Parse(raw []byte) (*Manifest, error) {
 		return nil, fmt.Errorf("app.json: %v", err)
 	}
 	m.Caps = caps
-	for _, f := range []struct{ name, v string }{{"page", m.Page}, {"actor", m.Actor}} {
+	for _, f := range []struct{ name, v string }{{"page", m.Page}, {"notFound", m.NotFound}, {"actor", m.Actor}} {
 		if f.v != "" && (strings.HasPrefix(f.v, "/") || path.Clean(f.v) != f.v || strings.HasPrefix(f.v, "..")) {
 			return nil, fmt.Errorf("app.json: %s must be a relative path in the tree", f.name)
 		}

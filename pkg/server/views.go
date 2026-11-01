@@ -263,7 +263,13 @@ func (s *Server) viewEvents(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	ch := v.Attach()
-	defer v.Detach(ch)
+	// The view is a peer while its stream is attached: its rooms hear it
+	// arrive and leave.
+	s.announceRooms(v)
+	defer func() {
+		v.Detach(ch)
+		s.announceRooms(v)
+	}()
 	resume := r.URL.Query().Has("after")
 	after, _ := strconv.ParseInt(r.URL.Query().Get("after"), 10, 64)
 	head := st.Head()
@@ -946,6 +952,13 @@ func (s *Server) announce(target, room string) {
 		if o.In(room) {
 			o.Send(ev)
 		}
+	}
+}
+
+// announceRooms tells every room v is in who is there now.
+func (s *Server) announceRooms(v *rt.View) {
+	for _, room := range s.roomsOf(v) {
+		s.announce(v.Target, room)
 	}
 }
 
