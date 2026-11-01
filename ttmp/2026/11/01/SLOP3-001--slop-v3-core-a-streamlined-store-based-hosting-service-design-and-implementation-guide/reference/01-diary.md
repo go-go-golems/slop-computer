@@ -2962,3 +2962,116 @@ this diary.
     line for a grant below the cap);
   - an unsupported claim about v2's access code was restated as the design
     reason.
+
+## Step 19: Models through Geppetto; the Node worker is gone
+
+v3 now calls models the way v2 does in production: Geppetto's Pi
+provider reads Pi's agent directory in-process. v2's backend
+(`slop-computer/pkg/piworker/gepp`) implements the same three-method
+interface as v3's `pkg/llm` (`Models`, `Sample`, `Close`), so it was
+copied with one import changed. The Node worker is deleted: its client,
+`web/piworker` and the `pi.node`, `pi.worker` and `--pi-worker` settings.
+The production image therefore needs no Node. Commit `debb573`.
+
+### Prompt Context
+
+**User prompt (verbatim):** "just drop pi-node and use geppetto straight
+out."
+
+**Assistant interpretation:** Port v2's gepp backend, make `llm: pi` mean
+it, and remove every trace of the worker.
+
+**Inferred user intent:** Merging v3 into slop-computer's repository will
+reuse its image build, which has no Node runtime. One model path, already
+proven in production, is simpler than two.
+
+**Commit (code):** `debb573` — "LLM through Geppetto: port v2's gepp
+backend, drop the Node Pi worker".
+
+### What I did
+
+- `pkg/llm/gepp/{backend.go, sample.go, gepp_test.go}`: copied from v2,
+  with `piworker.` replaced by `llm.` and the package comments reworded.
+- `pkg/server/server.go` `setupLLM`: `llm: pi` calls
+  `gepp.New(gepp.Config{AgentDir, Tiers: cfg.Pi.Models})`, with the agent
+  directory defaulting to `~/.pi/agent`.
+- `pkg/config/config.go`: `Pi` keeps `agent_dir` and `models`.
+- `cmd/slop/cmds/serve.go`: `--pi-worker` removed.
+- `pkg/llm/client.go` and `web/piworker/` deleted; `.gitignore` updated.
+- `go get github.com/go-go-golems/geppetto@v0.13.13` (v2's version),
+  then `go mod tidy`.
+- The comment in `web/runtime/src/sample.ts` no longer says "Only admins
+  sample" (that predates P6); the runtime was rebuilt.
+- Removed `worker:` from the demo's `slop.yaml` and restarted.
+
+### Why
+
+- One backend that production already runs, rather than a Node child
+  process inside an image built without Node.
+
+### What worked
+
+```text
+$ GOWORK=off go test ./... -count=1
+ok   github.com/go-go-golems/slop/pkg/llm/gepp   0.080s
+ok   github.com/go-go-golems/slop/pkg/server     3.116s   (and the rest)
+
+server.log: Pi models ready (Geppetto): 43
+
+$ node 06-p8-sample-e2e.mjs
+ok   guest on polis: {"text":"slop ok"}
+ok   admin on capabilities (Capabilities Share Admin Sign out): {"text":"slop ok"}
+
+$ node 09-p8-blocks-pinup-e2e.mjs various/p8-deploy
+… ok   pinup: Claude added a heading "Slop 205929" (sample on the real model)
+ok   pinup: the guest sees Claude's change live
+all passed
+```
+
+Pinup's Ask Claude uses page tools over several rounds, so the last check
+covers gepp's tool loop as well as single answers.
+
+### What didn't work
+
+- The first build failed with `pkg/server/server.go:8:2: "errors" imported
+  and not used`: the worker branch had been the only user of `errors`.
+  Removed.
+
+### What I learned
+
+- With gepp, Pi reports 43 available models; the Node worker reported 48
+  from the same agent directory. The tier models resolve the same. I did
+  not trace the difference; it is in which providers each runtime counts
+  as authenticated.
+
+### What was tricky to build
+
+- Nothing beyond keeping the interface identical. Keeping the type names
+  (`Model`, `Request`, `Event`, `ExecuteTool`, `Failure`, `Usage`) during
+  the earlier copy made this a rename.
+
+### What warrants a second pair of eyes
+
+- `go mod tidy` upgraded three indirect modules (`go-sourcemap` 2.1.4,
+  `google/pprof`, `spf13/pflag` 1.0.10) to satisfy geppetto.
+
+### What should be done in the future
+
+- Find out why the two runtimes count different numbers of models (43 and
+  48), if a model a user expects is missing.
+
+### Code review instructions
+
+- `pkg/server/server.go` (`setupLLM`) and `pkg/llm/gepp/backend.go`
+  (`New`).
+- Validate: `GOWORK=off go test ./pkg/llm/... -count=1`, then
+  `06-p8-sample-e2e.mjs` against a server with `llm: pi`.
+
+### Technical details
+
+```yaml
+llm: pi
+pi:
+  agent_dir: ~/.pi/agent        # default
+  models: {quick: "lunaroute/deepseek-4.1-flash:high", default: "…", complex: "…"}
+```
