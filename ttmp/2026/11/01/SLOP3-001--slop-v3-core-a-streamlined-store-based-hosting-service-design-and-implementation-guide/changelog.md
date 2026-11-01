@@ -68,3 +68,12 @@ P3 exit completed (23c0c67): examples guestbook/journal/static-site; tests for a
 
 - /home/manuel/code/wesen/2026-10-31--slop-v3/examples/journal/actor.js — the journal example on v3
 - /home/manuel/code/wesen/2026-10-31--slop-v3/pkg/server/p3_examples_test.go — P3 exit tests
+
+## 2026-11-01
+
+P4 (4ff910e): OIDC sign-in with PKCE, share links, guest limit/sweep/claim, explain.can; fixed store principals matching audience grants and needless link grants
+
+### Related Files
+
+- /home/manuel/code/wesen/2026-10-31--slop-v3/pkg/server/p4_test.go — P4 exit tests incl. fake OIDC provider
+- /home/manuel/code/wesen/2026-10-31--slop-v3/pkg/server/sitelinks.go — links and the claim on the live host

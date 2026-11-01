@@ -1619,3 +1619,244 @@ schema:                 a migration ran
 meta:<key>              store meta changed
 *                       every commit (except reactor and activate commits)
 ```
+
+## Step 12: P4, people and access (OIDC, share links, the guest claim, explain.can)
+
+P4 is done in commit `4ff910e`. Audiences, grants, caps and the access
+check with its trace already existed from P1 and P2. P4 adds what the plan
+lists on top of them:
+- sign-in with OIDC (PKCE and a nonce, Zitadel in production);
+- share links with redemption, revocation and view review;
+- the guest limits (30 new guests per address per hour, the 90-day sweep);
+- the cross-site guest claim;
+- `explain.can`.
+
+The exit criteria all have tests:
+- the audience × subject scenario suite;
+- the cross-site guest claim;
+- link redemption;
+- reopen versus revoked.
+
+Writing the scenario suite exposed one access bug: store principals
+matched audience grants. It also exposed one link bug, a needless grant
+for someone who already had the level.
+
+### Prompt Context
+
+**User prompt (verbatim):** see Step 6 and Step 11 ("also remember to
+commit at appropriate intervals and keep a detailed diary as you work
+(using the diary format from the skill)").
+
+**Assistant interpretation:** Build P4 as guide §7, §11.5 and §13.1
+describe, porting SLOP-011's links and claim and v2's OIDC client, and test
+the exit criteria.
+
+**Inferred user intent:** Guests must reach the Blocks workspaces, and
+people must sign in through Zitadel, for the final verification.
+
+**Commit (code):** `4ff910e` — "P4: people and access — OIDC sign-in,
+share links, guest claim, limits and sweep, explain.can".
+
+### What I did
+
+- **OIDC.**
+  - `pkg/identity/oidc.go` is v2's relying party (lazy discovery, S256
+    PKCE, nonce, a userinfo fallback for missing claims). It now has its
+    own `Identity` type and uses the standard `errors` package.
+  - `pkg/server/oidc.go`: `setupOIDC` runs in `Build`. It reads
+    `client_id_file`, `client_secret_file` and `scope` from the config.
+    `oidcStart` and `oidcCallback` are wired to `/auth/login` and
+    `/auth/callback`, and `signInFailed` shows a page with "Continue
+    signing in".
+  - `system.db` migration `002_login_flows.sql` and `pkg/system/flows.go`:
+    a flow lives ten minutes, is bound to its browser by a cookie whose
+    hash is stored, and is consumed once.
+- **Links.**
+  - `pkg/system/links.go`: `CreateLink` (the token is shown once and
+    stored as a hash), `Links` (with `uses`, the grants the link gave that
+    still stand), `LinkByID`, `RevokeLink` (sets `revoked_at` and deletes
+    only the grants with `via` = the link id), and `RedeemLink`.
+  - On the live host, `/_site/views` accepts `link`. A visitor without a
+    session gets a guest id when they bring a link, even on a store that
+    gives guests nothing.
+  - `/_site/links` and `/_site/links/<id>/revoke` are for owners.
+    `/_site/access` now lists the live links.
+  - Verbs: `link.new` (with `--url` it returns the full `?k=` address),
+    `link.ls`, `link.rm`.
+- **Guests.**
+  - `pkg/system/guests.go`: `GuestsFrom` (the hourly limit), `StaleGuests`,
+    `DeleteGuest`, `SubjectGrants`, `MoveGrants`, `SettleClaim`.
+  - `pkg/kernel/guests.go`: `GuestPlaces` (stores granted to the guest or
+    to `@guest`), `PrivateDocs`, and `SweepGuests`, which deletes
+    `data/users/<vis>/` documents in a system turn and then the person.
+  - The server sweeps once at start and then daily. `guest.sweep --days`
+    does the same for admins.
+- **The claim.** `/_site/me` returns
+  `claim: {docs, grants, places}` when the site session was created over a
+  guest (`from_guest`). `/_site/claim {keep}` either copies private
+  documents to `data/users/<usr>/` (skipping ones the person already has)
+  and moves the grants, or does neither. Both settle the offer.
+- **`explain.can`.** `store [level] --subject … --path … --op read|write`.
+  Admins may ask about anyone (a person, an email, `store:<id>` or
+  `anonymous`); others only about themselves.
+- `grant.set` and `grant.rm` call `Env.AccessChanged`, which is the
+  server's `reviewViews`, so open views reopen or close.
+- The shell marks link grants by a `lnk_` via instead of any non-empty via,
+  since v3's default via is `direct`.
+
+### Why
+
+- Flows are kept in `system.db`, not in a cookie, because the PKCE
+  verifier must not travel with the browser. The cookie holds only a
+  binding whose hash the flow stores.
+- People are matched by email (`SignInUser`), so the callback requires
+  `email_verified`. Without that, anyone could register someone else's
+  address at the provider and take over their account.
+- The claim works across stores because v3 has no single documents
+  database: it looks at the stores granted to the guest and the stores open
+  to every guest.
+
+### What worked
+
+```text
+$ GOWORK=off go test ./pkg/server -run 'TestAccessScenarios|TestShareLinks|TestGuestClaim|TestGuestLimitAndSweep|TestOIDCSignIn' -count=1 -v
+--- PASS: TestShareLinks (0.03s)
+--- PASS: TestGuestClaim (0.04s)
+--- PASS: TestGuestLimitAndSweep (0.05s)
+--- PASS: TestOIDCSignIn (0.20s)
+(TestAccessScenarios passed after the fixes below)
+$ GOWORK=off go test ./... -count=1
+ok pkg/blobs  ok pkg/rt  ok pkg/server (1.549s)  ok pkg/store
+```
+
+- The OIDC flow against a fake provider in the test (discovery, JWKS,
+  authorize, token with a real S256 check, RS256 ID token signed with
+  go-jose) works end to end. A callback from another browser is refused
+  (400), and the local form answers 404 while OIDC is configured.
+
+### What didn't work
+
+1. **Store principals matched audience grants** (a real bug). The first
+   run of the matrix:
+
+```text
+case 1 (map[@guest:view]), store: level view, want none
+  trace: [audience member (store:other) grant @guest view on s (direct)]
+case 3 (map[@member:interact]), store: level interact, want none
+```
+
+   `AudienceOf` gives store principals `member`, so every `@member` grant
+   gave every actor access through read aliases. That contradicts §7.5
+   (`store:<id>` is how an actor gets cross-store access) and P3's
+   `bind.set` doc. Fix: `access.Matches` lets a store principal match only
+   `store:<id>`.
+2. **A link wrote a grant for someone who already had the level** (a
+   real bug):
+
+```text
+p4_test.go:205: link uses = map[lnk_92b9…:1 lnk_cbba…:1]
+```
+
+   The owner opened a view link and got a link grant. `RedeemLink`
+   compared only explicit grants, but the owner's level comes from
+   creation, and an admin's from their role. `RedeemLink` now takes the
+   caller's effective level (`have`, from `Access.Level`).
+3. **Wrong expectations in my matrix** (not bugs):
+   - The admin persona created the store, so it read as `owner`. I added a
+     second admin who is not the creator.
+   - A member's direct `owner` grant reads as `admin`, because §7.5 caps
+     members at admin. Owner comes only from creation.
+4. **The claim test read an empty document:**
+
+```text
+p4_test.go:257: claimed doc = map[]
+```
+
+   `docs.get` hides `data/users/<id>/` even from admins, as the contract
+   says. The claim had worked. The test now reads through the store
+   (`privateDoc`). The sweep test had passed vacuously for the same
+   reason; it now also checks that the document existed before the sweep.
+5. **The fake OIDC provider's token response was rejected:**
+
+```text
+oidc exchange: exchange authorization code: oauth2: cannot fetch token: 400 Bad Request
+Response: {"error":"invalid_grant"}
+```
+
+   Tracing the fake provider showed two token requests. The first had
+   basic auth and passed every check, and the second carried `client_id`
+   in the form. My handler did not set `Content-Type: application/json`,
+   so `oauth2` parsed the JSON as form data and found no `access_token`.
+   Its auto-detected auth style then retried with the credentials in the
+   body, and the code had already been used. Fix in the fixture: set the
+   content type.
+6. The trace assertion compared against `json.Marshal` output, which
+   escapes `<` as `<`. It now uses `fmt.Sprint`.
+
+### What I learned
+
+- `golang.org/x/oauth2`'s auto-detected auth style retries a failed token
+  request with the other style. A provider that fails the first attempt
+  for any reason, even a malformed success response, sees the code twice.
+- In v3's grant model (several grants per subject, keyed by `via`), "a
+  link never lowers" holds by itself, because the highest grant wins. The
+  remaining question is whether to write a grant at all, and that needs
+  the effective level, not the grant list.
+
+### What was tricky to build
+
+- **The claim across stores.** v2 found a visitor's private documents
+  with one Postgres query. v3 needs the set of stores to look in, and a
+  guest can only have written where it had a level: stores granted to the
+  guest id, or to `@guest`. `GuestPlaces` is that set, and the sweep uses
+  it too.
+- **Reopen versus revoked.** After revoking a link, the guest still had
+  `@guest view`, so the view must stay open. Only removing that grant
+  leaves no level and closes it. The test walks through both states.
+
+### What warrants a second pair of eyes
+
+- `access.Matches` for store principals: P3's read aliases depend on it.
+  An actor reading a public store now needs `store:<id>` granted there
+  too.
+- `oidcCallback` deletes the flow before checking the binding (in
+  `ConsumeLoginFlow`). A wrong-browser callback burns the flow, as in v2.
+  The user just signs in again.
+- `SweepGuests` deletes documents store by store, then the person. A crash
+  in between leaves a guest with fewer documents, and the next sweep
+  finishes it.
+
+### What should be done in the future
+
+- RP-initiated logout at Zitadel (`LogoutURL` is ported but not wired).
+- People search and roles in the back office (P7).
+- A `link.new --mount` that builds the URL from a mount instead of `--url`.
+
+### Code review instructions
+
+- `pkg/server/oidc.go` with `pkg/system/flows.go`.
+- `pkg/server/sitelinks.go` (`siteClaim`, `redeemLink`), and
+  `pkg/system/links.go` (`RedeemLink`, `RevokeLink`).
+- `pkg/access/check.go`: `Matches`.
+- Validate:
+  - `GOWORK=off go test ./pkg/server -run 'Access|Share|Claim|Guest|OIDC' -v`;
+  - by hand:
+    `slop link new <store> interact --days 7 --url http://apps.localhost:18300/<path>`,
+    then open the URL in a private window.
+
+### Technical details
+
+The scenario matrix (rows are grants on store `s`, columns are personas):
+
+```text
+                     anon   guest  pending member  sub    admin  creator disabled store:other
+(none)               none   none   none    none    none   admin  owner   none     none
+@guest view          view   view   view    view    view   admin  owner   none     none
+@guest admin         inter  inter  inter   admin   admin  admin  owner   none     none
+@member interact     none   none   none    inter   inter  admin  owner   none     none
+@subscriber interact none   none   none    none    inter  admin  owner   none     none
+@member view +
+  mia owner          none   none   none    admin   view   admin  owner   none     none
+vis_… interact       none   inter  none    none    none   admin  owner   none     none
+store:other view     none   none   none    none    none   admin  owner   none     view
+```
