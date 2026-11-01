@@ -552,7 +552,8 @@ func (s *Server) reviewViews(ctx context.Context, id string) {
 		switch {
 		case d.Level == rt.LevelNone:
 			s.rt.views.Close(v, true)
-		case d.Level != v.Level:
+		case s.told.changed(v.ID, v.Level, d.Level):
+			// The page reopens at the new level (the shell does this).
 			v.Send(rt.Out{Type: "access", Data: map[string]any{"level": d.Level.String()}})
 		}
 	}

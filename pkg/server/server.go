@@ -11,6 +11,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/go-go-golems/slop/pkg/billing/stripe"
 	"github.com/go-go-golems/slop/pkg/config"
 	"github.com/go-go-golems/slop/pkg/httpx"
 	"github.com/go-go-golems/slop/pkg/identity"
@@ -32,12 +33,17 @@ type Server struct {
 	// oidcLogin starts an OIDC sign-in (nil until OIDC is configured).
 	oidcLogin func(w http.ResponseWriter, r *http.Request, ret string)
 	oidc      *identity.Provider
+	billing   *stripe.Service
+	told      notified
 }
 
 // Build makes the server with everything the configuration enables.
 func Build(ctx context.Context, cfg *config.Config, sys *system.DB, env *verbs.Env) (*Server, error) {
 	s := New(cfg, sys, env)
 	if err := s.setupOIDC(); err != nil {
+		return nil, err
+	}
+	if err := s.setupBilling(); err != nil {
 		return nil, err
 	}
 	return s, nil
@@ -53,6 +59,7 @@ func New(cfg *config.Config, sys *system.DB, env *verbs.Env) *Server {
 	}
 	s.rt = newRT(key)
 	env.AccessChanged = s.reviewViews
+	env.PersonChanged = s.reviewPerson
 	s.rt.views.OnClose = s.roomClosed
 	if env != nil && env.K != nil {
 		env.K.Subscribe(s.publish)
@@ -116,6 +123,7 @@ func (s *Server) mainRoutes(m *http.ServeMux) {
 	m.HandleFunc("GET /auth/handoff", s.handoff)
 	s.authRoutes(m)
 	s.deviceRoutes(m)
+	s.billingRoutes(m)
 	s.apiRoutes(m)
 }
 
@@ -124,6 +132,9 @@ func (s *Server) ListenAndServe(ctx context.Context) error {
 	srv := &http.Server{Addr: s.Cfg.Listen, Handler: s, ReadHeaderTimeout: 10 * time.Second}
 	if s.Env.A != nil {
 		s.Env.A.Start(ctx)
+	}
+	if s.billing != nil {
+		go func() { _ = s.billing.Run(ctx) }()
 	}
 	go func() {
 		t := time.NewTicker(time.Minute)
@@ -134,6 +145,7 @@ func (s *Server) ListenAndServe(ctx context.Context) error {
 				return
 			case now := <-t.C:
 				s.rt.views.Sweep(now)
+				s.reviewAll(ctx) // comps and subscription periods that ended
 			}
 		}
 	}()

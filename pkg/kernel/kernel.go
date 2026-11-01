@@ -48,8 +48,10 @@ func New(cfg *config.Config, sys *system.DB) (*Kernel, error) {
 	if err != nil {
 		return nil, err
 	}
-	return &Kernel{Cfg: cfg, Sys: sys, Blobs: b, Access: &access.Checker{Sys: sys},
-		open: map[string]*store.Store{}, subs: map[int]func(*store.Commit){}}, nil
+	k := &Kernel{Cfg: cfg, Sys: sys, Blobs: b, Access: &access.Checker{Sys: sys},
+		open: map[string]*store.Store{}, subs: map[int]func(*store.Commit){}}
+	k.Access.Subscribed = func(ctx context.Context, person string) bool { return k.Standing(ctx, person).Allowed }
+	return k, nil
 }
 
 func (k *Kernel) dir(id string) string { return filepath.Join(k.Cfg.Data, "stores", id) }

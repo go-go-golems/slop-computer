@@ -26,6 +26,7 @@ require (
 	github.com/kr/text v0.2.0 // indirect
 	github.com/muhlemmer/gu v0.3.1 // indirect
 	github.com/spf13/pflag v1.0.9 // indirect
+	github.com/stripe/stripe-go/v86 v86.1.1 // indirect
 	github.com/zitadel/schema v1.3.2 // indirect
 	go.opentelemetry.io/auto/sdk v1.2.1 // indirect
 	go.opentelemetry.io/otel v1.46.0 // indirect

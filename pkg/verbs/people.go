@@ -106,6 +106,9 @@ func init() {
 				if err != nil {
 					return nil, Errf("invalid_argument", "%s", err.Error())
 				}
+				if e.PersonChanged != nil {
+					e.PersonChanged(ctx, pp.ID)
+				}
 				return pp, nil
 			}},
 		&Verb{Name: "log.system", Doc: "The platform log: sign-ups, roles, tokens, grants, mounts, policy.", Scope: Read, AdminOnly: true,

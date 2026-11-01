@@ -8,6 +8,7 @@ import (
 
 	"github.com/go-go-golems/slop/pkg/access"
 	"github.com/go-go-golems/slop/pkg/actor"
+	"github.com/go-go-golems/slop/pkg/billing/stripe"
 	"github.com/go-go-golems/slop/pkg/config"
 	"github.com/go-go-golems/slop/pkg/kernel"
 	"github.com/go-go-golems/slop/pkg/rt"
@@ -22,9 +23,15 @@ type Env struct {
 	K   *kernel.Kernel
 	A   *actor.Manager
 
+	// Billing is the Stripe service (nil without a stripe config).
+	Billing *stripe.Service
+
 	// AccessChanged is called after a verb changed who may open a store
 	// (grants, links), so the server can review its open views.
 	AccessChanged func(ctx context.Context, store string)
+	// PersonChanged is called after a person's audience may have changed
+	// (role, comps), so the server can review their open views.
+	PersonChanged func(ctx context.Context, person string)
 }
 
 // open checks that p holds need on a store and opens it. A denial carries

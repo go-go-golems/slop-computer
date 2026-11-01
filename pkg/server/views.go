@@ -932,6 +932,7 @@ func (s *Server) announce(target, room string) {
 }
 
 func (s *Server) roomClosed(v *rt.View, rooms []string) {
+	s.told.forget(v.ID)
 	s.rt.roomMu.Lock()
 	delete(s.rt.joined, v.ID)
 	s.rt.roomMu.Unlock()
