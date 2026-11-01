@@ -23,6 +23,20 @@ func appName(name string) bool {
 	return n != "" && !strings.HasPrefix(n, "_") && !strings.HasPrefix(n, "sqlite_") && !strings.HasPrefix(n, "slop_")
 }
 
+// sqliteMade reports objects SQLite creates itself for app DDL:
+// sqlite_sequence for AUTOINCREMENT, and the automatic index of a
+// non-integer PRIMARY KEY or UNIQUE column (arg2 is its table).
+func sqliteMade(action int, a1, a2 string) bool {
+	n := strings.ToLower(a1)
+	switch action {
+	case sqlite3.SQLITE_CREATE_TABLE:
+		return n == "sqlite_sequence"
+	case sqlite3.SQLITE_CREATE_INDEX, sqlite3.SQLITE_DROP_INDEX:
+		return strings.HasPrefix(n, "sqlite_autoindex_") && appName(a2)
+	}
+	return false
+}
+
 func schemaTable(name string) bool {
 	n := strings.ToLower(name)
 	return n == "sqlite_master" || n == "sqlite_schema" || n == "sqlite_temp_master"
@@ -63,8 +77,7 @@ func (s *Store) authorize(action int, a1, a2, dbName string) int {
 		return sqlite3.SQLITE_DENY
 	case sqlite3.SQLITE_CREATE_TABLE, sqlite3.SQLITE_CREATE_INDEX, sqlite3.SQLITE_CREATE_VIEW, sqlite3.SQLITE_CREATE_TRIGGER,
 		sqlite3.SQLITE_DROP_TABLE, sqlite3.SQLITE_DROP_INDEX, sqlite3.SQLITE_DROP_VIEW, sqlite3.SQLITE_DROP_TRIGGER:
-		if caller == CallerMigration && (appName(a1) || (action == sqlite3.SQLITE_CREATE_TABLE && strings.EqualFold(a1, "sqlite_sequence"))) {
-			// AUTOINCREMENT makes SQLite create sqlite_sequence itself.
+		if caller == CallerMigration && (appName(a1) || sqliteMade(action, a1, a2)) {
 			if t != nil {
 				t.schema = true
 			}

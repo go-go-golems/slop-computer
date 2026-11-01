@@ -28,6 +28,7 @@ type harness struct {
 	cfg *config.Config
 	sys *system.DB
 	k   *kernel.Kernel
+	a   *actor.Manager
 }
 
 func newHarness(t *testing.T) *harness {
@@ -51,7 +52,7 @@ func newHarness(t *testing.T) *harness {
 	}
 	ts := httptest.NewServer(srv)
 	t.Cleanup(ts.Close)
-	return &harness{t: t, ts: ts, cfg: cfg, sys: sys, k: k}
+	return &harness{t: t, ts: ts, cfg: cfg, sys: sys, k: k, a: env.A}
 }
 
 // browser is a cookie-keeping client that sends Host: main.

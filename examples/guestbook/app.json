@@ -1,0 +1,11 @@
+{
+  "title": "Guestbook",
+  "page": "index.html",
+  "actor": "actor.js",
+  "type": "guestbook",
+  "capabilities": {
+    "db":     { "rules": [{ "path": "entries", "read": "view", "write": "admin" }] },
+    "user":   {},
+    "sample": {}
+  }
+}

@@ -333,6 +333,14 @@ func (a *Actor) handle(ev *event) {
 		}
 		if target.reply != nil {
 			target.reply <- result{err: a.asError(err)}
+		} else {
+			// Nobody waits for a reactor or an alarm: the log is where
+			// its failure shows. Its turn rolled back and will be retried.
+			what := target.kind
+			if target.name != "" {
+				what += " " + target.name
+			}
+			a.log("error", what+" failed: "+a.asError(err).Message)
 		}
 		a.m.afterTurn(a, cur)
 		return
@@ -441,7 +449,9 @@ func (a *Actor) crashed() {
 func (a *Actor) ctxObject(ev *event) *goja.Object {
 	vm := a.vm
 	o := vm.NewObject()
-	_ = o.Set("visitor", a.toJS(ev.visitor))
+	vis := a.toJS(ev.visitor)
+	_ = o.Set("visitor", vis)
+	_ = o.Set("principal", vis) // the lab's name for it
 	_ = o.Set("store", a.toJS(map[string]any{"id": a.st.ID, "type": a.st.Meta("type")}))
 	_ = o.Set("app", a.toJS(map[string]any{"id": a.run.App, "version": a.run.N}))
 	_ = o.Set("event", a.toJS(map[string]any{"kind": ev.kind, "name": ev.name, "late": ev.late}))
