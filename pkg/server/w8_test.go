@@ -49,6 +49,35 @@ func TestWorkshopApp(t *testing.T) {
 	if len(cs) != 3 || cs[1].(map[string]any)["agent"] != true || !strings.Contains(fmtAny(cs[2]), "published #") {
 		t.Fatalf("thread = %s", fmtAny(doc))
 	}
+	// Files: push one file onto a snapshot (the rest kept by hash), remove
+	// one, or replace the whole tree; each is a new draft, main untouched.
+	h.call(admin, "files.push", map[string]any{"store": "site", "ref": "draft", "files": files(map[string]string{
+		"index.html": "<h1>three</h1>", "style.css": "h1{}", "img/a.svg": "<svg/>"})})
+	base := h.call(admin, "snap.ls", map[string]any{"store": "site"}).([]any)[0].(map[string]any)["n"]
+	listed := fmtAny(call("files", map[string]any{"store": "site", "n": base}))
+	if !strings.Contains(listed, "style.css") || !strings.Contains(listed, "img/a.svg") {
+		t.Fatalf("files = %s", listed)
+	}
+	if got := call("read", map[string]any{"store": "site", "n": base, "path": "style.css"}); got != "h1{}" {
+		t.Fatalf("read = %v", got)
+	}
+	p1 := call("push", map[string]any{"store": "site", "n": base, "put": []any{map[string]any{"path": "style.css", "text": "h1{color:red}"}}}).(map[string]any)
+	p2 := call("push", map[string]any{"store": "site", "n": p1["n"], "remove": []any{"img/a.svg"}}).(map[string]any)
+	tree := fmtAny(h.call(admin, "files.ls", map[string]any{"store": "site", "at": "draft"}))
+	if !strings.Contains(tree, "index.html") || strings.Contains(tree, "img/a.svg") ||
+		h.call(admin, "files.cat", map[string]any{"store": "site", "at": "draft", "path": "style.css"}) != "h1{color:red}" {
+		t.Fatalf("after push and remove, draft #%v = %s", p2["n"], tree)
+	}
+	if _, body := h.get(static, "/site/"); !strings.Contains(body, "4em") {
+		t.Fatalf("file pushes moved main: %s", body)
+	}
+	h.fail(admin, "actor.call", map[string]any{"store": "workshop", "action": "push", "args": map[string]any{"store": "site", "n": base,
+		"put": []any{map[string]any{"path": "../x", "text": "no"}}}}, "invalid_argument")
+	call("push", map[string]any{"store": "site", "n": p2["n"], "replace": true, "put": []any{map[string]any{"path": "index.html", "text": "only"}}})
+	if tree := fmtAny(h.call(admin, "files.ls", map[string]any{"store": "site", "at": "draft"})); strings.Contains(tree, "style.css") {
+		t.Fatalf("replace kept old files: %s", tree)
+	}
+
 	call("resolve", map[string]any{"thread": th["id"]})
 	if s := h.call(admin, "docs.get", map[string]any{"store": "workshop", "path": "threads/" + th["id"].(string)}).(map[string]any)["body"].(map[string]any)["status"]; s != "resolved" {
 		t.Fatalf("status = %v", s)

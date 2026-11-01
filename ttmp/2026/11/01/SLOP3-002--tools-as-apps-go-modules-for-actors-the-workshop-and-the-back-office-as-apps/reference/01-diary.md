@@ -1134,3 +1134,76 @@ slop push ./wsite --ref draft     →    (reply names #11: page reloads snapshot
 slop call workshop reply {...n:11}→    view #11 → Publish #11 → ref.move main
                                         static host serves #11
 ```
+
+## Step 10: the Workshop's Files view
+
+The Workshop could preview, comment and publish, but not show a store's
+files or change them from the browser. It now has a Files view: the files
+of the selected snapshot, each shown read-only, and three ways to push
+onto that snapshot. "Add files…" puts files into the selected file's
+folder, replacing same-named ones. "Push a folder…" makes a folder the
+whole tree, as `slop push` does. "Remove" deletes the selected file. Each
+makes a new draft, and `main` does not move until someone publishes.
+
+### Prompt Context
+
+**User prompt (verbatim):** "how can I edit a site in workshop? I am
+admin but I can only comment on elements, I don't think I see the files of
+the store?" and, while it was being built, "files view, push, no editor
+though."
+
+**Assistant interpretation:** Add a file browser and browser-side pushing
+to the Workshop, without an in-page text editor (an editor was started,
+then replaced after the second message).
+
+**Inferred user intent:** Admins should be able to change a site from the
+Workshop by pushing files, while editing itself happens in their own
+tools or by agents.
+
+### What I did
+
+- `apps/workshop/actor.js`: actions `files({store, n})`,
+  `read({store, n, path})` and `push({store, n, put, remove, replace,
+  message})`. `push` rebuilds snapshot n's tree with unchanged files by
+  hash (`{path, sha256, size, type}`), so nothing is uploaded again; `put`
+  entries are `{path, text}` or `{path, data}` (base64); paths with `..` or
+  empty segments are refused; `ref` defaults to `draft` through the module.
+- `apps/workshop/index.html`, `app.js`, `styles.css`: a Preview/Files
+  switch; the file list; a read-only viewer (files over 512 KB are not
+  shown); "Add files…", "Push a folder…" (dotfiles skipped), "Remove", and
+  a confirmation bar in the page for the last two.
+- `pkg/server/w8_test.go`: file list, read, push one file, remove one,
+  replace the tree, refuse `../x`, and `main` unchanged.
+- `scripts/05-workshop-files-e2e.mjs`, screenshot `various/files/`.
+
+### Why
+
+- A confirmation bar in the page rather than `confirm()`: browsers limit
+  dialogs opened by cross-origin frames, and the Workshop runs in one.
+- Pushing onto the selected snapshot (not onto the working tree) makes
+  each push a precise change from a version the person is looking at.
+
+### What worked
+
+- `05-workshop-files-e2e.mjs`: 7 checks, `all passed` (add files → new
+  draft with a green button in the preview; remove; folder push;
+  static host unchanged). `go test ./pkg/server`: `ok`.
+
+### What didn't work
+
+- The first screenshot showed the middle column scrolling sideways: long
+  lines in the viewer and the toolbar widened the grid track (a `1fr`
+  track's minimum is its content). Fixed with `minmax(0, 1fr)` tracks,
+  `min-width: 0`, and a wrapping toolbar on its own row.
+- The second run failed at `waiting for locator('#flist
+  li[data-path="style.css"]')`: the first run's folder push had left a
+  draft without `style.css`. The script now pushes a known draft first.
+
+### What warrants a second pair of eyes
+
+- Uploads travel as JSON through the actor (base64 for binary files), so
+  large images are slow; `slop push` remains the path for big trees.
+
+### Code review instructions
+
+- `push` in `apps/workshop/actor.js`; the Files section of `app.js`.

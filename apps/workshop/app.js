@@ -34,7 +34,8 @@
   };
 
   const frame = $('frame');
-  const state = { stores: [], store: '', snaps: [], refs: {}, n: 0, threads: [], origin: '', focus: '', anchor: null, picking: false, off: null };
+  const state = { stores: [], store: '', snaps: [], refs: {}, n: 0, threads: [], origin: '', focus: '', anchor: null, picking: false, off: null,
+    mode: 'preview', previewN: 0, files: [], file: '' };
 
   // --- stores and snapshots ---------------------------------------------
 
@@ -61,8 +62,13 @@
     state.n = n || s.refs.draft || s.refs.main || (s.snapshots[0] && s.snapshots[0].n) || 0;
     watch();
     renderSnaps();
-    await preview();
+    $('v-preview').disabled = $('v-files').disabled = false;
+    state.file = '';
+    await showCurrent();
   }
+
+  // showCurrent shows snapshot n in the current mode.
+  function showCurrent() { return state.mode === 'files' ? loadFiles() : preview(); }
 
   function renderSnaps() {
     const refs = state.refs;
@@ -80,7 +86,7 @@
   function show(n) {
     state.n = n;
     renderSnaps();
-    preview();
+    showCurrent();
   }
 
   // refresh reloads the snapshots and refs (an agent pushed a new draft).
@@ -104,11 +110,31 @@
   async function preview() {
     const p = await act('preview', { store: state.store, n: state.n, parent: location.origin });
     state.origin = new URL(p.url).origin;
+    state.previewN = state.n;
     frame.src = p.url;
     $('at').textContent = `${state.store} #${state.n}`;
     $('pick').disabled = false;
     setPick(false);
   }
+
+  function setMode(m) {
+    state.mode = m;
+    $('v-preview').setAttribute('aria-pressed', String(m === 'preview'));
+    $('v-files').setAttribute('aria-pressed', String(m === 'files'));
+    frame.hidden = m !== 'preview';
+    $('files').hidden = m !== 'files';
+    if (m === 'files') {
+      setPick(false);
+      $('pick').disabled = true;
+      loadFiles();
+    } else if (state.previewN !== state.n) {
+      preview();
+    } else {
+      $('pick').disabled = false;
+    }
+  }
+  $('v-preview').onclick = () => setMode('preview');
+  $('v-files').onclick = () => setMode('files');
 
   function send(m) {
     if (state.origin && frame.contentWindow) frame.contentWindow.postMessage({ slop: 1, ...m }, state.origin);
@@ -142,6 +168,99 @@
       }
     }
   });
+
+  // --- files: look at a snapshot's tree, push files onto it ---------------
+
+  const size = (n) => (n < 1024 ? n + ' B' : n < 1048576 ? (n / 1024).toFixed(1) + ' KB' : (n / 1048576).toFixed(1) + ' MB');
+  const folderOf = (p) => (p.includes('/') ? p.slice(0, p.lastIndexOf('/') + 1) : '');
+
+  async function loadFiles() {
+    $('at').textContent = `${state.store} #${state.n}`;
+    state.files = await act('files', { store: state.store, n: state.n });
+    if (!state.files.some((f) => f.path === state.file)) state.file = '';
+    renderFiles();
+    if (state.file) openFile(state.file);
+    else { $('fpath').textContent = 'Pick a file.'; $('fview').textContent = ''; $('frm').disabled = true; }
+  }
+
+  function renderFiles() {
+    $('flist').replaceChildren(...state.files.map((f) => el('li', { className: f.path === state.file ? 'on' : '', dataset: { path: f.path }, onclick: () => openFile(f.path) },
+      el('span', {}, f.path), el('span', { className: 'dim' }, size(f.size)))));
+  }
+
+  async function openFile(path) {
+    state.file = path;
+    renderFiles();
+    const f = state.files.find((x) => x.path === path);
+    $('fpath').textContent = `${path} · ${f.type} · ${size(f.size)} · #${state.n}`;
+    $('frm').disabled = false;
+    if (f.size > 512 * 1024) { $('fview').textContent = '(large file: not shown)'; return; }
+    const v = await act('read', { store: state.store, n: state.n, path });
+    $('fview').textContent = typeof v === 'string' ? v : `(binary ${f.type}, ${size(f.size)})`;
+  }
+
+  // confirmBar asks in the page (dialogs from a cross-origin frame are unreliable).
+  function confirmBar(question, yes) {
+    return new Promise((resolve) => {
+      $('fcq').textContent = question;
+      $('fcyes').textContent = yes;
+      $('fconfirm').hidden = false;
+      const done = (ok) => { $('fconfirm').hidden = true; resolve(ok); };
+      $('fcyes').onclick = () => done(true);
+      $('fcno').onclick = () => done(false);
+    });
+  }
+
+  // asPut reads a chosen file as text, or as base64 when it is not UTF-8.
+  async function asPut(file, path) {
+    const buf = new Uint8Array(await file.arrayBuffer());
+    try {
+      return { path, text: new TextDecoder('utf-8', { fatal: true }).decode(buf) };
+    } catch {
+      let s = '';
+      for (let i = 0; i < buf.length; i += 0x8000) s += String.fromCharCode(...buf.subarray(i, i + 0x8000));
+      return { path, data: btoa(s) };
+    }
+  }
+
+  async function pushFiles(args) {
+    const r = await act('push', { store: state.store, n: state.n, message: $('fmsg').value, ...args });
+    $('fmsg').value = '';
+    say(`Pushed draft #${r.n}: preview it, then publish`);
+    await refresh();
+    state.n = r.n;
+    renderSnaps();
+    await loadFiles();
+    overview();
+  }
+
+  // Add files: into the folder of the selected file (the root otherwise),
+  // replacing files of the same name.
+  $('fadd').onchange = async (e) => {
+    const list = [...e.target.files];
+    e.target.value = '';
+    if (!list.length) return;
+    const dir = state.file ? folderOf(state.file) : '';
+    await pushFiles({ put: await Promise.all(list.map((f) => asPut(f, dir + f.name))) });
+  };
+
+  // Push a folder: its contents become the whole tree, as slop push does.
+  $('fdir').onchange = async (e) => {
+    const list = [...e.target.files].filter((f) => !/(^|\/)\./.test(f.webkitRelativePath)); // no dotfiles
+    e.target.value = '';
+    if (!list.length) return;
+    const top = list[0].webkitRelativePath.split('/')[0];
+    if (!(await confirmBar(`Replace the ${state.files.length} files of ${state.store} with the ${list.length} files of ${top}/ (as a new draft)?`, 'Push folder'))) return;
+    const put = await Promise.all(list.map((f) => asPut(f, f.webkitRelativePath.split('/').slice(1).join('/'))));
+    await pushFiles({ put, replace: true });
+  };
+
+  $('frm').onclick = async () => {
+    const p = state.file;
+    if (!p || !(await confirmBar(`Remove ${p} (as a new draft)?`, 'Remove'))) return;
+    state.file = '';
+    await pushFiles({ remove: [p] });
+  };
 
   // --- threads ------------------------------------------------------------
 

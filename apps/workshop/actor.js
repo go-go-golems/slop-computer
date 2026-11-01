@@ -55,6 +55,42 @@ defineActor({
       return await tool(ctx).preview(store, String(n), parent);
     },
 
+    async files(ctx, { store, n }) {
+      ctx.need('view');
+      return await tool(ctx).files(store, String(n));
+    },
+
+    // A text file's content, or {data, …} (base64) for a binary one.
+    async read(ctx, { store, n, path }) {
+      ctx.need('view');
+      return await tool(ctx).read(store, String(n), path);
+    },
+
+    // Push files onto snapshot n: put adds or replaces files ({path, text}
+    // or {path, data} in base64), remove deletes paths, replace makes put
+    // the whole tree (a folder push). The rest of the tree is kept by hash.
+    // The result is a new snapshot on draft; main, which visitors see, does
+    // not move until someone publishes.
+    async push(ctx, { store, n, put, remove, replace, message }) {
+      ctx.need('admin');
+      const w = tool(ctx);
+      const clean = (p) => {
+        const q = text(p, 300).replace(/^\/+/, '');
+        if (!q || q.split('/').some((s) => s === '..' || s === '')) ctx.fail('invalid_argument', 'a file path in the tree, like index.html or css/site.css');
+        return q;
+      };
+      const files = (Array.isArray(put) ? put : []).map((f) => (f.data != null
+        ? { path: clean(f.path), data: String(f.data) }
+        : { path: clean(f.path), text: String(f.text == null ? '' : f.text) }));
+      const gone = new Set([...(Array.isArray(remove) ? remove : []).map(clean), ...files.map((f) => f.path)]);
+      const kept = replace ? [] : (await w.files(store, String(n)))
+        .filter((f) => !gone.has(f.path))
+        .map((f) => ({ path: f.path, sha256: f.sha256, size: f.size, type: f.type }));
+      if (!files.length && !(Array.isArray(remove) && remove.length)) ctx.fail('invalid_argument', 'nothing to push');
+      const what = replace ? 'a folder' : [...files.map((f) => f.path), ...(remove || []).map((p) => '−' + p)].slice(0, 4).join(', ');
+      return await w.push(store, [...kept, ...files], { message: text(message, 200) || `${what} (onto #${n})` });
+    },
+
     comment(ctx, { store, n, anchor, text: body }) {
       ctx.need('interact');
       const a = anchor || {};

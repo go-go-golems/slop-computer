@@ -24,10 +24,28 @@
   <section class="col stage">
     <div class="bar">
       <span id="at" class="dim">Pick a store.</span>
+      <span class="seg"><button id="v-preview" class="btn" aria-pressed="true" disabled>Preview</button><button id="v-files" class="btn" aria-pressed="false" disabled>Files</button></span>
       <span class="sp"></span>
       <button id="pick" class="btn" aria-pressed="false" disabled>⊕ Comment on an element</button>
     </div>
     <iframe id="frame" title="Preview" referrerpolicy="no-referrer"></iframe>
+    <div id="files" class="files" hidden>
+      <div class="fcol">
+        <ul id="flist" class="list"></ul>
+      </div>
+      <div class="viewer">
+        <code id="fpath" class="dim">Pick a file.</code>
+        <div class="row">
+          <input id="fmsg" class="inp" placeholder="What changed (optional)" autocomplete="off">
+          <label class="btn">Add files…<input id="fadd" type="file" multiple hidden></label>
+          <label class="btn">Push a folder…<input id="fdir" type="file" webkitdirectory hidden></label>
+          <button id="frm" type="button" class="btn" disabled>Remove</button>
+        </div>
+        <div id="fconfirm" class="row confirm" hidden><span id="fcq"></span><span class="sp"></span>
+          <button id="fcyes" type="button" class="btn primary"></button><button id="fcno" type="button" class="btn">Cancel</button></div>
+        <pre id="fview" class="fview"></pre>
+      </div>
+    </div>
   </section>
   <aside class="col threads">
     <h2>Threads <span id="count" class="dim"></span></h2>
