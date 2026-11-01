@@ -598,3 +598,113 @@ workshop.publish('site', n)
 slop app follow jot-scratch draft
   → _meta.app_ref = draft → Running → migrations 002_tags.sql → tables [notes, tags]
 ```
+
+## Step 6: W5, inspect previews
+
+A tool can now show any snapshot the person may read in an iframe, with
+v2's bridge for pick mode and pins: `preview.url` (or
+`workshop.preview(store, at, location.origin)`) returns
+`http://p<label>.sbx…/`, which serves that snapshot at the root of its own
+origin for an hour. Commit `e7d4a7a`.
+
+### Prompt Context
+
+**User prompt (verbatim):** see Step 1.
+
+**Assistant interpretation:** Phase W5: previews table, verb, sandbox
+route, bridge, injection, CSP.
+
+**Inferred user intent:** Reviewing an agent's draft by pointing at
+elements, as in v2's Workshop, without exposing unpublished work.
+
+**Commit (code):** `e7d4a7a` — "W5: inspect previews on their own sandbox
+origins, with v2's pick-and-pin bridge".
+
+### What I did
+
+- `pkg/system/migrations/004_previews.sql`, `pkg/system/previews.go`:
+  `previews (label, store, n, person, parent, expires_at)`,
+  `CreatePreview` (also deletes expired rows), `PreviewByLabel` (only
+  unexpired).
+- `pkg/verbs/preview.go`: `preview.url` (store, at, parent). It needs a
+  person, `view` on the store, a `parent` that is an origin of this server
+  (`Env.serverOrigin`: main, a live host, or `<label>.<sandbox host>` with
+  a lowercase alphanumeric label), and resolves `at` (default `draft`,
+  else `main`).
+- `pkg/server/preview.go`: `servePreview` and `injectPreview`;
+  `serveSandbox` sends labels starting with `p` there (store origins start
+  with `s`). `insertHead` is factored out of `inject` and shared.
+- `pkg/server/assets/bridge.js`: v2's file, with a new header comment.
+- `workshop.preview(store, at, parent)`.
+- `pkg/server/w5_test.go`: `TestPreviews`.
+
+### Why
+
+- A random label rather than the guide's HMAC: the row is stored anyway,
+  so the label only has to be unguessable; there is nothing to recompute.
+- Access is re-checked per request, so revoking a grant ends a preview
+  immediately instead of after the hour.
+- A `window.claude` stub that resolves every capability to `null`: pages
+  of apps call `claude.use(…)`; in a preview they get the documented
+  "unavailable" answer instead of a `ReferenceError`.
+
+### What worked
+
+- `GOWORK=off go test ./pkg/server -run TestPreviews -count=1`: `ok`.
+- `GOWORK=off go test ./... -count=1`: all `ok`.
+
+### What didn't work
+
+- The first version sent `frame-ancestors <parent>` only, and the test
+  passed. It would have failed in a browser: CSP `frame-ancestors` is
+  checked against every ancestor, and a preview is framed by the tool's
+  sandbox page, which is itself framed by the shell on the live host. The
+  header now lists the parent plus the main and live origins
+  (`frameOrigins`), and the test checks the exact header for a tool
+  origin.
+
+### What I learned
+
+- `inject` in `pkg/server/sandbox.go` had
+  `bytes.ReplaceAll(raw, []byte("<"), []byte("<"))`, a no-op that looked
+  like escaping. `json.Marshal` already escapes `<`, `>` and `&` as
+  `<…`, so the boot JSON cannot close its script tag; the line is
+  replaced by a comment saying so (in both injectors).
+
+### What was tricky to build
+
+- Path resolution at the root: `/` is the manifest's entry (or
+  `index.html`), a trailing slash adds `index.html`, an extensionless path
+  falls back to `<path>/index.html`, and a missing file serves the
+  manifest's `notFound` page with 404 when there is one. Only
+  `/_slop/bridge.js` is served from the server's assets; every other path,
+  including other `/_slop/*` files a site carries (the boutique's
+  `_slop/page.js`), comes from the snapshot.
+
+### What warrants a second pair of eyes
+
+- `frame-ancestors` includes every live host and the main host, so any
+  shell of this server may be an ancestor; only the requesting sandbox
+  origin may be the direct sandbox parent. The bridge itself only posts to
+  `parentOrigin`.
+
+### What should be done in the future
+
+- W6: confirmations. W8 will exercise previews in a real browser.
+
+### Code review instructions
+
+- `pkg/server/preview.go`, `pkg/verbs/preview.go`; run
+  `GOWORK=off go test ./pkg/server -run TestPreviews -count=1`.
+
+### Technical details
+
+```text
+GET http://p5c1e…24hex.sbx.localhost:18399/
+  → previews row (unexpired) → person may view store? → snapshot n
+  → index.html with <script id=slop-boot>{"mode":"preview","parentOrigin":…}</script>
+                    <script>window.claude=…null stub…</script>
+                    <script src="/_slop/bridge.js?v=…"></script>
+  Content-Security-Policy: frame-ancestors <tool origin> <main> <live…>
+  Cache-Control: private, no-store
+```

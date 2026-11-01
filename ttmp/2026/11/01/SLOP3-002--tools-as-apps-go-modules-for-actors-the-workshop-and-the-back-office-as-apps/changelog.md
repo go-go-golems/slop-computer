@@ -43,3 +43,11 @@ W4 (1d619c5): workshop module, log.wait, app.follow
 ### Related Files
 
 - /home/manuel/code/wesen/2026-10-31--slop-v3/pkg/server/modworkshop.go — the workshop module
+
+## 2026-11-01
+
+W5 (e7d4a7a): inspect previews (random p-labels, per-request access check, bridge, frame-ancestors for tool and shells)
+
+### Related Files
+
+- /home/manuel/code/wesen/2026-10-31--slop-v3/pkg/server/preview.go — preview serving
