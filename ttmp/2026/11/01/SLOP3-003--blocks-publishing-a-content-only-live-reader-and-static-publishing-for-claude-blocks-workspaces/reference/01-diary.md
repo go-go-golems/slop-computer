@@ -576,3 +576,153 @@ and as a member.
   `http://site.localhost:18300/s/team-static/`, member
   `http://apps.localhost:18300/pub/my-notes-site/` and
   `http://site.localhost:18300/s/my-notes-static/`.
+
+## Step 6: B5, uploaded files
+
+Phase B5 publishes pictures and other files uploaded in Blocks. It needed
+two server changes and a decision. The decision: a binding shares the
+target's uploads only when set with `assets`, and setting it needs admin
+on the target, so an existing `store:<site> view` grant never starts
+covering uploads on its own. The server changes: the store handle
+describes uploads (never their bytes), and an actor route can answer
+`{asset: {from, id}}` so that the server, after rechecking the binding,
+sends the file. The site serves only uploads its published pages show and
+copies them into publications by hash. `TestBlocksSiteUploads` passed on
+its first run; the browser run uploads through Blocks' own upload block
+and ends with `all passed` after two script fixes. Commits `16fdc06` and
+`6ef1ed5`.
+
+### Prompt Context
+
+**User prompt (verbatim):** "Ok, do what you think is best, and commit
+at appropriate intervals and keep a detailed diary as you work (using the
+diary format from the skill)"
+
+This answered the question at the end of the previous exchange: whether
+uploads should come with every `view` grant (consistent with what people
+get, but widening existing grants) or need an explicit opt-in on the
+binding. The user had asked just before (verbatim): "so that's an API
+change for 2, allowing apps to potentially read upoaded files out of the
+system store?"
+
+**Assistant interpretation:** Implement the uploads phase with the
+explicit opt-in recommended in the answer.
+
+**Inferred user intent:** Pictures on published pages, without giving
+apps a general way to read stores' uploads.
+
+### What I did
+
+- `pkg/system/migrations/005_binding_assets.sql`: `bindings.assets`.
+  `pkg/system/bindings.go`: `Binding.Assets`, `DB.BindingOf`, the flag in
+  `Bindings`, `SetBinding` (logged as "(with uploads)").
+- `pkg/verbs/actors.go`: `bind.set` takes `assets`; with it, the target
+  needs admin instead of view.
+- `pkg/actor/modules.go`: `assets` on the store handle: `get(id)` and
+  `list()` returning `{id, type, size, sha256}`, `null` without the flag.
+- `pkg/actor/manager.go`: `Res.Asset` / `AssetRef`; `toRes` reads
+  `{asset: {from, id}}`. `pkg/server/actors.go`: `serveBoundAsset`
+  rechecks the binding flag and `store:<site>` view on the target, then
+  `serveBlob` with `sandbox; default-src 'none'`, and
+  `Content-Disposition: attachment` for anything but image, video, audio
+  or PDF (`isMedia`).
+- `apps/blocks-site`: CSP `img-src 'self' https: data:`; the site model
+  key includes whether uploads are shared; `shown(c)` (the uploads the
+  published pages render, via `render.mediaOf`); `GET /_media/:id`;
+  `publish` appends `{path: 'media/<id>', sha256, size, type}` per shown
+  upload; `status` and the settings page say whether uploads are shared.
+- `lib/render.js`: covers (the editor's eight presets copied from
+  `blocks.js` `COVERS`, https images, linear gradients, hex colours);
+  `each` templates (`F.itemsOf`, `F.aliasWith`); `file` records; records in
+  `image`, `video`, `audio`; https-only `image` URLs.
+- `pkg/server/b5_test.go`: `TestBlocksSiteUploads`, with a probe app whose
+  route answers `{asset}` for any id, to test the server's own checks.
+- `scripts/05-blocks-site-uploads-e2e.mjs`, screenshots in `various/b5/`;
+  `scripts/03-deploy-blocks-site.sh` now binds with `--assets true`.
+- Guide: section 5.8, sections 6.4 and 6.5, phase B5, API and file
+  references; the "Images" open question removed.
+
+### Why
+
+- Opt-in on the binding, consented by the target's admin: the person who
+  owns the uploads decides. A flag the site's admin could set alone would
+  let them widen the workspace admin's grant.
+- The server sends the bytes: goja strings are not binary-safe (`toRes`
+  turns `body` into `fmt.Sprint`), a 20 MB file would sit in JavaScript
+  memory, and the turn limit is 5 seconds. Naming the file keeps all of
+  that in Go.
+- The sandbox CSP and download disposition: the reader may run on the
+  live host, which holds session cookies; an uploaded HTML file served
+  there must not be a page.
+- Only shown uploads: the binding grants the site all of the workspace's
+  uploads; the site's policy narrows that to what is published.
+
+### What worked
+
+- Copying by hash: `files.push` accepts `{path, sha256, size, type}` for a
+  blob the server already holds; blobs are one content-addressed store per
+  server (`blobs.Open(filepath.Join(cfg.Data, "blobs"))` in
+  `pkg/kernel/kernel.go`), so a publication moves no bytes.
+- The test's probe app shows the server refusing on its own: 404 through a
+  binding without the flag, 200 with it, 404 again after `grant.rm`.
+- In the browser, Playwright's `setInputFiles` on the upload block's
+  hidden `<input type=file>` drives Blocks' real upload path
+  (`Files.store` → `assets.upload` → `photos += {…, id}`).
+
+### What didn't work
+
+- First browser run: `FAIL reader: the browser loads it (false px wide)`.
+  The image has `loading="lazy"` and sat below the fold; the check now
+  scrolls it into view and waits.
+- Second run: 4 failures. The script writes `handbook.photos = []` again
+  on each run and uploads a new picture, but it read the first matching
+  `photos +=` op, from the previous run (`a49b5d50aa3cf3c5c`). It now takes
+  this run's op (`o[4] >= since`). That previous upload then served as a
+  real orphan: `an upload no published page shows (a49b5d50aa3cf3c5c) answers 404`.
+- The generated CLI takes booleans with a value: `slop bind set --help`
+  shows `--assets string`, so the form is `--assets true`. The actor's
+  header comment and the guide were corrected.
+
+### What I learned
+
+- Blocks' `video`, `audio` and `image` elements accept a file record as
+  `src` (`srcOf` in `computer.js`), not only a URL.
+- `bind.set` states the whole binding: re-running it without `--assets`
+  turns sharing off, which is what the demo script did before this phase.
+
+### What was tricky to build
+
+- Knowing which uploads are published. They come from rendering
+  (templates resolve `each m in media` items through aliases), so
+  `mediaOf` renders every page once into a throwaway context and collects
+  the ids; it runs lazily, once per site model.
+
+### What warrants a second pair of eyes
+
+- `serveBoundAsset` trusts the actor to have applied its own policy
+  ("only shown uploads"); the server enforces only the binding flag and
+  the read grant. Another app with an assets binding may serve any upload
+  of its target.
+- A cover value goes into a `style` attribute; `coverOf` accepts only
+  presets, `https:` URLs without quotes, parentheses or backslashes,
+  `linear-gradient(...)` over a narrow character set, and hex colours.
+
+### What should be done in the future
+
+- The page runtime's own reads through bindings (`rpcSlopRead`) do not
+  see uploads; nothing needs them yet.
+
+### Code review instructions
+
+- `pkg/server/actors.go` (`serveBoundAsset`, `isMedia`),
+  `pkg/verbs/actors.go` (`bind.set`), `pkg/actor/modules.go` (`assets`).
+- `GOWORK=off go test ./pkg/server -run TestBlocksSite -count=1`;
+  `GOWORK=off go test ./... -count=1`; `-race` on `TestBlocksSite` passes.
+- Browser: `scripts/05-blocks-site-uploads-e2e.mjs <slop> <shots>`.
+
+### Technical details
+
+- The demo's `team-site` binding: `{"alias":"source","assets":true,"store":"team-site","target":"ws-team"}`.
+- The browser run captured an edit someone made in the editor during the
+  run (the heading reads "Yarn fosdfr people who knit in public" in
+  `b5-reader-picture.png`): the reader shows it, as it should.

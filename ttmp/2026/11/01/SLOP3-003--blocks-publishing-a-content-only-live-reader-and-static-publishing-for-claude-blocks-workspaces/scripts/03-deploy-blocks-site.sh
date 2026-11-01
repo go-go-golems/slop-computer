@@ -8,7 +8,8 @@
 # mount readers at /pub/:id (live host) and static sites at /s/:id (static
 # host). Then, as any member could for a workspace they administer: a site
 # for ws-team (team-site), public, and a static store for its snapshots
-# (team-static), public. Safe to repeat.
+# (team-static), public. The binding shares ws-team's uploads (the admin
+# administers both stores), so pictures are published too. Safe to repeat.
 set -eu
 repo=$(cd "$1" && pwd)
 SLOP=${SLOP:-$repo/slop}
@@ -23,7 +24,7 @@ $SLOP mount set "$LIVE_HOST" /pub/:id --storeParam id --type blocks-site >/dev/n
 $SLOP mount set "$STATIC_HOST" /s/:id --storeParam id --type site >/dev/null
 
 $SLOP store new team-site --app blocks-site --type blocks-site >/dev/null 2>&1 || true
-$SLOP bind set team-site source ws-team >/dev/null
+$SLOP bind set team-site source ws-team --assets true >/dev/null
 $SLOP grant set ws-team store:team-site view >/dev/null
 $SLOP grant set team-site @guest view >/dev/null
 $SLOP store new team-static --type site >/dev/null 2>&1 || true
