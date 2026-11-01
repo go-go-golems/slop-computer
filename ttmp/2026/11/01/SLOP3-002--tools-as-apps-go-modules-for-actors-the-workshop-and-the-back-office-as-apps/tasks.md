@@ -8,4 +8,4 @@
 - [x] W5: inspect previews (previews table, preview.url, sandbox p-labels, bridge.js, CSP) <!-- t:wqve -->
 - [x] W6: shell confirmation for governance writes (confirm.go, runtime retry, shell dialog, confirm.approve) <!-- t:tj0p -->
 - [x] W7: back office as an app (apps/backoffice, build.mjs --app) + Playwright check <!-- t:w89y -->
-- [ ] W8: Workshop app (apps/workshop) + Playwright check with CLI agent loop <!-- t:mrnn -->
+- [x] W8: Workshop app (apps/workshop) + Playwright check with CLI agent loop <!-- t:mrnn -->

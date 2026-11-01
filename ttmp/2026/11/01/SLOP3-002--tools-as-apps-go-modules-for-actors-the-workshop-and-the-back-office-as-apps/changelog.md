@@ -67,3 +67,11 @@ W7 (da05ae9): back office as an app; browser-verified confirmations and live ref
 ### Related Files
 
 - /home/manuel/code/wesen/2026-10-31--slop-v3/apps/backoffice/actor.js — the back office app's actor
+
+## 2026-11-01
+
+W8 (69c2316): Workshop app with a CLI agent loop; actor toJS now yields native JS values
+
+### Related Files
+
+- /home/manuel/code/wesen/2026-10-31--slop-v3/apps/workshop/actor.js — the Workshop app's actor

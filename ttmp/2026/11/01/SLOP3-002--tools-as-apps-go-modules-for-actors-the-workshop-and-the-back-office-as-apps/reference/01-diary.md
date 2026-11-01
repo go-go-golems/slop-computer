@@ -11,12 +11,22 @@ Topics:
 DocType: reference
 Intent: long-term
 Owners: []
-RelatedFiles: []
+RelatedFiles:
+    - Path: repo://apps/workshop/app.js
+      Note: the Workshop page
+    - Path: repo://pkg/actor/sysreact.go
+      Note: system log reactors
+    - Path: repo://pkg/server/modules.go
+      Note: actAs, callVerb, confirmations
+    - Path: repo://pkg/server/preview.go
+      Note: inspect previews
+    - Path: repo://pkg/verbs/confirm.go
+      Note: confirmations
 ExternalSources: []
-Summary: "Chronological record of SLOP3-002: the design guide and the implementation of phases W1 to W8."
+Summary: 'Chronological record of SLOP3-002: the design guide and the implementation of phases W1 to W8.'
 LastUpdated: 2026-11-01T16:20:14.512508729-05:00
-WhatFor: "Reviewing what was built in SLOP3-002, why, and what failed along the way."
-WhenToUse: "When resuming SLOP3-002 or reviewing one of its commits."
+WhatFor: Reviewing what was built in SLOP3-002, why, and what failed along the way.
+WhenToUse: When resuming SLOP3-002 or reviewing one of its commits.
 ---
 
 # Diary
@@ -969,4 +979,158 @@ page (sandbox) call('policy.set', {...})
   → verbs.Check ok → confirmation_required (cfm_…) → shell dialog → Allow
   → retry → policy.set as Ada, via app:backoffice → system log
   → system:* reactor → ui/changed → every open page's useVerb reloads
+```
+
+## Step 9: W8, the Workshop app with an agent loop
+
+The Workshop is now an app, `apps/workshop`. The browser check drives the
+whole loop:
+1. An admin opens a static site's draft in an inspect preview, switches
+   to pick mode, clicks the site's button, and writes a comment.
+2. An agent waiting in `slop log wait workshop` wakes, reads the thread
+   with `slop docs ls`, pushes a darker button to `draft` with
+   `slop push --ref draft`, and replies with `slop call workshop reply`,
+   naming the new snapshot.
+3. The admin opens that snapshot from the reply, publishes it, and the
+   static host serves it.
+
+A fix to the actor runtime came out of this: data read from documents
+could not be changed in place. Commit `69c2316`.
+
+### Prompt Context
+
+**User prompt (verbatim):** see Step 1. The Workshop itself traces back
+to the user's earlier messages (verbatim): "but i think maybe porting the
+workshop against store snapshots (and whatever apps are declared or so)
+would be possible pretty straightforwardly, no?" and "ccould the workshop
+just be itself an app? so we don't even need to really "bake it into" the
+server itself, but can provide it as an app itself (and thus build
+various versions of the tool)?"
+
+**Assistant interpretation:** Phase W8: the Workshop app on the new
+primitives, checked in a browser together with a CLI agent.
+
+**Inferred user intent:** v2's review loop with coding agents, rebuilt as
+an ordinary, replaceable app.
+
+**Commit (code):** `69c2316` — "W8: the Workshop app (apps/workshop),
+verified with a CLI agent loop".
+
+### What I did
+
+- `apps/workshop/app.json` (`slop.modules: ["workshop"]`, user profile,
+  `threads` rule), `actor.js` (actions `overview`, `store`, `preview`,
+  `comment`, `reply`, `resolve`, `publish`, `follow`), `index.html`,
+  `app.js` (vanilla JS, no build), `styles.css`.
+- The page's bridge handling: it accepts messages only from the preview's
+  origin and window; `pick` opens the composer with the anchor; `pin`
+  focuses a thread; `nav` reloads the frame only within the preview
+  origin; `ready` re-sends pins.
+- `pkg/actor/actor.go` `toJS`: `JSON.parse` instead of `vm.ToValue` on
+  decoded Go data.
+- `pkg/server/w8_test.go` `TestWorkshopApp`; ticket script
+  `03-w8-workshop-e2e.mjs`; screenshots in `various/w8/`.
+- Demo: `slop push apps/workshop --store workshop`,
+  `slop app trust workshop workshop`,
+  `slop mount set apps.localhost:18300 /workshop workshop`; the agent used
+  the admin person's read/write token (`agent/creds-rw.json`), as in
+  SLOP3-001's agent task 2.
+
+### Why
+
+- Levels per action (view to read, interact to comment, admin to publish)
+  are checked on the Workshop store. The module then applies the
+  visitor's own level on the store under review, so the Workshop grants
+  no rights there.
+- The agent uses only generic commands (`log wait`, `docs ls`, `push`,
+  `call`), so any coding agent with the CLI can take part.
+
+### What worked
+
+- `03-w8-workshop-e2e.mjs`, final run: 9 checks, `all passed`:
+
+```text
+ok   the Workshop opens at /workshop and lists wsite
+ok   the preview shows draft #10 on its own origin (pe566a06…)
+ok   pick: "On a Buy a skein" becomes thread 5, drawn as pin 5 in the preview
+ok   agent: log wait woke after 1 commit(s); the thread anchors a.cta
+ok   agent's snapshot #11 previews with the darker button (rgb(31, 58, 138))
+ok   publish #11: the static host switched from the pale to the darker button
+ok   the open thread notes the publication
+ok   the thread is resolved
+ok   no console errors
+```
+
+- `GOWORK=off go test ./... -count=1` and
+  `go test -race ./pkg/server -count=1`: `ok`.
+
+### What didn't work
+
+- `TestWorkshopApp` first failed: the thread kept one comment after
+  `reply` and `publish`, though `updatedAt` changed. `toJS` turned
+  documents into JS values wrapped around Go maps and slices
+  (`vm.ToValue` on `map[string]any`/`[]any`), and `push` on a wrapped,
+  non-addressable slice does not reach the map the object is serialized
+  from. Every app reading a document and appending to a nested array would
+  hit this; `toJS` now parses the JSON with the runtime's `JSON.parse`.
+- Run 1 of the browser script: `Timeout 8000ms exceeded … waiting for
+  locator('#snaps li.on[data-n="3"]')`. The page's snapshot list predated
+  the agent's push. The page now reloads snapshots and refs when a thread
+  names a snapshot it does not know.
+- Run 2: the pick click on `.cta` timed out because
+  `<button … title="White on this pale blue…">1</button> from
+  <div id="__slop_pins">… intercepts pointer events`: a pin of the
+  previous run's (resolved) thread covered the button. The page now draws
+  pins for open threads and the focused one only.
+- Run 3: the pin check looked for "1", but the new thread was number 2.
+  The script reads the focused thread's number.
+- Run 4: `waiting for locator('.thread.focus')` timed out. The thread's
+  snapshot arrived before the comment action resolved, so it was drawn
+  before `state.focus` was set. The composer now calls `focus(id)`, which
+  redraws.
+- The resolve check matched an older resolved thread; it now waits for
+  `.thread.focus.resolved`.
+
+### What I learned
+
+- The nested framing works in Chromium as designed: shell (live host) →
+  Workshop page (`s…` sandbox origin) → preview (`p…` origin) with
+  `frame-ancestors <workshop origin> <main> <live>`, and postMessage in
+  both directions with origin checks.
+
+### What was tricky to build
+
+- Pins over the page intercept clicks, in pick mode as in normal use;
+  limiting them to open threads keeps finished work out of the way.
+
+### What warrants a second pair of eyes
+
+- `overview` calls `workshop.refs` once per visible store (in parallel).
+  It is fine for tens of stores, but slow for hundreds.
+- The bridge's `nav` handling resolves links against the preview root,
+  because the tool cannot read the frame's current URL cross-origin.
+  Relative links on nested pages may resolve differently than in the
+  site.
+
+### What should be done in the future
+
+- Merge v3 into slop-computer.git (the user's earlier request, not yet
+  started) so that these apps can be deployed with the existing CI.
+- Decide the open questions in guide section 29.
+
+### Code review instructions
+
+- `apps/workshop/actor.js`, `apps/workshop/app.js` (message handler,
+  `pins`, `watch`), `toJS` in `pkg/actor/actor.go`.
+- Run the scripts against a demo server (commands in their headers).
+
+### Technical details
+
+```text
+agent                                   admin (browser)
+slop log wait workshop --after R  ⟵    comment(store, n=#10, anchor=a.cta)
+slop docs ls workshop threads
+slop push ./wsite --ref draft     →    (reply names #11: page reloads snapshots)
+slop call workshop reply {...n:11}→    view #11 → Publish #11 → ref.move main
+                                        static host serves #11
 ```
