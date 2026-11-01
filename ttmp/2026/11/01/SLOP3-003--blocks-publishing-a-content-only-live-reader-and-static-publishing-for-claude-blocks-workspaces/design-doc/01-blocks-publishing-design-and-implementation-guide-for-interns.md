@@ -570,7 +570,7 @@ Links between pages are relative; there are no other files (the stylesheet is in
 
 ## 10. Trying it by hand
 
-With the demo server running (`slop3` tmux session, `SLOP_CREDENTIALS` set to the admin's credentials):
+`scripts/03-deploy-blocks-site.sh <repo>` runs the admin steps and the `team-site` steps below in one go, and `scripts/04-blocks-site-e2e.mjs` drives the whole story in a browser (an editor writes in Blocks, a guest reads, the admin publishes, a member publishes their own workspace with the CLI). By hand, with the demo server running (`slop3` tmux session, `SLOP_CREDENTIALS` set to the admin's credentials):
 
 ```sh
 slop push apps/blocks-site --store blocks-site
@@ -598,4 +598,4 @@ Edit a page at `/b/ws-team`, reload the reader: the change is there. Reload the 
 - **Incremental fold.** Apply only chunks changed since the cached rev, when a workspace grows large enough for a full fold to matter.
 - **Push instead of poll.** The reader refolds on request. A cross-store reactor (the site reacting to the workspace's commits) would let it refold ahead of requests and could republish a static site automatically.
 - **Per-page publication.** `root` scopes a site to a subtree. A `published` checkbox per page would need a page property the editor shows; Blocks has page properties, so this is possible without changing the editor.
-- **The upstream tokenizer.** `Blocks.tokens` never returns for any text holding a bold, italic or struck span (`scripts/01-load-blocks-libs.mjs`). Whether the editor reaches that path in the browser is checked in phase B4; either way it should be reported upstream, and this ticket does not change vendored files.
+- **The upstream tokenizer.** `Blocks.tokens` never returns for any text holding a bold, italic or struck span (`scripts/01-load-blocks-libs.mjs`). Phase B4 checked the browser: the editor's page view and a guest's view-only page both render `**bold**` without reaching it, so the bug is latent (it sits behind Fruit's `R.p`, used for cards, embeds and past states). It should still be reported upstream; this ticket does not change vendored files.
