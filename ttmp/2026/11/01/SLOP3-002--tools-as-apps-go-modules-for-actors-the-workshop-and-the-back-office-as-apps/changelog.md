@@ -35,3 +35,11 @@ W3 (fe7db89): system: reactors; fixed pre-existing goja data races by copying th
 ### Related Files
 
 - /home/manuel/code/wesen/2026-10-31--slop-v3/pkg/actor/sysreact.go — system log follower and reactors
+
+## 2026-11-01
+
+W4 (1d619c5): workshop module, log.wait, app.follow
+
+### Related Files
+
+- /home/manuel/code/wesen/2026-10-31--slop-v3/pkg/server/modworkshop.go — the workshop module

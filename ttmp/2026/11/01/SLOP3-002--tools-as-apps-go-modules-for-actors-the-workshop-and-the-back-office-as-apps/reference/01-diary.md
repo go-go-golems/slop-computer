@@ -496,3 +496,105 @@ grant.set (CLI) → system.DB.Tx commits → OnLog() → wake (cap 1)
      → handler(ctx, {rev, at, principal, via, summary, changes}) → cursor = last
      (one store transaction: handler writes and cursor commit together)
 ```
+
+## Step 5: W4, the workshop module, log.wait and app.follow
+
+A tool app trusted with `workshop` can now list a store's snapshots and
+refs, read files at any snapshot, push to `draft`, and publish by moving
+`main`. An agent can block on `slop log wait <store> --after <rev>`. An
+admin can make a scratch instance run an app's draft with
+`slop app follow <store> draft`. Commit `1d619c5`.
+
+### Prompt Context
+
+**User prompt (verbatim):** see Step 1.
+
+**Assistant interpretation:** Phase W4: the module, the long-poll verb,
+and the verb that sets `app_ref`.
+
+**Inferred user intent:** The Workshop's loop (agent pushes a draft,
+person reviews, person publishes) must work without server code specific
+to the Workshop.
+
+**Commit (code):** `1d619c5` — "W4: workshop module, log.wait,
+app.follow".
+
+### What I did
+
+- `pkg/server/modworkshop.go`: `workshopFuncs` (11 functions).
+  `push` uses a new `modFunc.Default` (`ref: "draft"`), applied only when
+  the caller gives no `ref`; `publish` uses `Fixed` (`ref: "main"`).
+- `pkg/verbs/stores.go`: `log.wait` (store, after, timeout ≤ 300 s,
+  limit). It subscribes to `Kernel.Subscribe` for that store, then loops:
+  read `Log(after)`; return if non-empty; otherwise wait for a commit,
+  the timer or the request's cancellation.
+- `pkg/verbs/actors.go`: `app.follow` (write scope, admin only, needs
+  `admin` on the store). It refuses a ref the app store does not have,
+  writes `app_ref` in a store turn ("follows jot@draft"), then calls
+  `Running`, which activates the store at that snapshot.
+- `pkg/verbs/mounts.go`: `app.status` returns `ref`.
+- `pkg/server/w4_test.go`: `TestWorkshopModule`.
+
+### Why
+
+- `workshop.stores()` lists the stores the visitor can see; admins pass
+  `{all: true}`. A `Fixed` `all` would make the function fail for every
+  non-admin (`store.ls` refuses `all` to them).
+- `app.follow` checks that the ref exists, because `Running` treats a
+  missing ref as "no app", which would silently turn an instance into
+  plain content.
+
+### What worked
+
+- `GOWORK=off go test ./pkg/server -run TestWorkshopModule -count=1`: `ok`.
+- `GOWORK=off go test ./... -count=1`: all `ok`;
+  `go test -race ./pkg/server -run 'TestWorkshopModule|TestSystemReactor'`: `ok`.
+- `slop log wait --help` shows the generated command with `--after`,
+  `--timeout` and `--limit`.
+
+### What didn't work
+
+- The test actor called `use('sql').query(…)`:
+  `TypeError: Object has no member 'query' at tables (actor.js:1:63(6))`.
+  The sql module's functions are `all`, `one` and `run`.
+
+### What I learned
+
+- Sites are served from the snapshot of the ref the store follows
+  (`res.run.N` in `pkg/server/site.go`), never from the working tree. A
+  push to `draft` therefore replaces the working tree without changing
+  what visitors get, which is exactly what the Workshop needs.
+
+### What was tricky to build
+
+- `log.wait` must not miss a commit between reading the log and starting
+  to wait. Subscribing first, with a one-slot channel and a non-blocking
+  send (subscribers run on the committing goroutine and must not block),
+  closes that gap; the loop re-reads after every wake.
+
+### What warrants a second pair of eyes
+
+- `app.follow` on an app store itself (not an instance) changes which
+  version of its own tree it runs. That is allowed (admin only), and is
+  the way to run a draft of a single-store app.
+
+### What should be done in the future
+
+- W5: previews.
+
+### Code review instructions
+
+- `pkg/verbs/stores.go` `log.wait`, `pkg/verbs/actors.go` `app.follow`,
+  `pkg/server/modworkshop.go`; run
+  `GOWORK=off go test ./pkg/server -run TestWorkshopModule -count=1`.
+
+### Technical details
+
+```text
+workshop.push('site', [{path:'index.html', text:'<h1>two</h1>'}])
+  → files.push {store: site, files, ref: draft}     static host still serves "one"
+workshop.publish('site', n)
+  → ref.move {store: site, ref: main, n}             static host serves "two"
+slop app follow jot-scratch draft
+  → _meta.app_ref = draft → Running → migrations 002_tags.sql → tables [notes, tags]
+```
