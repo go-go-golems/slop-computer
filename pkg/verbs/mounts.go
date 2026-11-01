@@ -16,6 +16,11 @@ func init() {
 	hostArg := Arg{Name: "host", Type: "string", Pos: 1, Required: true}
 	pathArg := Arg{Name: "path", Type: "string", Pos: 2, Required: true}
 	Register(
+		&Verb{Name: "server.hosts", Doc: "This server's hosts: main, live, static and sandbox.", Scope: Read,
+			Run: func(ctx context.Context, e *Env, p *access.Principal, a Args) (any, error) {
+				h := e.Cfg.Hosts
+				return map[string]any{"main": h.Main, "live": h.Live, "static": h.Static, "sandbox": h.Sandbox}, nil
+			}},
 		&Verb{Name: "mount.ls", Doc: "List mounts (of one host).", Scope: Read,
 			Args: []Arg{{Name: "host", Type: "string", Pos: 1}},
 			Run: func(ctx context.Context, e *Env, p *access.Principal, a Args) (any, error) {

@@ -46,6 +46,7 @@ var systemFuncs = []modFunc{
 	{JS: "apps.modules", Verb: "app.modules", Pos: []string{"app"}},
 	{JS: "explain", Verb: "explain.can", Pos: []string{"store", "level", "subject"}},
 	{JS: "log", Verb: "log.system", Pos: []string{"limit"}},
+	{JS: "hosts", Verb: "server.hosts"},
 }
 
 // systemModule is use('system'): systemFuncs, plus call(verb, args) for

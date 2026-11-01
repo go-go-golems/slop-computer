@@ -1,6 +1,6 @@
 // Small shared pieces, after the lab's ui.jsx (Table, Trace, Seg, Err).
 import React, { useCallback, useEffect, useState } from 'react';
-import { call } from './api.js';
+import { call, onChange } from './api.js';
 
 // useVerb runs a verb, again when deps change or reload() is called.
 export function useVerb(verb, args, deps = []) {
@@ -13,6 +13,7 @@ export function useVerb(verb, args, deps = []) {
     return () => { live = false; };
   }, [verb, tick, ...deps]); // eslint-disable-line react-hooks/exhaustive-deps
   const reload = useCallback(() => setTick(t => t + 1), []);
+  useEffect(() => onChange(reload), [reload]);
   return [state.v, state.e, reload, state.loading];
 }
 
