@@ -477,6 +477,7 @@ func (m *Manager) Actions(ctx context.Context, storeID string) []string {
 type Req struct {
 	Method  string            `json:"method"`
 	Path    string            `json:"path"`
+	Base    string            `json:"base"` // the URL path the mount matched, without a trailing slash
 	Params  map[string]string `json:"params"`
 	Query   map[string]string `json:"query"`
 	Headers map[string]string `json:"headers"`

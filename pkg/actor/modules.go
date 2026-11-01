@@ -525,6 +525,8 @@ func (a *Actor) storesModule() goja.Value {
 			return a.toJS(fs)
 		})
 		_ = r.Set("files", files)
+		// rev is the target's latest rev: whether it changed since a read.
+		_ = r.Set("rev", func() int64 { return ts.Head() })
 		_ = r.Set("log", func(after int64) goja.Value {
 			cs, err := ts.Log(ctx, after, 100)
 			a.check(err)

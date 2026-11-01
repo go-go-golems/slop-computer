@@ -180,7 +180,7 @@ func (s *Server) serveActorRoute(w http.ResponseWriter, r *http.Request, res *re
 		return true
 	}
 	body, _ := io.ReadAll(io.LimitReader(r.Body, 1<<20))
-	req := actor.Req{Method: r.Method, Path: sub, Query: map[string]string{}, Headers: map[string]string{}, Body: string(body)}
+	req := actor.Req{Method: r.Method, Path: sub, Base: res.m.Base, Query: map[string]string{}, Headers: map[string]string{}, Body: string(body)}
 	for k := range r.URL.Query() {
 		req.Query[k] = r.URL.Query().Get(k)
 	}
