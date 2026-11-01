@@ -3,7 +3,7 @@
 ## TODO
 - [x] Write the intern design and implementation guide <!-- t:z0n1 -->
 - [x] Upload the guide to reMarkable <!-- t:0hh4 -->
-- [ ] P0: skeleton and sign-in (serve, local/OIDC login, device tokens, whoami) <!-- t:dswx -->
+- [x] P0: skeleton and sign-in (serve, local/OIDC login, device tokens, whoami) <!-- t:dswx -->
 - [ ] P1: stores, verb table, CLI/HTTP/eval doors, importers <!-- t:x1c5 -->
 - [ ] P2: apps and serving (static and live hosts, views, sandbox origins, runtime) <!-- t:3ybl -->
 - [ ] P3: goja actors (turns, actions, http, reactors, alarms, activation) <!-- t:1c6d -->

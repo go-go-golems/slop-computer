@@ -490,3 +490,186 @@ Now implement, commit at appropriate intervals and keep a detailed diary as you 
 python3 -I scratchpad/slop3-edits/edit3.py <design-doc>   -> applied 6
 go list -m -versions github.com/mattn/go-sqlite3          -> ... v1.14.51 v1.14.52
 ```
+
+## Step 7: P0, skeleton, sign-in, tokens and the verb door
+
+P0 is done. One binary, `slop`, runs the server (`slop serve`) and is also
+its CLI. A person signs in on the main host (with the local form for now;
+OIDC/Zitadel comes in P4) and approves a device login. The CLI stores the
+token and every verb in the table becomes a command.
+
+The exit test from the guide passes twice:
+- in a Go test, through HTTP;
+- by hand with the real binary: `slop serve --local`, curl standing in for
+  the browser, `slop auth login`, then `slop whoami`, which prints an admin.
+
+### Prompt Context
+
+**User prompt (verbatim):** see Step 6.
+
+**Assistant interpretation:** Build P0 from the guide: the skeleton, config,
+`system.db`, local sign-in, sessions, CSRF, device login, tokens and
+`whoami`.
+
+**Inferred user intent:** A service that can be started, with an agent token,
+as the base for everything else.
+
+### What I did
+
+- **The module:** `go.mod` (`github.com/go-go-golems/slop`, go 1.26.6) with
+  `mattn/go-sqlite3 v1.14.52`, `dop251/goja`, `spf13/cobra v1.10.2` and
+  `gopkg.in/yaml.v3`. `.gitignore` excludes the binary, data and `*.db`.
+- **`pkg/system`:**
+  - `migrations/001_init.sql` holds the whole schema from Appendix A,
+    including `comps`, the four Stripe tables, `llm_usage` keyed by
+    `(person, period)`, and the seed `@admin` LLM access.
+  - `system.go`: `Open` (WAL, a busy timeout, foreign keys, immediate
+    transactions) and a migration runner ported from SLOP-011 (foreign keys
+    off, then `foreign_key_check` before commit). Also `Log` and `Logs` for
+    the system log, and `Tx`.
+  - `people.go`: `SignInUser`. Admin emails become admins; open sign-up
+    makes members, approval mode makes pending users. Also `SetRole`
+    (disabling deletes sessions and revokes tokens) and `CreateGuest`.
+  - `sessions.go`:
+    - sessions are hashed and bound to one host, with a CSRF token;
+    - `ScopesForRole`;
+    - `CheckTokenGrant`, ported from v2's `tokenGrant`: admin-scope tokens
+      expire within 1–90 days;
+    - `CreateToken`, `TokenBySecret` (which records last use) and
+      `RevokeToken`.
+  - `device.go`: `StartDevice`, `DeviceByUserCode`, `ApproveDevice` and
+    `PollDevice`. A token is handed out exactly once; the poll answers
+    pending, denied or expired otherwise.
+- **`pkg/ids`:** prefixed hex ids (`usr_`, 12 bytes, like v2), `slp_`
+  secrets, `XXXX-XXXX` user codes, sha256 hashes.
+- **`pkg/config`:** the slop.yaml types (hosts, OIDC, Stripe) and defaults
+  for local development on `*.localhost:18300`; `HostKind`.
+- **`pkg/access/principal.go`:** `Principal` with `ID()`, `ViaLabel()`
+  (the door plus the token id) and `HasScope` (admin ⊃ write ⊃ read;
+  sessions hold every scope).
+- **`pkg/verbs`:**
+  - `Verb`, `Arg` and `Args` with typed getters;
+  - `Error`, with codes mapped to HTTP status;
+  - `Call`, which checks scope, admin-only, write verbs from guests and
+    required arguments, then runs the verb;
+  - the verbs `whoami`, `token.ls`, `token.new` (a token cannot mint more
+    scopes than it has), `token.rm`, `people.ls`, `people.role` (no
+    self-demotion) and `log.system`.
+- **`pkg/server`:**
+  - the host router, which dispatches main, live, static and sandbox hosts;
+    the last three are nil until P2;
+  - `auth.go`: `principalOf` (a bearer token or a session cookie), the
+    local sign-in form, logout, and `/auth/session` (the person and CSRF
+    token for the back office);
+  - `device.go`: `/auth/device`, `/auth/device/token`, and `/device` for
+    approval, with scope checkboxes and days;
+  - `api.go`: `GET /api/v1/verbs` and `POST /api/v1/{verb}`, which requires
+    `X-CSRF-Token` for session calls.
+- **`pkg/client`:** the credentials file in v2's exact format (so `slop2`
+  can share it), `SLOP_CREDENTIALS` and `SLOP_TOKEN` overrides, and `Call`.
+- **`cmd/slop`:**
+  - `serve` (`--local`, `--admin-email`, `--data`, `--listen`, `--config`);
+  - `auth login|status|logout`;
+  - `verbs`, and `verb <name> --json`;
+  - generated `slop <group> <verb>` commands with positional arguments, a
+    flag per argument, `--json` and `-o yaml|json|table`.
+- **Tests:** `pkg/server/p0_test.go`:
+  - `TestDeviceLoginWhoamiRevoke`: pending before approval, approve, collect
+    once, `whoami`, refuse escalation, refuse a read token on a write verb,
+    revoke, refuse a session call without CSRF;
+  - `TestSignupRoles`.
+- **Manual run:** the server runs in tmux session `slop3` with
+  `scratchpad/v3run/data`. `slop auth login` ran with
+  `SLOP_CREDENTIALS=scratchpad/v3run/creds.json` and was approved via curl
+  (local sign-in, then the CSRF token from `/device`, then POST). Then I ran
+  `slop whoami`, `slop token ls -o table` and `slop people ls -o table`.
+
+### Why
+
+- Cobra commands generated from the verb table, rather than Glazed, for
+  now. The table is the single source and the adapter is about 150 lines. A
+  Glazed adapter can replace it without touching the verbs.
+- In-process verbs rather than a separate `Need` hook: verbs call the access
+  checks themselves. That keeps the table simple; `Call` enforces only the
+  cross-cutting rules.
+- The test uses its own credentials file. The user's real
+  `~/.config/slop/credentials.json` holds their v2 production token, and
+  must never be rewritten by a test.
+
+### What worked
+
+- `go build`, `go vet` and `go test ./...` passed on the first run.
+- Device login end to end with the real binary:
+
+  ```text
+  Logged in to http://slop.localhost:18300 as Admin with scopes [read write admin] (token tok_344e7f96f8c02b370b64e85d).
+  ```
+
+  and `slop whoami` then showed `role: admin`, `kind: token`,
+  `via: cli:tok_344e…`.
+
+### What didn't work
+
+- Starting the server in tmux failed twice:
+  - `tmux has-session -t slop3 || tmux new-session ...` followed by
+    `tmux kill-window -t slop3:server` printed `can't find window: slop3`;
+  - `tmux new-window -d -t 'slop3:'` then printed
+    `can't find session: slop3`.
+
+  `tmux ls` showed no `slop3` session, so the `has-session` check must have
+  succeeded on something else (most likely a prefix match on the existing
+  session `slop`). Fixed with an explicit
+  `tmux new-session -d -s slop3 -n server <script>`.
+- The editor's language server keeps reporting
+  `go.work requires go >= 1.26.6 (running go 1.25.5)`. It runs an older Go
+  against a `go.work` higher up the tree. Builds use `GOWORK=off` with Go
+  1.26.6 and are unaffected.
+
+### What I learned
+
+- `tmux has-session -t <name>` is not safe when another session's name is a
+  prefix of it; create named sessions explicitly.
+- The device flow needs no token on the polling side. The CLI must clear any
+  stored token before starting it.
+
+### What was tricky to build
+
+- **Handing out the device token once.** The device row stores the token's
+  plain secret only until the first successful poll, then clears it. A
+  second poll gets 404 ("expired or already used"). The plain secret lives
+  in `system.db` for at most the time between approval and the first poll
+  (about two seconds).
+- **CSRF for the back office.** Session calls to `/api/v1` must send
+  `X-CSRF-Token`. The token comes from `/auth/session`, which needs the
+  cookie, so a cross-site page cannot read it.
+
+### What warrants a second pair of eyes
+
+- `token_plain` in `device_codes`: a short-lived plaintext secret at rest.
+  An alternative is to mint the token at poll time instead of approval time.
+- `principalOf`: a disabled user's token returns not-found (401), and a
+  disabled user's session behaves as signed out.
+
+### What should be done in the future
+
+- P1: stores, the turn API, documents, files, snapshots and refs, the log,
+  the store verbs, eval, and the importers.
+
+### Code review instructions
+
+- Start with `pkg/server/p0_test.go`, then `pkg/system/sessions.go` and
+  `device.go`, then `pkg/verbs/verb.go` (`Call`).
+- To run it:
+  1. `GOWORK=off go build -o slop ./cmd/slop`
+  2. `./slop serve --local --admin-email you@x`
+  3. in another shell:
+     `SLOP_CREDENTIALS=/tmp/c.json ./slop auth login --server http://slop.localhost:18300`
+
+### Technical details
+
+```text
+GOWORK=off go test ./...  ->  ok  github.com/go-go-golems/slop/pkg/server  0.033s
+server: tmux session slop3, data in scratchpad/v3run/data, listen 127.0.0.1:18300
+hosts:  slop.localhost:18300 (main), apps.localhost:18300 (live),
+        site.localhost:18300 (static), *.sbx.localhost:18300 (sandbox)
+```

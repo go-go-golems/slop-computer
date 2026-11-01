@@ -27,3 +27,7 @@ Applied the product owner's answers: anonymous folded into guest; lab is referen
 ## 2026-11-01
 
 Uploaded the revised guide as 'SLOP3-001 slop v3 core design guide v2' to /ai/2026/11/01/SLOP3-001 (first upload kept).
+
+## 2026-11-01
+
+P0 implemented: slop serve, system.db schema and migrations, local sign-in, sessions with CSRF, device login, tokens, verb table with HTTP door and generated CLI; tests and a manual device-login run pass.
