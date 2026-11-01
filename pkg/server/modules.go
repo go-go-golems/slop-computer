@@ -18,17 +18,18 @@ import (
 
 // A modFunc is one function of a verb-backed module.
 type modFunc struct {
-	JS    string         // group.name in JavaScript ("people.setRole")
-	Verb  string         // the verb it calls
-	Pos   []string       // the verb arguments positional parameters fill
-	Fixed map[string]any // arguments always passed
+	JS      string         // group.name in JavaScript ("people.setRole")
+	Verb    string         // the verb it calls
+	Pos     []string       // the verb arguments positional parameters fill
+	Fixed   map[string]any // arguments always passed
+	Confirm bool           // governance: the person confirms it in the shell (W6)
 }
 
 // registerModules puts the server's Go modules in the actor registry.
 func (s *Server) registerModules() {
 	s.Env.A.Trusted = s.Sys.Trusted
 	s.Env.A.Register(actor.Module{Name: "system", Doc: "People, grants, links, mounts, policy, LLM budgets, comps, secrets and the system log, as the visitor.",
-		Load: func(a *actor.Actor) goja.Value { return s.verbModule(a, systemFuncs) }})
+		Load: s.systemModule})
 }
 
 // verbModule builds a module's object from its functions.
@@ -38,7 +39,7 @@ func (s *Server) verbModule(a *actor.Actor, funcs []modFunc) goja.Value {
 	for _, f := range funcs {
 		f := f
 		fn := func(call goja.FunctionCall) goja.Value {
-			return s.callVerb(a, f.Verb, modArgs(a, f, call.Arguments))
+			return s.callVerb(a, f, modArgs(a, f, call.Arguments))
 		}
 		target := o
 		path := strings.Split(f.JS, ".")
@@ -98,8 +99,10 @@ func single(vals []any) (map[string]any, bool) {
 	return m, ok
 }
 
-// callVerb runs a verb as the visitor and returns its promise.
-func (s *Server) callVerb(a *actor.Actor, name string, args map[string]any) goja.Value {
+// callVerb runs a module function's verb as the visitor and returns its
+// promise.
+func (s *Server) callVerb(a *actor.Actor, f modFunc, args map[string]any) goja.Value {
+	name := f.Verb
 	v, ok := verbs.Get(name)
 	if !ok {
 		a.Throw("not_found", "no verb "+name)
@@ -143,13 +146,4 @@ func (s *Server) actAs(a *actor.Actor, write bool) *access.Principal {
 		p.Kind, p.Scopes = access.KindToken, v.Scopes
 	}
 	return p
-}
-
-// systemFuncs is the system module (W2 completes it).
-var systemFuncs = []modFunc{
-	{JS: "people.list", Verb: "people.ls", Pos: []string{"kind"}},
-	{JS: "people.setRole", Verb: "people.role", Pos: []string{"id", "role"}},
-	{JS: "grants.list", Verb: "grant.ls", Pos: []string{"store"}},
-	{JS: "grants.set", Verb: "grant.set", Pos: []string{"store", "subject", "level"}},
-	{JS: "log", Verb: "log.system", Pos: []string{"limit"}},
 }

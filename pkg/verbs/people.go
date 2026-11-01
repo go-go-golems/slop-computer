@@ -79,7 +79,7 @@ func init() {
 				if t.Person != p.ID() && !p.IsAdmin() {
 					return nil, Errf("permission_denied", "that token is not yours")
 				}
-				if err := e.Sys.RevokeToken(ctx, p.ID(), t.ID); err != nil {
+				if err := e.Sys.RevokeToken(ctx, p.ID(), p.ViaLabel(), t.ID); err != nil {
 					return nil, err
 				}
 				return map[string]any{"revoked": t.ID}, nil
@@ -99,7 +99,7 @@ func init() {
 				if a.S("id") == p.ID() && a.S("role") != system.RoleAdmin {
 					return nil, Errf("invalid_argument", "you cannot demote yourself")
 				}
-				pp, err := e.Sys.SetRole(ctx, p.ID(), a.S("id"), a.S("role"))
+				pp, err := e.Sys.SetRole(ctx, p.ID(), p.ViaLabel(), a.S("id"), a.S("role"))
 				if errors.Is(err, system.ErrNotFound) {
 					return nil, Errf("not_found", "no person %s", a.S("id"))
 				}

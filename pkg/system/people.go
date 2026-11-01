@@ -125,7 +125,7 @@ func (d *DB) SignInUser(ctx context.Context, email, name, subject string, admins
 }
 
 // SetRole changes a user's role.
-func (d *DB) SetRole(ctx context.Context, actor, id, role string) (Person, error) {
+func (d *DB) SetRole(ctx context.Context, actor, via, id, role string) (Person, error) {
 	switch role {
 	case RolePending, RoleMember, RoleAdmin, RoleDisabled:
 	default:
@@ -154,7 +154,7 @@ func (d *DB) SetRole(ctx context.Context, actor, id, role string) (Person, error
 				return err
 			}
 		}
-		_, err = Log(ctx, tx, d.NowMs(), actor, "verb", "role of "+id+": "+before+" → "+role,
+		_, err = Log(ctx, tx, d.NowMs(), actor, via, "role of "+id+": "+before+" → "+role,
 			Change{Kind: "person", Key: id, Op: "role", Before: before, After: role})
 		return err
 	})

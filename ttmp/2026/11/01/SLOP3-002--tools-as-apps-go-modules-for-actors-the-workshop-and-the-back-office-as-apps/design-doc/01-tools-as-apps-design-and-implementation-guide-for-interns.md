@@ -248,7 +248,7 @@ The eight primitives:
 
 `apps.Manifest.Slop` gains `Modules []string`. They are validated against the registry's names when the manifest is parsed: an unknown module makes the manifest broken, as an unknown capability does.
 
-**Registry.** Modules are compiled into the server. The actor package defines what a module is; the server registers the ones that need verbs:
+**Registry.** Modules are compiled into the server. The actor package defines what a module is; the server registers the ones that need verbs. The names an app may declare are listed in `apps.Modules` beside `apps.Platform`, because `apps.Parse` validates them and cannot import the server. As built (W1), the tier is not a field of `Module`: what matters per function is whether it writes (from the verb's scope) and whether it needs confirmation (a flag on each function):
 
 ```go
 // pkg/actor/registry.go
@@ -320,6 +320,10 @@ func (s *Server) actAs(a *actor.Actor, write bool) *access.Principal {
 
 The verb then applies every ordinary check to that person. A member using the back office app gets `permission_denied: people.role is for admins`, exactly as from the CLI. The system log records `via app:backoffice`, so the back office's Activity view reads "role of Pat: pending → member, by Ada via app:backoffice".
 
+**Functions return promises.** A module function runs its verb through `Actor.IO`: the turn commits, the verb runs on another goroutine, and the promise settles in a continuation turn that keeps the visitor. A verb that writes the actor's own store would otherwise wait for the turn's own transaction. Code therefore writes `await system.people.list()`.
+
+**Token scopes carry over.** When the visitor came with a token (an agent calling `slop call`), `actAs` builds a token principal with that token's scopes. A token without the `admin` scope cannot reach `policy.set` through an app either.
+
 **Results are curated.** Module functions return what the verbs return, which is what the CLI shows: tokens without secrets, people without sessions. They never return raw rows of `system.db`.
 
 ### 16. Primitive 2: the `system` module
@@ -345,13 +349,15 @@ The module is a table from JavaScript names to verbs. Each entry gives:
 | `policy.set(app, capability, audience, value)` | `policy.set` | governance | yes |
 | `llm.list()` / `llm.usage(person)` | `llm.ls` / `llm.usage` | read | |
 | `llm.set(subject, value, budget)` / `llm.remove(subject)` / `llm.reset(person)` | `llm.set` / `llm.rm` / `llm.reset` | governance | yes |
-| `subs.list(person)` / `subs.grant(person, until)` / `subs.revoke(person)` | `sub.ls` / `sub.grant` / `sub.revoke` | read / governance | grant, revoke |
+| `subs.list(person)` / `subs.grant(person, until, note)` / `subs.revoke(id)` | `sub.ls` / `sub.grant` / `sub.revoke` (`id` is a `cmp_…` comp) | read / governance | grant, revoke |
 | `secrets.list(app)` / `secrets.set(app, name, value)` / `secrets.remove(app, name)` | `secret.ls` / `secret.set` / `secret.rm` | read / governance | set, remove |
 | `stores.list()` / `stores.meta(id)` | `store.ls` (all) / `store.meta` | read | |
-| `apps.list()` / `apps.status(store)` / `apps.logs(store)` / `apps.restart(store)` | `app.ls` / `app.status` / `app.logs` / `app.restart` | read / publishing | |
+| `apps.list()` / `apps.status(store)` / `apps.logs(store)` / `apps.restart(store)` / `apps.modules(app)` | `app.ls` / `app.status` / `app.logs` / `app.restart` / `app.modules` | read / publishing | |
 | `explain(store, level, subject)` | `explain.can` | read | |
 | `log(limit)` | `log.system` | read | |
 | `call(verb, args)` | any verb above | that verb's | that verb's |
+
+The module has no function for `app.trust`, and `call` refuses it: an app trusted with `system` cannot widen its own trust or any other app's.
 
 `call` exists for the back-office port (section 23). The existing React UI calls verbs by name, so one generic action replaces its HTTP client. `call` refuses any verb not in the table.
 
@@ -364,8 +370,8 @@ const system = use('system');          // null unless an admin ran: slop app tru
 
 defineActor({
   actions: {
-    verb(ctx, { name, args }) { return system.call(name, args || {}); },
-    pending(ctx)              { return system.people.list({ kind: 'user' }).filter(p => p.role === 'pending'); },
+    verb(ctx, { name, args }) { return system.call(name, args || {}); },   // a promise: the action resolves with it
+    async pending(ctx)        { return (await system.people.list({ kind: 'user' })).filter(p => p.role === 'pending'); },
   },
 });
 ```

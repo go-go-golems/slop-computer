@@ -214,7 +214,7 @@ func (d *DB) Token(ctx context.Context, id string) (Token, error) {
 }
 
 // RevokeToken revokes a token.
-func (d *DB) RevokeToken(ctx context.Context, actor, id string) error {
+func (d *DB) RevokeToken(ctx context.Context, actor, via, id string) error {
 	return d.Tx(ctx, func(tx *sql.Tx) error {
 		res, err := tx.ExecContext(ctx, `UPDATE tokens SET revoked_at = ? WHERE id = ? AND revoked_at IS NULL`, d.NowMs(), id)
 		if err != nil {
@@ -223,7 +223,7 @@ func (d *DB) RevokeToken(ctx context.Context, actor, id string) error {
 		if n, _ := res.RowsAffected(); n == 0 {
 			return ErrNotFound
 		}
-		_, err = Log(ctx, tx, d.NowMs(), actor, "verb", "token "+id+" revoked", Change{Kind: "token", Key: id, Op: "revoke"})
+		_, err = Log(ctx, tx, d.NowMs(), actor, via, "token "+id+" revoked", Change{Kind: "token", Key: id, Op: "revoke"})
 		return err
 	})
 }

@@ -242,7 +242,7 @@ func TestSignupRoles(t *testing.T) {
 	}
 	// Disabling revokes tokens.
 	_, tk, _ := h.sys.CreateToken(ctx, m.ID, "x", []string{"read"}, 1)
-	if _, err := h.sys.SetRole(ctx, a.ID, m.ID, "disabled"); err != nil {
+	if _, err := h.sys.SetRole(ctx, a.ID, "test", m.ID, "disabled"); err != nil {
 		t.Fatal(err)
 	}
 	got, _ := h.sys.Token(ctx, tk.ID)
