@@ -374,3 +374,125 @@ system.call('token.new', {})                → permission_denied: not in the sy
 reactor: await system.stores.list()         → reads as the store's owner
 reactor: await system.grants.set(…)         → permission_denied (a write needs a person)
 ```
+
+## Step 4: W3, reactors on the system log (and a data-race fix)
+
+An actor can now react to platform changes: a handler under
+`on: {'system:grant'(ctx, e) {…}}` receives each system log commit that
+has a grant change, exactly once, with its cursor in the store. While
+building it, the race detector showed that the actor manager read goja
+objects from goroutines other than the actor's, already in the P3 tests.
+The definition's shape is now copied to Go data when the actor is built.
+Commit `fe7db89`.
+
+### Prompt Context
+
+**User prompt (verbatim):** see Step 1.
+
+**Assistant interpretation:** Phase W3: the `system:` selector, a log
+follower in `system.DB`, cursors with `source = 'system'`.
+
+**Inferred user intent:** A tool's pages should update when someone
+changes a grant from the CLI or another tool, without polling.
+
+**Commit (code):** `fe7db89` — "W3: system: reactors follow the system
+log; actor definition shape read once (fixes data races)".
+
+### What I did
+
+- `pkg/system/system.go`: `DB.OnLog` (called after every committed
+  `Tx`), `LogHead`, `LogAfter(rev, limit)` (commits with their changes,
+  oldest first). Every system write goes through `DB.Tx`
+  (`grep -n BeginTx pkg/system` finds only `Tx` and the migration runner),
+  so the hook sees all of them.
+- `pkg/actor/sysreact.go`: `followSystem` (one goroutine per manager,
+  woken through a one-slot channel; compares `LogHead` with the last head
+  seen), `systemKeys`, `followsSystem` (has `system:` keys, declares and is
+  trusted with `system`), `queueSystem` (at most one pending event per
+  actor), `reactSystem` (200 commits per turn per reactor, then requeues),
+  `systemSelects`.
+- `pkg/actor/manager.go`: activation gives `system:` reactors a cursor
+  with source `system` at the log head; `react` skips `system:` keys;
+  `Get` queues a catch-up when an actor that follows the log starts.
+- The race fix, `pkg/actor/actor.go` and `manager.go`: `Actor.groups` and
+  `Actor.routes` are filled by `readShape` at build; `keys()` reads them;
+  `Manager.Call` checks the action name against them and resolves the
+  function inside the event; `MatchRoute` uses the copied route levels;
+  `Serve` resolves the handler inside the event.
+- `pkg/server/w3_test.go`: `TestSystemReactor`.
+
+### Why
+
+- One follower goroutine and a one-slot channel bound the work: a burst
+  of system commits wakes running followers once per head change, and each
+  actor has at most one system reactor event queued.
+- Followers are only running actors; a stopped actor catches up when it
+  starts. Starting every store's actor on each system commit would be
+  costly and is unnecessary, since cursors make delivery resumable.
+
+### What worked
+
+- `GOWORK=off go test ./pkg/server -run TestSystemReactor -count=1 -v`:
+  `PASS` on the first run.
+- `GOWORK=off go test -race ./pkg/server -count=1`: `ok`, 0 races (after
+  the fix).
+- `GOWORK=off go test ./... -count=1`: all packages `ok`.
+
+### What didn't work
+
+- `go test -race … -run TestSystemReactor` reported races
+  (`testing.go:1712: race detected during execution of test`). The stacks:
+  `goja.(*templatedObject).materialiseProto` read by
+  `actor.(*Actor).fn` ← `actor.(*Actor).react` (actor goroutine), written
+  by `actor.(*Actor).fn` ← `actor.(*Manager).Call` ← `verbs.Call` ←
+  `server.(*Server).apiCall` (HTTP goroutine), and
+  `actor.(*Manager).onCommit.func1` ← `Get`. Running
+  `go test -race -run 'TestReactorExactlyOnce|TestActors|TestJournalExample' -count=2`
+  on the code before the fix printed 8 `DATA RACE` reports: the bug
+  predates this ticket. goja runtimes are not safe for concurrent use, even
+  for reads, because property access materialises prototypes lazily.
+
+### What I learned
+
+- `Manager.Call`, `MatchRoute`, `Serve` and `onCommit` all touched `a.def`
+  outside the actor's goroutine. Any new code that needs to know an actor's
+  handlers from outside should use `keys()` and `routes`, never `def`.
+
+### What was tricky to build
+
+- **Cursor source on conflict.** `_cursors` has `name` as its primary key.
+  An app activated before W3 has `system:` cursors with source `self`; an
+  upsert that kept the old source would then never be found by the
+  `source = 'system'` query. The system upsert sets `source` as well.
+- **Catch-up after trust.** The cursor is set at activation. If the app is
+  trusted later, the first run delivers what happened in between (the test
+  sees the `@guest` grant made before `app.trust`). That is bounded by 200
+  commits per turn, and is consistent with "the cursor records what was
+  delivered".
+
+### What warrants a second pair of eyes
+
+- The catch-up-after-trust semantics above: an alternative is to move
+  `system:` cursors to the head on `app.trust`.
+- `followSystem`'s goroutine lives as long as the process (one per
+  manager); tests create many managers, which leak one idle goroutine each.
+
+### What should be done in the future
+
+- W4: the workshop module, `log.wait`, `app.follow`.
+
+### Code review instructions
+
+- `pkg/actor/sysreact.go` top to bottom; then `readShape` and its users
+  (`git show fe7db89 -- pkg/actor`).
+- `GOWORK=off go test -race ./pkg/server -count=1`.
+
+### Technical details
+
+```text
+grant.set (CLI) → system.DB.Tx commits → OnLog() → wake (cap 1)
+  → follower: LogHead changed? → for running actors that followsSystem(): queueSystem
+  → actor goroutine: reactSystem: cursor(source=system) → LogAfter(rev,200)
+     → handler(ctx, {rev, at, principal, via, summary, changes}) → cursor = last
+     (one store transaction: handler writes and cursor commit together)
+```

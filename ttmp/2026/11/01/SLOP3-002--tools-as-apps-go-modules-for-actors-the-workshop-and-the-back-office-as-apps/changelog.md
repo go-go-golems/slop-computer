@@ -27,3 +27,11 @@ W2 (2405607): system module with call allowlist; SetRole/RevokeToken now log the
 ### Related Files
 
 - /home/manuel/code/wesen/2026-10-31--slop-v3/pkg/server/modsystem.go — the system module table
+
+## 2026-11-01
+
+W3 (fe7db89): system: reactors; fixed pre-existing goja data races by copying the actor definition's shape at build
+
+### Related Files
+
+- /home/manuel/code/wesen/2026-10-31--slop-v3/pkg/actor/sysreact.go — system log follower and reactors
