@@ -73,6 +73,10 @@ var versionPath = regexp.MustCompile(`^/v/([0-9]+)/(.*)$`)
 func (s *Server) serveSandbox(w http.ResponseWriter, r *http.Request) {
 	ctx := r.Context()
 	label, _, _ := strings.Cut(r.Host, ".")
+	if strings.HasPrefix(label, "p") {
+		s.servePreview(w, r, label)
+		return
+	}
 	storeID, app, err := s.Sys.Origin(ctx, label)
 	if err != nil {
 		notFound(w)
@@ -193,16 +197,22 @@ var (
 // inject puts the boot data and the runtime first in a page's head.
 func inject(page []byte, boot any) []byte {
 	raw, _ := json.Marshal(boot)
-	raw = bytes.ReplaceAll(raw, []byte("<"), []byte(`<`))
+	// json.Marshal escapes <, > and & (as \u003c…), so the data cannot close the script.
 	var head bytes.Buffer
 	head.WriteString(`<script type="application/json" id="slop-boot">`)
 	head.Write(raw)
 	head.WriteString(`</script><script src="` + assetURL("claude.js") + `"></script>`)
+	return insertHead(page, head.Bytes())
+}
+
+// insertHead inserts tags first in a page's head (after the doctype when
+// there is no head tag).
+func insertHead(page, tags []byte) []byte {
 	if loc := headOpen.FindIndex(page); loc != nil {
-		return append(append(append([]byte{}, page[:loc[1]]...), head.Bytes()...), page[loc[1]:]...)
+		return append(append(append([]byte{}, page[:loc[1]]...), tags...), page[loc[1]:]...)
 	}
 	if loc := doctype.FindIndex(page); loc != nil {
-		return append(append(append([]byte{}, page[:loc[1]]...), head.Bytes()...), page[loc[1]:]...)
+		return append(append(append([]byte{}, page[:loc[1]]...), tags...), page[loc[1]:]...)
 	}
-	return append(head.Bytes(), page...)
+	return append(append([]byte{}, tags...), page...)
 }

@@ -424,13 +424,14 @@ So each preview gets **its own sandbox origin**, and its unguessable label is th
 
 ```text
 preview.url(store, at, parent)  →  http://p<label>.sbx.localhost:18300/
-label   = "p" + hex(HMAC(serverKey, "preview\0" + store + "\0" + n + "\0" + person + "\0" + expires))[:24]
+label   = "p" + 24 hex characters from crypto/rand (stored in the previews table)
 ```
 
-- `preview.url` (verb, read scope) checks that the caller may read the store (`Can … view`) and resolves `at` to a snapshot number `n`. It inserts a row into a new `previews` table: `label, store, n, person, parent, expires_at` (one hour).
+- `preview.url` (verb, read scope) checks that the caller may read the store (`Can … view`) and resolves `at` (a ref or a snapshot number; default `draft`, else `main`) to a snapshot number `n`. It inserts a row into a new `previews` table: `label, store, n, person, parent, expires_at` (one hour). As built (W5), the label is random rather than an HMAC: it is stored anyway, so it needs only to be unguessable.
+- On every request, the sandbox host checks the row's expiry and that its person may still read the store, so losing access ends the preview.
 - The sandbox host, on a request whose label starts with `p`, looks up the row and checks the expiry. It serves the snapshot's files at the root, as the static host does: `/` gives the entry page, `/a/b.css` gives `a/b.css`, and directories give their `index.html`.
-- HTML responses get two tags injected before `</head>`: a boot block `{"mode": "preview", "parentOrigin": "<parent>"}` and `<script src="/_slop/bridge.js">`. `bridge.js` is v2's `pkg/render/assets/bridge.js`, copied.
-- Every response carries `Content-Security-Policy: frame-ancestors <parent>`, so only the tool that asked can frame it, and `Cache-Control: private, no-store`.
+- HTML responses get three tags injected at the start of the head: a boot block `{"mode": "preview", "parentOrigin": "<parent>"}`, a stub `window.claude = {use: () => Promise.resolve(null)}` (a preview has no view), and `<script src="/_slop/bridge.js">`. `bridge.js` is v2's `pkg/render/assets/bridge.js`, copied.
+- Every response carries `Content-Security-Policy: frame-ancestors <parent> <main> <live hosts>` and `Cache-Control: private, no-store`. `frame-ancestors` applies to every ancestor, not only the direct parent: a preview sits in the tool's sandbox frame, which sits in a shell on the live or main host, so those origins must be listed too. No other sandbox origin may frame it.
 - `parent` must be an origin of this server (a sandbox origin, the main host or a live host), and `preview.url` refuses others. The tool passes its page's `location.origin`.
 
 The bridge's message protocol (from v2's `web/workshop/src/preview/bridge-protocol.ts`), between the tool page and the preview:

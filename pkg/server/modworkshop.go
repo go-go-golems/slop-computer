@@ -15,4 +15,5 @@ var workshopFuncs = []modFunc{
 	{JS: "publish", Verb: "ref.move", Pos: []string{"store", "n"}, Fixed: map[string]any{"ref": "main"}},
 	{JS: "follow", Verb: "app.follow", Pos: []string{"store", "ref"}},
 	{JS: "status", Verb: "app.status", Pos: []string{"store"}},
+	{JS: "preview", Verb: "preview.url", Pos: []string{"store", "at", "parent"}},
 }
