@@ -19,6 +19,8 @@ topics:
       description: Coding agents and eval doors
     - slug: llm
       description: Model access and budgets
+    - slug: tools
+      description: Admin and authoring tools built as apps (back office, Workshop)
 docTypes:
     - slug: design-doc
       description: Structured rationale and architecture notes
