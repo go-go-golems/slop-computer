@@ -59,3 +59,12 @@ P3 actors (34f35c0): goja runtime per store, turns across awaits, migrations and
 
 - /home/manuel/code/wesen/2026-10-31--slop-v3/pkg/actor/actor.go — turn loop and the I/O bridge
 - /home/manuel/code/wesen/2026-10-31--slop-v3/pkg/actor/manager.go — activation, reactors, alarms
+
+## 2026-11-01
+
+P3 exit completed (23c0c67): examples guestbook/journal/static-site; tests for a missed alarm (late), a failing smoke check, reactor retry exactly once; fixes for sqlite_autoindex in migrations and silent reactor failures. Decision: no v2 bridge; P8 deploys from source
+
+### Related Files
+
+- /home/manuel/code/wesen/2026-10-31--slop-v3/examples/journal/actor.js — the journal example on v3
+- /home/manuel/code/wesen/2026-10-31--slop-v3/pkg/server/p3_examples_test.go — P3 exit tests

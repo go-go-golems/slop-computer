@@ -1430,3 +1430,192 @@ TestActors timeline (tracker):
   push 002 fixed (ALTER TABLE)      -> n 3, broken ""
   store tracker-2 (app tracker)     -> own migrations + setup, count 1
 ```
+
+## Step 11: P3's real exit list (examples, missed alarms, smoke), and no v2 bridge
+
+Step 10 said that `TestActors` covered everything the plan named for P3.
+That was wrong. The plan's exit list (§18.2) also names `examples/guestbook`
+and `examples/journal`, a reactor crash that leaves writes applied exactly
+once, an alarm missed during a restart that fires once with `late = true`,
+and a failing **smoke** check (not a migration) that keeps the old version.
+This step adds the examples and those tests. Two real bugs turned up while
+doing it, and both are fixed in commit `23c0c67`.
+
+The user also decided, mid-step, that v3 needs no v2 bridge. P8 becomes
+"deploy from source": each site and app is pushed from its source folder.
+The guide is updated to match (§15 "From v2", §18.2 P8, the decision list).
+
+### Prompt Context
+
+**User prompts (verbatim, sent while this step was in progress):**
+- "i closed a lot of tabs? it was a lot"
+- "how far are we?"
+- "what are the 5 open phases?"
+- "also remember to commit at appropriate intervals and keep a detailed
+  diary as you work (using the diary format from the skill)"
+- "no v2 bridge ? we don't need backwards compatibility."
+
+**Assistant interpretation:**
+- The tabs were Playwright tabs from the P2 browser checks. Close tabs and
+  contexts after every browser check from now on (saved as a memory).
+- Report status: P0 to P3 done, then P4 to P8, verification and the
+  report.
+- Keep committing at phase boundaries and writing investigation-format
+  diary steps.
+- Drop P8's `slop export --folder` bridge. slop.boutique and the francois
+  apps are deployed into v3 from their sources with `slop push`, adapted
+  to the v3 API where needed. No compatibility shims.
+
+**Inferred user intent:** Finish v3 as a clean system. Old content comes
+over by redeploying it, not by translating v2's data model.
+
+**Commit (code):** `23c0c67` — "P3 exit: examples (guestbook, journal,
+static-site), missed alarms, smoke failure, reactor retry".
+
+### What I did
+
+- `examples/journal`: the lab's journal seed (`lab/src/seeds/journal/`),
+  ported to the v3 API:
+  - the manifest uses `title`, `actor` and `type: journal`;
+  - the lab's `slop.sql.expose` and the page's `slop.sql.watch` are not
+    part of v3, so the page reads through two actions instead, `posts`
+    (view) and `drafts` (interact);
+  - the page refreshes when `stats/main` changes, which the reactor
+    rewrites on every commit to `posts`;
+  - `sql/001_posts.sql` is unchanged, including the `my_drafts` view that
+    filters by `slop_principal()`.
+- `examples/guestbook`: guide §3.4, with a page, `style.css` and the
+  actor. `reply` fails with `permission_denied` until P6 provides `sample`.
+- `examples/static-site`: no `app.json`, with a subdirectory page.
+- `ctx.principal` is an alias of `ctx.visitor`, the lab's name for it.
+- `pkg/server/p3_examples_test.go`:
+  - `TestJournalExample`: per-person drafts, publish rights, a publish
+    split by an await, the public feed route on the live host, the stats
+    reactor, a `digest` alarm moved three hours into the past (the
+    scheduler's tick fires it once, `late: true`, and it is rescheduled
+    into the future), and a version whose `smoke` throws (it stays at
+    `n = 1`, broken, with the old version still answering);
+  - `TestReactorExactlyOnce`: while a flag document exists the reactor
+    throws. Nothing it writes is applied, and the failure is in the actor
+    log. After the flag is removed, the next delivery applies all four
+    commits exactly once (`stats/seen.n == 4`, four `seen/r<rev>`
+    documents);
+  - `TestGuestbookExample`: a guest's view signs through RPC `slop.call`,
+    and the entry is trimmed and marked `guest: true`.
+- The harness keeps the `actor.Manager` (`h.a`), so a test can do what the
+  scheduler's tick does (`Fire`).
+
+### Why
+
+- The journal is the guide's teaching example for rule 3 (an await ends
+  the turn). It must run on what v3 actually ships.
+- The lab's SQL exposure (`slop.sql.expose`, `slop.sql.watch`) is not in
+  the v3 guide. Adding it would mean a second read path that bypasses
+  actors and has its own live updates. Actions plus a document as the
+  change signal give the same page with what exists.
+
+### What worked
+
+```text
+$ GOWORK=off go test ./pkg/server -run 'TestJournalExample|TestGuestbookExample' -count=1 -v
+--- PASS: TestJournalExample (0.22s)
+--- PASS: TestGuestbookExample (0.03s)
+$ GOWORK=off go test ./... -count=1
+ok  pkg/blobs  ok  pkg/rt  ok  pkg/server (1.411s)  ok  pkg/store
+```
+
+- `slop_principal()` inside a view, read by an actor turn, returns that
+  turn's visitor. Bob sees only his own draft.
+
+### What didn't work
+
+1. The journal's migration failed at activation:
+
+```text
+p3_examples_test.go:54: status = map[app:journal broken:migration sql/001_posts.sql: not authorized ...]
+```
+
+   A temporary test that logged every denial from the authorizer showed:
+
+```text
+deny 1 "sqlite_autoindex_posts_1" "posts" "main"
+```
+
+   Action 1 is `SQLITE_CREATE_INDEX`. A `TEXT PRIMARY KEY` (or `UNIQUE`)
+   makes SQLite create an automatic index named `sqlite_autoindex_<table>_N`,
+   which `appName` rejects for its `sqlite_` prefix. Fix: `sqliteMade()`
+   allows that index (and its drop) when arg2, the table, is an app
+   table, and keeps the earlier `sqlite_sequence` case. The debug hook was
+   removed again.
+2. The failing reactor left no trace:
+
+```text
+p3_examples_test.go:168: logs = map[lines:[]]
+```
+
+   Two causes:
+   - A failed turn whose event has no reply channel (reactor, alarm) was
+     dropped silently. It now logs `"<kind> <name> failed: <message>"` at
+     level `error`.
+   - My test's selector was `'docs:items'`, but change kinds are `doc`,
+     `file`, `table`, `schema` and `meta`, and the key is the path. The
+     right selector is `'doc:items/*'`. With the wrong one the reactor
+     never ran, which is why nothing failed.
+3. Mounting the journal on the static host was refused: "journal runs a
+   live app (capabilities or an actor): mount it on a live host". That is
+   the host-kind rule working as designed. The test now uses the live host,
+   where the public route answers without a session.
+
+### What I learned
+
+- SQLite's authorizer sees the objects SQLite makes on the app's behalf
+  (`sqlite_sequence`, `sqlite_autoindex_*`) as ordinary DDL. A name-prefix
+  rule must make room for them by action and table.
+- A reactor that fails is retried only on the next commit to the store.
+  That is enough for exactly-once delivery, but a store that goes quiet
+  keeps a failed reactor stuck until something commits.
+
+### What was tricky to build
+
+- Simulating "missed while the server was down" without waiting an hour:
+  move `_alarms.at` three hours back through a kernel-caller turn, mirror
+  it into `schedules`, and run what the 1 s tick runs (`DueSchedules`, then
+  `Fire`). `late` is true when the alarm is overdue by more than one period
+  (at least a minute). The test also checks that it fired once and that
+  its next time is in the future.
+
+### What warrants a second pair of eyes
+
+- `sqliteMade` in `pkg/store/sqlpolicy.go`: it must not let a migration
+  create an arbitrary `sqlite_*` object. It accepts only `sqlite_sequence`
+  (create table) and `sqlite_autoindex_*` on an app table.
+- Failed reactor retries: there is no backoff. A permanently failing
+  reactor runs (and fails) once per commit.
+
+### What should be done in the future
+
+- A retry timer for failed reactors (for example 30 s), so a quiet store
+  does not keep a failed delivery waiting.
+- P8 is now "deploy from source". Find slop.boutique's and the francois
+  apps' source folders, and check what of the v3 API they need.
+
+### Code review instructions
+
+- `pkg/store/sqlpolicy.go`: `sqliteMade`.
+- `pkg/actor/actor.go`: the failed-turn branch of `handle`.
+- `examples/journal/actor.js` against `lab/src/seeds/journal/actor.js.txt`.
+- Validate: `GOWORK=off go test ./pkg/server -run 'Journal|Guestbook|Reactor' -v`.
+
+### Technical details
+
+Change kinds a reactor selector can name (`pkg/store/turn.go`,
+`files.go`, `docs.go`):
+
+```text
+doc:<path pattern>      doc:items/*, doc:entries/**
+file:<path pattern>     file:posts/*.md   (the zone prefix is stripped)
+table:<name>            table:posts
+schema:                 a migration ran
+meta:<key>              store meta changed
+*                       every commit (except reactor and activate commits)
+```

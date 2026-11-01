@@ -2011,10 +2011,9 @@ without reading code.
   its content inline as `text` or base64 `data`.
 - **Transforms** are `eval` programs (section 12.5). The importers move bytes
   and rows; anything that reshapes data is a program you can read and rerun.
-- **From v2:** add one command to slop-computer, `slop export --folder` per
-  artifact, writing this folder format. Then `slop import folder` brings the
-  storefront, the francois releases, the journal and the Blocks workspaces
-  across. Nothing else of v2 is imported (no backwards compatibility).
+- **From v2:** nothing is imported (decision of 2026-11-01, no backwards
+  compatibility). The storefront, the francois apps, the journal and Blocks
+  are pushed from their source folders (P8).
 
 ## 16. What exists today, and what to reuse
 
@@ -2395,17 +2394,16 @@ previous phase's exit test passes.
   budget, turns a policy cell on, mounts an app, and finds each change in
   Activity.
 
-**P8. The v2 bridge and cut-over.**
-- `slop export --folder` in slop-computer, then import the storefront, the
-  francois releases, the journal and the Blocks workspaces.
-- Run v3 on its own hosts next to v2, and move sites over one at a time.
-- **CLIs:** v3's binary is `slop`. On a machine that needs both, install v2's
-  CLI as `slop2`. Both read `~/.config/slop/credentials.json`, which keeps
-  v2's format (`{version, default, servers: {<url>: {token, tokenId, name,
-  user, scopes, expiresAt}}}`), so their logins never collide: they are
-  keyed by server URL.
-- **Exit:** the storefront serves from a v3 static host, styled and complete,
-  and Blocks runs live with Ramon as a member.
+**P8. Deploy from source (no v2 bridge).**
+- Decision (2026-11-01): v3 needs no backwards compatibility. There is no
+  `slop export` in slop-computer and no import of v2 data. Each site and
+  app is pushed into v3 from its source folder with `slop push`, and
+  adapted where the v3 API differs.
+- Deploy the storefront (slop.boutique's pages), the francois apps, the
+  journal and Blocks this way, on v3's own hosts.
+- **Exit:** the storefront serves from a v3 static host, styled and
+  complete; the francois apps run; Blocks runs live with guest and member
+  workspaces.
 
 ## 19. Testing strategy
 
@@ -2483,8 +2481,8 @@ previous phase's exit test passes.
 - Stripe is copied from francois into the core, next to comps (section 7.4,
   P5).
 - Sign-up is open; Zitadel decides who can create an account (D10).
-- The binary is `slop`. During the cut-over, v2's CLI is installed as `slop2`
-  if both are needed on one machine (P8).
+- The binary is `slop`. v2's CLI can be installed as `slop2` if both are
+  needed on one machine; v3 does not read or import v2 data (P8).
 
 - LLM budgets are monthly (section 9.1).
 - Guests may be given LLM access (`@guest`), charged to their guest id. The
