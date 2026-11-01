@@ -95,3 +95,12 @@ P6 (a90186a): app policy matrix, LLM access with monthly budgets (Pi worker back
 
 - /home/manuel/code/wesen/2026-10-31--slop-v3/pkg/server/sample.go — page sample with budget checks
 - /home/manuel/code/wesen/2026-10-31--slop-v3/pkg/system/policy.go — policy, LLM ledger, secrets
+
+## 2026-11-01
+
+P7 (64ff450): back office on the main host (seven surfaces, lab design system, esbuild + React, every button a verb call); Playwright exit passes
+
+### Related Files
+
+- /home/manuel/code/wesen/2026-10-31--slop-v3/ttmp/2026/11/01/SLOP3-001--slop-v3-core-a-streamlined-store-based-hosting-service-design-and-implementation-guide/scripts/01-p7-backoffice-e2e.mjs — P7 exit run
+- /home/manuel/code/wesen/2026-10-31--slop-v3/web/admin/src/views.jsx — the back office surfaces

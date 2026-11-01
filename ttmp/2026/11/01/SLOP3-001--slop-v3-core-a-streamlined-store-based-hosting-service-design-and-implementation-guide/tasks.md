@@ -10,5 +10,5 @@
 - [x] P4: people, audiences, grants, links, guests, can() with trace <!-- t:53wk -->
 - [x] P5: subscriptions (comps; Stripe projection in P5b) <!-- t:t5w4 -->
 - [x] P6: app policy matrix, LLM access and budgets, visitor info <!-- t:wnmi -->
-- [ ] P7: back office UI <!-- t:h66s -->
+- [x] P7: back office UI <!-- t:h66s -->
 - [ ] P8: v2 export bridge and cut-over <!-- t:faws -->

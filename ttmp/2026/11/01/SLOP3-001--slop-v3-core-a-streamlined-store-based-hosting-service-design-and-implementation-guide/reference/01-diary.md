@@ -2237,3 +2237,170 @@ sample, in a turn with visitor v (actor) or in a view (page):
   call                 outside the transaction (actor: await ends the turn)
   charge               llm_usage += input + output   (after the call)
 ```
+
+## Step 15: P7, the back office
+
+P7 is done in commit `64ff450`. The back office is a React app on the main
+host's `/`, for admins. Every button in it is a call to
+`/api/v1/<verb>` with the session's CSRF token, so it holds no rules of
+its own. It has seven surfaces from guide §14, styled with the lab's
+design system (`lab/dist/styles.css`):
+- Activity;
+- People;
+- LLM;
+- Apps (status, the policy matrix, secrets);
+- Stores (grants, links);
+- Sites (mounts);
+- Explain.
+
+The exit run (`scripts/01-p7-backoffice-e2e.mjs`, Playwright) does five
+things against a fresh server and then finds each one in Activity:
+1. lets in a pending member;
+2. grants a comp;
+3. sets an LLM budget;
+4. turns a policy cell on;
+5. mounts an app.
+
+### Prompt Context
+
+**User prompt (verbatim):** see Step 6 and Step 11. Standing guidance from
+earlier sessions: designs should be "consistent, elegant, simple,
+expressive".
+
+**Assistant interpretation:** Build the back office as guide §14
+describes, plain, one table per surface, in the lab's look, and pass the
+P7 Playwright exit.
+
+**Inferred user intent:** An admin runs the platform from a browser
+without the CLI: people, money, LLM, policy, sites.
+
+**Commit (code):** `64ff450` — "P7: the back office — React on the main
+host, every button a verb call".
+
+### What I did
+
+- `web/admin/src/api.js`: `session()` (reads `/auth/session` and its CSRF
+  token), `call(verb, args)` and `signOut()`.
+- `web/admin/src/ui.jsx`:
+  - `useVerb` (run a verb, reload on demand) and `useAct` (run an action,
+    show a toast, reload);
+  - `Table`, `Trace`, `Err`, `Seg`, `Section`, `Field`, after the lab's
+    `ui.jsx`.
+- `web/admin/src/views.jsx`, the seven surfaces:
+  - **People:** let in, make admin, disable or enable; grant and revoke
+    comps.
+  - **LLM:** set access and budget for an audience or a person, reset
+    usage, look up a person's usage.
+  - **Apps:** restart; a policy matrix of toggle cells for the declared
+    capabilities; secrets by name.
+  - **Stores:** grants, and links (a new link shows its token once).
+  - **Sites:** set, remove and undo mounts.
+  - **Explain:** `explain.can` with its trace.
+- `web/admin/src/main.jsx`: a bar with the brand, a strip of surfaces (in
+  the URL hash) and the person; the gate sends a signed-out visitor to sign
+  in and tells a non-admin that the page is for admins.
+- `web/admin/src/admin.css`: layout on top of the lab tokens, including a
+  narrow-screen layout.
+- `web/admin/build.mjs`: esbuild bundles React into
+  `pkg/server/admin/app.js`; `styles.css` is the lab stylesheet followed by
+  `admin.css`.
+- `pkg/server/admin.go`: `GET /{$}` serves the page with the hosts as boot
+  JSON, and `/admin/{file}` serves the embedded files (immutable, with a
+  version query from the bundle hash).
+
+### Why
+
+- **esbuild instead of Vite, plain hooks instead of RTK Query** (a
+  deviation from guide §14). React and esbuild were already available
+  offline, and the back office needs only call-and-reload. The principle
+  that matters, every button being a verb call, holds.
+- **A strip of tabs instead of the lab's draggable dock.** "One window
+  holding a dock of tiles, each tile a strip of tabs" reduced to its first
+  tile. The dock's drag and drop is the part that would cost the most and
+  add the least to administration.
+
+### What worked
+
+```text
+$ NODE_PATH=…/420ff84f11983ee5/node_modules node 01-p7-backoffice-e2e.mjs shots
+P7 back office: all five changes found in Activity
+```
+
+The screenshots are in `various/p7-backoffice/` (people, llm, policy,
+sites, activity, explain). Explain shows Pat as a subscriber (from the
+comp) without a grant on `notes`: `none < view`.
+
+### What didn't work
+
+1. `import { chromium } from 'playwright'` failed with
+   `ERR_MODULE_NOT_FOUND`, because ESM ignores `NODE_PATH`. Fix:
+   `createRequire(import.meta.url)('playwright')`, as
+   `conformance/run.mjs` does.
+2. The mount step timed out waiting for the new row's link. A screenshot
+   on failure showed the row present but empty: `mount.ls` returns
+   `{mount, kind, url}`, not the mount itself. The Sites table now reads
+   `r.mount` and adds a Kind column.
+3. The Activity check read the Sites table, which was still on screen,
+   and reported every change as missing. The script now waits for the
+   Activity heading and a known row before reading.
+4. Design defects in the screenshots:
+   - the "What" column was right-aligned (the lab's rule for a table's
+     last column);
+   - the toasts sat at the bottom centre (my `.toast` class collided with
+     the lab's);
+   - Activity showed raw `usr_…` ids.
+
+   Fixes: columns align left and only action columns align right (`.r`);
+   the toasts were renamed `.otoast`; ids are rendered as names, with the
+   id kept in the title attribute. The check now expects "role of Pat:
+   pending → member" and "comp for Pat until".
+
+### What I learned
+
+- The lab's stylesheet ships its own `.toast` and table rules. A new
+  surface must either reuse them as they are or use its own class names.
+  Overriding them part-way gives the misplacements seen above.
+
+### What was tricky to build
+
+- **The policy matrix as buttons.** Each cell is a `button` with
+  `aria-pressed` and an `aria-label` such as "sample for subscriber". The
+  Playwright run finds it by that label. The matrix shows only the
+  capabilities the app declares, as `policy.ls` reports them.
+
+### What warrants a second pair of eyes
+
+- `GET /` on the main host is now the back office. It used to be a 404.
+  The sign-in return paths (`/auth/login?return=/`) now land there.
+- The bundle in `pkg/server/admin/` is a build artifact committed for
+  `go:embed`. A source change needs `node web/admin/build.mjs` and a new
+  commit.
+
+### What should be done in the future
+
+- The remaining surfaces of §14: tokens on People, documents and SQL on
+  Stores, files and versions on Apps (roll back), and Activity merged with
+  store logs.
+- A people search for large installations.
+
+### Code review instructions
+
+- `web/admin/src/views.jsx` (one function per surface) and
+  `pkg/server/admin.go`.
+- Validate: `node web/admin/build.mjs`, `go build`, then run
+  `scripts/01-p7-backoffice-e2e.mjs` against a server started with
+  `signup: approval`, `local: true`, `admin_emails: [admin@example.com]`
+  on 127.0.0.1:18310.
+
+### Technical details
+
+```text
+surface    verbs
+Activity   log.system, people.ls (names)
+People     people.ls, people.role, sub.ls, sub.grant, sub.revoke
+LLM        llm.ls, llm.set, llm.rm, llm.reset, llm.usage
+Apps       app.ls, app.status, app.restart, policy.ls, policy.set, secret.ls/set/rm
+Stores     store.ls --all, grant.ls/set/rm, link.ls/new/rm
+Sites      mount.ls, mount.set, mount.rm, mount.undo
+Explain    explain.can
+```
