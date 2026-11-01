@@ -282,3 +282,88 @@ the editor shows.
   holds one op under her own peer and one under Ada's (`FORGED BY MALLORY`).
 - Static output for the fixture with `root: weft`: `index.html`,
   `care/index.html`, `faq/index.html`.
+
+## Step 3: B2, the live reader
+
+The reader is `apps/blocks-site/app.json` plus `actor.js`: three routes
+(`GET /`, `GET /:page`, and `GET /*` so that deeper paths are a 404 page
+rather than the shell), a fold cache keyed on the workspace's rev, a site
+model cache keyed on the settings document, and response headers (CSP,
+`Cache-Control: private, no-cache`, `Referrer-Policy`). The exit test,
+`TestBlocksSiteReader`, passed on its first run. Commit `bb18f4c`.
+
+### Prompt Context
+
+**User prompt (verbatim):** see Step 1.
+
+**Assistant interpretation:** Implement phase B2 of the guide.
+
+**Inferred user intent:** A public page for a workspace that shows
+content and nothing of the editor.
+
+### What I did
+
+- `app.json`: type `blocks-site`, actor `actor.js`, capability `db`, module
+  `workshop` (used in B3).
+- `actor.js`: `current()` opens the binding, compares `rev()` with the
+  cached fold, refolds on change, rebuilds the site model when
+  `site/config` changes; `show()` renders the home page, a page by slug,
+  a 302 for a page id or the home page's slug, a 404 page, or a 503 page
+  when the binding or grant is missing (details for the site's admins
+  only).
+- `render.bare()` for the 503 page.
+- `pkg/server/b2_test.go`: `installBlocksSite`, `blocksSite` and
+  `TestBlocksSiteReader`.
+
+### Why
+
+- `GET /*` keeps the shell out: without it, `/pub/site/a/b` would load the
+  shell, which would look for an `index.html` the app does not have.
+- The 503 page hides the binding error from guests: "no binding for
+  source on weft-site" names stores a guest has no business knowing.
+
+### What worked
+
+- The test covers: 404 without a grant on the site; 200 with `@guest view`
+  on the site only (the workspace stays private); the CSP has no `script`
+  source; no op ids, paths, writer ids or overwritten text in the HTML;
+  absolute links under `/pub/weft-site`; the home slug and a page id
+  redirect; an edit (a new chunk) shows on the next request; `root` scope
+  makes `drafts` a 404 and strips its mention; the same site mounted on
+  the static host answers as a guest with links under `/r/weft-site`.
+- `app.status` reports the app healthy without an `index.html`.
+
+### What didn't work
+
+- Nothing failed in this phase.
+
+### What I learned
+
+- The static host serves actor routes after its own `@guest view` check,
+  so a reader can be sessionless and cacheable with no extra code.
+
+### What was tricky to build
+
+- The cache has two keys. Refolding is the expensive part and depends only
+  on the workspace's rev; the site model depends on the settings too. A
+  settings change rebuilds the model from the cached kernel.
+
+### What warrants a second pair of eyes
+
+- The cache lives in actor memory with no bound: one kernel per site. A
+  very large workspace costs its whole tree in memory per site bound to it.
+
+### What should be done in the future
+
+- Measure fold time on a large workspace (thousands of ops) against the
+  5-second turn limit.
+
+### Code review instructions
+
+- `apps/blocks-site/actor.js` (short); `pkg/server/b2_test.go`.
+- `GOWORK=off go test ./pkg/server -run TestBlocksSite -count=1`.
+
+### Technical details
+
+- Reader response headers: `Content-Security-Policy: default-src 'none'; style-src 'unsafe-inline'; img-src https: data:; form-action 'self'; base-uri 'none'; frame-ancestors 'none'`,
+  `Cache-Control: private, no-cache`, `Referrer-Policy: same-origin`.

@@ -11,3 +11,7 @@ Ticket, investigation script and intern guide (uploaded to reMarkable); tasks B1
 ## 2026-11-01
 
 B1: libraries (fold, site, render), req.base, rev(); TestBlocksSiteLibs (843de56)
+
+## 2026-11-01
+
+B2: live reader; TestBlocksSiteReader (bb18f4c)
