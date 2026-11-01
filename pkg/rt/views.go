@@ -25,20 +25,21 @@ const (
 // which capabilities. It lives in memory only; a server restart ends every
 // view and the shell opens new ones.
 type View struct {
-	ID      string    `json:"view"`
-	Secret  string    `json:"-"`
-	Target  string    `json:"target"`
-	App     string    `json:"app"`
-	Version int       `json:"version"`
-	User    string    `json:"user"`
-	Name    string    `json:"-"`
-	Role    string    `json:"-"` // the viewer's role: admin, member (visitor later); policy beyond levels
-	Level   Level     `json:"-"`
-	Caps    Caps      `json:"-"`
-	Perms   []string  `json:"permissions"` // approved slop permissions
-	Kind    string    `json:"kind"`        // viewer | agent
-	Expires time.Time `json:"expiresAt"`
-	Created time.Time `json:"-"`
+	ID      string          `json:"view"`
+	Secret  string          `json:"-"`
+	Target  string          `json:"target"`
+	App     string          `json:"app"`
+	Version int             `json:"version"`
+	User    string          `json:"user"`
+	Name    string          `json:"-"`
+	Role    string          `json:"-"` // the viewer's role: admin, member (visitor later); policy beyond levels
+	Level   Level           `json:"-"`
+	Caps    Caps            `json:"-"`
+	Policy  map[string]bool `json:"-"`           // the app policy cells for this viewer's audience, at open
+	Perms   []string        `json:"permissions"` // approved slop permissions
+	Kind    string          `json:"kind"`        // viewer | agent
+	Expires time.Time       `json:"expiresAt"`
+	Created time.Time       `json:"-"`
 
 	mu    sync.Mutex
 	ch    chan Out

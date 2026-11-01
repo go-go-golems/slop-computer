@@ -14,6 +14,7 @@ import (
 	"github.com/dop251/goja"
 
 	"github.com/go-go-golems/slop/pkg/access"
+	"github.com/go-go-golems/slop/pkg/apps"
 	"github.com/go-go-golems/slop/pkg/rt"
 	"github.com/go-go-golems/slop/pkg/store"
 )
@@ -39,20 +40,23 @@ func (a *Actor) module(name string) goja.Value {
 		return a.logModule()
 	case "stores":
 		return a.storesModule()
+	// Policy capabilities: use() runs before any visitor exists, so it is
+	// null only when the app does not declare the capability or the policy
+	// allows it for no audience; each call checks the turn's visitor.
 	case "fetch":
-		if len(a.run.Manifest.Slop.Fetch) > 0 && a.m.allowed(a, "fetch") {
+		if len(a.run.Manifest.Slop.Fetch) > 0 && a.m.allowedAny(a, "fetch") {
 			return a.fetchModule()
 		}
 	case "secrets":
-		if len(a.run.Manifest.Slop.Secrets) > 0 && a.m.allowed(a, "secrets") {
+		if len(a.run.Manifest.Slop.Secrets) > 0 && a.m.allowedAny(a, "secrets") {
 			return a.secretsModule()
 		}
 	case "sample":
-		if a.m.Sample != nil && a.m.allowed(a, "sample") {
-			return a.m.Sample(a)
+		if a.run.Manifest.Caps.Declared["sample"] && a.m.LLM != nil && a.m.allowedAny(a, "sample") {
+			return a.sampleModule()
 		}
 	case "platform":
-		if len(a.run.Manifest.Slop.Platform) > 0 && a.m.Platform != nil && a.m.allowed(a, "platform") {
+		if len(a.run.Manifest.Slop.Platform) > 0 && a.m.Platform != nil && a.m.allowedAny(a, "platform") {
 			return a.m.Platform(a)
 		}
 	}
@@ -71,6 +75,13 @@ func (a *Actor) Store() *store.Store { return a.st }
 
 // App is the app the actor runs.
 func (a *Actor) App() string { return a.run.App }
+
+// Manifest is the manifest of the running app version.
+func (a *Actor) Manifest() *apps.Manifest { return a.run.Manifest }
+
+// Need throws permission_denied unless this turn's visitor may use a
+// policy capability.
+func (a *Actor) Need(capability string) { a.need(capability) }
 
 // IO starts real I/O; see io.
 func (a *Actor) IO(work func() (any, error), settle func(v any) (goja.Value, error)) goja.Value {
@@ -528,6 +539,7 @@ func (a *Actor) storesModule() goja.Value {
 
 func (a *Actor) fetchModule() goja.Value {
 	return a.vm.ToValue(func(raw string, init goja.Value) goja.Value {
+		a.need("fetch")
 		u, err := url.Parse(raw)
 		if err != nil || (u.Scheme != "https" && u.Scheme != "http") {
 			a.throw(fail("invalid_argument", "fetch needs an http(s) URL"))
@@ -601,6 +613,7 @@ func (a *Actor) fetchModule() goja.Value {
 func (a *Actor) secretsModule() goja.Value {
 	o := a.vm.NewObject()
 	_ = o.Set("get", func(name string) goja.Value {
+		a.need("secrets")
 		if !slices.Contains(a.run.Manifest.Slop.Secrets, name) {
 			a.throw(fail("permission_denied", "%s is not in app.json slop.secrets", name))
 		}

@@ -18,8 +18,10 @@ import (
 
 	"github.com/go-go-golems/slop/pkg/access"
 	"github.com/go-go-golems/slop/pkg/kernel"
+	"github.com/go-go-golems/slop/pkg/llm"
 	"github.com/go-go-golems/slop/pkg/rt"
 	"github.com/go-go-golems/slop/pkg/store"
+	"github.com/go-go-golems/slop/pkg/system"
 )
 
 // Manager owns the actors of all stores.
@@ -36,8 +38,8 @@ type Manager struct {
 	RoomEmit  func(store, topic string, data any)
 	RoomPeers func(store string) []rt.Peer
 	Policy    func(app, capability, audience string) bool
+	LLM       llm.Backend // the sample backend (nil: no LLM)
 	Secret    func(ctx context.Context, app, name string) (string, error)
-	Sample    func(a *Actor) goja.Value
 	Platform  func(a *Actor) goja.Value
 }
 
@@ -51,6 +53,8 @@ func New(k *kernel.Kernel) *Manager {
 	return m
 }
 
+// allowed checks a policy capability for the current turn's visitor (for
+// alarms and reactors, the store owner's audience).
 func (m *Manager) allowed(a *Actor, capability string) bool {
 	if m.Policy == nil {
 		return true
@@ -60,6 +64,28 @@ func (m *Manager) allowed(a *Actor, capability string) bool {
 		aud = a.Visitor().Audience
 	}
 	return m.Policy(a.run.App, capability, aud)
+}
+
+// allowedAny reports whether the policy allows a capability for any
+// audience: use(name) is null when it allows it for none.
+func (m *Manager) allowedAny(a *Actor, capability string) bool {
+	if m.Policy == nil {
+		return true
+	}
+	for _, aud := range system.PolicyAudiences {
+		if m.Policy(a.run.App, capability, aud) {
+			return true
+		}
+	}
+	return false
+}
+
+// need throws permission_denied unless the current visitor may use a
+// policy capability.
+func (a *Actor) need(capability string) {
+	if !a.m.allowed(a, capability) {
+		a.throw(fail("permission_denied", "this app may not use %s for %s", capability, orNone(a.Visitor().Audience)))
+	}
 }
 
 // appFiles reads the scripts of an app version (cached).
@@ -178,6 +204,20 @@ func (m *Manager) markBroken(a *Actor, why string) {
 
 // Restart clears a store's broken state and stops its actor, so the next
 // event builds it again (and activation is retried).
+// RestartApp stops the running actors of every store running app, so the
+// next event builds them again (use() is evaluated at start: a policy
+// change needs a fresh runtime).
+func (m *Manager) RestartApp(app string) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	for id, a := range m.actors {
+		if a.run.App == app {
+			delete(m.actors, id)
+			close(a.stop)
+		}
+	}
+}
+
 func (m *Manager) Restart(id string) {
 	m.mu.Lock()
 	delete(m.broken, id)
@@ -213,9 +253,21 @@ func (m *Manager) storeVisitor(ctx context.Context, id string) Visitor {
 	if row, err := m.K.Sys.StoreByID(ctx, id); err == nil {
 		if p, err := m.K.Sys.Person(ctx, row.Owner); err == nil {
 			v.Audience = string(m.K.Access.AudienceOf(ctx, &access.Principal{Kind: access.KindUser, Person: &p}))
+			v.Payer = p.ID
 		}
 	}
+	m.withLLM(ctx, &v)
 	return v
+}
+
+// withLLM adds what the payer may spend on the LLM this month.
+func (m *Manager) withLLM(ctx context.Context, v *Visitor) {
+	if v.Payer == "" {
+		v.LLM = &system.LLM{}
+		return
+	}
+	l := m.K.Sys.LLMFor(ctx, v.Payer, v.Audience)
+	v.LLM = &l
 }
 
 // VisitorOf describes a principal to a store's actor.
@@ -239,6 +291,10 @@ func (m *Manager) VisitorOf(ctx context.Context, p *access.Principal, storeID st
 	if v.Level == "none" {
 		v.Level = ""
 	}
+	if p != nil && p.Person != nil {
+		v.Payer = p.Person.ID // a visitor without an id is never charged
+	}
+	m.withLLM(ctx, &v)
 	return v
 }
 

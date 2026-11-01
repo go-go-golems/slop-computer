@@ -5,9 +5,13 @@ package server
 
 import (
 	"context"
+	"errors"
+	"fmt"
 	"log"
 	"net"
 	"net/http"
+	"os"
+	"path/filepath"
 	"strings"
 	"time"
 
@@ -16,6 +20,7 @@ import (
 	"github.com/go-go-golems/slop/pkg/httpx"
 	"github.com/go-go-golems/slop/pkg/identity"
 	"github.com/go-go-golems/slop/pkg/ids"
+	"github.com/go-go-golems/slop/pkg/llm"
 	"github.com/go-go-golems/slop/pkg/rt"
 	"github.com/go-go-golems/slop/pkg/system"
 	"github.com/go-go-golems/slop/pkg/verbs"
@@ -35,6 +40,7 @@ type Server struct {
 	oidc      *identity.Provider
 	billing   *stripe.Service
 	told      notified
+	samples   samples
 }
 
 // Build makes the server with everything the configuration enables.
@@ -46,7 +52,47 @@ func Build(ctx context.Context, cfg *config.Config, sys *system.DB, env *verbs.E
 	if err := s.setupBilling(); err != nil {
 		return nil, err
 	}
+	if err := s.setupLLM(ctx); err != nil {
+		return nil, err
+	}
 	return s, nil
+}
+
+// setupLLM starts the model backend the config names.
+func (s *Server) setupLLM(ctx context.Context) error {
+	if s.Env.A == nil {
+		return nil
+	}
+	switch s.Cfg.LLM {
+	case "":
+		return nil
+	case "fake":
+		s.Env.A.LLM = &llm.Fake{}
+	case "pi":
+		pi := s.Cfg.Pi
+		if pi.Worker == "" {
+			return errors.New("llm: pi needs pi.worker (web/piworker/dist/worker.js)")
+		}
+		node := pi.Node
+		if node == "" {
+			node = "node"
+		}
+		agent := pi.AgentDir
+		if agent == "" {
+			home, _ := os.UserHomeDir()
+			agent = filepath.Join(home, ".pi", "agent")
+		}
+		c, err := llm.Start(ctx, node, pi.Worker, agent, os.TempDir(), pi.Models)
+		if err != nil {
+			return fmt.Errorf("start the Pi worker: %w", err)
+		}
+		go func() { <-ctx.Done(); _ = c.Close() }()
+		log.Printf("Pi worker ready: %d models", len(c.Models()))
+		s.Env.A.LLM = c
+	default:
+		return fmt.Errorf("unknown llm %q (pi or fake)", s.Cfg.LLM)
+	}
+	return nil
 }
 
 // New builds a server.
@@ -65,6 +111,11 @@ func New(cfg *config.Config, sys *system.DB, env *verbs.Env) *Server {
 		env.K.Subscribe(s.publish)
 	}
 	if env != nil && env.A != nil {
+		env.A.Policy = func(app, capability, audience string) bool {
+			return sys.Policy(context.Background(), app, capability, audience)
+		}
+		env.A.Secret = func(ctx context.Context, app, name string) (string, error) { return sys.Secret(ctx, key, app, name) }
+		env.A.Platform = s.platformModule
 		env.A.RoomEmit = s.actorEmit
 		env.A.RoomPeers = func(store string) []rt.Peer {
 			out := []rt.Peer{}

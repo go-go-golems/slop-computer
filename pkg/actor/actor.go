@@ -21,6 +21,7 @@ import (
 	"github.com/go-go-golems/slop/pkg/kernel"
 	"github.com/go-go-golems/slop/pkg/rt"
 	"github.com/go-go-golems/slop/pkg/store"
+	"github.com/go-go-golems/slop/pkg/system"
 )
 
 // Limits of one actor.
@@ -32,12 +33,16 @@ var (
 
 // Visitor is who an event acts for, as ctx.visitor shows them.
 type Visitor struct {
-	ID         string `json:"id"`
-	Name       string `json:"name"`
-	Audience   string `json:"audience"`
-	Level      string `json:"level"`
-	Guest      bool   `json:"guest"`
-	Subscribed bool   `json:"subscribed"`
+	ID         string      `json:"id"`
+	Name       string      `json:"name"`
+	Audience   string      `json:"audience"`
+	Level      string      `json:"level"`
+	Guest      bool        `json:"guest"`
+	Subscribed bool        `json:"subscribed"`
+	LLM        *system.LLM `json:"llm,omitempty"`
+	// Payer is who an LLM call is charged to: the visitor when they are a
+	// person, the store's owner for alarms and reactors (guide §9.2).
+	Payer string `json:"-"`
 }
 
 // Error is an actor failure with a code (permission_denied, actor_error…).

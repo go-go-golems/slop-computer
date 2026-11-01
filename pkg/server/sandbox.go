@@ -91,6 +91,9 @@ func (s *Server) serveSandbox(w http.ResponseWriter, r *http.Request) {
 	case p == "/_rt/assets" && r.Method == http.MethodPost:
 		s.uploadAsset(w, r)
 		return
+	case strings.HasPrefix(p, "/_rt/sample") && r.Method == http.MethodPost:
+		s.serveSampleRoute(w, r, p)
+		return
 	case !get:
 		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
 		return

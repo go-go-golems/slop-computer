@@ -91,16 +91,25 @@ func grantedCaps(v *rt.View) map[string]any {
 		case "db", "room", "downloads":
 			out[name] = map[string]any{}
 		case "assets":
-			if v.Level >= rt.LevelInteract && v.Role != string(access.AudGuest) {
-				out[name] = map[string]any{} // guests store no files: they answer to nobody
+			// The policy decides by audience (members and up by default);
+			// a visitor without an id answers to nobody and stores nothing.
+			if v.Level >= rt.LevelInteract && v.User != "" && v.Policy["assets"] {
+				out[name] = map[string]any{}
 			}
 		case "artifact":
 			if v.Target == v.App && v.Role == string(access.AudAdmin) {
 				out[name] = map[string]any{} // publishing replaces the app for everyone
 			}
+		case "sample":
+			if v.User != "" && v.Policy["sample"] {
+				out[name] = map[string]any{"images": v.Caps.Images}
+			}
 		case "user":
 			scopes := []string{}
 			for sc := range v.Caps.Scopes {
+				if sc == "email" && !v.Policy["user.email"] {
+					continue
+				}
 				scopes = append(scopes, sc)
 			}
 			sort.Strings(scopes)
@@ -153,8 +162,12 @@ func (s *Server) openView(ctx context.Context, p *access.Principal, storeID, par
 	if p != nil && p.Person != nil {
 		name = p.Person.Name
 	}
+	pol := map[string]bool{}
+	for _, c := range system.PolicyCaps {
+		pol[c] = s.Sys.Policy(ctx, run.App, c, string(d.Audience))
+	}
 	v := s.rt.views.Open(&rt.View{Target: storeID, App: run.App, Version: int(run.N), User: p.ID(), Name: name,
-		Role: string(d.Audience), Level: d.Level, Caps: caps, Kind: "viewer"})
+		Role: string(d.Audience), Level: d.Level, Caps: caps, Policy: pol, Kind: "viewer"})
 	u, origin, err := s.sandboxURL(ctx, v, parent)
 	if err != nil {
 		s.rt.views.Close(v, false)
@@ -408,7 +421,8 @@ func (s *Server) rpcTable() map[string]rpcFunc {
 		"db.get": s.rpcDBGet, "db.query": s.rpcDBQuery, "db.write": s.rpcDBWrite, "db.acquire": s.rpcDBAcquire,
 		"db.subscribe": s.rpcDBSubscribe, "db.unsubscribe": s.rpcDBUnsubscribe,
 		"user.profiles": s.rpcUserProfiles, "user.search": s.rpcUserSearch,
-		"room.join": s.rpcRoomJoin, "room.leave": s.rpcRoomLeave, "room.presence": s.rpcRoomPresence, "room.emit": s.rpcRoomEmit,
+		"sample.limits": s.rpcSampleLimits,
+		"room.join":     s.rpcRoomJoin, "room.leave": s.rpcRoomLeave, "room.presence": s.rpcRoomPresence, "room.emit": s.rpcRoomEmit,
 		"assets.list": s.rpcAssetsList, "assets.delete": s.rpcAssetsDelete, "artifact.publish": s.rpcArtifactPublish,
 		"room.canSendToClaudeSession": func(context.Context, *rt.View, json.RawMessage) (any, error) { return false, nil },
 		"slop.call":                   s.rpcSlopCall, "slop.read": s.rpcSlopRead,
@@ -798,7 +812,7 @@ func profileOf(v *rt.View, p system.Person) profile {
 			out.Name, _, _ = strings.Cut(p.Email, "@")
 		}
 	}
-	if v.Caps.Scopes["email"] {
+	if v.Caps.Scopes["email"] && v.Policy["user.email"] {
 		out.Email = p.Email
 	}
 	return out
@@ -814,8 +828,12 @@ func (s *Server) userInfo(ctx context.Context, v *rt.View) map[string]any {
 			"assets.write": v.Level >= rt.LevelInteract, "files.write": v.Level >= rt.LevelAdmin, "people.add": false,
 		}}
 	if s.Env.A != nil {
-		out["visitor"] = s.Env.A.VisitorOf(ctx, s.viewPrincipal(ctx, v), v.Target)
+		vis := s.Env.A.VisitorOf(ctx, s.viewPrincipal(ctx, v), v.Target)
+		out["visitor"] = vis
+		out["subscribed"] = vis.Subscribed
 	}
+	l := s.viewLLM(ctx, v) // §9.5: user.me().llm
+	out["llm"] = map[string]any{"allowed": l.Allowed, "remaining": l.Remaining}
 	if v.Caps.Declared["user"] {
 		out["id"] = v.User
 		out["guest"] = strings.HasPrefix(v.User, "vis_") || v.User == ""

@@ -51,7 +51,16 @@ type Config struct {
 	OIDC        OIDC     `yaml:"oidc"`
 	Stripe      Stripe   `yaml:"stripe"`
 	SecretKey   string   `yaml:"secret_key_file"` // HMAC key for sandbox labels and secrets
-	LLM         string   `yaml:"llm"`             // "pi" (default when available) or "fake"
+	LLM         string   `yaml:"llm"`             // "" (off), "pi" (the Pi worker) or "fake"
+	Pi          Pi       `yaml:"pi"`
+}
+
+// Pi runs the Pi model worker (web/piworker) for the sample capability.
+type Pi struct {
+	Node     string            `yaml:"node"`      // node binary (default "node")
+	Worker   string            `yaml:"worker"`    // web/piworker/dist/worker.js
+	AgentDir string            `yaml:"agent_dir"` // ~/.pi/agent (models, credentials)
+	Models   map[string]string `yaml:"models"`    // tier (quick, default, complex) -> provider/model
 }
 
 // Load reads a YAML file (optional) and applies defaults.

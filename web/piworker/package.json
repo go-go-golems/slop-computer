@@ -1,0 +1,20 @@
+{
+  "name": "slop-piworker",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "build": "node build.mjs",
+    "check": "tsc --noEmit"
+  },
+  "dependencies": {
+    "@earendil-works/pi-ai": "0.85.1",
+    "@earendil-works/pi-coding-agent": "0.85.1"
+  },
+  "devDependencies": {
+    "@types/node": "24.19.2",
+    "esbuild": "0.25.12",
+    "typescript": "5.9.3"
+  },
+  "packageManager": "pnpm@10.15.1",
+  "engines": { "node": ">=24" }
+}
