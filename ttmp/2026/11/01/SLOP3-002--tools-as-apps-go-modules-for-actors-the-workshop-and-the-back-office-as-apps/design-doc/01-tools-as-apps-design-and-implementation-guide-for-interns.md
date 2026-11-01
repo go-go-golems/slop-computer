@@ -568,20 +568,22 @@ export async function call(verb, args = {}) {
 }
 ```
 
-Rules: `threads` is readable at `view` and written only by the actor (`write: "admin"`), so every change goes through an action that validates it.
+Rules: `threads` is readable at `view`; pages do not write it (`write: "owner"`), so changes go through actions that validate them.
 
 **Actions** (`apps/workshop/actor.js`):
 
 | Action | Level | What it does |
 |---|---|---|
-| `overview()` | admin | stores with their refs (`main`, `draft`), latest snapshots, open thread counts |
-| `snapshots({store})` | admin | `workshop.snapshots` + `workshop.refs` |
-| `preview({store, n, parent})` | admin | `workshop.preview` |
-| `comment({store, n, anchor, text})` | admin | new thread |
-| `reply({thread, text, n, agent})` | admin | add a comment; `n` is the snapshot that answers it |
-| `resolve({thread, open})` | admin | close or reopen |
+| `overview()` | view | the stores the visitor can read that have `main` or `draft`, with their refs and open thread counts |
+| `store({store})` | view | `workshop.snapshots` (30 newest) + `workshop.refs` |
+| `preview({store, n, parent})` | view | `workshop.preview` |
+| `comment({store, n, anchor, text})` | interact | new thread |
+| `reply({thread, text, n, agent})` | interact | add a comment; `n` is the snapshot that answers it |
+| `resolve({thread, open})` | interact | close or reopen |
 | `publish({store, n})` | admin | `workshop.publish`; adds a system comment to the store's open threads |
 | `follow({store, ref})` | admin | `workshop.follow` (run a draft on a scratch instance) |
+
+The levels are on the Workshop store; the workshop module then applies the visitor's own level on the reviewed store (reading it, moving its `main`). As built (W8), the page draws pins only for open threads and the focused one, and reloads the snapshot list when a reply names a snapshot it has not seen.
 
 **Screens** (the page, `apps/workshop/index.html` + `app.js`):
 

@@ -1,0 +1,9 @@
+{
+  "title": "Workshop",
+  "actor": "actor.js",
+  "capabilities": {
+    "user": { "scopes": ["profile"] },
+    "db": { "rules": [{ "path": "threads", "read": "view", "write": "owner" }] }
+  },
+  "slop": { "modules": ["workshop"] }
+}

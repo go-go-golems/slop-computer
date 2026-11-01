@@ -618,11 +618,18 @@ func (a *Actor) toJS(v any) goja.Value {
 	if err != nil {
 		return goja.Null()
 	}
-	var out any
-	if json.Unmarshal(b, &out) != nil {
+	// JSON.parse makes native objects and arrays: values wrapped from Go
+	// maps and slices would not keep in-place changes (push on a nested
+	// array would be lost when the object is written back).
+	parse, ok := goja.AssertFunction(a.vm.Get("JSON").ToObject(a.vm).Get("parse"))
+	if !ok {
 		return goja.Null()
 	}
-	return a.vm.ToValue(out)
+	out, err := parse(goja.Undefined(), a.vm.ToValue(string(b)))
+	if err != nil {
+		return goja.Null()
+	}
+	return out
 }
 
 // export converts a JS value to JSON data (JSON.stringify's rules).

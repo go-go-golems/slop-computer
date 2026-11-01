@@ -1,0 +1,45 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Workshop</title>
+<link rel="stylesheet" href="styles.css">
+</head>
+<body>
+<header class="top">
+  <b class="brand">Workshop</b>
+  <span id="crumb" class="dim"></span>
+  <span class="sp"></span>
+  <span id="refs" class="dim"></span>
+</header>
+<main class="grid">
+  <nav class="col stores">
+    <h2>Stores</h2>
+    <ul id="stores" class="list"><li class="dim">Loading…</li></ul>
+    <h2 id="snaps-h" hidden>Snapshots</h2>
+    <ul id="snaps" class="list"></ul>
+    <button id="publish" class="btn primary" hidden></button>
+  </nav>
+  <section class="col stage">
+    <div class="bar">
+      <span id="at" class="dim">Pick a store.</span>
+      <span class="sp"></span>
+      <button id="pick" class="btn" aria-pressed="false" disabled>⊕ Comment on an element</button>
+    </div>
+    <iframe id="frame" title="Preview" referrerpolicy="no-referrer"></iframe>
+  </section>
+  <aside class="col threads">
+    <h2>Threads <span id="count" class="dim"></span></h2>
+    <form id="composer" class="card" hidden>
+      <p class="anchor" id="anchor"></p>
+      <textarea id="ctext" rows="3" placeholder="What should change here?" required></textarea>
+      <div class="row"><button class="btn primary">Comment</button><button type="button" id="cancel" class="btn">Cancel</button></div>
+    </form>
+    <ol id="threads" class="threadlist"></ol>
+  </aside>
+</main>
+<p id="msg" class="msg" role="status"></p>
+<script src="app.js"></script>
+</body>
+</html>
