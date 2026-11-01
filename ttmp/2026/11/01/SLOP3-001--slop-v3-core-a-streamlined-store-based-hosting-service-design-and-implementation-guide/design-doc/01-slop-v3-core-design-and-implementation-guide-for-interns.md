@@ -1602,6 +1602,10 @@ shell from `slop-computer/pkg/render/assets/shell.js` and `shell.css`:
      then sets the site session.
 
   The v2 functions are `siteLogin`, `handoff` and `siteCallback`.
+  The state cookie is `SameSite=Lax` (the return from the main host is a
+  cross-site navigation, where the `Strict` session cookie is withheld) and
+  carries the guest id this browser had, signed with the server key, so the
+  new session can record `from_guest`.
 - **Guests** are created in `openSiteView` when the store gives guests a
   level (v2's `newVisitor`). The claim offer appears after sign-in
   (`/_site/claim`).
@@ -1647,6 +1651,12 @@ page runtime:
     `index.html`;
   - `/_rt/…`, the view's stream and RPC;
   - `/_s/…`, the store's files.
+- **One commit, one resume point:** a v3 commit can change many documents
+  at one rev (batches). The stream sends a commit's documents together and
+  puts `rev` only on the last one, so a runtime that reconnects mid-commit
+  resumes before it rather than after it. Every commit is published to the
+  store's views, including commits a view cannot see, so the stream's rev
+  advances without a catch-up read.
 - **Stream events:**
   - `hello`;
   - `doc` (the body, or a patch against the version the page holds);
@@ -2245,7 +2255,9 @@ pkg/access/             audiences, levels, can() with trace, policy, llmFor
 pkg/billing/            subscription decision (copied from francois)
 pkg/llm/                Backend, Pi worker adapter, fake, usage ledger
 pkg/identity/           OIDC, sessions, local login, device login, tokens
-pkg/serve/              hosts, mounts, resolve, static, images, live, views, sandbox
+pkg/server/             hosts: main (auth, device, /api/v1), static (site.go),
+                        live (live.go: shell, site sessions, handoff),
+                        sandbox (sandbox.go), views (views.go), assets
 pkg/verbs/              the verb table; adapters for cli, http, eval
 pkg/importer/           folder, docs, table, files
 web/runtime/            window.claude (copied from slop-computer)

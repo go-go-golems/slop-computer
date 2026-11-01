@@ -41,3 +41,12 @@ P1 implemented (9f454de): stores on SQLite with turns and a log, documents with 
 - /home/manuel/code/wesen/2026-10-31--slop-v3/pkg/store/sqlpolicy.go — the SQL authorizer
 - /home/manuel/code/wesen/2026-10-31--slop-v3/pkg/store/turn.go — turns and commits
 - /home/manuel/code/wesen/2026-10-31--slop-v3/pkg/verbs/eval.go — eval programs
+
+## 2026-11-01
+
+P2 implemented (98f3859, e9ae7b3): app.json and running versions, mounts with history, static host (trailing slash, /_s/, cache classes), live host (shell, site sessions, guests, handoff), sandbox origins, views/stream/RPC with v2's runtime unchanged, assets. Conformance passes in Chromium; Blocks with guests and Pinup run.
+
+### Related Files
+
+- /home/manuel/code/wesen/2026-10-31--slop-v3/pkg/server/live.go — live host and handoff
+- /home/manuel/code/wesen/2026-10-31--slop-v3/pkg/server/views.go — the page protocol

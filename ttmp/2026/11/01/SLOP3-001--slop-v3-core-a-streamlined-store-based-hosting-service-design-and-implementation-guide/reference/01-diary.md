@@ -999,3 +999,233 @@ The authorizer denial that revealed AUTOINCREMENT:
 DENY action=2 a1="sqlite_sequence" a2="" db="main"
 CREATE TABLE entries (id INTEG… not authorized
 ```
+
+## Step 9: P2, apps and serving (static host, live host, sandbox, views)
+
+P2 is done, in two code commits:
+- `98f3859` (P2a): manifests, running versions, mounts and the static host;
+- `e9ae7b3` (P2b): the live host, sandbox origins, views and the runtime;
+- plus `121e5fc`, gofmt only.
+
+All three exit criteria pass:
+1. A static site serves on the static host with its relative CSS, behind
+   the trailing-slash redirect.
+2. Blocks runs on a live host for guests, and two separate guest browsers
+   see each other's edits: a page made in one appears in the other's
+   sidebar.
+3. slop-computer's runtime conformance page passes in headless Chromium
+   (44 of 46 checks; the two `comments` checks are out of scope), including
+   its two-tab checks.
+
+The page runtime (`claude.js`) is v2's build, unchanged. The v3 server
+speaks its wire protocol over v3 stores.
+
+### Prompt Context
+
+**User prompt (verbatim, sent while this step was in progress):** "to
+verify proper working, make sure that slop.boutique pages and the francois
+apps are properly served, that you can collaborate with a coding agent (say,
+pi coding agent with lunaroute/deepseek-4.1-flash:high) can be used to
+create / modify apps, and that blocks and pinup work too once you built it
+all. make different instances of blocks that guests can access too. but once
+you get there, after writing a detailed report of implementing slop v3 (
+write a detailed project report for the obsidian vault as a deep dive
+technical analysis blog post using a textbook writing style (no analogies,
+see skill).
+ Commit and push the bsidian vault when done (go-go-parc vault).   )"
+
+**Assistant interpretation:** Continue the phases. The final verification
+adds five requirements:
+- slop.boutique and the francois apps served from v3 (through the P8 v2
+  bridge);
+- a pi agent (lunaroute/deepseek-4.1-flash:high) making and changing apps;
+- Blocks and Pinup working;
+- several Blocks workspaces open to guests;
+- then a textbook-style deep-dive report in the go-go-parc vault, committed
+  and pushed.
+
+**Inferred user intent:** Prove v3 with real content and a real agent, not
+only with tests.
+
+### What I did
+
+- **P2a:**
+  - `pkg/apps/manifest.go`: `app.json` = the contract `capabilities` block
+    (`rt.ParseManifest`) plus a `slop` block: reads, fetch, secrets and
+    platform.
+  - `pkg/kernel/apps.go`: `Running(store)` resolves the app (the store
+    itself, or `_meta.app`) at the ref it follows. It activates the store
+    when `_meta.app_version` lags, which for now only records the version,
+    in the store's log and the system log. Manifests are cached per
+    `app@n`, and `Rules` comes from the running manifest.
+  - `pkg/system/mounts.go`: `SetMount`, `RemoveMount` and `UndoMount`, each
+    recorded in `mount_log` and the system log. `BestMount` ranks literal >
+    `:param` > `*`, then the longer pattern, and a mount covers its
+    subtree.
+  - Verbs:
+    - `mount.ls/set/rm/undo`; `set` enforces the host kind, putting live
+      apps (with capabilities or an actor) on live hosts and plain content
+      on static ones;
+    - `app.status` and `app.ls`;
+    - D9 in `files.put/rm/push`, `snap.new` and `ref.move`: only admins
+      write the tree or refs of a store holding `app.json`.
+  - `pkg/server/site.go`: the static host, as an id-less guest (public
+    means `@guest view`):
+    - a 308 to the trailing slash, then directory index pages;
+    - the entry page as the fallback for client routes;
+    - `/_s/<store>/<n|ref|assets>/…` with immutable, moving and private
+      cache classes;
+    - ETag, 304 and ranges through `http.ServeContent`.
+- **P2b:**
+  - `pkg/server/views.go`, the page protocol ported from v2's `rt.go`:
+    - views from `rt.Registry`;
+    - `/_rt/events`: hello, catch-up from `?after=`, live commits, rooms,
+      reload;
+    - `/_rt/rpc`: `db.get/query/write/acquire/subscribe/unsubscribe`,
+      `user.profiles/search`, `room.*` and `permissions.state`;
+    - diff-sync patches, in-memory leases.
+
+    Writes are turns with `Who{via: page, app: app@n}`.
+  - `pkg/store`: `Change` carries the new and previous body in memory
+    (`json:"-"`), so publishing needs no re-read and can diff.
+  - `pkg/server/sandbox.go`:
+    - labels `s` + HMAC(server key, store\0app)[:20], recorded in
+      `origins`;
+    - `/v/<n>/` serves the app store's snapshot n, with the boot JSON and
+      `claude.js` injected into the entry page;
+    - `frame-ancestors` names the main host and the live hosts;
+    - `/_slop/` serves embedded assets with hashed URLs.
+  - `pkg/server/rtassets.go`:
+    - `assets`: `/_rt/assets` upload, `/_blob/<id>`, list and delete, kept
+      in the store's assets zone;
+    - `artifact.publish`, for admins only: it replaces the entry page and
+      snapshots.
+  - `pkg/server/live.go`:
+    - a site session per host and guests (`vis_`);
+    - the handoff: `/_site/login`, then main `/auth/handoff`, then
+      `/_site/callback`;
+    - `/_site/me|views|create|access|grants`, all checked for same origin;
+    - `reviewViews`: views close or reopen when grants change;
+    - the shell page.
+  - **Assets:**
+    - `claude.js`, copied built from v2;
+    - `shell.js`/`shell.css`, adapted (`@member`/`@guest`, `/_site/create`,
+      `kind: guest`);
+    - `web/runtime` sources copied, so the runtime can be rebuilt later;
+    - `config.Key()` loads `secret_key_file` or generates
+      `<data>/secret.key`.
+  - `conformance/app` (manifest renamed to `app.json`) and
+    `conformance/run.mjs`, a v3 runner that signs in through the handoff
+    and runs the two-tab checks.
+- **The live demo instance** (scratch data):
+  - Blocks and Pinup pushed as app stores, from v2's builds with v3
+    manifests;
+  - Blocks workspaces `ws-lobby` and `ws-scratch` (`@guest interact`) and
+    `ws-team` (`@member interact`);
+  - `pinup-demo` (`@guest interact`);
+  - mounts `/blocks/:ws` and `/pinup/:file` on `apps.localhost:18300`,
+    with `createApp` set.
+
+### Why
+
+- **Keeping v2's wire protocol** lets the built runtime and both apps run
+  unchanged. Blocks and Pinup were written against claude.ai, and v2 already
+  matched that.
+- **Keeping the server code in `pkg/server`** (not a new `pkg/serve`): the
+  hosts share the principal, session and access code there.
+
+### What worked
+
+- **The conformance page in Chromium:**
+  - as a guest, 40 of 46 checks passed on the first run (failures:
+    canEdit, which needs an admin; artifact; assets; comments);
+  - after porting assets and artifact, and signed in as admin, 44 of 46;
+  - the headless runner prints `all passed`, with `comments` skipped.
+- **Blocks for guests:** "Shared · live", three guest avatars in the room,
+  and a new page from one guest showing in the other guest's sidebar.
+- **Pinup:** "View only" for a guest. It enables editing only when
+  `canEdit()` is true, which means admin level, and guests are capped at
+  interact; that is Pinup's own rule, as on claude.ai. The signed-in admin
+  gets the editor.
+- **Go tests:** `TestStaticSite`, `TestOnlyAdminsPushAppCode`,
+  `TestLiveHostViews` (two guests over HTTP and SSE; a write reaches the
+  other stream with its rev; a cross-store RPC is refused) and
+  `TestSiteHandoff` (a code fails without the state cookie). All pass.
+
+### What didn't work
+
+- **The handoff callback failed in Chromium:** `this sign-in link is not
+  valid here; try again` (HTTP 400 on `/_site/callback`). I had made the
+  state cookie `SameSite=Strict`, so the browser withheld it on the
+  navigation back from the main host. v2 used `Lax` for exactly this
+  reason. The fix uses Lax for the state cookie only, and puts the guest id
+  in it (HMAC-signed), since the Strict session cookie is withheld there
+  too.
+- **Editing a Blocks property through the UI did nothing:** clicking the
+  `cups` value never opened an input. `cups` is a typed cell (`title="number"`)
+  and Blocks sends typed cells to its source editor (`Props.edit` →
+  `Src.cell`). I tested live edits with "New page" instead.
+- **An earlier Playwright `waitForURL(/auth\/login/)` timed out:** the
+  main host was already signed in, so the handoff skipped the login page.
+
+### What I learned
+
+- `slop.localhost` and `apps.localhost` count as cross-site for SameSite.
+  `slop.example.com` and `apps.example.com` count as same-site. So a
+  handoff that works in production can fail locally; v2's choice of Lax
+  avoids depending on that.
+- The conformance page and Blocks both tolerate `use('comments')` and
+  `use('sample')` returning null.
+
+### What was tricky to build
+
+- **Resume points with batch commits:** v2 had one doc per rev, so "skip
+  events with rev ≤ last" was safe. A v3 batch shares one rev, and the
+  runtime advances `lastRev` on any doc event that carries a rev. The
+  stream now sends a whole commit as one `Out` and puts the rev only on the
+  commit's last visible document.
+- **Reloads after a push:** the app store's ref moves, but its data stores
+  activate lazily. `publish` spots ref changes and `reloadApp`, in a
+  goroutine, activates each viewed store and sends `reload` to views
+  running an older version.
+
+### What warrants a second pair of eyes
+
+- `grantedCaps` here is the core's list, before P6's policy matrix:
+  - db, room, downloads and user for everyone;
+  - assets for non-guests holding at least interact;
+  - artifact for admins on self-contained apps.
+- `/_s/` on the sandbox origin is served as a guest, because `<img>` tags
+  cannot send the view secret. Private stores' files are not reachable that
+  way, by design.
+- Guests are created on any open of a store that grants `@guest`
+  something. That is one `people` row per new browser.
+
+### What should be done in the future
+
+- Share links (`/_site/links`, P4) and the guest claim offer.
+- Image thumbnails (`?w=`) and caching per v2's `thumbs.go`.
+- Rebuild `claude.js` with the `slop` namespace and `user.me()` additions
+  (P3/P6).
+
+### Code review instructions
+
+- `pkg/server/views.go`: `viewEvents` (the resume logic), `publish`,
+  `dbWrite`.
+- `pkg/server/live.go`: the handoff and `stateValue`; `siteOpenView`.
+- `pkg/server/site.go`: `serveStatic`.
+- Validate:
+  - `GOWORK=off go test ./...`;
+  - by hand: `slop serve --local`, push `conformance/app`, mount it on
+    `apps.localhost:18300`, then
+    `NODE_PATH=<playwright> node conformance/run.mjs`.
+
+### Technical details
+
+```text
+conformance as admin: 44 ok, 2 skip (comments), two tabs: write, presence,
+moment, download, reload all ok — "all passed"
+blocks ws-lobby, two guest contexts:
+  before: Welcome to Claude Blocks, Lisbon in May, Reading list
+  after:  … Reading list, 📄 Guest notes from tab one
+```
