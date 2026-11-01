@@ -1,0 +1,7 @@
+{
+  "title": "Blocks site",
+  "type": "blocks-site",
+  "actor": "actor.js",
+  "capabilities": { "db": {} },
+  "slop": { "modules": ["workshop"] }
+}

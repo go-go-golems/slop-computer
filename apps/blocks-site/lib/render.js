@@ -243,6 +243,12 @@ function page(site, n, opts) {
   return layout(site, { title: n === site.home && !site.config.title ? site.title(n) : `${site.title(n)} · ${site.name}`, current: n, link: opts.link, home: opts.home, admin: opts.admin, body: main });
 }
 
+// A page without a site around it (the site cannot read its workspace).
+function bare(title, text) {
+  return `<!doctype html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1"><title>${esc(title)}</title><style>${CSS}</style></head>`
+    + `<body><main><article><h1 class="title">${esc(title)}</h1><p class="empty">${esc(text)}</p></article></main></body></html>`;
+}
+
 // A page for a site with nothing to show yet (no pages, or a missing one).
 function message(site, title, text, opts) {
   return layout(site, { title, current: '', link: opts.link, home: opts.home, admin: opts.admin, body: `<article><h1 class="title">${esc(title)}</h1><p class="empty">${esc(text)}</p></article>` });
@@ -286,4 +292,4 @@ function adminPage(site, { base, source, rev, published, note, bad }) {
   return layout(site, { title: 'Settings · ' + site.name, current: '', link: opts.link, home: opts.home, admin: { source, href: base + '/_site' }, body });
 }
 
-module.exports = { page, message, staticFiles, liveLinks, adminPage, tokens, esc };
+module.exports = { page, message, bare, staticFiles, liveLinks, adminPage, tokens, esc };
