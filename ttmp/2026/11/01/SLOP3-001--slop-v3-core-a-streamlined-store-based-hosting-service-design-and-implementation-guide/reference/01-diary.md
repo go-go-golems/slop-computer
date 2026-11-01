@@ -2940,3 +2940,25 @@ task 2      Admin (admin person)           read write     journal tags; sql.quer
 before {id, name, avatarUrl, color, email, isOwner, canEdit}
 after  {id, name, avatarUrl, color, email, isOwner, canEdit, audience, level, guest, subscribed, llm}
 ```
+
+## Step 18: The project report in the go-go-parc vault (milestone)
+
+The deep-dive report asked for in Step 9 is written and pushed. It is in
+textbook style without analogies, ordered by dependency, from the data
+model to the agent run, and every claim is checked against the code or
+this diary.
+
+- **Note:** `go-go-parc/Projects/2026/11/01/PROJECT REPORT - slop v3 - A
+  Store-Based Hosting Service from Design to Deployment - A Technical Deep
+  Dive.md` (about 9,000 words), with eight figures in `_assets/slop-v3-*.png`.
+- **Vault commit:** `8dfcd87`, pushed to `go-go-golems/go-go-parc` main.
+  Only the note and its figures were staged; the vault's unrelated working
+  changes (`Research/Software Architecture Garden/dropcut-studio/`) were
+  left alone.
+- **Code commit on the way:** `7aaec53` (`go mod tidy`: stripe-go,
+  `pkg/errors` and `x/sync` are direct dependencies).
+- **Corrections made while proofreading:**
+  - the `explain.can` trace example now matches what `Level` emits (no cap
+    line for a grant below the cap);
+  - an unsupported claim about v2's access code was restated as the design
+    reason.

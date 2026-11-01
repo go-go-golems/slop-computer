@@ -13,4 +13,4 @@
 - [x] P7: back office UI <!-- t:h66s -->
 - [x] P8: deploy from source (slop.boutique, francois apps, Blocks, Pinup; no v2 bridge) <!-- t:faws -->
 - [x] Verify: a pi coding agent (lunaroute/deepseek-4.1-flash:high) creates and modifies apps with the slop CLI <!-- t:ibft -->
-- [ ] Write the go-go-parc project report (textbook deep dive) and push the vault <!-- t:u95e -->
+- [x] Write the go-go-parc project report (textbook deep dive) and push the vault <!-- t:u95e -->
