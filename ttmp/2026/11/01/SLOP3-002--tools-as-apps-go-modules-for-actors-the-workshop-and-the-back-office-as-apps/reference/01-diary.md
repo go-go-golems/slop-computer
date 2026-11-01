@@ -145,3 +145,119 @@ while every platform change stays audited and checked.
 
 - Ticket path:
   `ttmp/2026/11/01/SLOP3-002--tools-as-apps-go-modules-for-actors-the-workshop-and-the-back-office-as-apps/`.
+
+## Step 2: W1, the module registry and app trust
+
+Apps can now declare Go modules in `app.json` (`"slop": {"modules":
+["system"]}`), and `use(name)` returns such a module only after an admin
+has run `slop app trust <app> <module>`. A module function calls a verb
+as the person behind the event, labelled `app:<app>`, so the verb's own
+checks decide and the system log names the app. The `system` module
+exists with five functions; W2 fills it in. Commit `632cfaf`.
+
+### Prompt Context
+
+**User prompt (verbatim):** see Step 1.
+
+**Assistant interpretation:** Phase W1 of the guide: registry, manifest
+field, trust table and verbs, `actAs`, and restarting actors when trust
+changes.
+
+**Inferred user intent:** The foundation every later phase uses; it must
+already refuse what the visitor could not do directly.
+
+**Commit (code):** `632cfaf` — "W1: Go module registry for actors, app
+trust (app.trust/untrust/modules), calls as the visitor".
+
+### What I did
+
+- `pkg/apps/manifest.go`: `Slop.Modules []string`, validated against
+  `apps.Modules` (`system`, `workshop`) as `slop.platform` is validated
+  against `apps.Platform`.
+- `pkg/system/migrations/003_app_modules.sql` and `pkg/system/modules.go`:
+  table `app_modules (app, module, granted_by, granted_at)`;
+  `TrustModule`, `UntrustModule` (both log `Change{Kind: "module"}`),
+  `Trusted`, `AppModules`.
+- `pkg/actor/registry.go`: `Module{Name, Doc, Load}`, `Manager.Register`,
+  `Manager.Modules`, `Manager.Module`, and `Actor.trustedModule`, which
+  `Actor.module` calls in a new `default:` case.
+- `pkg/actor/manager.go`: `Manager.Trusted` hook; `VisitorOf` copies a
+  token's scopes into the new `Visitor.Scopes` (`json:"-"`).
+- `pkg/verbs/actors.go`: `app.trust` and `app.untrust` (admin scope, admin
+  only, restart the app's actors), `app.modules` (read).
+- `pkg/server/modules.go`: `modFunc{JS, Verb, Pos, Fixed}`, `verbModule`
+  (builds nested objects from `group.name`), `modArgs` (argument mapping),
+  `callVerb`, `actAs`, `registerModules` (called from `server.New`).
+- `pkg/server/w1_test.go`: `TestModuleTrust`.
+
+### Why
+
+- `app.trust` refuses a module the app does not declare, as `policy.set`
+  refuses an undeclared capability. The deployment order (push, trust,
+  mount) already puts the declaration first.
+- The module list sits in `pkg/apps` beside `apps.Platform`, because
+  `apps.Parse` must validate names and cannot import the server, which
+  registers the implementations. A name in `apps.Modules` with no
+  registered implementation just makes `use()` return null.
+
+### What worked
+
+- `GOWORK=off go test ./pkg/server -run TestModuleTrust -count=1`: `ok`.
+- `GOWORK=off go test ./... -count=1`: all packages `ok`.
+
+### What didn't work
+
+- The first run of the test failed with
+  `w1_test.go:57: trusted: keys = ["grants","log","people"]`, because the
+  harness's `fmtAny` renders JSON, not Go's `%v`. The expectation was
+  corrected.
+
+### What I learned
+
+- `Visitor.Payer` is the person for person visitors and the store's owner
+  for reactors and alarms, which is why `platform` acts as `Payer`. The new
+  modules use `ID` instead, and fall back to `Payer` only for reads, so a
+  reactor cannot write as the owner.
+
+### What was tricky to build
+
+- **Token scopes.** Without them, a token with `read, write` could call an
+  action that calls `policy.set` (admin scope) and act with the full rights
+  of its person. The visitor now carries the token's scopes and `actAs`
+  builds a token principal with them; the test checks that a write token
+  gets "this token lacks the admin scope" through the app.
+- **Synchronous or asynchronous functions.** A verb that writes the actor's
+  own store, called during a turn, would wait for the turn's own
+  transaction. Module functions therefore run the verb through `Actor.IO`
+  and return a promise: the turn commits, the verb runs on another
+  goroutine, and the result settles in a continuation turn that keeps the
+  visitor. The guide's synchronous examples must become `await` calls; the
+  guide is updated in W2.
+
+### What warrants a second pair of eyes
+
+- `actAs` labels a token principal's `Via` as `app:<app>` without the token
+  id (`TokenID` is left empty so `ViaLabel` does not append it). The
+  person is still recorded; the token is not.
+- `Trusted` is read when `use()` runs, at actor start; a trust change takes
+  effect through `RestartApp`, the same mechanism `policy.set` uses.
+
+### What should be done in the future
+
+- W2: the full system module and the guide update for promises.
+
+### Code review instructions
+
+- Start at `pkg/server/modules.go` (`actAs`, `callVerb`), then
+  `pkg/actor/registry.go` and the `default:` case in
+  `pkg/actor/modules.go`.
+- Run `GOWORK=off go test ./pkg/server -run TestModuleTrust -count=1`.
+
+### Technical details
+
+```text
+use('system') returns an object iff
+  "system" ∈ app.json slop.modules        (apps.Parse rejects unknown names)
+  ∧ "system" is registered                (Manager.Register in server.New)
+  ∧ app_modules has (app, "system")       (app.trust, admin only)
+```
