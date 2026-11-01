@@ -176,6 +176,7 @@ func (s *Server) mainRoutes(m *http.ServeMux) {
 	s.deviceRoutes(m)
 	s.billingRoutes(m)
 	s.apiRoutes(m)
+	s.adminRoutes(m)
 }
 
 // ListenAndServe runs the server until ctx ends.

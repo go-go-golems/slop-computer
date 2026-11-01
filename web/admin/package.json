@@ -1,0 +1,8 @@
+{
+  "name": "slop-admin",
+  "private": true,
+  "description": "slop's back office: every button is a call to /api/v1/<verb>",
+  "scripts": { "build": "node build.mjs" },
+  "dependencies": { "react": "18.3.1", "react-dom": "18.3.1" },
+  "devDependencies": { "esbuild": "0.25.12" }
+}
