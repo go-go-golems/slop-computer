@@ -382,3 +382,16 @@ python3 -I scratchpad/slop3-edits/edit1.py <design-doc>   -> applied 23
 python3 -I scratchpad/slop3-edits/edit2.py <design-doc>   -> applied 11
 git diff --stat: 1 file changed, 231 insertions(+), 81 deletions(-); doc now 2,711 lines
 ```
+
+## Step 5: Uploaded the revised guide (milestone)
+
+The revised guide is on the reMarkable cloud as a second document, next to the
+first, so any notes made on the first copy are kept.
+
+**User prompt (verbatim):** see Step 4.
+
+- **Command:** `remarquee upload bundle <design-doc> --name "SLOP3-001 slop v3 core design guide v2" --remote-dir "/ai/2026/11/01/SLOP3-001" --toc-depth 2 --non-interactive`
+- **Result:** `OK: uploaded SLOP3-001 slop v3 core design guide v2.pdf -> /ai/2026/11/01/SLOP3-001`. That proves cloud delivery, not device sync.
+- **No `--force`:** the first upload, `SLOP3-001 slop v3 core design guide.pdf`, stays as it is.
+- **Guide revision:** `ba21061`.
+- **Next:** answers to the two open questions in §20; then P0.

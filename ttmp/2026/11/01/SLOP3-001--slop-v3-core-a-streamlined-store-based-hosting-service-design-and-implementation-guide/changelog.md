@@ -23,3 +23,7 @@ Applied the product owner's answers: anonymous folded into guest; lab is referen
 ### Related Files
 
 - /home/manuel/code/wesen/2026-10-31--slop-v3/ttmp/2026/11/01/SLOP3-001--slop-v3-core-a-streamlined-store-based-hosting-service-design-and-implementation-guide/design-doc/01-slop-v3-core-design-and-implementation-guide-for-interns.md — Revised guide
+
+## 2026-11-01
+
+Uploaded the revised guide as 'SLOP3-001 slop v3 core design guide v2' to /ai/2026/11/01/SLOP3-001 (first upload kept).
