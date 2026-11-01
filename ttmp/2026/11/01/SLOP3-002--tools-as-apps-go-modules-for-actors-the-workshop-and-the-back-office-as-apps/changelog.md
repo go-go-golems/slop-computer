@@ -19,3 +19,11 @@ W1 (632cfaf): module registry, app.trust/untrust/modules, actAs with token scope
 ### Related Files
 
 - /home/manuel/code/wesen/2026-10-31--slop-v3/pkg/server/modules.go — actAs and the verb-module builder
+
+## 2026-11-01
+
+W2 (2405607): system module with call allowlist; SetRole/RevokeToken now log the real via
+
+### Related Files
+
+- /home/manuel/code/wesen/2026-10-31--slop-v3/pkg/server/modsystem.go — the system module table

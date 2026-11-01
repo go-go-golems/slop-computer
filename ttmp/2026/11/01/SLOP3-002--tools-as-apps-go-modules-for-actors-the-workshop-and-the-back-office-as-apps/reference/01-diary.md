@@ -261,3 +261,116 @@ use('system') returns an object iff
   ∧ "system" is registered                (Manager.Register in server.New)
   ∧ app_modules has (app, "system")       (app.trust, admin only)
 ```
+
+## Step 3: W2, the system module
+
+`use('system')` now holds 34 functions over the governance verbs, plus
+`call(verb, args)` for code that names verbs. Functions that change roles,
+policy, LLM budgets, comps or secrets carry a `Confirm` flag that W6 will
+enforce. The test exposed a pre-existing audit bug: `people.role` and
+token revocation logged `via: verb` whatever the door, so the "via
+app:office" the design promises was missing. Both now take the via. Commit
+`2405607`.
+
+### Prompt Context
+
+**User prompt (verbatim):** see Step 1.
+
+**Assistant interpretation:** Phase W2: the full function table, `call`
+with an allowlist, and the tests the guide lists for it.
+
+**Inferred user intent:** An app should reach exactly the platform
+operations a back office needs, no more, and every change should be
+traceable to the app.
+
+**Commit (code):** `2405607` — "W2: the system module (34 functions and
+call), via passed through SetRole/RevokeToken".
+
+### What I did
+
+- Listed the verbs the existing back office calls
+  (`grep -rhoE "'(people|grant|…)\.[a-z]+'" web/admin/src`): 31 verbs, all
+  of which are in the module, so the back-office port (W7) can use `call`
+  unchanged.
+- `pkg/server/modsystem.go`: `systemFuncs` (JS name, verb, positional
+  names, fixed arguments, `Confirm`), and `systemModule`, which adds
+  `call`. `call` looks the verb up in a map built from `systemFuncs` and
+  throws `permission_denied: system.call: <verb> is not in the system
+  module` otherwise.
+- `pkg/server/modules.go`: `modFunc.Confirm`; `callVerb` takes the
+  `modFunc` so W6 can read the flag.
+- `pkg/system/people.go` `SetRole` and `pkg/system/sessions.go`
+  `RevokeToken` take a `via` argument; `pkg/verbs/people.go` passes
+  `p.ViaLabel()`.
+- `pkg/server/w2_test.go`: `TestSystemModule`.
+- The guide: functions return promises (section 15), token scopes carry
+  over, `subs.revoke(id)` takes a comp id, `apps.modules`, the examples use
+  `await`, and a note that `app.trust` is not reachable.
+
+### Why
+
+- `app.trust` is left out of the module so that an app trusted with
+  `system` cannot widen its own trust or another app's.
+- `subs.revoke` takes a comp id because `sub.revoke` does (`cmp_…`); the
+  guide had `person`.
+
+### What worked
+
+- `GOWORK=off go test ./pkg/server -run 'TestModuleTrust|TestSystemModule' -count=1`: `ok`.
+- `GOWORK=off go test ./... -count=1`: all packages `ok`.
+
+### What didn't work
+
+- `w2_test.go:58: log entry = map[… summary:role of usr_…: pending → member via:verb]`.
+  `system.SetRole` hard-coded `"verb"` as the via
+  (`pkg/system/people.go:157`), as did `RevokeToken`
+  (`pkg/system/sessions.go:226`). Fixed by passing the via.
+- `w2_test.go:63: letIn as member: … this token lacks the admin scope`.
+  Correct behaviour: the scope check comes before the admin check. The
+  member's token now has all scopes so the test reaches the role check.
+- `notes is plain content: mount it on a static host`: the test mounted a
+  plain store on the live host; it now mounts the app itself.
+- Two assertion shapes were wrong (`mount.set` returns `{mount, note, url}`;
+  `docs.get` returns `{body, …}`).
+
+### What I learned
+
+- Every `system.DB` method that logs should take `via`; `grep -n '"verb"'
+  pkg/system` now finds none.
+- A reactor's `try { await system.grants.set(…) } catch (e)` receives
+  `e.code === "permission_denied"`, because `actAs` throws before the I/O
+  starts and the async function turns the throw into a rejection.
+
+### What was tricky to build
+
+- Argument mapping. `people.list({kind: 'user'})` must pass `kind`, not an
+  object named `kind`. The rule is: one plain object is the argument
+  object; otherwise arguments fill the positional names, and a plain object
+  after them adds options. `mounts.set({host, path, store})` and
+  `mounts.set(host, path, store, {type: 'blocks'})` are therefore both
+  valid; the test uses the first form.
+
+### What warrants a second pair of eyes
+
+- The `Confirm` flags in `systemFuncs`: which operations count as
+  governance. Grants, links and mounts are not flagged (they are
+  per-store publishing decisions, already limited by the person's level);
+  roles, policy, LLM, comps and secrets are.
+
+### What should be done in the future
+
+- W3: the `system:` selector, so tools can react to changes made
+  elsewhere.
+
+### Code review instructions
+
+- `pkg/server/modsystem.go` (the table), then `TestSystemModule`.
+
+### Technical details
+
+```text
+system.call('grant.ls', {store:'office'})   → verbs.Call(grant.ls) as the visitor
+system.call('token.new', {})                → permission_denied: not in the system module
+reactor: await system.stores.list()         → reads as the store's owner
+reactor: await system.grants.set(…)         → permission_denied (a write needs a person)
+```
