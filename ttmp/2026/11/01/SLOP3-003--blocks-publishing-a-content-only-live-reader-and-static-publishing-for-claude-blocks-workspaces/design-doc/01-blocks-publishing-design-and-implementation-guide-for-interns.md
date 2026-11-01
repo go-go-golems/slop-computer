@@ -349,6 +349,7 @@ Each decision below names the alternative that was rejected and why.
 | `GET /` | view | the home page |
 | `GET /:page` | view | the page whose slug or id is `:page`; a page id redirects (302) to its slug; the home page's slug redirects to `/` |
 | `GET /_site` | admin | the settings and publishing page |
+| `GET /_media/:id` | view | an upload a published page shows, when the binding shares uploads; otherwise 404 |
 | `POST /_site`, `POST /_publish` | admin | form posts; answer with a 303 back to `/_site` |
 
 **The site model.** After a fold, `lib/site.js` builds the model every page render reads:
@@ -461,17 +462,32 @@ The push replaces the store's whole tree (`files.push` prunes by default), so a 
 | allow the read | `slop grant set my-notes store:my-notes-site view` | admin of the workspace |
 | make it public | `slop grant set my-notes-site @guest view` | admin of the site |
 | create a static store | `slop store new my-notes-static --type site`, `slop grant set my-notes-static @guest view` | member |
+| publish uploaded files too | `slop bind set my-notes-site source my-notes --assets true` | admin of the site and of the workspace |
 | publish | the *Publish* form on `/pub/my-notes-site/_site`, or `slop call my-notes-site publish '{"to":"my-notes-static","live":true}'` | admin of the site and of the static store |
 
 The four admin steps happen once per server. Every row below them is something a member does alone for workspaces they own. A member who is only a contributor on a shared workspace cannot publish it: the `grant set` on the workspace needs its admin.
 
 ### 5.7 What is exposed
 
-A reader of a site sees the rendered HTML of the pages in the site's scope, at the time of the request. A reader does not see the op log, earlier versions of a text, deleted pages, pages outside the scope (not even their titles), who wrote what, or the editor. A reader does see the values of formulas the author placed on published pages, including values computed from unpublished cells. The site's admin page shows the source workspace id and the last publication; it is admin-only.
+A reader of a site sees the rendered HTML of the pages in the site's scope, at the time of the request. A reader does not see the op log, earlier versions of a text, deleted pages, pages outside the scope (not even their titles), who wrote what, or the editor. A reader does see the values of formulas the author placed on published pages, including values computed from unpublished cells. Uploaded files are published only as described in 5.8. The site's admin page shows the source workspace id and the last publication; it is admin-only.
+
+### 5.8 Uploaded files (phase B5)
+
+A picture or PDF added in Blocks ("File or image", drag and drop) is stored in the workspace store's `assets` zone, and the page records it as a file record, `{name, kind, type, size, url: "/_blob/<id>", id}`, usually in a list shown by a template: `media = [...]`, `upload media`, `each m in media` with a child `file m`. The URL `/_blob/<id>` is served only on the sandbox origin of a view of the workspace, to someone who can open it. A site needs three things to publish such a file: a right to read the workspace's uploads, a way to send the bytes, and a rule for which files it sends.
+
+**The right: a binding shares uploads only when set to.** A binding has an `assets` flag (`slop bind set team-site source ws-team --assets true`, migration `005_binding_assets.sql`). Setting it needs admin on the target as well as on the site, so the person who owns the uploads consents, and an existing `store:<site> view` grant never starts covering uploads by itself. Re-running `bind set` without the flag turns it off.
+
+**The bytes: the actor names the file, the server sends it.** With the flag, the handle from `use('stores').open(alias)` has `assets.get(id)` and `assets.list()`, which describe files (`{id, type, size, sha256}`) and never return content; without it, `assets` is `null`. An HTTP route answers `{asset: {from: 'source', id}}`, and the server rechecks the binding's flag and the site's read on the workspace, then streams the file (`serveBoundAsset`, `pkg/server/actors.go`). The response has `Content-Security-Policy: sandbox; default-src 'none'`, like `/_blob/` on a sandbox origin, and anything that is not an image, video, sound or PDF is sent with `Content-Disposition: attachment`: the live host holds session cookies, and an uploaded HTML file must never run there. No bytes pass through JavaScript, which matters for 20 MB files and the 5-second turn limit.
+
+**The rule: only what a published page shows.** The reader serves `GET /_media/:id` only for ids that a page in the site's scope renders (`render.mediaOf(site)`, computed once per site model). An upload on an unpublished page, or one no page shows, is a 404 even when the binding shares uploads.
+
+**Static publications copy them by hash.** The files of a store live in one content-addressed blob store per server, so `publish` adds `{path: 'media/<id>', sha256, size, type}` to the push for every upload its pages show, and no bytes move. Pages link to `media/<id>` relatively.
+
+**Rendering.** `file m` inside `each m in media` renders an image record as `<figure><img></figure>` and anything else as a download link; records only in the uploader's tab (`local: true`) are skipped. `image` renders https URLs (the reader's CSP allows `'self'`, `https:` and `data:` images) and uploads; plain `http:` images are dropped in both outputs. Page covers render: the editor's eight presets, an https image, a linear gradient or a hex colour, nothing else (the value goes into a style attribute).
 
 ## 6. Server changes
 
-Three small changes make the app possible. All are general, not Blocks-specific.
+Five small changes make the app possible (three in B1 to B3, two in B5). All are general, not Blocks-specific.
 
 ### 6.1 `req.base`: the URL a route was reached at
 
@@ -484,6 +500,14 @@ The handle from `use('stores').open(alias)` gains `rev()`, returning the target'
 ### 6.3 Cross-origin posts to actor routes do not carry the session
 
 On the live host, a `POST` (or any method other than `GET` and `HEAD`) to an actor route is served with the session's person only when the browser says it came from the same origin: `Sec-Fetch-Site` is absent or `same-origin`, and `Origin` is absent or the live host's own origin (`crossOrigin`, `pkg/server/live.go`). Otherwise the request is served as a guest. Without this, a page in an app's sandbox, which is same-site with the live host, could submit a form to `/pub/team-site/_publish` and publish as whoever is looking at it. The B3 test checks both a same-site and a cross-site post, and fails if the rule is removed.
+
+### 6.4 Bindings that share uploads
+
+`bindings.assets` (migration `005_binding_assets.sql`), `system.Binding.Assets`, `DB.BindingOf`, and the `assets` argument of `bind.set`, which requires admin on the target when set (`pkg/verbs/actors.go`). The system log records `bound <store> <alias> → <target> (with uploads)`.
+
+### 6.5 Route answers that send an upload
+
+`actor.Res.Asset` (`AssetRef{From, ID}`) is set when a route returns `{asset: {from, id}}` (`toRes`); `serveActorRoute` hands it to `serveBoundAsset`, which rechecks and streams (section 5.8). The store handle's `assets` object is in `storesModule` (`pkg/actor/modules.go`).
 
 ## 7. Implementation plan
 
@@ -506,6 +530,12 @@ Each phase ends with a test that must pass before the next starts. Commit after 
 
 1. `configure`, `status`, `publish` actions; `GET /_site`, `POST /_site`, `POST /_publish`.
 2. **Exit test:** `TestBlocksSitePublish`: untrusted app gets `unavailable`; trusted, an admin publishes live and the static store's `main` holds `index.html` and `<slug>/index.html` with relative links; a draft publication leaves `main` alone; a member who is not admin of the static store gets `permission_denied`; the form post as a guest is refused.
+
+### Phase B5: uploaded files (added after B4)
+
+1. The binding flag, the handle's `assets`, `{asset}` route answers (sections 6.4, 6.5).
+2. Covers, https-only images, file records in `each` templates, `GET /_media/:id`, copies in publications.
+3. **Exit test:** `TestBlocksSiteUploads` (`pkg/server/b5_test.go`); in the browser, `scripts/05-blocks-site-uploads-e2e.mjs` uploads through the Blocks upload block.
 
 ### Phase B4: deployment, member self-publishing, end to end
 
@@ -531,7 +561,7 @@ Each phase ends with a test that must pass before the next starts. Commit after 
 
 | Action | Args | Level | Returns |
 |---|---|---|---|
-| `status` | | view | `{source, rev, pages: [{id, slug, title, parent}], home, config, published}` |
+| `status` | | view | `{source, rev, pages: [{id, slug, title, parent}], home, config, published, assets}` |
 | `configure` | `{title?, home?, root?, to?}` | admin | the new config |
 | `publish` | `{to?, live?}` (`to` defaults to `config.to`) | admin | `{to, n, live, files}` |
 
@@ -547,9 +577,10 @@ Each phase ends with a test that must pass before the next starts. Commit after 
 ```text
 index.html                 the home page
 <slug>/index.html          every other page
+media/<id>                 uploads the pages show (when the binding shares uploads)
 ```
 
-Links between pages are relative; there are no other files (the stylesheet is inline).
+Links between pages are relative; the stylesheet is inline.
 
 ## 9. File reference
 
@@ -567,6 +598,8 @@ Links between pages are relative; there are no other files (the stylesheet is in
 | `pkg/actor/modules.go` | `rev()` on a store handle |
 | `pkg/server/actors.go` | sets `Base` |
 | `pkg/server/live.go` | `crossOrigin`: unsafe cross-origin requests to actor routes are served as a guest |
+| `pkg/system/bindings.go`, `pkg/system/migrations/005_binding_assets.sql` | bindings that share uploads |
+| `pkg/server/b5_test.go` | uploads test |
 | `pkg/server/b1_test.go` … `b3_test.go` | phase tests |
 | upstream `web/blocks/src/blocks.js` | `Net.load` (fold), `Pages`, `Markdown.page` (the reference walk) |
 | upstream `web/blocks/src/blocks-kit.js` | prose grammar, `numberLabel`, block kinds' positional props |
@@ -598,7 +631,6 @@ Edit a page at `/b/ws-team`, reload the reader: the change is there. Reload the 
 
 ## 11. Open questions and later work
 
-- **Images.** Covers and uploaded images live in the workspace's asset store, which guests of the site cannot read. A later phase can copy referenced assets into the static store and proxy them in the reader.
 - **Incremental fold.** Apply only chunks changed since the cached rev, when a workspace grows large enough for a full fold to matter.
 - **Push instead of poll.** The reader refolds on request. A cross-store reactor (the site reacting to the workspace's commits) would let it refold ahead of requests and could republish a static site automatically.
 - **Per-page publication.** `root` scopes a site to a subtree. A `published` checkbox per page would need a page property the editor shows; Blocks has page properties, so this is possible without changing the editor.

@@ -209,10 +209,12 @@ function block(cx, q, kind) {
     case 'image': {
       // https only (the reader's CSP allows https images), or an uploaded file
       const src = prop(cx, q, 'src'), alt = prop(cx, q, 'alt');
+      if (src && typeof src === 'object') return file(cx, src);
       const up = typeof src === 'string' && /^\/_blob\/([\w.-]+)$/.exec(src), href = up ? media(cx, up[1]) : typeof src === 'string' && /^https:\/\//.test(src) ? src : '';
       return href ? `<p><img src="${esc(href)}" alt="${esc(typeof alt === 'string' ? alt : '')}" loading="lazy"></p>` : '';
     }
     case 'file': return file(cx, prop(cx, q, 'of'));
+    case 'video': case 'audio': return file(cx, prop(cx, q, 'src')); // a record: offered as a download link
     case 'each': {
       // a template: its child blocks once per item, the item under its alias (each m in media)
       const name = String(prop(cx, q, 'as') || 'it'), { items } = F.itemsOf(K, q, 'of', cx.env);

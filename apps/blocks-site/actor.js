@@ -11,7 +11,7 @@
 //   slop grant set team-site @guest view
 // Uploaded files (pictures, PDFs) are published only when the binding
 // shares them, which needs admin on the workspace as well:
-//   slop bind set team-site source ws-team --assets
+//   slop bind set team-site source ws-team --assets true
 // The reader then serves the files its pages show at _media/<id>, and a
 // publication copies them to media/<id>.
 // Static publishing renders every page into a static store through the
