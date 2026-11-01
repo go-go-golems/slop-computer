@@ -38,6 +38,7 @@ func Build(ctx context.Context, cfg *config.Config, sys *system.DB, env *verbs.E
 func New(cfg *config.Config, sys *system.DB, env *verbs.Env) *Server {
 	s := &Server{Cfg: cfg, Sys: sys, Env: env, main: http.NewServeMux()}
 	s.mainRoutes(s.main)
+	s.Static = http.HandlerFunc(s.serveStatic)
 	return s
 }
 

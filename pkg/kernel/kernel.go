@@ -5,6 +5,7 @@ package kernel
 
 import (
 	"context"
+	"database/sql"
 	"errors"
 	"fmt"
 	"os"
@@ -15,7 +16,6 @@ import (
 	"github.com/go-go-golems/slop/pkg/blobs"
 	"github.com/go-go-golems/slop/pkg/config"
 	"github.com/go-go-golems/slop/pkg/ids"
-	"github.com/go-go-golems/slop/pkg/rt"
 	"github.com/go-go-golems/slop/pkg/store"
 	"github.com/go-go-golems/slop/pkg/system"
 )
@@ -29,6 +29,8 @@ type Kernel struct {
 
 	mu   sync.Mutex
 	open map[string]*store.Store
+
+	mc manifestCache
 
 	subMu sync.RWMutex
 	subs  map[int]func(*store.Commit)
@@ -179,7 +181,5 @@ func (k *Kernel) Close() {
 	}
 }
 
-// Rules returns the document rules of a store's owner app. P2 reads them
-// from the app's manifest; until then every store has the defaults (read
-// view, write interact, data/users/<id>/ private).
-func (k *Kernel) Rules(ctx context.Context, id string) rt.Rules { return rt.Rules{} }
+// systemTx is the transaction type system.DB.Tx hands out.
+type systemTx = *sql.Tx

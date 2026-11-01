@@ -86,6 +86,11 @@ func init() {
 				if err != nil {
 					return nil, err
 				}
+				if zoneOf(a) == "tree" {
+					if err := needCodeRight(ctx, s, p, a.S("path")); err != nil {
+						return nil, err
+					}
+				}
 				data := []byte(a.S("text"))
 				if a.Has("data") {
 					if data, err = base64.StdEncoding.DecodeString(a.S("data")); err != nil {
@@ -110,6 +115,11 @@ func init() {
 				s, d, err := e.open(ctx, p, a.S("store"), rt.LevelAdmin, "deleting files")
 				if err != nil {
 					return nil, err
+				}
+				if zoneOf(a) == "tree" {
+					if err := needCodeRight(ctx, s, p); err != nil {
+						return nil, err
+					}
 				}
 				paths := []string{a.S("path")}
 				if a.B("recursive") {
@@ -168,6 +178,9 @@ func init() {
 				if err != nil {
 					return nil, err
 				}
+				if err := needCodeRight(ctx, s, p); err != nil {
+					return nil, err
+				}
 				var n int64
 				c, err := s.Do(ctx, who(p, d), func(t *store.Turn) error {
 					var err error
@@ -202,6 +215,9 @@ func init() {
 			Run: func(ctx context.Context, e *Env, p *access.Principal, a Args) (any, error) {
 				s, d, err := e.open(ctx, p, a.S("store"), rt.LevelAdmin, "moving refs")
 				if err != nil {
+					return nil, err
+				}
+				if err := needCodeRight(ctx, s, p); err != nil {
 					return nil, err
 				}
 				c, err := s.Do(ctx, who(p, d), func(t *store.Turn) error { return t.MoveRef(a.S("ref"), a.I("n", 0)) })
@@ -333,6 +349,15 @@ func push(ctx context.Context, e *Env, p *access.Principal, a Args, full bool) (
 		}
 		seen[f.Path] = true
 		sums = append(sums, f.SHA256)
+	}
+	if zone == "tree" {
+		paths := make([]string, 0, len(files))
+		for _, f := range files {
+			paths = append(paths, f.Path)
+		}
+		if err := needCodeRight(ctx, s, p, paths...); err != nil {
+			return nil, err
+		}
 	}
 	if missing := s.Blobs.Missing(sums); len(missing) > 0 {
 		sort.Strings(missing)
