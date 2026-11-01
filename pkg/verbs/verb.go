@@ -212,26 +212,36 @@ func AsError(err error) *Error {
 
 // Call runs a verb for a principal: scope, admin check, required args, Run.
 func Call(ctx context.Context, e *Env, p *access.Principal, name string, a Args) (any, error) {
-	v, ok := Get(name)
-	if !ok {
-		return nil, Errf("not_found", "no verb %q", name)
-	}
 	if a == nil {
 		a = Args{}
 	}
+	if err := Check(p, name, a); err != nil {
+		return nil, err
+	}
+	v, _ := Get(name)
+	return v.Run(ctx, e, p, a)
+}
+
+// Check runs the checks Call makes before Run: the verb exists, the token
+// has its scope, admins only, no guest writes, required arguments.
+func Check(p *access.Principal, name string, a Args) error {
+	v, ok := Get(name)
+	if !ok {
+		return Errf("not_found", "no verb %q", name)
+	}
 	if !p.HasScope(string(v.Scope)) {
-		return nil, Errf("permission_denied", "this token lacks the %s scope", v.Scope)
+		return Errf("permission_denied", "this token lacks the %s scope", v.Scope)
 	}
 	if v.AdminOnly && !p.IsAdmin() {
-		return nil, Errf("permission_denied", "%s is for admins", v.Name)
+		return Errf("permission_denied", "%s is for admins", v.Name)
 	}
 	if v.Scope != Read && p.Kind == access.KindGuest {
-		return nil, Errf("permission_denied", "sign in to %s", v.Name)
+		return Errf("permission_denied", "sign in to %s", v.Name)
 	}
 	for _, arg := range v.Args {
 		if arg.Required && !a.Has(arg.Name) {
-			return nil, Errf("invalid_argument", "%s needs %s", v.Name, arg.Name)
+			return Errf("invalid_argument", "%s needs %s", v.Name, arg.Name)
 		}
 	}
-	return v.Run(ctx, e, p, a)
+	return nil
 }

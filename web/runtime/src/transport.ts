@@ -316,7 +316,8 @@ export async function rpc<T = any>(method: string, args?: unknown): Promise<T> {
     } catch {
       /* not JSON */
     }
-    if (body && body.error) throw fail(body.error.code || "unavailable", body.error.message || "failed");
+    if (body && body.error)
+      throw fail(body.error.code || "unavailable", body.error.message || "failed", body.error.confirm ? { confirm: body.error.confirm } : undefined);
     if (!r.ok) throw fail("unavailable", "HTTP " + r.status);
     return body.result as T;
   }

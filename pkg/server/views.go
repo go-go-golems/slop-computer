@@ -52,7 +52,7 @@ func newRT(key []byte) *rtState {
 }
 
 // rtFail is a protocol error with a code the runtime understands.
-type rtFail struct{ Code, Message string }
+type rtFail struct{ Code, Message, Confirm string }
 
 func (e *rtFail) Error() string { return e.Code + ": " + e.Message }
 
@@ -467,7 +467,11 @@ func (s *Server) viewRPC(w http.ResponseWriter, r *http.Request) {
 			log.Printf("rpc %s: %v", in.Method, err)
 			f = &rtFail{Code: "unavailable", Message: "the call failed"}
 		}
-		httpx.JSON(w, 200, map[string]any{"error": map[string]string{"code": f.Code, "message": f.Message}})
+		e := map[string]string{"code": f.Code, "message": f.Message}
+		if f.Confirm != "" {
+			e["confirm"] = f.Confirm
+		}
+		httpx.JSON(w, 200, map[string]any{"error": e})
 		return
 	}
 	httpx.JSON(w, 200, map[string]any{"result": out})

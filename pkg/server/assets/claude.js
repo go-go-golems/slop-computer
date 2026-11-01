@@ -329,7 +329,8 @@
         body = await r.json();
       } catch {
       }
-      if (body && body.error) throw fail(body.error.code || "unavailable", body.error.message || "failed");
+      if (body && body.error)
+        throw fail(body.error.code || "unavailable", body.error.message || "failed", body.error.confirm ? { confirm: body.error.confirm } : void 0);
       if (!r.ok) throw fail("unavailable", "HTTP " + r.status);
       return body.result;
     }
@@ -591,7 +592,17 @@
   });
   function slop(h) {
     const cfg = h.caps.slop ?? {};
-    const call3 = (action, args) => rpc("slop.call", { action: String(action), args: args ?? {} });
+    const call3 = async (action, args) => {
+      for (let asked = 0; ; asked++) {
+        try {
+          return await rpc("slop.call", { action: String(action), args: args ?? {} });
+        } catch (e) {
+          if (e?.code !== "confirmation_required" || !e.confirm || asked >= 4) throw e;
+          const r = await ask("confirm", { confirm: e.confirm }).catch(() => null);
+          if (!r?.approved) throw fail("confirmation_declined", "not allowed: " + e.message);
+        }
+      }
+    };
     const actions = new Proxy({}, {
       get: (_t, name) => typeof name === "string" && name !== "then" ? (args) => call3(name, args) : void 0
     });

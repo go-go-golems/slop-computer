@@ -46,12 +46,16 @@ type Visitor struct {
 	// Scopes are the token's scopes when the visitor came with a token
 	// (nil for sessions): trusted modules act with them, no more.
 	Scopes []string `json:"-"`
+	// View is the page's view when the event came from one: approvals of
+	// governance calls are per view.
+	View string `json:"-"`
 }
 
 // Error is an actor failure with a code (permission_denied, actor_error…).
 type Error struct {
 	Code    string `json:"code"`
 	Message string `json:"message"`
+	Confirm string `json:"confirm,omitempty"` // confirmation_required: the confirmation's id
 }
 
 func (e *Error) Error() string { return e.Code + ": " + e.Message }
@@ -553,6 +557,9 @@ func (a *Actor) errValue(e *Error) goja.Value {
 		return a.vm.ToValue(e.Error())
 	}
 	_ = obj.Set("code", e.Code)
+	if e.Confirm != "" {
+		_ = obj.Set("confirm", e.Confirm)
+	}
 	return obj
 }
 
@@ -564,7 +571,11 @@ func (a *Actor) jsError(v goja.Value) *Error {
 			msg = m.String()
 		}
 		if c := obj.Get("code"); c != nil && !goja.IsUndefined(c) && c.String() != "" {
-			return &Error{Code: c.String(), Message: msg}
+			e := &Error{Code: c.String(), Message: msg}
+			if cf := obj.Get("confirm"); cf != nil && !goja.IsUndefined(cf) {
+				e.Confirm = cf.String()
+			}
+			return e
 		}
 		if msg != "" {
 			return &Error{Code: "actor_error", Message: msg}

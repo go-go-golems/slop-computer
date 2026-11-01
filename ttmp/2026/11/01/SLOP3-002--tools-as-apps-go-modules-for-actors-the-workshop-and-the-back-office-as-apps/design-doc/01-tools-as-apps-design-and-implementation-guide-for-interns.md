@@ -513,8 +513,11 @@ Rules:
 
   The server writes the summary from the verb and its arguments, never the page.
 - An approval is valid for the same person, view and call hash until it expires. The first use does not consume it. An action that makes two governance calls first fails on the first, is confirmed and retried, then fails on the second, is confirmed and retried again, and then both pass.
-- The runtime retries transparently: the app's promise resolves with the retried result, or rejects with `confirmation_declined`.
+- The runtime retries transparently: the app's promise resolves with the retried result, or rejects with `confirmation_declined`. Because approvals are keyed by (person, view, call hash), the retry is the same RPC repeated; it carries no confirmation id. The id travels only on the error (`{code: "confirmation_required", confirm: "cfm_…"}`) so the shell can fetch the summary.
+- Before asking, the module runs the verb's static checks (`verbs.Check`: scope, admin only, guest writes, required arguments), so a member is refused at once instead of being asked to allow a call that would fail.
+- Confirmations live in memory (`verbs.Confirmations`, reached through `Env.Confirmations()`): they last two minutes, and a restart only means asking again.
 - Calls made directly by a person (CLI, HTTP, eval, the built-in back office) are not confirmed: the person is the one acting. Confirmation guards against app code acting for a person.
+- The shell's `GET`/`POST /_site/confirm/<id>` pass the live host's same-origin guard (`Sec-Fetch-Site`, `Origin`), so the app's sandbox page cannot approve its own request even though it knows the id.
 - From the CLI, `slop call backoffice letIn …` fails with `confirmation_required` and prints the summary and id. The person may run `slop confirm approve <id>` and repeat the call. The verb `confirm.approve` checks that the confirmation belongs to the calling person.
 
 ---

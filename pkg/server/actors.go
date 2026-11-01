@@ -45,7 +45,7 @@ func (s *Server) viewPrincipal(ctx context.Context, v *rt.View) *access.Principa
 func actorFail(err error) error {
 	var ae *actor.Error
 	if errors.As(err, &ae) {
-		return rtErr(ae.Code, "%s", ae.Message)
+		return &rtFail{Code: ae.Code, Message: ae.Message, Confirm: ae.Confirm}
 	}
 	return err
 }
@@ -66,6 +66,7 @@ func (s *Server) rpcSlopCall(ctx context.Context, v *rt.View, raw json.RawMessag
 		_ = dec.Decode(&in)
 	}
 	vis := s.Env.A.VisitorOf(ctx, s.viewPrincipal(ctx, v), v.Target)
+	vis.View = v.ID
 	out, err := s.Env.A.Call(ctx, v.Target, a.Action, in, vis, "page")
 	return out, actorFail(err)
 }

@@ -16,7 +16,12 @@ import (
 func actorErr(err error) error {
 	var ae *actor.Error
 	if errors.As(err, &ae) {
-		return &Error{Code: ae.Code, Message: ae.Message}
+		e := &Error{Code: ae.Code, Message: ae.Message}
+		if ae.Confirm != "" {
+			e.Message += "; allow it with: slop confirm approve " + ae.Confirm + ", then repeat the call"
+			e.Extra = map[string]any{"confirm": ae.Confirm}
+		}
+		return e
 	}
 	return err
 }

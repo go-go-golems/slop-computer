@@ -280,7 +280,21 @@ export const artifact = Object.freeze({
 // who is visiting, and asking the shell to sign in.
 export function slop(h: Hello) {
   const cfg = (h.caps.slop as Record<string, unknown> | undefined) ?? {};
-  const call = (action: string, args?: unknown) => rpc("slop.call", { action: String(action), args: args ?? {} });
+  // A governance change the actor makes for the visitor (roles, policy,
+  // budgets…) needs their approval in the shell, outside this frame: the
+  // call fails with confirmation_required, the shell asks, and an allowed
+  // call is repeated (the approval holds for this view and call).
+  const call = async (action: string, args?: unknown) => {
+    for (let asked = 0; ; asked++) {
+      try {
+        return await rpc("slop.call", { action: String(action), args: args ?? {} });
+      } catch (e: any) {
+        if (e?.code !== "confirmation_required" || !e.confirm || asked >= 4) throw e;
+        const r = await ask("confirm", { confirm: e.confirm }).catch(() => null);
+        if (!r?.approved) throw fail("confirmation_declined", "not allowed: " + e.message);
+      }
+    }
+  };
   const actions = new Proxy({} as Record<string, (args?: unknown) => Promise<unknown>>, {
     get: (_t, name) => (typeof name === "string" && name !== "then" ? (args?: unknown) => call(name, args) : undefined),
   });

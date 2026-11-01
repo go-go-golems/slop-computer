@@ -227,6 +227,15 @@
         post({ id: m.id, status: "saved" });
         return;
       }
+      case "confirm": { // an app asks to change something for this person (SLOP3-002)
+        const id = encodeURIComponent(String(m.confirm || ""));
+        const c = await call("GET", `/_site/confirm/${id}`);
+        if (c.status !== 200) return post({ id: m.id, approved: false });
+        const yes = await ask(`Allow ${c.body.title || boot.title} to do this?`, c.body.summary, "Allow");
+        const ok = !!yes && (await call("POST", `/_site/confirm/${id}`)).status === 200;
+        post({ id: m.id, approved: ok });
+        return;
+      }
       case "compose": post({ id: m.id, opened: false }); return; // no comments on the site yet
       case "permissions": post({ id: m.id }); return;
       case "signin": location.assign(signIn()); return; // the page asked: claude.use("slop").signIn()

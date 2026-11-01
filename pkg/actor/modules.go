@@ -104,6 +104,9 @@ func (a *Actor) Visitor() Visitor {
 // Throw raises an error with a code in JavaScript.
 func (a *Actor) Throw(code, msg string) { a.throw(fail(code, "%s", msg)) }
 
+// ThrowError raises an Error (with its confirmation id) in JavaScript.
+func (a *Actor) ThrowError(e *Error) { a.throw(e) }
+
 // ToJS converts Go data to JS data.
 func (a *Actor) ToJS(v any) goja.Value { return a.toJS(v) }
 

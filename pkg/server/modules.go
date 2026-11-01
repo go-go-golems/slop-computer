@@ -116,6 +116,21 @@ func (s *Server) callVerb(a *actor.Actor, f modFunc, args map[string]any) goja.V
 		a.Throw("not_found", "no verb "+name)
 	}
 	p := s.actAs(a, v.Scope != verbs.Read)
+	if f.Confirm {
+		// Refuse what the verb would refuse before asking anyone to allow it.
+		if err := verbs.Check(p, name, args); err != nil {
+			ve := verbs.AsError(err)
+			a.Throw(ve.Code, ve.Message)
+		}
+		title := a.App()
+		if m := a.Manifest(); m != nil && m.Title != "" {
+			title = m.Title
+		}
+		c, ok := s.Env.Confirmations().Check(p.Person.ID, a.Visitor().View, a.App(), title, name, args)
+		if !ok {
+			a.ThrowError(&actor.Error{Code: "confirmation_required", Message: title + " asks to " + c.Summary, Confirm: c.ID})
+		}
+	}
 	return a.IO(func() (any, error) {
 		out, err := verbs.Call(withPrincipal(context.Background(), p), s.Env, p, name, args)
 		if err != nil {

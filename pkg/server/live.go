@@ -185,6 +185,8 @@ func (s *Server) siteCall(w http.ResponseWriter, r *http.Request) {
 		s.siteRevokeLink(w, r, strings.TrimSuffix(strings.TrimPrefix(p, "/_site/links/"), "/revoke"))
 	case p == "/_site/claim" && r.Method == http.MethodPost:
 		s.siteClaim(w, r)
+	case strings.HasPrefix(p, "/_site/confirm/"):
+		s.siteConfirm(w, r, strings.TrimPrefix(p, "/_site/confirm/"))
 	default:
 		httpx.Fail(w, 404, "not_found", "no such site call")
 	}
@@ -596,4 +598,30 @@ func (s *Server) serveShell(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("Referrer-Policy", "same-origin")
 	_ = shellPage.Execute(w, map[string]any{"Title": title, "CSS": assetURL("shell.css"), "JS": assetURL("shell.js"),
 		"Boot": template.JS(boot)})
+}
+
+// siteConfirm is the shell's side of a confirmation (SLOP3-002): GET shows
+// what an app asks to do for the signed-in person, POST allows it. The
+// shell runs outside the app's frame, so the app can neither draw nor
+// answer this dialog.
+func (s *Server) siteConfirm(w http.ResponseWriter, r *http.Request, id string) {
+	p, _ := s.sitePrincipal(r)
+	if p == nil || p.Person == nil {
+		httpx.Fail(w, 404, "not_found", "no such confirmation")
+		return
+	}
+	book := s.Env.Confirmations()
+	switch r.Method {
+	case http.MethodGet:
+		if c, ok := book.Get(id, p.ID()); ok {
+			httpx.JSON(w, 200, c)
+			return
+		}
+	case http.MethodPost:
+		if c, ok := book.Approve(id, p.ID()); ok {
+			httpx.JSON(w, 200, c)
+			return
+		}
+	}
+	httpx.Fail(w, 404, "not_found", "no such confirmation")
 }

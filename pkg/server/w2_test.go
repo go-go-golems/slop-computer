@@ -48,7 +48,10 @@ func TestSystemModule(t *testing.T) {
 
 	// An admin lets Pat in through the app; the log names the app.
 	h.call(admin, "people.role", map[string]any{"id": patID, "role": "pending"})
-	got := h.call(admin, "actor.call", map[string]any{"store": "office", "action": "letIn", "args": map[string]any{"id": patID}}).(map[string]any)
+	letIn := map[string]any{"store": "office", "action": "letIn", "args": map[string]any{"id": patID}}
+	e := h.fail(admin, "actor.call", letIn, "confirmation_required") // governance: W6
+	h.call(admin, "confirm.approve", map[string]any{"id": e["extra"].(map[string]any)["confirm"]})
+	got := h.call(admin, "actor.call", letIn).(map[string]any)
 	if got["role"] != "member" {
 		t.Fatalf("letIn = %v", got)
 	}
@@ -57,7 +60,7 @@ func TestSystemModule(t *testing.T) {
 		t.Fatalf("log entry = %v", entry)
 	}
 	// A member gets the verb's refusal, as from the CLI.
-	e := h.fail(mia, "actor.call", map[string]any{"store": "office", "action": "letIn", "args": map[string]any{"id": patID}}, "permission_denied")
+	e = h.fail(mia, "actor.call", map[string]any{"store": "office", "action": "letIn", "args": map[string]any{"id": patID}}, "permission_denied")
 	if !strings.Contains(e["message"].(string), "people.role is for admins") {
 		t.Fatalf("letIn as member: %v", e)
 	}

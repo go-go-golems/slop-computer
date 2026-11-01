@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"strings"
+	"sync"
 
 	"github.com/go-go-golems/slop/pkg/access"
 	"github.com/go-go-golems/slop/pkg/actor"
@@ -32,6 +33,9 @@ type Env struct {
 	// PersonChanged is called after a person's audience may have changed
 	// (role, comps), so the server can review their open views.
 	PersonChanged func(ctx context.Context, person string)
+
+	confirms     *Confirmations
+	confirmsOnce sync.Once
 }
 
 // open checks that p holds need on a store and opens it. A denial carries
