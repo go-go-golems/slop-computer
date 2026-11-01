@@ -18,6 +18,10 @@ RelatedFiles:
       Note: 'Net.load (the fold), Pages, Markdown.page: the reference implementations ported'
     - Path: abs:///home/manuel/workspaces/2026-10-28/slop-computer/slop-computer/web/blocks/src/hypha.js
       Note: the Kernel the fold replays ops into
+    - Path: repo://apps/blocks-site/actor.js
+      Note: 'the app: reader routes, settings forms, publish'
+    - Path: repo://apps/blocks-site/lib/render.js
+      Note: the renderer
     - Path: repo://pkg/actor/modules.go
       Note: 'storesModule: the binding handle the reader reads the workspace through'
     - Path: repo://pkg/server/actors.go

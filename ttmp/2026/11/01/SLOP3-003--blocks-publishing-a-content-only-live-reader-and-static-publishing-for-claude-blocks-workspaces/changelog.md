@@ -19,3 +19,7 @@ B2: live reader; TestBlocksSiteReader (bb18f4c)
 ## 2026-11-01
 
 B3: static publishing, settings page, cross-origin rule for actor routes; TestBlocksSitePublish (d065c7c)
+
+## 2026-11-01
+
+B4: demo deployment, end-to-end script (16 checks), screenshots (29afe15)

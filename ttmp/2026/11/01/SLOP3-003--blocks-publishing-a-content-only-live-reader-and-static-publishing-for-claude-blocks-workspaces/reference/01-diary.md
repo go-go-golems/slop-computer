@@ -463,3 +463,116 @@ or pushes a draft and reviews it in the Workshop.
 - Static output for the fixture: 3 files; the test pushes a live
   publication, then a draft (main unchanged, `files.cat --at draft` shows
   the edit), then a live publication from the form.
+
+## Step 5: B4, the demo deployment and the end-to-end run
+
+B4 put the app on the running demo server and drove the whole story in a
+browser: an editor writes a handbook page and a sub-page in Blocks, a
+guest reads them at `/pub/team-site/` with no editor, the admin scopes the
+site and publishes it from `/pub/team-site/_site`, the static host serves
+the snapshot, a later edit reaches the reader but not the static site
+until a draft is pushed, and a member publishes a workspace of their own
+with the CLI alone. `scripts/04-blocks-site-e2e.mjs` ends with
+`all passed` (16 checks). The browser check also settled the tokenizer
+question: the editor never reaches the looping code. Commit `29afe15`.
+
+### Prompt Context
+
+**User prompt (verbatim):** see Step 1. The earlier question in the same
+conversation named both audiences (verbatim): "how can we publish blocks
+as a public visible page, say ws-team, or my-notes if i were to create
+it?"
+
+**Assistant interpretation:** Show `ws-team` published by the admin, and
+`my-notes` published by a member, on the demo.
+
+**Inferred user intent:** Try it by hand afterwards, as a content person
+and as a member.
+
+### What I did
+
+- Rebuilt `slop` and restarted the demo (`tmux kill-session -t slop3`,
+  `tmux new-session -d -s slop3 $S/v3run/serve.sh`).
+- `scripts/03-deploy-blocks-site.sh`: push the app, trust it with the
+  workshop module, mount `/pub/:id` (live) and `/s/:id` (static, type
+  `site`), create `team-site` bound to `ws-team`, `team-static`, grants,
+  `configure {"to":"team-static"}`.
+- `scripts/04-blocks-site-e2e.mjs`: writes content through the Blocks
+  Claude panel in lines mode (`#ph-ask`, scope `all`, `#ag-in`,
+  `#ag-send` showing "Write"), reads as a guest in a second context, uses
+  the settings forms, checks the static host, then runs the member's CLI
+  steps with `MEMBER_CREDENTIALS`.
+- Screenshots in `various/b4/`: `b4-reader-guest.png`,
+  `b4-site-settings.png`, `b4-static-site.png`.
+- `go test -race ./pkg/server -run TestBlocksSite` passes.
+
+### Why
+
+- Writing through the Claude panel's lines mode exercises the real editor
+  (the ops are written by the page, chunked and flushed by `Net`) without
+  scripting `contenteditable` typing.
+
+### What worked
+
+- The reader shows Blocks edits within one poll (under a second).
+- A member with no admin rights did the whole setup: `store new` (owner),
+  `bind set`, `grant set` on their own stores, `call ... publish`; and was
+  refused (`permission_denied`) on a site they do not administer.
+
+### What didn't work
+
+- Opening the Claude panel with `Control+j` on the frame's body did
+  nothing (`locator('#ag-in')` stayed hidden for 5 s); clicking `#ph-ask`
+  works.
+- My first exploratory write used the panel's default scope "This page",
+  so `probe_page.title = ...` landed under the FOOBAR page as a property
+  (`page_p7sq.probe_page`). A follow-up `probe_page -` was classified as
+  a question ("Ask"), not lines. The probe ops were alone in chunk
+  `chunks/c-ucm0pbw-wngc8u-0` and `ws-team` has no checkpoint, so
+  `slop docs rm ws-team chunks/c-ucm0pbw-wngc8u-0` removed them cleanly.
+- `slop files cat ... -o json` prints the raw file, not JSON: the script's
+  JSON helper failed with `SyntaxError: Unexpected token '<'`; it reads the
+  file as text now.
+- `slop docs set my-notes <path> <json>` answered
+  `error: accepts at most 2 arg(s), received 3`; the data goes in `--data`.
+- The first full run created `my-notes` before failing, so the second run
+  prints `error: conflict: store my-notes exists` from the tolerant
+  `store new` (expected on repeat runs).
+
+### What I learned
+
+- Blocks' editor and its view-only mode render `**bold**` with their own
+  code; `Blocks.tokens` is reached only through Fruit's `R.p` (cards,
+  embeds, past states). Checked with a guest given `@guest view` on
+  `ws-team` for the duration of the check (`slop grant rm ws-team @guest`
+  afterwards).
+
+### What was tricky to build
+
+- Making the script repeatable: the home page moves once the site is
+  scoped (`/pub/team-site/weft-handbook` becomes a redirect to `/`), and
+  run-specific text (`stamp`) tells this run's edit from earlier ones.
+
+### What warrants a second pair of eyes
+
+- The demo now has `team-site` scoped to the handbook with title "Weft",
+  and the member's `my-notes`, `my-notes-site`, `my-notes-static`.
+
+### What should be done in the future
+
+- Report the `Blocks.tokens` reentrancy bug upstream (slop-computer
+  `web/blocks/src/blocks-kit.js`).
+
+### Code review instructions
+
+- Run `scripts/03-deploy-blocks-site.sh <repo>` then
+  `scripts/04-blocks-site-e2e.mjs <slop> <shots>` with the environment in
+  the script header.
+
+### Technical details
+
+- Demo URLs: reader `http://apps.localhost:18300/pub/team-site/`,
+  settings `http://apps.localhost:18300/pub/team-site/_site`, static
+  `http://site.localhost:18300/s/team-static/`, member
+  `http://apps.localhost:18300/pub/my-notes-site/` and
+  `http://site.localhost:18300/s/my-notes-static/`.
