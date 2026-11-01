@@ -11,3 +11,7 @@ Wrote the intern design and implementation guide for slop v3 core: stores, apps,
 ### Related Files
 
 - /home/manuel/code/wesen/2026-10-31--slop-v3/ttmp/2026/11/01/SLOP3-001--slop-v3-core-a-streamlined-store-based-hosting-service-design-and-implementation-guide/design-doc/01-slop-v3-core-design-and-implementation-guide-for-interns.md — The guide
+
+## 2026-11-01
+
+Uploaded the guide to reMarkable at /ai/2026/11/01/SLOP3-001 (fixed a LaTeX escape in section 11.6 first).

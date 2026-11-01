@@ -1559,7 +1559,7 @@ page runtime:
 ```
 
 - **The label** is `s` plus the first 20 hex digits of HMAC-SHA256(server
-  key, store + "\x00" + app). It is stable for as long as the server key is,
+  key, `store + "\x00" + app`). It is stable for as long as the server key is,
   so a store's `localStorage` survives new versions.
   - `system.db` `origins(label, store, app)` maps a label back to its store
     and app.

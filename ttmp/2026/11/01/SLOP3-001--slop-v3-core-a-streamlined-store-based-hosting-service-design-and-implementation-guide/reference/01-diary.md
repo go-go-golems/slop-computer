@@ -241,3 +241,26 @@ docmgr task add ... (11 tasks); docmgr task check --id z0n1
 docmgr changelog update --ticket SLOP3-001 --entry "Wrote the intern design ..."
 docmgr doctor --ticket SLOP3-001 --stale-after 30   -> All checks passed
 ```
+
+## Step 3: Uploaded to reMarkable (milestone)
+
+The guide is on the reMarkable cloud as one PDF with a table of contents. The
+first attempt failed while building the PDF; the fix was a one-character
+quoting change in the guide.
+
+**User prompt (verbatim):** see Step 1.
+
+- **First attempt:** `remarquee upload bundle <design-doc> --name "SLOP3-001 slop v3 core design guide" --remote-dir "/ai/2026/11/01/SLOP3-001" --toc-depth 2 --non-interactive` failed:
+
+  ```text
+  Error: pandoc failed: Error producing PDF.
+  ! Undefined control sequence.
+  l.2537   HMAC-SHA256(server key, store + "\x
+  ```
+
+  The text `"\x00"` sat in prose (section 11.6), so LaTeX read `\x` as a command.
+- **Fix:** wrapped `store + "\x00" + app` in backticks. A scan for
+  backslashes outside code blocks found no others.
+- **Second attempt** (the same command): `OK: uploaded SLOP3-001 slop v3 core design guide.pdf -> /ai/2026/11/01/SLOP3-001`. That proves cloud delivery, not device sync.
+- Checked task 0hh4 and updated the changelog.
+- **Next:** the user answers the open questions in section 20; then P0.
