@@ -367,3 +367,99 @@ content and nothing of the editor.
 
 - Reader response headers: `Content-Security-Policy: default-src 'none'; style-src 'unsafe-inline'; img-src https: data:; form-action 'self'; base-uri 'none'; frame-ancestors 'none'`,
   `Cache-Control: private, no-cache`, `Referrer-Policy: same-origin`.
+
+## Step 4: B3, static publishing and the settings page
+
+B3 added the three actions (`status`, `configure`, `publish`), the
+settings page `GET /_site` with its two form posts, and one server rule
+the forms turned out to need: on the live host, an unsafe cross-origin
+request to an actor route is served as a guest. `TestBlocksSitePublish`
+passes, and fails when the rule is removed. The full suite passes.
+Commit `d065c7c`.
+
+### Prompt Context
+
+**User prompt (verbatim):** see Step 1.
+
+**Assistant interpretation:** Implement phase B3 of the guide.
+
+**Inferred user intent:** An editor publishes a snapshot with one click,
+or pushes a draft and reviews it in the Workshop.
+
+### What I did
+
+- `actor.js`: `configure` (title, home, root, to; validated; empty clears),
+  `publish` (`use('workshop')` per call, `render.staticFiles`, `w.push`,
+  `w.publish` when live, record in `site/published`), `status`; routes
+  `GET /_site` (admin), `POST /_site`, `POST /_publish` (admin; 303 back
+  with a note built from known codes and validated values only); a small
+  `application/x-www-form-urlencoded` parser.
+- `render.adminPage`: a warning when the app is not trusted with the
+  workshop module.
+- `pkg/server/live.go`: `crossOrigin(r)`; the actor-route branch of
+  `serveLive` drops the session principal for unsafe cross-origin
+  requests.
+- `pkg/server/b3_test.go`: `site.page` (a text-body request with the
+  site's cookies) and `TestBlocksSitePublish`.
+- The guide gained section 6.3 and the corrected reasoning in 5.2.
+
+### Why
+
+- The guide's first argument for the forms was `SameSite=Lax`. Writing
+  the test showed the hole: Lax keys on the registrable domain, and the
+  sandbox origins share it with the live host. An app page could post to
+  `/_publish` with the visitor's session. `/_site/*` endpoints already
+  refuse such requests (`sameOrigin`); actor routes did not.
+
+### What worked
+
+- Publishing as the visitor: the same `publish` call answers
+  `permission_denied` for a member who is admin of the site but not of the
+  static store, with no extra check in the app.
+- The static host's existing slash redirect (`/s/weft-static/care` → 308
+  `/s/weft-static/care/`) made relative links work unchanged.
+
+### What didn't work
+
+- `h.personOf` does not exist in the harness; tests get an id with
+  `h.call(token, "whoami", nil)`.
+- `h.fail(..., "")` expects an empty error code; the call answered
+  `permission_denied` (`this needs admin; you have view`), which is the
+  right answer, so the test now names it.
+- Negative control: with `pr = nil` disabled in `serveLive`, the test
+  fails with `a cross-origin form post (map[Origin:http://x1.sbx.localhost Sec-Fetch-Site:same-site]) was accepted`.
+
+### What I learned
+
+- `ctx.fail` throws an `Error` with `.code`, and rejected module calls
+  carry `.code` too, so an http route can catch and translate both.
+
+### What was tricky to build
+
+- Notes after a redirect. The query string is attacker-controlled, so the
+  page never prints free text from it: `m=published` needs a numeric `n`
+  and a store-shaped `to`, errors map from a fixed set of codes.
+
+### What warrants a second pair of eyes
+
+- `crossOrigin` trusts browsers to send `Sec-Fetch-Site` or `Origin` on
+  unsafe requests. Both are sent by current browsers on form posts; an old
+  browser that sends neither is treated as same-origin, as `sameOrigin`
+  already does.
+
+### What should be done in the future
+
+- The Workshop could list a draft's origin ("pushed by team-site") so a
+  reviewer knows it came from Blocks.
+
+### Code review instructions
+
+- `apps/blocks-site/actor.js` (`publish`, `note`, the routes),
+  `pkg/server/live.go` (`crossOrigin`).
+- `GOWORK=off go test ./pkg/server -run TestBlocksSite -count=1`; `GOWORK=off go test ./... -count=1`.
+
+### Technical details
+
+- Static output for the fixture: 3 files; the test pushes a live
+  publication, then a draft (main unchanged, `files.cat --at draft` shows
+  the edit), then a live publication from the form.

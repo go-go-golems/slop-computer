@@ -15,3 +15,7 @@ B1: libraries (fold, site, render), req.base, rev(); TestBlocksSiteLibs (843de56
 ## 2026-11-01
 
 B2: live reader; TestBlocksSiteReader (bb18f4c)
+
+## 2026-11-01
+
+B3: static publishing, settings page, cross-origin rule for actor routes; TestBlocksSitePublish (d065c7c)
