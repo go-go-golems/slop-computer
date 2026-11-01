@@ -86,3 +86,12 @@ P5 (a5e5299): comps and Stripe subscriptions from francois (policy unchanged, pa
 
 - /home/manuel/code/wesen/2026-10-31--slop-v3/pkg/billing/stripe/service.go — checkout, webhooks, worker
 - /home/manuel/code/wesen/2026-10-31--slop-v3/pkg/server/billing.go — subscribe page and view reviews
+
+## 2026-11-01
+
+P6 (a90186a): app policy matrix, LLM access with monthly budgets (Pi worker backend from v2, fake for tests), page and actor sample with charging, encrypted secrets, platform capability, visitor llm info
+
+### Related Files
+
+- /home/manuel/code/wesen/2026-10-31--slop-v3/pkg/server/sample.go — page sample with budget checks
+- /home/manuel/code/wesen/2026-10-31--slop-v3/pkg/system/policy.go — policy, LLM ledger, secrets

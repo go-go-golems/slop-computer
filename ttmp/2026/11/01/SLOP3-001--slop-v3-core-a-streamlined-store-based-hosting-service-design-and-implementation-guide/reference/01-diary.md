@@ -2054,3 +2054,186 @@ who re-checks open views:
   every minute                            -> reviewAll
   grant.set/rm, link.rm, /_site/grants    -> reviewViews(store)
 ```
+
+## Step 14: P6, the policy matrix, LLM budgets, secrets, platform and visitor info
+
+P6 is done in commit `a90186a`. Grants say what a person may do to a
+store. The policy says what an app may do for a person:
+- one matrix per app, with rows for the policy capabilities the app
+  declares and a column per audience;
+- in pages, a capability the policy denies resolves to `null`;
+- in actors, every call is checked against the turn's visitor.
+
+LLM access follows guide §9:
+- a person's own row, else their audience's row (an exact match);
+- a token budget per calendar month;
+- the payer is the visiting person, or the store's owner for alarms and
+  reactors.
+
+The page `sample` endpoints are v2's, with these checks added. The model
+backend is v2's Pi worker. All four exit scenarios are tested with the
+fake backend.
+
+### Prompt Context
+
+**User prompt (verbatim):** see Step 6 ("1. monthly 2. yes", which decided
+monthly budgets and `@guest` LLM access) and Step 11.
+
+**Assistant interpretation:** Build P6 as guide §8 to §10 describe,
+reusing v2's `piworker` and `rt_sample.go`.
+
+**Inferred user intent:** The LLM is the costly capability. It must be
+off by default, given per audience and per person, and metered per month.
+
+**Commit (code):** `a90186a` — "P6: the app policy matrix, LLM access with
+monthly budgets, secrets, platform, visitor info".
+
+### What I did
+
+- `pkg/system/policy.go`:
+  - **Policy:** `Policy` (a missing row means the default: assets for
+    members and up, everything else off), `PolicyMatrix`, `SetPolicy`.
+  - **LLM:** `LLMFor` (person, then audience, then this month's usage),
+    `AddLLMUsage` (an upsert on `(person, period)`), `ResetLLMUsage`,
+    `SetLLM`, `RemoveLLM`, `LLMRows`.
+  - **Secrets:** AES-GCM with a key derived as `HMAC(server key, "slop
+    secrets v1")`, and `app\0name` as associated data, so a sealed value
+    cannot be moved to another app or name.
+- **Pages.** `rt.View.Policy` holds the view's audience's cells, taken
+  when the view opens; views reopen when the audience changes (P5).
+  `grantedCaps` grants:
+  - `assets` with the policy, at least interact, and an id;
+  - `sample` with the policy and an id;
+  - the `email` user scope with `user.email` (`profileOf` checks it too).
+- **Actors.**
+  - `use(name)` for `fetch`, `secrets`, `sample` and `platform` is null
+    only when the capability is not declared or `allowedAny` finds no
+    audience allowed.
+  - Each call runs `a.need(cap)` for the visitor's audience.
+    `Manager.RestartApp` runs after `policy.set`, because `use` is
+    evaluated at start.
+- `pkg/llm`: v2's `piworker` package (backend types, the Node client,
+  `Fake`, `ValidateRequest`) and its Node sources under `web/piworker`.
+  `slop serve --llm pi|fake --pi-worker …`, and the `pi:` config block
+  (node, worker, agent_dir, models per tier).
+- `pkg/actor/sample.go`:
+  - `sampleCheck` runs the policy, payer, access and budget checks.
+  - `sample(input, opts)` is I/O, so the turn ends at the await.
+  - Usage is charged after the call, even when the call fails mid-way
+    with usage reported.
+  - Also `allowed()`, `limits()` and `json()`.
+- `pkg/server/sample.go`: v2's `/_rt/sample` stream, tools and cancel,
+  with `sampleView` checks:
+  - 403 `not_granted` when the policy is off;
+  - 403 `permission_denied` without LLM access;
+  - 429 `quota_exceeded` when the budget is used up.
+
+  The `sample.limits` RPC returns `allowed`, `remaining` and the models.
+- `pkg/server/platform.go`: `stores.create`, `mounts.set` and `grants.set`
+  through `verbs.Call`, as the visitor (or the owner), when app.json lists
+  them and the policy allows them.
+- Visitor info: `actor.Visitor` gains `llm` and an unexported `Payer`.
+  `user.me()` gains `llm {allowed, remaining}` and `subscribed`.
+- Verbs: `policy.ls`, `policy.set`, `llm.ls`, `llm.set`, `llm.rm`,
+  `llm.usage`, `llm.reset`, `secret.ls`, `secret.set`, `secret.rm`.
+
+### Why
+
+- The backend interface is v2's, not the smaller one sketched in guide
+  §9.4. The page runtime's `sample` API streams text, runs page tools and
+  reports usage, and v2's `Backend.Sample(req, emit, execute)` already
+  carries all three. This is a recorded deviation from the guide's
+  sketch.
+- Policy cells are fixed when a view opens. Audience changes reopen views
+  anyway (P5), and policy changes are rare. Checking per call would mean a
+  query per capability use.
+
+### What worked
+
+```text
+$ GOWORK=off go test ./pkg/server -run 'TestLLMBudgets|TestPageSampleBudget|TestSecretsAndPlatformPolicy' -count=1 -v
+--- PASS: TestLLMBudgets (0.07s)
+--- PASS: TestPageSampleBudget (0.02s)
+--- PASS: TestSecretsAndPlatformPolicy (0.02s)
+$ GOWORK=off go test ./... -count=1
+ok pkg/billing  ok pkg/blobs  ok pkg/rt  ok pkg/server (2.980s)  ok pkg/store
+```
+
+The budget arithmetic in `TestLLMBudgets`: the fake model charges the
+input's JSON length plus its 18-character answer, so each `"hi"` call
+costs 22. With 60 a month, the remaining budget goes 38, 16, 0. The
+fourth call is `quota_exceeded`, and the usage stands at 66, because the
+third call started with budget left and was allowed to finish.
+
+### What didn't work
+
+- These three tests passed on their first run, so P6 has no failure to
+  record for them.
+- The one adjustment: my first draft of the page test asked for
+  `user.me` over RPC, which is not an RPC method. It now reads `me.llm`
+  from the stream's `hello` event, which is what the runtime uses.
+
+### What I learned
+
+- "Policy off denies even a person with access" has two layers in
+  actors. With no audience allowed, `use('sample')` is null, and the app
+  sees "no sample module". With some audience allowed, the module exists
+  and a call from a disallowed audience is `permission_denied … for
+  admin`. The test checks both.
+
+### What was tricky to build
+
+- **Who pays inside a continuation.** `Visitor()` returns the parent
+  event's visitor during a continuation turn. The payer is captured before
+  the await (`sampleCheck` runs in the calling turn), and the charge runs
+  in the I/O goroutine, outside any store turn, so a rolled-back
+  continuation never loses a charge.
+- **`use()` timing.** A policy change after an actor started would leave
+  a null module in place. `RestartApp` drops the app's runtimes, and the
+  next event builds them again.
+
+### What warrants a second pair of eyes
+
+- `platform` calls verbs synchronously from inside an actor turn of
+  another store. `store.new` with an app activates the new store (a
+  temporary actor for that store) on the same goroutine. Activation must
+  never touch the calling store.
+- Secrets use `cfg.Key()`. If the server runs with a temporary key (when
+  the key file cannot be read), secrets set during that run become
+  unreadable after a restart. The server logs that case.
+- `RestartApp` closes the actors' `stop` channels while handlers may be
+  parked on I/O. Those handlers fail with the actor's drain error.
+
+### What should be done in the future
+
+- The real Pi worker: build `web/piworker` (pnpm) and run
+  `slop serve --llm pi --pi-worker web/piworker/dist/worker.js` with
+  `~/.pi/agent`. This is part of the final verification, without reading
+  `auth.json`.
+- Consent prompts for `sample` (v2 asked viewers once). Not in the v3
+  guide.
+- The policy matrix and LLM rows in the back office (P7).
+
+### Code review instructions
+
+- `pkg/system/policy.go`, then `pkg/actor/sample.go` (`sampleCheck`),
+  then `pkg/server/sample.go` (`sampleView`).
+- `pkg/server/views.go`: `grantedCaps`.
+- Validate:
+  - `GOWORK=off go test ./pkg/server -run 'LLM|Sample|Secrets' -v`;
+  - by hand: `slop serve --local --llm fake`, push an app with
+    `"capabilities":{"sample":{}}`, then `slop policy set <app> sample
+    @admin on` and `slop call <store> <action>`.
+
+### Technical details
+
+```text
+sample, in a turn with visitor v (actor) or in a view (page):
+  declared?            app.json capabilities.sample
+  policy?              app_policy[app, sample, v.audience]   (default off)
+  payer                v.person  | store owner (alarm, reactor)
+  access               llm_access[payer] or llm_access['@'+audience]
+  budget               remaining = budget - llm_usage[payer, YYYY-MM]
+  call                 outside the transaction (actor: await ends the turn)
+  charge               llm_usage += input + output   (after the call)
+```
