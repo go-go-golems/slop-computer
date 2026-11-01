@@ -20,7 +20,12 @@ export type Hello = {
   level: string;
   caps: Record<string, Record<string, unknown>>;
   rev: number;
-  me: { id?: string; isOwner: boolean; canEdit: boolean; can: Record<string, boolean>; profile?: Record<string, unknown> };
+  me: {
+    id?: string; isOwner: boolean; canEdit: boolean; can: Record<string, boolean>; profile?: Record<string, unknown>;
+    // Who the visitor is to the platform (guide §10), beyond the contract.
+    audience?: string; level?: string; guest?: boolean; subscribed?: boolean;
+    llm?: { allowed: boolean; remaining: number | null };
+  };
   permissions: Record<string, string>;
 };
 

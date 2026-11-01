@@ -45,14 +45,17 @@ type Config struct {
 	Hosts       Hosts    `yaml:"hosts"`
 	AdminEmails []string `yaml:"admin_emails"`
 	Signup      string   `yaml:"signup"` // open (default) or approval
-	Local       bool     `yaml:"local"`  // local sign-in form instead of OIDC (development)
-	Test        bool     `yaml:"test"`   // loopback only: X-Slop-As, fake LLM, virtual clock
-	TrustProxy  bool     `yaml:"trust_proxy_headers"`
-	OIDC        OIDC     `yaml:"oidc"`
-	Stripe      Stripe   `yaml:"stripe"`
-	SecretKey   string   `yaml:"secret_key_file"` // HMAC key for sandbox labels and secrets
-	LLM         string   `yaml:"llm"`             // "" (off), "pi" (the Pi worker) or "fake"
-	Pi          Pi       `yaml:"pi"`
+	// GuestsPerHour caps the new guests one address may create in an hour
+	// (0: system.GuestsPerHour, 30).
+	GuestsPerHour int    `yaml:"guests_per_hour"`
+	Local         bool   `yaml:"local"` // local sign-in form instead of OIDC (development)
+	Test          bool   `yaml:"test"`  // loopback only: X-Slop-As, fake LLM, virtual clock
+	TrustProxy    bool   `yaml:"trust_proxy_headers"`
+	OIDC          OIDC   `yaml:"oidc"`
+	Stripe        Stripe `yaml:"stripe"`
+	SecretKey     string `yaml:"secret_key_file"` // HMAC key for sandbox labels and secrets
+	LLM           string `yaml:"llm"`             // "" (off), "pi" (the Pi worker) or "fake"
+	Pi            Pi     `yaml:"pi"`
 }
 
 // Pi runs the Pi model worker (web/piworker) for the sample capability.

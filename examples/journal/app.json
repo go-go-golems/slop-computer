@@ -7,7 +7,7 @@
       { "path": "stats", "read": "view", "write": "admin" },
       { "path": "digests", "read": "view", "write": "admin" }
     ] },
-    "user": {},
+    "user": { "scopes": ["profile"] },
     "room": { "topics": { "published": "admin" } }
   }
 }

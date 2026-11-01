@@ -94,7 +94,11 @@ func (s *Server) sitePrincipal(r *http.Request) (*access.Principal, *system.Sess
 // newGuest gives this browser a guest id on this host.
 func (s *Server) newGuest(w http.ResponseWriter, r *http.Request) (*access.Principal, error) {
 	ip := s.clientIP(r)
-	if s.Sys.GuestsFrom(r.Context(), ip, time.Now().Add(-time.Hour).UnixMilli()) >= system.GuestsPerHour {
+	limit := s.Cfg.GuestsPerHour
+	if limit <= 0 {
+		limit = system.GuestsPerHour
+	}
+	if s.Sys.GuestsFrom(r.Context(), ip, time.Now().Add(-time.Hour).UnixMilli()) >= limit {
 		return nil, system.ErrTooManyGuests
 	}
 	g, err := s.Sys.CreateGuest(r.Context(), ip)

@@ -22,6 +22,10 @@ export function user(h: Hello) {
   const viewer = freeze({
     id: meId, name: scopes.has("profile") ? (prof.name ?? "") : "", avatarUrl: scopes.has("profile") ? (prof.avatar ?? "") : "",
     color: prof.color ?? "hsl(210 50% 45%)", email: scopes.has("email") ? (prof.email ?? null) : null, isOwner: me.isOwner, canEdit: me.canEdit,
+    // Guide §10: the visitor as the platform sees them, the same facts an
+    // actor reads from ctx.visitor.
+    audience: me.audience ?? "guest", level: me.level ?? h.level, guest: me.guest ?? !meId,
+    subscribed: !!me.subscribed, llm: me.llm ?? { allowed: false, remaining: null },
   });
   const base: Record<string, unknown> = {
     isOwner: async () => me.isOwner,

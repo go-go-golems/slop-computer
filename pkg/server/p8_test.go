@@ -6,6 +6,7 @@ import (
 	"time"
 
 	"github.com/go-go-golems/slop/pkg/apps"
+	"github.com/go-go-golems/slop/pkg/config"
 )
 
 // A static site whose app.json names a notFound page has no client-side
@@ -83,4 +84,24 @@ func TestPresenceLeavesWithStream(t *testing.T) {
 	count(2)
 	sa.resp.Body.Close()
 	count(1)
+}
+
+// guests_per_hour replaces the default limit of new guests per address.
+func TestGuestsPerHourConfig(t *testing.T) {
+	h := newHarnessWith(t, func(c *config.Config) { c.GuestsPerHour = 2 })
+	admin := h.tokenFor("admin@example.com", "read", "write", "admin")
+	live := h.cfg.Hosts.Live[0]
+	h.call(admin, "store.new", map[string]any{"id": "open"})
+	h.call(admin, "files.push", map[string]any{"store": "open", "files": files(map[string]string{
+		"app.json": `{"title":"Open","capabilities":{"db":{}}}`, "index.html": "<!doctype html><title>o</title>"})})
+	h.call(admin, "grant.set", map[string]any{"store": "open", "subject": "@guest", "level": "interact"})
+	h.call(admin, "mount.set", map[string]any{"host": live, "path": "/open", "store": "open"})
+	for i := 0; i < 2; i++ {
+		if st, v := openView(h.site(live), live, "/open", ""); st != 200 {
+			t.Fatalf("guest %d: %d %v", i, st, v)
+		}
+	}
+	if st, v := openView(h.site(live), live, "/open", ""); st != 429 {
+		t.Fatalf("third guest: %d %v", st, v)
+	}
 }

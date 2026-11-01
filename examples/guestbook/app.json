@@ -5,7 +5,7 @@
   "type": "guestbook",
   "capabilities": {
     "db":     { "rules": [{ "path": "entries", "read": "view", "write": "admin" }] },
-    "user":   {},
+    "user":   { "scopes": ["profile"] },
     "sample": {}
   }
 }
