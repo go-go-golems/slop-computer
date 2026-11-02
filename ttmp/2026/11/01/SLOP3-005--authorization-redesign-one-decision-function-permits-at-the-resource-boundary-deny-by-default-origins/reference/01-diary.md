@@ -1193,3 +1193,158 @@ func Floor(act Action, level rt.Level, admin bool) (ok bool, why string) {
 	return true, ""
 }
 ```
+
+## Step 9: The two Codex P2s on #13, an actor build race, admin power needs the admin scope
+
+This step fixed the two new Codex findings on #13 and merged them here:
+- guests lost their identity after 30 days;
+- store export corrupted BLOB cells.
+
+The merge's test run exposed a flaky test, which came from an older race:
+an actor built just before a restart was installed after it. This step
+also made admin power require the token's admin scope, and narrowed verb
+scopes to read or write. Commits:
+- on `task/slop-v3` (pushed to #13): `6f4cd0d` (BLOBs) and `3046a21`
+  (guests);
+- here: `9c07a2e` (merge), `c80d717` (race), `d67c05e` (scopes).
+
+### Prompt Context
+
+**User prompt (verbatim):** "fic the P2s they seem like low hanging
+fruits, right? / admin verbs should be admin scoped. / What's the
+read/write scopes? do they even make sense? Should we maybe clean up our
+scopes handling?"
+
+**Assistant interpretation:**
+- fix both P2s on #13's branch and push them;
+- make admin power need the admin scope;
+- explain read and write, and clean up what is clearly inconsistent.
+
+**Inferred user intent:** Close the review cheaply, and give token
+scopes one clear meaning.
+
+### What I did
+
+- **BLOBs (`pkg/store/export.go`, `turn.go`):**
+  - `scanRows(rows, max, blob)`, where `scanMaps` keeps converting BLOBs
+    to strings;
+  - export's `tableRows` writes a BLOB as `{"$blob": base64}`;
+  - `sqlValue` decodes it back to bytes on restore.
+- **Guests (`pkg/system/sessions.go`, `pkg/server/live.go`):**
+  - `CreateSessionFor(..., days)`: guest sessions last `GuestDays` (90);
+  - `SeeGuest` slides a guest's session and its `last_seen_at` forward,
+    at most once a day, from `sitePrincipal`;
+  - visits to the live host had never updated `last_seen_at`, so the
+    sweep could delete an active guest.
+- **Pushed `task/slop-v3`** and replied to both Codex threads. The
+  replies were sent in parallel with the commit step and name placeholder
+  hashes (`d31bf91`, `8dde36a`). Correcting them was blocked by the
+  permission classifier (an external write). The real hashes are
+  `3046a21` (guests) and `6f4cd0d` (BLOBs).
+- **Merged `task/slop-v3` here.** Two conflicts:
+  - `sitePrincipal`: kept `personAs` and added `SeeGuest` for guests;
+  - `store_test.go`: kept both new tests.
+- **Actor build race (`pkg/actor/manager.go`):**
+  - `Manager.gen` moves in `RestartApp`, `Restart` and `onActivated`;
+  - `Get` reads it before building. If it moved, Get drops the build and
+    builds again.
+- **Admin scope:**
+  - `Principal.Role()` returns member for a token without the admin
+    scope, even when the person is an admin;
+  - `IsAdmin()`, `AudienceOf` (admins are admin on every store) and
+    `CodeRightOf` all follow from it;
+  - `verbs.Check` names the missing scope when an admin's token lacks
+    it.
+- **Verb scopes:**
+  - a verb's scope means only whether it changes anything (read or
+    write); the `Admin` constant is gone;
+  - the 14 admin-scoped verbs became write (`sql.query` read);
+  - `doc/production.md` gained a table of the three scopes.
+
+### Why
+
+- **Sliding guest sessions,** not a fixed 400 days. The sweep deletes
+  guests unseen for 90 days, so "the identity lasts while it is used"
+  matches the sweep. The renewal is also where the guest gets recorded
+  as seen.
+- **The role is capped in `Principal.Role`.** It is the one place the
+  role is read, so admin-only verbs, admin level and the code right
+  change together. A check per verb would have left the admin level on
+  every store, and D9 pushes, open to an admin's write token.
+- **Verb scopes say read or write only.** Admin power comes from the
+  role, so `Scope: Admin` on a verb had become a second, weaker spelling
+  of `AdminOnly`.
+
+### What worked
+
+- **`TestExportKeepsBlobs`:** non-UTF-8 bytes go through JSON into a
+  STRICT table, and come back with `typeof = blob` and the same hex.
+  Before the fix: `cannot store TEXT value in BLOB column bins.data`.
+- **`TestGuestSessionsLastWhileUsed`:** the same guest id at day 45 and
+  day 130, and none after 100 days unseen. Before: `day 45: <nil>`.
+- **The race:** with the trust and workshop tests run 40 times each,
+  there were 4 failures before (`TestSystemModule` ×2,
+  `TestWorkshopApp`, `TestWorkshopModule`) and none after.
+- **`TestAdminPowerNeedsTheAdminScope`:** with a read or write token, an
+  admin cannot call `people.ls`, `secret.ls`, `log.system`, `mount.set`
+  or `grant.ls` on a stranger's store, nor push app code. With the admin
+  scope, all work. Before the change: an admin's read token listed
+  people.
+- The full suite passes; `#13`'s branch passes too (Go and runtime).
+
+### What didn't work
+
+- **The first full run after the merge** failed `TestSystemModule`
+  (`Cannot read property 'people' of undefined`). It passed on reruns,
+  which led to the race above.
+- **`TestModuleTrust`** expected a refusal mentioning "admin scope". The
+  first version said "is for admins"; the refusal now names the scope.
+- **A shadowed variable:** `ok, _ := authz.Floor(...)` redeclared `ok`
+  in `Check`.
+
+### What I learned
+
+- `onCommit` builds actors in a goroutine after every store commit, so
+  actors are built at moments nobody asked for. Any state an actor reads
+  at build time (trust, policy) can therefore go stale between the read
+  and the install.
+
+### What was tricky to build
+
+- **Ordering of the race.**
+  1. The `files.push` commit starts a build.
+  2. `app.trust` commits.
+  3. `RestartApp` finds no actor to stop.
+  4. The build finishes with the pre-trust state and is installed.
+
+  A generation counter read before the build catches exactly this.
+
+### What warrants a second pair of eyes
+
+- **The read scope still caps a token at view on every store.** So
+  `grant.ls`, `store.export`, `app.logs`, `alarm.ls`, `sql.schema` and
+  `link.ls` (all read verbs) never work with a read token. No read verb
+  writes, except `preview.url`, which creates a preview link. Dropping
+  the cap would let read tokens use those verbs. That widens what they
+  can do, so it is the user's call.
+- **The live-host cookie for guests is still 400 days,** longer than any
+  guest session. The server's session decides.
+
+### What should be done in the future
+
+- The read-scope cap (above).
+- Correct the two reply hashes on #13 (needs the user, or their
+  permission).
+- Port the actor build-race fix to #13 if its CI flakes.
+
+### Code review instructions
+
+- On `task/slop-v3`: `pkg/store/export.go`, `pkg/store/turn.go`,
+  `pkg/system/sessions.go`, `pkg/server/live.go`.
+- Here: `pkg/actor/manager.go` (`gen`, `Get`/`get`),
+  `pkg/access/principal.go` (`Role`, `IsAdmin`), `pkg/access/check.go`,
+  `pkg/verbs/verb.go` (`Scope`, `Check`), `doc/production.md`.
+- **Tests:**
+  - `GOWORK=off go test ./pkg/store -run TestExportKeepsBlobs -count=1`;
+  - `GOWORK=off go test ./pkg/server -run 'TestGuestSessionsLastWhileUsed|TestAdminPowerNeedsTheAdminScope|TestModuleTrust' -count=1`;
+  - `GOWORK=off go test ./pkg/server -run 'TestSystemModule|TestModuleTrust|TestWorkshop' -count=40`.

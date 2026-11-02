@@ -47,3 +47,11 @@ A2: authz.Floor shared by viewMay, verbs.Check, explain.can --action (1e57f5d, c
 ### Related Files
 
 - /home/manuel/workspaces/2026-10-28/slop-computer/slop-computer/pkg/authz/actions.go — Floor
+
+## 2026-11-02
+
+Admin power needs the admin scope (Principal.Role caps the role); verb scopes are read/write only (d67c05e). Actor build race fixed (c80d717). #13 P2s fixed on task/slop-v3 (6f4cd0d, 3046a21) and merged (9c07a2e)
+
+### Related Files
+
+- /home/manuel/workspaces/2026-10-28/slop-computer/slop-computer/pkg/access/principal.go — Role caps the role by token scope
