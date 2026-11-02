@@ -100,7 +100,7 @@ https://<main>` approves a device code in the browser.
 The deployment on the hetzner k3s cluster lives in the GitOps repository as
 `gitops/kustomize/slop/`: one replica with `Recreate` (the data volume is
 ReadWriteOnce and SQLite has one writer), the data volume at
-`/var/lib/slop`, secrets from Vault (`kv/apps/slop/prod/runtime`) mounted as
+`/var/lib/slop`, secrets from Vault (`kv/apps/slop/test/runtime`) mounted as
 files, a DNS-01 certificate covering the main, live and static hosts and the
 sandbox wildcard, and Traefik ingress for all of them. The image is
 `ghcr.io/go-go-golems/slop-computer:sha-<short>`, published from `main` by
