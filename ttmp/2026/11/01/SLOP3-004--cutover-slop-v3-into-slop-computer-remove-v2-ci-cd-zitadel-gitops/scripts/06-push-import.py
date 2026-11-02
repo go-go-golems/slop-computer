@@ -8,8 +8,9 @@ Uses the default login of the slop CLI ($SLOP_CREDENTIALS or
 token is read, never printed. Run 05-copy-blobs.sh first: the manifests
 name v2's files by hash. Safe to repeat.
 
-  apps/<id>  store <id>, guests interact, sample on for members and up,
-             mounted at /f/<id> on the live host
+  apps/<id>  store <id> of type release, guests interact, sample on for
+             members and up; served by the one /f/:id --type release
+             mount on the live host (SLOP3-006)
   site       store boutique, guests view, mounted at / on the static host
 """
 import json
@@ -44,20 +45,24 @@ def call(verb, args, ok=()):
         raise SystemExit(f"{verb} {args.get('store') or args.get('id') or ''}: {e.code} {body}")
 
 
-def install(m, grants, host, path):
-    call("store.new", {"id": m["store"]}, ok=("conflict",))
+def install(m, grants, host=None, path=None, typ=""):
+    call("store.new", {"id": m["store"], "type": typ}, ok=("conflict",))
+    if typ:
+        call("store.type", {"id": m["store"], "type": typ})  # an existing store
     r = call("files.push", m)
     for subject, level in grants:
         call("grant.set", {"store": m["store"], "subject": subject, "level": level})
-    call("mount.set", {"host": host, "path": path, "store": m["store"]})
+    if host:
+        call("mount.set", {"host": host, "path": path, "store": m["store"]})
     return r
 
 
 def main(d, live, static):
     d = pathlib.Path(d)
+    call("mount.set", {"host": live, "path": "/f/:id", "storeParam": "id", "type": "release"})
     for p in sorted((d / "apps").glob("*.json")):
         m = json.loads(p.read_text())
-        r = install(m, [("@guest", "interact")], live, f"/f/{m['store']}")
+        r = install(m, [("@guest", "interact")], typ="release")
         app = json.loads(next(f["text"] for f in m["files"] if f["path"] == "app.json"))
         if "sample" in app.get("capabilities", {}):
             for aud in ("member", "subscriber", "admin"):

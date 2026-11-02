@@ -96,6 +96,27 @@ type NewStore struct {
 	Owner string // defaults to the principal
 }
 
+// SetStoreType changes a store's type in the registry (what mounts match)
+// and in the store's own meta (what it reports), as CreateStore sets both.
+func (k *Kernel) SetStoreType(ctx context.Context, p *access.Principal, id, typ string) (system.StoreRow, error) {
+	row, err := k.Sys.SetStoreType(ctx, p.ID(), p.ViaLabel(), id, typ)
+	if err != nil {
+		return row, err
+	}
+	s, err := k.Store(ctx, id)
+	if err != nil {
+		return row, err
+	}
+	if s.Meta("type") == typ {
+		return row, nil
+	}
+	_, err = s.Do(ctx, store.Who{ID: p.ID(), Via: p.ViaLabel()}, func(t *store.Turn) error {
+		t.Summary = "type " + typ
+		return t.SetMeta("type", typ)
+	})
+	return row, err
+}
+
 // CreateStore registers and creates a store.
 func (k *Kernel) CreateStore(ctx context.Context, p *access.Principal, n NewStore) (system.StoreRow, *store.Store, error) {
 	if n.ID == "" {
