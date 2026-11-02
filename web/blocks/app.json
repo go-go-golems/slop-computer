@@ -1,6 +1,6 @@
 {
   "title": "Claude Blocks",
-  "kind": "page",
+  "type": "blocks",
   "capabilities": {
     "db": {},
     "user": { "scopes": ["profile"] },
