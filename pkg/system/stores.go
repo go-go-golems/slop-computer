@@ -70,6 +70,30 @@ func (d *DB) AddStore(ctx context.Context, s StoreRow, via string) (StoreRow, er
 	return s, err
 }
 
+// SetStoreType changes a store's type: which typed mounts (/b/:id --type
+// blocks) serve it. It returns the row as it is now.
+func (d *DB) SetStoreType(ctx context.Context, actor, via, id, typ string) (StoreRow, error) {
+	var row StoreRow
+	err := d.Tx(ctx, func(tx *sql.Tx) error {
+		var err error
+		if row, err = scanStore(tx.QueryRowContext(ctx, `SELECT `+storeCols+` FROM stores WHERE id = ?`, id)); err != nil {
+			return err
+		}
+		if row.Type == typ {
+			return nil
+		}
+		if _, err = tx.ExecContext(ctx, `UPDATE stores SET type = ? WHERE id = ?`, typ, id); err != nil {
+			return err
+		}
+		before := row.Type
+		row.Type = typ
+		_, err = Log(ctx, tx, d.NowMs(), actor, via, "set the type of store "+id,
+			Change{Kind: "store", Key: id, Op: "type", Before: before, After: typ})
+		return err
+	})
+	return row, err
+}
+
 // StoreByID returns a store's registry row.
 func (d *DB) StoreByID(ctx context.Context, id string) (StoreRow, error) {
 	return scanStore(d.QueryRowContext(ctx, `SELECT `+storeCols+` FROM stores WHERE id = ?`, id))

@@ -74,6 +74,15 @@ func init() {
 				}
 				return map[string]any{"deleted": a.S("id")}, nil
 			}},
+		&Verb{Name: "store.type", Doc: "Set a store's type, which decides the typed mounts that serve it (/b/:id --type blocks); empty clears it. Admins only.", Scope: Write, AdminOnly: true, Action: authz.PlatformAdmin,
+			Args: []Arg{{Name: "id", Type: "string", Pos: 1, Required: true}, {Name: "type", Type: "string", Pos: 2, Doc: "the new type; empty clears it"}},
+			Run: func(ctx context.Context, e *Env, p *access.Principal, a Args) (any, error) {
+				row, err := e.K.SetStoreType(ctx, p, a.S("id"), a.S("type"))
+				if errors.Is(err, system.ErrNotFound) {
+					return nil, Errf("not_found", "no store %s", a.S("id"))
+				}
+				return row, err
+			}},
 		&Verb{Name: "store.meta", Doc: "A store's settings, head rev, sizes and your level on it.", Scope: Read, Action: authz.StoreRead, StoreArg: "id",
 			Args: []Arg{{Name: "id", Type: "string", Pos: 1, Required: true}},
 			Run: func(ctx context.Context, e *Env, p *access.Principal, a Args) (any, error) {
