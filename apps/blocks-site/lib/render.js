@@ -126,14 +126,19 @@ function blocks(cx, parent) {
     if (LISTS[kind]) {
       let j = i;
       while (j < items.length && F.kindOf(cx.site.K, items[j]) === kind) j++;
-      out += `<${LISTS[kind]} class="${kind}">${items.slice(i, j).map((q) => item(cx, q, kind)).join('')}</${LISTS[kind]}>`;
+      out += `<${LISTS[kind]} class="${kind}">${items.slice(i, j).map((q) => safely(q, () => item(cx, q, kind))).join('')}</${LISTS[kind]}>`;
       i = j;
     } else {
-      out += block(cx, items[i], kind);
+      const q = items[i];
+      out += safely(q, () => block(cx, q, kind));
       i++;
     }
   }
   return out;
+}
+// A block that fails to render is left out (and logged), not the page.
+function safely(q, f) {
+  try { return f(); } catch (e) { console.warn(`blocks-site: ${q} did not render: ${e && e.message ? e.message : e}`); return ''; }
 }
 
 function item(cx, q, kind) {
@@ -197,13 +202,19 @@ function block(cx, q, kind) {
         + '</tbody></table></div>';
     }
     case 'stat': {
-      const label = prop(cx, q, 'label');
-      return `<div class="stat${tc}"><div class="sv val">${esc(shown(prop(cx, q, 'of')))}</div>${label ? `<div class="sl">${esc(shown(label))}</div>` : ''}</div>`;
+      // as Fruit's R.stat: formatted with unit, pre, pct, fixed; an optional sub line
+      const v = prop(cx, q, 'of'), label = F.label(K, q, cx.env, ''), sub = prop(cx, q, 'sub');
+      const o = { unit: prop(cx, q, 'unit'), pre: prop(cx, q, 'pre'), pct: prop(cx, q, 'pct'), fixed: prop(cx, q, 'fixed') };
+      const val = H.isErr(v) || H.unfinished(v) ? shown(v) : F.fmt(v, o);
+      return `<div class="stat${tc}"><div class="sv val">${esc(val)}</div>${label ? `<div class="sl">${esc(label)}</div>` : ''}${sub != null ? `<div class="sl">${esc(shown(sub))}</div>` : ''}</div>`;
     }
     case 'progress': {
-      const v = prop(cx, q, 'of'), label = prop(cx, q, 'label');
-      const pct = typeof v === 'number' && isFinite(v) ? Math.max(0, Math.min(100, Math.round((v <= 1 ? v * 100 : v)))) : 0;
-      return `<div class="progress${tc}">${label ? `<span class="ql">${esc(shown(label))}</span> ` : ''}<progress max="100" value="${pct}">${pct}%</progress> <span class="val">${pct}%</span></div>`;
+      // as Fruit's R.progress: of / max, max defaulting to 1 for a share and 100 otherwise
+      const v = prop(cx, q, 'of'), label = F.label(K, q, cx.env, '');
+      let max = prop(cx, q, 'max');
+      if (typeof max !== 'number') max = typeof v === 'number' && v <= 1 ? 1 : 100;
+      const pct = typeof v === 'number' && isFinite(v) ? Math.round(Math.max(0, Math.min(1, v / (max || 1))) * 100) : 0;
+      return `<div class="progress${tc}">${label ? `<span class="ql">${esc(label)}</span> ` : ''}<progress max="100" value="${pct}"></progress> <span class="val">${typeof v === 'number' ? pct + '%' : esc(shown(v))}</span></div>`;
     }
     case 'num': case 'date': case 'slider': return labelled(cx, q, tc);
     case 'image': {

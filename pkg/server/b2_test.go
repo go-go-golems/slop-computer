@@ -74,9 +74,22 @@ func TestBlocksSiteReader(t *testing.T) {
 			[]any{"z1", "uz:you", 900, `faq.ui.1 is p "NEW ANSWER"`, 1793600100000},
 			[]any{"z2", "uz:you", 901, `p_x1.title = "Getting started"`, 1793600100000},
 			[]any{"z3", "uz:you", 902, `p_x1.parent = "weft"`, 1793600100000},
+			[]any{"z4", "uz:you", 903, `faq.total = 1234567.5`, 1793600100000},
+			[]any{"z5", "uz:you", 904, `faq.ui.2 is p "Sold {money(total, \"€\")} ({total} exactly), {money(-42, \"€\")} back."`, 1793600100000},
+			[]any{"z6", "uz:you", 905, `faq.ui.3 is stat total, label: "Total"`, 1793600100000},
+			[]any{"z7", "uz:you", 906, `faq.ui.4 is progress 1930, max: 2090, label: "Planned against spent"`, 1793600100000},
+			[]any{"z8", "uz:you", 907, `faq.ui.5 is stat 0.25, pct: true, label: "Share"`, 1793600100000},
 		}}})
-	if _, body := h.get(live, "/pub/weft-site/faq"); !strings.Contains(body, "NEW ANSWER") {
+	_, body := h.get(live, "/pub/weft-site/faq")
+	if !strings.Contains(body, "NEW ANSWER") {
 		t.Fatalf("faq after the edit:\n%s", body)
+	}
+	// Numbers as the editor shows them: goja's toLocaleString("en-US") throws without lib/blocks.js.
+	if !strings.Contains(body, `Sold <span class="val">€1,234,568</span> (<span class="val">1,234,568</span> exactly), <span class="val">-€42</span> back.`) ||
+		!strings.Contains(body, `<div class="sv val">1,234,568</div>`) ||
+		!strings.Contains(body, `<span class="ql">Planned against spent</span> <progress max="100" value="92"></progress> <span class="val">92%</span>`) ||
+		!strings.Contains(body, `<div class="sv val">25%</div><div class="sl">Share</div>`) {
+		t.Fatalf("faq numbers:\n%s", body)
 	}
 	if res, _ := h.get(live, "/pub/weft-site/p_x1"); res.StatusCode != 302 || res.Header.Get("Location") != "/pub/weft-site/getting-started" {
 		t.Fatalf("a page id answers %d → %q", res.StatusCode, res.Header.Get("Location"))

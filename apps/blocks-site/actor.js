@@ -138,6 +138,15 @@ const page = (status, html) => ({ status, html, headers: { 'Content-Security-Pol
 const redirect = (to, status) => ({ status: status || 302, headers: { Location: to, 'Cache-Control': 'no-store' }, text: '' });
 
 function show(ctx, req, seg) {
+  try {
+    return showPage(ctx, req, seg);
+  } catch (e) {
+    console.error(`blocks-site: ${req.path} failed: ${e && e.message ? e.message : e}`);
+    return page(500, render.bare('Something went wrong', 'This page could not be shown.'));
+  }
+}
+
+function showPage(ctx, req, seg) {
   let c;
   try {
     c = current();

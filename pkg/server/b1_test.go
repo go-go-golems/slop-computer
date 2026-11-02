@@ -100,7 +100,7 @@ func TestBlocksSiteLibs(t *testing.T) {
 		`<a class="pagelink" href="care/">`,
 		`We have <span class="val">12</span> skeins, <span class="val">216</span> euros of stock.`,
 		`<div class="sv val">12</div><div class="sl">Skeins</div>`,
-		`<progress max="100" value="40">40%</progress>`,
+		`<progress max="100" value="40"></progress> <span class="val">40%</span>`,
 		`<th>name</th><th>stock</th></tr></thead><tbody><tr><td>Oat</td><td>4</td></tr>`,
 		`&lt;script&gt;alert(1)&lt;/script&gt; &amp; stays text`,
 		`Unpublished: <span class="mention">drafts</span>.`, // a page outside the site: its name, no link, no title
