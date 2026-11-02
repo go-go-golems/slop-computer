@@ -591,21 +591,19 @@ func (s *Server) dbGet(ctx context.Context, v *rt.View, path string) (any, error
 	return docResult(d), nil
 }
 
-// readable lists a collection's documents the viewer may read.
-func (s *Server) readable(ctx context.Context, v *rt.View, coll string) ([]rt.Doc, error) {
+// readable runs q over the documents the viewer may read.
+func (s *Server) readable(ctx context.Context, v *rt.View, q rt.Query) ([]rt.Doc, error) {
 	st, err := s.viewStore(ctx, v)
 	if err != nil {
 		return nil, err
 	}
-	docs, err := st.Query(ctx, rt.Query{Coll: coll})
+	docs, err := st.Query(ctx, q, func(path string) bool { return v.Caps.Rules.CanRead(path, v.User, v.Level) })
 	if err != nil {
-		return nil, rtErr("invalid_argument", "invalid collection %q", coll)
+		return nil, rtErr("invalid_argument", "invalid query on %q", q.Coll)
 	}
 	out := make([]rt.Doc, 0, len(docs))
 	for _, d := range docs {
-		if v.Caps.Rules.CanRead(d.Path, v.User, v.Level) {
-			out = append(out, rt.Doc{Path: d.Path, Body: d.Body, Version: d.Version})
-		}
+		out = append(out, rt.Doc{Path: d.Path, Body: d.Body, Version: d.Version})
 	}
 	return out, nil
 }
@@ -618,11 +616,11 @@ func (s *Server) rpcDBQuery(ctx context.Context, v *rt.View, raw json.RawMessage
 	if err := q.Validate(); err != nil {
 		return nil, rtErr("invalid_argument", "invalid query on %q", q.Coll)
 	}
-	docs, err := s.readable(ctx, v, q.Coll)
+	docs, err := s.readable(ctx, v, q)
 	if err != nil {
 		return nil, err
 	}
-	return map[string]any{"docs": q.Apply(docs)}, nil
+	return map[string]any{"docs": docs}, nil
 }
 
 type writeIn struct {
@@ -837,11 +835,11 @@ func (s *Server) rpcDBSubscribe(ctx context.Context, v *rt.View, raw json.RawMes
 		}
 		return map[string]any{"rev": head, "doc": d}, nil
 	}
-	docs, err := s.readable(ctx, v, a.Path)
+	docs, err := s.readable(ctx, v, q)
 	if err != nil {
 		return nil, err
 	}
-	return map[string]any{"rev": head, "docs": q.Apply(docs)}, nil
+	return map[string]any{"rev": head, "docs": docs}, nil
 }
 
 func (s *Server) rpcDBUnsubscribe(_ context.Context, v *rt.View, raw json.RawMessage) (any, error) {

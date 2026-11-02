@@ -265,7 +265,7 @@ func (a *Actor) query(q rt.Query) goja.Value {
 		return a.query(n)
 	})
 	_ = o.Set("get", func() goja.Value {
-		docs, err := a.turn().t.QueryDocs(q)
+		docs, err := a.turn().t.QueryDocs(q, store.Everything)
 		a.check(err)
 		snaps := make([]any, len(docs))
 		for i, d := range docs {
@@ -482,10 +482,16 @@ func (a *Actor) storesModule() goja.Value {
 		}
 		ts, err := a.m.K.Store(ctx, target)
 		a.check(err)
+		// the target's read rules hold for a store as for anyone at its level
+		rules := a.m.K.Rules(ctx, target)
+		may := func(path string) bool { return rules.CanRead(path, me.ID(), d.Level) }
 		r := a.vm.NewObject()
 		_ = r.Set("id", target)
 		docs := a.vm.NewObject()
 		_ = docs.Set("get", func(path string) goja.Value {
+			if !may(path) {
+				return a.snap(store.Doc{}, false, path)
+			}
 			doc, err := ts.GetDoc(ctx, path)
 			if err != nil {
 				return a.snap(store.Doc{}, false, path)
@@ -499,7 +505,7 @@ func (a *Actor) storesModule() goja.Value {
 				_ = json.Unmarshal(b, &q)
 				q.Coll = coll
 			}
-			ds, err := ts.Query(ctx, q)
+			ds, err := ts.Query(ctx, q, may)
 			a.check(err)
 			out := make([]any, len(ds))
 			for i, d := range ds {

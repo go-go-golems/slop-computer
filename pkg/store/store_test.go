@@ -80,7 +80,7 @@ func TestDocsAndLog(t *testing.T) {
 	if _, err := s.GetDoc(ctx, "notes/b"); !errors.Is(err, ErrNotFound) {
 		t.Fatalf("deleted doc err = %v", err)
 	}
-	docs, err := s.Query(ctx, rt.Query{Coll: "notes"})
+	docs, err := s.Query(ctx, rt.Query{Coll: "notes"}, Everything)
 	if err != nil || len(docs) != 1 {
 		t.Fatalf("query = %+v, %v", docs, err)
 	}

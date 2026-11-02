@@ -108,24 +108,13 @@ func (s *Server) rpcSlopRead(ctx context.Context, v *rt.View, raw json.RawMessag
 			_ = json.Unmarshal(a.Query, &q)
 		}
 		q.Coll = a.Coll
-		// the read rules first, then the limit (as db.query does)
-		if q.Validate() != nil {
-			return nil, rtErr("invalid_argument", "invalid query on %q", a.Coll)
-		}
-		limit := q.Limit
-		q.Limit = 0
-		docs, err := st.Query(ctx, q)
+		docs, err := st.Query(ctx, q, func(path string) bool { return rules.CanRead(path, p.ID(), d.Level) })
 		if err != nil {
 			return nil, rtErr("invalid_argument", "invalid query on %q", a.Coll)
 		}
 		out := []map[string]any{}
 		for _, doc := range docs {
-			if limit > 0 && len(out) == limit {
-				break
-			}
-			if rules.CanRead(doc.Path, p.ID(), d.Level) {
-				out = append(out, docResult(doc))
-			}
+			out = append(out, docResult(doc))
 		}
 		return map[string]any{"docs": out}, nil
 	case "files", "file":

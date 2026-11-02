@@ -109,28 +109,12 @@ func queryDocs(ctx context.Context, e *Env, p *access.Principal, id string, q rt
 	if err != nil {
 		return nil, err
 	}
-	// The read rules first, then the limit: a limit applied before them
-	// would count documents this caller never sees.
-	if err := q.Validate(); err != nil {
-		return nil, Errf("invalid_argument", "invalid query on %q", q.Coll)
-	}
-	limit := q.Limit
-	q.Limit = 0
-	docs, err := s.Query(ctx, q)
+	rules := e.K.Rules(ctx, s.ID)
+	docs, err := s.Query(ctx, q, func(path string) bool { return rules.CanRead(path, p.ID(), d.Level) })
 	if err != nil {
 		return nil, storeErr(err)
 	}
-	rules := e.K.Rules(ctx, s.ID)
-	out := []store.Doc{}
-	for _, doc := range docs {
-		if limit > 0 && len(out) == limit {
-			break
-		}
-		if rules.CanRead(doc.Path, p.ID(), d.Level) {
-			out = append(out, doc)
-		}
-	}
-	return out, nil
+	return docs, nil
 }
 
 type docItem struct {
