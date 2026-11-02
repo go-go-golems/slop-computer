@@ -5,7 +5,11 @@
 // cells), never for less.
 package authz
 
-import "github.com/go-go-golems/slop-computer/pkg/rt"
+import (
+	"fmt"
+
+	"github.com/go-go-golems/slop-computer/pkg/rt"
+)
 
 // Action is what an operation does.
 type Action string
@@ -67,4 +71,21 @@ var Specs = map[Action]Spec{
 func Of(a Action) (Spec, bool) {
 	s, ok := Specs[a]
 	return s, ok
+}
+
+// Floor decides whether a caller holding level on the action's store, with
+// the admin role or not, clears act's floor; why says what is missing.
+// The dispatchers (verbs.Call, the runtime's viewRPC) and explain.can all
+// decide with it.
+func Floor(act Action, level rt.Level, admin bool) (ok bool, why string) {
+	spec, known := Specs[act]
+	switch {
+	case !known:
+		return false, fmt.Sprintf("%q is not an action", act)
+	case spec.Admin && !admin:
+		return false, fmt.Sprintf("%s is for admins", act)
+	case spec.Store && level < spec.Level:
+		return false, fmt.Sprintf("%s needs %s on the store, not %s", act, spec.Level, level)
+	}
+	return true, ""
 }

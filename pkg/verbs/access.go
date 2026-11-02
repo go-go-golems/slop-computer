@@ -43,7 +43,8 @@ func init() {
 			Args: []Arg{storeArg, {Name: "level", Type: "string", Pos: 2, Doc: "view, interact, admin or owner (default view)"},
 				{Name: "subject", Type: "string", Doc: "usr_…, vis_…, an email, store:<id> or anonymous (default: you)"},
 				{Name: "path", Type: "string", Doc: "a document path: apply the app's rules"},
-				{Name: "op", Type: "string", Doc: "read or write, with path (default read)"}},
+				{Name: "op", Type: "string", Doc: "read or write, with path (default read)"},
+				{Name: "action", Type: "string", Doc: "an action (doc.write, store.admin, code.push, …): does its floor hold"}},
 			Run: func(ctx context.Context, e *Env, p *access.Principal, a Args) (any, error) {
 				who := p
 				if s := a.S("subject"); s != "" {
@@ -73,6 +74,19 @@ func init() {
 					return nil, err
 				}
 				d := e.K.Access.Level(ctx, who, st)
+				if act := authz.Action(a.S("action")); act != "" {
+					ok, why := authz.Floor(act, d.Level, who.IsAdmin())
+					if ok {
+						d.Trace = append(d.Trace, fmt.Sprintf("%s: the floor holds", act))
+					} else {
+						d.Trace = append(d.Trace, why)
+					}
+					out := map[string]any{"ok": ok, "level": d.LevelName(), "action": act, "audience": d.Audience, "trace": d.Trace}
+					if !ok {
+						out["code"] = "permission_denied"
+					}
+					return out, nil
+				}
 				if path := a.S("path"); path != "" {
 					op := a.S("op")
 					if op == "" {

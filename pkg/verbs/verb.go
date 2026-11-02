@@ -13,6 +13,7 @@ import (
 
 	"github.com/go-go-golems/slop-computer/pkg/access"
 	"github.com/go-go-golems/slop-computer/pkg/authz"
+	"github.com/go-go-golems/slop-computer/pkg/rt"
 )
 
 // Scope is what a token needs to call a verb.
@@ -257,10 +258,12 @@ func Check(p *access.Principal, name string, a Args) error {
 	if !p.HasScope(string(v.Scope)) {
 		return Errf("permission_denied", "this token lacks the %s scope", v.Scope)
 	}
-	if spec, ok := authz.Of(v.Action); !ok {
+	if _, ok := authz.Of(v.Action); !ok {
 		return Errf("internal", "%s declares no action", v.Name)
-	} else if spec.Admin && !p.IsAdmin() {
-		return Errf("permission_denied", "%s is for admins", v.Name)
+	}
+	// the role half of the floor; Call checks the level on the store
+	if ok, why := authz.Floor(v.Action, rt.LevelOwner, p.IsAdmin()); !ok {
+		return Errf("permission_denied", "%s: %s", v.Name, why)
 	}
 	if v.AdminOnly && !p.IsAdmin() {
 		return Errf("permission_denied", "%s is for admins", v.Name)

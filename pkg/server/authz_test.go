@@ -55,3 +55,24 @@ func TestCallChecksTheFloor(t *testing.T) {
 		t.Fatalf("an admin: %v", out)
 	}
 }
+
+// explain.can answers for an action with the same floor the dispatchers use.
+func TestExplainAction(t *testing.T) {
+	h := newHarness(t)
+	admin := h.tokenFor("admin@example.com", "read", "write", "admin")
+	h.call(admin, "store.new", map[string]any{"id": "plain"})
+	h.call(admin, "grant.set", map[string]any{"store": "plain", "subject": "@member", "level": "interact"})
+	mia := h.tokenFor("mia@example.com", "read", "write")
+	ask := func(token, act string) map[string]any {
+		return h.call(token, "explain.can", map[string]any{"store": "plain", "action": act}).(map[string]any)
+	}
+	if out := ask(mia, "doc.write"); out["ok"] != true {
+		t.Fatalf("a member's doc.write: %v", out)
+	}
+	if out := ask(mia, "store.admin"); out["ok"] != false || out["code"] != "permission_denied" {
+		t.Fatalf("a member's store.admin: %v", out)
+	}
+	if out := ask(admin, "code.push"); out["ok"] != true {
+		t.Fatalf("an admin's code.push: %v", out)
+	}
+}

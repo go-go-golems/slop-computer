@@ -477,8 +477,9 @@ func (s *Server) rpcTable() map[string]rpcMethod {
 
 // viewMay reports whether v clears act's floor on its own store.
 func viewMay(v *rt.View, act authz.Action) bool {
-	spec, ok := authz.Of(act)
-	return ok && spec.Store && v.Level >= spec.Level && (!spec.Admin || v.Role == string(access.AudAdmin))
+	spec, _ := authz.Of(act)
+	ok, _ := authz.Floor(act, v.Level, v.Role == string(access.AudAdmin))
+	return ok && spec.Store
 }
 
 func (s *Server) viewRPC(w http.ResponseWriter, r *http.Request) {
