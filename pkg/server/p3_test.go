@@ -14,12 +14,11 @@ defineActor({
     if (!sql.one('SELECT 1 AS x FROM tasks WHERE title = ?', 'welcome')) sql.run('INSERT INTO tasks (title, by, at) VALUES (?, ?, ?)', 'welcome', ctx.visitor.id, ctx.now);
   },
   actions: {
-    add(ctx, { title }) {
-      ctx.need('interact');
+    add: { requires: 'interact', run(ctx, { title }) {
       const r = sql.run('INSERT INTO tasks (title, by, at) VALUES (?, ?, ?)', title, ctx.visitor.id, ctx.now);
       room.emit('changed', { id: r.lastRowid });
       return { id: r.lastRowid, by: ctx.visitor.id, audience: ctx.visitor.audience };
-    },
+    } },
     async slow(ctx, { title }) {
       sql.run('INSERT INTO tasks (title, by, at) VALUES (?, ?, ?)', title + ' (draft)', ctx.visitor.id, ctx.now);
       const before = ctx.now;
@@ -210,7 +209,7 @@ func TestPageCallsAction(t *testing.T) {
 	h.call(admin, "store.new", map[string]any{"id": "votes"})
 	h.call(admin, "files.push", map[string]any{"store": "votes", "files": files(map[string]string{
 		"app.json":   `{"title":"Votes","actor":"actor.js","capabilities":{"db":{}}}`,
-		"actor.js":   `const db = use('db'); defineActor({ actions: { vote(ctx, { pick }) { ctx.need('interact'); db.doc('votes/' + ctx.visitor.id.replace(/[^a-z0-9_]/gi, '')).set({ pick }); return { ok: true, guest: ctx.visitor.guest }; } } });`,
+		"actor.js":   `const db = use('db'); defineActor({ actions: { vote: { requires: 'interact', run(ctx, { pick }) { db.doc('votes/' + ctx.visitor.id.replace(/[^a-z0-9_]/gi, '')).set({ pick }); return { ok: true, guest: ctx.visitor.guest }; } } } });`,
 		"index.html": "<!doctype html><title>v</title>",
 	})})
 	h.call(admin, "grant.set", map[string]any{"store": "votes", "subject": "@guest", "level": "interact"})

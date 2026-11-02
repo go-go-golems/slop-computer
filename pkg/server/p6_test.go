@@ -13,15 +13,14 @@ const aiActor = `
 const sample = use('sample'), db = use('db'), secrets = use('secrets'), platform = use('platform');
 defineActor({
   actions: {
-    async ask(ctx, { q }) {
-      ctx.need('interact');
+    ask: { requires: 'interact', async run(ctx, { q }) {
       if (!sample) ctx.fail('permission_denied', 'no sample module');
       const r = await sample(q || 'hi');
       return { text: r.text, usage: r.usage };
-    },
-    can(ctx) { return { allowed: sample ? sample.allowed() : false, limits: sample ? sample.limits() : null, visitor: ctx.visitor }; },
-    token(ctx) { return secrets ? secrets.get('TOKEN') : 'no secrets module'; },
-    make(ctx, { id }) { return platform ? platform.stores.create({ id }) : 'no platform module'; },
+    } },
+    can: { requires: 'view', run(ctx) { return { allowed: sample ? sample.allowed() : false, limits: sample ? sample.limits() : null, visitor: ctx.visitor }; } },
+    token: { requires: 'interact', run(ctx) { return secrets ? secrets.get('TOKEN') : 'no secrets module'; } },
+    make: { requires: 'interact', run(ctx, { id }) { return platform ? platform.stores.create({ id }) : 'no platform module'; } },
   },
   every: {
     digest: { every: '1h', async run(ctx) {

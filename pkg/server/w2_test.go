@@ -10,9 +10,10 @@ const officeActor = `
 const system = use('system'), db = use('db');
 defineActor({
   actions: {
-    async letIn(ctx, { id }) { return await system.people.setRole(id, 'member'); },
-    async verb(ctx, { name, args }) { return await system.call(name, args || {}); },
-    async mount(ctx, { host, path, store }) { return await system.mounts.set({ host, path, store }); },
+    // Members may call these; what the module lets them do is the verb's own rule.
+    letIn: { requires: 'interact', async run(ctx, { id }) { return await system.people.setRole(id, 'member'); } },
+    verb: { requires: 'interact', async run(ctx, { name, args }) { return await system.call(name, args || {}); } },
+    mount: { requires: 'interact', async run(ctx, { host, path, store }) { return await system.mounts.set({ host, path, store }); } },
   },
   on: {
     async 'doc:trigger/*'(ctx, c) {

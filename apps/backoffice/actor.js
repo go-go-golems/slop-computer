@@ -10,10 +10,12 @@ const db = use('db');
 
 defineActor({
   actions: {
-    verb(ctx, { name, args }) {
-      ctx.need('admin');
-      if (!system) ctx.fail('unavailable', 'this app is not trusted with the system module (slop app trust <store> system)');
-      return system.call(String(name), args || {});
+    verb: {
+      requires: 'admin',
+      run(ctx, { name, args }) {
+        if (!system) ctx.fail('unavailable', 'this app is not trusted with the system module (slop app trust <store> system)');
+        return system.call(String(name), args || {});
+      },
     },
   },
   on: {

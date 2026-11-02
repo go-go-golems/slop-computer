@@ -6,6 +6,7 @@ package server
 
 import (
 	"context"
+	"strings"
 	"sync"
 	"testing"
 	"time"
@@ -137,7 +138,6 @@ defineActor({
 // before it runs (decision 4, amended). Today actor.call checks view and
 // the action checks nothing.
 func TestActionWithoutRequiresNeedsAdmin(t *testing.T) {
-	t.Skip("SLOP3-007 phase 3")
 	h := newHarness(t)
 	admin := h.tokenFor("admin@example.com", "read", "write", "admin")
 	mia := h.tokenFor("mia@example.com")
@@ -227,5 +227,22 @@ func TestGroupsByKind(t *testing.T) {
 	}
 	if got := aud(adminNoScope, ""); got != "member" {
 		t.Errorf("admin token without the admin scope: %v", got)
+	}
+}
+
+// Phase 3: a requires that names no level a caller can hold fails the
+// activation, which rolls back; the store reports why.
+func TestActionRequiresBadLevelFailsActivation(t *testing.T) {
+	h := newHarness(t)
+	admin := h.tokenFor("admin@example.com", "read", "write", "admin")
+	h.call(admin, "store.new", map[string]any{"id": "bad"})
+	h.call(admin, "files.push", map[string]any{"store": "bad", "files": files(map[string]string{
+		"app.json":   `{"title":"Bad","actor":"actor.js","capabilities":{"db":{}}}`,
+		"actor.js":   `defineActor({ actions: { mine: { requires: 'self', run(ctx) { return 1; } } } });`,
+		"index.html": "<!doctype html><title>bad</title>",
+	})})
+	st := h.call(admin, "app.status", map[string]any{"store": "bad"}).(map[string]any)
+	if b, _ := st["broken"].(string); !strings.Contains(b, `requires "self"`) {
+		t.Fatalf("app.status = %v", st)
 	}
 }

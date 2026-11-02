@@ -17,9 +17,10 @@ const system = use('system');
 defineActor({
   actions: {
     has(ctx) { return system ? Object.keys(system).sort() : null; },
-    async people(ctx) { return (await system.people.list({ kind: 'user' })).length; },
-    async role(ctx, { id, role }) { return await system.people.setRole(id, role); },
-    async grant(ctx, { store, subject, level }) { return await system.grants.set(store, subject, level); },
+    // Members may call these; what the module lets them do is the verb's own rule.
+    people: { requires: 'interact', async run(ctx) { return (await system.people.list({ kind: 'user' })).length; } },
+    role: { requires: 'interact', async run(ctx, { id, role }) { return await system.people.setRole(id, role); } },
+    grant: { requires: 'interact', async run(ctx, { store, subject, level }) { return await system.grants.set(store, subject, level); } },
   },
 });
 `

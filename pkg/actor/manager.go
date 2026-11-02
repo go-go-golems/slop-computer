@@ -394,6 +394,9 @@ func (m *Manager) activate(ctx context.Context, t *store.Turn, r kernel.Running)
 	if err != nil {
 		return err
 	}
+	for _, name := range a.undeclared {
+		a.log("warn", fmt.Sprintf("action %s declares no requires; callers need admin", name))
+	}
 	ev := &event{kind: "setup", visitor: m.storeVisitor(ctx, r.Store), via: "activate"}
 	a.cur = &turn{t: t, ev: ev, rev: t.Rev - 1}
 	defer func() { a.cur = nil }()
@@ -488,6 +491,11 @@ func (m *Manager) Call(ctx context.Context, storeID, action string, args any, vi
 	if !slices.Contains(a.keys("actions"), action) {
 		return nil, fail("not_found", "%s has no action %q", storeID, action)
 	}
+	// The action's declared requires, checked before any of its code runs:
+	// one check for the actor.call verb, page calls and store-to-store calls.
+	if err := a.mayCall(action, vis); err != nil {
+		return nil, err
+	}
 	return a.send(ctx, &event{kind: "action", name: action, visitor: vis, via: via,
 		run: func(a *Actor, cx *goja.Object) (goja.Value, error) {
 			f := a.fn("actions", action)
@@ -496,6 +504,25 @@ func (m *Manager) Call(ctx context.Context, storeID, action string, args any, vi
 			}
 			return f(goja.Undefined(), cx, a.toJS(args))
 		}})
+}
+
+// mayCall checks the visitor's level against an action's requires.
+func (a *Actor) mayCall(action string, vis Visitor) error {
+	need, ok := a.requires[action]
+	if !ok {
+		need = rt.LevelAdmin
+	}
+	have, _ := rt.ParseLevel(vis.Level)
+	if have >= need {
+		return nil
+	}
+	if have == rt.LevelNone {
+		return fail("not_found", "%s has no action %q", a.st.ID, action)
+	}
+	if slices.Contains(a.undeclared, action) {
+		return fail("permission_denied", "%s declares no requires, so it needs admin; you have %s", action, have)
+	}
+	return fail("permission_denied", "%s needs %s; you have %s", action, need, have)
 }
 
 // Actions lists the actions of a store's actor.
