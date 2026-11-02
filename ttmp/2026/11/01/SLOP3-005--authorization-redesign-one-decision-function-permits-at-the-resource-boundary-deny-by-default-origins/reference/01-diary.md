@@ -538,3 +538,171 @@ func (s *Server) confirm(ctx context.Context, v *rt.View) bool {
 	return true
 }
 ```
+
+## Step 5: Phases A0 and A4 (every operation declares an action), phase A7 (no app SQL runs as the kernel)
+
+Every verb (84) and every runtime method (21) now declares an action
+from one table in `pkg/authz`. Each action has a floor: whether it is on
+a store, the least level there, and whether it needs the admin role. The
+dispatchers check the floor before the operation runs: `verbs.Call` for
+verbs, `viewRPC` for methods. A verb whose `Run` forgot its check is
+still refused. The A7 spike confirmed that mattn drops the authorizer's
+trigger-name argument. It also found a live hole: a foreign-key cascade
+from a kernel table into an app table ran the app's trigger with kernel
+authority. Two invariants close it without that argument. Commits:
+- `eae9621` and `749c0b0` (A0 and A4);
+- `7a3c37d` (A7).
+
+### Prompt Context
+
+**User prompt (verbatim):** see step 2 ("Go ahead. then implement ...").
+
+**Assistant interpretation:** Continue with the phases. A0/A4 give the
+structural "every operation declares its access" property. A7 is the
+spike the guide planned for SQL author authority.
+
+**Inferred user intent:** Make a missing or wrong check visible and
+impossible to forget.
+
+### What I did
+
+- **`pkg/authz/actions.go`:**
+  - `Action`;
+  - store actions: `store.read`, `doc.read`, `doc.write`, `actor.call`,
+    `room`, `user.read`, `sample`, `asset.write`, `store.admin`,
+    `code.push` (admin role, D9), `store.owner`;
+  - other actions: `store.create`, `account`, `platform`,
+    `platform.admin`, `program`;
+  - `Spec{Store, Level, Admin}` and `Of`.
+- **Verbs:**
+  - `Verb.Action` and `Verb.StoreArg` (`""` means `store`; `"-"` means
+    `Run` finds the store, as for `link.rm`);
+  - `Check` refuses an undeclared action and enforces `Spec.Admin`;
+  - `Call` opens the declared store at the floor before `Run`;
+  - each verb's action was assigned from what its `Run` checks today:
+    I extracted every `e.open(..., rt.LevelX)` call per verb literal and
+    mapped the 84 verbs by script.
+- **Runtime methods:**
+  - `rpcTable` maps to `rpcMethod{act, fn}`;
+  - `viewMay(v, act)` compares the view's (epoch-confirmed) level and
+    role with the floor;
+  - `viewRPC` refuses with `not_granted` before the method runs.
+- **A7 spike:**
+  - read mattn v1.14.52 `callback.go`: `authorizerTrampoline(handle, op,
+    arg1, arg2, arg3)`. The C prototype has four strings; the Go side
+    reads three, so the trigger/view name is dropped;
+  - wrote a throwaway test: kernel table `_k`, app table `c REFERENCES
+    _k(id) ON DELETE CASCADE`, and a trigger on `c` inserting into
+    `_k2`;
+  - deleting from `_k` logged `9 c` (DELETE on the child) and `18 _k2`
+    (the trigger's INSERT). The trigger wrote one row.
+- **A7 fix:**
+  - `authorize`: a kernel caller's INSERT, UPDATE or DELETE on an app
+    name is denied;
+  - `Turn.checkAppForeignKeys` runs at the end of any turn that changed
+    the schema. It reads `pragma_foreign_key_list` for every table and
+    refuses an app table that references a non-app table.
+
+### Why
+
+- **Floors, not full decisions.** Many verbs need more than one level
+  check: db rules per path, D9 when the tree holds app code, `store.rm`
+  needing owner unless the caller is an admin. Declaring the least level
+  any caller needs keeps the table honest. Run keeps its finer checks.
+  The floor turns a forgotten check into a refusal instead of an open
+  door.
+- **Invariants instead of the sixth argument.** Patching or forking the
+  driver to pass it is a maintenance burden. Reading the raw `sqlite3*`
+  through `unsafe` and installing our own trampoline is fragile. SQLite
+  authorizes a trigger body, and a cascade, at prepare time under the
+  outer statement's caller. So the guarantee "no app SQL runs as the
+  kernel" follows from two facts. The kernel's statements never touch an
+  app table, directly or by cascade. App triggers can only sit on app
+  tables, which was already enforced at `CREATE TRIGGER`.
+
+### What worked
+
+- **`TestEveryVerbDeclaresAnAction`:** verbs by action are
+  `account:12 actor.call:1 doc.read:3 doc.write:4 platform:3
+  platform.admin:21 program:2 store.admin:23 store.create:1
+  store.owner:3 store.read:11`.
+- **`TestEveryRPCDeclaresAnAction`** passes. A viewer and a non-admin
+  owner do not clear `code.push`.
+- **`TestCallChecksTheFloor`:** a registered verb with `Run` returning
+  `"ran"` is refused to a stranger (`not_found`) and to a member with
+  interact (`permission_denied`), and runs for an admin. With the `Call`
+  check disabled: `want not_found, got 200 map[result:ran]`.
+- **`TestNoAppSQLRunsAsTheKernel`** passes. With the foreign-key check
+  removed it fails at `store_test.go:251` (the reference to `_docs` was
+  accepted). With the kernel rule removed it fails at `store_test.go:272`.
+- The full suite passed with the kernel rule before the foreign-key check
+  existed. No kernel path writes app tables: restores insert rows as
+  `CallerMigration`, `import.table` as `CallerAdminWrite`.
+
+### What didn't work
+
+- **`grant.set` with an email subject:** `invalid_argument: a subject is
+  usr_…, vis_…, store:<id>, @guest, @member or @subscriber`. The test
+  uses `@member`.
+- **A stray field:** a `Write` field I had dropped from `Spec` was left
+  on `StoreCreate` and broke the build until I removed it.
+- **Formatting:** `gofmt` flagged `authz_test.go` after the commit. A
+  follow-up commit formats it.
+
+### What I learned
+
+- Foreign-key cascades are authorized: SQLite codes them like trigger
+  programs, and the authorizer sees the child DELETE. Before this phase,
+  the kernel caller returned `SQLITE_OK` for everything, so the cascade
+  hole was real.
+
+### What was tricky to build
+
+- **Mapping 84 verbs without changing behavior.** An over-declared floor
+  silently refuses calls that used to work. The full suite is the check
+  that no floor exceeds what the tests exercise. Declarations were taken
+  from the lowest `e.open` level in each `Run`.
+
+### What warrants a second pair of eyes
+
+- **`store.rm` is `store.admin` on `id`.** An owner who is not an admin
+  has owner level, which clears it, and `Run` still requires owner for
+  them.
+- **`app.modules` declares `store.read` on the `app` argument.** When the
+  argument is empty, `Run` decides.
+- **Unchanged:** the 10 admin-only verbs with Read or Write scope (an
+  open question in the guide).
+- **`checkAppForeignKeys` reads every table's foreign keys** on each
+  schema change. Stores have few tables, so this is cheap.
+
+### What should be done in the future
+
+- **A2:** `Decide` composing the floor with the finer rules (db rules,
+  policy cells, D9). `explain.can` could print it.
+- **A5:** permits at the store boundary.
+- **S1 and S2.**
+
+### Code review instructions
+
+- `pkg/authz/actions.go`, `pkg/verbs/verb.go` (`Call`, `Check`,
+  `store`), the `Action:` fields in `pkg/verbs/*.go`,
+  `pkg/server/views.go` (`rpcTable`, `viewMay`, `viewRPC`),
+  `pkg/store/sqlpolicy.go` (`authorize` kernel branch,
+  `checkAppForeignKeys`), `pkg/store/turn.go`.
+- **Tests:**
+  - `GOWORK=off go test ./pkg/verbs ./pkg/store -count=1`;
+  - `GOWORK=off go test ./pkg/server -run 'TestEveryRPCDeclaresAnAction|TestCallChecksTheFloor' -count=1`.
+
+### Technical details
+
+The spike's authorizer log, for `DELETE FROM _k WHERE id = 'a'`:
+
+```text
+9 _k  main        DELETE _k
+20 _k id main     READ _k.id
+20 c k main       READ c.k        (the cascade's scan)
+9 c  main         DELETE c        (the cascade)
+...
+18 _k2  main      INSERT _k2      (the trigger body on c)
+rows written by the trigger: 1
+```
