@@ -1,7 +1,7 @@
 # Tasks
 
 ## TODO
-- [ ] Phase 0: failing exit tests, skipped by phase <!-- t:kxm9 -->
+- [x] Phase 0: failing exit tests, skipped by phase <!-- t:kxm9 -->
 - [ ] Phase 1: groups replace audiences (policy, LLM rows, create-audience, needAudience, views) <!-- t:bmt0 -->
 - [ ] Phase 2: one level rule (max of sources, min of ceilings) and live link grants <!-- t:5wfg -->
 - [ ] Phase 3: actions declare requires, checked before entry; undeclared needs admin; shipped actors updated <!-- t:hex7 -->
