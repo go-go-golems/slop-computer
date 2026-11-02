@@ -33,11 +33,15 @@ func (s *Server) adminIndex(w http.ResponseWriter, r *http.Request) {
 	_ = adminPage.Execute(w, map[string]any{"Boot": template.JS(boot), "V": adminVersion})
 }
 
-// adminVersion busts caches when the embedded build changes.
+// adminVersion busts caches when the embedded build changes: either file,
+// since both are served immutable under the same ?v=.
 var adminVersion = func() string {
-	b, _ := adminFS.ReadFile("admin/app.js")
-	sum := sha256.Sum256(b)
-	return hex.EncodeToString(sum[:6])
+	h := sha256.New()
+	for _, name := range []string{"admin/app.js", "admin/styles.css"} {
+		b, _ := adminFS.ReadFile(name)
+		h.Write(b)
+	}
+	return hex.EncodeToString(h.Sum(nil)[:6])
 }()
 
 func (s *Server) adminAsset(w http.ResponseWriter, r *http.Request) {
