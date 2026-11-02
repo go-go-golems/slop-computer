@@ -38,14 +38,12 @@ func (s *Server) principalOf(r *http.Request) (*access.Principal, *system.Sessio
 		if err != nil {
 			return nil, nil, err
 		}
-		p, err := s.Sys.Person(ctx, t.Person)
-		if err != nil {
-			return nil, nil, err
-		}
-		if p.Role == system.RoleDisabled {
+		p := s.personAs(ctx, t.Person, "http")
+		if p == nil {
 			return nil, nil, system.ErrNotFound
 		}
-		return &access.Principal{Kind: access.KindToken, Person: &p, TokenID: t.ID, Scopes: t.Scopes, Via: "http"}, nil, nil
+		p.Kind, p.TokenID, p.Scopes = access.KindToken, t.ID, t.Scopes
+		return p, nil, nil
 	}
 	c, err := r.Cookie(s.sessionCookie())
 	if err != nil || c.Value == "" {
@@ -55,15 +53,24 @@ func (s *Server) principalOf(r *http.Request) (*access.Principal, *system.Sessio
 	if err != nil {
 		return nil, nil, nil
 	}
-	p, err := s.Sys.Person(ctx, sess.Person)
-	if err != nil || p.Role == system.RoleDisabled {
+	p := s.personAs(ctx, sess.Person, "http")
+	if p == nil {
 		return nil, nil, nil
 	}
-	kind := access.KindUser
-	if p.Kind == "guest" {
-		kind = access.KindGuest
+	return p, &sess, nil
+}
+
+// personAs is the principal person id acts as through via, or nil when the
+// person is gone or their account is disabled. Sessions, tokens, views,
+// previews and apps acting for their payer all turn a stored person id into
+// someone who acts here, so a disabled account is refused the same way on
+// every door.
+func (s *Server) personAs(ctx context.Context, id, via string) *access.Principal {
+	p, err := s.Sys.Person(ctx, id)
+	if err != nil || p.Role == system.RoleDisabled {
+		return nil
 	}
-	return &access.Principal{Kind: kind, Person: &p, Via: "http"}, &sess, nil
+	return access.PersonPrincipal(p, via)
 }
 
 func (s *Server) authRoutes(m *http.ServeMux) {

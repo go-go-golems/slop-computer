@@ -438,3 +438,42 @@ func TestStreamFollowsSystemState(t *testing.T) {
 		}
 	}
 }
+
+// A disabled account is nobody on every door: its open view stops at the
+// next call (no review ran), the site session reopens as an anonymous
+// visitor, and nothing can act as it.
+func TestDisabledAccountActsNowhere(t *testing.T) {
+	h := newHarness(t)
+	admin := h.tokenFor("admin@example.com", "read", "write", "admin")
+	s, _, _ := clubSite(t, h, "una@example.com")
+	h.call(admin, "sub.grant", map[string]any{"person": "una@example.com", "until": "30d"})
+	live := h.cfg.Hosts.Live[0]
+	st, v := openView(s, live, "/club", "")
+	if st != 200 || v["level"] != "interact" {
+		t.Fatalf("subscriber view: %d %v", st, v)
+	}
+	ctx := context.Background()
+	una, err := h.sys.PersonByEmail(ctx, "una@example.com")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if h.srv.personAs(ctx, una.ID, "test") == nil {
+		t.Fatal("an active member should act")
+	}
+	if _, err := h.sys.SetRole(ctx, "", "test", una.ID, system.RoleDisabled); err != nil {
+		t.Fatal(err)
+	}
+	sbx := strings.TrimPrefix(strings.Split(v["url"].(string), "/v/")[0], "http://")
+	r, _ := s.do("POST", sbx, "/_rt/rpc", map[string]any{"method": "db.write",
+		"args": map[string]any{"path": "notes/n1", "op": "set", "body": map[string]any{"text": "x"}}},
+		map[string]string{"Authorization": "Bearer " + v["secret"].(string)})
+	if r.StatusCode != 401 {
+		t.Fatalf("write through a disabled account's view: %d", r.StatusCode)
+	}
+	if st, v2 := openView(s, live, "/club", ""); st == 200 && (v2["user"] != "" || v2["level"] == "interact") {
+		t.Fatalf("reopen as a disabled account: %d %v", st, v2)
+	}
+	if h.srv.personAs(ctx, una.ID, "test") != nil {
+		t.Fatal("a disabled account acts")
+	}
+}

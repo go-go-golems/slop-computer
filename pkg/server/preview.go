@@ -7,7 +7,6 @@ import (
 	"path"
 	"strings"
 
-	"github.com/go-go-golems/slop-computer/pkg/access"
 	"github.com/go-go-golems/slop-computer/pkg/rt"
 )
 
@@ -27,14 +26,10 @@ func (s *Server) servePreview(w http.ResponseWriter, r *http.Request, label stri
 		notFound(w)
 		return
 	}
-	pp, err := s.Sys.Person(ctx, pv.Person)
-	if err != nil {
+	who := s.personAs(ctx, pv.Person, "preview")
+	if who == nil {
 		notFound(w)
 		return
-	}
-	who := &access.Principal{Kind: access.KindUser, Person: &pp, Via: "preview"}
-	if pp.Kind == "guest" {
-		who.Kind = access.KindGuest
 	}
 	if d, _, err := s.Env.K.Access.Can(ctx, who, pv.Store, rt.LevelView, "previewing", true); err != nil || !d.OK {
 		notFound(w)

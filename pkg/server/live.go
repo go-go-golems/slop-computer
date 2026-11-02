@@ -80,16 +80,14 @@ func (s *Server) sitePrincipal(r *http.Request) (*access.Principal, *system.Sess
 	if err != nil {
 		return nil, nil
 	}
-	p, err := s.Sys.Person(r.Context(), sess.Person)
-	if err != nil || p.Role == system.RoleDisabled {
+	p := s.personAs(r.Context(), sess.Person, "page")
+	if p == nil {
 		return nil, nil
 	}
-	kind := access.KindUser
-	if p.Kind == "guest" {
-		kind = access.KindGuest
+	if p.Kind == access.KindGuest {
 		s.Sys.SeeGuest(r.Context(), c.Value, sess)
 	}
-	return &access.Principal{Kind: kind, Person: &p, Via: "page"}, &sess
+	return p, &sess
 }
 
 // newGuest gives this browser a guest id on this host.
@@ -113,7 +111,7 @@ func (s *Server) newGuest(w http.ResponseWriter, r *http.Request) (*access.Princ
 	// The cookie outlives any guest; the session (renewed while the guest
 	// visits) decides how long the identity lasts.
 	s.setSiteCookie(w, s.siteCookie(), secret, 400*24*3600)
-	return &access.Principal{Kind: access.KindGuest, Person: &g, Via: "page"}, nil
+	return access.PersonPrincipal(g, "page"), nil
 }
 
 // sameOrigin guards /_site/* calls: they must come from this host's pages.
@@ -602,17 +600,7 @@ func (s *Server) confirm(ctx context.Context, v *rt.View) bool {
 // recheck closes v when its viewer's access to row is no longer the one v
 // was opened with, and reports whether it did.
 func (s *Server) recheck(ctx context.Context, v *rt.View, row system.StoreRow) bool {
-	var p *access.Principal
-	if v.User != "" {
-		if pp, err := s.Sys.Person(ctx, v.User); err == nil {
-			kind := access.KindUser
-			if pp.Kind == "guest" {
-				kind = access.KindGuest
-			}
-			p = &access.Principal{Kind: kind, Person: &pp}
-		}
-	}
-	d := s.Env.K.Access.Level(ctx, p, row)
+	d := s.Env.K.Access.Level(ctx, s.viewPrincipal(ctx, v), row)
 	switch {
 	case d.Level == rt.LevelNone:
 		s.rt.views.Close(v, true)

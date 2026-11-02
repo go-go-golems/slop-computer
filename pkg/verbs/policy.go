@@ -148,11 +148,7 @@ func init() {
 					if pp.ID != p.ID() && !p.IsAdmin() {
 						return nil, Errf("permission_denied", "only admins look at other people's usage")
 					}
-					kind := access.KindUser
-					if pp.Kind == "guest" {
-						kind = access.KindGuest
-					}
-					q = &access.Principal{Kind: kind, Person: &pp}
+					q = access.PersonPrincipal(pp, "")
 				}
 				aud := e.K.Access.AudienceOf(ctx, q)
 				return map[string]any{"person": q.ID(), "audience": aud, "llm": e.Sys.LLMFor(ctx, q.ID(), string(aud))}, nil

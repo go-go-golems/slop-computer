@@ -27,6 +27,18 @@ type Principal struct {
 	Via     string         // how the request came in: cli, http, eval, page, actor, ...
 }
 
+// PersonPrincipal is the principal a person acts as through via: a user, or
+// a guest when the account is a guest's. It does not refuse a disabled
+// account (its audience is none, so it holds nothing); code that
+// authenticates someone refuses one before acting.
+func PersonPrincipal(p system.Person, via string) *Principal {
+	kind := KindUser
+	if p.Kind == "guest" {
+		kind = KindGuest
+	}
+	return &Principal{Kind: kind, Person: &p, Via: via}
+}
+
 // ID is what logs and slop_principal() record: the person for users, guests
 // and tokens (a token acts as its user), store:<id> for stores, "system".
 func (p *Principal) ID() string {

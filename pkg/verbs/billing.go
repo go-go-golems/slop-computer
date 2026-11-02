@@ -126,7 +126,7 @@ func init() {
 					return nil, err
 				}
 				pp, _ := e.Sys.Person(ctx, id)
-				q := &access.Principal{Kind: access.KindUser, Person: &pp}
+				q := access.PersonPrincipal(pp, "")
 				return map[string]any{"person": id, "audience": e.K.Access.AudienceOf(ctx, q), "decision": e.K.Standing(ctx, id),
 					"comps": comps, "subscriptions": subs}, nil
 			}},

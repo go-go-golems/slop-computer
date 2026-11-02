@@ -31,15 +31,7 @@ func (s *Server) viewPrincipal(ctx context.Context, v *rt.View) *access.Principa
 	if v.User == "" {
 		return nil
 	}
-	p, err := s.Sys.Person(ctx, v.User)
-	if err != nil {
-		return nil
-	}
-	kind := access.KindUser
-	if p.Kind == "guest" {
-		kind = access.KindGuest
-	}
-	return &access.Principal{Kind: kind, Person: &p, Via: "page"}
+	return s.personAs(ctx, v.User, "page")
 }
 
 func actorFail(err error) error {

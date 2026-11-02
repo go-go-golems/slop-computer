@@ -264,7 +264,7 @@ func (m *Manager) storeVisitor(ctx context.Context, id string) Visitor {
 	v := Visitor{ID: "store:" + id, Name: id, Level: "owner", Audience: "member"}
 	if row, err := m.K.Sys.StoreByID(ctx, id); err == nil {
 		if p, err := m.K.Sys.Person(ctx, row.Owner); err == nil {
-			v.Audience = string(m.K.Access.AudienceOf(ctx, &access.Principal{Kind: access.KindUser, Person: &p}))
+			v.Audience = string(m.K.Access.AudienceOf(ctx, access.PersonPrincipal(p, "")))
 			v.Payer = p.ID
 		}
 	}

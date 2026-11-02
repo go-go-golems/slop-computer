@@ -7,7 +7,6 @@ import (
 
 	"github.com/dop251/goja"
 
-	"github.com/go-go-golems/slop-computer/pkg/access"
 	"github.com/go-go-golems/slop-computer/pkg/actor"
 	"github.com/go-go-golems/slop-computer/pkg/verbs"
 )
@@ -34,15 +33,10 @@ func (s *Server) platformModule(a *actor.Actor) goja.Value {
 				a.Throw("permission_denied", "a visitor without an id cannot use the platform")
 			}
 			ctx := context.Background()
-			pp, err := s.Sys.Person(ctx, v.Payer)
-			if err != nil {
+			p := s.personAs(ctx, v.Payer, "app:"+a.App())
+			if p == nil {
 				a.Throw("permission_denied", "no person to act as")
 			}
-			kind := access.KindUser
-			if pp.Kind == "guest" {
-				kind = access.KindGuest
-			}
-			p := &access.Principal{Kind: kind, Person: &pp, Via: "app:" + a.App()}
 			args, _ := a.FromJS(arg).(map[string]any)
 			if args == nil {
 				args = map[string]any{}

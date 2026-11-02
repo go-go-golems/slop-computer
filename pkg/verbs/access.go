@@ -32,11 +32,7 @@ func (e *Env) subjectPrincipal(ctx context.Context, subject string) (*access.Pri
 	if err != nil {
 		return nil, Errf("not_found", "no person %s", subject)
 	}
-	kind := access.KindUser
-	if p.Kind == "guest" {
-		kind = access.KindGuest
-	}
-	return &access.Principal{Kind: kind, Person: &p}, nil
+	return access.PersonPrincipal(p, ""), nil
 }
 
 func init() {
