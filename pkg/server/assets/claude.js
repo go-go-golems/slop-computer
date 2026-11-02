@@ -304,6 +304,20 @@
     }
     return ready;
   }
+  var resendable = /* @__PURE__ */ new Set([
+    "db.get",
+    "db.query",
+    "db.subscribe",
+    "db.unsubscribe",
+    "slop.read",
+    "assets.list",
+    "user.profiles",
+    "user.search",
+    "sample.limits",
+    "room.join",
+    "room.leave",
+    "room.presence"
+  ]);
   async function rpc(method, args) {
     if (terminal) throw fail(terminal, "this view was closed");
     for (let attempt = 0; ; attempt++) {
@@ -317,7 +331,7 @@
           body: JSON.stringify({ method, args: args ?? {} })
         });
       } catch {
-        if (attempt < 1) {
+        if (attempt < 1 && resendable.has(method)) {
           await new Promise((res) => setTimeout(res, 300 + Math.random() * 400));
           continue;
         }

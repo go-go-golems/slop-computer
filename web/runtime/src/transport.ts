@@ -289,6 +289,17 @@ export function connect(): Promise<Hello | null> {
   return ready;
 }
 
+// Methods sent again when the request failed in the network: they read, or
+// set state absolutely, so a server that did run the first one gives the
+// same result. Anything else (an action, a write, an emit, a publish) may
+// have run before the connection broke; resending it could do it twice, so
+// it fails as unavailable and the page decides. A 401 is different: the
+// server refused it, so every method is sent again after a renewal.
+const resendable = new Set([
+  "db.get", "db.query", "db.subscribe", "db.unsubscribe", "slop.read", "assets.list",
+  "user.profiles", "user.search", "sample.limits", "room.join", "room.leave", "room.presence",
+]);
+
 /** Calls a capability method as this view. Rejects {code, message}. */
 export async function rpc<T = any>(method: string, args?: unknown): Promise<T> {
   if (terminal) throw fail(terminal, "this view was closed");
@@ -303,7 +314,7 @@ export async function rpc<T = any>(method: string, args?: unknown): Promise<T> {
         body: JSON.stringify({ method, args: args ?? {} }),
       });
     } catch {
-      if (attempt < 1) {
+      if (attempt < 1 && resendable.has(method)) {
         await new Promise((res) => setTimeout(res, 300 + Math.random() * 400));
         continue;
       }
