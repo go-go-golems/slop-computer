@@ -103,7 +103,7 @@ func (s *Server) oidcCallback(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	s.setCookie(w, s.flowCookie(), "", -1, http.SameSiteLaxMode)
-	id, _, err := s.oidc.Exchange(r.Context(), q.Get("code"), flow.Verifier, flow.Nonce)
+	id, idToken, err := s.oidc.Exchange(r.Context(), q.Get("code"), flow.Verifier, flow.Nonce)
 	if err != nil {
 		log.Printf("oidc exchange: %v", err)
 		s.signInFailed(w, r, "The sign-in could not be completed.", flow.ReturnPath)
@@ -113,7 +113,7 @@ func (s *Server) oidcCallback(w http.ResponseWriter, r *http.Request) {
 		s.signInFailed(w, r, "Your account needs a verified email address.", flow.ReturnPath)
 		return
 	}
-	if err := s.signIn(w, r, id.Email, id.Name, id.Issuer+"|"+id.Subject); err != nil {
+	if err := s.signIn(w, r, id.Email, id.Name, id.Issuer+"|"+id.Subject, idToken); err != nil {
 		s.signInFailed(w, r, err.Error(), flow.ReturnPath)
 		return
 	}

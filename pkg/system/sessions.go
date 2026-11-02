@@ -54,6 +54,20 @@ func (d *DB) SessionBySecret(ctx context.Context, secret, host string) (Session,
 }
 
 // DeleteSession ends a session.
+// SetSessionIDToken keeps an OIDC sign-in's ID token with its session, for
+// logout at the identity provider.
+func (d *DB) SetSessionIDToken(ctx context.Context, secret, idToken string) error {
+	_, err := d.ExecContext(ctx, `UPDATE sessions SET id_token = ? WHERE id_hash = ?`, nullStr(idToken), ids.Hash(secret))
+	return err
+}
+
+// SessionIDToken is the ID token kept with a session, or "".
+func (d *DB) SessionIDToken(ctx context.Context, secret string) string {
+	var tok sql.NullString
+	_ = d.QueryRowContext(ctx, `SELECT id_token FROM sessions WHERE id_hash = ?`, ids.Hash(secret)).Scan(&tok)
+	return tok.String
+}
+
 func (d *DB) DeleteSession(ctx context.Context, secret string) error {
 	_, err := d.ExecContext(ctx, `DELETE FROM sessions WHERE id_hash = ?`, ids.Hash(secret))
 	return err

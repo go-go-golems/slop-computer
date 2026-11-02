@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"html/template"
+	"log"
 	"net/http"
 	"net/url"
 	"strings"
@@ -118,7 +119,7 @@ func (s *Server) localSignIn(w http.ResponseWriter, r *http.Request) {
 		http.Redirect(w, r, "/auth/login?problem="+url.QueryEscape("Enter an email")+"&return="+url.QueryEscape(ret), http.StatusSeeOther)
 		return
 	}
-	if err := s.signIn(w, r, email, r.PostForm.Get("name"), ""); err != nil {
+	if err := s.signIn(w, r, email, r.PostForm.Get("name"), "", ""); err != nil {
 		http.Redirect(w, r, "/auth/login?problem="+url.QueryEscape(err.Error()), http.StatusSeeOther)
 		return
 	}
@@ -126,7 +127,7 @@ func (s *Server) localSignIn(w http.ResponseWriter, r *http.Request) {
 }
 
 // signIn finds or creates the user and starts a main-host session.
-func (s *Server) signIn(w http.ResponseWriter, r *http.Request, email, name, subject string) error {
+func (s *Server) signIn(w http.ResponseWriter, r *http.Request, email, name, subject, idToken string) error {
 	p, _, err := s.Sys.SignInUser(r.Context(), email, name, subject, s.Cfg.AdminEmails, s.Cfg.SignupOpen())
 	if err != nil {
 		return err
@@ -138,15 +139,35 @@ func (s *Server) signIn(w http.ResponseWriter, r *http.Request, email, name, sub
 	if err != nil {
 		return err
 	}
+	if idToken != "" {
+		if err := s.Sys.SetSessionIDToken(r.Context(), secret, idToken); err != nil {
+			return err
+		}
+	}
 	s.setCookie(w, s.sessionCookie(), secret, system.SessionDays*24*3600, http.SameSiteLaxMode)
 	return nil
 }
 
+// logout ends the session; after an OIDC sign-in it goes on to the
+// provider's end_session_endpoint (RP-initiated logout), which ends the
+// provider's browser session too and comes back to the main host's /, so
+// the next sign-in asks again (another account can sign in).
 func (s *Server) logout(w http.ResponseWriter, r *http.Request) {
+	idToken := ""
 	if c, err := r.Cookie(s.sessionCookie()); err == nil {
+		idToken = s.Sys.SessionIDToken(r.Context(), c.Value)
 		_ = s.Sys.DeleteSession(r.Context(), c.Value)
 	}
 	s.setCookie(w, s.sessionCookie(), "", -1, http.SameSiteLaxMode)
+	if s.oidc != nil && idToken != "" {
+		target, err := s.oidc.LogoutURL(r.Context(), idToken, s.Cfg.MainURL()+"/", "")
+		if err != nil {
+			log.Printf("oidc logout: %v", err)
+		} else if target != "" {
+			http.Redirect(w, r, target, http.StatusSeeOther)
+			return
+		}
+	}
 	http.Redirect(w, r, "/", http.StatusSeeOther)
 }
 

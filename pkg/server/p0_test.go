@@ -250,3 +250,17 @@ func TestSignupRoles(t *testing.T) {
 		t.Fatalf("disabling did not revoke the token")
 	}
 }
+
+// Probes reach the pod's address, which is not a configured host.
+func TestProbesOnAnyHost(t *testing.T) {
+	h := newHarness(t)
+	b := h.browser()
+	for _, path := range []string{"/healthz", "/readyz"} {
+		if r := b.do("GET", path, "10.42.0.7:8080", nil, nil); r.StatusCode != 200 {
+			t.Fatalf("%s on the pod address: %d", path, r.StatusCode)
+		}
+	}
+	if r := b.do("GET", "/", "10.42.0.7:8080", nil, nil); r.StatusCode != http.StatusMisdirectedRequest {
+		t.Fatalf("/ on the pod address: %d", r.StatusCode)
+	}
+}

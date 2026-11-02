@@ -95,9 +95,11 @@ func New(cfg *config.Config, sys *system.DB, env *verbs.Env) *Server {
 		key = []byte(ids.Secret("key_"))
 	}
 	s.rt = newRT(key)
-	env.AccessChanged = s.reviewViews
-	env.PersonChanged = s.reviewPerson
 	s.rt.views.OnClose = s.roomClosed
+	if env != nil {
+		env.AccessChanged = s.reviewViews
+		env.PersonChanged = s.reviewPerson
+	}
 	if env != nil && env.K != nil {
 		env.K.Subscribe(s.publish)
 	}
@@ -138,12 +140,26 @@ func (s *Server) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	case "sandbox":
 		serveOr(s.Sandbox, w, r)
 	default:
-		if r.URL.Path == "/healthz" {
+		// probes reach the pod's address, not a configured host
+		switch r.URL.Path {
+		case "/healthz":
 			_, _ = w.Write([]byte("ok\n"))
+			return
+		case "/readyz":
+			s.ready(w, r)
 			return
 		}
 		http.Error(w, "unknown host "+r.Host, http.StatusMisdirectedRequest)
 	}
+}
+
+// ready answers whether the system database answers.
+func (s *Server) ready(w http.ResponseWriter, r *http.Request) {
+	if err := s.Sys.PingContext(r.Context()); err != nil {
+		httpx.Fail(w, 503, "unavailable", err.Error())
+		return
+	}
+	httpx.JSON(w, 200, map[string]any{"ok": true})
 }
 
 func serveOr(h http.Handler, w http.ResponseWriter, r *http.Request) {
@@ -156,13 +172,7 @@ func serveOr(h http.Handler, w http.ResponseWriter, r *http.Request) {
 
 func (s *Server) mainRoutes(m *http.ServeMux) {
 	m.HandleFunc("GET /healthz", func(w http.ResponseWriter, r *http.Request) { _, _ = w.Write([]byte("ok\n")) })
-	m.HandleFunc("GET /readyz", func(w http.ResponseWriter, r *http.Request) {
-		if err := s.Sys.PingContext(r.Context()); err != nil {
-			httpx.Fail(w, 503, "unavailable", err.Error())
-			return
-		}
-		httpx.JSON(w, 200, map[string]any{"ok": true})
-	})
+	m.HandleFunc("GET /readyz", s.ready)
 	m.HandleFunc("GET /auth/handoff", s.handoff)
 	s.authRoutes(m)
 	s.deviceRoutes(m)

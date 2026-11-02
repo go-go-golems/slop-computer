@@ -13,6 +13,7 @@ import (
 	"net/url"
 	"os"
 	"path/filepath"
+	"slices"
 	"strings"
 	"sync"
 	"testing"
@@ -360,6 +361,7 @@ type fakeOP struct {
 	mu       sync.Mutex
 	codes    map[string]fakeCode
 	email    string
+	scope    string // of the last authorize request
 }
 
 type fakeCode struct{ nonce, challenge, redirect string }
@@ -374,7 +376,7 @@ func newFakeOP(t *testing.T, clientID, email string) *fakeOP {
 	m.HandleFunc("GET /.well-known/openid-configuration", func(w http.ResponseWriter, r *http.Request) {
 		iss := op.ts.URL
 		_ = json.NewEncoder(w).Encode(map[string]any{"issuer": iss, "authorization_endpoint": iss + "/authorize",
-			"token_endpoint": iss + "/token", "jwks_uri": iss + "/keys", "userinfo_endpoint": iss + "/userinfo",
+			"token_endpoint": iss + "/token", "jwks_uri": iss + "/keys", "userinfo_endpoint": iss + "/userinfo", "end_session_endpoint": iss + "/logout",
 			"id_token_signing_alg_values_supported": []string{"RS256"}, "response_types_supported": []string{"code"},
 			"subject_types_supported": []string{"public"}, "code_challenge_methods_supported": []string{"S256"}})
 	})
@@ -389,6 +391,7 @@ func newFakeOP(t *testing.T, clientID, email string) *fakeOP {
 		}
 		code := "c" + q.Get("state")[:8]
 		op.mu.Lock()
+		op.scope = q.Get("scope")
 		op.codes[code] = fakeCode{q.Get("nonce"), q.Get("code_challenge"), q.Get("redirect_uri")}
 		op.mu.Unlock()
 		http.Redirect(w, r, q.Get("redirect_uri")+"?code="+code+"&state="+url.QueryEscape(q.Get("state")), http.StatusSeeOther)
@@ -429,7 +432,7 @@ func TestOIDCSignIn(t *testing.T) {
 	}
 	h := newHarnessWith(t, func(c *config.Config) {
 		c.Local = false
-		c.OIDC = config.OIDC{Issuer: op.ts.URL, ClientIDFile: idFile}
+		c.OIDC = config.OIDC{Issuer: op.ts.URL, ClientIDFile: idFile, Scope: "urn:zitadel:iam:org:id:123456"}
 	})
 	b := h.browser()
 	r := b.do("GET", "/auth/login?return=/x", h.cfg.Hosts.Main, nil, nil)
@@ -467,6 +470,27 @@ func TestOIDCSignIn(t *testing.T) {
 	person, _ := info["person"].(map[string]any)
 	if info["signedIn"] != true || person["email"] != "olga@example.com" || person["name"] != "Olga OIDC" {
 		t.Fatalf("session = %v", info)
+	}
+	// ZITADEL's organization scope is asked for along with the standard ones.
+	op.mu.Lock()
+	scope := strings.Fields(op.scope)
+	op.mu.Unlock()
+	for _, want := range []string{"openid", "email", "profile", "urn:zitadel:iam:org:id:123456"} {
+		if !slices.Contains(scope, want) {
+			t.Fatalf("authorize scope %q lacks %s", op.scope, want)
+		}
+	}
+	// Signing out ends the provider's session too (RP-initiated logout with
+	// the ID token as hint), and comes back to the main host.
+	r = b.do("POST", "/auth/logout", h.cfg.Hosts.Main, nil, nil)
+	out, _ := url.Parse(r.Header.Get("Location"))
+	lq := out.Query()
+	if r.StatusCode != 303 || !strings.HasPrefix(out.String(), op.ts.URL+"/logout?") || lq.Get("client_id") != "slop-client" ||
+		lq.Get("post_logout_redirect_uri") != h.cfg.MainURL()+"/" || strings.Count(lq.Get("id_token_hint"), ".") != 2 {
+		t.Fatalf("logout: %d %s", r.StatusCode, out)
+	}
+	if info := readJSON(t, b.do("GET", "/auth/session", h.cfg.Hosts.Main, nil, nil)); info["signedIn"] != false {
+		t.Fatalf("session after logout = %v", info)
 	}
 	// The local form is off.
 	if r := b.do("POST", "/auth/local", h.cfg.Hosts.Main, strings.NewReader("email=x@example.com"), map[string]string{"Content-Type": "application/x-www-form-urlencoded"}); r.StatusCode != 404 {
