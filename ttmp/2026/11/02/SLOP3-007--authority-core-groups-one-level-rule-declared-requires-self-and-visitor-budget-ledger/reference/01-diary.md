@@ -9,9 +9,19 @@ Topics:
 DocType: reference
 Intent: long-term
 Owners: []
-RelatedFiles: []
+RelatedFiles:
+    - Path: repo://pkg/access/check.go
+      Note: Level, groups, deadLink
+    - Path: repo://pkg/actor/actor.go
+      Note: readShape requires
+    - Path: repo://pkg/server/core_test.go
+      Note: exit tests and worked examples
+    - Path: repo://pkg/server/modules.go
+      Note: actAs, trusted modules
+    - Path: repo://pkg/system/ledger.go
+      Note: Reserve/Settle/Meter
 ExternalSources: []
-Summary: "Chronological work log for SLOP3-007, the authority core: groups, one level rule, live links, declared requires, self and visitor, budget ledger."
+Summary: 'Chronological work log for SLOP3-007, the authority core: groups, one level rule, live links, declared requires, self and visitor, budget ledger.'
 LastUpdated: 2026-11-02T16:27:42.938218785-05:00
 WhatFor: ""
 WhenToUse: ""
@@ -398,3 +408,41 @@ Model budgets are hard now. Each model round holds what it may cost before the p
 ### Code review instructions
 - `pkg/system/ledger.go`; the `Before` call in `pkg/llm/gepp/sample.go`; the meter wiring in `pkg/server/sample.go` and `pkg/actor/sample.go`.
 - Validate with `GOWORK=off go test ./pkg/system ./pkg/server -run 'Ledger|Reserv|Hold|Retry|TestConcurrent|TestLLMBudgets|TestPageSample' -count=1`.
+
+## Step 8: Phase 7, explanations, worked examples as data, the lab spec
+
+`explain.can` reports groups, and six of the plan's worked examples now run as data-driven cases. The lab's executable spec computes levels by the same max-then-min rule as Go. Phase 6 (cost units) stays deferred, as amended.
+
+### Prompt Context
+**User prompt (verbatim):** see Step 1.
+**Assistant interpretation:** Phase 7: explain, shared cases, reconcile `lab/src/kernel/access.js`.
+**Inferred user intent:** Executable examples that keep the rules honest, and one spec that agrees with the code.
+**Commit (code):** efe2a7e — "SLOP3-007 phase 7: explain shows groups, worked examples as data, the lab agrees"
+
+### What I did
+- `pkg/verbs/access.go`: both `explain.can` result shapes add `groups`.
+- `pkg/server/testdata/authz/cases.json`: examples 1, 2, 4, 5, 6 and 9. Each step gives `as` (admin or an email, optional `scopes`), a verb, args (`@id:<email>` substitution; `files` as a path → content map) and an expectation (`code`, or a `result` subset).
+- `TestWorkedExamples` runs each case on a fresh server; `contains` does subset matching, maps as subsets, everything else exact.
+- `lab/src/kernel/access.js` `level()`:
+  - sources first (platform admin, owner, grants capped at admin), then ceilings (disabled none, pending interact, token `max_level`, the kind cap);
+  - pending users are no longer `none` but guest-like (in `*anyone` only).
+- `scripts/02-lab-level-check.mjs` checks the lab's `level()` on a stub database with five cases (pending owner → interact; a member's owner grant → admin; disabled → none; an admin owner → owner; pending on someone else's public store → view).
+
+### Why
+- Cases as verb sequences, not fixtures written straight into the database, so they go through every entry check, the way an agent or the CLI would.
+- The lab keeps `*anyone`/`*signed-in`. Renaming touches 18 places in 6 files including its UI, and there is no runner for the lab kernel yet (it needs its SQLite build), so a rename couldn't be verified. The rule, which is the part that disagreed with Go, is reconciled.
+
+### What worked
+- `TestWorkedExamples`: 6/6.
+- The lab check: 5/5 (`node scripts/02-lab-level-check.mjs <repo>/lab/src/kernel/access.js`).
+- Full gate: Go tests, vet, gofmt, runtime 9/9.
+
+### What didn't work
+- No failures observed. (A first-try pass deserved a check: each case asserts something the earlier phases changed, namely the guest ceiling on a mistaken admin grant, `groups: ["@store"]`, the pending cap, and `@subscriber` inheriting the `@member` cell with the larger row.)
+
+### What should be done in the future
+- A node runner that replays `cases.json` against the lab kernel, after renaming its groups to `@guest`/`@member`.
+- Example 3 (share links) and example 8 (nightly digest) as data, once the case format can drive a site session and fire alarms.
+
+### Code review instructions
+- `pkg/server/testdata/authz/cases.json`, `TestWorkedExamples`, `lab/src/kernel/access.js` `level()`.

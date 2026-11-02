@@ -8,4 +8,4 @@
 - [x] Phase 4: self and visitor in actors (store as its own visitor, store principal for platform/trusted modules, per-call cross-store checks) <!-- t:bqdv -->
 - [x] Phase 5: budget ledger with a hold per model round <!-- t:xs46 -->
 - [ ] Phase 6: cost units (deferred) <!-- t:afob -->
-- [ ] Phase 7: explain output and worked-example cases; reconcile lab access.js <!-- t:20bp -->
+- [x] Phase 7: explain output and worked-example cases; reconcile lab access.js <!-- t:20bp -->
