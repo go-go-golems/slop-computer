@@ -726,3 +726,138 @@ apps a general way to read stores' uploads.
 - The browser run captured an edit someone made in the editor during the
   run (the heading reads "Yarn fosdfr people who knit in public" in
   `b5-reader-picture.png`): the reader shows it, as it should.
+
+## Step 7: The "Thinking…" placeholder that ate the first line of every Claude answer
+
+The user showed a Blocks page whose totals never resolved. Folding the
+workspace and reading the Claude panel's transcript found two causes. One
+is ours: the page runtime sent a thinking placeholder through `onText`
+that Claude Blocks does not recognise, so Blocks wrote it into its op
+stream and dropped the first nine characters of the real answer. The
+first op of every answer was rejected. The other is the demo's model
+writing Hypha that does not mean what it intended. The runtime no longer
+sends a placeholder; three runs against the real model show no mangled
+line. Commit `d3c270b`. The same message asked about deep links inside
+apps; that was investigated and answered, not built.
+
+### Prompt Context
+
+**User prompt (verbatim):** "Something is weird in [Image #5]
+
+Also, can apps do like their URL updates so we can deeplink within an app,
+for example within b/ws-team ? would that work?"
+
+Mid-turn, with two more screenshots (verbatim): "[Image #6] And like
+itsays that for the ..." and "[Image #7] And from the transcript".
+
+Image #5: the page "NO NO NO NO" with formula properties (`planned total
+= sum(budget.planned)`, ...) and text showing `…` for every total. Image
+#6: the tooltip "waiting for a Claude block · = planned_text" and `!` in
+"Biggest gap: Catering, ! over its €! plan." Image #7: the Claude panel's
+runs, with rejected lines `Thinking….budget.0 = {item: "Venue deposit", …}`
+and `Thinking…p8.budget -`.
+
+**Assistant interpretation:** Find out why the page is wrong and whether
+slop is at fault; answer whether apps can keep their own state in the URL.
+
+**Inferred user intent:** Trust that what Claude writes in Blocks lands
+as written; link to a page inside the editor.
+
+### What I did
+
+- Dumped `ws-team`'s chunks (`slop docs ls ws-team chunks`) and folded them
+  with `apps/blocks-site/lib/fold.js` in Node (scratch script
+  `fold-ws.mjs`), then evaluated the page's cells:
+  `planned_total [formula] src=sum(budget.planned) → RESIDUAL ?page_o1p8.planned_total`,
+  `budget [branch] kids=0,1,2,3,4` with Flowers twice,
+  `budget.planned = RESIDUAL ?budget.planned`,
+  `budget.*.planned = [900,500,350,180,180]`.
+- Read the ops: the second answer's first line, `  page_o1p8.budget -`,
+  arrived as `Thinking…p8.budget -`; the answer then wrote rows 0 to 3
+  over the old rows 1 to 4, leaving row 4.
+- Compared both sides: Blocks (`blocks.js` lines 345 and 427) does
+  `if (!text || text === "Thinking...") return; if (text.length > prev) { st.feed(text.slice(prev)); prev = text.length; }`;
+  the runtime (`web/runtime/src/sample.ts`) sent
+  `o.onText({ text: "Thinking…", delta: "" })` on the first `thinking`
+  event. The contract (0.2.92 `sample.d.ts`) says the page shows
+  "Thinking..." until `onText` first fires.
+- Removed the placeholder; `pnpm run check`, `pnpm run build` (rebuilds
+  `pkg/server/assets/claude.js`), `pnpm test` (3 pass); server tests pass.
+- Rebuilt and restarted the demo; `scripts/06-blocks-claude-stream-e2e.mjs`
+  asks Blocks' Claude for a heading and a list in `ws-scratch` and checks
+  the run's rejected lines.
+- Deep links: read the shell (`pkg/server/assets/shell.js`): it opens the
+  view with `frame.src = view.url + location.hash`, and has a `case "args"`
+  handler that sets the top URL's hash, which nothing sends. Read Blocks'
+  `Nav`: the current page is kept in `localStorage` (`store.set("page", …)`,
+  `Nav.restore()`), never in the URL. The contract has no URL API.
+
+### Why
+
+- `text` must be only the model's answer so far: a consumer that counts
+  characters of it (as Blocks does) cannot survive a placeholder of any
+  spelling. Sending none follows the current contract and works with
+  Blocks' check for the old ASCII placeholder.
+
+### What worked
+
+- The arithmetic matches both rejected lines: "Thinking…" is nine
+  characters; `page_o1p8.budget.0` minus nine is `.budget.0`, and
+  `  page_o1p8.budget -` (two spaces) minus nine is `p8.budget -`.
+- After the fix, three runs: 4 ops / 0 rejected, 8 ops / 4 rejected,
+  3 ops / 0 rejected, none with the placeholder.
+
+### What didn't work
+
+- The first version of the check passed on a run with `4 ops … 4 rejected`:
+  it only looked for "N ops" and read the rejected lines with
+  `allInnerTexts()`, which returns empty strings inside a closed
+  `<details>`. It now reads `textContent` and requires more ops than
+  rejections.
+- `look-props.mjs` (to inspect the blue-outlined formula boxes) timed out
+  on `text=NO NO NO NO`; I did not pursue it once the transcript showed
+  the cause.
+
+### What I learned
+
+- The four rejected lines in the 8-op run are the model's: it rewrote the
+  page as a view block, `ui:   # page_dqt7.ui` then indented elements.
+  Fed to an unchanged upstream `Hypha.Stream` with base `page_dqt7` in
+  Node (`stream-probe.mjs`), the same lines fail with the same message, so
+  Hypha rejects that form in a page scope; v3 plays no part.
+- In Hypha `budget.planned` names a path; a column across a list is
+  `budget.*.planned`. A path that does not exist reads as an unfinished
+  value, which Blocks labels "waiting for a Claude block".
+
+### What was tricky to build
+
+- Telling the platform's fault from the model's. The fold reproduced the
+  editor's state exactly, and the transcript's rejected lines pointed at
+  the stream, but the residual totals were the model's formulas, unrelated
+  to the placeholder.
+
+### What warrants a second pair of eyes
+
+- Other v3 pages that relied on the placeholder to show progress now get
+  nothing until the first text; the contract says that is theirs to show.
+
+### What should be done in the future
+
+- Deep links: hash sync between the view and the top URL (runtime posts
+  `hashchange`, shell `replaceState`s; back/forward forwarded into the
+  frame), and a two-line Blocks change to keep its page in the hash.
+- The `ws-team` page still has the duplicate row and the `budget.planned`
+  formulas; it can be repaired in the editor or with a chunk of ops.
+
+### Code review instructions
+
+- `web/runtime/src/sample.ts` (the `thinking` case); the rebuilt
+  `pkg/server/assets/claude.js`.
+- `NODE_PATH=<playwright> node scripts/06-blocks-claude-stream-e2e.mjs <shots>`
+  against the demo (calls the demo's model).
+
+### Technical details
+
+- The demo's `sample` model: `llm: pi` with
+  `models: {quick, default, complex: "lunaroute/deepseek-4.1-flash:high"}`
+  in `v3run/slop.yaml`.

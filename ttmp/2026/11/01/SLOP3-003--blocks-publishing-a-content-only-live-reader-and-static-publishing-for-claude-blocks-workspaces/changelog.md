@@ -27,3 +27,7 @@ B4: demo deployment, end-to-end script (16 checks), screenshots (29afe15)
 ## 2026-11-01
 
 B5: uploaded files; bindings share uploads only with --assets (admin on target); {asset} route answers; TestBlocksSiteUploads (16fdc06, 6ef1ed5)
+
+## 2026-11-01
+
+Runtime: no thinking placeholder through onText (Blocks dropped the first 9 characters of every Claude answer) (d3c270b)
