@@ -1372,7 +1372,6 @@
       const reader = r.body.getReader();
       const dec = new TextDecoder();
       let buf = "";
-      let thinking = false;
       for (; ; ) {
         const x = await reader.read();
         if (x.done) break;
@@ -1393,10 +1392,6 @@
               callId = ev.call;
               break;
             case "thinking":
-              if (!text && !thinking && o.onText) {
-                thinking = true;
-                o.onText({ text: "Thinking\u2026", delta: "" });
-              }
               break;
             case "text":
               text = ev.text;

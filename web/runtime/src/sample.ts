@@ -104,7 +104,6 @@ async function call(images: boolean, input: unknown, o: Options = {}): Promise<R
     const reader = r.body.getReader();
     const dec = new TextDecoder();
     let buf = "";
-    let thinking = false;
     for (;;) {
       const x = await reader.read();
       if (x.done) break;
@@ -125,10 +124,11 @@ async function call(images: boolean, input: unknown, o: Options = {}): Promise<R
             callId = ev.call;
             break;
           case "thinking":
-            if (!text && !thinking && o.onText) {
-              thinking = true;
-              o.onText({ text: "Thinking…", delta: "" });
-            }
+            // No placeholder through onText: text is only ever the model's
+            // whole answer so far, and the page shows its own "Thinking..."
+            // until onText first fires (contract 0.2.92). Pages that count
+            // characters of text (Claude Blocks feeds text.slice(prev) to
+            // its op stream) lose the answer's first characters otherwise.
             break;
           case "text":
             text = ev.text;
