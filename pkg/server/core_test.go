@@ -31,7 +31,6 @@ func llmAllowed(t *testing.T, h *harness, tok string) map[string]any {
 // who pay. Today cells match the audience exactly, so paying takes the
 // capability away.
 func TestSubscriberKeepsMemberPolicy(t *testing.T) {
-	t.Skip("SLOP3-007 phase 1")
 	h := newHarness(t)
 	admin := h.tokenFor("admin@example.com", "read", "write", "admin")
 	aiApp(t, h, admin)
@@ -48,7 +47,6 @@ func TestSubscriberKeepsMemberPolicy(t *testing.T) {
 // Phase 1: an @member LLM row reaches subscribers. Today LLMFor looks for
 // the person's row, else the exact audience's, and finds none.
 func TestSubscriberKeepsMemberLLMRow(t *testing.T) {
-	t.Skip("SLOP3-007 phase 1")
 	h := newHarness(t)
 	admin := h.tokenFor("admin@example.com", "read", "write", "admin")
 	sam := h.tokenFor("sam@example.com")
@@ -195,5 +193,38 @@ func TestConcurrentSamplesCannotOverspend(t *testing.T) {
 	t.Logf("ok=%d used=%v", ok, used)
 	if ok == 0 || used > budget {
 		t.Fatalf("%d calls succeeded and spent %v tokens against a budget of %d", ok, used, budget)
+	}
+}
+
+// Phase 1: groups by kind of principal, through explain.can, which
+// reports the highest group as the audience. A pending person is in
+// @guest only; an admin token without the admin scope is a member.
+func TestGroupsByKind(t *testing.T) {
+	h := newHarness(t)
+	admin := h.tokenFor("admin@example.com", "read", "write", "admin")
+	adminNoScope := h.tokenFor("admin@example.com", "read", "write")
+	h.tokenFor("mia@example.com")
+	h.tokenFor("sam@example.com")
+	h.tokenFor("pat@example.com")
+	h.call(admin, "store.new", map[string]any{"id": "g"})
+	h.call(admin, "sub.grant", map[string]any{"person": "sam@example.com", "until": "30d"})
+	h.call(admin, "people.role", map[string]any{"id": personID(t, h, "pat@example.com"), "role": "pending"})
+	aud := func(tok, subject string) any {
+		args := map[string]any{"store": "g"}
+		if subject != "" {
+			args["subject"] = subject
+		}
+		return h.call(tok, "explain.can", args).(map[string]any)["audience"]
+	}
+	for subject, want := range map[string]string{"mia@example.com": "member", "sam@example.com": "subscriber", "pat@example.com": "guest", "anonymous": "guest"} {
+		if got := aud(admin, subject); got != want {
+			t.Errorf("%s: audience %v, want %s", subject, got, want)
+		}
+	}
+	if got := aud(admin, ""); got != "admin" {
+		t.Errorf("admin token: %v", got)
+	}
+	if got := aud(adminNoScope, ""); got != "member" {
+		t.Errorf("admin token without the admin scope: %v", got)
 	}
 }

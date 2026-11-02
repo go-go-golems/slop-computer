@@ -47,7 +47,7 @@ func init() {
 			Args: []Arg{{Name: "id", Type: "string", Pos: 1, Doc: "lowercase slug; empty makes s-xxxxxxxx"},
 				{Name: "type", Type: "string"}, {Name: "app", Type: "string", Doc: "the app store it runs"}},
 			Run: func(ctx context.Context, e *Env, p *access.Principal, a Args) (any, error) {
-				if !e.K.Access.AudienceOf(ctx, p).AtLeast(access.AudMember) {
+				if !e.K.Access.In(ctx, p, access.GroupMember) {
 					return nil, Errf("permission_denied", "only members make stores")
 				}
 				row, _, err := e.K.CreateStore(ctx, p, kernel.NewStore{ID: a.S("id"), Type: a.S("type"), App: a.S("app")})

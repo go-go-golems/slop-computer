@@ -78,7 +78,7 @@ func init() {
 			Args: []Arg{{Name: "store", Type: "string", Pos: 1, Doc: "the new store's id"}, {Name: "bundle", Type: "json", Required: true},
 				{Name: "blobs", Type: "json", Doc: "{sha256: base64}"}},
 			Run: func(ctx context.Context, e *Env, p *access.Principal, a Args) (any, error) {
-				if !e.K.Access.AudienceOf(ctx, p).AtLeast(access.AudMember) {
+				if !e.K.Access.In(ctx, p, access.GroupMember) {
 					return nil, Errf("permission_denied", "only members make stores")
 				}
 				var b store.Bundle

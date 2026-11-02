@@ -520,7 +520,7 @@ func (a *Actor) ctxObject(ev *event) *goja.Object {
 		return goja.Undefined()
 	})
 	_ = o.Set("needAudience", func(aud string) goja.Value {
-		if audRank[ev.visitor.Audience] < audRank[aud] {
+		if !system.InGroup(ev.visitor.Audience, aud) {
 			a.throw(fail("audience_required", "this is for %ss", aud))
 		}
 		return goja.Undefined()
@@ -535,8 +535,6 @@ func (a *Actor) ctxObject(ev *event) *goja.Object {
 	})
 	return o
 }
-
-var audRank = map[string]int{"guest": 1, "member": 2, "subscriber": 3, "admin": 4}
 
 func orNone(s string) string {
 	if s == "" {

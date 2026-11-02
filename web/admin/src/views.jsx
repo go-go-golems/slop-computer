@@ -209,7 +209,9 @@ function AppDetail({ app, row, c, toast }) {
         <table className="rt matrixt"><thead><tr><th>capability</th>{auds.map(a => <th key={a}>{a}</th>)}</tr></thead>
           <tbody>{caps.map(cap => <tr key={cap}><td><b>{cap}</b></td>{auds.map(a => { const x = cell(cap, a); return (
             <td key={a}><button type="button" className={'cellbtn' + (x?.allowed ? ' on' : '')} aria-pressed={!!x?.allowed} aria-label={`${cap} for ${a}`}
-              onClick={() => act('policy.set', { app, capability: cap, audience: '@' + a, value: x?.allowed ? 'off' : 'on' }, `${cap} for ${a}: ${x?.allowed ? 'off' : 'on'}`)}>{x?.allowed ? 'on' : '–'}</button></td>); })}</tr>)}</tbody></table>)}
+              title={!x?.allowed && x?.effective ? `On through a group ${a} is inside` : undefined}
+              onClick={() => act('policy.set', { app, capability: cap, audience: '@' + a, value: x?.allowed ? 'off' : 'on' }, `${cap} for ${a}: ${x?.allowed ? 'off' : 'on'}`)}>{x?.allowed ? 'on' : x?.effective ? 'inherited' : '–'}</button></td>); })}</tr>)}</tbody></table>)}
+      {caps.length > 0 && <p className="dim small">Groups nest: a cell on for member also reaches subscribers and admins (shown as inherited).</p>}
       <h3>Secrets</h3>
       <Table rows={secrets} rowKey={s => s.name} empty="No secrets." cols={[
         { h: 'Name', r: s => <b className="mono">{s.name}</b> },

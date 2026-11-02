@@ -75,9 +75,10 @@ func TestLLMBudgets(t *testing.T) {
 	}
 	h.call(admin, "policy.set", map[string]any{"app": "ai", "capability": "sample", "audience": "@member", "value": "on"})
 	h.call(admin, "policy.set", map[string]any{"app": "ai", "capability": "sample", "audience": "@subscriber", "value": "on"})
-	// Now the module exists, but the admin's audience is still off.
-	if _, out := ask(admin); code(out) != "permission_denied" || !strings.Contains(out["error"].(map[string]any)["message"].(string), "for admin") {
-		t.Fatalf("admin, policy off for admin: %v", out)
+	// Now the module exists, and admins are members (SLOP3-007 groups):
+	// the @member cell reaches the admin, whose @admin row is unlimited.
+	if st, out := ask(admin); st != 200 {
+		t.Fatalf("admin through the @member cell: %d %v", st, out)
 	}
 	// The member's audience is on, but members have no LLM access.
 	if _, out := ask(mia); code(out) != "permission_denied" || !strings.Contains(out["error"].(map[string]any)["message"].(string), "no LLM access") {

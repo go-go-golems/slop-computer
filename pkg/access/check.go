@@ -21,13 +21,49 @@ const (
 	AudAdmin      Audience = "admin"
 )
 
-var audRank = map[Audience]int{AudNone: 0, AudGuest: 1, AudMember: 2, AudSubscriber: 3, AudAdmin: 4}
+// Group is a set of principals computed from role, kind and subscription
+// (SLOP3-007): @guest, @member, @subscriber, @admin, @store. Nesting is
+// decided once, in system.GroupsOf.
+type Group string
 
-// AtLeast reports a >= b on the ladder.
-func (a Audience) AtLeast(b Audience) bool { return audRank[a] >= audRank[b] }
+const (
+	GroupGuest      Group = "@guest" // everyone, signed in or not
+	GroupMember     Group = "@member"
+	GroupSubscriber Group = "@subscriber"
+	GroupAdmin      Group = "@admin"
+	GroupStore      Group = "@store" // a store acting on its own
+)
+
+// Groups is the audience's groups, nesting included.
+func (a Audience) Groups() []Group {
+	var out []Group
+	for _, g := range system.GroupsOf(string(a)) {
+		out = append(out, Group("@"+g))
+	}
+	return out
+}
+
+// In reports whether the audience is in group g ("@member" or "member").
+func (a Audience) In(g Group) bool { return system.InGroup(string(a), string(g)) }
+
+// Groups computes a principal's groups.
+func (c *Checker) Groups(ctx context.Context, p *Principal) []Group {
+	return c.AudienceOf(ctx, p).Groups()
+}
+
+// In reports whether p is in group g.
+func (c *Checker) In(ctx context.Context, p *Principal, g Group) bool {
+	return c.AudienceOf(ctx, p).In(g)
+}
 
 // ValidAudience reports one of guest, member, subscriber, admin.
-func ValidAudience(s string) bool { return audRank[Audience(s)] > 0 }
+func ValidAudience(s string) bool {
+	switch Audience(s) {
+	case AudGuest, AudMember, AudSubscriber, AudAdmin:
+		return true
+	}
+	return false
+}
 
 // capOf is the highest level an audience may hold through grants.
 func capOf(a Audience) rt.Level {
@@ -85,13 +121,9 @@ func Matches(subject string, p *Principal, aud Audience) bool {
 		// cross-store access is always explicit.
 		return subject == p.ID()
 	}
-	switch subject {
-	case "@guest":
-		return aud.AtLeast(AudGuest)
-	case "@member":
-		return aud.AtLeast(AudMember)
-	case "@subscriber":
-		return aud.AtLeast(AudSubscriber)
+	switch Group(subject) {
+	case GroupGuest, GroupMember, GroupSubscriber:
+		return aud.In(Group(subject))
 	}
 	return subject != "" && subject == p.ID()
 }
