@@ -81,7 +81,7 @@ func init() {
 					} else {
 						d.Trace = append(d.Trace, why)
 					}
-					out := map[string]any{"ok": ok, "level": d.LevelName(), "action": act, "audience": d.Audience, "trace": d.Trace}
+					out := map[string]any{"ok": ok, "level": d.LevelName(), "action": act, "audience": d.Audience, "groups": d.Audience.Groups(), "trace": d.Trace}
 					if !ok {
 						out["code"] = "permission_denied"
 					}
@@ -103,7 +103,7 @@ func init() {
 				if need == rt.LevelSelf {
 					d.Trace = append(d.Trace, "only its own person ({self}) may do this")
 				}
-				out := map[string]any{"ok": ok, "level": d.LevelName(), "need": need.String(), "audience": d.Audience, "trace": d.Trace}
+				out := map[string]any{"ok": ok, "level": d.LevelName(), "need": need.String(), "audience": d.Audience, "groups": d.Audience.Groups(), "trace": d.Trace}
 				if !ok {
 					d.Trace = append(d.Trace, fmt.Sprintf("%s < %s", d.Level, need))
 					out["trace"] = d.Trace

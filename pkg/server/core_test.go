@@ -6,6 +6,10 @@ package server
 
 import (
 	"context"
+	"encoding/json"
+	"fmt"
+	"os"
+	"reflect"
 	"strings"
 	"sync"
 	"testing"
@@ -384,4 +388,100 @@ func TestTrustEndsWithItsAdmin(t *testing.T) {
 	if !strings.Contains(e["message"].(string), "no longer trusted") {
 		t.Fatalf("after ada is demoted: %v", e)
 	}
+}
+
+// Phase 7: the worked examples of the plan, as data (testdata/authz/
+// cases.json), each on a fresh server.
+func TestWorkedExamples(t *testing.T) {
+	raw, err := os.ReadFile("testdata/authz/cases.json")
+	if err != nil {
+		t.Fatal(err)
+	}
+	var doc struct {
+		Cases []struct {
+			Name  string `json:"name"`
+			Steps []struct {
+				As     string         `json:"as"`
+				Scopes []string       `json:"scopes"`
+				Verb   string         `json:"verb"`
+				Args   map[string]any `json:"args"`
+				Expect struct {
+					Ok     bool           `json:"ok"`
+					Code   string         `json:"code"`
+					Result map[string]any `json:"result"`
+				} `json:"expect"`
+			} `json:"steps"`
+		} `json:"cases"`
+	}
+	if err := json.Unmarshal(raw, &doc); err != nil {
+		t.Fatal(err)
+	}
+	for _, c := range doc.Cases {
+		t.Run(c.Name, func(t *testing.T) {
+			h := newHarness(t)
+			h.tokenFor("admin@example.com", "read", "write", "admin")
+			for i, st := range c.Steps {
+				email, scopes := st.As, st.Scopes
+				if email == "admin" {
+					email, scopes = "admin@example.com", []string{"read", "write", "admin"}
+				}
+				tok := h.tokenFor(email, scopes...)
+				args := map[string]any{}
+				for k, v := range st.Args {
+					if s, ok := v.(string); ok && strings.HasPrefix(s, "@id:") {
+						v = personID(t, h, s[len("@id:"):])
+					}
+					if k == "files" {
+						m := map[string]string{}
+						for p, body := range v.(map[string]any) {
+							m[p] = body.(string)
+						}
+						v = files(m)
+					}
+					args[k] = v
+				}
+				code, out := api(t, h, tok, st.Verb, args)
+				e, _ := out["error"].(map[string]any)
+				switch {
+				case st.Expect.Code != "":
+					if code == 200 || e == nil || e["code"] != st.Expect.Code {
+						t.Fatalf("step %d %s as %s: want %s, got %d %v", i, st.Verb, st.As, st.Expect.Code, code, out)
+					}
+				case code != 200:
+					t.Fatalf("step %d %s as %s: %d %v", i, st.Verb, st.As, code, out)
+				}
+				if st.Expect.Result != nil {
+					if why := contains(out["result"], st.Expect.Result); why != "" {
+						t.Fatalf("step %d %s as %s: %s\nresult %v", i, st.Verb, st.As, why, out["result"])
+					}
+				}
+			}
+		})
+	}
+}
+
+// contains says how got differs from want, a subset of it ("" when it
+// holds): every key of want must be in got with an equal value; maps are
+// compared as subsets, everything else (lists included) exactly.
+func contains(got any, want map[string]any) string {
+	m, ok := got.(map[string]any)
+	if !ok {
+		return fmt.Sprintf("not an object: %v", got)
+	}
+	for k, w := range want {
+		g, ok := m[k]
+		if !ok {
+			return "missing " + k
+		}
+		if wm, ok := w.(map[string]any); ok {
+			if why := contains(g, wm); why != "" {
+				return k + ": " + why
+			}
+			continue
+		}
+		if !reflect.DeepEqual(g, w) {
+			return fmt.Sprintf("%s = %v, want %v", k, g, w)
+		}
+	}
+	return ""
 }
