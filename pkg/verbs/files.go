@@ -58,8 +58,8 @@ func init() {
 				}
 				var f store.File
 				if at := a.S("at"); at != "" {
-					n, err := s.Ref(ctx, at)
-					if err != nil {
+					n, rerr := s.Ref(ctx, at)
+					if rerr != nil {
 						return nil, Errf("not_found", "no snapshot or ref %s", at)
 					}
 					f, err = s.SnapshotFile(ctx, n, a.S("path"))

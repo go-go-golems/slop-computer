@@ -816,7 +816,9 @@ func (m *Manager) Start(ctx context.Context) {
 					continue
 				}
 				for _, id := range due {
-					m.Fire(ctx, id, "")
+					if err := m.Fire(ctx, id, ""); err != nil {
+						log.Printf("schedule %s: %v", id, err)
+					}
 				}
 			}
 		}

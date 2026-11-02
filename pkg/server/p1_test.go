@@ -93,6 +93,10 @@ return { books: rows.length, recent: recent.map(d => d.body.title),
 	if idx != "<h1>Library</h1>" {
 		t.Fatalf("snapshot 1 index = %v", idx)
 	}
+	// A path the snapshot does not have is not an empty file.
+	if st, out := api(t, h, admin, "files.cat", map[string]any{"store": "library", "path": "nope.html", "at": "1"}); st != 404 {
+		t.Fatalf("missing file at snapshot 1: %d %v", st, out)
+	}
 
 	// A caught verb error has .code; an uncaught one keeps it.
 	res = h.call(admin, "eval", map[string]any{"source": `try { slop.docs.get({ store: 'library', path: 'books/nope' }) } catch (e) { return e.code }`}).(map[string]any)
