@@ -1,0 +1,150 @@
+(function () {
+  'use strict';
+  // The page runtime. A hosted page talks to the kernel over one MessagePort the lab hands it; the
+  // kernel binds that port to this view's principal, so nothing the page sends can change who it is.
+  var VIEW = window.__SLOP_VIEW || {}, CAPS = VIEW.caps || [];
+  var port = null, queue = [], seq = 0, calls = {}, subs = {}, watches = {}, roomH = {}, peersH = [], lastPeers = null;
+  function send(method, args) {
+    return new Promise(function (res, rej) {
+      var id = ++seq; calls[id] = { res: res, rej: rej };
+      var msg = { id: id, method: method, args: args || [] };
+      if (port) port.postMessage(msg); else queue.push(msg);
+    });
+  }
+  function mkErr(e) { var x = new Error((e && e.message) || 'error'); x.code = (e && e.code) || 'unavailable'; return x; }
+  window.addEventListener('message', function (e) {
+    if (port || e.source !== window.parent || !e.data || e.data.type !== 'slop:port' || !e.ports || !e.ports[0]) return;
+    port = e.ports[0]; port.onmessage = onPort;
+    queue.splice(0).forEach(function (m) { port.postMessage(m); });
+  });
+  function onPort(ev) {
+    var m = ev.data;
+    if (m.id) { var c = calls[m.id]; if (!c) return; delete calls[m.id]; if (m.ok) c.res(m.value); else c.rej(mkErr(m.error)); return; }
+    if (m.type === 'snapshot') { var s = subs[m.sub]; if (s) s(m); }
+    else if (m.type === 'rows') { var w = watches[m.watch]; if (w) { if (m.error) { if (w.err) w.err(mkErr(m.error)); } else w.next(m.rows); } }
+    else if (m.type === 'room') { (roomH[m.topic] || []).slice().forEach(function (f) { try { f(m.data, { from: m.peer, name: m.name, isMe: m.isMe }); } catch (x) { console.error(x); } }); }
+    else if (m.type === 'peers') { lastPeers = m.peers; peersH.slice().forEach(function (f) { try { f(m.peers); } catch (x) { console.error(x); } }); }
+  }
+  function rid() { var a = new Uint8Array(12); crypto.getRandomValues(a); return Array.prototype.map.call(a, function (x) { return 'abcdefghijklmnopqrstuvwxyz234567'[x & 31]; }).join(''); }
+
+  // ---- db: the claude.ai document contract, backed by the store's documents ----
+  var SEG = /^[A-Za-z0-9_\-.~:@+]+$/;
+  function check(path, even) {
+    var s = String(path).split('/');
+    if (s.some(function (x) { return !x || !SEG.test(x) || x === '.' || x === '..'; })) throw new TypeError('bad path "' + path + '"');
+    if ((s.length % 2 === 0) !== even) throw new TypeError('"' + path + '" has ' + s.length + ' segment(s); ' + (even ? 'documents need an even number' : 'collections need an odd number'));
+    return String(path);
+  }
+  var META = Object.freeze({ fromCache: false, hasPendingWrites: false });
+  function docSnap(d, id) { var data = d ? Object.freeze(d.data) : undefined; return Object.freeze({ id: d ? d.id : id, exists: !!d, data: function () { return data; }, metadata: META }); }
+  function querySnap(rows, prev) {
+    var docs = rows.map(function (r) { return docSnap(r); }), prevIds = prev ? prev.map(function (d) { return d.id; }) : [], changes = [];
+    docs.forEach(function (d, i) { var j = prevIds.indexOf(d.id); changes.push({ type: j < 0 ? 'added' : 'modified', doc: d, oldIndex: j, newIndex: i }); });
+    (prev || []).forEach(function (d, j) { if (!docs.some(function (x) { return x.id === d.id; })) changes.push({ type: 'removed', doc: d, oldIndex: j, newIndex: -1 }); });
+    return Object.freeze({ docs: docs, size: docs.length, empty: !docs.length, docChanges: function () { return changes; }, metadata: META });
+  }
+  function subscribe(spec, deliver, error) {
+    var sid = 's' + (++seq), dead = false;
+    function fail(e) { if (dead) return; dead = true; delete subs[sid]; if (error) error(e); else console.error(e); }
+    subs[sid] = function (m) { if (dead) return; if (m.error) fail(mkErr(m.error)); else deliver(m.data); };
+    send('db.subscribe', [sid, spec]).then(function (d) { if (!dead) deliver(d); }, fail);
+    return function () { if (dead) return; dead = true; delete subs[sid]; send('db.unsubscribe', [sid]); };
+  }
+  function docRef(path) {
+    check(path, true); var id = path.split('/').pop();
+    return Object.freeze({ id: id, path: path,
+      get: function () { return send('db.get', [path]).then(function (d) { return docSnap(d, id); }); },
+      set: function (data) { return send('db.set', [path, data, false]).then(function () {}); },
+      update: function (data) { return send('db.set', [path, data, true]).then(function () {}); },
+      delete: function () { return send('db.delete', [path]).then(function () {}); },
+      acquire: function (o) { return Promise.resolve({ acquired: true, holder: o && o.holder }); },
+      onSnapshot: function (next, error) { return subscribe({ doc: path }, function (d) { next(docSnap(d, id)); }, error); },
+      collection: function (c) { return collRef(path + '/' + c); } });
+  }
+  function query(coll, q) {
+    var self = {
+      where: function (f, op, v) { return query(coll, Object.assign({}, q, { where: (q.where || []).concat([[f, op, v]]) })); },
+      orderBy: function (f, d) { return query(coll, Object.assign({}, q, { orderBy: [[f, d || 'asc']] })); },
+      limit: function (n) { return query(coll, Object.assign({}, q, { limit: n })); },
+      get: function () { return send('db.query', [coll, q]).then(function (rows) { return querySnap(rows, null); }); },
+      onSnapshot: function (next, error) { var prev = null; return subscribe({ coll: coll, q: q }, function (rows) { var s = querySnap(rows, prev); prev = s.docs; next(s); }, error); },
+    };
+    return self;
+  }
+  function collRef(path) {
+    check(path, false);
+    var c = query(path, {});
+    c.path = path;
+    c.doc = function (id) { return docRef(path + '/' + (id || rid())); };
+    c.add = function (data) { var r = c.doc(); return r.set(data).then(function () { return r; }); };
+    return c;
+  }
+
+  var meP = null; function me() { return meP || (meP = send('user.me')); }
+  var mods = {
+    db: function () { return { doc: docRef, collection: collRef }; },
+    user: function () { return {
+      id: function () { return me().then(function (m) { return m.id; }); },
+      me: me,
+      isOwner: function () { return me().then(function (m) { return m.isOwner; }); },
+      canEdit: function () { return me().then(function (m) { return m.canEdit; }); },
+      can: function (n) { return me().then(function (m) { return n === 'data.write' ? ['interact', 'admin', 'owner'].indexOf(m.level) >= 0 : null; }); },
+      profiles: function (ids) { return send('user.profiles', [ids]); },
+      search: function () { return Promise.resolve([]); } }; },
+    room: function () { return {
+      emit: function (topic, data) { return send('room.emit', [topic, data]); },
+      on: function (topic, f) { (roomH[topic] = roomH[topic] || []).push(f); return function () { roomH[topic] = (roomH[topic] || []).filter(function (g) { return g !== f; }); }; },
+      peers: function () { return send('room.peers'); },
+      onPeers: function (f) { peersH.push(f); if (lastPeers) f(lastPeers); else send('room.peers').then(function (p) { if (!lastPeers) f(p); }); return function () { peersH = peersH.filter(function (g) { return g !== f; }); }; },
+      setPresence: function (o) { return send('room.presence', [o]); } }; },
+    slop: function () { return {
+      view: Object.freeze({ store: VIEW.store, app: VIEW.app, version: VIEW.version, level: VIEW.level }),
+      sql: {
+        select: function (name, q) { return send('slop.sql.select', [name, q || {}]); },
+        watch: function (name, q, next, err) {
+          var wid = 'w' + (++seq); watches[wid] = { next: next, err: err };
+          send('slop.sql.watch', [wid, name, q || {}]).then(function (rows) { if (watches[wid]) next(rows); }, function (e) { delete watches[wid]; if (err) err(e); else console.error(e); });
+          return function () { if (watches[wid]) { delete watches[wid]; send('slop.sql.unwatch', [wid]); } };
+        } },
+      actions: { call: function (name, args) { return send('slop.actions.call', [name, args || {}]); } },
+      log: { since: function (rev) { return send('slop.log.since', [rev || 0]); } } }; },
+    sample: function () {
+      var f = function (input, opts) {
+        opts = opts || {};
+        if (opts.tools) console.warn('slop lab: tools are not passed through to hosted pages');
+        return send('sample', [input, { modelTier: opts.modelTier }]).then(function (r) { if (opts.onText) opts.onText({ text: r.text, delta: r.text }); return r; });
+      };
+      f.json = function (input, opts) { return f(input, opts).then(function (r) { return JSON.parse(String(r.text).replace(/^\s*```(?:json)?|```\s*$/g, '')); }); };
+      f.limits = function () { return Promise.resolve({ images: false }); };
+      return f; },
+    downloads: function () { return { save: function (o) { return send('downloads.save', [o]); } }; },
+    assets: function () { return {
+      upload: function (blob) { return new Promise(function (res, rej) { var r = new FileReader(); r.onload = function () { send('assets.upload', [{ base64: String(r.result).split(',')[1], type: blob.type || 'application/octet-stream' }]).then(res, rej); }; r.onerror = rej; r.readAsDataURL(blob); }); },
+      list: function () { return send('assets.list'); } }; },
+    permissions: function () { return { has: function (n) { return Promise.resolve(CAPS.indexOf(n) >= 0); } }; },
+  };
+  var memo = {};
+  window.claude = Object.freeze({ use: function (name) {
+    if (!(name in memo)) memo[name] = new Promise(function (res) { setTimeout(function () { res(CAPS.indexOf(name) >= 0 && mods[name] ? Object.freeze(mods[name]()) : null); }, 0); });
+    return memo[name];
+  } });
+
+  // Errors and console output go to the lab, so the person and the agent can see them.
+  function fmt(a) { return Array.prototype.map.call(a, function (x) { try { return typeof x === 'string' ? x : x instanceof Error ? x.message : JSON.stringify(x); } catch (e) { return String(x); } }).join(' '); }
+  ['warn', 'error'].forEach(function (lv) { var o = console[lv]; console[lv] = function () { send('page.log', [lv, fmt(arguments)]).catch(function () {}); return o.apply(console, arguments); }; });
+  window.addEventListener('error', function (e) { send('page.log', ['error', (e.message || 'error') + (e.lineno ? ' (line ' + e.lineno + ')' : '')]).catch(function () {}); });
+  window.addEventListener('unhandledrejection', function (e) { send('page.log', ['error', 'unhandled: ' + ((e.reason && e.reason.message) || e.reason)]).catch(function () {}); });
+
+  // prompt() is refused in the sandbox; a small in-page replacement.
+  window.__lab_prompt = function (label, value) {
+    return new Promise(function (res) {
+      var w = document.createElement('div');
+      w.setAttribute('style', 'position:fixed;inset:0;background:rgba(255,255,255,.85);display:grid;place-items:center;z-index:99999;font:13px Arial,sans-serif');
+      w.innerHTML = '<form style="background:#fff;border:1px solid #1a1a1a;padding:14px;display:grid;gap:8px;min-width:260px"><label></label><input style="font:inherit;border:1px solid #d6d6d6;padding:6px"><div style="display:flex;gap:6px;justify-content:flex-end"><button type="button">Cancel</button><button>OK</button></div></form>';
+      w.querySelector('label').textContent = label; var i = w.querySelector('input'); i.value = value || '';
+      w.querySelector('form').onsubmit = function (e) { e.preventDefault(); w.remove(); res(i.value); };
+      w.querySelector('button[type=button]').onclick = function () { w.remove(); res(null); };
+      document.body.appendChild(w); i.focus(); i.select();
+    });
+  };
+})();

@@ -1,0 +1,28 @@
+// The contract's numbers (D7). pkg/rt/limits.go holds the same values;
+// TestLimitsMatchRuntime compares the two files.
+export const limits = {
+  MaxDocBytes: 256 << 10,
+  MaxDocDepth: 32,
+  MaxDocsPerTarget: 25000,
+  MaxPathBytes: 1000,
+  MaxPathSegments: 16,
+  MaxSegmentBytes: 200,
+  MaxRules: 64,
+  MaxFilters: 10,
+  MaxInValues: 30,
+  MaxQueryLimit: 1000,
+  MaxSubscriptions: 64,
+  MinLeaseMs: 1000,
+  MaxLeaseMs: 600000,
+  DefaultLeaseMs: 30000,
+  MaxRoomData: 4 << 10,
+  MaxPresence: 4 << 10,
+  MaxTopics: 16,
+  MaxRooms: 16,
+  MaxCommentBytes: 4 << 10,
+  MaxAssetBytes: 20 << 20,
+  MaxCodeAssetBytes: 16 << 20,
+  MaxPromptBytes: 256 << 10,
+  MaxToolResultBytes: 32 << 10,
+  MaxSendToClaude: 4 << 10,
+};

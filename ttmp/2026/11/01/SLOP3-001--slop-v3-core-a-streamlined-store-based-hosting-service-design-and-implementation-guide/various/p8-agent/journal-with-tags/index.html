@@ -1,0 +1,34 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Journal</title>
+<link rel="stylesheet" href="style.css">
+</head>
+<body>
+<header>
+  <h1>Journal</h1>
+  <span id="who" class="dim">…</span>
+  <span class="sp"></span>
+  <span id="peers" class="dim"></span>
+</header>
+<p id="stats" class="stats">Loading…</p>
+<section id="compose" hidden>
+  <h2>New draft</h2>
+  <form id="draft">
+    <input id="title" placeholder="Title" autocomplete="off">
+    <textarea id="body" rows="3" placeholder="Write something"></textarea>
+    <input id="tags" placeholder="Tags, comma separated" autocomplete="off">
+    <button>Save draft</button>
+  </form>
+  <h2>Your drafts</h2>
+  <ul id="drafts" class="list"><li class="dim">None yet.</li></ul>
+</section>
+<h2>Posts</h2>
+<p id="filterbar" class="filter" hidden>Showing only <b id="filtertag"></b> <button type="button" data-showall>Show all</button></p>
+<ul id="posts" class="list"><li class="dim">Loading…</li></ul>
+<p id="msg" class="msg" role="status"></p>
+<script src="app.js"></script>
+</body>
+</html>

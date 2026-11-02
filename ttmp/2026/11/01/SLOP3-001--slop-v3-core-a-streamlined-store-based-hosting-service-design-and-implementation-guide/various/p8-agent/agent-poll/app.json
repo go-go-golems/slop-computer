@@ -1,0 +1,11 @@
+{
+  "title": "Which slop app next?",
+  "page": "index.html",
+  "actor": "actor.js",
+  "type": "poll",
+  "capabilities": {
+    "db": { "rules": [{ "path": "poll", "read": "view", "write": "admin" }] },
+    "user": {},
+    "room": {}
+  }
+}

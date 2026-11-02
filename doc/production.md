@@ -1,208 +1,154 @@
-# Running slop.computer in production
+# Running slop in production
 
-One binary, `slop`, is the server and the CLI. The Workshop is embedded in it
-(`make build`, or the Docker image). Artifacts, versions, routes and comments
-live in Postgres; file contents live in a blob directory. Nothing else is
-stateful.
+One binary, `slop`, is the server and the CLI. The back office and the page
+runtime are embedded in it (`make build`, or the Docker image). All state is
+one data directory:
 
-## The three kinds of host
+| Path under `data` | What it holds |
+| --- | --- |
+| `system.db` | people, sessions, tokens, grants, mounts, bindings, apps, budgets, the system log |
+| `stores/<id>/` | one SQLite database per store: documents, files and snapshots, refs, app tables |
+| `blobs/` | file contents, content-addressed, shared by all stores |
+| `secret.key` | the HMAC key for sandbox labels and secrets, generated on first start unless `secret_key_file` is set |
 
-| Host | Example | Serves | Who |
-| --- | --- | --- | --- |
-| Main host (`--public-url`) | `https://slop.computer` | the Workshop, sign-in, `/api`, safe mode `/_/` | admins |
-| Site hosts (`--site-host`, repeatable) | `https://slop.boutique` | pages through the route table | visitors |
-| Sandbox domain (`--sandbox-domain`) | `https://s3f9….slop.run` | previews and tools, one origin per version | the Workshop's iframes |
+SQLite is reached through `mattn/go-sqlite3`, so the binary is built with cgo
+(`CGO_ENABLED=1`; the Dockerfile builds and runs on Debian bookworm).
 
-The sandbox domain **must be a separate registrable domain** (not a subdomain
-of the main host): every preview runs pushed code, and a separate site keeps
-it away from the Workshop's cookies. Each preview origin is
-`s<20 hex>.<sandbox domain>`, so it needs a **wildcard DNS record and a
-wildcard TLS certificate** (`*.slop.run`, issued with an ACME DNS-01
-challenge).
+## Configuration
 
-## DNS and TLS
+`slop serve --config slop.yaml`; `--listen`, `--data`, `--admin-email` and
+`--llm` override the file. Without a file the server runs on
+`*.localhost:18300` for development. Secrets are never in the file itself,
+only paths to files that hold them.
 
-```
-slop.computer      A/AAAA  → the reverse proxy
-slop.boutique      A/AAAA  → the reverse proxy
-*.slop.run         A/AAAA  → the reverse proxy   (wildcard; needs DNS-01 for its certificate)
-```
-
-Caddy, with a DNS provider plugin for the wildcard:
-
-```caddyfile
-slop.computer, slop.boutique {
-	reverse_proxy 127.0.0.1:8080 {
-		flush_interval -1          # /api/events and comments wait stream
-	}
-}
-*.slop.run {
-	tls {
-		dns <provider> {env.DNS_API_TOKEN}
-	}
-	reverse_proxy 127.0.0.1:8080 {
-		flush_interval -1
-	}
-}
+```yaml
+listen: 0.0.0.0:8080
+data: /var/lib/slop
+scheme: https                 # how browsers reach the hosts: secure (__Host-) cookies
+hosts:
+  main: slop.example          # back office, sign-in, /api/v1, device login
+  live: [apps.slop.example]   # apps for visitors: the shell, sessions, guests
+  static: [site.slop.example] # published files only, no sessions
+  sandbox: sbx.slop.example   # s<label>.sbx.slop.example: one origin per store and app
+trust_proxy_headers: true     # only when the server is reachable through the proxy alone
+signup: approval              # new people wait for an admin; "open" (the default) makes them members
+admin_emails: [admin@example.com]
+oidc:
+  issuer: https://auth.example.com
+  client_id_file: /run/secrets/slop/oidc-client-id
+  # client_secret_file: /run/secrets/slop/oidc-client-secret   (optional: PKCE is always used)
+  scope: urn:zitadel:iam:org:id:<organization id>
+# secret_key_file: /run/secrets/slop/secret-key   (optional: else data/secret.key)
+# llm: pi                                         (sample through Pi's models; off by default)
+# pi: {agent_dir: /var/lib/slop/pi, models: {quick: lunaroute/…, default: …}}
 ```
 
-The proxy must pass the `Host` header through unchanged (Caddy does): the
-server picks the host class from it. Start the server with
-`--trust-proxy-headers` when it is only reachable through the proxy, so rate
-limits see client addresses from `X-Real-Ip` / `X-Forwarded-For`.
+## Hosts, DNS and TLS
 
-## Identity (ZITADEL or any OIDC provider)
+| Host | Serves | Who |
+| --- | --- | --- |
+| main | the back office (`/admin`), sign-in, `/api/v1`, device login for the CLI | admins, members, agents |
+| live (repeatable) | mounted apps in the shell (`/b/<workspace>`, `/pub/<site>`), guests, share links | visitors |
+| static (repeatable) | published snapshots of stores, no sessions | visitors |
+| sandbox | `s<label>.<sandbox>`: each store and app runs on its own origin inside the shell's iframe | the shell's frames |
 
-Register a web application:
+The sandbox needs a **wildcard DNS record and a wildcard certificate**
+(`*.sbx.slop.example`, issued with an ACME DNS-01 challenge). The proxy must
+pass the `Host` header through unchanged: the server picks the host's role
+from it. Long-polls (`slop log wait`) and the shell's event stream need the
+proxy not to buffer responses (Caddy: `flush_interval -1`).
 
-- redirect URI `https://slop.computer/auth/callback`
-- post-logout redirect URI `https://slop.computer/`
-- PKCE; a client secret is optional (`--oidc-client-secret-file`)
+Sandbox origins are same-site with the live host when both are subdomains of
+one registrable domain. The server allows for that: a session cookie is
+never sent with an unsafe cross-origin request to an actor route, and views
+carry their own secret instead of cookies.
 
-Everyone who signs in for the first time is **pending** and sees nothing
-until an admin lets them in. Bootstrap the first admin directly in the
-database after their first sign-in:
+## Identity: ZITADEL (or any OIDC provider)
 
-```
-slop db users list --database-url-file /run/secrets/db-url
-slop db users promote --user-id usr_… --database-url-file /run/secrets/db-url
-```
+Register a **web application** in the ZITADEL project:
 
-## Running it
+- **Redirect URI:** `https://<main>/auth/callback`
+- **Post-logout redirect URI:** `https://<main>/`. Signing out on the main host
+  ends ZITADEL's browser session too (RP-initiated logout with the ID token
+  as `id_token_hint`), so the next sign-in asks again and another account can
+  sign in.
+- **Authentication method:** PKCE. A client secret is optional
+  (`client_secret_file`).
+- **Organization:** `oidc.scope: urn:zitadel:iam:org:id:<organization id>`
+  limits sign-in to that organization's users. The organization id is not a
+  secret: it appears in every authorize URL.
 
-```
-slop serve \
-  --database-url-file /run/secrets/db-url \        # postgres://…
-  --blobs /var/lib/slop/blobs \
-  --listen 127.0.0.1:8080 \
-  --public-url https://slop.computer \
-  --site-host slop.boutique \
-  --sandbox-domain slop.run \
-  --oidc-issuer https://auth.example.com \
-  --oidc-client-id 123456@slop \
-  --trust-proxy-headers
-```
+The live hosts never talk to ZITADEL: their sign-in hands off to the main
+host (`/_site/login` → `/auth/login` → ZITADEL → `/auth/callback` →
+`/auth/handoff` → back to the live host), so only the main host's callback is
+registered.
 
-Pending migrations are applied at start (`--no-migrate` to apply them
-separately with `slop migrate`). The Docker image runs `slop serve --listen
-0.0.0.0:8080 --blobs /var/lib/slop/blobs`; append the flags above as
-arguments and mount `/var/lib/slop` as a volume.
+A sign-in needs a **verified email address**. ZITADEL may leave the profile
+claims out of the ID token; the server then asks the userinfo endpoint. The
+person is matched by email; the issuer and subject are recorded.
 
-```
-docker run -d --name slop -p 127.0.0.1:8080:8080 -v slop-data:/var/lib/slop \
-  -v /srv/secrets:/run/secrets:ro slop:dev serve --listen 0.0.0.0:8080 --blobs /var/lib/slop/blobs \
-  --database-url-file /run/secrets/db-url --public-url https://slop.computer … 
-```
+**The first admin** is whoever signs in with an address listed in
+`admin_emails` (or `--admin-email`); that list can stay in place. With
+`signup: approval`, everyone else waits until an admin lets them in from the
+back office.
 
-`--local` refuses to start unless it listens on loopback with an http
-loopback public URL: it has no authentication.
+**Agents** use the CLI with a personal token: `slop auth login --server
+https://<main>` approves a device code in the browser.
 
 ## Kubernetes
 
-The test deployment on the hetzner k3s cluster (ticket SLOP-002) lives in the
-GitOps repository as `gitops/kustomize/slop/`, cloned from francois's
-package: one replica with `Recreate` (the blob volume is ReadWriteOnce), a
-database on the shared Postgres created by a bootstrap Job, secrets from
-Vault (`kv/apps/slop/prod/runtime`: `database-url`, `oidc-client-id`,
-`zitadel-org-id`) mounted as files, a DNS-01 certificate covering the main
-host, the site host and the sandbox wildcard, and Traefik ingress for all
-three. The image is `ghcr.io/go-go-golems/slop-computer:sha-<short>`,
-published from `main` by `.github/workflows/publish-image.yaml`.
+The deployment on the hetzner k3s cluster lives in the GitOps repository as
+`gitops/kustomize/slop/`: one replica with `Recreate` (the data volume is
+ReadWriteOnce and SQLite has one writer), the data volume at
+`/var/lib/slop`, secrets from Vault (`kv/apps/slop/test/runtime`) mounted as
+files, a DNS-01 certificate covering the main, live and static hosts and the
+sandbox wildcard, and Traefik ingress for all of them. The image is
+`ghcr.io/go-go-golems/slop-computer:sha-<short>`, published from `main` by
+`.github/workflows/publish-image.yaml`; the deployment pins it by hand.
 
-```
-slop serve --listen=0.0.0.0:8080 --blobs=/var/lib/slop/blobs \
-  --database-url-file=/run/slop/database-url \
-  --oidc-client-id-file=/run/slop/oidc-client-id \
-  --oidc-issuer=https://zitadel.example --oidc-scope=urn:zitadel:iam:org:id:<org> \
-  --public-url=https://slop.example --site-host=site.slop.example \
-  --sandbox-domain=sbx.slop.example --trust-proxy-headers
+```yaml
+args: [serve, --config=/etc/slop/slop.yaml, --listen=0.0.0.0:8080, --data=/var/lib/slop/v3]
 ```
 
-A network policy must let the pod reach the identity provider: when it
-resolves to the cluster's own address, that is the ingress controller's
-port (francois's policy allows Traefik on 8443 for this hairpin).
+with `slop.yaml` from a ConfigMap and the OIDC client id from the runtime
+secret. The probes need no Host header: `/healthz` and `/readyz` answer on
+the pod's address. A network policy must let the pod reach the identity
+provider: when it resolves to the cluster's own address, that is the ingress
+controller's port (francois's policy allows Traefik on 8443 for this
+hairpin).
+
+**Cutover from v2.** v3 imports nothing from v2: apps are pushed from their
+sources (`make blocks-push pinup-push`, SLOP3-001's deploy scripts, the apps
+in `apps/`). Pointing `--data` at a new directory on the same volume
+(`/var/lib/slop/v3`) leaves v2's blobs and its Postgres database untouched,
+so rolling back is redeploying the previous image. v2's `database-url`, the
+Postgres bootstrap job and its secrets can go once v3 has settled.
 
 ## Health
 
-- `GET /healthz` — the process is up. Health checks answer on any host the server does not serve (a pod or container address), so probes need no Host header.
-- `GET /readyz` — the database answers (503 otherwise).
+- `GET /healthz`: the process is up.
+- `GET /readyz`: `system.db` answers (503 otherwise).
 
-## What the server sends
-
-- Main host: `X-Frame-Options: DENY`, `Referrer-Policy: same-origin`; the
-  Workshop page gets a CSP that allows only its own scripts and API and
-  frames only `https://*.<sandbox domain>`.
-- Site and sandbox hosts: `Content-Security-Policy: frame-ancestors` listing
-  the main origins (the Workshop frames them), `Cache-Control: no-store` for
-  pages, `immutable` for blobs.
-- HTTPS deployments: `Strict-Transport-Security: max-age=31536000` on every
-  host (without `includeSubDomains`).
-- No CORS: an app's runtime calls `/_rt/…` on its own target origin with a
-  view secret (`slv_…`) handed over by postMessage, never cookies. The
-  `slop` capability reaches the API through `/_rt/api/…` on that origin.
-- Assets (`/_blob/<id>` on a target origin) carry `X-Content-Type-Options:
-  nosniff` and `Content-Security-Policy: sandbox`.
+Both answer on any host the server does not serve (a pod or container
+address); every other path there gets 421.
 
 ## Models (the sample capability)
 
-`slop serve --models pi` serves `sample` in Go, on geppetto engines. It reads
-Pi's agent directory (`--pi-agent-dir`, default `$PI_CODING_AGENT_DIR` or
-`~/.pi/agent`: `auth.json`, `models.json`, `models-store.json`,
-`settings.json`), so models and credentials are managed with Pi on the server
-host and never reach the database or a browser. `--model-quick/default/complex`
-pin the tiers, optionally with a thinking level (`lunaroute/glm-5.3-flash`,
-`deepseek-4.1-flash:high`); without them every tier is Pi's default model.
-Only admins sample; there is no per-person budget, and every call writes an
-audit row (`sample`, with model and token counts).
-
-- Supported wire APIs: `openai-completions`, `openai-responses`,
-  `openai-codex-responses`, `anthropic-messages`, `google-generative-ai`.
-  Bedrock, Vertex, Mistral Conversations and Azure models are not offered.
-- `models.json` values may be `$ENV` or `!command` references, resolved as
-  Pi does; commands run as the server's user.
-- **OAuth refresh rotates tokens.** When a Codex credential expires, slop
-  refreshes it and writes it back to `auth.json` under Pi's lock, so Pi on
-  the same host stays logged in. A *copy* of `auth.json` on another host
-  holds the same refresh token: whichever refreshes first invalidates the
-  other. Give each host its own login, or use API-key providers on servers.
-
-`--models pi-node --pi-worker web/piworker/dist/worker.js` runs the previous
-Node worker instead (`make piworker`; Node 24 or newer), which also covers the
-providers geppetto lacks. `--pi-worker` alone still selects it.
+`llm: pi` serves `sample` through Pi's models on Geppetto. It reads Pi's
+agent directory (`pi.agent_dir`, default `~/.pi/agent`: `auth.json`,
+`models.json`, `settings.json`), so models and credentials are managed with
+Pi on the server and never reach a database or a browser. `pi.models` pins
+the tiers (`quick`, `default`, `complex`). Which apps may sample for which
+audience is the policy matrix (`slop policy set <app> sample @member on`);
+who has LLM access, with a monthly token budget, is `slop llm set`.
 
 ## Backups and upgrades
 
-State is the Postgres database plus the blob directory. Back up the database
-first, then the blobs (blobs are content-addressed and never change, so an
-rsync of new files is enough). Restoring an older database with newer blobs is
-safe; the reverse is not.
+State is the data directory. Back it up with the server stopped, or as a
+volume snapshot; blobs are content-addressed and never change, so an rsync of
+new files is enough for them. `slop store export <id> --folder <dir>` exports
+one store in a format people and agents can read and diff.
 
-To upgrade: back up, replace the binary or image, restart. Migrations run at
-start.
-
-## Blob garbage collection
-
-Blobs no version references (aborted pushes) accumulate slowly. Remove them
-from time to time:
-
-```
-slop db gc-blobs --database-url-file /run/secrets/db-url --blobs /var/lib/slop/blobs --dry-run
-slop db gc-blobs --database-url-file /run/secrets/db-url --blobs /var/lib/slop/blobs
-```
-
-Unreferenced blobs younger than `--grace` (default 24h) are kept, because a
-push uploads its blobs before it stores the version that uses them.
-
-## When the Workshop is broken
-
-`https://slop.computer/_/` (safe mode) is server-rendered and has no
-JavaScript: point any route at another version, undo the last route change,
-revoke tokens. `slop route undo /path` does the same from a terminal.
-
-## Agents
-
-Agents use the CLI with a personal token: `slop auth login --server
-https://slop.computer` approves a device code in the browser. Tokens carry
-`read`, `write` (and `admin` for user management); revoke them on Admin →
-Tokens or in safe mode. Set `SLOP_VIA=agent` in an agent's environment so its
-pushes are labelled as agent work (Claude Code is detected by itself).
+To upgrade: back up, replace the binary or image, restart. `system.db`'s
+migrations run at start; an app's `sql/*.sql` migrations run in each of its
+stores when they activate a new version of the app.

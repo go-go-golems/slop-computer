@@ -1,10 +1,14 @@
 .git
 .playwright-mcp
 ttmp
+design
+transcripts
+references
+lab
 var
+data
 dist
 **/node_modules
-web/workshop/dist
-pkg/web/workshop
 *.test
+*.db
 slop

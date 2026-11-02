@@ -1,0 +1,13 @@
+{
+  "title": "Pinup",
+  "type": "design",
+  "capabilities": {
+    "db": {},
+    "user": { "scopes": ["profile"] },
+    "room": {},
+    "comments": {},
+    "assets": {},
+    "downloads": true,
+    "sample": {}
+  }
+}

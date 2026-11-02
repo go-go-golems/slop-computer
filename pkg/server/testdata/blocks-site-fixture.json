@@ -1,0 +1,432 @@
+{
+ "meta/snap": {
+  "id": "s1",
+  "at": 1793600000000,
+  "clock": 4,
+  "parts": 1,
+  "folded": {
+   "c-a-0": [
+    3,
+    "op002"
+   ]
+  }
+ },
+ "snaps/s1-0": {
+  "ops": [
+   [
+    "ujrhcqy:you",
+    1,
+    "weft.title = \"Weft\""
+   ],
+   [
+    "ujrhcqy:you",
+    2,
+    "weft.icon = \"🧶\""
+   ],
+   [
+    "ujrhcqy:you",
+    3,
+    "weft.ui.0.k = \"h1\""
+   ],
+   [
+    "ujrhcqy:you",
+    3,
+    "weft.ui.0.text = \"Yarn for people who knit in public\""
+   ]
+  ],
+  "stamps": []
+ },
+ "chunks/c-a-0": {
+  "by": "usr_ada",
+  "tab": "a",
+  "seq": 0,
+  "at": 1793600001000,
+  "n": 4,
+  "ops": [
+   [
+    "op000",
+    "ujrhcqy:you",
+    1,
+    "weft.title = \"Weft\"",
+    1793599997000
+   ],
+   [
+    "op001",
+    "ujrhcqy:you",
+    2,
+    "weft.icon = \"🧶\"",
+    1793599998000
+   ],
+   [
+    "op002",
+    "ujrhcqy:you",
+    3,
+    "weft.ui.0 is h1 \"Yarn for people who knit in public\"",
+    1793599999000
+   ],
+   [
+    "op003",
+    "ujrhcqy:you",
+    4,
+    "weft.ui.1 is p \"OLD INTRO TEXT\"",
+    1793600001000
+   ]
+  ]
+ },
+ "chunks/c-a-1": {
+  "by": "usr_ada",
+  "tab": "a",
+  "seq": 1,
+  "at": 1793600025000,
+  "n": 44,
+  "ops": [
+   [
+    "op004",
+    "ujrhcqy:you",
+    5,
+    "weft.ui.1.text = \"We spin **small batches** of *undyed* wool, ~~fast~~ slowly. See [[care]] and [our shop](https://example.com/shop).\"",
+    1793600002500
+   ],
+   [
+    "op005",
+    "ujrhcqy:you",
+    6,
+    "weft.ui.2 is callout \"Orders ship on **Mondays**.\", icon: \"📦\"",
+    1793600003000
+   ],
+   [
+    "op006",
+    "ujrhcqy:you",
+    7,
+    "weft.ui.3 is toc",
+    1793600003500
+   ],
+   [
+    "op007",
+    "ujrhcqy:you",
+    8,
+    "weft.ui.4 is h2 \"What we make\"",
+    1793600004000
+   ],
+   [
+    "op008",
+    "ujrhcqy:you",
+    9,
+    "weft.ui.5 is bullet \"Worsted, 200 m\"",
+    1793600004500
+   ],
+   [
+    "op009",
+    "ujrhcqy:you",
+    10,
+    "weft.ui.5.0 is bullet \"in three weights\"",
+    1793600005000
+   ],
+   [
+    "op00a",
+    "ujrhcqy:you",
+    11,
+    "weft.ui.6 is bullet \"Fingering, 400 m\", color: \"blue\"",
+    1793600005500
+   ],
+   [
+    "op00b",
+    "ujrhcqy:you",
+    12,
+    "weft.ui.7 is numbered \"Pick a yarn\"",
+    1793600006000
+   ],
+   [
+    "op00c",
+    "ujrhcqy:you",
+    13,
+    "weft.ui.8 is numbered \"Pick a colour\"",
+    1793600006500
+   ],
+   [
+    "op00d",
+    "ujrhcqy:you",
+    14,
+    "weft.ui.9 is todo \"Restock the oat colourway\", done: true",
+    1793600007000
+   ],
+   [
+    "op00e",
+    "ujrhcqy:you",
+    15,
+    "weft.ui.10 is todo \"Photograph the new batch\"",
+    1793600007500
+   ],
+   [
+    "op00f",
+    "ujrhcqy:you",
+    16,
+    "weft.ui.11 is quote \"The softest yarn I own.\"",
+    1793600008000
+   ],
+   [
+    "op00g",
+    "ujrhcqy:you",
+    17,
+    "weft.ui.12 is code \"skeins = 12\"",
+    1793600008500
+   ],
+   [
+    "op00h",
+    "ujrhcqy:you",
+    18,
+    "weft.ui.13 is divider",
+    1793600009000
+   ],
+   [
+    "op00i",
+    "ujrhcqy:you",
+    19,
+    "weft.ui.14 is fold \"Shipping details\"",
+    1793600009500
+   ],
+   [
+    "op00j",
+    "ujrhcqy:you",
+    20,
+    "weft.ui.14.0 is p \"Two to four days in the EU.\"",
+    1793600010000
+   ],
+   [
+    "op00k",
+    "ujrhcqy:you",
+    21,
+    "weft.ui.15 is columns",
+    1793600010500
+   ],
+   [
+    "op00l",
+    "ujrhcqy:you",
+    22,
+    "weft.ui.15.0 is col",
+    1793600011000
+   ],
+   [
+    "op00m",
+    "ujrhcqy:you",
+    23,
+    "weft.ui.15.0.0 is p \"Left column\"",
+    1793600011500
+   ],
+   [
+    "op00n",
+    "ujrhcqy:you",
+    24,
+    "weft.ui.15.1 is col",
+    1793600012000
+   ],
+   [
+    "op00o",
+    "ujrhcqy:you",
+    25,
+    "weft.ui.15.1.0 is p \"Right column\"",
+    1793600012500
+   ],
+   [
+    "op00p",
+    "ujrhcqy:you",
+    26,
+    "weft.ui.16 is page \"care\"",
+    1793600013000
+   ],
+   [
+    "op00q",
+    "ujrhcqy:you",
+    27,
+    "weft.ui.17 is h2 \"Numbers\"",
+    1793600013500
+   ],
+   [
+    "op00r",
+    "ujrhcqy:you",
+    28,
+    "weft.skeins = 12",
+    1793600014000
+   ],
+   [
+    "op00s",
+    "ujrhcqy:you",
+    29,
+    "weft.price = 18",
+    1793600014500
+   ],
+   [
+    "op00t",
+    "ujrhcqy:you",
+    30,
+    "weft.share = 0.4",
+    1793600015000
+   ],
+   [
+    "op00u",
+    "ujrhcqy:you",
+    31,
+    "weft.colours = [{name: \"Oat\", stock: 4}, {name: \"Moss\", stock: 8}]",
+    1793600015500
+   ],
+   [
+    "op00v",
+    "ujrhcqy:you",
+    32,
+    "weft.ui.18 is p \"We have {skeins} skeins, {skeins * price} euros of stock.\"",
+    1793600016000
+   ],
+   [
+    "op00w",
+    "ujrhcqy:you",
+    33,
+    "weft.ui.19 is stat skeins, label: \"Skeins\"",
+    1793600016500
+   ],
+   [
+    "op00x",
+    "ujrhcqy:you",
+    34,
+    "weft.ui.20 is progress share, label: \"Sold\"",
+    1793600017000
+   ],
+   [
+    "op00y",
+    "ujrhcqy:you",
+    35,
+    "weft.ui.21 is table colours",
+    1793600017500
+   ],
+   [
+    "op00z",
+    "ujrhcqy:you",
+    36,
+    "weft.ui.22 is p \"<script>alert(1)</script> & stays text\"",
+    1793600018000
+   ],
+   [
+    "op010",
+    "ujrhcqy:you",
+    37,
+    "weft.ui.23 is button \"Press me\" -> weft.skeins = weft.skeins + 1",
+    1793600018500
+   ],
+   [
+    "op011",
+    "ujrhcqy:you",
+    38,
+    "care:",
+    1793600019000
+   ],
+   [
+    "op012",
+    "ujrhcqy:you",
+    39,
+    "care.title = \"Care\"",
+    1793600019500
+   ],
+   [
+    "op013",
+    "ujrhcqy:you",
+    40,
+    "care.icon = \"🫧\"",
+    1793600020000
+   ],
+   [
+    "op014",
+    "ujrhcqy:you",
+    41,
+    "care.parent = \"weft\"",
+    1793600020500
+   ],
+   [
+    "op015",
+    "ujrhcqy:you",
+    42,
+    "care.ui.0 is p \"Wash cold. Dry flat.\"",
+    1793600021000
+   ],
+   [
+    "op016",
+    "ujrhcqy:you",
+    43,
+    "faq.title = \"FAQ\"",
+    1793600021500
+   ],
+   [
+    "op017",
+    "ujrhcqy:you",
+    44,
+    "faq.parent = \"weft\"",
+    1793600022000
+   ],
+   [
+    "op018",
+    "ujrhcqy:you",
+    45,
+    "faq.ui.0 is p \"Ask us anything. Back to [[weft]].\"",
+    1793600022500
+   ],
+   [
+    "op019",
+    "ujrhcqy:you",
+    46,
+    "drafts.title = \"Drafts\"",
+    1793600023000
+   ],
+   [
+    "op01a",
+    "ujrhcqy:you",
+    47,
+    "drafts.ui.0 is p \"NOT READY FOR READERS\"",
+    1793600023500
+   ],
+   [
+    "op01b",
+    "ujrhcqy:you",
+    48,
+    "weft.ui.24 is p \"Unpublished: [[drafts]].\"",
+    1793600024000
+   ]
+  ]
+ },
+ "chunks/c-m-0": {
+  "by": "usr_mallory",
+  "tab": "m",
+  "seq": 0,
+  "at": 1793600025000,
+  "n": 2,
+  "ops": [
+   [
+    "op01c",
+    "usq9z40:you",
+    49,
+    "weft.ui.25 is p \"Mallory was here\"",
+    1793600024500
+   ],
+   [
+    "op01d",
+    "ujrhcqy:you",
+    50,
+    "weft.ui.26 is p \"FORGED BY MALLORY\"",
+    1793600025000
+   ]
+  ]
+ },
+ "chunks/c-old": {
+  "by": "usr_ada",
+  "tab": "o",
+  "seq": 0,
+  "at": 1793598800000,
+  "n": 1,
+  "ops": [
+   [
+    "op01e",
+    "ujrhcqy:you",
+    51,
+    "weft.ui.27 is p \"STALE CHUNK\"",
+    1793598800000
+   ]
+  ]
+ }
+}

@@ -1,4 +1,6 @@
-.PHONY: lint fmt-check test test-postgres build web generate run-local dev-backend dev-frontend pinup pinup-push runtime runtime-test piworker conformance blocks blocks-push
+.PHONY: lint fmt-check test build run-local runtime runtime-test admin conformance blocks blocks-push pinup pinup-push
+
+SLOP ?= slop
 
 lint:
 	GOWORK=off golangci-lint run -v
@@ -9,63 +11,44 @@ fmt-check:
 test:
 	GOWORK=off go test ./...
 
-# Runs the store and server tests against Postgres as well as SQLite.
-test-postgres:
-	TEST_DATABASE_URL=$${TEST_DATABASE_URL:-postgres://postgres:postgres@127.0.0.1:5432/postgres?sslmode=disable} GOWORK=off go test ./...
+# The slop binary (server and CLI). SQLite needs cgo.
+build:
+	GOWORK=off CGO_ENABLED=1 go build -o slop ./cmd/slop
 
-# The page runtime (window.claude): web/runtime → pkg/render/assets/claude.js,
+# A development server on *.localhost:18300 with the sign-in form instead of
+# OIDC: slop.localhost (main), apps.localhost (live), site.localhost (static).
+run-local:
+	GOWORK=off go run ./cmd/slop serve --local
+
+# The page runtime (window.claude): web/runtime → pkg/server/assets/claude.js,
 # committed because the server embeds it.
 runtime:
-	cd web/runtime && pnpm install --frozen-lockfile && pnpm check && node build.mjs
+	cd web/runtime && pnpm install --frozen-lockfile && pnpm check && pnpm build
 
 runtime-test:
-	cd web/runtime && node --test --experimental-strip-types test/*.test.ts
+	cd web/runtime && pnpm test
 
-# The Pi model worker (web/piworker/dist/worker.js) for slop serve --pi-worker.
-piworker:
-	cd web/piworker && pnpm install --frozen-lockfile && pnpm check && node build.mjs
+# The back office: web/admin → pkg/server/admin/{app.js,styles.css},
+# committed because the server embeds them.
+admin:
+	cd web/admin && npm ci --no-audit --no-fund && node build.mjs
 
-# The browser conformance suites against a running local server
-# (SLOP_SERVER, default http://localhost:8080), apps pushed as rt-conformance
-# and rt-sample; needs playwright on NODE_PATH.
+# The runtime conformance page on a running --local server, with the app
+# pushed and mounted (see conformance/run.mjs); needs playwright on NODE_PATH.
 conformance:
-	node web/rt-conformance/run.mjs $${SLOP_SERVER:-http://localhost:8080} rt-conformance
-	node web/rt-conformance/run.mjs $${SLOP_SERVER:-http://localhost:8080} rt-sample
+	node conformance/run.mjs $${CONFORMANCE_URL:-http://apps.localhost:18300/conformance}
 
-# Claude Blocks (web/blocks): the upstream files, checked, plus slop.json.
+# Claude Blocks (web/blocks) and Pinup (web/pinup) as app folders; the
+# -push targets store them on the server you are logged in to (SLOP_SERVER).
 blocks:
 	web/blocks/build.sh
 
 blocks-push: blocks
-	$(SLOP) push web/blocks/dist -a blocks --title "Claude Blocks" -m "Claude Blocks $$(git rev-parse --short HEAD)"
+	$(SLOP) push web/blocks/dist --store blocks -m "Claude Blocks $$(git rev-parse --short HEAD)"
 
-# Builds the Workshop into pkg/web/workshop (served from disk by plain builds).
-web generate:
-	GOWORK=off go generate ./pkg/web
-
-# The slop binary with the Workshop inside.
-build: generate
-	GOWORK=off go build -tags embed -o slop ./cmd/slop
-
-run-local:
-	GOWORK=off go run ./cmd/slop serve --local
-
-# Workshop development: the server on :8080, Vite with HMR on :5173
-# (open http://localhost:5173; API calls are proxied to :8080).
-dev-backend:
-	GOWORK=off go run ./cmd/slop serve --local --dev-origin http://localhost:5173
-
-dev-frontend:
-	cd web/workshop && pnpm install && pnpm dev
-
-# Pinup (web/pinup) built for slop: the pinup tool and the prototype player.
-# pinup-push publishes both to the server you are logged in to (SLOP_SERVER);
-# an admin then enables the new tool version in the Workshop.
-SLOP ?= slop
 pinup:
 	cd web/pinup/vendor && npm ci --no-audit --no-fund
-	node web/pinup/slop/build.js
+	web/pinup/build-app.sh
 
 pinup-push: pinup
-	$(SLOP) push web/pinup/dist/slop -a pinup --title Pinup -m "Pinup $$(git rev-parse --short HEAD)"
-	$(SLOP) push web/pinup/dist/slop-player -a pinup-player --title "Pinup player" -m "Pinup player $$(git rev-parse --short HEAD)"
+	$(SLOP) push web/pinup/dist/app --store pinup -m "Pinup $$(git rev-parse --short HEAD)"

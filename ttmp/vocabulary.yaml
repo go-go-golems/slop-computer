@@ -18,11 +18,27 @@ topics:
     - slug: routing
       description: Route table, path matching and page resolution
     - slug: tools
-      description: 'Workshop tools: pages that run with API grants'
+      description: Tools built as apps or pages with API grants (back office, Workshop)
     - slug: collaboration
       description: Live shared editing, presence and review
     - slug: performance
       description: Load time, caching, compression and resource size
+    - slug: hosting
+      description: Hosting apps and sites
+    - slug: access
+      description: Identity, access control and audiences
+    - slug: sqlite
+      description: SQLite storage
+    - slug: goja
+      description: Goja JavaScript runtime
+    - slug: agents
+      description: Coding agents and eval doors
+    - slug: llm
+      description: Model access and budgets
+    - slug: apps
+      description: Apps hosted on slop (Blocks, Pinup, readers)
+    - slug: publishing
+      description: Publishing content as public pages and static sites
 docTypes:
     - slug: design-doc
       description: Structured rationale and architecture notes

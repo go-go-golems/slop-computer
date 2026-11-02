@@ -1,0 +1,12 @@
+import { chromium } from 'playwright';
+import http from 'node:http'; import fs from 'node:fs'; import path from 'node:path';
+const root = process.argv[2] || 'dist';
+const types = { '.html': 'text/html', '.js': 'text/javascript', '.wasm': 'application/wasm', '.css': 'text/css' };
+const srv = http.createServer((q, r) => { const u = decodeURIComponent(q.url.split('?')[0]); const p = path.join(root, u === '/' ? 'index.html' : u); if (!fs.existsSync(p)) { r.writeHead(404); return r.end(); } r.writeHead(200, { 'content-type': types[path.extname(p)] || 'application/octet-stream' }); fs.createReadStream(p).pipe(r); }).listen(0);
+const b = await chromium.launch(); const pg = await b.newPage();
+pg.on('console', m => console.log('console', m.type(), m.text()));
+pg.on('pageerror', e => console.log('pageerror', e.message, e.stack));
+await pg.goto(`http://127.0.0.1:${srv.address().port}/`);
+await pg.waitForTimeout(Number(process.argv[3] || 6000));
+console.log('BODY:', (await pg.locator('body').innerText()).slice(0, 600));
+await b.close(); srv.close();

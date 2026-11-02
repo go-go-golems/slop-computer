@@ -1,0 +1,476 @@
+
+booted in 725 ms: blog@11 journal@2 system@7 team-board@6 tracker@2
+
+$ [usr_me] stores
+id          type     app      running    owner   rev  level
+──────────  ───────  ───────  ─────────  ──────  ───  ─────
+blog        journal  journal  journal@1  usr_me  11   owner
+journal     app                          usr_me  2    owner
+system      system                       system  7    admin
+team-board  tracker  tracker  tracker@1  usr_me  6    owner
+tracker     app                          usr_me  2    owner
+
+$ [usr_me] tables blog
+name             type   columns                                                    rows
+───────────────  ─────  ─────────────────────────────────────────────────────────  ────
+posts            table  id, title, body, author, status, created_at, published_at  3
+my_drafts        view   id, title, body, created_at
+published_posts  view   id, title, body, author, published_at
+
+$ [usr_me] sql blog "SELECT id, title, status, author FROM posts"
+id              title                            status     author
+──────────────  ───────────────────────────────  ─────────  ─────────
+p_mvwras3w3340  Stores are the unit              published  usr_me
+p_mvwras3w5267  Turns, not requests              published  usr_ramon
+p_mvwras3w2063  Half-written thoughts on mounts  draft      usr_ramon
+
+$ [usr_me] get blog stats/main
+path: stats/main
+id: main
+data:
+  published: 2
+  drafts: 1
+  words: 39
+  asOfRev: 10
+version: 6
+rev: 11
+at: 1793472632780
+by: app:journal
+
+$ [usr_me] log blog --n 6
+rev  at                   principal    via                  step  summary              changes
+───  ───────────────────  ───────────  ───────────────────  ────  ───────────────────  ───────────────────────
+11   2026-10-31 18:50:32  app:journal  reactor:table:posts        reactor table:posts  doc:stats/main
+10   2026-10-31 18:50:32  usr_ramon    actor                      action draft         table:posts row:posts:3
+9    2026-10-31 18:50:32  app:journal  reactor:table:posts        reactor table:posts  doc:stats/main
+8    2026-10-31 18:50:32  usr_ramon    actor                      action publish       table:posts row:posts:2
+7    2026-10-31 18:50:32  app:journal  reactor:table:posts        reactor table:posts  doc:stats/main
+6    2026-10-31 18:50:32  usr_ramon    actor                      action draft         table:posts row:posts:2
+
+$ [usr_ramon] sql blog "SELECT 1"
+âœ— permission_denied: usr_ramon may not sql.admin on blog
+  · grant *anyone view (direct)
+  · grant usr_ramon interact (direct)
+  level interact
+  raw SQL needs admin
+  ✗ interact < admin
+
+$ [usr_me] sql blog "DELETE FROM posts"
+âœ— permission_denied: admin SQL is read-only without --write
+
+$ [usr_me] sql blog "SELECT count(*) AS n FROM _log"
+n
+──
+11
+
+$ [usr_me] get team-board data/users/usr_me/notes
+path: data/users/usr_me/notes
+id: notes
+data:
+  text: Only I can read this, even though Ramon is admin-adjacent.
+version: 1
+rev: 6
+at: 1793472632780
+by: usr_me
+
+$ [usr_ramon] get team-board data/users/usr_me/notes
+(nothing)
+
+$ [usr_me] can usr_ramon team-board doc.read data/users/usr_me/notes
+ok: false
+code: not_found
+level: interact
+need: self
+trace:
+  - · grant *signed-in interact (direct)
+  - level interact
+  - rule data/users/{self}: read needs self — {self} = usr_ramon, path owner = usr_me
+  - ✗ interact < self → not_found (hidden reads look missing)
+
+$ [gst_ana] call blog draft {"title":"guest post"}
+id: p_mvwrasq50471
+
+$ [anon] call blog draft {"title":"anon post"}
+âœ— permission_denied: anon has view, needs interact
+
+$ [usr_me] resolve site.lab/feed.json
+kind: http
+trace:
+  - mount site.lab/ (live)
+  - store blog
+  - code: journal@1
+  - 1. http route "GET /feed.json" in actor.js
+response:
+  status: 200
+  json:
+    title: Journal
+    updated: 1793472633581
+    items:
+      - {"id":"p_mvwras3w5267","title":"Turns, not requests","author":"usr_ramon","published_at":1793472632780}
+      - {"id":"p_mvwras3w3340","title":"Stores are the unit","author":"usr_me","published_at":1793472632780}
+
+$ [anon] resolve site.lab/
+kind: live
+trace:
+  - mount site.lab/ (live)
+  - store blog
+  - code: journal@1
+  - 3. live view of blog as anon (view)
+store: blog
+
+$ [usr_kim] resolve site.lab/t/kims-board
+kind: create
+trace:
+  - mount site.lab/t/:board (live)
+  - no store "kims-board"
+  - on_missing create: usr_kim may instantiate tracker
+app: tracker
+type: tracker
+suggested: kims-board
+
+$ [usr_ramon] sql blog "SELECT id FROM posts WHERE status = 'draft'"
+âœ— permission_denied: usr_ramon may not sql.admin on blog
+  · grant *anyone view (direct)
+  · grant usr_ramon interact (direct)
+  level interact
+  raw SQL needs admin
+  ✗ interact < admin
+
+$ [usr_me] sql blog "SELECT title, status FROM posts WHERE id = 'p_mvwras3w2063'"
+title                                        status
+───────────────────────────────────────────  ──────
+Half-written thoughts on mounts (scheduled)  draft
+
+slow â†’ {"ok":true,"publishedAt":1793472693581}
+
+$ [usr_me] get blog stats/main
+path: stats/main
+id: main
+data:
+  published: 3
+  drafts: 1
+  words: 39
+  asOfRev: 16
+version: 9
+rev: 17
+at: 1793472693581
+by: app:journal
+
+$ [usr_me] turns --n 8
+id  store  principal    via                  label                                                         status     rev  ms   error
+──  ─────  ───────────  ───────────────────  ────────────────────────────────────────────────────────────  ─────────  ───  ───  ─────────────────────────
+53  blog   app:journal  reactor:table:posts  reactor table:posts                                           commit     17   1.8
+52  blog   usr_ramon    actor                action slowPublish, continued                                 commit     16   2.7
+51  blog   usr_me       cli                  sql SELECT title, status FROM posts WHERE id = 'p_mvwras3w2…  read            0.5
+49  blog   app:journal  reactor:table:posts  reactor table:posts                                           commit     15   3
+48  blog   usr_ramon    actor                action slowPublish                                            commit     14   6
+47  blog   usr_me       cli                  sql SELECT id FROM posts WHERE status = 'draft'               read            0.9
+46  blog   usr_ramon    cli                  sql.admin                                                     denied          0    permission_denied: denied
+45  blog   usr_me       actor                http GET /feed.json                                           no writes       2.3
+
+$ [usr_me] alarms blog
+name    at             every  running  in
+──────  ─────────────  ─────  ───────  ───────
+digest  1793476232780  1h     0        58m 58s
+
+$ [usr_me] colls blog
+coll     n
+───────  ─
+digests  3
+stats    1
+
+$ [usr_me] edit journal actor.js --old "sql.one('SELECT count(*) AS n FROM published_posts');" --new "throw new Error('smoke failed on purpose');"
+path: actor.js
+sha256: 03d16109c757b9b730811e6368b8af10ff4f9a918fad9164a16e2482fcfdaa90
+
+$ [usr_me] publish journal broken smoke
+snapshot: 2
+activations:
+  - {"store":"blog","ok":false,"error":"activation of journal@2 on blog rolled back: smoke failed on purpose","running":1}
+
+$ [usr_me] stores
+id          type     app      running    owner   rev  level
+──────────  ───────  ───────  ─────────  ──────  ───  ─────
+blog        journal  journal  journal@1  usr_me  20   owner
+journal     app                          usr_me  4    owner
+system      system                       system  7    admin
+team-board  tracker  tracker  tracker@1  usr_me  6    owner
+tracker     app                          usr_me  2    owner
+
+$ [usr_me] call blog publish {"id":"nope"}
+âœ— not_found: no post nope
+
+$ [usr_me] edit journal actor.js --old "throw new Error('smoke failed on purpose');" --new "sql.one('SELECT count(*) AS n FROM published_posts');"
+path: actor.js
+sha256: 7e15c6a60345be88cec37187de5cfbf0ccaeb5327c3d50e031a483e99539d941
+
+$ [usr_me] write journal sql/002_tags.sql
+path: sql/002_tags.sql
+sha256: cb4e91e1c2f8ebe9cc0a283ba99ce5e5137ee6efe0b74a1fc5c15d39d1228d15
+
+$ [usr_me] publish journal tags column
+snapshot: 3
+activations:
+  - {"store":"blog","ok":true,"version":3,"steps":"migration 002_tags.sql, setup, smoke"}
+
+$ [usr_me] tables blog
+name             type   columns                                                       rows
+───────────────  ─────  ────────────────────────────────────────────────────────────  ────
+posts            table  id, title, body, author, status, created_at, published_at, …  4
+my_drafts        view   id, title, body, created_at
+published_posts  view   id, title, body, author, published_at
+
+$ [usr_me] diff journal 2 3
+path              change   lines
+────────────────  ───────  ────────────────────────────────────────────────────────────
+actor.js          changed  ["+14:     sql.one('SELECT count(*) AS n FROM published_pos…
+sql/002_tags.sql  added
+
+$ [tok_agent] set team-board cards/c9 {"text":"agent card","col":"todo"}
+path: cards/c9
+version: 1
+
+$ [tok_agent] set team-board settings/board {"name":"renamed by agent"}
+path: settings/board
+version: 2
+
+$ [usr_me] steps
+id          principal  state  message    commits
+──────────  ─────────  ─────  ─────────  ─────────────────────────
+stp_6q7rrk  tok_agent  done   test step  team-board@7 team-board@8
+
+$ [usr_me] revert stp_6q7rrk
+step: stp_6q7rrk
+report:
+  - team-board: settings/board restored
+  - team-board: cards/c9 restored
+
+$ [usr_me] get team-board settings/board
+path: settings/board
+id: board
+data:
+  name: v3 kernel
+version: 3
+rev: 9
+at: 1793483495181
+by: usr_me
+
+$ [tok_ci] set team-board cards/c10 {"text":"ci"}
+âœ— permission_denied: tok_ci may not doc.write on team-board
+  · tok_ci acts for usr_me
+  · platform admin: admin on every store
+  · usr_me created team-board: owner
+  · grant *signed-in interact (direct)
+  · token capped at view
+  level view
+  rule cards: write needs interact
+  ✗ view < interact
+
+$ [usr_me] call blog summarize {"id":"p_mvwras3w2063"}
+âœ— permission_denied: sample is not approved for this version of journal
+
+$ [usr_me] approve journal 3 sample
+app: journal
+version: 3
+caps:
+  - sample
+
+$ [usr_me] call blog summarize {"id":"p_mvwras3w2063"}
+A fake summary.
+
+$ [usr_me] fault crash blog
+crashNext: blog
+failNextCommit: null
+
+$ [usr_me] call blog draft {"title":"lost?"}
+âœ— actor_error: lost: the actor crashed mid-turn (fault)
+
+$ [usr_me] call blog draft {"title":"after crash"}
+id: p_mvwxrlqt6851
+
+$ [usr_me] actors
+store  state   code       inbox  waiting  turns  cpuMs  error
+─────  ──────  ─────────  ─────  ───────  ─────  ─────  ──────────────────────────────
+blog   active  journal@3  0      0        63     74.1   fault injected: crash mid-turn
+
+$ [usr_me] new counter
+id: counter
+type: 
+app: null
+
+$ [usr_me] write counter app.json
+path: app.json
+sha256: 463b2463564ebc0e1a2fdb95bb91db9542afbc02adddb4a3e560d75e9f57d142
+
+$ [usr_me] write counter actor.js
+path: actor.js
+sha256: e36693a69e5919cba52914606ec8ed38584a2df288499c838e9301442c9e7434
+
+$ [usr_me] write counter index.html
+path: index.html
+sha256: 8d13a2727dd5dcf5d7e5b364c2f9a26b709afe9e67e82e0d76cbe5320c830612
+
+$ [usr_me] publish counter first
+snapshot: 1
+activations: []
+
+$ [usr_me] new global-counter --app counter
+id: global-counter
+type: counter
+app: counter
+
+$ [usr_me] grant global-counter *anyone view
+store: global-counter
+subject: *anyone
+level: view
+
+$ [usr_me] grant global-counter *signed-in interact
+store: global-counter
+subject: *signed-in
+level: interact
+
+$ [usr_me] grant global-counter counter-view view
+âœ— invalid_argument: "counter-view" is not a principal.
+
+$ [usr_me] new counter-display
+id: counter-display
+type: 
+app: null
+
+$ [usr_me] write counter-display app.json
+path: app.json
+sha256: 754ca8de570b3aa472b08a4e16c30d5caa964a1b987c877ba964603b12874649
+
+$ [usr_me] write counter-display actor.js
+path: actor.js
+sha256: e2635e359d30222cba21ab6ec92459724c3eea7af294eca749861f28a8e4d019
+
+$ [usr_me] write counter-display index.html
+path: index.html
+sha256: aa6fda344c53e4ff840c4678ebce4ae92611d941fa72406c0a538ea2fdd44972
+
+$ [usr_me] publish counter-display first
+snapshot: 1
+activations: []
+
+$ [usr_me] new counter-view --app counter-display
+id: counter-view
+type: counter-display
+app: counter-display
+
+$ [usr_me] grant counter-view *anyone view
+store: counter-view
+subject: *anyone
+level: view
+
+$ [usr_me] can app:counter-display global-counter doc.read counter/main
+ok: true
+level: view
+need: view
+trace:
+  - · grant *anyone view (direct)
+  - level view
+  - rule counter: read needs view
+  - ✓ view ≥ view
+  - ✓ capability db: declared
+
+$ [usr_me] get counter-view shown/main
+path: shown/main
+id: main
+data:
+  value: 0
+version: 1
+rev: 1
+at: 1793483495381
+by: system
+
+$ [usr_ramon] call global-counter increment
+value: 1
+
+$ [usr_ramon] call global-counter increment
+value: 2
+
+$ [usr_ramon] call global-counter double
+value: 4
+
+$ [gst_ana] call global-counter increment
+âœ— permission_denied: gst_ana has view, needs interact
+
+$ [usr_me] grant global-counter gst_ana interact
+store: global-counter
+subject: gst_ana
+level: interact
+
+$ [gst_ana] call global-counter decrement
+value: 3
+
+$ [usr_me] get counter-view shown/main
+path: shown/main
+id: main
+data:
+  value: 3
+version: 5
+rev: 5
+at: 1793483495381
+by: app:counter-display
+
+$ [usr_me] log counter-view --n 4
+rev  at                   principal            via                                         step  summary                                     changes
+───  ───────────────────  ───────────────────  ──────────────────────────────────────────  ────  ──────────────────────────────────────────  ──────────────
+5    2026-10-31 21:51:35  app:counter-display  reactor:store:global-counter doc:counter/*        reactor store:global-counter doc:counter/*  doc:shown/main
+4    2026-10-31 21:51:35  app:counter-display  reactor:store:global-counter doc:counter/*        reactor store:global-counter doc:counter/*  doc:shown/main
+3    2026-10-31 21:51:35  app:counter-display  reactor:store:global-counter doc:counter/*        reactor store:global-counter doc:counter/*  doc:shown/main
+2    2026-10-31 21:51:35  app:counter-display  reactor:store:global-counter doc:counter/*        reactor store:global-counter doc:counter/*  doc:shown/main
+
+$ [usr_me] revoke global-counter *anyone
+store: global-counter
+revoked: *anyone
+
+$ [usr_ramon] call global-counter increment
+value: 4
+
+$ [usr_me] actors
+store           state   code               inbox  waiting  turns  cpuMs  error
+──────────────  ──────  ─────────────────  ─────  ───────  ─────  ─────  ──────────────────────────────
+blog            active  journal@3          0      0        63     74.1   fault injected: crash mid-turn
+global-counter  active  counter@1          0      0        13     4.9
+counter-view    active  counter-display@1  0      0        10     7.3
+
+$ [usr_me] grant global-counter app:counter-display view
+store: global-counter
+subject: app:counter-display
+level: view
+
+$ [usr_me] get counter-view shown/main
+path: shown/main
+id: main
+data:
+  value: 4
+version: 6
+rev: 6
+at: 1793483495782
+by: app:counter-display
+
+$ [tok_agent] step begin nested
+âœ— conflict: tok_agent already has step stp_r5jtu2 open. The agent panel opens a step for every request; do not begin another
+
+export: system 328K, journal 200K, tracker 184K, blog 200K, team-board 176K, counter 176K, global-counter 176K, counter-display 176K, counter-view 176K
+
+$ [usr_me] stores
+id               type             app              running            owner   rev  level
+───────────────  ───────────────  ───────────────  ─────────────────  ──────  ───  ─────
+blog             journal          journal          journal@3          usr_me  25   owner
+counter                                                               usr_me  4    owner
+counter-display                                                       usr_me  4    owner
+counter-view     counter-display  counter-display  counter-display@1  usr_me  6    owner
+global-counter   counter          counter          counter@1          usr_me  6    owner
+journal          app                                                  usr_me  7    owner
+system           system                                               system  18   admin
+team-board       tracker          tracker          tracker@1          usr_me  9    owner
+tracker          app                                                  usr_me  2    owner
+
+$ [usr_me] sql blog "SELECT count(*) AS n FROM posts"
+n
+─
+5
+

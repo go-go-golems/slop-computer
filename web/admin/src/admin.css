@@ -1,0 +1,52 @@
+/* The back office on top of the lab's stylesheet: one window, a strip of
+   surfaces, a table per surface. */
+html, body { height: 100%; margin: 0; }
+body { background: var(--bg); color: var(--ink); font: var(--fs-m)/1.45 var(--font-ui, Arial, sans-serif); }
+.shell { display: flex; flex-direction: column; min-height: 100vh; }
+.bar .sp, .toolbar .sp { flex: 1; }
+.dtabs { display: flex; gap: 0; height: 100%; overflow-x: auto; }
+.dtab { display: flex; align-items: center; padding: 0 12px; color: var(--ink-2); text-decoration: none; border-bottom: 2px solid transparent; white-space: nowrap; }
+.dtab:hover { color: var(--ink); }
+.dtab.on { color: var(--ink); border-bottom-color: var(--ink); font-weight: 700; }
+.main { flex: 1; min-height: 0; }
+.surface { display: flex; flex-direction: column; }
+.stitle { font-size: var(--fs-l); margin: 0; font-weight: 700; }
+.sbody { padding: 12px 16px 48px; }
+.sbody h3 { font-size: var(--fs-xs); text-transform: uppercase; letter-spacing: 0.06em; color: var(--ink-2); margin: 20px 0 6px; font-weight: 400; }
+.inp { height: 30px; border: 1px solid var(--hair); background: var(--bg); color: var(--ink); padding: 0 8px; font: inherit; border-radius: 0; min-width: 180px; }
+.inp.sm { min-width: 90px; width: 110px; }
+.inp:focus, .btn:focus-visible, .cellbtn:focus-visible, .dtab:focus-visible { outline: 2px solid var(--ink); outline-offset: 1px; }
+.field { display: inline-flex; flex-direction: column; gap: 2px; }
+.field .lbl { font-size: var(--fs-xs); color: var(--ink-2); }
+.formrow { display: flex; gap: 10px; align-items: flex-end; flex-wrap: wrap; margin: 8px 0 14px; }
+.acts { display: inline-flex; gap: 6px; justify-content: flex-end; flex-wrap: wrap; }
+.mono { font-family: var(--font-mono, ui-monospace, monospace); font-size: var(--fs-s); }
+.split { display: grid; grid-template-columns: minmax(260px, 2fr) 3fr; gap: 24px; align-items: start; }
+.split .detail { border-left: 1px solid var(--hair); padding-left: 24px; min-height: 120px; }
+.kv.narrow { max-width: 360px; margin: 6px 0 10px; }
+.kv dd.bad, .bad { color: var(--accent); }
+.matrixt td, .matrixt th { text-align: center; }
+.matrixt td:first-child, .matrixt th:first-child { text-align: left; }
+.cellbtn { width: 44px; height: 26px; border: 1px solid var(--hair); background: var(--bg); color: var(--ink-2); font: inherit; cursor: pointer; border-radius: 0; }
+.cellbtn.on { background: var(--ink); color: var(--bg); border-color: var(--ink); }
+.errbox { border: 1px solid var(--accent); color: var(--accent); padding: 8px 10px; margin: 8px 0; }
+.trace-l { list-style: none; padding: 0; margin: 6px 0; font-family: var(--font-mono, monospace); font-size: var(--fs-s); }
+.trace-l li { padding: 1px 0; }
+.trace-l li.bad { color: var(--accent); font-weight: 700; }
+.answer .ok { font-weight: 700; }
+.answer .bad { font-weight: 700; }
+.made { padding: 4px 8px; background: var(--fill); user-select: all; }
+.sub { margin-top: 24px; border-top: 1px solid var(--rule); padding-top: 8px; }
+.otoasts { position: fixed; right: 16px; bottom: 16px; left: auto; transform: none; display: flex; flex-direction: column; align-items: flex-end; gap: 6px; z-index: 20; }
+.otoast { background: var(--ink); color: var(--bg); padding: 8px 12px; font-size: var(--fs-s); max-width: 420px; }
+.otoast.bad { background: var(--accent); color: var(--on-accent); }
+/* Columns read left to right; only action columns sit on the right. */
+.surface .rt td:last-child, .surface .rt th:last-child { text-align: left; }
+.surface .rt td.r, .surface .rt th.r { text-align: right; }
+.gate { max-width: 420px; margin: 18vh auto; padding: 0 16px; }
+@media (max-width: 760px) {
+  .split { grid-template-columns: 1fr; }
+  .split .detail { border-left: 0; padding-left: 0; border-top: 1px solid var(--hair); padding-top: 12px; }
+  .bar { height: auto; flex-wrap: wrap; padding: 6px 12px; }
+  .sbody { padding: 10px 12px 40px; }
+}

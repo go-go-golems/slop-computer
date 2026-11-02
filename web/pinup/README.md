@@ -2,7 +2,7 @@
 
 Pinup is a screen-design tool that runs as a single HTML page: frames, auto layout, components and instances, colour and text tokens with light and dark modes, a prototype player, an inspect panel, code export, pinned feedback items, and a shared history in which every step can be reverted on its own. Ramon wrote it in one Claude Code session on 2026-10-28, as a claude.ai Artifact.
 
-This folder is that source, copied here so Pinup can be maintained next to slop. SLOP-004 adapts it into a Workshop tool for designing pages served on slop's site hosts. The design is in `ttmp/2026/10/29/SLOP-004--…/design-doc/01-intern-guide-integrating-pinup-into-slop-as-a-workshop-tool.md`.
+This folder is that source, copied here so Pinup can be maintained next to slop. On slop it runs unchanged as an app: `build-app.sh` wraps the built page in the Artifact host's document skeleton and adds `app.json` (store type `design`); each design file is a store of that type, opened at `/p/<file>` on the live host (SLOP3-001's `scripts/08-deploy-blocks-pinup.sh`). The v2 Workshop integration (SLOP-004) was removed with v2.
 
 ## Provenance
 
@@ -20,6 +20,7 @@ This folder is that source, copied here so Pinup can be maintained next to slop.
 ```sh
 cd vendor && npm ci && cd ..   # lucide-static: the icon set the build inlines
 node build.js                  # → dist/pinup.html (the page) and dist/check.js (for node --check)
+./build-app.sh                 # → dist/app/{index.html,app.json}, the slop app (make pinup)
 ```
 
 `build.js` concatenates `src/head.html`, `src/body.html`, the Lucide icons as a JSON script element, and `src/NN-*.js` in lexical order inside one IIFE. There is no module system: the modules share one scope, and the number prefixes give the load order.
