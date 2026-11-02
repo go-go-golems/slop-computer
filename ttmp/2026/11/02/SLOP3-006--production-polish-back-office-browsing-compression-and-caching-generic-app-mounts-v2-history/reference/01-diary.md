@@ -183,3 +183,27 @@ Every slop host now goes through a Traefik `compress` middleware for text types.
   - site files: `Cache-Control` max-age=60 plus `ETag` = sha256, served with `http.ServeContent` (pkg/server/site.go:221), so revalidation returns 304;
   - back office assets: `immutable` under `?v=`.
 - Snapshot-addressed immutable URLs for site files would need URLs that name the snapshot. That is left in task hc66.
+
+## Step 4: Review fix on #15, and merge
+
+Codex flagged (P2) that the Apps tab resolved an app's addresses with the type from `app.ls`. That is the type the app's manifest declares for its instances, not the app store's own type. An untyped app store such as `blocks-site`, whose manifest declares `blocks-site`, was therefore shown as served at `/pub/blocks-site`. `pkg/server/site.go` refuses that address, and the app also dropped out of the Not mounted filter. The fix looks up the app's store row instead. The PR was merged after CI passed.
+
+### Prompt Context
+**User prompt (verbatim):** "Address code review comment for #15, then merge"
+**Assistant interpretation:** Fix the review finding on PR #15, reply to it, and merge once CI passes.
+**Inferred user intent:** Ship the back office improvements.
+**Commit (code):** 1895500 — "Back office: an app's addresses come from its own store's type (review on #15)"; merge 30defba
+
+### What I did
+- `useCatalog` exposes `storeOf`; `Apps` calls `c.urlsOf(c.storeOf.get(a.app) || { id: a.app })`.
+- The AppDetail label "store type" is now "instance type".
+- Replied on the review thread (discussion_r4446949055). Merged with `gh pr merge 15 --merge`.
+
+### What worked
+- Checked on a local server (port 18311). An app store `pubapp` with no type, a manifest with `type: thing`, a mount `/pub/:id --storeParam id --type thing`, and an instance `inst-a`:
+  - the app pane shows "served at=not mounted";
+  - the instance pane shows "served at=apps.localhost:18311/pub/inst-a".
+- `GOWORK=off go test ./pkg/server -count=1`: ok. CI `release / publish`: pass.
+
+### What should be done in the future
+- Production runs this only after the image pin in GitOps moves to the merge's image. `publish-image.yaml` sets `open_gitops_pr: false`, so the bump is a manual GitOps PR.
