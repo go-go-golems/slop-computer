@@ -1348,3 +1348,84 @@ scopes one clear meaning.
   - `GOWORK=off go test ./pkg/store -run TestExportKeepsBlobs -count=1`;
   - `GOWORK=off go test ./pkg/server -run 'TestGuestSessionsLastWhileUsed|TestAdminPowerNeedsTheAdminScope|TestModuleTrust' -count=1`;
   - `GOWORK=off go test ./pkg/server -run 'TestSystemModule|TestModuleTrust|TestWorkshop' -count=40`.
+
+## Step 10: The read scope no longer caps a token's level
+
+The user agreed to drop the cap. A read token now holds its person's own
+levels, and "read" means only that it calls verbs that change nothing.
+Commits: `1c3841c`, and `28dcb94` (gofmt).
+
+### Prompt Context
+
+**User prompt (verbatim):** "yes" (to removing the cap on read tokens;
+see step 9, "What warrants a second pair of eyes").
+
+**Assistant interpretation:** Remove `scopeCap`, so a read token keeps
+its person's levels.
+
+**Inferred user intent:** Read-only tokens that are useful for backups
+and audits.
+
+### What I did
+
+- **Removed `scopeCap`.** `Checker.Level` now zeroes only a token without
+  any scope.
+- **Checked the token entry points first.** Tokens reach the server only
+  through `api.go`, which means verbs. Actor routes take cookie
+  principals or nobody, and the billing, device and auth pages use the
+  main session. So the verbs' read/write scope is the write gate for
+  tokens.
+- **Added `TestReadTokensReadAtTheirLevel`:**
+  - an owner's read token can call `store.export`, `grant.ls` and
+    `docs.get`;
+  - `docs.set`, `grant.set`, `files.put` and `store.rm` refuse it.
+- **Docs:** `doc/production.md`'s scope table says what read tokens can
+  now do.
+
+### Why
+
+- **The cap protected nothing.** No read verb writes (`preview.url`
+  creates a preview link, a read capability for the same content). The
+  cap made six read verbs that need admin or owner level unusable with
+  read tokens.
+
+### What worked
+
+- **The new test passes.** On the previous commit it fails with
+  `store.export on mine needs admin ... token scopes [read] cap at view`.
+- The full suite passes; the commit was gated on its exit status.
+
+### What didn't work
+
+- **Formatting:** removing the `slices` import left a blank line that
+  gofmt flagged after the commit. The follow-up commit `28dcb94` fixes
+  it.
+
+### What I learned
+
+- Tokens have exactly one door (verbs). That is what makes "scope =
+  which verbs" sufficient on its own.
+
+### What was tricky to build
+
+- **Ruling out other doors.** The only real work was proving there is
+  no other door for a token, by listing every `principalOf` and
+  `serveActorRoute` caller.
+
+### What warrants a second pair of eyes
+
+- **A future token door would need a write gate of its own.** Any new
+  door that accepts tokens without going through `verbs.Check` (for
+  example, actor routes on the main host) would let a read token act at
+  its person's full level. The comment in `Checker.Level` says so.
+
+### What should be done in the future
+
+- Correct the two reply hashes on #13.
+- Push this branch and open a PR stacked on #13.
+
+### Code review instructions
+
+- `pkg/access/check.go` (`Level`), `pkg/server/authz_test.go`,
+  `doc/production.md`.
+- **Test:** `GOWORK=off go test ./pkg/server -run TestReadTokensReadAtTheirLevel -count=1`.
