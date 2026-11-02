@@ -60,7 +60,6 @@ func TestSubscriberKeepsMemberLLMRow(t *testing.T) {
 // Phase 2: an owner set back to pending is capped like a guest. Today
 // Level returns owner before it applies the audience cap.
 func TestPendingOwnerCappedAtInteract(t *testing.T) {
-	t.Skip("SLOP3-007 phase 2")
 	h := newHarness(t)
 	admin := h.tokenFor("admin@example.com", "read", "write", "admin")
 	dan := h.tokenFor("dan@example.com")
@@ -87,7 +86,6 @@ func linkStore(t *testing.T, h *harness, admin, owner string) string {
 // Phase 2: a grant made by redeeming a link stops counting once the link
 // expires. Today expiry only stops new redemptions.
 func TestExpiredLinkGrantsInert(t *testing.T) {
-	t.Skip("SLOP3-007 phase 2")
 	h := newHarness(t)
 	admin := h.tokenFor("admin@example.com", "read", "write", "admin")
 	live := linkStore(t, h, admin, admin)
@@ -101,12 +99,15 @@ func TestExpiredLinkGrantsInert(t *testing.T) {
 	if st, v := openView(g, live, "/notes", ""); st == 200 {
 		t.Fatalf("an expired link's grant must not open the store: %v", v)
 	}
+	gs := h.call(admin, "grant.ls", map[string]any{"store": "notes"}).([]any)
+	if len(gs) != 1 || gs[0].(map[string]any)["inactive"] != "its link was revoked or has expired" {
+		t.Fatalf("grant.ls must show the expired link's grant as inactive: %v", gs)
+	}
 }
 
 // Phase 2: a link's grants end when its creator no longer holds the
 // link's level (decision 7). Today they outlive the creator.
 func TestLinkGrantsEndWithCreator(t *testing.T) {
-	t.Skip("SLOP3-007 phase 2")
 	h := newHarness(t)
 	admin := h.tokenFor("admin@example.com", "read", "write", "admin")
 	ana := h.tokenFor("ana@example.com")
