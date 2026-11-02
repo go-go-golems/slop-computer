@@ -3,6 +3,7 @@ package actor
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"strings"
 	"time"
 
@@ -40,7 +41,7 @@ func (a *Actor) sampleCheck() (string, system.LLM) {
 // limits() and json().
 func (a *Actor) sampleModule() goja.Value {
 	call := func(input, opts goja.Value, asJSON bool) goja.Value {
-		payer, _ := a.sampleCheck()
+		payer, l := a.sampleCheck()
 		var raw json.RawMessage
 		switch x := a.export(input).(type) {
 		case string:
@@ -73,7 +74,11 @@ func (a *Actor) sampleModule() goja.Value {
 			text, model string
 			in, out     int64
 		}
-		backend, sys := a.m.LLM, a.m.K.Sys
+		backend := a.m.LLM
+		// Each model round holds the payer's budget first and settles with
+		// its usage (SLOP3-007): no call spends past the limit.
+		meter := a.m.K.Sys.NewMeter(payer, l.Budget, req.CallID)
+		req.Meter = meter
 		return a.io(func() (any, error) {
 			ctx, cancel := context.WithTimeout(context.Background(), SampleTimeout)
 			defer cancel()
@@ -83,6 +88,7 @@ func (a *Actor) sampleModule() goja.Value {
 				switch e.Type {
 				case "usage":
 					if e.Usage != nil {
+						meter.Usage(*e.Usage)
 						ans.in += e.Usage.Input
 						ans.out += e.Usage.Output
 						ans.model = e.Usage.Model
@@ -97,10 +103,10 @@ func (a *Actor) sampleModule() goja.Value {
 			}, func(context.Context, llm.Event) (llm.ToolResult, error) {
 				return llm.ToolResult{Value: json.RawMessage(`"tools are not available to actors"`), IsError: true}, nil
 			})
-			// A call that started with budget left always completes, even
-			// past the budget; the next call is refused.
-			if ans.in+ans.out > 0 {
-				_ = sys.AddLLMUsage(context.Background(), payer, ans.in+ans.out)
+			meter.Close() // a round that reported no usage is charged in full
+			var f *llm.Failure
+			if errors.As(err, &f) && f.Code == "quota_exceeded" {
+				return nil, fail(f.Code, "%s", f.Message)
 			}
 			if err != nil {
 				return nil, fail("unavailable", "the model failed: %v", err)

@@ -67,6 +67,9 @@ type call struct {
 	thinking string
 }
 
+// imageTokens is the input allowance held for each image.
+const imageTokens = 2000
+
 func (c *call) run(ctx context.Context) error {
 	ch, applied := c.b.pick(c.r.Options)
 	m := ch.model
@@ -102,6 +105,20 @@ func (c *call) run(ctx context.Context) error {
 		perRound, err := budget.next(m.MaxTokens)
 		if err != nil {
 			return err
+		}
+		if c.r.Meter != nil {
+			// Hold this round's cost before the provider is contacted
+			// (SLOP3-007): one token per byte of context is conservative,
+			// plus a fixed allowance per image; the hold caps the round's
+			// output, so the round cannot spend past it.
+			est := llm.Estimate{InputTokens: int64(contextBytes(t)) + int64(len(c.r.Images))*imageTokens, MaxOutputTokens: int64(perRound)}
+			capped, err := c.r.Meter.Before(ctx, round, est)
+			if err != nil {
+				return err
+			}
+			if capped > 0 && capped < int64(perRound) {
+				perRound = int(capped)
+			}
 		}
 		if err := engine.KeyInferenceConfig.Set(&t.Data, engine.InferenceConfig{MaxResponseTokens: &perRound}); err != nil {
 			return err

@@ -90,22 +90,28 @@ func TestLLMBudgets(t *testing.T) {
 	if can["allowed"] != true || can["limits"].(map[string]any)["remaining"] != 60.0 || can["visitor"].(map[string]any)["llm"].(map[string]any)["remaining"] != 60.0 {
 		t.Fatalf("can = %v", can)
 	}
-	for i, wantLeft := range []float64{38, 16, 0} {
+	// The budget is hard (SLOP3-007 ledger): each round holds what it may
+	// cost and its output is capped at the hold. The third call starts with
+	// 16 left, 4 of them for its input, so it may write 12: it is cut short
+	// and spends exactly what was left.
+	for i, want := range []struct {
+		text string
+		left float64
+	}{{"slop is connected.", 38}, {"slop is connected.", 16}, {"slop is conn", 0}} {
 		st, out := ask(sam)
-		if st != 200 || out["result"].(map[string]any)["text"] != "slop is connected." {
+		if st != 200 || out["result"].(map[string]any)["text"] != want.text {
 			t.Fatalf("call %d: %d %v", i, st, out)
 		}
 		u := h.call(sam, "llm.usage", map[string]any{}).(map[string]any)["llm"].(map[string]any)
-		if u["remaining"] != wantLeft {
+		if u["remaining"] != want.left {
 			t.Fatalf("after call %d: %v", i, u)
 		}
 	}
-	// The third call started with 16 left and finished over budget; the
-	// fourth is refused.
+	// The fourth is refused.
 	if _, out := ask(sam); code(out) != "quota_exceeded" {
 		t.Fatalf("over budget: %v", out)
 	}
-	if got := h.call(admin, "llm.usage", map[string]any{"person": "sam@example.com"}).(map[string]any)["llm"].(map[string]any); got["used"] != 66.0 {
+	if got := h.call(admin, "llm.usage", map[string]any{"person": "sam@example.com"}).(map[string]any)["llm"].(map[string]any); got["used"] != 60.0 {
 		t.Fatalf("sam's usage = %v", got)
 	}
 	// An admin resets the month.

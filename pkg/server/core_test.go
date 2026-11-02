@@ -164,7 +164,6 @@ func TestActionWithoutRequiresNeedsAdmin(t *testing.T) {
 // call checks remaining > 0, calls the model, then charges, so parallel
 // calls all pass the check.
 func TestConcurrentSamplesCannotOverspend(t *testing.T) {
-	t.Skip("SLOP3-007 phase 5")
 	h := newHarness(t)
 	admin := h.tokenFor("admin@example.com", "read", "write", "admin")
 	aiApp(t, h, admin)

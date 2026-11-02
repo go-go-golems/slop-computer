@@ -224,9 +224,12 @@ func (d *DB) LLMFor(ctx context.Context, person, audience string) LLM {
 	if !ok || !row.Allowed || person == "" {
 		return LLM{}
 	}
-	out := LLM{Allowed: true, Budget: row.Budget, Used: d.LLMUsed(ctx, person, Period(time.Now())), Source: row.Subject}
+	period := Period(time.Now())
+	out := LLM{Allowed: true, Budget: row.Budget, Used: d.LLMUsed(ctx, person, period), Source: row.Subject}
 	if row.Budget != nil {
-		rem := max(0, *row.Budget-out.Used)
+		// What is left: the limit less what was spent and what open holds
+		// set aside (SLOP3-007 ledger).
+		rem := max(0, *row.Budget-out.Used-d.LLMReserved(ctx, person, period))
 		out.Remaining = &rem
 	}
 	return out
@@ -255,15 +258,6 @@ func (d *DB) LLMUsed(ctx context.Context, person, period string) int64 {
 	var n int64
 	_ = d.QueryRowContext(ctx, `SELECT used_tokens FROM llm_usage WHERE person = ? AND period = ?`, person, period).Scan(&n)
 	return n
-}
-
-// AddLLMUsage charges tokens to a person's current month.
-func (d *DB) AddLLMUsage(ctx context.Context, person string, tokens int64) error {
-	now := time.Now()
-	_, err := d.ExecContext(ctx, `INSERT INTO llm_usage (person, period, used_tokens, updated_at) VALUES (?, ?, ?, ?)
-		ON CONFLICT (person, period) DO UPDATE SET used_tokens = used_tokens + excluded.used_tokens, updated_at = excluded.updated_at`,
-		person, Period(now), tokens, now.UnixMilli())
-	return err
 }
 
 // ResetLLMUsage sets a person's current month to zero.

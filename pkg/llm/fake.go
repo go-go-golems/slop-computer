@@ -55,8 +55,19 @@ func (f *Fake) Sample(ctx context.Context, r Request, emit func(Event), execute 
 	if err := ctx.Err(); err != nil {
 		return err
 	}
-	if r.MaxOutputTokens > 0 && len(text) > r.MaxOutputTokens {
-		text = text[:r.MaxOutputTokens]
+	limit := int64(r.MaxOutputTokens)
+	if r.Meter != nil {
+		// One round: hold its cost first; the fake counts a byte as a token.
+		capped, err := r.Meter.Before(ctx, 0, Estimate{InputTokens: int64(len(r.Input)), MaxOutputTokens: limit})
+		if err != nil {
+			return err
+		}
+		if capped > 0 && (limit <= 0 || capped < limit) {
+			limit = capped
+		}
+	}
+	if limit > 0 && int64(len(text)) > limit {
+		text = text[:limit]
 	}
 	emit(Event{Type: "usage", CallID: r.CallID, Usage: &Usage{Input: int64(len(r.Input)), Output: int64(len(text)), Model: "test/fake"}})
 	emit(Event{Type: "text", CallID: r.CallID, Text: text, Delta: text})
