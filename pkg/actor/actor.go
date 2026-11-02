@@ -64,6 +64,11 @@ func fail(code, format string, args ...any) *Error {
 	return &Error{Code: code, Message: fmt.Sprintf(format, args...)}
 }
 
+// errStopped fails an event that never ran because its actor stopped first
+// (a new version activated, a restart, the actor broke). Nothing of it
+// happened, so the caller sends it again to the actor that replaces it.
+var errStopped = fail("actor_error", "the actor stopped")
+
 type result struct {
 	v   any
 	err error
@@ -312,12 +317,15 @@ func (a *Actor) drain() {
 	for {
 		select {
 		case ev := <-a.inbox:
-			target := ev
 			if ev.parent != nil {
-				target = ev.parent
+				// the rest of an action that already ran up to an await
+				if ev.parent.reply != nil {
+					ev.parent.reply <- result{err: fail("actor_error", "lost: the actor stopped")}
+				}
+				continue
 			}
-			if target.reply != nil {
-				target.reply <- result{err: fail("actor_error", "lost: the actor stopped")}
+			if ev.reply != nil {
+				ev.reply <- result{err: errStopped}
 			}
 		default:
 			return
@@ -717,7 +725,7 @@ func (a *Actor) send(ctx context.Context, ev *event) (any, error) {
 	case <-ctx.Done():
 		return nil, fail("unavailable", "the actor is busy")
 	case <-a.stop:
-		return nil, fail("actor_error", "the actor stopped")
+		return nil, errStopped
 	}
 	select {
 	case r := <-ev.reply:

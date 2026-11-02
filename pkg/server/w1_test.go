@@ -1,9 +1,13 @@
 package server
 
 import (
+	"context"
+	"fmt"
 	"strings"
 	"testing"
+	"time"
 
+	"github.com/go-go-golems/slop-computer/pkg/actor"
 	"github.com/go-go-golems/slop-computer/pkg/apps"
 )
 
@@ -95,4 +99,55 @@ func TestModuleTrust(t *testing.T) {
 		t.Fatalf("untrusted again: use('system') = %v", got)
 	}
 	h.fail(admin, "app.untrust", map[string]any{"app": "tool", "module": "system"}, "not_found")
+}
+
+// Calls queued behind a busy turn when the actor stops (a new version, a
+// restart) never ran: they go to the actor that replaces it instead of
+// failing with "the actor stopped".
+func TestCallsSurviveActorRestart(t *testing.T) {
+	h := newHarness(t)
+	admin := h.tokenFor("admin@example.com", "read", "write", "admin")
+	h.call(admin, "store.new", map[string]any{"id": "busy"})
+	h.call(admin, "files.push", map[string]any{"store": "busy", "files": files(map[string]string{
+		"app.json": `{"title":"Busy","actor":"actor.js"}`,
+		"actor.js": `
+defineActor({
+  actions: {
+    spin(ctx, { n }) { let x = 0; for (let i = 0; i < n; i++) x += i; return x; },
+    ping(ctx) { return 'pong'; },
+  },
+});`,
+		"index.html": "<!doctype html><title>busy</title>",
+	})})
+	h.call(admin, "actor.call", map[string]any{"store": "busy", "action": "ping"}) // build the actor
+	owner := actor.Visitor{ID: "store:busy", Level: "owner"}
+	// spin holds the turn for a while (the test clock does not move, so it
+	// counts instead of waiting)
+	start := time.Now()
+	if _, err := h.srv.Env.A.Call(context.Background(), "busy", "spin", map[string]any{"n": 200000}, owner, "test"); err != nil {
+		t.Fatal(err)
+	}
+	n0 := int(200000 * float64(400*time.Millisecond) / float64(time.Since(start)+1))
+	go func() {
+		_, _ = h.srv.Env.A.Call(context.Background(), "busy", "spin", map[string]any{"n": n0}, owner, "test")
+	}()
+	time.Sleep(50 * time.Millisecond)
+	const n = 6
+	errs := make(chan error, n)
+	for range n {
+		go func() {
+			v, err := h.srv.Env.A.Call(context.Background(), "busy", "ping", nil, owner, "test")
+			if err == nil && v != "pong" {
+				err = fmt.Errorf("ping = %v", v)
+			}
+			errs <- err
+		}()
+	}
+	time.Sleep(50 * time.Millisecond) // the pings are queued behind spin
+	h.srv.Env.A.Restart("busy")
+	for range n {
+		if err := <-errs; err != nil {
+			t.Fatalf("a call queued when the actor stopped: %v", err)
+		}
+	}
 }

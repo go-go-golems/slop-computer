@@ -444,24 +444,30 @@ func (m *Manager) activate(ctx context.Context, t *store.Turn, r kernel.Running)
 // Call runs an action of a store's actor and waits for its result (which
 // may take several turns when the action awaits I/O).
 func (m *Manager) Call(ctx context.Context, storeID, action string, args any, vis Visitor, via string) (any, error) {
-	a, err := m.Get(ctx, storeID)
-	if err != nil {
-		return nil, err
+	for try := 0; ; try++ {
+		a, err := m.Get(ctx, storeID)
+		if err != nil {
+			return nil, err
+		}
+		if a == nil {
+			return nil, fail("not_found", "%s has no actor", storeID)
+		}
+		if !slices.Contains(a.keys("actions"), action) {
+			return nil, fail("not_found", "%s has no action %q", storeID, action)
+		}
+		v, err := a.send(ctx, &event{kind: "action", name: action, visitor: vis, via: via,
+			run: func(a *Actor, cx *goja.Object) (goja.Value, error) {
+				f := a.fn("actions", action)
+				if f == nil {
+					return nil, fail("not_found", "%s has no action %q", storeID, action)
+				}
+				return f(goja.Undefined(), cx, a.toJS(args))
+			}})
+		if err == error(errStopped) && try < 2 {
+			continue // it never ran: send it to the actor that replaces this one
+		}
+		return v, err
 	}
-	if a == nil {
-		return nil, fail("not_found", "%s has no actor", storeID)
-	}
-	if !slices.Contains(a.keys("actions"), action) {
-		return nil, fail("not_found", "%s has no action %q", storeID, action)
-	}
-	return a.send(ctx, &event{kind: "action", name: action, visitor: vis, via: via,
-		run: func(a *Actor, cx *goja.Object) (goja.Value, error) {
-			f := a.fn("actions", action)
-			if f == nil {
-				return nil, fail("not_found", "%s has no action %q", storeID, action)
-			}
-			return f(goja.Undefined(), cx, a.toJS(args))
-		}})
 }
 
 // Actions lists the actions of a store's actor.
@@ -571,18 +577,31 @@ func matchPattern(pat, p string) (map[string]string, int, bool) {
 // Serve runs a matched route as an event and returns its response.
 func (m *Manager) Serve(ctx context.Context, a *Actor, route Route, req Req, vis Visitor) (*Res, error) {
 	req.Params = route.Params
-	v, err := a.send(ctx, &event{kind: "http", name: route.Key, visitor: vis, via: "http",
-		run: func(a *Actor, cx *goja.Object) (goja.Value, error) {
-			f := a.fn("http", route.Key)
-			if f == nil {
-				return nil, fail("actor_error", "route %s has no run", route.Key)
+	for try := 0; ; try++ {
+		v, err := a.send(ctx, &event{kind: "http", name: route.Key, visitor: vis, via: "http",
+			run: func(a *Actor, cx *goja.Object) (goja.Value, error) {
+				f := a.fn("http", route.Key)
+				if f == nil {
+					return nil, fail("actor_error", "route %s has no run", route.Key)
+				}
+				return f(goja.Undefined(), cx, a.toJS(req))
+			}})
+		if err == error(errStopped) && try < 2 {
+			// it never ran: send it to the actor that replaces this one
+			id := a.st.ID
+			if a, err = m.Get(ctx, id); err != nil {
+				return nil, err
 			}
-			return f(goja.Undefined(), cx, a.toJS(req))
-		}})
-	if err != nil {
-		return nil, err
+			if a == nil {
+				return nil, fail("not_found", "%s has no actor", id)
+			}
+			continue
+		}
+		if err != nil {
+			return nil, err
+		}
+		return toRes(v), nil
 	}
-	return toRes(v), nil
 }
 
 func toRes(v any) *Res {
