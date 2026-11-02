@@ -103,3 +103,61 @@ I wrote the exit tests for phases 1, 2, 3 and 5 in `pkg/server/core_test.go`, ea
 
 ### Code review instructions
 - `pkg/server/core_test.go`. To see a failure, remove a `t.Skip` and run `GOWORK=off go test ./pkg/server -run <name> -count=1 -v`.
+
+## Step 3: Phase 1, groups replace the audience ladder
+
+Every "is this person in this class?" question now goes through one nesting function, `system.GroupsOf`. A policy cell or LLM row on `@member` reaches subscribers and admins. Before this change, paying took access away because those lookups matched the audience exactly. The audience string survives as the name of the highest group, so views, the runtime and actor code see no API change.
+
+### Prompt Context
+**User prompt (verbatim):** see Step 1.
+**Assistant interpretation:** Phase 1 of the plan (decisions 1 and 2).
+**Inferred user intent:** One rule for class membership, in one place.
+**Commit (code):** 43331d3 — "SLOP3-007 phase 1: groups replace the audience ladder"
+
+### What I did
+- `pkg/system/policy.go`:
+  - `GroupsOf(audience)`, the nesting: guest; guest+member; …; admin has all four; "store" has only itself;
+  - `InGroup`;
+  - `Policy` is on when any group's cell (or that group's default) is on;
+  - `PolicyMatrix` sets `Effective` on every cell;
+  - `LLMFor`: a person's own row wins (even off), else `groupLLMRow`, the most generous row that is on (no budget beats any budget).
+- `pkg/access/check.go`:
+  - `Group` constants, `Audience.Groups()`, `Audience.In(g)`, `Checker.Groups`, `Checker.In`;
+  - `Matches` tests group membership;
+  - `AtLeast` and `audRank` deleted; `ValidAudience` is a switch.
+- Call sites moved from `AtLeast` to `In`:
+  - `verbs/stores.go` (`store.new`), `verbs/data.go` (`import.folder`);
+  - `server/live.go` (create-audience, twice);
+  - `server/actors.go` (route audiences);
+  - `actor/actor.go` (`ctx.needAudience` uses `system.InGroup`; the actor's `audRank` is deleted).
+- Back office: the policy matrix shows a cell that is on through a group as "inherited", with a note that groups nest. Rebuilt `pkg/server/admin`.
+- Tests:
+  - phase 1's two exit tests are unskipped;
+  - `TestGroupsByKind` (server, through `explain.can`);
+  - `pkg/system/groups_test.go`: `TestGroupsOf`, `TestPolicyThroughGroups`, `TestLLMRowThroughGroups`.
+
+### Why
+- Nesting is linear (decision 1), so an audience determines its groups. I kept the audience string as the carrier and derived groups from it, instead of adding `View.Groups`, `Visitor.Groups` and a new `Policy` hook signature as the plan sketched. Fewer moving parts, the same semantics, and no change to stored views or the JS runtime.
+- `GroupsOf` lives in `pkg/system` rather than `pkg/access`. `system` answers policy and LLM questions and can't import `access` (`access` imports `system`).
+
+### What worked
+- `GOWORK=off go test ./... -count=1`: all green, including the phase 1 exit tests.
+- `cd web/runtime && pnpm test`: 9/9.
+- `go vet` clean; `gofmt` fixed `check.go`.
+
+### What didn't work
+- `TestLLMBudgets` failed on purpose: `p6_test.go:80: admin, policy off for admin: map[result:map[text:slop is connected. …]]`. The admin now gets `sample` through the `@member` cell. The assertion now expects success, as the plan's "tests that change on purpose" table says.
+
+### What I learned
+- The `"store"` audience isn't produced yet: `AudienceOf` still returns `member` for `KindStore`. Making stores `@store` changes what alarms and cross-store calls may do, so it belongs with phase 4's tests.
+
+### What warrants a second pair of eyes
+- `groupLLMRow`: a group row that is off adds nothing, while a person's own row that is off switches them off. That is the plan's rule, and now executable in `TestLLMRowThroughGroups`.
+- In the matrix, turning `@subscriber` off while `@member` is on changes nothing for subscribers. The cell shows "inherited" so this isn't hidden.
+
+### What should be done in the future
+- Phase 4: `KindStore` → `@store`; `DefaultPolicy` already keeps `assets` off for "store" (its rule is `audience != "guest"`, so it would be on for "store" too; check this in phase 4).
+
+### Code review instructions
+- `pkg/system/policy.go` (`GroupsOf`, `Policy`, `groupLLMRow`), then `pkg/access/check.go` (`Matches`, `In`).
+- Validate with `GOWORK=off go test ./pkg/system ./pkg/server -count=1`.
