@@ -149,7 +149,7 @@ func (s *Server) openView(ctx context.Context, p *access.Principal, storeID, par
 	if run.N == 0 {
 		return nil, rtErr("unavailable", "nothing has been pushed to %s yet", run.App)
 	}
-	if run.Broken != "" {
+	if run.Broken != "" && !run.Fallback { // a fallback runs the last good version
 		return nil, rtErr("unavailable", "the app is broken: %s", run.Broken)
 	}
 	var caps rt.Caps

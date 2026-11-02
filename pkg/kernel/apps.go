@@ -20,6 +20,9 @@ type Running struct {
 	N        int64          `json:"n"`                  // the app store's snapshot; 0 = nothing pushed yet
 	Manifest *apps.Manifest `json:"manifest,omitempty"` // nil: plain content, no app.json
 	Broken   string         `json:"broken,omitempty"`   // why app.json could not be read
+	// Fallback: the newest version is broken and the store runs the last
+	// version it activated (N, Manifest); that one is usable.
+	Fallback bool `json:"fallback,omitempty"`
 }
 
 type manifestCache struct {
@@ -75,6 +78,7 @@ func (k *Kernel) Running(ctx context.Context, id string) (Running, error) {
 	if cur > 0 {
 		r.N = cur
 		r.Manifest, _ = k.manifest(ctx, as, cur)
+		r.Fallback = true
 	}
 	return r, nil
 }

@@ -232,3 +232,28 @@ func TestPageCallsAction(t *testing.T) {
 		t.Fatalf("unknown action = %v", out)
 	}
 }
+
+// A version whose activation fails leaves the store on the last good one,
+// and pages keep opening on it.
+func TestViewsOpenOnFallbackVersion(t *testing.T) {
+	h := newHarness(t)
+	admin := h.tokenFor("admin@example.com", "read", "write", "admin")
+	live := h.cfg.Hosts.Live[0]
+	h.call(admin, "store.new", map[string]any{"id": "fb"})
+	h.call(admin, "files.push", map[string]any{"store": "fb", "files": files(map[string]string{
+		"app.json": `{"title":"F","capabilities":{"db":{}}}`, "index.html": "<!doctype html><title>f</title>",
+		"sql/001_ok.sql": "CREATE TABLE items (id INTEGER PRIMARY KEY);"})})
+	h.call(admin, "grant.set", map[string]any{"store": "fb", "subject": "@guest", "level": "view"})
+	h.call(admin, "mount.set", map[string]any{"host": live, "path": "/fb", "store": "fb"})
+	g := h.site(live)
+	if st, v := openView(g, live, "/fb", ""); st != 200 {
+		t.Fatalf("first version: %d %v", st, v)
+	}
+	h.call(admin, "files.push", map[string]any{"store": "fb", "prune": false, "files": files(map[string]string{"sql/002_bad.sql": "CREATE TABLE _nope (x);"})})
+	if st := h.call(admin, "app.status", map[string]any{"store": "fb"}).(map[string]any); st["n"] != 1.0 || st["broken"] == "" {
+		t.Fatalf("status after a bad version: %v", st)
+	}
+	if st, v := openView(g, live, "/fb", ""); st != 200 || v["version"] != 1.0 {
+		t.Fatalf("view on the fallback version: %d %v", st, v)
+	}
+}
