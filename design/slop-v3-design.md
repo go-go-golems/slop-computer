@@ -325,9 +325,11 @@ CREATE VIEW my_orders AS SELECT id, item, qty, at FROM orders WHERE owner = slop
 
 ```js
 actions: {
-  order(ctx, { item, qty }) {
-    ctx.need('interact');
-    return sql.run('INSERT INTO orders(owner, item, qty, at) VALUES (?,?,?,?)', ctx.principal.id, item, qty, ctx.now);
+  order: {
+    requires: 'interact',   // checked by the kernel before run (SLOP3-007)
+    run(ctx, { item, qty }) {
+      return sql.run('INSERT INTO orders(owner, item, qty, at) VALUES (?,?,?,?)', ctx.principal.id, item, qty, ctx.now);
+    },
   },
 }
 ```
@@ -427,20 +429,27 @@ defineActor({
   },
 
   // Called from pages: (await claude.use('slop')).actions.addTask({...}). Returns JSON.
+  // Each action declares the level it requires; the kernel checks it before
+  // any of the action's code runs, and an action that declares none needs
+  // admin (SLOP3-007). ctx.need stays for checks that depend on data.
   actions: {
-    addTask(ctx, { board, title }) {
-      ctx.need('interact');
-      const { lastRowid } = sql.run(
-        'INSERT INTO tasks(board, title, owner, at) VALUES (?,?,?,?)',
-        board, title, ctx.principal.id, ctx.now);
-      return { id: lastRowid };
+    addTask: {
+      requires: 'interact',
+      run(ctx, { board, title }) {
+        const { lastRowid } = sql.run(
+          'INSERT INTO tasks(board, title, owner, at) VALUES (?,?,?,?)',
+          board, title, ctx.principal.id, ctx.now);
+        return { id: lastRowid };
+      },
     },
-    async summarize(ctx, { board }) {
-      ctx.need('interact');
-      const rows = sql.all('SELECT title FROM tasks WHERE board = ?', board);   // turn 1
-      const text = await use('sample').create({ prompt: rows.map(r => r.title).join('\n') });
-      docs.doc(`summaries/${board}`).set({ text, at: ctx.now });                    // turn 2, new ctx.now
-      return { text };
+    summarize: {
+      requires: 'interact',
+      async run(ctx, { board }) {
+        const rows = sql.all('SELECT title FROM tasks WHERE board = ?', board);   // turn 1
+        const text = await use('sample').create({ prompt: rows.map(r => r.title).join('\n') });
+        docs.doc(`summaries/${board}`).set({ text, at: ctx.now });                    // turn 2, new ctx.now
+        return { text };
+      },
     },
   },
 
@@ -798,7 +807,7 @@ Rules map an operation to the minimum level it needs. They come from the app man
 | --- | --- | --- |
 | Read or write a document | `capabilities.db.rules`, path patterns with `{self}` | read `view`, write `interact`; `data/users/{self}/…` private to its owner |
 | SQL on a table or view | `slop.sql.expose` | not exposed |
-| Call an action | `ctx.need(level)` inside it; `slop.api` documents it | none: the action decides |
+| Call an action | `requires` on the action, checked before it runs (SLOP3-007); `ctx.need` inside it for checks that depend on data | `admin` |
 | HTTP route | `level` on the route | `view` |
 | Channel topic | `capabilities.room.topics` | `admin` |
 | Comment | contract | `interact` |

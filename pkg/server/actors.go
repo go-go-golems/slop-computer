@@ -160,7 +160,7 @@ func (s *Server) serveActorRoute(w http.ResponseWriter, r *http.Request, res *re
 			return true
 		}
 	}
-	if route.Audience != "" && !access.Audience(vis.Audience).AtLeast(access.Audience(route.Audience)) {
+	if route.Audience != "" && !access.Audience(vis.Audience).In(access.Group(route.Audience)) {
 		w.Header().Set("Content-Type", "application/json")
 		w.WriteHeader(403)
 		_ = json.NewEncoder(w).Encode(map[string]any{"error": map[string]any{"code": "audience_required", "audience": route.Audience}})

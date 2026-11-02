@@ -7,6 +7,7 @@ import (
 
 	"github.com/dop251/goja"
 
+	"github.com/go-go-golems/slop-computer/pkg/access"
 	"github.com/go-go-golems/slop-computer/pkg/actor"
 	"github.com/go-go-golems/slop-computer/pkg/verbs"
 )
@@ -17,8 +18,8 @@ var platformOps = map[string]string{"stores.create": "store.new", "mounts.set": 
 // platformModule is use('platform') in actors: an app that creates stores,
 // sets mounts or grants. Each call needs the operation listed in app.json
 // slop.platform and the policy on for the visitor's audience, and runs as
-// the visitor (the store's owner for alarms and reactors) through the verb
-// of the same meaning, so it can do only what that person could.
+// the visitor (the store itself for alarms and reactors) through the verb
+// of the same meaning, so it can do only what they could.
 func (s *Server) platformModule(a *actor.Actor) goja.Value {
 	vm := a.VM()
 	listed := a.Manifest().Slop.Platform
@@ -29,13 +30,20 @@ func (s *Server) platformModule(a *actor.Actor) goja.Value {
 				a.Throw("permission_denied", name+" is not in app.json slop.platform")
 			}
 			v := a.Visitor()
-			if v.Payer == "" {
-				a.Throw("permission_denied", "a visitor without an id cannot use the platform")
-			}
 			ctx := context.Background()
-			p := s.personAs(ctx, v.Payer, "app:"+a.App())
-			if p == nil {
-				a.Throw("permission_denied", "no person to act as")
+			var p *access.Principal
+			if id, ok := strings.CutPrefix(v.ID, "store:"); ok {
+				// Nobody behind the call (an alarm, a reactor, another
+				// store): the store acts as itself, holding only what was
+				// granted to store:<id> (SLOP3-007), never its owner.
+				p = &access.Principal{Kind: access.KindStore, Store: id, Via: "app:" + a.App()}
+			} else {
+				if v.Payer == "" {
+					a.Throw("permission_denied", "a visitor without an id cannot use the platform")
+				}
+				if p = s.personAs(ctx, v.Payer, "app:"+a.App()); p == nil {
+					a.Throw("permission_denied", "no person to act as")
+				}
 			}
 			args, _ := a.FromJS(arg).(map[string]any)
 			if args == nil {

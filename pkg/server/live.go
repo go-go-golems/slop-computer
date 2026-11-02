@@ -258,7 +258,7 @@ func (s *Server) siteOpenView(w http.ResponseWriter, r *http.Request) {
 	if errors.Is(err, errNoStore) {
 		m := res.m.Mount
 		out := map[string]any{"error": map[string]string{"code": "no_instance", "message": "nothing is here yet"}, "create": m.CreateApp != ""}
-		if m.CreateApp != "" && p != nil && s.Env.K.Access.AudienceOf(ctx, p).AtLeast(access.Audience(m.CreateAudience)) {
+		if m.CreateApp != "" && p != nil && s.Env.K.Access.In(ctx, p, access.Group(m.CreateAudience)) {
 			out["mayCreate"] = true
 		}
 		httpx.JSON(w, 404, out)
@@ -434,7 +434,7 @@ func (s *Server) siteCreate(w http.ResponseWriter, r *http.Request) {
 		httpx.Fail(w, 404, "not_found", "nothing can be created here")
 		return
 	}
-	if !s.Env.K.Access.AudienceOf(ctx, p).AtLeast(access.Audience(m.Mount.CreateAudience)) {
+	if !s.Env.K.Access.In(ctx, p, access.Group(m.Mount.CreateAudience)) {
 		httpx.Fail(w, 403, "audience_required", "creating one here is for "+m.Mount.CreateAudience+"s")
 		return
 	}

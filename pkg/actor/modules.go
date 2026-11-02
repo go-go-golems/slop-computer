@@ -1,6 +1,7 @@
 package actor
 
 import (
+	"context"
 	"encoding/base64"
 	"encoding/json"
 	"io"
@@ -475,20 +476,29 @@ func (a *Actor) storesModule() goja.Value {
 		}
 		target := b.Target
 		me := &access.Principal{Kind: access.KindStore, Store: a.st.ID}
-		d, _, err := a.m.K.Access.Can(ctx, me, target, rt.LevelView, "reading", true)
-		a.check(err)
-		if !d.OK {
-			a.throw(fail("permission_denied", "store:%s cannot read %s (grant it view)", a.st.ID, target))
+		// fresh decides again on every call through the handle, in the
+		// calling turn (SLOP3-007): a handle kept across turns stops working
+		// once the grant to store:<id> is gone. It returns the turn's
+		// context, the level, and the target's read rule at that level.
+		fresh := func() (context.Context, rt.Level, func(string) bool) {
+			cx := a.turn().t.Context()
+			d, _, err := a.m.K.Access.Can(cx, me, target, rt.LevelView, "reading", true)
+			a.check(err)
+			if !d.OK {
+				a.throw(fail("permission_denied", "store:%s cannot read %s (grant it view)", a.st.ID, target))
+			}
+			// the target's read rules hold for a store as for anyone at its level
+			rules := a.m.K.Rules(cx, target)
+			return cx, d.Level, func(path string) bool { return rules.CanRead(path, me.ID(), d.Level) }
 		}
+		fresh()
 		ts, err := a.m.K.Store(ctx, target)
 		a.check(err)
-		// the target's read rules hold for a store as for anyone at its level
-		rules := a.m.K.Rules(ctx, target)
-		may := func(path string) bool { return rules.CanRead(path, me.ID(), d.Level) }
 		r := a.vm.NewObject()
 		_ = r.Set("id", target)
 		docs := a.vm.NewObject()
 		_ = docs.Set("get", func(path string) goja.Value {
+			ctx, _, may := fresh()
 			doc, err := ts.GetDoc(ctx, path, may)
 			if err != nil {
 				return a.snap(store.Doc{}, false, path)
@@ -496,6 +506,7 @@ func (a *Actor) storesModule() goja.Value {
 			return a.snap(doc, true, path)
 		})
 		_ = docs.Set("query", func(coll string, opts goja.Value) goja.Value {
+			ctx, _, may := fresh()
 			q := rt.Query{Coll: coll}
 			if obj, ok := opts.(*goja.Object); ok && opts != nil {
 				b, _ := json.Marshal(a.fromJS(obj))
@@ -513,6 +524,7 @@ func (a *Actor) storesModule() goja.Value {
 		_ = r.Set("docs", docs)
 		files := a.vm.NewObject()
 		_ = files.Set("text", func(path string) goja.Value {
+			ctx, _, _ := fresh()
 			n, err := ts.Ref(ctx, "main")
 			a.check(err)
 			f, err := ts.SnapshotFile(ctx, n, path)
@@ -522,6 +534,7 @@ func (a *Actor) storesModule() goja.Value {
 			return a.vm.ToValue(string(b))
 		})
 		_ = files.Set("list", func() goja.Value {
+			ctx, _, _ := fresh()
 			n, err := ts.Ref(ctx, "main")
 			a.check(err)
 			fs, err := ts.SnapshotFiles(ctx, n)
@@ -539,6 +552,7 @@ func (a *Actor) storesModule() goja.Value {
 			}
 			assets := a.vm.NewObject()
 			_ = assets.Set("get", func(id string) goja.Value {
+				ctx, _, _ := fresh()
 				f, err := ts.File(ctx, "assets", id)
 				if err != nil {
 					return goja.Null()
@@ -546,6 +560,7 @@ func (a *Actor) storesModule() goja.Value {
 				return a.toJS(desc(f))
 			})
 			_ = assets.Set("list", func() goja.Value {
+				ctx, _, _ := fresh()
 				fs, err := ts.Files(ctx, "assets", "")
 				a.check(err)
 				out := make([]any, len(fs))
@@ -559,13 +574,15 @@ func (a *Actor) storesModule() goja.Value {
 		// rev is the target's latest rev: whether it changed since a read.
 		_ = r.Set("rev", func() int64 { return ts.Head() })
 		_ = r.Set("log", func(after int64) goja.Value {
+			ctx, _, _ := fresh()
 			cs, err := ts.Log(ctx, after, 100)
 			a.check(err)
 			return a.toJS(cs)
 		})
 		_ = r.Set("call", func(action string, args goja.Value) goja.Value {
+			ctx, lv, _ := fresh()
 			payload := a.fromJS(args)
-			vis := Visitor{ID: "store:" + a.st.ID, Audience: "member", Level: d.LevelName()}
+			vis := Visitor{ID: "store:" + a.st.ID, Audience: string(access.AudStore), Level: lv.String()}
 			return a.io(func() (any, error) {
 				return a.m.Call(ctx, target, action, payload, vis, "store:"+a.st.ID)
 			}, func(v any) (goja.Value, error) { return a.toJS(v), nil })

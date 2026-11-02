@@ -65,12 +65,12 @@ func New(k *kernel.Kernel) *Manager {
 }
 
 // allowed checks a policy capability for the current turn's visitor (for
-// alarms and reactors, the store owner's audience).
+// alarms and reactors, the store itself: the @store cell).
 func (m *Manager) allowed(a *Actor, capability string) bool {
 	if m.Policy == nil {
 		return true
 	}
-	aud := "admin"
+	aud := string(access.AudStore) // no turn: nobody but the store itself
 	if a.cur != nil {
 		aud = a.Visitor().Audience
 	}
@@ -291,13 +291,11 @@ func (m *Manager) onActivated(id string, r kernel.Running) {
 
 // storeVisitor is the store itself, for setup, reactors and alarms.
 func (m *Manager) storeVisitor(ctx context.Context, id string) Visitor {
-	v := Visitor{ID: "store:" + id, Name: id, Level: "owner", Audience: "member"}
-	if row, err := m.K.Sys.StoreByID(ctx, id); err == nil {
-		if p, err := m.K.Sys.Person(ctx, row.Owner); err == nil {
-			v.Audience = string(m.K.Access.AudienceOf(ctx, access.PersonPrincipal(p, "")))
-			v.Payer = p.ID
-		}
-	}
+	// Nobody is behind an alarm, a reactor or setup: the store acts as
+	// itself (SLOP3-007 decision 3). It is owner of its own data, in the
+	// group @store for policy, and pays for its own model calls; it never
+	// borrows its owner.
+	v := Visitor{ID: "store:" + id, Name: id, Level: "owner", Audience: string(access.AudStore), Payer: "store:" + id}
 	m.withLLM(ctx, &v)
 	return v
 }
@@ -394,6 +392,9 @@ func (m *Manager) activate(ctx context.Context, t *store.Turn, r kernel.Running)
 	if err != nil {
 		return err
 	}
+	for _, name := range a.undeclared {
+		a.log("warn", fmt.Sprintf("action %s declares no requires; callers need admin", name))
+	}
 	ev := &event{kind: "setup", visitor: m.storeVisitor(ctx, r.Store), via: "activate"}
 	a.cur = &turn{t: t, ev: ev, rev: t.Rev - 1}
 	defer func() { a.cur = nil }()
@@ -488,6 +489,11 @@ func (m *Manager) Call(ctx context.Context, storeID, action string, args any, vi
 	if !slices.Contains(a.keys("actions"), action) {
 		return nil, fail("not_found", "%s has no action %q", storeID, action)
 	}
+	// The action's declared requires, checked before any of its code runs:
+	// one check for the actor.call verb, page calls and store-to-store calls.
+	if err := a.mayCall(action, vis); err != nil {
+		return nil, err
+	}
 	return a.send(ctx, &event{kind: "action", name: action, visitor: vis, via: via,
 		run: func(a *Actor, cx *goja.Object) (goja.Value, error) {
 			f := a.fn("actions", action)
@@ -496,6 +502,25 @@ func (m *Manager) Call(ctx context.Context, storeID, action string, args any, vi
 			}
 			return f(goja.Undefined(), cx, a.toJS(args))
 		}})
+}
+
+// mayCall checks the visitor's level against an action's requires.
+func (a *Actor) mayCall(action string, vis Visitor) error {
+	need, ok := a.requires[action]
+	if !ok {
+		need = rt.LevelAdmin
+	}
+	have, _ := rt.ParseLevel(vis.Level)
+	if have >= need {
+		return nil
+	}
+	if have == rt.LevelNone {
+		return fail("not_found", "%s has no action %q", a.st.ID, action)
+	}
+	if slices.Contains(a.undeclared, action) {
+		return fail("permission_denied", "%s declares no requires, so it needs admin; you have %s", action, have)
+	}
+	return fail("permission_denied", "%s needs %s; you have %s", action, need, have)
 }
 
 // Actions lists the actions of a store's actor.

@@ -17,9 +17,10 @@ const system = use('system');
 defineActor({
   actions: {
     has(ctx) { return system ? Object.keys(system).sort() : null; },
-    async people(ctx) { return (await system.people.list({ kind: 'user' })).length; },
-    async role(ctx, { id, role }) { return await system.people.setRole(id, role); },
-    async grant(ctx, { store, subject, level }) { return await system.grants.set(store, subject, level); },
+    // Members may call these; what the module lets them do is the verb's own rule.
+    people: { requires: 'interact', async run(ctx) { return (await system.people.list({ kind: 'user' })).length; } },
+    role: { requires: 'interact', async run(ctx, { id, role }) { return await system.people.setRole(id, role); } },
+    grant: { requires: 'interact', async run(ctx, { store, subject, level }) { return await system.grants.set(store, subject, level); } },
   },
 });
 `
@@ -88,9 +89,12 @@ func TestModuleTrust(t *testing.T) {
 	if !strings.Contains(e["message"].(string), "admin scope") {
 		t.Fatalf("role with a write token: %v", e)
 	}
-	// The system log names the app.
+	// The system log names the app. (The activation row can land among the
+	// last few: whichever caller runs Running first activates and logs, and
+	// a background caller may log after the test's own calls; so look at
+	// the last ten rows, not three.)
 	h.call(admin, "actor.call", map[string]any{"store": "tool", "action": "grant", "args": map[string]any{"store": "tool", "subject": "@guest", "level": "view"}})
-	logs := fmtAny(h.call(admin, "log.system", map[string]any{"limit": 3}))
+	logs := fmtAny(h.call(admin, "log.system", map[string]any{"limit": 10}))
 	if !strings.Contains(logs, "app:tool") || !strings.Contains(logs, "trust tool with system") {
 		t.Fatalf("system log = %s", logs)
 	}

@@ -119,6 +119,11 @@ type Actor struct {
 	// followers) consult them; only the actor's goroutine touches def.
 	groups map[string][]string
 	routes map[string]Route
+	// requires is the level each action needs, checked by the kernel
+	// before the action runs (SLOP3-007 phase 3); undeclared lists the
+	// actions that declare none, which need admin.
+	requires   map[string]rt.Level
+	undeclared []string
 
 	wake  chan struct{} // capacity 1: the store's inbox has something
 	stop  chan struct{}
@@ -194,16 +199,41 @@ func build(m *Manager, st *store.Store, run kernel.Running, files map[string][]b
 	if a.def == nil {
 		return nil, fail("actor_error", "%s did not call defineActor", entry)
 	}
-	a.readShape()
+	if err := a.readShape(); err != nil {
+		return nil, fail("actor_error", "%s: %v", entry, err)
+	}
 	return a, nil
 }
 
 // readShape copies the definition's group keys and route options to Go.
-func (a *Actor) readShape() {
+func (a *Actor) readShape() error {
 	a.groups, a.routes = map[string][]string{}, map[string]Route{}
 	for _, group := range []string{"actions", "on", "every", "alarms", "http"} {
 		if obj, ok := a.def.Get(group).(*goja.Object); ok {
 			a.groups[group] = obj.Keys()
+		}
+	}
+	// Each action's requires: { requires: 'view' | 'interact' | 'admin' |
+	// 'owner', run }. A plain function, or an object without requires,
+	// needs admin: an action fails closed (decision 4, amended).
+	a.requires, a.undeclared = map[string]rt.Level{}, nil
+	actions, _ := a.def.Get("actions").(*goja.Object)
+	for _, name := range a.groups["actions"] {
+		need, declared := rt.LevelAdmin, false
+		if o, ok := actions.Get(name).(*goja.Object); ok {
+			if _, isFn := goja.AssertFunction(o); !isFn {
+				if v := o.Get("requires"); v != nil && !goja.IsUndefined(v) {
+					l, ok := rt.ParseLevel(v.String())
+					if !ok || l == rt.LevelNone || l == rt.LevelSelf {
+						return fmt.Errorf("action %s requires %q: use view, interact, admin or owner", name, v.String())
+					}
+					need, declared = l, true
+				}
+			}
+		}
+		a.requires[name] = need
+		if !declared {
+			a.undeclared = append(a.undeclared, name)
 		}
 	}
 	routes, _ := a.def.Get("http").(*goja.Object)
@@ -219,6 +249,7 @@ func (a *Actor) readShape() {
 		}
 		a.routes[key] = r
 	}
+	return nil
 }
 
 // requirer gives actor.js CommonJS require of other .js files in its tree.
@@ -520,7 +551,7 @@ func (a *Actor) ctxObject(ev *event) *goja.Object {
 		return goja.Undefined()
 	})
 	_ = o.Set("needAudience", func(aud string) goja.Value {
-		if audRank[ev.visitor.Audience] < audRank[aud] {
+		if !system.InGroup(ev.visitor.Audience, aud) {
 			a.throw(fail("audience_required", "this is for %ss", aud))
 		}
 		return goja.Undefined()
@@ -535,8 +566,6 @@ func (a *Actor) ctxObject(ev *event) *goja.Object {
 	})
 	return o
 }
-
-var audRank = map[string]int{"guest": 1, "member": 2, "subscriber": 3, "admin": 4}
 
 func orNone(s string) string {
 	if s == "" {

@@ -24,7 +24,11 @@ type Principal struct {
 	TokenID string         // tokens only
 	Scopes  []string       // tokens only
 	Store   string         // store principals: the store id
-	Via     string         // how the request came in: cli, http, eval, page, actor, ...
+	// Trusted marks a store principal admitted by a live trust row (an
+	// admin trusted its app with the module it is calling through): set
+	// only by the module bridge, never from a request.
+	Trusted bool
+	Via     string // how the request came in: cli, http, eval, page, actor, ...
 }
 
 // PersonPrincipal is the principal a person acts as through via: a user, or
@@ -85,7 +89,7 @@ func (p *Principal) Role() string {
 // IsAdmin reports someone acting as an admin: a signed-in admin, an
 // admin's token with the admin scope, or the kernel.
 func (p *Principal) IsAdmin() bool {
-	return p != nil && (p.Kind == KindSystem || p.Role() == system.RoleAdmin)
+	return p != nil && (p.Kind == KindSystem || p.Role() == system.RoleAdmin || (p.Kind == KindStore && p.Trusted))
 }
 
 // HasScope reports whether a token carries a scope; sessions carry all.

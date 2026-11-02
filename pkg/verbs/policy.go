@@ -98,15 +98,22 @@ func init() {
 			}},
 		&Verb{Name: "llm.ls", Doc: "List LLM access rows (people and audience defaults) with their monthly budgets.", Scope: Read, AdminOnly: true, Action: authz.PlatformAdmin,
 			Run: func(ctx context.Context, e *Env, p *access.Principal, a Args) (any, error) { return e.Sys.LLMRows(ctx) }},
-		&Verb{Name: "llm.set", Doc: "Give a person (usr_…, vis_…, an email) or an audience (@guest, @member, @subscriber, @admin) LLM access on or off, with a monthly token budget.", Scope: Write, AdminOnly: true, Action: authz.PlatformAdmin,
+		&Verb{Name: "llm.set", Doc: "Give a person (usr_…, vis_…, an email), an audience (@guest, @member, @subscriber, @admin), @store (stores acting on their own) or one store (store:<id>) LLM access on or off, with a monthly token budget.", Scope: Write, AdminOnly: true, Action: authz.PlatformAdmin,
 			Args: []Arg{{Name: "subject", Type: "string", Pos: 1, Required: true}, {Name: "value", Type: "string", Pos: 2, Required: true},
 				{Name: "budget", Type: "int", Doc: "tokens per calendar month (omit: no limit)"}},
 			Run: func(ctx context.Context, e *Env, p *access.Principal, a Args) (any, error) {
 				sub := a.S("subject")
 				switch {
+				case sub == string(access.GroupStore):
+					// every store acting on its own (alarms, reactors)
 				case strings.HasPrefix(sub, "@"):
 					if !access.ValidAudience(strings.TrimPrefix(sub, "@")) || sub == "@none" {
-						return nil, Errf("invalid_argument", "audience is @guest, @member, @subscriber or @admin")
+						return nil, Errf("invalid_argument", "audience is @guest, @member, @subscriber, @admin or @store")
+					}
+				case strings.HasPrefix(sub, "store:"):
+					// one store's own budget, for its alarms and reactors
+					if _, err := e.Sys.StoreByID(ctx, sub[len("store:"):]); err != nil {
+						return nil, Errf("not_found", "no store %s", sub[len("store:"):])
 					}
 				default:
 					pp, err := e.personArg(ctx, sub)
@@ -141,7 +148,13 @@ func init() {
 			Args: []Arg{{Name: "person", Type: "string", Pos: 1}},
 			Run: func(ctx context.Context, e *Env, p *access.Principal, a Args) (any, error) {
 				q := p
-				if s := a.S("person"); s != "" {
+				if id, ok := strings.CutPrefix(a.S("person"), "store:"); ok {
+					// a store's own budget (alarms, reactors): admins only
+					if !p.IsAdmin() {
+						return nil, Errf("permission_denied", "only admins look at a store's usage")
+					}
+					q = &access.Principal{Kind: access.KindStore, Store: id}
+				} else if s := a.S("person"); s != "" {
 					pp, err := e.personArg(ctx, s)
 					if err != nil {
 						return nil, err

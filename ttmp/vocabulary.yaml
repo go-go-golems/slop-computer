@@ -39,6 +39,10 @@ topics:
       description: Apps hosted on slop (Blocks, Pinup, readers)
     - slug: publishing
       description: Publishing content as public pages and static sites
+    - slug: authz
+      description: 'Authorization: levels, grants, groups, credentials'
+    - slug: security
+      description: Security-relevant design and fixes
 docTypes:
     - slug: design-doc
       description: Structured rationale and architecture notes
@@ -50,6 +54,8 @@ docTypes:
       description: Ticket landing page
     - slug: skill
       description: Skill documentation (what it's for and when to use it)
+    - slug: design
+      description: Design documents and plans
 intent:
     - slug: long-term
       description: Likely to persist

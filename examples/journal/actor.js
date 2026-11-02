@@ -14,49 +14,61 @@ defineActor({
 
   actions: {
     // Pages read posts through these two actions; stats/main changes on every commit to posts.
-    posts(ctx) {
-      ctx.need('view');
-      return sql.all('SELECT id, title, body, author, published_at FROM published_posts ORDER BY published_at DESC LIMIT 50');
+    posts: {
+      requires: 'view',
+      run(ctx) {
+        return sql.all('SELECT id, title, body, author, published_at FROM published_posts ORDER BY published_at DESC LIMIT 50');
+      },
     },
-    drafts(ctx) {
-      ctx.need('interact');
-      return sql.all('SELECT id, title, body, created_at FROM my_drafts ORDER BY created_at DESC');
+    drafts: {
+      requires: 'interact',
+      run(ctx) {
+        return sql.all('SELECT id, title, body, created_at FROM my_drafts ORDER BY created_at DESC');
+      },
     },
-    draft(ctx, args) {
-      ctx.need('interact');
-      const title = String((args && args.title) || '').trim();
-      if (!title) ctx.fail('invalid_argument', 'a draft needs a title');
-      const id = 'p_' + ctx.now.toString(36) + Math.random().toString(36).slice(2, 6);
-      sql.run('INSERT INTO posts(id, title, body, author, created_at) VALUES (?, ?, ?, ?, ?)',
-        id, title, String(args.body || ''), ctx.principal.id, ctx.now);
-      return { id };
+    draft: {
+      requires: 'interact',
+      run(ctx, args) {
+        const title = String((args && args.title) || '').trim();
+        if (!title) ctx.fail('invalid_argument', 'a draft needs a title');
+        const id = 'p_' + ctx.now.toString(36) + Math.random().toString(36).slice(2, 6);
+        sql.run('INSERT INTO posts(id, title, body, author, created_at) VALUES (?, ?, ?, ?, ?)',
+          id, title, String(args.body || ''), ctx.principal.id, ctx.now);
+        return { id };
+      },
     },
-    publish(ctx, { id }) {
-      ctx.need('interact');
-      const p = sql.one('SELECT author, status FROM posts WHERE id = ?', id);
-      if (!p) ctx.fail('not_found', 'no post ' + id);
-      if (p.author !== ctx.principal.id) ctx.need('admin'); // only admins publish other people's drafts
-      sql.run("UPDATE posts SET status = 'published', published_at = ? WHERE id = ?", ctx.now, id);
-      room.emit('published', { id });
-      return { ok: true };
+    publish: {
+      requires: 'interact',
+      run(ctx, { id }) {
+        const p = sql.one('SELECT author, status FROM posts WHERE id = ?', id);
+        if (!p) ctx.fail('not_found', 'no post ' + id);
+        if (p.author !== ctx.principal.id) ctx.need('admin'); // only admins publish other people's drafts
+        sql.run("UPDATE posts SET status = 'published', published_at = ? WHERE id = ?", ctx.now, id);
+        room.emit('published', { id });
+        return { ok: true };
+      },
     },
     // An await ends the turn: the title change commits now, the publish commits after the sleep.
-    async slowPublish(ctx, { id, delayMs }) {
-      ctx.need('interact');
-      sql.run("UPDATE posts SET title = title || ' (scheduled)' WHERE id = ? AND status = 'draft'", id);
-      await time.sleep(delayMs || 60000);
-      sql.run("UPDATE posts SET status = 'published', published_at = ?, title = replace(title, ' (scheduled)', '') WHERE id = ?", ctx.now, id);
-      room.emit('published', { id });
-      return { ok: true, publishedAt: ctx.now };
+    slowPublish: {
+      requires: 'interact',
+      async run(ctx, { id, delayMs }) {
+        sql.run("UPDATE posts SET title = title || ' (scheduled)' WHERE id = ? AND status = 'draft'", id);
+        await time.sleep(delayMs || 60000);
+        sql.run("UPDATE posts SET status = 'published', published_at = ?, title = replace(title, ' (scheduled)', '') WHERE id = ?", ctx.now, id);
+        room.emit('published', { id });
+        return { ok: true, publishedAt: ctx.now };
+      },
     },
-    async summarize(ctx, { id }) {
-      ctx.need('admin');
-      if (!sample) ctx.fail('permission_denied', 'sample is not allowed for this app');
-      const p = sql.one('SELECT title, body FROM posts WHERE id = ?', id);
-      if (!p) ctx.fail('not_found', 'no post ' + id);
-      const r = await sample('Summarize this blog post in one plain sentence.\n\n' + p.title + '\n\n' + p.body);
-      sql.run('UPDATE posts SET body = body || ? WHERE id = ?', '\n\nIn short: ' + r.text.trim(), id);
-      return r.text;
+    summarize: {
+      requires: 'admin',
+      async run(ctx, { id }) {
+        if (!sample) ctx.fail('permission_denied', 'sample is not allowed for this app');
+        const p = sql.one('SELECT title, body FROM posts WHERE id = ?', id);
+        if (!p) ctx.fail('not_found', 'no post ' + id);
+        const r = await sample('Summarize this blog post in one plain sentence.\n\n' + p.title + '\n\n' + p.body);
+        sql.run('UPDATE posts SET body = body || ? WHERE id = ?', '\n\nIn short: ' + r.text.trim(), id);
+        return r.text;
+      },
     },
   },
 

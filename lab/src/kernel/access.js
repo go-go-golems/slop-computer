@@ -35,18 +35,27 @@ export class Access {
       if (!gs.length) trace.push(`no grant to ${p.id} or *anyone on ${storeId}; fix: grant ${storeId} ${p.id} view`);
       return { level: l, trace };
     }
+    // SLOP3-007: the level is the max over every source, then the min over
+    // every ceiling, with no other branch (as pkg/access.Level in Go). A
+    // pending user is guest-like: in *anyone only, at most interact.
     let level = 'none';
-    if (who.kind === 'user' && who.role === 'disabled') { trace.push(`${who.id} is disabled`); return { level, trace }; }
-    if (who.kind === 'user' && who.role === 'pending') { trace.push(`${who.id} is pending`); return { level, trace }; }
-    if (who.kind === 'user' && who.role === 'admin') { level = 'admin'; trace.push('platform admin: admin on every store'); }
-    if (st.owner === who.id) { level = 'owner'; trace.push(`${who.id} created ${storeId}: owner`); }
+    const source = (l, why) => { trace.push(why); level = maxLevel(level, l); };
+    if (who.kind === 'user' && who.role === 'admin') source('admin', 'platform admin: admin on every store');
+    if (st.owner === who.id) source('owner', `${who.id} created ${storeId}: owner`);
     const subjects = [who.id, '*anyone'];
     if (who.kind === 'user' && (who.role === 'member' || who.role === 'admin')) subjects.push('*signed-in');
     const gs = this.sys().kall(`SELECT subject, level, via FROM grants WHERE store = ? AND subject IN (${subjects.map(() => '?').join(',')})`, [storeId, ...subjects]);
-    for (const g of gs) { trace.push(`grant ${g.subject} ${g.level} (${g.via})`); level = maxLevel(level, g.level); }
-    const cap = p.kind === 'token' ? (p.max_level || 'admin') : KIND_CAP[who.kind];
-    if (cap && lv(level) > lv(cap)) { trace.push(`${p.kind === 'token' ? 'token' : who.kind} capped at ${cap}`); level = minLevel(level, cap); }
+    // a grant gives at most admin: owner comes only from creating the store
+    for (const g of gs) source(minLevel(g.level, 'admin'), `grant ${g.subject} ${g.level} (${g.via})`);
     if (!gs.length && level === 'none') trace.push('no grant reaches this principal');
+    const ceilings = [];
+    if (who.kind === 'user' && who.role === 'disabled') ceilings.push(['none', `${who.id} is disabled`]);
+    if (who.kind === 'user' && who.role === 'pending') ceilings.push(['interact', `${who.id} is pending: guest-like`]);
+    if (p.kind === 'token') ceilings.push([p.max_level || 'admin', 'token']);
+    if (KIND_CAP[who.kind]) ceilings.push([KIND_CAP[who.kind], who.kind]);
+    for (const [cap, why] of ceilings) {
+      if (lv(level) > lv(cap)) { trace.push(`${why} capped at ${cap}`); level = minLevel(level, cap); }
+    }
     return { level, trace };
   }
 

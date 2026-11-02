@@ -3,6 +3,7 @@ package server
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"net/http"
 	"strings"
 	"sync"
@@ -174,16 +175,18 @@ func (s *Server) startSample(w http.ResponseWriter, r *http.Request) {
 		flusher.Flush()
 	}
 	send("call", map[string]string{"call": req.CallID})
-	var usage llm.Usage
+	// Each model round holds budget first and settles with its usage
+	// (SLOP3-007): the viewer can't spend past their limit, however many
+	// calls run at once.
+	meter := s.Sys.NewMeter(v.User, s.viewLLM(r.Context(), v).Budget, req.CallID)
+	req.Meter = meter
 	emit := func(e llm.Event) {
 		switch e.Type {
 		case "text", "thinking":
 			send(e.Type, map[string]string{"text": e.Text, "delta": e.Delta})
 		case "usage":
 			if e.Usage != nil { // never forwarded to the page
-				usage.Input += e.Usage.Input
-				usage.Output += e.Usage.Output
-				usage.Model = e.Usage.Model
+				meter.Usage(*e.Usage)
 			}
 		case "result":
 			send("result", e.Result)
@@ -207,12 +210,13 @@ func (s *Server) startSample(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 	err := s.Env.A.LLM.Sample(ctx, req, emit, execute)
-	if err != nil && ctx.Err() == nil {
+	meter.Close() // a round that reported no usage is charged in full
+	var f *llm.Failure
+	switch {
+	case errors.As(err, &f) && f.Code == "quota_exceeded":
+		send("error", map[string]string{"code": f.Code, "message": f.Message})
+	case err != nil && ctx.Err() == nil:
 		send("error", map[string]string{"code": "upstream_error", "message": "the model failed"})
-	}
-	// A call that started with budget left completes, even past it.
-	if n := usage.Input + usage.Output; n > 0 {
-		_ = s.Sys.AddLLMUsage(context.Background(), v.User, n)
 	}
 }
 

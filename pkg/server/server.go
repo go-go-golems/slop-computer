@@ -220,7 +220,8 @@ func (s *Server) ListenAndServe(ctx context.Context) error {
 				return
 			case now := <-t.C:
 				s.rt.views.Sweep(now)
-				s.reviewAll(ctx) // comps and subscription periods that ended
+				s.reviewAll(ctx)              // comps and subscription periods that ended
+				_, _ = s.Sys.ExpireHolds(ctx) // model rounds whose outcome never arrived: charged in full
 			}
 		}
 	}()

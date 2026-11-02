@@ -13,15 +13,14 @@ const aiActor = `
 const sample = use('sample'), db = use('db'), secrets = use('secrets'), platform = use('platform');
 defineActor({
   actions: {
-    async ask(ctx, { q }) {
-      ctx.need('interact');
+    ask: { requires: 'interact', async run(ctx, { q }) {
       if (!sample) ctx.fail('permission_denied', 'no sample module');
       const r = await sample(q || 'hi');
       return { text: r.text, usage: r.usage };
-    },
-    can(ctx) { return { allowed: sample ? sample.allowed() : false, limits: sample ? sample.limits() : null, visitor: ctx.visitor }; },
-    token(ctx) { return secrets ? secrets.get('TOKEN') : 'no secrets module'; },
-    make(ctx, { id }) { return platform ? platform.stores.create({ id }) : 'no platform module'; },
+    } },
+    can: { requires: 'view', run(ctx) { return { allowed: sample ? sample.allowed() : false, limits: sample ? sample.limits() : null, visitor: ctx.visitor }; } },
+    token: { requires: 'interact', run(ctx) { return secrets ? secrets.get('TOKEN') : 'no secrets module'; } },
+    make: { requires: 'interact', run(ctx, { id }) { return platform ? platform.stores.create({ id }) : 'no platform module'; } },
   },
   every: {
     digest: { every: '1h', async run(ctx) {
@@ -75,9 +74,10 @@ func TestLLMBudgets(t *testing.T) {
 	}
 	h.call(admin, "policy.set", map[string]any{"app": "ai", "capability": "sample", "audience": "@member", "value": "on"})
 	h.call(admin, "policy.set", map[string]any{"app": "ai", "capability": "sample", "audience": "@subscriber", "value": "on"})
-	// Now the module exists, but the admin's audience is still off.
-	if _, out := ask(admin); code(out) != "permission_denied" || !strings.Contains(out["error"].(map[string]any)["message"].(string), "for admin") {
-		t.Fatalf("admin, policy off for admin: %v", out)
+	// Now the module exists, and admins are members (SLOP3-007 groups):
+	// the @member cell reaches the admin, whose @admin row is unlimited.
+	if st, out := ask(admin); st != 200 {
+		t.Fatalf("admin through the @member cell: %d %v", st, out)
 	}
 	// The member's audience is on, but members have no LLM access.
 	if _, out := ask(mia); code(out) != "permission_denied" || !strings.Contains(out["error"].(map[string]any)["message"].(string), "no LLM access") {
@@ -90,22 +90,28 @@ func TestLLMBudgets(t *testing.T) {
 	if can["allowed"] != true || can["limits"].(map[string]any)["remaining"] != 60.0 || can["visitor"].(map[string]any)["llm"].(map[string]any)["remaining"] != 60.0 {
 		t.Fatalf("can = %v", can)
 	}
-	for i, wantLeft := range []float64{38, 16, 0} {
+	// The budget is hard (SLOP3-007 ledger): each round holds what it may
+	// cost and its output is capped at the hold. The third call starts with
+	// 16 left, 4 of them for its input, so it may write 12: it is cut short
+	// and spends exactly what was left.
+	for i, want := range []struct {
+		text string
+		left float64
+	}{{"slop is connected.", 38}, {"slop is connected.", 16}, {"slop is conn", 0}} {
 		st, out := ask(sam)
-		if st != 200 || out["result"].(map[string]any)["text"] != "slop is connected." {
+		if st != 200 || out["result"].(map[string]any)["text"] != want.text {
 			t.Fatalf("call %d: %d %v", i, st, out)
 		}
 		u := h.call(sam, "llm.usage", map[string]any{}).(map[string]any)["llm"].(map[string]any)
-		if u["remaining"] != wantLeft {
+		if u["remaining"] != want.left {
 			t.Fatalf("after call %d: %v", i, u)
 		}
 	}
-	// The third call started with 16 left and finished over budget; the
-	// fourth is refused.
+	// The fourth is refused.
 	if _, out := ask(sam); code(out) != "quota_exceeded" {
 		t.Fatalf("over budget: %v", out)
 	}
-	if got := h.call(admin, "llm.usage", map[string]any{"person": "sam@example.com"}).(map[string]any)["llm"].(map[string]any); got["used"] != 66.0 {
+	if got := h.call(admin, "llm.usage", map[string]any{"person": "sam@example.com"}).(map[string]any)["llm"].(map[string]any); got["used"] != 60.0 {
 		t.Fatalf("sam's usage = %v", got)
 	}
 	// An admin resets the month.
@@ -114,9 +120,11 @@ func TestLLMBudgets(t *testing.T) {
 		t.Fatalf("after reset: %d", st)
 	}
 
-	// An alarm's call is charged to the store's owner (the admin, whose
-	// audience must have the policy on).
-	h.call(admin, "policy.set", map[string]any{"app": "ai", "capability": "sample", "audience": "@admin", "value": "on"})
+	// An alarm's call is the store's own (SLOP3-007): it needs the @store
+	// cell and an LLM row for store:ai, and is charged to store:ai, never
+	// to the owner.
+	h.call(admin, "policy.set", map[string]any{"app": "ai", "capability": "sample", "audience": "@store", "value": "on"})
+	h.call(admin, "llm.set", map[string]any{"subject": "store:ai", "value": "on"})
 	before := h.call(admin, "llm.usage", map[string]any{}).(map[string]any)["llm"].(map[string]any)["used"].(float64)
 	samBefore := h.call(sam, "llm.usage", map[string]any{}).(map[string]any)["llm"].(map[string]any)["used"].(float64)
 	h.call(admin, "alarm.fire", map[string]any{"store": "ai", "name": "digest"})
@@ -127,8 +135,11 @@ func TestLLMBudgets(t *testing.T) {
 	}
 	after := h.call(admin, "llm.usage", map[string]any{}).(map[string]any)["llm"].(map[string]any)["used"].(float64)
 	samAfter := h.call(sam, "llm.usage", map[string]any{}).(map[string]any)["llm"].(map[string]any)["used"].(float64)
-	if after <= before || samAfter != samBefore {
-		t.Fatalf("alarm charged owner %v -> %v, sam %v -> %v", before, after, samBefore, samAfter)
+	if after != before || samAfter != samBefore {
+		t.Fatalf("the alarm must charge neither the owner (%v -> %v) nor sam (%v -> %v)", before, after, samBefore, samAfter)
+	}
+	if u := h.call(admin, "llm.usage", map[string]any{"person": "store:ai"}).(map[string]any)["llm"].(map[string]any); u["used"].(float64) <= 0 {
+		t.Fatalf("store:ai must be charged: %v", u)
 	}
 }
 

@@ -53,7 +53,7 @@ var systemFuncs = []modFunc{
 // code that names verbs (the back office's API client). call accepts only
 // the verbs above.
 func (s *Server) systemModule(a *actor.Actor) goja.Value {
-	o := s.verbModule(a, systemFuncs).(*goja.Object)
+	o := s.verbModule(a, "system", systemFuncs).(*goja.Object)
 	byVerb := map[string]modFunc{}
 	for _, f := range systemFuncs {
 		if _, dup := byVerb[f.Verb]; !dup {
@@ -69,7 +69,7 @@ func (s *Server) systemModule(a *actor.Actor) goja.Value {
 		if in == nil {
 			in = map[string]any{}
 		}
-		return s.callVerb(a, f, in)
+		return s.callVerb(a, "system", f, in)
 	})
 	return o
 }

@@ -18,13 +18,49 @@ import (
 // app declares is always on.
 var PolicyCaps = []string{"assets", "sample", "user.email", "fetch", "secrets", "platform"}
 
-// PolicyAudiences are the matrix's columns.
-var PolicyAudiences = []string{"guest", "member", "subscriber", "admin"}
+// PolicyAudiences are the matrix's columns: the person groups, then
+// "store", a store acting on its own (alarms, reactors; SLOP3-007).
+var PolicyAudiences = []string{"guest", "member", "subscriber", "admin", "store"}
+
+// GroupsOf is the one place group nesting is decided (SLOP3-007 decision
+// 1): @admin ⊆ @subscriber ⊆ @member ⊆ @guest, so an audience's groups are
+// it and every audience below it. "store" (a store acting on its own) is a
+// group of its own, inside none of the others. Every "is this person in
+// this class?" question reads this, never a rank.
+func GroupsOf(audience string) []string {
+	switch audience {
+	case "guest":
+		return []string{"guest"}
+	case "member":
+		return []string{"guest", "member"}
+	case "subscriber":
+		return []string{"guest", "member", "subscriber"}
+	case "admin":
+		return []string{"guest", "member", "subscriber", "admin"}
+	case "store":
+		return []string{"store"}
+	}
+	return nil
+}
+
+// InGroup reports whether an audience's groups include group (with or
+// without its "@").
+func InGroup(audience, group string) bool {
+	if len(group) > 0 && group[0] == '@' {
+		group = group[1:]
+	}
+	for _, g := range GroupsOf(audience) {
+		if g == group {
+			return true
+		}
+	}
+	return false
+}
 
 // DefaultPolicy is a cell without a row: assets for members and up, the
-// rest off.
+// rest off (and off for stores acting on their own).
 func DefaultPolicy(capability, audience string) bool {
-	return capability == "assets" && audience != "guest"
+	return capability == "assets" && InGroup(audience, "member")
 }
 
 // IsPolicyCap reports a capability the matrix controls.
@@ -37,12 +73,25 @@ func IsPolicyCap(c string) bool {
 	return false
 }
 
-// Policy answers one cell: may app use capability for audience?
+// Policy answers whether app may use capability for someone in audience:
+// on when the cell of any of the audience's groups is on (a cell on for
+// @member reaches subscribers and admins). A group without a row has the
+// default cell.
 func (d *DB) Policy(ctx context.Context, app, capability, audience string) bool {
+	for _, g := range GroupsOf(audience) {
+		if d.policyCell(ctx, app, capability, g) {
+			return true
+		}
+	}
+	return false
+}
+
+// policyCell is one stored cell, or its default.
+func (d *DB) policyCell(ctx context.Context, app, capability, group string) bool {
 	var allowed bool
-	err := d.QueryRowContext(ctx, `SELECT allowed FROM app_policy WHERE app = ? AND capability = ? AND audience = ?`, app, capability, audience).Scan(&allowed)
+	err := d.QueryRowContext(ctx, `SELECT allowed FROM app_policy WHERE app = ? AND capability = ? AND audience = ?`, app, capability, group).Scan(&allowed)
 	if errors.Is(err, sql.ErrNoRows) {
-		return DefaultPolicy(capability, audience)
+		return DefaultPolicy(capability, group)
 	}
 	return err == nil && allowed
 }
@@ -52,7 +101,8 @@ type PolicyCell struct {
 	Capability string `json:"capability"`
 	Audience   string `json:"audience"`
 	Allowed    bool   `json:"allowed"`
-	Default    bool   `json:"default"` // no row: the default applies
+	Default    bool   `json:"default"`   // no row: the default applies
+	Effective  bool   `json:"effective"` // on for this audience, through its own cell or a group it is inside
 }
 
 // PolicyMatrix returns an app's cells for the capabilities given.
@@ -81,6 +131,19 @@ func (d *DB) PolicyMatrix(ctx context.Context, app string, caps []string) ([]Pol
 			out = append(out, PolicyCell{Capability: c, Audience: a, Allowed: v, Default: !ok})
 		}
 	}
+	// A cell is in effect when it or the cell of any group the audience is
+	// inside is on (Policy's rule).
+	on := map[string]bool{}
+	for _, c := range out {
+		on[c.Capability+"/"+c.Audience] = c.Allowed
+	}
+	for i, c := range out {
+		for _, g := range GroupsOf(c.Audience) {
+			if on[c.Capability+"/"+g] {
+				out[i].Effective = true
+			}
+		}
+	}
 	return out, rows.Err()
 }
 
@@ -94,7 +157,7 @@ func (d *DB) SetPolicy(ctx context.Context, actor, via, app, capability, audienc
 		ok = ok || a == audience
 	}
 	if !ok {
-		return errors.New("audience is guest, member, subscriber or admin")
+		return errors.New("audience is guest, member, subscriber, admin or store")
 	}
 	return d.Tx(ctx, func(tx *sql.Tx) error {
 		now := d.NowMs()
@@ -149,22 +212,45 @@ func (d *DB) llmRow(ctx context.Context, subject string) (LLMRow, bool) {
 	return r, true
 }
 
-// LLMFor decides a person's LLM access: their own row wins, else the row
-// of their audience (exact, not "at least"); then this month's usage.
+// LLMFor decides a person's LLM access: their own row wins (on or off);
+// else the most generous row among their groups' (one without a budget
+// beats any budget; a row that is off adds nothing); then this month's
+// usage.
 func (d *DB) LLMFor(ctx context.Context, person, audience string) LLM {
 	row, ok := d.llmRow(ctx, person)
 	if !ok {
-		row, ok = d.llmRow(ctx, "@"+audience)
+		row, ok = d.groupLLMRow(ctx, audience)
 	}
 	if !ok || !row.Allowed || person == "" {
 		return LLM{}
 	}
-	out := LLM{Allowed: true, Budget: row.Budget, Used: d.LLMUsed(ctx, person, Period(time.Now())), Source: row.Subject}
+	period := Period(time.Now())
+	out := LLM{Allowed: true, Budget: row.Budget, Used: d.LLMUsed(ctx, person, period), Source: row.Subject}
 	if row.Budget != nil {
-		rem := max(0, *row.Budget-out.Used)
+		// What is left: the limit less what was spent and what open holds
+		// set aside (SLOP3-007 ledger).
+		rem := max(0, *row.Budget-out.Used-d.LLMReserved(ctx, person, period))
 		out.Remaining = &rem
 	}
 	return out
+}
+
+// groupLLMRow is the most generous row that is on among an audience's
+// groups.
+func (d *DB) groupLLMRow(ctx context.Context, audience string) (LLMRow, bool) {
+	var best LLMRow
+	found := false
+	for _, g := range GroupsOf(audience) {
+		r, ok := d.llmRow(ctx, "@"+g)
+		if !ok || !r.Allowed {
+			continue
+		}
+		switch {
+		case !found, best.Budget != nil && (r.Budget == nil || *r.Budget > *best.Budget):
+			best, found = r, true
+		}
+	}
+	return best, found
 }
 
 // LLMUsed is a person's usage in a period.
@@ -172,15 +258,6 @@ func (d *DB) LLMUsed(ctx context.Context, person, period string) int64 {
 	var n int64
 	_ = d.QueryRowContext(ctx, `SELECT used_tokens FROM llm_usage WHERE person = ? AND period = ?`, person, period).Scan(&n)
 	return n
-}
-
-// AddLLMUsage charges tokens to a person's current month.
-func (d *DB) AddLLMUsage(ctx context.Context, person string, tokens int64) error {
-	now := time.Now()
-	_, err := d.ExecContext(ctx, `INSERT INTO llm_usage (person, period, used_tokens, updated_at) VALUES (?, ?, ?, ?)
-		ON CONFLICT (person, period) DO UPDATE SET used_tokens = used_tokens + excluded.used_tokens, updated_at = excluded.updated_at`,
-		person, Period(now), tokens, now.UnixMilli())
-	return err
 }
 
 // ResetLLMUsage sets a person's current month to zero.

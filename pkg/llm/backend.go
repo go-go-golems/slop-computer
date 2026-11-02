@@ -45,6 +45,25 @@ type Request struct {
 	// MaxRounds bounds tool rounds; only the server sets it (0 = default 5).
 	MaxRounds       int `json:"maxRounds,omitempty"`
 	MaxOutputTokens int `json:"maxOutputTokens,omitempty"`
+	// Meter is asked before each model round (SLOP3-007 phase 5); nil
+	// meters nothing. Only the server sets it.
+	Meter Meter `json:"-"`
+}
+
+// Meter reserves budget before a model round. Before returns the round's
+// output cap (0: no cap), which the backend must apply so the round cannot
+// spend more than its hold, or an error that ends the call before the
+// provider is contacted (a *Failure with code quota_exceeded when the
+// budget is used up).
+type Meter interface {
+	Before(ctx context.Context, round int, est Estimate) (int64, error)
+}
+
+// Estimate is what a round may cost: a conservative input size (one token
+// per byte of context) and the output the backend would allow.
+type Estimate struct {
+	InputTokens     int64
+	MaxOutputTokens int64 // 0: the backend has no cap of its own
 }
 type Result struct {
 	Thinking         string  `json:"thinking,omitempty"`

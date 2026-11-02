@@ -166,19 +166,25 @@ function showPage(ctx, req, seg) {
 
 defineActor({
   actions: {
-    status(ctx) {
-      ctx.need('view');
-      const c = current(), s = c.site;
-      return { source: s.source, rev: c.rev, home: s.home, config: settings(), published: published(), assets: !!c.src.assets,
-        pages: s.pages.map((p) => ({ id: p, slug: s.slug(p), title: s.title(p), parent: s.parent(p) })) };
+    status: {
+      requires: 'view',
+      run(ctx) {
+        const c = current(), s = c.site;
+        return { source: s.source, rev: c.rev, home: s.home, config: settings(), published: published(), assets: !!c.src.assets,
+          pages: s.pages.map((p) => ({ id: p, slug: s.slug(p), title: s.title(p), parent: s.parent(p) })) };
+      },
     },
-    configure(ctx, args) {
-      ctx.need('admin');
-      try { return configure(args || {}); } catch (e) { ctx.fail('invalid_argument', e.message); }
+    configure: {
+      requires: 'admin',
+      run(ctx, args) {
+        try { return configure(args || {}); } catch (e) { ctx.fail('invalid_argument', e.message); }
+      },
     },
-    async publish(ctx, args) {
-      ctx.need('admin');
-      return await publish(ctx, (args || {}).to, !!(args || {}).live);
+    publish: {
+      requires: 'admin',
+      async run(ctx, args) {
+        return await publish(ctx, (args || {}).to, !!(args || {}).live);
+      },
     },
   },
   http: {

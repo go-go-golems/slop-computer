@@ -1,0 +1,69 @@
+{
+  "about": "SLOP3-007 worked examples (design/01-authority-core-plan.md, 'Worked examples') as data. Each case runs its steps on a fresh server, in order. 'as' is admin (admin@example.com with every scope) or an email (a token with 'scopes', default read and write). '@id:<email>' in args is replaced by that person's id; 'files' maps paths to contents. 'expect' is 'ok' (succeeds), a 'code' (fails with it), and/or 'result', a subset the result must contain.",
+  "cases": [
+    {
+      "name": "1. a public guestbook: guests interact, and a mistaken admin grant still stops at the guest ceiling",
+      "steps": [
+        {"as": "admin", "verb": "store.new", "args": {"id": "guestbook"}},
+        {"as": "admin", "verb": "grant.set", "args": {"store": "guestbook", "subject": "@guest", "level": "interact"}},
+        {"as": "admin", "verb": "explain.can", "args": {"store": "guestbook", "level": "interact", "subject": "anonymous"}, "expect": {"result": {"ok": true, "level": "interact", "groups": ["@guest"]}}},
+        {"as": "admin", "verb": "grant.set", "args": {"store": "guestbook", "subject": "@guest", "level": "admin"}},
+        {"as": "admin", "verb": "explain.can", "args": {"store": "guestbook", "level": "admin", "subject": "anonymous"}, "expect": {"result": {"ok": false, "level": "interact"}}}
+      ]
+    },
+    {
+      "name": "2. a private journal: another member holds nothing, an admin is admin",
+      "steps": [
+        {"as": "ana@example.com", "verb": "store.new", "args": {"id": "j-ana"}},
+        {"as": "bob@example.com", "verb": "docs.get", "args": {"store": "j-ana", "path": "posts/p1"}, "expect": {"code": "not_found"}},
+        {"as": "admin", "verb": "explain.can", "args": {"store": "j-ana", "level": "admin", "subject": "admin@example.com"}, "expect": {"result": {"ok": true, "level": "admin"}}},
+        {"as": "admin", "verb": "explain.can", "args": {"store": "j-ana", "level": "owner", "subject": "ana@example.com"}, "expect": {"result": {"ok": true, "level": "owner"}}}
+      ]
+    },
+    {
+      "name": "4. a read-only token for a coding agent: no writes, no admin verbs",
+      "steps": [
+        {"as": "admin", "verb": "store.new", "args": {"id": "ws-team"}},
+        {"as": "admin@example.com", "scopes": ["read"], "verb": "docs.get", "args": {"store": "ws-team", "path": "notes/a"}, "expect": {"code": "not_found"}},
+        {"as": "admin@example.com", "scopes": ["read"], "verb": "docs.set", "args": {"store": "ws-team", "path": "notes/a", "data": {"t": 1}}, "expect": {"code": "permission_denied"}},
+        {"as": "admin@example.com", "scopes": ["read"], "verb": "people.ls", "args": {}, "expect": {"code": "permission_denied"}}
+      ]
+    },
+    {
+      "name": "5. an owner set back to pending holds interact: may edit, may not manage access",
+      "steps": [
+        {"as": "dan@example.com", "verb": "store.new", "args": {"id": "s-dan"}},
+        {"as": "admin", "verb": "people.role", "args": {"id": "@id:dan@example.com", "role": "pending"}},
+        {"as": "admin", "verb": "explain.can", "args": {"store": "s-dan", "level": "admin", "subject": "dan@example.com"}, "expect": {"result": {"ok": false, "level": "interact", "groups": ["@guest"]}}},
+        {"as": "admin", "verb": "explain.can", "args": {"store": "s-dan", "level": "interact", "subject": "dan@example.com"}, "expect": {"result": {"ok": true}}},
+        {"as": "dan@example.com", "verb": "grant.set", "args": {"store": "s-dan", "subject": "@guest", "level": "view"}, "expect": {"code": "permission_denied"}}
+      ]
+    },
+    {
+      "name": "6. AI for members, more for subscribers: one @member cell reaches subscribers, who get the larger allotment",
+      "steps": [
+        {"as": "admin", "verb": "store.new", "args": {"id": "journal"}},
+        {"as": "admin", "verb": "files.push", "args": {"store": "journal", "files": {"app.json": "{\"title\":\"Journal\",\"capabilities\":{\"sample\":{},\"db\":{}}}", "index.html": "<!doctype html><title>j</title>"}}},
+        {"as": "admin", "verb": "policy.set", "args": {"app": "journal", "capability": "sample", "audience": "@member", "value": "on"}},
+        {"as": "admin", "verb": "llm.set", "args": {"subject": "@member", "value": "on", "budget": 500000}},
+        {"as": "admin", "verb": "llm.set", "args": {"subject": "@subscriber", "value": "on", "budget": 5000000}},
+        {"as": "ana@example.com", "verb": "llm.usage", "args": {}, "expect": {"result": {"audience": "member", "llm": {"allowed": true, "budget": 500000}}}},
+        {"as": "admin", "verb": "sub.grant", "args": {"person": "ana@example.com", "until": "30d"}},
+        {"as": "ana@example.com", "verb": "llm.usage", "args": {}, "expect": {"result": {"audience": "subscriber", "llm": {"allowed": true, "budget": 5000000, "source": "@subscriber"}}}},
+        {"as": "admin", "verb": "policy.ls", "args": {"app": "journal"}, "expect": {"ok": true}}
+      ]
+    },
+    {
+      "name": "9. a site published from a workspace: the store reads what was granted to store:<id>, until the grant goes",
+      "steps": [
+        {"as": "admin", "verb": "store.new", "args": {"id": "ws-team"}},
+        {"as": "admin", "verb": "store.new", "args": {"id": "site-team"}},
+        {"as": "admin", "verb": "grant.set", "args": {"store": "ws-team", "subject": "store:site-team", "level": "view"}},
+        {"as": "admin", "verb": "explain.can", "args": {"store": "ws-team", "level": "view", "subject": "store:site-team"}, "expect": {"result": {"ok": true, "level": "view", "groups": ["@store"]}}},
+        {"as": "admin", "verb": "explain.can", "args": {"store": "ws-team", "level": "interact", "subject": "store:site-team"}, "expect": {"result": {"ok": false}}},
+        {"as": "admin", "verb": "grant.rm", "args": {"store": "ws-team", "subject": "store:site-team"}},
+        {"as": "admin", "verb": "explain.can", "args": {"store": "ws-team", "level": "view", "subject": "store:site-team"}, "expect": {"result": {"ok": false, "level": "none"}}}
+      ]
+    }
+  ]
+}

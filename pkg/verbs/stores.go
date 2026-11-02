@@ -47,7 +47,7 @@ func init() {
 			Args: []Arg{{Name: "id", Type: "string", Pos: 1, Doc: "lowercase slug; empty makes s-xxxxxxxx"},
 				{Name: "type", Type: "string"}, {Name: "app", Type: "string", Doc: "the app store it runs"}},
 			Run: func(ctx context.Context, e *Env, p *access.Principal, a Args) (any, error) {
-				if !e.K.Access.AudienceOf(ctx, p).AtLeast(access.AudMember) {
+				if !e.K.Access.In(ctx, p, access.GroupMember) {
 					return nil, Errf("permission_denied", "only members make stores")
 				}
 				row, _, err := e.K.CreateStore(ctx, p, kernel.NewStore{ID: a.S("id"), Type: a.S("type"), App: a.S("app")})
@@ -102,7 +102,18 @@ func init() {
 				if _, _, err := e.open(ctx, p, a.S("store"), rt.LevelAdmin, "listing grants"); err != nil {
 					return nil, err
 				}
-				return e.Sys.Grants(ctx, a.S("store"))
+				gs, err := e.Sys.Grants(ctx, a.S("store"))
+				if err != nil {
+					return nil, err
+				}
+				st, err := e.Sys.StoreByID(ctx, a.S("store"))
+				if err != nil {
+					return nil, err
+				}
+				for i := range gs {
+					gs[i].Inactive = e.K.Access.GrantInactive(ctx, gs[i], st)
+				}
+				return gs, nil
 			}},
 		&Verb{Name: "grant.set", Doc: "Give a subject (usr_…, vis_…, store:<id>, @guest, @member, @subscriber) a level on a store.", Scope: Write, Action: authz.StoreAdmin,
 			Args: []Arg{{Name: "store", Type: "string", Pos: 1, Required: true}, {Name: "subject", Type: "string", Pos: 2, Required: true},
