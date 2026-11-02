@@ -19,11 +19,11 @@ import (
 	"sync"
 	"time"
 
-	"github.com/go-go-golems/slop/pkg/access"
-	"github.com/go-go-golems/slop/pkg/httpx"
-	"github.com/go-go-golems/slop/pkg/rt"
-	"github.com/go-go-golems/slop/pkg/store"
-	"github.com/go-go-golems/slop/pkg/system"
+	"github.com/go-go-golems/slop-computer/pkg/access"
+	"github.com/go-go-golems/slop-computer/pkg/httpx"
+	"github.com/go-go-golems/slop-computer/pkg/rt"
+	"github.com/go-go-golems/slop-computer/pkg/store"
+	"github.com/go-go-golems/slop-computer/pkg/system"
 )
 
 // The page protocol (ported from slop-computer's rt.go, same wire format so

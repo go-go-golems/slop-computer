@@ -3,7 +3,7 @@ package kernel
 import (
 	"context"
 
-	"github.com/go-go-golems/slop/pkg/store"
+	"github.com/go-go-golems/slop-computer/pkg/store"
 )
 
 // GuestPlaces are the stores where a guest may have left something: those

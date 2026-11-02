@@ -8,9 +8,9 @@ import (
 
 	"github.com/dop251/goja"
 
-	"github.com/go-go-golems/slop/pkg/ids"
-	"github.com/go-go-golems/slop/pkg/llm"
-	"github.com/go-go-golems/slop/pkg/system"
+	"github.com/go-go-golems/slop-computer/pkg/ids"
+	"github.com/go-go-golems/slop-computer/pkg/llm"
+	"github.com/go-go-golems/slop-computer/pkg/system"
 )
 
 // SampleTimeout bounds one LLM call from an actor.

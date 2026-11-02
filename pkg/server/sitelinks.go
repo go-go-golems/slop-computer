@@ -8,10 +8,10 @@ import (
 	"strings"
 	"time"
 
-	"github.com/go-go-golems/slop/pkg/access"
-	"github.com/go-go-golems/slop/pkg/httpx"
-	"github.com/go-go-golems/slop/pkg/store"
-	"github.com/go-go-golems/slop/pkg/system"
+	"github.com/go-go-golems/slop-computer/pkg/access"
+	"github.com/go-go-golems/slop-computer/pkg/httpx"
+	"github.com/go-go-golems/slop-computer/pkg/store"
+	"github.com/go-go-golems/slop-computer/pkg/system"
 )
 
 // claimDocsAtMost bounds the private documents one claim copies.

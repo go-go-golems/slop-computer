@@ -5,7 +5,7 @@ package access
 import (
 	"slices"
 
-	"github.com/go-go-golems/slop/pkg/system"
+	"github.com/go-go-golems/slop-computer/pkg/system"
 )
 
 // Kinds of principal.

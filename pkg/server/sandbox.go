@@ -15,8 +15,8 @@ import (
 	"strings"
 	"sync"
 
-	"github.com/go-go-golems/slop/pkg/apps"
-	"github.com/go-go-golems/slop/pkg/store"
+	"github.com/go-go-golems/slop-computer/pkg/apps"
+	"github.com/go-go-golems/slop-computer/pkg/store"
 )
 
 //go:embed assets/*

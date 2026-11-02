@@ -8,11 +8,11 @@ import (
 	"net/http"
 	"strings"
 
-	"github.com/go-go-golems/slop/pkg/access"
-	"github.com/go-go-golems/slop/pkg/httpx"
-	"github.com/go-go-golems/slop/pkg/ids"
-	"github.com/go-go-golems/slop/pkg/rt"
-	"github.com/go-go-golems/slop/pkg/store"
+	"github.com/go-go-golems/slop-computer/pkg/access"
+	"github.com/go-go-golems/slop-computer/pkg/httpx"
+	"github.com/go-go-golems/slop-computer/pkg/ids"
+	"github.com/go-go-golems/slop-computer/pkg/rt"
+	"github.com/go-go-golems/slop-computer/pkg/store"
 )
 
 // The assets capability keeps uploads in the store's assets zone, one file

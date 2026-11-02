@@ -7,8 +7,8 @@ import (
 	"testing"
 	"time"
 
-	"github.com/go-go-golems/slop/pkg/store"
-	"github.com/go-go-golems/slop/pkg/verbs"
+	"github.com/go-go-golems/slop-computer/pkg/store"
+	"github.com/go-go-golems/slop-computer/pkg/verbs"
 )
 
 // tokenFor signs a person in (making them on first use) and mints a token.

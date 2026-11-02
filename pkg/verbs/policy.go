@@ -6,9 +6,9 @@ import (
 	"strconv"
 	"strings"
 
-	"github.com/go-go-golems/slop/pkg/access"
-	"github.com/go-go-golems/slop/pkg/apps"
-	"github.com/go-go-golems/slop/pkg/system"
+	"github.com/go-go-golems/slop-computer/pkg/access"
+	"github.com/go-go-golems/slop-computer/pkg/apps"
+	"github.com/go-go-golems/slop-computer/pkg/system"
 )
 
 // declaredPolicyCaps are the policy capabilities an app's current version

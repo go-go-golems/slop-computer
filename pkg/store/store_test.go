@@ -7,8 +7,8 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/go-go-golems/slop/pkg/blobs"
-	"github.com/go-go-golems/slop/pkg/rt"
+	"github.com/go-go-golems/slop-computer/pkg/blobs"
+	"github.com/go-go-golems/slop-computer/pkg/rt"
 )
 
 func openTest(t *testing.T) *Store {

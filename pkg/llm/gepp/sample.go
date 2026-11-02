@@ -15,7 +15,7 @@ import (
 	"github.com/go-go-golems/geppetto/pkg/steps/ai/providers/pi"
 	"github.com/go-go-golems/geppetto/pkg/turns"
 	"github.com/go-go-golems/geppetto/pkg/turns/toolblocks"
-	"github.com/go-go-golems/slop/pkg/llm"
+	"github.com/go-go-golems/slop-computer/pkg/llm"
 	"github.com/invopop/jsonschema"
 	"golang.org/x/sync/errgroup"
 )

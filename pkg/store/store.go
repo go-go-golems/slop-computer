@@ -14,7 +14,7 @@ import (
 
 	"github.com/mattn/go-sqlite3"
 
-	"github.com/go-go-golems/slop/pkg/blobs"
+	"github.com/go-go-golems/slop-computer/pkg/blobs"
 )
 
 const schema = `

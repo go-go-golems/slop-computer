@@ -9,9 +9,9 @@ import (
 	"strings"
 	"time"
 
-	"github.com/go-go-golems/slop/pkg/identity"
-	"github.com/go-go-golems/slop/pkg/ids"
-	"github.com/go-go-golems/slop/pkg/system"
+	"github.com/go-go-golems/slop-computer/pkg/identity"
+	"github.com/go-go-golems/slop-computer/pkg/ids"
+	"github.com/go-go-golems/slop-computer/pkg/system"
 )
 
 // flowCookie binds an OIDC flow to the browser that started it.

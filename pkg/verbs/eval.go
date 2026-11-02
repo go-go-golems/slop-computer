@@ -10,7 +10,7 @@ import (
 
 	"github.com/dop251/goja"
 
-	"github.com/go-go-golems/slop/pkg/access"
+	"github.com/go-go-golems/slop-computer/pkg/access"
 )
 
 // EvalTimeout bounds one eval program.

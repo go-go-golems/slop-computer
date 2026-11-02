@@ -6,8 +6,8 @@ import (
 	"errors"
 	"time"
 
-	"github.com/go-go-golems/slop/pkg/billing"
-	"github.com/go-go-golems/slop/pkg/ids"
+	"github.com/go-go-golems/slop-computer/pkg/billing"
+	"github.com/go-go-golems/slop-computer/pkg/ids"
 )
 
 // Billing storage: comps and the Stripe projection, ported from

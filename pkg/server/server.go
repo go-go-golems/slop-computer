@@ -14,16 +14,16 @@ import (
 	"strings"
 	"time"
 
-	"github.com/go-go-golems/slop/pkg/billing/stripe"
-	"github.com/go-go-golems/slop/pkg/config"
-	"github.com/go-go-golems/slop/pkg/httpx"
-	"github.com/go-go-golems/slop/pkg/identity"
-	"github.com/go-go-golems/slop/pkg/ids"
-	"github.com/go-go-golems/slop/pkg/llm"
-	"github.com/go-go-golems/slop/pkg/llm/gepp"
-	"github.com/go-go-golems/slop/pkg/rt"
-	"github.com/go-go-golems/slop/pkg/system"
-	"github.com/go-go-golems/slop/pkg/verbs"
+	"github.com/go-go-golems/slop-computer/pkg/billing/stripe"
+	"github.com/go-go-golems/slop-computer/pkg/config"
+	"github.com/go-go-golems/slop-computer/pkg/httpx"
+	"github.com/go-go-golems/slop-computer/pkg/identity"
+	"github.com/go-go-golems/slop-computer/pkg/ids"
+	"github.com/go-go-golems/slop-computer/pkg/llm"
+	"github.com/go-go-golems/slop-computer/pkg/llm/gepp"
+	"github.com/go-go-golems/slop-computer/pkg/rt"
+	"github.com/go-go-golems/slop-computer/pkg/system"
+	"github.com/go-go-golems/slop-computer/pkg/verbs"
 )
 
 // Server holds the shared state of every host.

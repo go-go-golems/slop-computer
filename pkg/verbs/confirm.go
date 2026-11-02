@@ -12,7 +12,7 @@ import (
 	"sync"
 	"time"
 
-	"github.com/go-go-golems/slop/pkg/access"
+	"github.com/go-go-golems/slop-computer/pkg/access"
 )
 
 // ConfirmTTL is how long a confirmation waits, and how long an approval

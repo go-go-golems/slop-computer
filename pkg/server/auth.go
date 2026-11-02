@@ -8,9 +8,9 @@ import (
 	"net/url"
 	"strings"
 
-	"github.com/go-go-golems/slop/pkg/access"
-	"github.com/go-go-golems/slop/pkg/httpx"
-	"github.com/go-go-golems/slop/pkg/system"
+	"github.com/go-go-golems/slop-computer/pkg/access"
+	"github.com/go-go-golems/slop-computer/pkg/httpx"
+	"github.com/go-go-golems/slop-computer/pkg/system"
 )
 
 type ctxKey struct{}

@@ -6,8 +6,8 @@ import (
 	"fmt"
 	"slices"
 
-	"github.com/go-go-golems/slop/pkg/rt"
-	"github.com/go-go-golems/slop/pkg/system"
+	"github.com/go-go-golems/slop-computer/pkg/rt"
+	"github.com/go-go-golems/slop-computer/pkg/system"
 )
 
 // Audience is computed for every request and turn, never stored.

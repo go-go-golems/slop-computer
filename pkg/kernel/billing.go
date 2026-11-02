@@ -4,8 +4,8 @@ import (
 	"context"
 	"time"
 
-	"github.com/go-go-golems/slop/pkg/billing"
-	"github.com/go-go-golems/slop/pkg/system"
+	"github.com/go-go-golems/slop-computer/pkg/billing"
+	"github.com/go-go-golems/slop-computer/pkg/system"
 )
 
 // Policy is francois's access policy with this server's accepted prices.

@@ -1,4 +1,4 @@
-module github.com/go-go-golems/slop
+module github.com/go-go-golems/slop-computer
 
 go 1.26.6
 

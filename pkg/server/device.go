@@ -8,8 +8,8 @@ import (
 	"strconv"
 	"strings"
 
-	"github.com/go-go-golems/slop/pkg/httpx"
-	"github.com/go-go-golems/slop/pkg/system"
+	"github.com/go-go-golems/slop-computer/pkg/httpx"
+	"github.com/go-go-golems/slop-computer/pkg/system"
 )
 
 // Device login: the CLI asks for a code, a person approves it in the

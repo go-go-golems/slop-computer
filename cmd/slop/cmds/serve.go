@@ -10,12 +10,12 @@ import (
 
 	"github.com/spf13/cobra"
 
-	"github.com/go-go-golems/slop/pkg/actor"
-	"github.com/go-go-golems/slop/pkg/config"
-	"github.com/go-go-golems/slop/pkg/kernel"
-	"github.com/go-go-golems/slop/pkg/server"
-	"github.com/go-go-golems/slop/pkg/system"
-	"github.com/go-go-golems/slop/pkg/verbs"
+	"github.com/go-go-golems/slop-computer/pkg/actor"
+	"github.com/go-go-golems/slop-computer/pkg/config"
+	"github.com/go-go-golems/slop-computer/pkg/kernel"
+	"github.com/go-go-golems/slop-computer/pkg/server"
+	"github.com/go-go-golems/slop-computer/pkg/system"
+	"github.com/go-go-golems/slop-computer/pkg/verbs"
 )
 
 func serveCmd() *cobra.Command {

@@ -20,7 +20,7 @@ import (
 
 	"github.com/go-jose/go-jose/v4"
 
-	"github.com/go-go-golems/slop/pkg/config"
+	"github.com/go-go-golems/slop-computer/pkg/config"
 )
 
 // signInSite runs the live-host handoff for a site client whose browser b

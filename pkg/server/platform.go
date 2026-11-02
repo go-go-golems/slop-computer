@@ -7,9 +7,9 @@ import (
 
 	"github.com/dop251/goja"
 
-	"github.com/go-go-golems/slop/pkg/access"
-	"github.com/go-go-golems/slop/pkg/actor"
-	"github.com/go-go-golems/slop/pkg/verbs"
+	"github.com/go-go-golems/slop-computer/pkg/access"
+	"github.com/go-go-golems/slop-computer/pkg/actor"
+	"github.com/go-go-golems/slop-computer/pkg/verbs"
 )
 
 // platformOps maps app.json slop.platform entries to the verbs they call.

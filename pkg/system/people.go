@@ -6,7 +6,7 @@ import (
 	"errors"
 	"strings"
 
-	"github.com/go-go-golems/slop/pkg/ids"
+	"github.com/go-go-golems/slop-computer/pkg/ids"
 )
 
 // Roles of a user. Guests are people of kind guest with role "guest".

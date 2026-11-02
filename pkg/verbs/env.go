@@ -7,14 +7,14 @@ import (
 	"strings"
 	"sync"
 
-	"github.com/go-go-golems/slop/pkg/access"
-	"github.com/go-go-golems/slop/pkg/actor"
-	"github.com/go-go-golems/slop/pkg/billing/stripe"
-	"github.com/go-go-golems/slop/pkg/config"
-	"github.com/go-go-golems/slop/pkg/kernel"
-	"github.com/go-go-golems/slop/pkg/rt"
-	"github.com/go-go-golems/slop/pkg/store"
-	"github.com/go-go-golems/slop/pkg/system"
+	"github.com/go-go-golems/slop-computer/pkg/access"
+	"github.com/go-go-golems/slop-computer/pkg/actor"
+	"github.com/go-go-golems/slop-computer/pkg/billing/stripe"
+	"github.com/go-go-golems/slop-computer/pkg/config"
+	"github.com/go-go-golems/slop-computer/pkg/kernel"
+	"github.com/go-go-golems/slop-computer/pkg/rt"
+	"github.com/go-go-golems/slop-computer/pkg/store"
+	"github.com/go-go-golems/slop-computer/pkg/system"
 )
 
 // Env is what verbs work against; every door shares one.

@@ -9,7 +9,7 @@ import (
 
 	"github.com/spf13/cobra"
 
-	"github.com/go-go-golems/slop/pkg/client"
+	"github.com/go-go-golems/slop-computer/pkg/client"
 )
 
 func authCmd() *cobra.Command {

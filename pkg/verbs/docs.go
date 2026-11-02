@@ -4,9 +4,9 @@ import (
 	"context"
 	"errors"
 
-	"github.com/go-go-golems/slop/pkg/access"
-	"github.com/go-go-golems/slop/pkg/rt"
-	"github.com/go-go-golems/slop/pkg/store"
+	"github.com/go-go-golems/slop-computer/pkg/access"
+	"github.com/go-go-golems/slop-computer/pkg/rt"
+	"github.com/go-go-golems/slop-computer/pkg/store"
 )
 
 // MaxBatch is the most documents one docs.* call writes (in one turn).

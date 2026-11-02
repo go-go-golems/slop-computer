@@ -3,9 +3,9 @@ package server
 import (
 	"net/http"
 
-	"github.com/go-go-golems/slop/pkg/access"
-	"github.com/go-go-golems/slop/pkg/httpx"
-	"github.com/go-go-golems/slop/pkg/verbs"
+	"github.com/go-go-golems/slop-computer/pkg/access"
+	"github.com/go-go-golems/slop-computer/pkg/httpx"
+	"github.com/go-go-golems/slop-computer/pkg/verbs"
 )
 
 // The HTTP door: POST /api/v1/<verb> with the arguments as JSON.

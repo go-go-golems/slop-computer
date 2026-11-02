@@ -5,7 +5,7 @@ import (
 	"database/sql"
 	"time"
 
-	"github.com/go-go-golems/slop/pkg/ids"
+	"github.com/go-go-golems/slop-computer/pkg/ids"
 )
 
 // Guest limits (SLOP-011): one address may create at most GuestsPerHour

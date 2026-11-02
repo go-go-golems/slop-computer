@@ -6,7 +6,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/go-go-golems/slop/pkg/llm"
+	"github.com/go-go-golems/slop-computer/pkg/llm"
 )
 
 const aiActor = `

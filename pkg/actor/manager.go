@@ -17,12 +17,12 @@ import (
 	"github.com/dop251/goja"
 	"github.com/robfig/cron/v3"
 
-	"github.com/go-go-golems/slop/pkg/access"
-	"github.com/go-go-golems/slop/pkg/kernel"
-	"github.com/go-go-golems/slop/pkg/llm"
-	"github.com/go-go-golems/slop/pkg/rt"
-	"github.com/go-go-golems/slop/pkg/store"
-	"github.com/go-go-golems/slop/pkg/system"
+	"github.com/go-go-golems/slop-computer/pkg/access"
+	"github.com/go-go-golems/slop-computer/pkg/kernel"
+	"github.com/go-go-golems/slop-computer/pkg/llm"
+	"github.com/go-go-golems/slop-computer/pkg/rt"
+	"github.com/go-go-golems/slop-computer/pkg/store"
+	"github.com/go-go-golems/slop-computer/pkg/system"
 )
 
 // Manager owns the actors of all stores.

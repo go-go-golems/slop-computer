@@ -4,7 +4,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/go-go-golems/slop/pkg/apps"
+	"github.com/go-go-golems/slop-computer/pkg/apps"
 )
 
 const toolActor = `

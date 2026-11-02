@@ -8,9 +8,9 @@ import (
 	"net/http"
 	"strings"
 
-	"github.com/go-go-golems/slop/pkg/access"
-	"github.com/go-go-golems/slop/pkg/actor"
-	"github.com/go-go-golems/slop/pkg/rt"
+	"github.com/go-go-golems/slop-computer/pkg/access"
+	"github.com/go-go-golems/slop-computer/pkg/actor"
+	"github.com/go-go-golems/slop-computer/pkg/rt"
 )
 
 // actorEmit sends an actor's room message to the store's views (after the

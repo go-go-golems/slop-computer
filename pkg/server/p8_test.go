@@ -5,8 +5,8 @@ import (
 	"testing"
 	"time"
 
-	"github.com/go-go-golems/slop/pkg/apps"
-	"github.com/go-go-golems/slop/pkg/config"
+	"github.com/go-go-golems/slop-computer/pkg/apps"
+	"github.com/go-go-golems/slop-computer/pkg/config"
 )
 
 // A static site whose app.json names a notFound page has no client-side

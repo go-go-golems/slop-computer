@@ -10,9 +10,9 @@ import (
 	"testing"
 	"time"
 
-	"github.com/go-go-golems/slop/pkg/billing"
-	"github.com/go-go-golems/slop/pkg/billing/stripe"
-	"github.com/go-go-golems/slop/pkg/config"
+	"github.com/go-go-golems/slop-computer/pkg/billing"
+	"github.com/go-go-golems/slop-computer/pkg/billing/stripe"
+	"github.com/go-go-golems/slop-computer/pkg/config"
 )
 
 // stream follows a view's event stream and hands over each event.

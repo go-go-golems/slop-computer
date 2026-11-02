@@ -12,7 +12,7 @@ import (
 
 	"github.com/spf13/cobra"
 
-	"github.com/go-go-golems/slop/pkg/client"
+	"github.com/go-go-golems/slop-computer/pkg/client"
 )
 
 // addExtraCommands adds the commands that work with local files (push,

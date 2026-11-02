@@ -3,7 +3,7 @@ package server
 import (
 	"github.com/dop251/goja"
 
-	"github.com/go-go-golems/slop/pkg/actor"
+	"github.com/go-go-golems/slop-computer/pkg/actor"
 )
 
 // systemFuncs is the system module: the platform's governance verbs, each

@@ -9,7 +9,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/go-go-golems/slop/pkg/store"
+	"github.com/go-go-golems/slop-computer/pkg/store"
 )
 
 // exampleFiles reads examples/<name> as files.push entries.

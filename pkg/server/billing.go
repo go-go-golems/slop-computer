@@ -10,9 +10,9 @@ import (
 	"strings"
 	"sync"
 
-	"github.com/go-go-golems/slop/pkg/access"
-	"github.com/go-go-golems/slop/pkg/billing/stripe"
-	"github.com/go-go-golems/slop/pkg/rt"
+	"github.com/go-go-golems/slop-computer/pkg/access"
+	"github.com/go-go-golems/slop-computer/pkg/billing/stripe"
+	"github.com/go-go-golems/slop-computer/pkg/rt"
 )
 
 // setupBilling builds the Stripe service when the config has a stripe

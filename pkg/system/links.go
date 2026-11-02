@@ -6,7 +6,7 @@ import (
 	"errors"
 	"strconv"
 
-	"github.com/go-go-golems/slop/pkg/ids"
+	"github.com/go-go-golems/slop-computer/pkg/ids"
 )
 
 // Link is a share link: a secret URL that gives its opener a level on a

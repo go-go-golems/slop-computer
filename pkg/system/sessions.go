@@ -8,7 +8,7 @@ import (
 	"strings"
 	"time"
 
-	"github.com/go-go-golems/slop/pkg/ids"
+	"github.com/go-go-golems/slop-computer/pkg/ids"
 )
 
 // Session is a browser session on one host.

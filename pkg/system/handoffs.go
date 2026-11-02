@@ -5,7 +5,7 @@ import (
 	"database/sql"
 	"errors"
 
-	"github.com/go-go-golems/slop/pkg/ids"
+	"github.com/go-go-golems/slop-computer/pkg/ids"
 )
 
 // HandoffTTL is how long a sign-in handoff code is good for (ms).

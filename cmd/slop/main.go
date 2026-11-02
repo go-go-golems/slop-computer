@@ -5,7 +5,7 @@ import (
 	"fmt"
 	"os"
 
-	"github.com/go-go-golems/slop/cmd/slop/cmds"
+	"github.com/go-go-golems/slop-computer/cmd/slop/cmds"
 )
 
 func main() {

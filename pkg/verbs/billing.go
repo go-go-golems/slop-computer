@@ -7,9 +7,9 @@ import (
 	"strings"
 	"time"
 
-	"github.com/go-go-golems/slop/pkg/access"
-	"github.com/go-go-golems/slop/pkg/billing/stripe"
-	"github.com/go-go-golems/slop/pkg/system"
+	"github.com/go-go-golems/slop-computer/pkg/access"
+	"github.com/go-go-golems/slop-computer/pkg/billing/stripe"
+	"github.com/go-go-golems/slop-computer/pkg/system"
 )
 
 // parseUntil reads a date (2027-06-30, end of that day UTC), a duration in

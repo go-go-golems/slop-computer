@@ -8,7 +8,7 @@ import (
 	"sync"
 	"time"
 
-	"github.com/go-go-golems/slop/pkg/billing"
+	"github.com/go-go-golems/slop-computer/pkg/billing"
 )
 
 // Fake is an in-memory Gateway for tests and `slop serve --test`. Webhook

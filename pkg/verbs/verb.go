@@ -11,7 +11,7 @@ import (
 	"strconv"
 	"strings"
 
-	"github.com/go-go-golems/slop/pkg/access"
+	"github.com/go-go-golems/slop-computer/pkg/access"
 )
 
 // Scope is what a token needs to call a verb.

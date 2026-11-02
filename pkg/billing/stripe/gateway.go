@@ -18,7 +18,7 @@ import (
 	"errors"
 	"fmt"
 
-	"github.com/go-go-golems/slop/pkg/billing"
+	"github.com/go-go-golems/slop-computer/pkg/billing"
 	stripe "github.com/stripe/stripe-go/v86"
 )
 

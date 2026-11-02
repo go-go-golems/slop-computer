@@ -7,7 +7,7 @@ import (
 	"errors"
 	"fmt"
 
-	"github.com/go-go-golems/slop/pkg/rt"
+	"github.com/go-go-golems/slop-computer/pkg/rt"
 )
 
 // Doc is one document as stored.

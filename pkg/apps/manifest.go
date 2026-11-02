@@ -9,7 +9,7 @@ import (
 	"path"
 	"strings"
 
-	"github.com/go-go-golems/slop/pkg/rt"
+	"github.com/go-go-golems/slop-computer/pkg/rt"
 )
 
 // File is the manifest's name in a store's tree.
