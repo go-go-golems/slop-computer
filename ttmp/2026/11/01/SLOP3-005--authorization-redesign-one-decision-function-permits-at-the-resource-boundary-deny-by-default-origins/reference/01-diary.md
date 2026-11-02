@@ -362,3 +362,179 @@ because they follow directly from the last two review findings.
   the actor route headers), `server.go` (`trustedDefaults`), `admin.go`,
   `auth.go` (`logout`), `web/admin/src/api.js`.
 - **Tests:** `GOWORK=off go test ./pkg/server -run 'TestStoreBytesFacts|TestTrustedHostHeaders|TestOIDCSignIn|TestLiveStoreFilesIsolated|TestGuestGrantFilesNotPublic|TestLiveHostViews' -count=1`.
+
+## Step 4: Phase A3 (view decisions keyed by the system epoch), phase A1 (one person-to-principal path)
+
+A view held its level, audience and policy from the moment it opened,
+and they stayed correct only if every writer that could change them
+remembered to call `reviewViews`. Phase A3 removes that dependence. Every
+committed `system.db` transaction now moves an epoch. A view records the
+epoch its decision was made at. `viewOf`, and the event stream before
+each commit it sends, confirm the view and decide again when the epoch
+has moved. The hooks stay, but only to tell idle pages early.
+
+Phase A1 then found ten hand-written copies of "person → user-or-guest
+principal". Only three of them refused a disabled account. There is now
+one pure mapping (`access.PersonPrincipal`) and one loader that refuses
+gone or disabled people (`server.personAs`). Commits: `50ff337` (A3),
+`a9e00de` (A1).
+
+### Prompt Context
+
+**User prompt (verbatim):** see step 2 ("Go ahead. then implement ...").
+
+**Assistant interpretation:** Continue with the phases in the order the
+guide gives. A3 and A1 come next; A3 closes the root cause (R3,
+decisions cached without a validity condition) behind three of the #13
+findings.
+
+**Inferred user intent:** Make access follow the state by construction,
+not by convention.
+
+### What I did
+
+- **Surveyed** the `system.db` writers that change a decision:
+  - grants, roles, policy, LLM access, links, comps, Stripe events;
+  - stores and their apps, sign-in.
+  All of them go through `DB.Tx`. Writes outside `Tx` (sessions, device
+  codes, login flows, schedules, usage counters) do not change a view's
+  decision.
+- **Epoch:** `system.DB.epoch` (`atomic.Int64`). `Tx` adds 1 after a
+  commit, before `OnLog`. `Epoch()` reads it.
+- **View:** `rt.View.Epoch` (`atomic.Int64`). `openView` reads the epoch
+  *before* deciding and stores it on the view before `Open` publishes the
+  secret.
+- **`confirm(ctx, v)`** (`pkg/server/live.go`):
+  - same epoch: true, at the cost of one atomic load;
+  - store gone: close the view as revoked;
+  - transient error: refuse this call, ask again next time;
+  - otherwise `recheck`, which closes the view if the answer changed, and
+    record the epoch only when it did not.
+- **Callers:**
+  - `viewOf` (every RPC, upload, sample and stream open);
+  - the stream loop for each commit (`case o.Rev > 0 && !s.confirm(ctx, v)`
+    drops the commit; the access or revoked event queued by `recheck`
+    follows).
+- **A1:**
+  - `access.PersonPrincipal(p, via)`;
+  - `server.personAs(ctx, id, via)`;
+  - converted `principalOf` (both branches), `sitePrincipal`, `newGuest`,
+    `viewPrincipal`, `recheck`, preview, platform verbs, app modules,
+    `explain`'s subject, `billing.status`, `llm.usage` and the actor
+    manager's store visitor.
+
+### Why
+
+- **The epoch is coarse on purpose.** Any write moves it. One recheck
+  per view after an unrelated write costs a few indexed reads, and
+  correctness no longer depends on knowing which writes matter. A
+  finer key, such as one per store or per person, could miss a writer.
+  Group grants and policy cells cross stores and people, so they would
+  be the likely misses.
+- **The epoch is read before deciding.** A write that lands during the
+  decision leaves the view with the older epoch, so the next use decides
+  again. Reading it after the decision would bless a stale answer.
+- **The view keeps its fields.** The guide proposed removing
+  Level/Role/Policy from `rt.View` and computing them per call. Making
+  them a cache with an explicit validity condition gives the same
+  guarantee: no call acts on a decision older than the last write. It
+  touches two lines in the hot path instead of about 25 read sites.
+
+### What worked
+
+- **`TestDowngradeClosesView`, new part:**
+  - grant `@subscriber` interact, open, write (200);
+  - `h.sys.SetGrant(... "view")` directly, with no review;
+  - the next write gives 401;
+  - after an unrelated `SetPolicy` on another app, a fresh view keeps
+    writing (200).
+- **`TestStreamFollowsSystemState`:** a subscribed stream gets
+  `notes/a`. After a direct grant change, `notes/b` is not sent; an
+  `access` event with level `view` is.
+- **`TestDisabledAccountActsNowhere`:**
+  - the view stops at the next call (401) with no review;
+  - the site reopens as anonymous;
+  - `personAs` gives nil.
+- **Negative controls:**
+  - with `if true || v.Epoch.Load() == e` in `confirm`:
+    `p5_test.go:244: write after the grant changed underneath: 200`;
+  - with the stream case disabled, the stream test fails (doc sent).
+- **Checks:**
+  - full suite: `GOWORK=off go test ./... -count=1` passes;
+  - race run: `go test -race ./pkg/server -run 'Downgrade|StreamFollows|PolicyChange|ShareLinks|LiveHost'`
+    passes.
+
+### What didn't work
+
+- **The first stream test** waited for a `doc` that never came: `no doc
+  event within 2s`. A stream only carries paths the view subscribed to
+  (`View.Wants`), so the test now calls `db.subscribe` first.
+- **`SetPolicy` in the test** first had the wrong shape:
+  - it returns only an error;
+  - the audience is `member`, not `@member`.
+
+### What I learned
+
+- `recheck` already refused disabled accounts: `AudienceOf` maps them to
+  `AudNone`, which holds no level. The real gap was elsewhere. App
+  modules and platform verbs acting for a payer built the principal
+  without the check, so a disabled payer's app could still call platform
+  verbs that touch no store.
+
+### What was tricky to build
+
+- **Closing the stream mid-flight.** `Registry.Close(v, false)` does not
+  close the channel. The access event `recheck` queued is already in it,
+  and the registry sends the view nothing more. So the loop drops the
+  commit that triggered the check and lets the next receive deliver the
+  access event.
+
+### What warrants a second pair of eyes
+
+- **A transient `system.db` error** in `confirm` refuses the call but
+  keeps the view. In `recheck`, a failed person lookup still reads as
+  anonymous, which can close a view with an access event. That was true
+  before.
+- **Behavior change:** a disabled account's site session now becomes an
+  anonymous visitor in `recheck`. Before, it was a principal with
+  audience none, which closed the view as revoked. Either way the person
+  keeps no level of their own.
+
+### What should be done in the future
+
+- **A0:** the inventory test.
+- **A2:** `Decide` beside the checks, with a differential test.
+- **A4:** dispatch declares actions.
+
+### Code review instructions
+
+- `pkg/system/system.go` (`Epoch`, `Tx`), `pkg/rt/views.go`
+  (`View.Epoch`), `pkg/server/live.go` (`confirm`, `recheck`,
+  `reviewViews` comment), `pkg/server/views.go` (`openView`, `viewOf`,
+  the stream loop), `pkg/server/auth.go` (`personAs`),
+  `pkg/access/principal.go` (`PersonPrincipal`).
+- **Tests:** `GOWORK=off go test ./pkg/server -run 'TestDowngradeClosesView|TestStreamFollowsSystemState|TestDisabledAccountActsNowhere' -count=1`.
+
+### Technical details
+
+```go
+func (s *Server) confirm(ctx context.Context, v *rt.View) bool {
+	e := s.Sys.Epoch()
+	if v.Epoch.Load() == e {
+		return true
+	}
+	row, err := s.Sys.StoreByID(ctx, v.Target)
+	if errors.Is(err, system.ErrNotFound) {
+		s.rt.views.Close(v, true)
+		return false
+	}
+	if err != nil {
+		return false
+	}
+	if s.recheck(ctx, v, row) {
+		return false
+	}
+	v.Epoch.Store(e)
+	return true
+}
+```

@@ -5,7 +5,7 @@
 - [ ] A0: inventory and structural tests (verbs/RPCs declare actions; trusted-host headers) <!-- t:veq5 -->
 - [ ] A1: pkg/authn: Subject, Credential, Ceiling, Authenticate (one cross-origin rule) <!-- t:9wcr -->
 - [ ] A2: pkg/authz: actions, resources, Decide beside today's checks; differential test <!-- t:ggzv -->
-- [ ] A3: access epoch; views without Level/Role/Policy; reviewViews becomes UX only <!-- t:1pnu -->
+- [x] A3: access epoch; view Level/Role/Policy become a cache confirmed per use against the epoch; reviewViews becomes UX only <!-- t:1pnu -->
 - [ ] A4: verbs, RPC table and actor routes declare actions and receive permits <!-- t:nj3o -->
 - [ ] A5: permits at the store boundary (PutFile/PutBlob/Snapshot/Query); kernel.SystemPermit; drop needCodeRight <!-- t:wg1w -->
 - [x] A6: host-class response policy (ShellPage/JSON/Untrusted); back office headers <!-- t:entp -->
@@ -14,3 +14,4 @@
 - [ ] S2: idempotency keys for mutating RPCs; store-owned actor inboxes <!-- t:0n8f -->
 - [x] L: lifecycle state (Running.Active/Failed/Usable), callers converted <!-- t:9o0b -->
 - [x] A6b: StoreBytes (visibility, mutability), writeStoreBytes, resolveStoreFile for all four serving paths <!-- t:nfdj -->
+- [x] A1a: one person-to-principal path (access.PersonPrincipal, server.personAs; disabled refused on every door) <!-- t:doig -->
