@@ -706,3 +706,179 @@ The spike's authorizer log, for `DELETE FROM _k WHERE id = 'a'`:
 18 _k2  main      INSERT _k2      (the trigger body on c)
 rows written by the trigger: 1
 ```
+
+## Step 6: Phase S2 (keyed calls run once; the actor inbox belongs to the store)
+
+Two delivery problems from #13 had been fixed case by case. First, the
+runtime could not resend a write or an action after a network error,
+because it might already have run. Second, calls queued for an actor
+that restarted were failed with `errStopped` and resent by `Call`, which
+could reorder them. Phase S2 gives both a structural answer. Every call
+that is not harmless to run twice carries a key, and the server answers
+a repeat of the key with the first result. A store's events wait in a
+queue the store owns, which the next actor takes over. Commit: `d200761`.
+
+### Prompt Context
+
+**User prompt (verbatim):** see step 2 ("Go ahead. then implement ...").
+
+**Assistant interpretation:** S2 as the guide specifies it: idempotency
+keys for mutating RPCs, and store-owned inboxes.
+
+**Inferred user intent:** Delivery that is safe to retry, without special
+cases per method.
+
+### What I did
+
+- **Runtime (`web/runtime/src/transport.ts`):**
+  - `resendable` is now `absolute`: the methods that read or set state
+    absolutely;
+  - every other method gets `newKey()` (`crypto.randomUUID`, with a
+    fallback) once per call;
+  - a network failure resends any method once, with the same key. A 401
+    is still resent after a renewal.
+- **Server:**
+  - `pkg/server/once.go`: `onceCache.do(onceKey{target, user, key}, fn)`.
+    The first run stores its result for ten minutes. A repeat waits on
+    the first run's `done` channel and gets the same output and error.
+    Expired entries are swept at most once a minute.
+  - `viewRPC` reads `key` (at most 64 characters) and runs keyed calls
+    through the cache, with
+    `context.WithTimeout(context.WithoutCancel(r.Context()), 2m)`.
+- **Actors:**
+  - `pkg/actor/inbox.go`: `inbox{evs}` per store in `Manager.inboxes`,
+    guarded by `Manager.mu`;
+  - `push` appends (busy at 256, continuations exempt) and wakes the
+    current actor. With no current actor it starts one.
+  - `take(a)` pops the next event, or reports `ok=false` once `a` is no
+    longer `m.actors[id]`;
+  - `retire` refuses while the inbox is non-empty, and now closes
+    `a.stop`.
+- **Actor loop and callers:**
+  - `Actor.loop` is take, then handle, then wait for `wake`, idle or
+    stop. It skips events whose caller gave up (`gone`) and fails
+    continuations owned by another runtime (`owner`) as "lost".
+  - `send` pushes, then waits. If the actor it targeted stops, it calls
+    `m.Get` for the successor and keeps waiting on the same reply.
+  - `Call` and `Serve` lost their resend loops; `errStopped` and `drain`
+    are gone;
+  - producers (`continueWith`, `onCommit`, `queueSystem`, `Fire`) use
+    `push`. A full queue resets the reactor's dedupe flag, so the next
+    commit queues it again.
+
+### Why
+
+- **Keys, not a list of safe methods.** The list was a judgement per
+  method, and every new method had to be classified. With keys, a new
+  method is safe to retry by default.
+- **An in-memory cache, not a `system.db` table** (the guide's first
+  idea), for two reasons:
+  - every `system.db` write moves the access epoch (step 4), so a write
+    per RPC would recheck every open view after every call;
+  - a restart ends all views anyway. The remaining window (a restart
+    between a commit and its response) is documented in `once.go`.
+- **Keyed calls are detached from the request context.** A client that
+  disconnects cancels `r.Context()`, so the first run could fail halfway
+  and its "cancelled" error would answer the resend.
+- **A queue under the manager's mutex, not a shared channel.** With a
+  channel, a stopped actor and its successor can both read it. Go's
+  `select` picks among ready cases at random, so the old runtime could
+  take one more event after it was replaced. `take` checks "am I still
+  the store's actor" under the same lock that replaces actors.
+- **The wake channel is per actor.** A shared wake channel could be
+  consumed by the retiring actor, leaving the successor asleep with work
+  queued. A new actor always starts by taking, so it needs no wake.
+
+### What worked
+
+- **`pnpm test`:** 9 pass, among them the three transport tests:
+  - a read is resent without a key;
+  - an action is resent with the same key;
+  - each call has its own key, and a second network failure gives up.
+- **`TestKeyedCallsRunOnce`:**
+  - the same key gives the same rev;
+  - another key gives a new rev, and two unkeyed writes give two revs;
+  - with the cache disabled: `a resend of k-1 committed again: rev 4,
+    then 5`.
+- **`TestOnceWaitsForTheFirstRun`:** a resend that arrives while the
+  first run is blocked gets `"first"`, after one run.
+- **`TestQueuedCallsRunOnceInOrder`:** five `add` calls are queued behind
+  a long `spin`, then `Restart`. The document reads `seen = [0 1 2 3 4]`.
+  Control: with `send` returning on stop, the test fails with `a call
+  queued when the actor stopped: actor_error: control: stopped`, which
+  shows the restart lands while the calls are queued.
+- **Other checks:**
+  - `TestCallsSurviveActorRestart` passes without the resend loop;
+  - `go test -race ./pkg/server ./pkg/store` is clean, and actor tests
+    with `-race -count=3` pass;
+  - the full suite passes.
+
+### What didn't work
+
+- **The first `TestKeyedCallsRunOnce`** read `r.Body`, which the test
+  helper `site.do` had already consumed: `write: 200` with an empty body.
+  The helper returns the decoded JSON as its second value.
+
+### What I learned
+
+- `retire` used to return without closing `stop`. With the old channel
+  inbox, an event sent between the idle check and the retirement sat in
+  a dead actor's channel until `CallTimeout`. The new `retire` refuses
+  while anything is queued, and `push` starts an actor when none runs.
+
+### What was tricky to build
+
+- **Lost wakeups and double consumers.** Three races guided the design:
+  1. the old actor taking an event after replacement (solved by `take`
+     checking ownership under `m.mu`);
+  2. a wake token consumed by the retiring actor (solved by a wake
+     channel per actor);
+  3. an event queued just as the last actor retires (solved by `retire`
+     checking the queue under the same lock, and `push` starting an
+     actor when none runs).
+
+### What warrants a second pair of eyes
+
+- **`push` starts `m.Get` in a goroutine when no actor runs.** Get errors
+  (a broken app, a removed store) are dropped there. Waiting callers see
+  them through their own `Get`.
+- **Abandoned events are skipped only before they start.** One whose
+  caller timed out mid-run still completes, as before.
+- **A broken store keeps its queued events** (marked `gone` when their
+  callers returned). Reactor and alarm events in it run after a
+  `Restart`.
+
+### What should be done in the future
+
+- **S1:** rev-guarded sync.
+- **A2 and A5.**
+
+### Code review instructions
+
+- `pkg/actor/inbox.go`, `pkg/actor/actor.go` (`event.owner/gone`,
+  `loop`, `send`, `continueWith`), `pkg/actor/manager.go` (`retire`,
+  `Call`, `Serve`, `onCommit`, `Fire`), `pkg/actor/sysreact.go`,
+  `pkg/server/once.go`, `pkg/server/views.go` (`viewRPC`),
+  `web/runtime/src/transport.ts`.
+- **Tests:**
+  - `GOWORK=off go test -race ./pkg/server -run 'TestQueuedCallsRunOnceInOrder|TestCallsSurviveActorRestart|TestKeyedCallsRunOnce|TestOnceWaitsForTheFirstRun' -count=3`;
+  - `cd web/runtime && pnpm test`.
+
+### Technical details
+
+```go
+func (m *Manager) take(a *Actor) (ev *event, ok bool) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	if m.actors[a.st.ID] != a {
+		return nil, false
+	}
+	in := m.inboxLocked(a.st.ID)
+	if len(in.evs) > 0 {
+		ev = in.evs[0]
+		in.evs[0] = nil
+		in.evs = in.evs[1:]
+	}
+	return ev, true
+}
+```

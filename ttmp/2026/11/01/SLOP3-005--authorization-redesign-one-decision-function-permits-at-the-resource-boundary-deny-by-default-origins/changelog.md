@@ -21,3 +21,12 @@ A0/A4: every verb and runtime method declares an authz action; dispatch checks i
 
 - /home/manuel/workspaces/2026-10-28/slop-computer/slop-computer/pkg/authz/actions.go — the action table
 - /home/manuel/workspaces/2026-10-28/slop-computer/slop-computer/pkg/store/sqlpolicy.go — kernel rule and checkAppForeignKeys
+
+## 2026-11-01
+
+S2: keyed calls run once (runtime keys, server onceCache); store-owned actor inbox replaces the resend loop (d200761)
+
+### Related Files
+
+- /home/manuel/workspaces/2026-10-28/slop-computer/slop-computer/pkg/actor/inbox.go — store-owned inbox
+- /home/manuel/workspaces/2026-10-28/slop-computer/slop-computer/pkg/server/once.go — keyed call cache

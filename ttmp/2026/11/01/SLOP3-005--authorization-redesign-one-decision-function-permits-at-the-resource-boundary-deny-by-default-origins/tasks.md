@@ -11,7 +11,7 @@
 - [x] A6: host-class response policy (ShellPage/JSON/Untrusted); back office headers <!-- t:entp -->
 - [x] A7: spike: SQLite authorizer with the inner trigger/view argument (author authority) <!-- t:kmn0 -->
 - [ ] S1: rev-guarded sync (per-entry rev, cursor from stream only, catch-up in one read transaction) <!-- t:aysd -->
-- [ ] S2: idempotency keys for mutating RPCs; store-owned actor inboxes <!-- t:0n8f -->
+- [x] S2: idempotency keys for mutating RPCs; store-owned actor inboxes <!-- t:0n8f -->
 - [x] L: lifecycle state (Running.Active/Failed/Usable), callers converted <!-- t:9o0b -->
 - [x] A6b: StoreBytes (visibility, mutability), writeStoreBytes, resolveStoreFile for all four serving paths <!-- t:nfdj -->
 - [x] A1a: one person-to-principal path (access.PersonPrincipal, server.personAs; disabled refused on every door) <!-- t:doig -->
