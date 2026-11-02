@@ -41,6 +41,8 @@ type rtState struct {
 
 	leaseMu sync.Mutex
 	leases  map[string]lease // store \x00 path
+
+	once onceCache // keyed calls: a resend gets the first result
 }
 
 type lease struct {
@@ -485,6 +487,7 @@ func (s *Server) viewRPC(w http.ResponseWriter, r *http.Request) {
 	var in struct {
 		Method string          `json:"method"`
 		Args   json.RawMessage `json:"args"`
+		Key    string          `json:"key"` // set on calls that are not harmless to run twice
 	}
 	if err := httpx.Read(r, &in, int64(rt.MaxDocBytes)+64<<10); err != nil {
 		httpx.JSON(w, 400, map[string]any{"error": map[string]string{"code": "invalid_argument", "message": "send {method, args}"}})
@@ -504,7 +507,19 @@ func (s *Server) viewRPC(w http.ResponseWriter, r *http.Request) {
 		httpx.JSON(w, 403, map[string]any{"error": map[string]string{"code": "not_granted", "message": in.Method + " needs more access than this view has"}})
 		return
 	}
-	out, err := m.fn(r.Context(), v, in.Args)
+	run := func() (any, error) { return m.fn(r.Context(), v, in.Args) }
+	var out any
+	var err error
+	if in.Key != "" && len(in.Key) <= 64 {
+		// The call runs to its end even when the connection breaks: its
+		// resend waits for this result instead of a cancellation.
+		ctx, cancel := context.WithTimeout(context.WithoutCancel(r.Context()), 2*time.Minute)
+		defer cancel()
+		run = func() (any, error) { return m.fn(ctx, v, in.Args) }
+		out, err = s.rt.once.do(onceKey{v.Target, v.User, in.Key}, run)
+	} else {
+		out, err = run()
+	}
 	if err != nil {
 		var f *rtFail
 		if !errors.As(err, &f) {

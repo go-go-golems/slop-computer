@@ -29,11 +29,12 @@ import (
 type Manager struct {
 	K *kernel.Kernel
 
-	mu     sync.Mutex
-	actors map[string]*Actor
-	broken map[string]string // store → app@n: why
-	files  map[string]map[string][]byte
-	logs   map[string][]LogLine
+	mu      sync.Mutex
+	actors  map[string]*Actor
+	inboxes map[string]*inbox // store → its queue of events (inbox.go)
+	broken  map[string]string // store → app@n: why
+	files   map[string]map[string][]byte
+	logs    map[string][]LogLine
 
 	// Hooks provided by the server and later phases.
 	RoomEmit  func(store, topic string, data any)
@@ -50,7 +51,7 @@ type Manager struct {
 // New makes the actor manager and hooks it into the kernel (activation,
 // commits for reactors).
 func New(k *kernel.Kernel) *Manager {
-	m := &Manager{K: k, actors: map[string]*Actor{}, broken: map[string]string{}, files: map[string]map[string][]byte{}, logs: map[string][]LogLine{}}
+	m := &Manager{K: k, actors: map[string]*Actor{}, inboxes: map[string]*inbox{}, broken: map[string]string{}, files: map[string]map[string][]byte{}, logs: map[string][]LogLine{}}
 	k.Activate = m.activate
 	k.OnActivated = m.onActivated
 	k.Subscribe(m.onCommit)
@@ -197,9 +198,14 @@ func (m *Manager) Running(id string) *Actor {
 func (m *Manager) retire(a *Actor) bool {
 	m.mu.Lock()
 	defer m.mu.Unlock()
-	if m.actors[a.st.ID] == a {
-		delete(m.actors, a.st.ID)
+	if m.actors[a.st.ID] != a {
+		return true
 	}
+	if len(m.inboxLocked(a.st.ID).evs) > 0 {
+		return false // something arrived: take it first
+	}
+	delete(m.actors, a.st.ID)
+	close(a.stop)
 	return true
 }
 
@@ -448,30 +454,24 @@ func (m *Manager) activate(ctx context.Context, t *store.Turn, r kernel.Running)
 // Call runs an action of a store's actor and waits for its result (which
 // may take several turns when the action awaits I/O).
 func (m *Manager) Call(ctx context.Context, storeID, action string, args any, vis Visitor, via string) (any, error) {
-	for try := 0; ; try++ {
-		a, err := m.Get(ctx, storeID)
-		if err != nil {
-			return nil, err
-		}
-		if a == nil {
-			return nil, fail("not_found", "%s has no actor", storeID)
-		}
-		if !slices.Contains(a.keys("actions"), action) {
-			return nil, fail("not_found", "%s has no action %q", storeID, action)
-		}
-		v, err := a.send(ctx, &event{kind: "action", name: action, visitor: vis, via: via,
-			run: func(a *Actor, cx *goja.Object) (goja.Value, error) {
-				f := a.fn("actions", action)
-				if f == nil {
-					return nil, fail("not_found", "%s has no action %q", storeID, action)
-				}
-				return f(goja.Undefined(), cx, a.toJS(args))
-			}})
-		if err == error(errStopped) && try < 2 {
-			continue // it never ran: send it to the actor that replaces this one
-		}
-		return v, err
+	a, err := m.Get(ctx, storeID)
+	if err != nil {
+		return nil, err
 	}
+	if a == nil {
+		return nil, fail("not_found", "%s has no actor", storeID)
+	}
+	if !slices.Contains(a.keys("actions"), action) {
+		return nil, fail("not_found", "%s has no action %q", storeID, action)
+	}
+	return a.send(ctx, &event{kind: "action", name: action, visitor: vis, via: via,
+		run: func(a *Actor, cx *goja.Object) (goja.Value, error) {
+			f := a.fn("actions", action)
+			if f == nil {
+				return nil, fail("not_found", "%s has no action %q", storeID, action)
+			}
+			return f(goja.Undefined(), cx, a.toJS(args))
+		}})
 }
 
 // Actions lists the actions of a store's actor.
@@ -581,31 +581,18 @@ func matchPattern(pat, p string) (map[string]string, int, bool) {
 // Serve runs a matched route as an event and returns its response.
 func (m *Manager) Serve(ctx context.Context, a *Actor, route Route, req Req, vis Visitor) (*Res, error) {
 	req.Params = route.Params
-	for try := 0; ; try++ {
-		v, err := a.send(ctx, &event{kind: "http", name: route.Key, visitor: vis, via: "http",
-			run: func(a *Actor, cx *goja.Object) (goja.Value, error) {
-				f := a.fn("http", route.Key)
-				if f == nil {
-					return nil, fail("actor_error", "route %s has no run", route.Key)
-				}
-				return f(goja.Undefined(), cx, a.toJS(req))
-			}})
-		if err == error(errStopped) && try < 2 {
-			// it never ran: send it to the actor that replaces this one
-			id := a.st.ID
-			if a, err = m.Get(ctx, id); err != nil {
-				return nil, err
+	v, err := a.send(ctx, &event{kind: "http", name: route.Key, visitor: vis, via: "http",
+		run: func(a *Actor, cx *goja.Object) (goja.Value, error) {
+			f := a.fn("http", route.Key)
+			if f == nil {
+				return nil, fail("actor_error", "route %s has no run", route.Key)
 			}
-			if a == nil {
-				return nil, fail("not_found", "%s has no actor", id)
-			}
-			continue
-		}
-		if err != nil {
-			return nil, err
-		}
-		return toRes(v), nil
+			return f(goja.Undefined(), cx, a.toJS(req))
+		}})
+	if err != nil {
+		return nil, err
 	}
+	return toRes(v), nil
 }
 
 func toRes(v any) *Res {
@@ -690,9 +677,10 @@ func (m *Manager) onCommit(c *store.Commit) {
 				a.mu.Unlock()
 				return nil, a.react(cx)
 			}}
-		select {
-		case a.inbox <- ev:
-		case <-a.stop:
+		if m.push(c.Store, ev) != nil {
+			a.mu.Lock()
+			a.reactor = false // the queue is full: the next commit queues it again
+			a.mu.Unlock()
 		}
 	}()
 }
@@ -863,11 +851,7 @@ func (m *Manager) Fire(ctx context.Context, id, name string) error {
 	_ = m.K.Sys.SetSchedule(ctx, id, time.Now().Add(time.Minute).UnixMilli())
 	ev := &event{kind: "alarm", name: name, visitor: m.storeVisitor(ctx, id), via: "alarm",
 		run: func(a *Actor, cx *goja.Object) (goja.Value, error) { return a.alarm(cx, name) }}
-	select {
-	case a.inbox <- ev:
-	case <-a.stop:
-	}
-	return nil
+	return m.push(id, ev)
 }
 
 // alarm runs the first due alarm (or the named one) and reschedules it.

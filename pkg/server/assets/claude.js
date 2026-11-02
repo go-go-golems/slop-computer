@@ -304,7 +304,7 @@
     }
     return ready;
   }
-  var resendable = /* @__PURE__ */ new Set([
+  var absolute = /* @__PURE__ */ new Set([
     "db.get",
     "db.query",
     "db.subscribe",
@@ -318,8 +318,14 @@
     "room.leave",
     "room.presence"
   ]);
+  function newKey() {
+    const c = globalThis.crypto;
+    if (c?.randomUUID) return c.randomUUID();
+    return Date.now().toString(36) + Math.random().toString(36).slice(2) + Math.random().toString(36).slice(2);
+  }
   async function rpc(method, args) {
     if (terminal) throw fail(terminal, "this view was closed");
+    const key = absolute.has(method) ? void 0 : newKey();
     for (let attempt = 0; ; attempt++) {
       if (!secret && !await awaitView(1e4)) throw fail("unavailable", "no view");
       let r;
@@ -328,10 +334,10 @@
           method: "POST",
           headers: { Authorization: "Bearer " + secret, "Content-Type": "application/json" },
           credentials: "omit",
-          body: JSON.stringify({ method, args: args ?? {} })
+          body: JSON.stringify({ method, args: args ?? {}, key })
         });
       } catch {
-        if (attempt < 1 && resendable.has(method)) {
+        if (attempt < 1) {
           await new Promise((res) => setTimeout(res, 300 + Math.random() * 400));
           continue;
         }
