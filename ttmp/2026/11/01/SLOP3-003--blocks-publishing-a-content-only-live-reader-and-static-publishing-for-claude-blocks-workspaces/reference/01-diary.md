@@ -947,7 +947,7 @@ editor shows.
 
 - Other goja gaps in the vendored code would surface the same way; with
   `safely` they now drop a block instead of the page, and log the error
-  to the actor's log (`slop actor logs <site>`).
+  to the actor's log (`slop app logs <site>`).
 
 ### What should be done in the future
 
