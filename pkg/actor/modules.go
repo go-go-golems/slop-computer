@@ -489,10 +489,7 @@ func (a *Actor) storesModule() goja.Value {
 		_ = r.Set("id", target)
 		docs := a.vm.NewObject()
 		_ = docs.Set("get", func(path string) goja.Value {
-			if !may(path) {
-				return a.snap(store.Doc{}, false, path)
-			}
-			doc, err := ts.GetDoc(ctx, path)
+			doc, err := ts.GetDoc(ctx, path, may)
 			if err != nil {
 				return a.snap(store.Doc{}, false, path)
 			}

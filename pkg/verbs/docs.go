@@ -23,11 +23,8 @@ func init() {
 				if err != nil {
 					return nil, err
 				}
-				path := a.S("path")
-				if !e.K.Rules(ctx, s.ID).CanRead(path, p.ID(), d.Level) {
-					return nil, Errf("not_found", "no document %s", path)
-				}
-				doc, err := s.GetDoc(ctx, path)
+				path, rules := a.S("path"), e.K.Rules(ctx, s.ID)
+				doc, err := s.GetDoc(ctx, path, func(path string) bool { return rules.CanRead(path, p.ID(), d.Level) })
 				if errors.Is(err, store.ErrNotFound) {
 					return nil, Errf("not_found", "no document %s", path)
 				}

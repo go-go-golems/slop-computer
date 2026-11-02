@@ -73,11 +73,11 @@ func TestDocsAndLog(t *testing.T) {
 	if err != nil || c.Rev != 2 {
 		t.Fatalf("rev 2 = %+v, %v", c, err)
 	}
-	d, err := s.GetDoc(ctx, "notes/a")
+	d, err := s.GetDoc(ctx, "notes/a", Everything)
 	if err != nil || d.Body["tag"] != "x" || d.Version != 2 {
 		t.Fatalf("merged doc = %+v, %v", d, err)
 	}
-	if _, err := s.GetDoc(ctx, "notes/b"); !errors.Is(err, ErrNotFound) {
+	if _, err := s.GetDoc(ctx, "notes/b", Everything); !errors.Is(err, ErrNotFound) {
 		t.Fatalf("deleted doc err = %v", err)
 	}
 	docs, err := s.Query(ctx, rt.Query{Coll: "notes"}, Everything)
@@ -97,7 +97,7 @@ func TestDocsAndLog(t *testing.T) {
 	if err == nil {
 		t.Fatal("expected error")
 	}
-	if _, err := s.GetDoc(ctx, "notes/c"); !errors.Is(err, ErrNotFound) {
+	if _, err := s.GetDoc(ctx, "notes/c", Everything); !errors.Is(err, ErrNotFound) {
 		t.Fatalf("rolled-back doc err = %v", err)
 	}
 	log, err := s.Log(ctx, 0, 10)

@@ -94,10 +94,7 @@ func (s *Server) rpcSlopRead(ctx context.Context, v *rt.View, raw json.RawMessag
 	rules := s.Env.K.Rules(ctx, target)
 	switch a.Op {
 	case "get":
-		if !rules.CanRead(a.Path, p.ID(), d.Level) {
-			return map[string]any{"path": a.Path, "exists": false}, nil
-		}
-		doc, err := st.GetDoc(ctx, a.Path)
+		doc, err := st.GetDoc(ctx, a.Path, func(path string) bool { return rules.CanRead(path, p.ID(), d.Level) })
 		if err != nil {
 			return map[string]any{"path": a.Path, "exists": false}, nil
 		}

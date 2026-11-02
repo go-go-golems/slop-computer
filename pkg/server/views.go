@@ -574,14 +574,11 @@ func (s *Server) dbGet(ctx context.Context, v *rt.View, path string) (any, error
 		return nil, rtErr("invalid_argument", "%q is not a document path", path)
 	}
 	missing := map[string]any{"path": path, "exists": false}
-	if !v.Caps.Rules.CanRead(path, v.User, v.Level) {
-		return missing, nil
-	}
 	st, err := s.viewStore(ctx, v)
 	if err != nil {
 		return nil, err
 	}
-	d, err := st.GetDoc(ctx, path)
+	d, err := st.GetDoc(ctx, path, func(path string) bool { return v.Caps.Rules.CanRead(path, v.User, v.Level) })
 	if errors.Is(err, store.ErrNotFound) {
 		return missing, nil
 	}

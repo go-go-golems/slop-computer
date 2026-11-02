@@ -38,8 +38,12 @@ func decodeBody(raw sql.NullString) (map[string]any, error) {
 	return m, nil
 }
 
-// GetDoc reads a live document (ErrNotFound for missing or deleted).
-func (s *Store) GetDoc(ctx context.Context, path string) (Doc, error) {
+// GetDoc reads a live document that may lets the caller read (ErrNotFound
+// for missing, deleted or unreadable: the caller cannot tell them apart).
+func (s *Store) GetDoc(ctx context.Context, path string, may func(path string) bool) (Doc, error) {
+	if !may(path) {
+		return Doc{}, ErrNotFound
+	}
 	return getDoc(ctx, s.ro, path)
 }
 
