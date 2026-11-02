@@ -920,7 +920,7 @@
         if (res.doc.exists) {
           intoMirror(l, res.doc);
           remember(res.doc.path, res.doc.version, res.doc.body);
-        } else l.mirror.delete(l.path);
+        } else if (!l.streamed.has(l.path)) l.mirror.delete(l.path);
       }
       l.ready = true;
       deliver(l);

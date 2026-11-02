@@ -220,7 +220,7 @@ async function register(l: Listener) {
       if (res.doc.exists) {
         intoMirror(l, res.doc);
         remember(res.doc.path, res.doc.version, res.doc.body as Body);
-      } else l.mirror.delete(l.path);
+      } else if (!l.streamed.has(l.path)) l.mirror.delete(l.path); // a creation streamed meanwhile is newer
     }
     l.ready = true;
     deliver(l);

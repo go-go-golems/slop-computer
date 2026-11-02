@@ -33,6 +33,17 @@ test("a creation streamed while the snapshot was out survives it", async () => {
   stop();
 });
 
+test("a document created while its snapshot was out survives a missing read", async () => {
+  const seen: unknown[] = [];
+  const stop = db.doc("notes/x").onSnapshot((s: any) => seen.push(s.exists ? s.data() : null));
+  await settle(); // db.subscribe is out
+  emit("doc", { path: "notes/x", version: 1, body: { text: "new" }, rev: 7 });
+  answer({ rev: 6, doc: { path: "notes/x", exists: false } }); // read before it existed
+  await settle();
+  assert.deepEqual(seen.at(-1), { text: "new" });
+  stop();
+});
+
 test("a subscription's snapshot does not move the stream's cursor", async () => {
   const stop = db.collection("other").onSnapshot(() => {});
   await settle();
