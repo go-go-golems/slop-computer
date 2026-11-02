@@ -42,7 +42,7 @@ func TestCallChecksTheFloor(t *testing.T) {
 	registerForgetful.Do(func() {
 		verbs.Register(&verbs.Verb{Name: "test.forgetful", Scope: verbs.Read, Action: authz.StoreAdmin,
 			Args: []verbs.Arg{{Name: "store", Type: "string", Pos: 1}},
-			Run: func(context.Context, *verbs.Env, *access.Principal, verbs.Args) (any, error) { return "ran", nil }})
+			Run:  func(context.Context, *verbs.Env, *access.Principal, verbs.Args) (any, error) { return "ran", nil }})
 	})
 	h := newHarness(t)
 	admin := h.tokenFor("admin@example.com", "read", "write", "admin")
