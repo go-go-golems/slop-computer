@@ -16,9 +16,10 @@ const SURFACES = [
 ];
 
 function App({ me, hosts }) {
-  const [tab, setTab] = useState(() => (location.hash.slice(1) || 'activity'));
+  const tabOf = () => location.hash.slice(1).split('?')[0] || 'activity';
+  const [tab, setTab] = useState(tabOf);
   const [toasts, setToasts] = useState([]);
-  useEffect(() => { const f = () => setTab(location.hash.slice(1) || 'activity'); addEventListener('hashchange', f); return () => removeEventListener('hashchange', f); }, []);
+  useEffect(() => { const f = () => setTab(tabOf()); addEventListener('hashchange', f); return () => removeEventListener('hashchange', f); }, []);
   const toast = useCallback((text, bad) => {
     const id = Math.random();
     setToasts(t => [...t.slice(-3), { id, text, bad }]);

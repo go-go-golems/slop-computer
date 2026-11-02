@@ -1,7 +1,7 @@
 // The surfaces of guide §14: one table per surface, actions next to the row
 // they change.
 import React, { useMemo, useState } from 'react';
-import { Err, Field, Section, Seg, Table, Trace, fmtDate, fmtNum, useAct, useVerb } from './ui.jsx';
+import { Browse, Err, Field, Kv, Section, Seg, Table, Trace, fmtDate, fmtNum, useAct, useHashParams, useVerb } from './ui.jsx';
 
 // --- Activity: the platform log ------------------------------------------------
 
@@ -116,30 +116,67 @@ function Usage() {
   );
 }
 
-// --- Apps: status, the policy matrix, secrets ----------------------------------------------
+// --- Shared: apps, stores, mounts and people, joined -----------------------------------
+
+// useCatalog loads what the browsing surfaces join: apps (titles), stores,
+// mounts (where each store is served) and people (owners' names).
+function useCatalog() {
+  const [apps, ae, reloadA] = useVerb('app.ls', {});
+  const [stores, se, reloadS] = useVerb('store.ls', { all: true });
+  const [mounts, me, reloadM] = useVerb('mount.ls', {});
+  const [people] = useVerb('people.ls', { kind: 'user' });
+  const reload = () => { reloadA(); reloadS(); reloadM(); };
+  const appOf = useMemo(() => new Map((apps || []).map(a => [a.app, a])), [apps]);
+  const personOf = useMemo(() => new Map((people || []).map(p => [p.id, p])), [people]);
+  const storeOf = useMemo(() => new Map((stores || []).map(s => [s.id, s])), [stores]);
+  const urlsOf = (s) => (mounts || []).flatMap(({ mount: m, url }) => {
+    if (m.store === s.id) return [url];
+    if (m.storeParam && (!m.type || m.type === s.type)) return [url.replace(':' + m.storeParam, s.id)];
+    return [];
+  });
+  const kindOf = (s) => (appOf.has(s.id) ? 'app' : s.app ? 'instance' : 'files');
+  return { apps, stores, mounts, appOf, personOf, storeOf, urlsOf, kindOf, e: ae || se || me, reload };
+}
+
+const who = (personOf, id) => {
+  const p = personOf.get(id);
+  return p ? (p.name || p.email) : id || '';
+};
+
+const Addr = ({ urls }) => (urls.length ? <ul className="addrs">{urls.map(u => <li key={u}><a href={u} target="_blank" rel="noreferrer">{u.replace(/^https?:\/\//, '')}</a></li>)}</ul> : <span className="dim">not mounted</span>);
+
+// --- Apps: browse, status, the policy matrix, secrets --------------------------------------
 
 export function Apps({ toast }) {
-  const [apps, e, reload] = useVerb('app.ls', {});
-  const [sel, setSel] = useState('');
+  const c = useCatalog();
+  const [p, set] = useHashParams();
+  const instances = (app) => (c.stores || []).filter(s => s.app === app);
+  // a.type is the type the app declares for its instances; where the app
+  // itself is served depends on its own store's type (c.storeOf).
+  const rows = (c.apps || []).map(a => ({ ...a, instances: instances(a.app).length, urls: c.urlsOf(c.storeOf.get(a.app) || { id: a.app }) }));
   return (
-    <Section title="Apps" tools={<button className="btn" onClick={reload}>Refresh</button>}>
-      <Err e={e} />
+    <Section title="Apps" tools={<button className="btn" onClick={c.reload}>Refresh</button>}>
+      <Err e={c.e} />
       <div className="split">
         <div className="list">
-          <Table rows={apps} rowKey={a => a.app} sel={sel} onRow={a => setSel(a.app)} empty="No apps pushed yet." cols={[
-            { h: 'App', r: a => <b>{a.app}</b> },
-            { h: 'Title', r: a => a.title || '' },
-            { h: 'Version', k: 'n' },
-            { h: 'Kind', r: a => (a.live ? 'live' : 'static') },
-          ]} />
+          <Browse rows={rows} noun="apps" rowKey={a => a.app} sel={p.sel} onRow={a => set({ sel: a.app })} empty="No apps pushed yet."
+            text={a => `${a.app} ${a.title || ''} ${a.type || ''}`}
+            filters={[['all', 'All', () => true], ['live', 'Live', a => a.live], ['static', 'Static', a => !a.live], ['unmounted', 'Not mounted', a => !a.urls.length && !a.instances]]}
+            cols={[
+              { h: 'App', r: a => <b>{a.app}</b>, sort: a => a.app },
+              { h: 'Title', r: a => a.title || '', sort: a => a.title || '' },
+              { h: 'Version', k: 'n', sort: a => a.n },
+              { h: 'Kind', r: a => (a.live ? 'live' : 'static'), sort: a => (a.live ? 0 : 1) },
+              { h: 'Instances', r: a => a.instances || '', sort: a => a.instances },
+            ]} />
         </div>
-        <div className="detail">{sel ? <AppDetail app={sel} toast={toast} /> : <p className="empty">Pick an app.</p>}</div>
+        <div className="detail">{p.sel ? <AppDetail key={p.sel} app={p.sel} row={rows.find(a => a.app === p.sel)} c={c} toast={toast} /> : <p className="empty">Pick an app.</p>}</div>
       </div>
     </Section>
   );
 }
 
-function AppDetail({ app, toast }) {
+function AppDetail({ app, row, c, toast }) {
   const [st, e, reloadSt] = useVerb('app.status', { store: app }, [app]);
   const [pol, pe, reloadPol] = useVerb('policy.ls', { app }, [app]);
   const [secrets, , reloadSec] = useVerb('secret.ls', { app }, [app]);
@@ -149,18 +186,30 @@ function AppDetail({ app, toast }) {
   const cells = pol?.cells || [];
   const caps = pol?.declared || [];
   const auds = ['guest', 'member', 'subscriber', 'admin'];
-  const cell = (c, a) => cells.find(x => x.capability === c && x.audience === a);
+  const cell = (cap, a) => cells.find(x => x.capability === cap && x.audience === a);
+  const inst = (c.stores || []).filter(s => s.app === app);
   return (
     <div>
+      <h2 className="dtitle">{row?.title || app} <span className="dim mono">{app}</span></h2>
       <Err e={e || pe} />
-      {st && <dl className="kv narrow"><dt>version</dt><dd>{st.n}</dd><dt>status</dt><dd className={st.broken ? 'bad' : ''}>{st.broken ? 'broken: ' + st.broken : 'running'}</dd></dl>}
-      <div className="formrow"><button className="btn" onClick={() => act('app.restart', { store: app }, 'Restarted')}>Restart</button></div>
+      <Kv items={[
+        ['version', st?.n],
+        ['status', st && <span className={st.broken ? 'bad' : ''}>{st.broken ? 'broken: ' + st.broken : 'running'}</span>],
+        ['kind', row && (row.live ? 'live: runs in the shell' : 'static: files only')],
+        ['instance type', row?.type],
+        ['instances', inst.length ? inst.map(s => s.id).join(', ') : ''],
+        ['served at', <Addr key="a" urls={row?.urls || []} />],
+      ]} />
+      <div className="formrow">
+        <a className="btn" href={`#stores?sel=${encodeURIComponent(app)}`}>Open its store</a>
+        <button className="btn" onClick={() => act('app.restart', { store: app }, 'Restarted')}>Restart</button>
+      </div>
       <h3>Policy</h3>
       {caps.length === 0 ? <p className="empty">This app declares no policy capability.</p> : (
         <table className="rt matrixt"><thead><tr><th>capability</th>{auds.map(a => <th key={a}>{a}</th>)}</tr></thead>
-          <tbody>{caps.map(c => <tr key={c}><td><b>{c}</b></td>{auds.map(a => { const x = cell(c, a); return (
-            <td key={a}><button type="button" className={'cellbtn' + (x?.allowed ? ' on' : '')} aria-pressed={!!x?.allowed} aria-label={`${c} for ${a}`}
-              onClick={() => act('policy.set', { app, capability: c, audience: '@' + a, value: x?.allowed ? 'off' : 'on' }, `${c} for ${a}: ${x?.allowed ? 'off' : 'on'}`)}>{x?.allowed ? 'on' : '–'}</button></td>); })}</tr>)}</tbody></table>)}
+          <tbody>{caps.map(cap => <tr key={cap}><td><b>{cap}</b></td>{auds.map(a => { const x = cell(cap, a); return (
+            <td key={a}><button type="button" className={'cellbtn' + (x?.allowed ? ' on' : '')} aria-pressed={!!x?.allowed} aria-label={`${cap} for ${a}`}
+              onClick={() => act('policy.set', { app, capability: cap, audience: '@' + a, value: x?.allowed ? 'off' : 'on' }, `${cap} for ${a}: ${x?.allowed ? 'off' : 'on'}`)}>{x?.allowed ? 'on' : '–'}</button></td>); })}</tr>)}</tbody></table>)}
       <h3>Secrets</h3>
       <Table rows={secrets} rowKey={s => s.name} empty="No secrets." cols={[
         { h: 'Name', r: s => <b className="mono">{s.name}</b> },
@@ -176,26 +225,89 @@ function AppDetail({ app, toast }) {
   );
 }
 
-// --- Stores: grants and links ----------------------------------------------------------
+// --- Stores: browse, what a store holds, grants and links ---------------------------------
 
 export function Stores({ toast }) {
-  const [stores, e, reload] = useVerb('store.ls', { all: true });
-  const [sel, setSel] = useState('');
+  const c = useCatalog();
+  const [p, set] = useHashParams();
+  const rows = (c.stores || []).map(s => ({
+    ...s,
+    kind: c.kindOf(s),
+    title: (c.appOf.get(s.id) || c.appOf.get(s.app) || {}).title || '',
+    ownerName: who(c.personOf, s.owner),
+    urls: c.urlsOf(s),
+  }));
   return (
-    <Section title="Stores" tools={<button className="btn" onClick={reload}>Refresh</button>}>
-      <Err e={e} />
+    <Section title="Stores" tools={<button className="btn" onClick={c.reload}>Refresh</button>}>
+      <Err e={c.e} />
       <div className="split">
         <div className="list">
-          <Table rows={stores} rowKey={s => s.id} sel={sel} onRow={s => setSel(s.id)} cols={[
-            { h: 'Store', r: s => <b>{s.id}</b> },
-            { h: 'App', r: s => s.app || <span className="dim">—</span> },
-            { h: 'Type', r: s => s.type || '' },
-            { h: 'Owner', r: s => <span className="dim mono">{s.owner}</span> },
-          ]} />
+          <Browse rows={rows} noun="stores" rowKey={s => s.id} sel={p.sel} onRow={s => set({ sel: s.id })} defaultSort="Created" defaultDesc
+            text={s => `${s.id} ${s.title} ${s.app || ''} ${s.type || ''} ${s.ownerName}`}
+            filters={[['all', 'All', () => true], ['app', 'Apps', s => s.kind === 'app'], ['instance', 'Instances', s => s.kind === 'instance'], ['files', 'Files', s => s.kind === 'files'], ['unmounted', 'Not mounted', s => !s.urls.length]]}
+            cols={[
+              { h: 'Store', r: s => <b>{s.id}</b>, sort: s => s.id },
+              { h: 'Title', r: s => s.title, sort: s => s.title },
+              { h: 'Kind', r: s => <span className="dim">{s.kind}{s.app ? ` of ${s.app}` : ''}</span>, sort: s => s.kind },
+              { h: 'Owner', r: s => <span className="dim">{s.ownerName}</span>, sort: s => s.ownerName },
+              { h: 'Created', r: s => <span className="dim">{fmtDate(s.createdAt)}</span>, sort: s => s.createdAt || 0 },
+            ]} />
         </div>
-        <div className="detail">{sel ? <StoreAccess store={sel} toast={toast} /> : <p className="empty">Pick a store.</p>}</div>
+        <div className="detail">{p.sel ? <StoreDetail key={p.sel} store={p.sel} row={rows.find(s => s.id === p.sel)} c={c} toast={toast} /> : <p className="empty">Pick a store.</p>}</div>
       </div>
     </Section>
+  );
+}
+
+function StoreDetail({ store, row, c, toast }) {
+  const [meta, e] = useVerb('store.meta', { id: store }, [store]);
+  const [snaps] = useVerb('snap.ls', { store }, [store]);
+  const [log] = useVerb('log.show', { store, limit: 8 }, [store]);
+  const [binds] = useVerb('bind.ls', { store }, [store]);
+  const runs = row && (row.kind === 'app' || row.app);
+  const [st] = useVerb(runs ? 'app.status' : '', { store }, [store, runs]);
+  const cols = meta?.collections ? Object.entries(meta.collections) : [];
+  return (
+    <div>
+      <h2 className="dtitle">{row?.title || store} <span className="dim mono">{store}</span></h2>
+      <Err e={e} />
+      <Kv items={[
+        ['kind', row && (row.kind === 'app' ? 'app: its tree holds app.json' : row.kind === 'instance' ? <span>instance of <a href={`#apps?sel=${encodeURIComponent(row.app)}`}>{row.app}</a></span> : 'files and documents')],
+        ['type', row?.type],
+        ['owner', row?.ownerName],
+        ['created', row && fmtDate(row.createdAt)],
+        ['status', st && <span className={st.broken ? 'bad' : ''}>{st.broken ? 'broken: ' + st.broken : `running ${st.app || row?.app || store}@${st.n}`}</span>],
+        ['main', meta?.refs && meta.refs.main != null ? `snapshot ${meta.refs.main}` : ''],
+        ['refs', meta?.refs && Object.keys(meta.refs).length > 1 ? Object.entries(meta.refs).map(([k, v]) => `${k} ${v}`).join(', ') : ''],
+        ['head', meta && `rev ${meta.head}`],
+        ['documents', meta && (meta.docs ? `${fmtNum(meta.docs)} in ${cols.length} collection${cols.length === 1 ? '' : 's'}` : 'none')],
+        ['served at', <Addr key="a" urls={row?.urls || []} />],
+      ]} />
+      {cols.length > 0 && <p className="dim small">{cols.map(([k, n]) => `${k} ${n}`).join(' · ')}</p>}
+      <h3>Snapshots</h3>
+      <Table rows={(snaps || []).slice(0, 6)} rowKey={s => s.n} empty="No snapshots." cols={[
+        { h: '#', r: s => <b>{s.n}</b> },
+        { h: 'Message', r: s => s.message || <span className="dim">—</span> },
+        { h: 'When', r: s => <span className="dim">{fmtDate(s.at)}</span> },
+      ]} />
+      {snaps && snaps.length > 6 && <p className="dim small">and {snaps.length - 6} older</p>}
+      <h3>Recent changes</h3>
+      <Table rows={log} rowKey={l => l.rev} empty="Nothing yet." cols={[
+        { h: 'Rev', r: l => <b>{l.rev}</b> },
+        { h: 'What', r: l => l.summary || `${(l.changes || []).length} changes` },
+        { h: 'Who', r: l => <span className="dim">{l.principal === 'system' ? 'system' : who(c.personOf, l.principal)} · {l.via}</span> },
+        { h: 'When', r: l => <span className="dim">{fmtDate(l.at)}</span> },
+      ]} />
+      {binds && binds.length > 0 && <>
+        <h3>Bindings</h3>
+        <Table rows={binds} rowKey={b => b.alias} cols={[
+          { h: 'Alias', r: b => <b className="mono">{b.alias}</b> },
+          { h: 'Target', r: b => <a href={`#stores?sel=${encodeURIComponent(b.target)}`}>{b.target}</a> },
+          { h: 'Assets', r: b => (b.assets ? 'yes' : '') },
+        ]} />
+      </>}
+      <StoreAccess store={store} toast={toast} />
+    </div>
   );
 }
 
@@ -256,16 +368,19 @@ export function Sites({ toast, hosts }) {
         <Field label="Store"><input className="inp sm" value={store} onChange={ev => setStore(ev.target.value)} aria-label="Store" /></Field>
         <button className="btn primary" type="submit" disabled={!store}>Mount</button>
       </form>
-      <Table rows={mounts} rowKey={r => r.mount.host + r.mount.path} empty="Nothing is mounted." cols={[
-        { h: 'Address', r: r => <a href={r.url} target="_blank" rel="noreferrer">{r.mount.host}{r.mount.path}</a> },
-        { h: 'Kind', r: r => <span className="dim">{r.kind}</span> },
-        { h: 'Store', r: ({ mount: m }) => m.store || <span className="dim">:{m.storeParam}{m.type ? ` (${m.type})` : ''}</span> },
-        { h: 'Creates', r: r => r.mount.createApp || '' },
-        { h: 'Changed', r: r => <span className="dim">{fmtDate(r.mount.changedAt)}</span> },
-        { h: '', r: ({ mount: m }) => <span className="acts">
-          <button className="btn sm" onClick={() => act('mount.rm', { host: m.host, path: m.path }, 'Removed')}>Remove</button>
-          <button className="btn sm" onClick={() => act('mount.undo', { host: m.host, path: m.path }, 'Undone')}>Undo</button></span> },
-      ]} />
+      <Browse rows={mounts} noun="mounts" rowKey={r => r.mount.host + r.mount.path} empty="Nothing is mounted." defaultSort="Address"
+        text={r => `${r.mount.host}${r.mount.path} ${r.mount.store || ''} ${r.mount.type || ''} ${r.mount.createApp || ''}`}
+        filters={[['all', 'All', () => true], ...all.map(([h]) => [h, h.split('.')[0], r => r.mount.host === h])]}
+        cols={[
+          { h: 'Address', r: r => <a href={r.url} target="_blank" rel="noreferrer">{r.mount.host}{r.mount.path}</a>, sort: r => r.mount.host + r.mount.path },
+          { h: 'Kind', r: r => <span className="dim">{r.kind}</span>, sort: r => r.kind },
+          { h: 'Store', r: ({ mount: m }) => (m.store ? <a href={`#stores?sel=${encodeURIComponent(m.store)}`}>{m.store}</a> : <span className="dim">:{m.storeParam}{m.type ? ` (${m.type})` : ''}</span>), sort: r => r.mount.store || '' },
+          { h: 'Creates', r: r => r.mount.createApp || '' },
+          { h: 'Changed', r: r => <span className="dim">{fmtDate(r.mount.changedAt)}</span>, sort: r => -(r.mount.changedAt || 0) },
+          { h: '', r: ({ mount: m }) => <span className="acts">
+            <button className="btn sm" onClick={() => act('mount.rm', { host: m.host, path: m.path }, 'Removed')}>Remove</button>
+            <button className="btn sm" onClick={() => act('mount.undo', { host: m.host, path: m.path }, 'Undone')}>Undo</button></span> },
+        ]} />
     </Section>
   );
 }
