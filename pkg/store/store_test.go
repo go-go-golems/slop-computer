@@ -122,6 +122,10 @@ func TestAppSQLAuthorizer(t *testing.T) {
 		`CREATE TABLE _evil (x)`,
 		`CREATE TEMP TABLE t (x)`,
 		`ATTACH DATABASE ':memory:' AS other`,
+		// An app-named trigger or index on a kernel table: a trigger there
+		// would run its body inside the kernel's own (unchecked) writes.
+		`CREATE TRIGGER inject AFTER INSERT ON _docs BEGIN INSERT INTO _meta (key, value) VALUES ('x', 'y'); END`,
+		`CREATE INDEX docs_by ON _docs (path)`,
 	} {
 		_, err := s.Do(ctx, me, func(t *Turn) error { _, err := t.Exec(CallerMigration, q); return err })
 		if err == nil {

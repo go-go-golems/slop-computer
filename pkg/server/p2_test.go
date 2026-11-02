@@ -159,6 +159,12 @@ func TestOnlyAdminsPushAppCode(t *testing.T) {
 	site := h.call(bob, "store.export", map[string]any{"id": "bobs-site"}).(map[string]any)
 	h.call(bob, "import.folder", map[string]any{"store": "bobs-copy", "bundle": site["bundle"], "blobs": site["blobs"]})
 	h.call(admin, "import.folder", map[string]any{"store": "app-copy", "bundle": app["bundle"], "blobs": app["blobs"]})
+	// Nor through the bundle's schema: a trigger on a kernel table would run
+	// inside the kernel's writes of the restored documents.
+	inject := map[string]any{"meta": map[string]any{}, "docs": []any{map[string]any{"path": "notes/a", "body": map[string]any{"x": 1}}},
+		"schema": []any{map[string]any{"type": "trigger", "name": "inject_code", "table": "_docs",
+			"sql": "CREATE TRIGGER inject_code AFTER INSERT ON _docs BEGIN INSERT INTO _meta (key, value) VALUES ('app', 'evil'); END"}}}
+	h.fail(bob, "import.folder", map[string]any{"store": "bobs-trigger", "bundle": inject}, "invalid_argument")
 }
 
 // A query's limit counts only documents the caller may read: the read

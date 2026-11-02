@@ -77,7 +77,15 @@ func (s *Store) authorize(action int, a1, a2, dbName string) int {
 		return sqlite3.SQLITE_DENY
 	case sqlite3.SQLITE_CREATE_TABLE, sqlite3.SQLITE_CREATE_INDEX, sqlite3.SQLITE_CREATE_VIEW, sqlite3.SQLITE_CREATE_TRIGGER,
 		sqlite3.SQLITE_DROP_TABLE, sqlite3.SQLITE_DROP_INDEX, sqlite3.SQLITE_DROP_VIEW, sqlite3.SQLITE_DROP_TRIGGER:
-		if caller == CallerMigration && (appName(a1) || sqliteMade(action, a1, a2)) {
+		// An index or trigger (arg2 is its table) only on an app table: a
+		// trigger on a kernel table would fire inside the kernel's own
+		// statements, whose trigger bodies nothing here checks.
+		onApp := true
+		switch action {
+		case sqlite3.SQLITE_CREATE_INDEX, sqlite3.SQLITE_DROP_INDEX, sqlite3.SQLITE_CREATE_TRIGGER, sqlite3.SQLITE_DROP_TRIGGER:
+			onApp = appName(a2)
+		}
+		if caller == CallerMigration && ((appName(a1) && onApp) || sqliteMade(action, a1, a2)) {
 			if t != nil {
 				t.schema = true
 			}
