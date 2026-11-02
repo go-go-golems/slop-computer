@@ -230,3 +230,30 @@ func TestSiteHandoff(t *testing.T) {
 		t.Fatalf("me after sign-in = %v", me)
 	}
 }
+
+// Files under /_s/ are anyone's who can push to a store. On the live host
+// (the shell's origin, with its sessions) they run nothing (a sandbox CSP)
+// and what is not media is a download; the static host, which has no
+// sessions, serves them as they are.
+func TestLiveStoreFilesIsolated(t *testing.T) {
+	h := newHarness(t)
+	admin := h.tokenFor("admin@example.com", "read", "write", "admin")
+	live, static := h.cfg.Hosts.Live[0], h.cfg.Hosts.Static[0]
+	h.call(admin, "store.new", map[string]any{"id": "pub"})
+	h.call(admin, "files.push", map[string]any{"store": "pub", "files": files(map[string]string{
+		"index.html": "<!doctype html><script>fetch('/_site/me')</script>",
+		"pic.svg":    `<svg xmlns="http://www.w3.org/2000/svg"><script>alert(1)</script></svg>`})})
+	h.call(admin, "files.put", map[string]any{"store": "pub", "zone": "assets", "path": "up.html", "text": "<script>alert(1)</script>"})
+	h.call(admin, "grant.set", map[string]any{"store": "pub", "subject": "@guest", "level": "view"})
+	for path, download := range map[string]bool{"/_s/pub/main/index.html": true, "/_s/pub/assets/up.html": true, "/_s/pub/main/pic.svg": false} {
+		r, _ := h.get(live, path)
+		if r.StatusCode != 200 || r.Header.Get("Content-Security-Policy") != "sandbox; default-src 'none'" ||
+			(r.Header.Get("Content-Disposition") == "attachment") != download {
+			t.Fatalf("live %s: %d %s, csp %q, disposition %q", path, r.StatusCode, r.Header.Get("Content-Type"),
+				r.Header.Get("Content-Security-Policy"), r.Header.Get("Content-Disposition"))
+		}
+	}
+	if r, _ := h.get(static, "/_s/pub/main/index.html"); r.StatusCode != 200 || r.Header.Get("Content-Security-Policy") != "" || r.Header.Get("Content-Disposition") != "" {
+		t.Fatalf("static: %d csp %q", r.StatusCode, r.Header.Get("Content-Security-Policy"))
+	}
+}

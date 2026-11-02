@@ -105,7 +105,7 @@ func (s *Server) serveSandbox(w http.ResponseWriter, r *http.Request) {
 		serveAsset(w, r)
 		return
 	case strings.HasPrefix(p, "/_s/"):
-		s.serveStoreFile(w, r, nil)
+		s.serveStoreFile(w, r, nil, false) // an untrusted origin by design
 		return
 	case strings.HasPrefix(p, "/_blob/"):
 		s.serveAssetBlob(w, r, storeID, strings.TrimPrefix(p, "/_blob/"))

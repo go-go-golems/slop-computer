@@ -73,7 +73,7 @@ func (s *Server) serveStatic(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if strings.HasPrefix(r.URL.Path, "/_s/") {
-		s.serveStoreFile(w, r, nil)
+		s.serveStoreFile(w, r, nil, false) // the static host has no sessions
 		return
 	}
 	ctx := r.Context()
@@ -156,7 +156,11 @@ func (s *Server) serveStatic(w http.ResponseWriter, r *http.Request) {
 
 // serveStoreFile serves /_s/<store>/<n|ref>/<path> (the tree at a snapshot
 // or ref) and /_s/<store>/assets/<path>, to whoever may read the store.
-func (s *Server) serveStoreFile(w http.ResponseWriter, r *http.Request, p *access.Principal) {
+// isolate is for a host whose origin is trusted (the live host: the shell
+// and its sessions): the files are anyone's who can push to a store, so they
+// get a sandbox CSP (no scripts, no requests), and what is not media is a
+// download rather than a page.
+func (s *Server) serveStoreFile(w http.ResponseWriter, r *http.Request, p *access.Principal, isolate bool) {
 	ctx := r.Context()
 	parts := strings.SplitN(strings.TrimPrefix(r.URL.Path, "/_s/"), "/", 3)
 	if len(parts) < 3 || parts[2] == "" {
@@ -202,6 +206,12 @@ func (s *Server) serveStoreFile(w http.ResponseWriter, r *http.Request, p *acces
 	if err != nil {
 		notFound(w)
 		return
+	}
+	if isolate {
+		w.Header().Set("Content-Security-Policy", "sandbox; default-src 'none'")
+		if !isMedia(f.Type) {
+			w.Header().Set("Content-Disposition", "attachment")
+		}
 	}
 	s.serveBlob(w, r, st, f, cache)
 }
