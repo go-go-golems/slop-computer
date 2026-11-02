@@ -32,9 +32,14 @@ type Manager struct {
 	mu      sync.Mutex
 	actors  map[string]*Actor
 	inboxes map[string]*inbox // store → its queue of events (inbox.go)
-	broken  map[string]string // store → app@n: why
-	files   map[string]map[string][]byte
-	logs    map[string][]LogLine
+	// gen moves whenever actors are stopped so the next event builds them
+	// again (a restart, trust or policy change, a new version). A build
+	// that started before reads state from before the change: Get drops it
+	// and builds again.
+	gen    uint64
+	broken map[string]string // store → app@n: why
+	files  map[string]map[string][]byte
+	logs   map[string][]LogLine
 
 	// Hooks provided by the server and later phases.
 	RoomEmit  func(store, topic string, data any)
@@ -134,48 +139,64 @@ func (m *Manager) appFiles(ctx context.Context, app string, n int64) (map[string
 // Get returns the store's running actor, building it on first use. It is
 // nil (and no error) when the store's app has no actor.
 func (m *Manager) Get(ctx context.Context, id string) (*Actor, error) {
+	for {
+		a, stale, err := m.get(ctx, id)
+		if !stale {
+			return a, err
+		}
+	}
+}
+
+// get is one attempt of Get; stale reports a build overtaken by a restart.
+func (m *Manager) get(ctx context.Context, id string) (_ *Actor, stale bool, _ error) {
+	m.mu.Lock()
+	gen := m.gen
+	m.mu.Unlock()
 	r, err := m.K.Running(ctx, id)
 	if err != nil {
-		return nil, err
+		return nil, false, err
 	}
 	if r.N > 0 && !r.Usable() {
 		// never activated (its migrations or setup failed): no actor runs it
-		return nil, fail("actor_error", "the app is broken: %s", r.Broken())
+		return nil, false, fail("actor_error", "the app is broken: %s", r.Broken())
 	}
 	if r.Manifest == nil || r.Manifest.Actor == "" {
-		return nil, nil
+		return nil, false, nil
 	}
 	key := r.App + "@" + strconv.FormatInt(r.N, 10)
 	m.mu.Lock()
 	if a := m.actors[id]; a != nil && a.key == key {
 		m.mu.Unlock()
-		return a, nil
+		return a, false, nil
 	}
 	if why, ok := m.broken[id]; ok && strings.HasPrefix(why, key+": ") {
 		m.mu.Unlock()
-		return nil, fail("actor_error", "the actor is broken: %s", strings.TrimPrefix(why, key+": "))
+		return nil, false, fail("actor_error", "the actor is broken: %s", strings.TrimPrefix(why, key+": "))
 	}
 	m.mu.Unlock()
 	files, err := m.appFiles(ctx, r.App, r.N)
 	if err != nil {
-		return nil, err
+		return nil, false, err
 	}
 	st, err := m.K.Store(ctx, id)
 	if err != nil {
-		return nil, err
+		return nil, false, err
 	}
 	a, err := build(m, st, r, files)
+	m.mu.Lock()
+	if m.gen != gen {
+		m.mu.Unlock()
+		return nil, true, nil // a restart happened during the build
+	}
 	if err != nil {
-		m.mu.Lock()
 		m.broken[id] = key + ": " + err.Error()
 		m.mu.Unlock()
-		return nil, err
+		return nil, false, err
 	}
-	m.mu.Lock()
 	if old := m.actors[id]; old != nil {
 		if old.key == key {
 			m.mu.Unlock()
-			return old, nil // someone else built it meanwhile
+			return old, false, nil // someone else built it meanwhile
 		}
 		close(old.stop)
 	}
@@ -185,7 +206,7 @@ func (m *Manager) Get(ctx context.Context, id string) (*Actor, error) {
 	if a.followsSystem() {
 		m.queueSystem(a) // catch up with what happened while it was stopped
 	}
-	return a, nil
+	return a, false, nil
 }
 
 // Running is the actor of a store if one is in memory (nil otherwise).
@@ -228,6 +249,7 @@ func (m *Manager) markBroken(a *Actor, why string) {
 func (m *Manager) RestartApp(app string) {
 	m.mu.Lock()
 	defer m.mu.Unlock()
+	m.gen++
 	for id, a := range m.actors {
 		if a.run.App == app {
 			delete(m.actors, id)
@@ -238,6 +260,7 @@ func (m *Manager) RestartApp(app string) {
 
 func (m *Manager) Restart(id string) {
 	m.mu.Lock()
+	m.gen++
 	delete(m.broken, id)
 	if a := m.actors[id]; a != nil {
 		delete(m.actors, id)
@@ -256,6 +279,7 @@ func (m *Manager) Broken(id string) string {
 
 func (m *Manager) onActivated(id string, r kernel.Running) {
 	m.mu.Lock()
+	m.gen++
 	delete(m.broken, id)
 	if a := m.actors[id]; a != nil {
 		delete(m.actors, id)
