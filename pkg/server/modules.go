@@ -32,17 +32,17 @@ func (s *Server) registerModules() {
 	s.Env.A.Register(actor.Module{Name: "system", Doc: "People, grants, links, mounts, policy, LLM budgets, comps, secrets and the system log, as the visitor.",
 		Load: s.systemModule})
 	s.Env.A.Register(actor.Module{Name: "workshop", Doc: "Stores, snapshots, refs and files of any store the visitor may read; push to draft, publish, run drafts.",
-		Load: func(a *actor.Actor) goja.Value { return s.verbModule(a, workshopFuncs) }})
+		Load: func(a *actor.Actor) goja.Value { return s.verbModule(a, "workshop", workshopFuncs) }})
 }
 
 // verbModule builds a module's object from its functions.
-func (s *Server) verbModule(a *actor.Actor, funcs []modFunc) goja.Value {
+func (s *Server) verbModule(a *actor.Actor, module string, funcs []modFunc) goja.Value {
 	vm := a.VM()
 	o := vm.NewObject()
 	for _, f := range funcs {
 		f := f
 		fn := func(call goja.FunctionCall) goja.Value {
-			return s.callVerb(a, f, modArgs(a, f, call.Arguments))
+			return s.callVerb(a, module, f, modArgs(a, f, call.Arguments))
 		}
 		target := o
 		path := strings.Split(f.JS, ".")
@@ -109,13 +109,22 @@ func single(vals []any) (map[string]any, bool) {
 
 // callVerb runs a module function's verb as the visitor and returns its
 // promise.
-func (s *Server) callVerb(a *actor.Actor, f modFunc, args map[string]any) goja.Value {
+func (s *Server) callVerb(a *actor.Actor, module string, f modFunc, args map[string]any) goja.Value {
 	name := f.Verb
 	v, ok := verbs.Get(name)
 	if !ok {
 		a.Throw("not_found", "no verb "+name)
 	}
-	p := s.actAs(a, v.Scope != verbs.Read)
+	// The trust that let the app use() this module is checked again on every
+	// call: it ends when it is withdrawn, or when the admin who made it is
+	// no longer an admin (SLOP3-007), without waiting for a restart.
+	if module != "" && !s.Sys.Trusted(context.Background(), a.App(), module) {
+		a.Throw("permission_denied", a.App()+" is no longer trusted with "+module)
+	}
+	p := s.actAs(a, module, v.Scope != verbs.Read)
+	if f.Confirm && p.Person == nil {
+		a.Throw("permission_denied", name+" asks a person to confirm, and nobody is behind this call")
+	}
 	if f.Confirm {
 		// Refuse what the verb would refuse before asking anyone to allow it.
 		if err := verbs.Check(p, name, args); err != nil {
@@ -143,16 +152,21 @@ func (s *Server) callVerb(a *actor.Actor, f modFunc, args map[string]any) goja.V
 
 // actAs is the principal a module call runs as: the person behind the
 // event, with their token's scopes if they came with one, labelled
-// app:<app>. Reactors and alarms have nobody behind them: they may read,
-// as the store's owner, but never write.
-func (s *Server) actAs(a *actor.Actor, write bool) *access.Principal {
+// app:<app>. Reactors, alarms and other stores have nobody behind them:
+// they act as the store itself (SLOP3-007), never as its owner, and may
+// only read. The trust row that lets the app use the module admits the
+// store (Principal.Trusted); it counts only while the admin who made it
+// is still an admin.
+func (s *Server) actAs(a *actor.Actor, module string, write bool) *access.Principal {
 	v := a.Visitor()
 	person := v.ID
-	if strings.HasPrefix(person, "store:") {
+	if id, ok := strings.CutPrefix(person, "store:"); ok {
 		if write {
 			a.Throw("permission_denied", "a module write needs a person; reactors, alarms and other stores may only read")
 		}
-		person = v.Payer
+		p := &access.Principal{Kind: access.KindStore, Store: id, Via: "app:" + a.App()}
+		p.Trusted = module != "" && s.Sys.Trusted(context.Background(), a.App(), module)
+		return p
 	}
 	if person == "" {
 		a.Throw("permission_denied", "no person to act as")

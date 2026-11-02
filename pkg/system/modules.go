@@ -49,7 +49,10 @@ func (d *DB) UntrustModule(ctx context.Context, actor, via, app, module string) 
 // Trusted reports whether an app may use a Go module.
 func (d *DB) Trusted(ctx context.Context, app, module string) bool {
 	var one int
-	return d.QueryRowContext(ctx, `SELECT 1 FROM app_modules WHERE app = ? AND module = ?`, app, module).Scan(&one) == nil
+	// A trust row counts only while the admin who made it is still an admin
+	// (SLOP3-007: trust has provenance, like a link and its creator).
+	return d.QueryRowContext(ctx, `SELECT 1 FROM app_modules m LEFT JOIN people p ON p.id = m.granted_by
+		WHERE m.app = ? AND m.module = ? AND (m.granted_by = 'system' OR p.role = 'admin')`, app, module).Scan(&one) == nil
 }
 
 // AppModules lists trusts, of one app or (app "") of all.

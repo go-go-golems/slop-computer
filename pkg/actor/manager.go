@@ -65,12 +65,12 @@ func New(k *kernel.Kernel) *Manager {
 }
 
 // allowed checks a policy capability for the current turn's visitor (for
-// alarms and reactors, the store owner's audience).
+// alarms and reactors, the store itself: the @store cell).
 func (m *Manager) allowed(a *Actor, capability string) bool {
 	if m.Policy == nil {
 		return true
 	}
-	aud := "admin"
+	aud := string(access.AudStore) // no turn: nobody but the store itself
 	if a.cur != nil {
 		aud = a.Visitor().Audience
 	}
@@ -291,13 +291,11 @@ func (m *Manager) onActivated(id string, r kernel.Running) {
 
 // storeVisitor is the store itself, for setup, reactors and alarms.
 func (m *Manager) storeVisitor(ctx context.Context, id string) Visitor {
-	v := Visitor{ID: "store:" + id, Name: id, Level: "owner", Audience: "member"}
-	if row, err := m.K.Sys.StoreByID(ctx, id); err == nil {
-		if p, err := m.K.Sys.Person(ctx, row.Owner); err == nil {
-			v.Audience = string(m.K.Access.AudienceOf(ctx, access.PersonPrincipal(p, "")))
-			v.Payer = p.ID
-		}
-	}
+	// Nobody is behind an alarm, a reactor or setup: the store acts as
+	// itself (SLOP3-007 decision 3). It is owner of its own data, in the
+	// group @store for policy, and pays for its own model calls; it never
+	// borrows its owner.
+	v := Visitor{ID: "store:" + id, Name: id, Level: "owner", Audience: string(access.AudStore), Payer: "store:" + id}
 	m.withLLM(ctx, &v)
 	return v
 }

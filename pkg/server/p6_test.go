@@ -114,9 +114,11 @@ func TestLLMBudgets(t *testing.T) {
 		t.Fatalf("after reset: %d", st)
 	}
 
-	// An alarm's call is charged to the store's owner (the admin, whose
-	// audience must have the policy on).
-	h.call(admin, "policy.set", map[string]any{"app": "ai", "capability": "sample", "audience": "@admin", "value": "on"})
+	// An alarm's call is the store's own (SLOP3-007): it needs the @store
+	// cell and an LLM row for store:ai, and is charged to store:ai, never
+	// to the owner.
+	h.call(admin, "policy.set", map[string]any{"app": "ai", "capability": "sample", "audience": "@store", "value": "on"})
+	h.call(admin, "llm.set", map[string]any{"subject": "store:ai", "value": "on"})
 	before := h.call(admin, "llm.usage", map[string]any{}).(map[string]any)["llm"].(map[string]any)["used"].(float64)
 	samBefore := h.call(sam, "llm.usage", map[string]any{}).(map[string]any)["llm"].(map[string]any)["used"].(float64)
 	h.call(admin, "alarm.fire", map[string]any{"store": "ai", "name": "digest"})
@@ -127,8 +129,11 @@ func TestLLMBudgets(t *testing.T) {
 	}
 	after := h.call(admin, "llm.usage", map[string]any{}).(map[string]any)["llm"].(map[string]any)["used"].(float64)
 	samAfter := h.call(sam, "llm.usage", map[string]any{}).(map[string]any)["llm"].(map[string]any)["used"].(float64)
-	if after <= before || samAfter != samBefore {
-		t.Fatalf("alarm charged owner %v -> %v, sam %v -> %v", before, after, samBefore, samAfter)
+	if after != before || samAfter != samBefore {
+		t.Fatalf("the alarm must charge neither the owner (%v -> %v) nor sam (%v -> %v)", before, after, samBefore, samAfter)
+	}
+	if u := h.call(admin, "llm.usage", map[string]any{"person": "store:ai"}).(map[string]any)["llm"].(map[string]any); u["used"].(float64) <= 0 {
+		t.Fatalf("store:ai must be charged: %v", u)
 	}
 }
 

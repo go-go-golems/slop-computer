@@ -19,6 +19,9 @@ const (
 	AudMember     Audience = "member"
 	AudSubscriber Audience = "subscriber"
 	AudAdmin      Audience = "admin"
+	// AudStore is a store acting on its own (alarms, reactors, its own
+	// platform calls): in the group @store only (SLOP3-007).
+	AudStore Audience = "store"
 )
 
 // Group is a set of principals computed from role, kind and subscription
@@ -80,8 +83,12 @@ func (c *Checker) AudienceOf(ctx context.Context, p *Principal) Audience {
 		return AudGuest
 	case p.Kind == KindSystem:
 		return AudAdmin
+	case p.Kind == KindStore && p.Trusted:
+		// A store admitted by a live trust row (an admin trusted its app
+		// with a module): it acts with admin's reads through that module.
+		return AudAdmin
 	case p.Kind == KindStore:
-		return AudMember
+		return AudStore
 	case p.Person == nil, p.Kind == KindGuest, p.Person.Kind == "guest":
 		return AudGuest
 	}

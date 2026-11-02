@@ -246,3 +246,143 @@ func TestActionRequiresBadLevelFailsActivation(t *testing.T) {
 		t.Fatalf("app.status = %v", st)
 	}
 }
+
+const platformAlarmActor = `
+const platform = use('platform'), db = use('db');
+defineActor({
+  actions: { ping: { requires: 'view', run(ctx) { return 'pong'; } } },
+  every: {
+    share: { every: '1h', run(ctx) {
+      try { platform.grants.set({ store: 'other', subject: '@guest', level: 'view' }); db.doc('out/share').set({ ok: true, at: ctx.now }); }
+      catch (e) { db.doc('out/share').set({ code: e.code || String(e), at: ctx.now }); }
+    } },
+  },
+});
+`
+
+// fireAndWait fires an alarm, then calls ping: the actor runs one event at
+// a time, so ping returns after the alarm's turn.
+func fireAndWait(t *testing.T, h *harness, admin, store, alarm string) {
+	t.Helper()
+	h.call(admin, "alarm.fire", map[string]any{"store": store, "name": alarm})
+	h.call(admin, "actor.call", map[string]any{"store": store, "action": "ping"})
+}
+
+// Phase 4: an alarm has no person behind it, so a platform call acts as
+// the store itself, which holds only what was granted to store:<id>. Today
+// it acts as the store's owner (here an admin) and the grant goes through.
+func TestAlarmPlatformActsAsStore(t *testing.T) {
+	h := newHarness(t)
+	admin := h.tokenFor("admin@example.com", "read", "write", "admin")
+	h.call(admin, "store.new", map[string]any{"id": "other"})
+	h.call(admin, "store.new", map[string]any{"id": "pf"})
+	h.call(admin, "files.push", map[string]any{"store": "pf", "files": files(map[string]string{
+		"app.json":   `{"title":"PF","actor":"actor.js","capabilities":{"db":{}},"slop":{"platform":["grants.set"]}}`,
+		"actor.js":   platformAlarmActor,
+		"index.html": "<!doctype html><title>pf</title>",
+	})})
+	h.call(admin, "policy.set", map[string]any{"app": "pf", "capability": "platform", "audience": "@admin", "value": "on"})
+	h.call(admin, "policy.set", map[string]any{"app": "pf", "capability": "platform", "audience": "@store", "value": "on"})
+	fireAndWait(t, h, admin, "pf", "share")
+	// Refused: store:pf holds nothing on other, so it isn't even told other
+	// exists (not_found), as for anyone holding nothing.
+	if d := docBody(h, admin, "pf", "out/share"); d["ok"] == true || (d["code"] != "not_found" && d["code"] != "permission_denied") {
+		t.Fatalf("store:pf holds nothing on other, the grant must be refused: %v", d)
+	}
+	h.call(admin, "grant.set", map[string]any{"store": "other", "subject": "store:pf", "level": "admin"})
+	fireAndWait(t, h, admin, "pf", "share")
+	if d := docBody(h, admin, "pf", "out/share"); d["ok"] != true {
+		t.Fatalf("with admin granted to store:pf, the grant goes through: %v", d)
+	}
+}
+
+// Phase 4: an alarm's model call is the store's: it needs the @store
+// policy cell and an LLM row for store:<id> (or @store), and charges
+// store:<id>. Today it needs the owner's cell and charges the owner.
+func TestAlarmSampleNeedsStoreCellAndBudget(t *testing.T) {
+	h := newHarness(t)
+	admin := h.tokenFor("admin@example.com", "read", "write", "admin")
+	aiApp(t, h, admin)
+	h.call(admin, "policy.set", map[string]any{"app": "ai", "capability": "sample", "audience": "@admin", "value": "on"})
+	used := func() float64 { return llmAllowed(t, h, admin)["used"].(float64) }
+	before := used()
+	fire := func() {
+		t.Helper()
+		h.call(admin, "alarm.fire", map[string]any{"store": "ai", "name": "digest"})
+		h.call(admin, "actor.call", map[string]any{"store": "ai", "action": "can"})
+	}
+	fire()
+	if docBody(h, admin, "ai", "digests/last") != nil || used() != before {
+		t.Fatal("without the @store cell the alarm must not sample, nor charge the owner")
+	}
+	h.call(admin, "policy.set", map[string]any{"app": "ai", "capability": "sample", "audience": "@store", "value": "on"})
+	fire()
+	if docBody(h, admin, "ai", "digests/last") != nil {
+		t.Fatal("without an LLM row for the store the alarm must not sample")
+	}
+	h.call(admin, "llm.set", map[string]any{"subject": "store:ai", "value": "on", "budget": 1000})
+	fire()
+	waitFor(t, "the digest", func() bool { return docBody(h, admin, "ai", "digests/last") != nil })
+	if d := docBody(h, admin, "ai", "digests/last"); d["payer"] != "store:ai" {
+		t.Fatalf("digest = %v", d)
+	}
+	if used() != before {
+		t.Fatal("the owner must not be charged for the store's alarm")
+	}
+	if u := h.call(admin, "llm.usage", map[string]any{"person": "store:ai"}).(map[string]any)["llm"].(map[string]any); u["used"].(float64) <= 0 {
+		t.Fatalf("store:ai must be charged: %v", u)
+	}
+}
+
+const readerActor = `
+const stores = use('stores');
+let src = null;
+defineActor({
+  actions: {
+    open: { requires: 'admin', run(ctx) { src = stores.open('src'); return src.docs.get('notes/a').exists; } },
+    read: { requires: 'admin', run(ctx) { return src.docs.get('notes/a').exists; } },
+  },
+});
+`
+
+// Phase 4: a handle from stores.open decides on every call, not once at
+// open: after the grant to store:<id> is removed, the kept handle fails.
+func TestStoresOpenRechecks(t *testing.T) {
+	h := newHarness(t)
+	admin := h.tokenFor("admin@example.com", "read", "write", "admin")
+	h.call(admin, "store.new", map[string]any{"id": "src"})
+	h.call(admin, "docs.set", map[string]any{"store": "src", "path": "notes/a", "data": map[string]any{"t": 1}})
+	h.call(admin, "store.new", map[string]any{"id": "reader"})
+	h.call(admin, "files.push", map[string]any{"store": "reader", "files": files(map[string]string{
+		"app.json":   `{"title":"Reader","actor":"actor.js","capabilities":{"db":{}}}`,
+		"actor.js":   readerActor,
+		"index.html": "<!doctype html><title>r</title>",
+	})})
+	h.call(admin, "bind.set", map[string]any{"store": "reader", "alias": "src", "target": "src"})
+	h.call(admin, "grant.set", map[string]any{"store": "src", "subject": "store:reader", "level": "view"})
+	if got := h.call(admin, "actor.call", map[string]any{"store": "reader", "action": "open"}); got != true {
+		t.Fatalf("open: %v", got)
+	}
+	h.call(admin, "grant.rm", map[string]any{"store": "src", "subject": "store:reader"})
+	h.fail(admin, "actor.call", map[string]any{"store": "reader", "action": "read"}, "permission_denied")
+}
+
+// Phase 4 (amended): trust in a module has provenance. It counts only
+// while the admin who made it is still an admin, checked on every call.
+func TestTrustEndsWithItsAdmin(t *testing.T) {
+	h := newHarness(t)
+	admin := h.tokenFor("admin@example.com", "read", "write", "admin")
+	h.tokenFor("ada@example.com")
+	h.call(admin, "people.role", map[string]any{"id": personID(t, h, "ada@example.com"), "role": "admin"})
+	ada := h.tokenFor("ada@example.com", "read", "write", "admin")
+	toolApp(t, h, admin, "tool", toolActor, "system")
+	h.call(ada, "app.trust", map[string]any{"app": "tool", "module": "system"})
+	if n, _ := h.call(admin, "actor.call", map[string]any{"store": "tool", "action": "people"}).(float64); n < 2 {
+		t.Fatalf("trusted by ada: people = %v", n)
+	}
+	h.call(admin, "people.role", map[string]any{"id": personID(t, h, "ada@example.com"), "role": "member"})
+	e := h.fail(admin, "actor.call", map[string]any{"store": "tool", "action": "people"}, "permission_denied")
+	if !strings.Contains(e["message"].(string), "no longer trusted") {
+		t.Fatalf("after ada is demoted: %v", e)
+	}
+}

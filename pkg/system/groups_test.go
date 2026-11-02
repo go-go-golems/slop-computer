@@ -57,7 +57,7 @@ func TestPolicyThroughGroups(t *testing.T) {
 		t.Fatal(err)
 	}
 	for _, c := range cells {
-		if want := c.Audience != "guest"; c.Effective != want {
+		if want := InGroup(c.Audience, "member"); c.Effective != want {
 			t.Errorf("cell %s: effective %v, want %v", c.Audience, c.Effective, want)
 		}
 	}

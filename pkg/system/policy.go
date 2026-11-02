@@ -18,8 +18,9 @@ import (
 // app declares is always on.
 var PolicyCaps = []string{"assets", "sample", "user.email", "fetch", "secrets", "platform"}
 
-// PolicyAudiences are the matrix's columns.
-var PolicyAudiences = []string{"guest", "member", "subscriber", "admin"}
+// PolicyAudiences are the matrix's columns: the person groups, then
+// "store", a store acting on its own (alarms, reactors; SLOP3-007).
+var PolicyAudiences = []string{"guest", "member", "subscriber", "admin", "store"}
 
 // GroupsOf is the one place group nesting is decided (SLOP3-007 decision
 // 1): @admin ⊆ @subscriber ⊆ @member ⊆ @guest, so an audience's groups are
@@ -57,9 +58,9 @@ func InGroup(audience, group string) bool {
 }
 
 // DefaultPolicy is a cell without a row: assets for members and up, the
-// rest off.
+// rest off (and off for stores acting on their own).
 func DefaultPolicy(capability, audience string) bool {
-	return capability == "assets" && audience != "guest"
+	return capability == "assets" && InGroup(audience, "member")
 }
 
 // IsPolicyCap reports a capability the matrix controls.
@@ -156,7 +157,7 @@ func (d *DB) SetPolicy(ctx context.Context, actor, via, app, capability, audienc
 		ok = ok || a == audience
 	}
 	if !ok {
-		return errors.New("audience is guest, member, subscriber or admin")
+		return errors.New("audience is guest, member, subscriber, admin or store")
 	}
 	return d.Tx(ctx, func(tx *sql.Tx) error {
 		now := d.NowMs()
