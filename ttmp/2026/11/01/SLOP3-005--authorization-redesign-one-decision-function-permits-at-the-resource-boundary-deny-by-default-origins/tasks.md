@@ -3,8 +3,8 @@
 ## TODO
 - [x] Guide: intern analysis, design and implementation guide, uploaded to reMarkable <!-- t:wflv -->
 - [x] A0: inventory and structural tests (verbs/RPCs declare actions; trusted-host headers) <!-- t:veq5 -->
-- [ ] A1: pkg/authn: Subject, Credential, Ceiling, Authenticate (one cross-origin rule) <!-- t:9wcr -->
-- [ ] A2: pkg/authz: actions, resources, Decide beside today's checks; differential test <!-- t:ggzv -->
+- [ ] A1: Credential/Ceiling (token-scope ceiling for admin-only verbs) — waits on the admin-scope open question; the person-to-principal path (A1a) and the cross-origin cookie rule in sitePrincipal are done <!-- t:9wcr -->
+- [x] A2: pkg/authz: actions, resources, Decide beside today's checks; differential test <!-- t:ggzv -->
 - [x] A3: access epoch; view Level/Role/Policy become a cache confirmed per use against the epoch; reviewViews becomes UX only <!-- t:1pnu -->
 - [x] A4: verbs, RPC table and actor routes declare actions and receive permits <!-- t:nj3o -->
 - [x] A5: permits at the store boundary (PutFile/PutBlob/Snapshot/Query); kernel.SystemPermit; drop needCodeRight <!-- t:wg1w -->

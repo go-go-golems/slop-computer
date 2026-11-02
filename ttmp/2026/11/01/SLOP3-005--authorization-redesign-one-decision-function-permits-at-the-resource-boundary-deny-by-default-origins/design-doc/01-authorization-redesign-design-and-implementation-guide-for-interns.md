@@ -861,7 +861,32 @@ Design references: the v3 intern guide (`ttmp/2026/11/01/SLOP3-001--…/design-d
 - **Audience changes.** Should an audience change alone (same level) change a view's capabilities? With `Decide` it does automatically when a policy cell differs by audience; confirm that this is the intended product behavior for subscriptions ending.
 - **Share links.** Today redemption creates a grant. Should a link instead be a credential with its own ceiling (no grant row), so revoking the link revokes access without a grant cleanup?
 - **Owner versus admin.** `Level` makes store owners owner and admins admin. Some actions (deleting a store) may want owner only; the action table is the place to say so.
-- **SQLite driver.** Patch, fork or switch for the sixth authorizer argument (phase A7).
+- **SQLite driver.** Resolved without the sixth argument (section 12, A7): the kernel never writes app tables, and app tables cannot reference kernel tables.
 - **A change feed for views.** `AccessChanged`, `PersonChanged`, `PolicyChanged`, `reviewViews`, `reloadApp` and the actor manager's activation callback are separate notifications that each code path must remember to call. With the epoch (phase A3) they no longer carry security; the remaining user-experience part (tell pages to reopen or reload) could become one feed over the system log that views subscribe to.
 - **Live-host sign-out.** Signing out on a live host ends only the site session; should it end the main session and the identity provider's session too?
 - **Admin actions and token scopes.** Should every admin-only action require a token with the admin scope (`Ceiling.Admin`), or only the actions that change people and access? Today an admin's read token can call six admin-only read verbs, including `people.ls` and `secret.ls` (names only).
+
+## 12. Implementation status (what was built, and where it differs)
+
+This section records how the phases were implemented on branch `task/slop3-005-authz`. Where the implementation took a different route from section 6, the reason is given here and in the diary (`reference/01-diary.md`, steps 4 to 8).
+
+| Phase | Commit(s) | What was built | Differs from the design |
+|---|---|---|---|
+| L | (step 2) | `Running.Active`, `Failed`, `Usable()` | as designed |
+| A6b, A6 | `0527971`, `f61c5a2` | `writeStoreBytes` over visibility and mutability facts; trusted hosts deny by default | as designed |
+| A3 | `50ff337` | `system.DB.Epoch()` moves on every committed transaction; a view records the epoch its level, audience and policy were decided at; `confirm` decides again on the next use (RPC, upload, sample, stream open, each streamed commit) | the view keeps `Level`, `Role`, `Policy` as a cache with an explicit validity condition instead of removing them; the epoch is coarse (any write), so no writer can be missed |
+| A1 | `a9e00de`, `b8adb03` | `access.PersonPrincipal`, `server.personAs` (a gone or disabled person acts nowhere); the cross-origin cookie rule lives in `sitePrincipal` | no `pkg/authn` and no `Credential`/`Ceiling` types yet: the token-scope ceiling for admin-only verbs waits on the open question above |
+| A0, A4 | `eae9621` | `pkg/authz` actions with floors; every verb (84) and runtime method (21) declares one; `verbs.Call` and `viewRPC` check the floor before running | floors, not full decisions: finer rules stay in the operation (db rules, D9 in the store, policy cells) |
+| A7 | `7a3c37d` | the kernel never writes app tables (authorizer); a schema in which an app table references a kernel table is refused | no driver change: a trigger or a foreign-key cascade runs with the authority of the statement that set it off, which is then never the kernel's |
+| S2 | `d200761` | runtime keys on calls that are not harmless twice, resent once after a network error; server `onceCache` per (store, person, key); a store-owned actor inbox under the manager's mutex | the result cache is in memory, not in `system.db` (a write per RPC would move the epoch) |
+| S1 | `425f66f` | a seam and a test hold the catch-up order (head before documents) | the runtime mirror already merged by per-document version; no runtime change |
+| A5 | `067b50d`, `1cb71d7`, `61c9548` | `authz.CodeRight` on `store.Who`; tree and ref writers refuse app code without it (`needCodeRight` removed); `Store.Query`, `Turn.QueryDocs` and `Store.GetDoc` take the caller's read predicate (`store.Everything` for the store's own reads) | a code right and a read predicate instead of general permits: they are the two rules the store must hold, and both are visible to grep |
+| A2 | `1e57f5d`, `c1294ff` | `authz.Floor(act, level, admin)` used by `viewMay`, `verbs.Check` and `explain.can --action` | `Decide` is the composition of the floor, the epoch-confirmed level and the store-side rules, not one function |
+
+Holes closed along the way, each with a test that fails on the commit before its fix:
+
+- an actor could label a private store's upload or page `public` (A6b);
+- a foreign-key cascade from a kernel table ran an app trigger with kernel authority (A7, found by the spike);
+- an actor's `files.write` could put `app.json` and code into its app store's tree (A5);
+- a store reading another through a binding ignored the target's db rules (A5);
+- platform verbs and modules acted for a disabled payer (A1).

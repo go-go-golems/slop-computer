@@ -1059,3 +1059,137 @@ func (t *Turn) guardCode(paths ...string) error {
 	...
 }
 ```
+
+## Step 8: Phase A2 (one floor decision), the cross-origin rule in the principal, the guide's status section
+
+A2 became small, because A3 to A5 had already put the parts of a
+decision in their places. `authz.Floor(act, level, admin)` is the one
+function that decides an action's floor. Both dispatchers and
+`explain.can --action` call it. The live host's cross-origin cookie rule
+moved into `sitePrincipal`. I also added section 12 to the guide, which
+records what was built and where it differs from the design. One commit
+in this step was made with two tests failing; the next commit fixed
+them. Commits:
+- `1e57f5d` (A2; made with two failing tests);
+- `c1294ff` (the fix);
+- `b8adb03` (cross-origin rule).
+
+### Prompt Context
+
+**User prompt (verbatim):** see step 2 ("Go ahead. then implement ...").
+
+**Assistant interpretation:** Finish the remaining phases where they
+still add something, and leave the guide describing what exists.
+
+**Inferred user intent:** A branch whose design document matches its
+code.
+
+### What I did
+
+- **`authz.Floor`:**
+  - added the function;
+  - `viewMay` now calls it;
+  - `verbs.Check` calls it for the role half
+    (`Floor(act, LevelOwner, admin)`), while `Call` still opens the store
+    at the floor's level;
+  - `explain.can` gained `--action`, which prints the floor's verdict
+    after the level trace.
+- **Tests:** `TestFloor` covers every action at every level, with and
+  without the admin role, against its spec, plus named cases (D9: an
+  owner who is not an admin does not clear `code.push`).
+  `TestExplainAction` covers the new flag.
+- **Cross-origin rule:** `sitePrincipal` returns nobody for an unsafe
+  request that the browser says came from another origin. The one-off
+  check in `serveLive`'s actor-route branch is gone.
+- **Guide:**
+  - section 12 is a table of phases, commits, what was built and how it
+    differs, plus the list of holes closed;
+  - the SQLite-driver open question is marked resolved.
+
+### Why
+
+- **No separate `Decide` function.** After A3 (the epoch-confirmed
+  level), A4 (declared floors) and A5 (code right and read predicates in
+  the store), a separate function would only re-wrap those three.
+  `Floor` is the one piece that was duplicated, in `viewMay` and
+  `Check`.
+- **The cookie rule belongs to the credential.** A rule that lives in
+  one branch of one handler is the R4 pattern from the guide: an origin
+  policy decided per handler.
+
+### What worked
+
+- `go test ./pkg/authz ./pkg/verbs` passes, as do `TestExplainAction`,
+  `TestEveryRPCDeclaresAnAction`, `TestCallChecksTheFloor`, and the
+  cross-origin form posts in `b3_test.go`.
+- The full suite passes at `c1294ff` and `b8adb03`.
+
+### What didn't work
+
+- **Commit `1e57f5d` was made with two failing tests:**
+  - `TestModuleTrust`: `w1_test.go:75: people as member:
+    map[code:permission_denied message:people.ls: platform.admin is for
+    admins]`;
+  - `TestSystemModule`: `w2_test.go:65: letIn as member: ... people.role:
+    platform.admin is for admins`;
+  - the cause: I changed the refusal text from `<verb> is for admins` to
+    the floor's wording, which both tests, and CLI users, rely on;
+  - why it got in: my command was `go test ... | grep -v ok; git add ...
+    && git commit`. The pipe swallowed the test's exit status, so the
+    commit ran anyway;
+  - fixed in `c1294ff` (the old message is back). The failing commit
+    stays in history, not rewritten.
+- **How I run tests now:** the suite writes to a file, the exit status
+  is checked, and only then is anything committed.
+
+### What I learned
+
+- Messages are part of the interface. Tests of module trust assert the
+  refusal text a member sees through an app, because it is the same text
+  as from the CLI.
+
+### What was tricky to build
+
+- **Nothing in the code.** The process failure above is the lesson of
+  this step.
+
+### What warrants a second pair of eyes
+
+- **The admin-scope ceiling (A1's `Ceiling`) is not built.** Whether
+  admin-only verbs should require a token with the admin scope is still
+  an open question for the user: section 11 of the guide, last item.
+- **`explain.can --action` judges a non-store action by role alone.**
+  It also needs a store argument today.
+
+### What should be done in the future
+
+- Decide the admin-scope question, then build `Ceiling` (or close it).
+- Push the branch and open a PR stacked on #13, when the user wants it.
+- Check the latest Codex review on #13.
+
+### Code review instructions
+
+- `pkg/authz/actions.go` (`Floor`), `pkg/authz/actions_test.go`,
+  `pkg/server/views.go` (`viewMay`), `pkg/verbs/verb.go` (`Check`),
+  `pkg/verbs/access.go` (`explain.can`), `pkg/server/live.go`
+  (`sitePrincipal`, `serveLive`), and section 12 of the guide.
+- **Tests:**
+  - `GOWORK=off go test ./pkg/authz ./pkg/verbs -count=1`;
+  - `GOWORK=off go test ./pkg/server -run 'TestExplainAction|TestModuleTrust|TestSystemModule' -count=1`.
+
+### Technical details
+
+```go
+func Floor(act Action, level rt.Level, admin bool) (ok bool, why string) {
+	spec, known := Specs[act]
+	switch {
+	case !known:
+		return false, fmt.Sprintf("%q is not an action", act)
+	case spec.Admin && !admin:
+		return false, fmt.Sprintf("%s is for admins", act)
+	case spec.Store && level < spec.Level:
+		return false, fmt.Sprintf("%s needs %s on the store, not %s", act, spec.Level, level)
+	}
+	return true, ""
+}
+```

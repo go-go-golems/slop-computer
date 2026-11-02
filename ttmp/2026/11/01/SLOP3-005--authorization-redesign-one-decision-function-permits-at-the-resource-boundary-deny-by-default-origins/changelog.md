@@ -39,3 +39,11 @@ S1: catch-up order held by a test (425f66f). A5: D9 in the store via authz.CodeR
 
 - /home/manuel/workspaces/2026-10-28/slop-computer/slop-computer/pkg/store/docs.go — read predicate
 - /home/manuel/workspaces/2026-10-28/slop-computer/slop-computer/pkg/store/files.go — guardCode
+
+## 2026-11-01
+
+A2: authz.Floor shared by viewMay, verbs.Check, explain.can --action (1e57f5d, c1294ff); cross-origin cookie rule in sitePrincipal (b8adb03); guide section 12 records the implementation
+
+### Related Files
+
+- /home/manuel/workspaces/2026-10-28/slop-computer/slop-computer/pkg/authz/actions.go — Floor
