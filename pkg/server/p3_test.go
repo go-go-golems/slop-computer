@@ -1,6 +1,7 @@
 package server
 
 import (
+	"fmt"
 	"strings"
 	"testing"
 	"time"
@@ -255,5 +256,27 @@ func TestViewsOpenOnFallbackVersion(t *testing.T) {
 	}
 	if st, v := openView(g, live, "/fb", ""); st != 200 || v["version"] != 1.0 {
 		t.Fatalf("view on the fallback version: %d %v", st, v)
+	}
+}
+
+// A first version that fails to activate has nothing usable: its actor
+// does not run against migrations that never ran, and status says why.
+func TestNothingUsableAfterFirstActivationFails(t *testing.T) {
+	h := newHarness(t)
+	admin := h.tokenFor("admin@example.com", "read", "write", "admin")
+	h.call(admin, "store.new", map[string]any{"id": "nogo"})
+	h.call(admin, "files.push", map[string]any{"store": "nogo", "files": files(map[string]string{
+		"app.json":        `{"title":"N","actor":"actor.js"}`,
+		"actor.js":        `defineActor({ actions: { count(ctx) { return sql.query('SELECT count(*) AS n FROM items')[0].n; } } });`,
+		"index.html":      "x",
+		"sql/001_bad.sql": "CREATE TABLE _nope (x);",
+	})})
+	st := h.call(admin, "app.status", map[string]any{"store": "nogo"}).(map[string]any)
+	if !strings.Contains(fmt.Sprint(st["broken"]), "001_bad") {
+		t.Fatalf("status = %v", st)
+	}
+	e := h.fail(admin, "actor.call", map[string]any{"store": "nogo", "action": "count"}, "actor_error")
+	if !strings.Contains(e["message"].(string), "broken") {
+		t.Fatalf("actor.call on a never-activated version: %v", e)
 	}
 }

@@ -137,6 +137,10 @@ func (m *Manager) Get(ctx context.Context, id string) (*Actor, error) {
 	if err != nil {
 		return nil, err
 	}
+	if r.N > 0 && !r.Usable() {
+		// never activated (its migrations or setup failed): no actor runs it
+		return nil, fail("actor_error", "the app is broken: %s", r.Broken())
+	}
 	if r.Manifest == nil || r.Manifest.Actor == "" {
 		return nil, nil
 	}

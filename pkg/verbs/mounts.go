@@ -93,7 +93,7 @@ func init() {
 				if err != nil {
 					return nil, err
 				}
-				out := map[string]any{"store": r.Store, "app": r.App, "ref": st.Meta("app_ref"), "n": r.N, "broken": r.Broken}
+				out := map[string]any{"store": r.Store, "app": r.App, "ref": st.Meta("app_ref"), "n": r.N, "broken": r.Broken()}
 				if m := r.Manifest; m != nil {
 					caps := []string{}
 					for c := range m.Caps.Declared {

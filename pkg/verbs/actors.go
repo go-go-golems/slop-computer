@@ -68,7 +68,7 @@ func init() {
 				if err != nil {
 					return nil, err
 				}
-				return map[string]any{"store": r.Store, "app": r.App, "n": r.N, "broken": r.Broken}, nil
+				return map[string]any{"store": r.Store, "app": r.App, "n": r.N, "broken": r.Broken()}, nil
 			}},
 		&Verb{Name: "app.trust", Doc: "Trust an app with a Go module it declares in app.json slop.modules (system, workshop); restarts its actors.", Scope: Admin, AdminOnly: true,
 			Args: []Arg{{Name: "app", Type: "string", Pos: 1, Required: true}, {Name: "module", Type: "string", Pos: 2, Required: true}},
@@ -133,7 +133,7 @@ func init() {
 				if err != nil {
 					return nil, err
 				}
-				return map[string]any{"store": s.ID, "app": r.App, "ref": ref, "n": r.N, "broken": r.Broken}, nil
+				return map[string]any{"store": s.ID, "app": r.App, "ref": ref, "n": r.N, "broken": r.Broken()}, nil
 			}},
 		&Verb{Name: "app.modules", Doc: "The Go modules apps can use, and which apps are trusted with them (one app: what it declares and is trusted with).", Scope: Read,
 			Args: []Arg{{Name: "app", Type: "string", Pos: 1}},

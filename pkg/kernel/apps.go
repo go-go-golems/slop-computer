@@ -13,16 +13,35 @@ import (
 	"github.com/go-go-golems/slop-computer/pkg/system"
 )
 
-// Running is the app a store runs now.
+// Running is the app a store runs now: the version it serves (N,
+// Manifest), whether that version is activated (Active), and the newest
+// version's failure if it failed. Usable is the one answer to "can this
+// store serve its app".
 type Running struct {
 	Store    string         `json:"store"`
 	App      string         `json:"app"`                // the app store (the store itself when it names none)
-	N        int64          `json:"n"`                  // the app store's snapshot; 0 = nothing pushed yet
+	N        int64          `json:"n"`                  // the version served: the active one, else the newest; 0 = nothing pushed yet
 	Manifest *apps.Manifest `json:"manifest,omitempty"` // nil: plain content, no app.json
-	Broken   string         `json:"broken,omitempty"`   // why app.json could not be read
-	// Fallback: the newest version is broken and the store runs the last
-	// version it activated (N, Manifest); that one is usable.
-	Fallback bool `json:"fallback,omitempty"`
+	Active   bool           `json:"active"`             // N is activated (migrations, setup and smoke check done)
+	Failed   *Failure       `json:"failed,omitempty"`   // the newest version failed; the store keeps the last active one
+}
+
+// Failure is why a version could not be activated.
+type Failure struct {
+	N   int64  `json:"n"`
+	Why string `json:"why"`
+}
+
+// Usable reports whether the store can serve N: something was pushed and
+// that version is activated (possibly an older one, after a failure).
+func (r Running) Usable() bool { return r.N > 0 && r.Active }
+
+// Broken is why the newest version failed, or "".
+func (r Running) Broken() string {
+	if r.Failed == nil {
+		return ""
+	}
+	return r.Failed.Why
 }
 
 type manifestCache struct {
@@ -59,26 +78,31 @@ func (k *Kernel) Running(ctx context.Context, id string) (Running, error) {
 		return r, err
 	}
 	r.N = n
-	r.Manifest, r.Broken = k.manifest(ctx, as, n)
+	m, why := k.manifest(ctx, as, n)
+	r.Manifest = m
 	cur := s.MetaInt("app_version")
 	if cur == n {
+		r.Active = true
 		return r, nil
 	}
-	if r.Broken == "" {
+	if why == "" {
 		if failed := k.failedActivation(id, n); failed != "" {
-			r.Broken = failed
+			why = failed
 		} else if err := k.activate(ctx, s, r); err != nil {
 			k.recordFailure(id, n, err.Error())
-			r.Broken = "activation of " + r.App + "@" + strconv.FormatInt(n, 10) + " failed: " + err.Error()
+			why = "activation of " + r.App + "@" + strconv.FormatInt(n, 10) + " failed: " + err.Error()
 		} else {
+			r.Active = true
 			return r, nil
 		}
 	}
-	// Broken: the store keeps running the version it ran before.
+	// The newest version failed: the store keeps running the version it
+	// ran before, if any.
+	r.Failed = &Failure{N: n, Why: why}
 	if cur > 0 {
 		r.N = cur
 		r.Manifest, _ = k.manifest(ctx, as, cur)
-		r.Fallback = true
+		r.Active = true
 	}
 	return r, nil
 }

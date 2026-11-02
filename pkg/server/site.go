@@ -83,7 +83,7 @@ func (s *Server) serveStatic(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	d, _, err := s.Env.K.Access.Can(ctx, nil, res.store, rt.LevelView, "reading", true)
-	if err != nil || !d.OK || res.run.N == 0 {
+	if err != nil || !d.OK || !res.run.Usable() {
 		notFound(w)
 		return
 	}
