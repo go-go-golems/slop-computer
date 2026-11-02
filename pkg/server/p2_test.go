@@ -149,4 +149,38 @@ func TestOnlyAdminsPushAppCode(t *testing.T) {
 	h.fail(bob, "files.put", map[string]any{"store": "bobs-site", "path": "app.json", "text": "{}"}, "permission_denied")
 	// Content stores of an app's data are not code: a data store's assets are fine.
 	h.call(bob, "files.put", map[string]any{"store": "bobs-site", "zone": "assets", "path": "a.txt", "text": "x"})
+	// Nor through an import: a bundle whose tree holds app.json is code.
+	admin := h.tokenFor("admin@example.com", "read", "write", "admin")
+	h.call(admin, "store.new", map[string]any{"id": "an-app"})
+	h.call(admin, "files.push", map[string]any{"store": "an-app", "files": files(map[string]string{
+		"app.json": `{"title":"A","actor":"actor.js"}`, "actor.js": "defineActor({})", "index.html": "hi"})})
+	app := h.call(admin, "store.export", map[string]any{"id": "an-app"}).(map[string]any)
+	h.fail(bob, "import.folder", map[string]any{"store": "bobs-app", "bundle": app["bundle"], "blobs": app["blobs"]}, "permission_denied")
+	site := h.call(bob, "store.export", map[string]any{"id": "bobs-site"}).(map[string]any)
+	h.call(bob, "import.folder", map[string]any{"store": "bobs-copy", "bundle": site["bundle"], "blobs": site["blobs"]})
+	h.call(admin, "import.folder", map[string]any{"store": "app-copy", "bundle": app["bundle"], "blobs": app["blobs"]})
+}
+
+// A query's limit counts only documents the caller may read: the read
+// rules apply first (docs.query, docs.ls), as they do for db.query.
+func TestQueryLimitAfterReadRules(t *testing.T) {
+	h := newHarness(t)
+	admin := h.tokenFor("admin@example.com", "read", "write", "admin")
+	mia := h.tokenFor("mia@example.com")
+	h.call(admin, "store.new", map[string]any{"id": "ruled"})
+	h.call(admin, "files.push", map[string]any{"store": "ruled", "files": files(map[string]string{
+		"app.json":   `{"title":"R","capabilities":{"db":{"rules":[{"path":"notes/a","read":"admin","write":"admin"}]}}}`,
+		"index.html": "x"})})
+	h.call(admin, "grant.set", map[string]any{"store": "ruled", "subject": "@member", "level": "view"})
+	h.call(admin, "docs.set", map[string]any{"store": "ruled", "path": "notes/a", "data": map[string]any{"n": 1}})
+	h.call(admin, "docs.set", map[string]any{"store": "ruled", "path": "notes/b", "data": map[string]any{"n": 2}})
+	for _, verb := range []string{"docs.query", "docs.ls"} {
+		got := h.call(mia, verb, map[string]any{"store": "ruled", "coll": "notes", "limit": 1}).([]any)
+		if len(got) != 1 || got[0].(map[string]any)["path"] != "notes/b" {
+			t.Fatalf("%s limit 1 as a member: %v", verb, got)
+		}
+	}
+	if got := h.call(admin, "docs.query", map[string]any{"store": "ruled", "coll": "notes", "limit": 1}).([]any); len(got) != 1 || got[0].(map[string]any)["path"] != "notes/a" {
+		t.Fatalf("docs.query limit 1 as admin: %v", got)
+	}
 }

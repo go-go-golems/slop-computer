@@ -10,6 +10,7 @@ import (
 	"strings"
 
 	"github.com/go-go-golems/slop-computer/pkg/access"
+	"github.com/go-go-golems/slop-computer/pkg/apps"
 	"github.com/go-go-golems/slop-computer/pkg/blobs"
 	"github.com/go-go-golems/slop-computer/pkg/ids"
 	"github.com/go-go-golems/slop-computer/pkg/kernel"
@@ -86,6 +87,15 @@ func init() {
 				dec.UseNumber()
 				if err := dec.Decode(&b); err != nil {
 					return nil, Errf("invalid_argument", "bundle: %s", err.Error())
+				}
+				// Decision D9, as files.push enforces it: only admins write
+				// app code, and a tree with app.json is app code.
+				if !p.IsAdmin() {
+					for _, f := range b.Files {
+						if (f.Zone == "" || f.Zone == "tree") && f.Path == apps.File {
+							return nil, Errf("permission_denied", "only admins import app code (the bundle's tree holds app.json; decision D9)")
+						}
+					}
 				}
 				if err := putBlobs(e, a); err != nil {
 					return nil, err
