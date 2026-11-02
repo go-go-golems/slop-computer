@@ -128,13 +128,14 @@ function useCatalog() {
   const reload = () => { reloadA(); reloadS(); reloadM(); };
   const appOf = useMemo(() => new Map((apps || []).map(a => [a.app, a])), [apps]);
   const personOf = useMemo(() => new Map((people || []).map(p => [p.id, p])), [people]);
+  const storeOf = useMemo(() => new Map((stores || []).map(s => [s.id, s])), [stores]);
   const urlsOf = (s) => (mounts || []).flatMap(({ mount: m, url }) => {
     if (m.store === s.id) return [url];
     if (m.storeParam && (!m.type || m.type === s.type)) return [url.replace(':' + m.storeParam, s.id)];
     return [];
   });
   const kindOf = (s) => (appOf.has(s.id) ? 'app' : s.app ? 'instance' : 'files');
-  return { apps, stores, mounts, appOf, personOf, urlsOf, kindOf, e: ae || se || me, reload };
+  return { apps, stores, mounts, appOf, personOf, storeOf, urlsOf, kindOf, e: ae || se || me, reload };
 }
 
 const who = (personOf, id) => {
@@ -150,7 +151,9 @@ export function Apps({ toast }) {
   const c = useCatalog();
   const [p, set] = useHashParams();
   const instances = (app) => (c.stores || []).filter(s => s.app === app);
-  const rows = (c.apps || []).map(a => ({ ...a, instances: instances(a.app).length, urls: c.urlsOf({ id: a.app, type: a.type }) }));
+  // a.type is the type the app declares for its instances; where the app
+  // itself is served depends on its own store's type (c.storeOf).
+  const rows = (c.apps || []).map(a => ({ ...a, instances: instances(a.app).length, urls: c.urlsOf(c.storeOf.get(a.app) || { id: a.app }) }));
   return (
     <Section title="Apps" tools={<button className="btn" onClick={c.reload}>Refresh</button>}>
       <Err e={c.e} />
@@ -193,7 +196,7 @@ function AppDetail({ app, row, c, toast }) {
         ['version', st?.n],
         ['status', st && <span className={st.broken ? 'bad' : ''}>{st.broken ? 'broken: ' + st.broken : 'running'}</span>],
         ['kind', row && (row.live ? 'live: runs in the shell' : 'static: files only')],
-        ['store type', row?.type],
+        ['instance type', row?.type],
         ['instances', inst.length ? inst.map(s => s.id).join(', ') : ''],
         ['served at', <Addr key="a" urls={row?.urls || []} />],
       ]} />
