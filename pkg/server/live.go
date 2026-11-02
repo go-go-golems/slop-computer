@@ -559,11 +559,11 @@ func (s *Server) siteGrant(w http.ResponseWriter, r *http.Request) {
 }
 
 // reviewViews re-checks the open views of a store after its access
-// changed. A view's level, audience and policy are fixed when it opens and
-// authorize every call, so a view whose viewer now has another level or
-// audience is closed: revoked when no access is left, otherwise after an
-// access event, on which the page reopens at the new level (the shell does
-// this). Its secret stops working at once, whether or not the page listens.
+// changed. A view whose viewer now has another level or audience is closed:
+// revoked when no access is left, otherwise after an access event, on which
+// the page reopens at the new level (the shell does this). Calling it is
+// not what makes access correct (confirm does that on the view's next use);
+// it tells idle pages now rather than at their next call.
 func (s *Server) reviewViews(ctx context.Context, id string) {
 	row, err := s.Sys.StoreByID(ctx, id)
 	if err != nil {
@@ -572,6 +572,31 @@ func (s *Server) reviewViews(ctx context.Context, id string) {
 	for _, v := range s.rt.views.Of(id) {
 		s.recheck(ctx, v, row)
 	}
+}
+
+// confirm reports whether v may still act with the level, audience and
+// policy it was opened with. They are a cache of a decision made from
+// system.db, valid at the epoch it was made at; after any write the view's
+// next use decides again and closes it if the answer changed, so access
+// follows the state even when no hook called reviewViews.
+func (s *Server) confirm(ctx context.Context, v *rt.View) bool {
+	e := s.Sys.Epoch()
+	if v.Epoch.Load() == e {
+		return true
+	}
+	row, err := s.Sys.StoreByID(ctx, v.Target)
+	if errors.Is(err, system.ErrNotFound) {
+		s.rt.views.Close(v, true)
+		return false
+	}
+	if err != nil {
+		return false // refuse this call; the next one asks again
+	}
+	if s.recheck(ctx, v, row) {
+		return false
+	}
+	v.Epoch.Store(e)
+	return true
 }
 
 // recheck closes v when its viewer's access to row is no longer the one v

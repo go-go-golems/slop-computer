@@ -135,6 +135,7 @@ type viewOut struct {
 // openView opens a view of a store for p. parent is the origin that will
 // frame it.
 func (s *Server) openView(ctx context.Context, p *access.Principal, storeID, parent string) (*viewOut, error) {
+	epoch := s.Sys.Epoch() // read first: a write during the decision makes the next call decide again
 	d, _, err := s.Env.K.Access.Can(ctx, p, storeID, rt.LevelView, "opening", true)
 	if err != nil {
 		return nil, err
@@ -166,8 +167,10 @@ func (s *Server) openView(ctx context.Context, p *access.Principal, storeID, par
 	for _, c := range system.PolicyCaps {
 		pol[c] = s.Sys.Policy(ctx, run.App, c, string(d.Audience))
 	}
-	v := s.rt.views.Open(&rt.View{Target: storeID, App: run.App, Version: int(run.N), User: p.ID(), Name: name,
-		Role: string(d.Audience), Level: d.Level, Caps: caps, Policy: pol, Kind: "viewer"})
+	v := &rt.View{Target: storeID, App: run.App, Version: int(run.N), User: p.ID(), Name: name,
+		Role: string(d.Audience), Level: d.Level, Caps: caps, Policy: pol, Kind: "viewer"}
+	v.Epoch.Store(epoch)
+	v = s.rt.views.Open(v)
 	u, origin, err := s.sandboxURL(ctx, v, parent)
 	if err != nil {
 		s.rt.views.Close(v, false)
@@ -208,6 +211,9 @@ func (s *Server) viewOf(r *http.Request) *rt.View {
 		return nil
 	}
 	if id, ok := r.Context().Value(originStore{}).(string); ok && id != v.Target {
+		return nil
+	}
+	if !s.confirm(r.Context(), v) {
 		return nil
 	}
 	return v
@@ -344,6 +350,8 @@ func (s *Server) viewEvents(w http.ResponseWriter, r *http.Request) {
 			var err error
 			switch {
 			case o.Rev > 0 && o.Rev <= last:
+			case o.Rev > 0 && !s.confirm(ctx, v):
+				// the view was closed: its access or revoked event follows
 			case o.Rev > last+1:
 				err = catchUp(last)
 			case o.Rev > 0:

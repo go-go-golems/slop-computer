@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"time"
 )
 
@@ -40,6 +41,9 @@ type View struct {
 	Kind    string          `json:"kind"`        // viewer | agent
 	Expires time.Time       `json:"expiresAt"`
 	Created time.Time       `json:"-"`
+	// Epoch is the system epoch at which Level, Role and Policy were last
+	// confirmed; the server decides again when it has moved.
+	Epoch atomic.Int64 `json:"-"`
 
 	mu    sync.Mutex
 	ch    chan Out

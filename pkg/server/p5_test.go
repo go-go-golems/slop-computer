@@ -225,6 +225,34 @@ func TestDowngradeClosesView(t *testing.T) {
 	if st := write(v, "after the renewal"); st != 401 {
 		t.Fatalf("write after the renewal: %d", st)
 	}
+
+	// Nor does a call need a renewal first: the view's level is a decision
+	// cached at a system epoch, and any write moves the epoch.
+	grant := func(level string) {
+		t.Helper()
+		if _, err := h.sys.SetGrant(context.Background(), "", "test", system.Grant{Store: "club", Subject: "@subscriber", Level: level}); err != nil {
+			t.Fatal(err)
+		}
+	}
+	grant("interact")
+	v = asSubscriber()
+	if st := write(v, "before"); st != 200 {
+		t.Fatalf("write before the change: %d", st)
+	}
+	grant("view")
+	if st := write(v, "after the grant changed"); st != 401 {
+		t.Fatalf("write after the grant changed underneath: %d", st)
+	}
+	// An unrelated write moves the epoch too; the view decides again, gets
+	// the same answer and keeps working.
+	grant("interact")
+	v = asSubscriber()
+	if err := h.sys.SetPolicy(context.Background(), "", "test", "another-app", "sample", "member", true); err != nil {
+		t.Fatal(err)
+	}
+	if st := write(v, "after an unrelated write"); st != 200 {
+		t.Fatalf("write after an unrelated write: %d", st)
+	}
 }
 
 func jsonInt(n int64) string { b, _ := json.Marshal(n); return string(b) }
@@ -360,5 +388,53 @@ func TestPolicyChangeClosesViews(t *testing.T) {
 	st, v = openView(s, live, "/pics", "")
 	if caps, _ := v["caps"].(map[string]any); st != 200 || caps["assets"] != nil {
 		t.Fatalf("view with assets off: %d %v", st, v)
+	}
+}
+
+// An open stream answers to the same epoch: after a grant changes with no
+// review, the next commit is not sent; the view closes with an access event.
+func TestStreamFollowsSystemState(t *testing.T) {
+	h := newHarness(t)
+	admin := h.tokenFor("admin@example.com", "read", "write", "admin")
+	s, _, _ := clubSite(t, h, "una@example.com")
+	h.call(admin, "sub.grant", map[string]any{"person": "una@example.com", "until": "30d"})
+	st, v := openView(s, h.cfg.Hosts.Live[0], "/club", "")
+	if st != 200 || v["level"] != "interact" {
+		t.Fatalf("subscriber view: %d %v", st, v)
+	}
+	ev := openStream(t, s, v)
+	ev.next(t, "hello", 2*time.Second)
+	sbx := strings.TrimPrefix(strings.Split(v["url"].(string), "/v/")[0], "http://")
+	r, _ := s.do("POST", sbx, "/_rt/rpc", map[string]any{"method": "db.subscribe", "args": map[string]any{"sub": "s1", "path": "notes", "coll": true}},
+		map[string]string{"Authorization": "Bearer " + v["secret"].(string)})
+	if r.StatusCode != 200 {
+		t.Fatalf("subscribe: %d", r.StatusCode)
+	}
+	h.call(admin, "docs.set", map[string]any{"store": "club", "path": "notes/a", "data": map[string]any{"n": 1}})
+	if d := ev.next(t, "doc", 2*time.Second); d["path"] != "notes/a" {
+		t.Fatalf("first doc: %v", d)
+	}
+	if _, err := h.sys.SetGrant(context.Background(), "", "test", system.Grant{Store: "club", Subject: "@subscriber", Level: "view"}); err != nil {
+		t.Fatal(err)
+	}
+	h.call(admin, "docs.set", map[string]any{"store": "club", "path": "notes/b", "data": map[string]any{"n": 2}})
+	for {
+		select {
+		case d, ok := <-ev.ch:
+			if !ok {
+				t.Fatal("stream ended without an access event")
+			}
+			switch d["_type"] {
+			case "doc":
+				t.Fatalf("doc sent after the grant changed: %v", d)
+			case "access":
+				if d["level"] != "view" {
+					t.Fatalf("access event: %v", d)
+				}
+				return
+			}
+		case <-time.After(2 * time.Second):
+			t.Fatal("no access event")
+		}
 	}
 }
