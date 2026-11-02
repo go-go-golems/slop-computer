@@ -132,8 +132,11 @@ func New(cfg *config.Config, sys *system.DB, env *verbs.Env) *Server {
 func (s *Server) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	switch s.Cfg.HostKind(r.Host) {
 	case "main":
+		s.trustedDefaults(w)
+		w.Header().Set("X-Frame-Options", "DENY")
 		s.main.ServeHTTP(w, r)
 	case "live":
+		s.trustedDefaults(w)
 		serveOr(s.Live, w, r)
 	case "static":
 		serveOr(s.Static, w, r)
@@ -150,6 +153,21 @@ func (s *Server) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 		http.Error(w, "unknown host "+r.Host, http.StatusMisdirectedRequest)
+	}
+}
+
+// trustedDefaults are the headers every response on a trusted origin (the
+// main and live hosts, which hold sessions) starts with, deny by default:
+// not framed, no MIME sniffing, no full referrers, HTTPS remembered. A
+// handler may replace the CSP with its own (the shell's, an actor page's,
+// the sandbox CSP of store bytes).
+func (s *Server) trustedDefaults(w http.ResponseWriter) {
+	h := w.Header()
+	h.Set("Content-Security-Policy", "frame-ancestors 'none'")
+	h.Set("X-Content-Type-Options", "nosniff")
+	h.Set("Referrer-Policy", "same-origin")
+	if s.Cfg.Scheme == "https" {
+		h.Set("Strict-Transport-Security", "max-age=31536000")
 	}
 }
 
