@@ -7,10 +7,10 @@
 - [ ] A2: pkg/authz: actions, resources, Decide beside today's checks; differential test <!-- t:ggzv -->
 - [x] A3: access epoch; view Level/Role/Policy become a cache confirmed per use against the epoch; reviewViews becomes UX only <!-- t:1pnu -->
 - [x] A4: verbs, RPC table and actor routes declare actions and receive permits <!-- t:nj3o -->
-- [ ] A5: permits at the store boundary (PutFile/PutBlob/Snapshot/Query); kernel.SystemPermit; drop needCodeRight <!-- t:wg1w -->
+- [x] A5: permits at the store boundary (PutFile/PutBlob/Snapshot/Query); kernel.SystemPermit; drop needCodeRight <!-- t:wg1w -->
 - [x] A6: host-class response policy (ShellPage/JSON/Untrusted); back office headers <!-- t:entp -->
 - [x] A7: spike: SQLite authorizer with the inner trigger/view argument (author authority) <!-- t:kmn0 -->
-- [ ] S1: rev-guarded sync (per-entry rev, cursor from stream only, catch-up in one read transaction) <!-- t:aysd -->
+- [x] S1: rev-guarded sync (per-entry rev, cursor from stream only, catch-up in one read transaction) <!-- t:aysd -->
 - [x] S2: idempotency keys for mutating RPCs; store-owned actor inboxes <!-- t:0n8f -->
 - [x] L: lifecycle state (Running.Active/Failed/Usable), callers converted <!-- t:9o0b -->
 - [x] A6b: StoreBytes (visibility, mutability), writeStoreBytes, resolveStoreFile for all four serving paths <!-- t:nfdj -->

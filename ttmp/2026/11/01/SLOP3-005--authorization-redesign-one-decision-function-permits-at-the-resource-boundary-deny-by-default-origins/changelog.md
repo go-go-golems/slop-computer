@@ -30,3 +30,12 @@ S2: keyed calls run once (runtime keys, server onceCache); store-owned actor inb
 
 - /home/manuel/workspaces/2026-10-28/slop-computer/slop-computer/pkg/actor/inbox.go — store-owned inbox
 - /home/manuel/workspaces/2026-10-28/slop-computer/slop-computer/pkg/server/once.go — keyed call cache
+
+## 2026-11-01
+
+S1: catch-up order held by a test (425f66f). A5: D9 in the store via authz.CodeRight (067b50d); Query/GetDoc take the caller's read rule (1cb71d7, 61c9548); closed two holes (actor files.write of app code; stores module ignoring target rules)
+
+### Related Files
+
+- /home/manuel/workspaces/2026-10-28/slop-computer/slop-computer/pkg/store/docs.go — read predicate
+- /home/manuel/workspaces/2026-10-28/slop-computer/slop-computer/pkg/store/files.go — guardCode

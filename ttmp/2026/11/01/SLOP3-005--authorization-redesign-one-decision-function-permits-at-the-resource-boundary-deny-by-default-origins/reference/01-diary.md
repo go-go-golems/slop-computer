@@ -882,3 +882,180 @@ func (m *Manager) take(a *Actor) (ev *event, ok bool) {
 	return ev, true
 }
 ```
+
+## Step 7: Phase S1 (a test holds the catch-up order), phase A5 (D9 and read rules at the store boundary)
+
+S1 turned out to need a test, not a change. The server's catch-up reads
+the head before the documents, which was correct but argued only in a
+comment. Now a seam between the two reads, and a test that commits
+there, holds it. The runtime mirror already merges by per-document
+version.
+
+A5 moved two rules into `pkg/store`, so that callers cannot forget them:
+- **D9:** only the code right changes app code;
+- **read rules:** every query and single read takes the caller's read
+  predicate.
+
+Each move found a live hole:
+- an actor could write `app.json` and code into its app store's tree;
+- one store reading another through a binding ignored the target's db
+  rules.
+
+Commits:
+- `425f66f` (S1);
+- `067b50d` (D9 in the store);
+- `1cb71d7` (queries take the read rule);
+- `61c9548` (single reads too).
+
+### Prompt Context
+
+**User prompt (verbatim):** see step 2 ("Go ahead. then implement ...").
+
+**Assistant interpretation:** Continue with the remaining phases. S1 and
+A5 come next; A2 is left for last because A4 and A5 already moved most
+decisions to declared or structural places.
+
+**Inferred user intent:** Rules that live where the resource lives.
+
+### What I did
+
+- **S1:**
+  - `Server.catchUpGap func()` runs between `st.Head()` and
+    `st.DocsSince` in the stream's `catchUp`;
+  - `TestCatchUpLosesNoCommit` subscribes, closes the first stream, then
+    resumes with `after=0`. The seam commits `notes/gap` once, and the
+    test requires that document to arrive.
+- **A5, D9:**
+  - `authz.CodeRight` (unexported field) with `CodeRightOf(p)` (admins
+    and the kernel) and `KernelCodeRight()`;
+  - `store.Who.Code` carries it;
+  - `Turn.guardCode(paths...)` refuses without the right when a path is
+    `app.json`, the tree holds `app.json`, or main's snapshot does.
+    `PutBlob` (and so `PutFile`) on the tree, `RemoveFile` on the tree,
+    `Snapshot` and `MoveRef` call it. `MoveRef` also refuses a move onto
+    a snapshot that holds `app.json`.
+  - refusals are `store.ErrAppCode`, which `storeErr`/`fileErr` in verbs
+    and `asError` in actors map to `permission_denied`;
+  - the right is given in four places: verbs' `who()`, the
+    `import.folder` restore turn, `artifact.publish` (from the viewer's
+    principal), and the store tests;
+  - removed: `needCodeRight` (five call sites) and `import.folder`'s own
+    bundle scan. The restore writes through the same guarded writers.
+- **A5, reads:**
+  - `Store.Query(ctx, q, may)` and `Turn.QueryDocs(q, may)`: `may`
+    filters rows before `q.Apply` (filters, order, limit);
+  - `store.Everything` for the actor's own reads;
+  - `docs.query`/`docs.ls`, `slop.read`, `db.query` and `db.subscribe`
+    pass the caller's rule and dropped their manual limit loops;
+  - `Store.GetDoc(ctx, path, may)`: an unreadable document is
+    `ErrNotFound`. `docs.get`, `slop.read`, `db.get` and the stores
+    module pass the rule.
+
+### Why
+
+- **The store owns the invariant.** A check in each caller is one more
+  place to forget. The actor's `files` module never had the D9 check,
+  and the stores module never had the read rules. Both holes came from
+  callers that were added after the checks were written.
+- **The predicate is mandatory, with no default.** `store.Everything` is
+  an explicit choice and shows up in a grep. Adding the parameter broke
+  the build at exactly the callers that had to decide, which is how the
+  stores module leak surfaced.
+- **One code-right type with an unexported field.** Only `pkg/authz`
+  makes one, so the holders are listable: `git grep -n
+  'CodeRightOf\|KernelCodeRight'` gives four lines outside authz.
+
+### What worked
+
+- **`TestCatchUpLosesNoCommit`** passes. With the reads swapped (documents
+  first, then head) it fails: `the commit made during the catch-up never
+  arrived`.
+- **`TestStoreGuardsAppCode`:**
+  - without the right: tree, snapshot and asset writes in a plain store
+    succeed; `app.json` is refused;
+  - in an app store: put, remove, snapshot and move-ref are refused, and
+    assets succeed.
+- **`TestActorsCannotWriteAppCode`:** `app.json`, `actor.js` and
+  `index.html` are refused with `permission_denied`. On the previous
+  commit, in a scratch worktree: `an actor writing app.json into its
+  app's tree: <nil>` (it succeeded).
+- **`TestStoresModuleReadsByRules`:** the reader sees `secret: false` and
+  `all: ["notes/open"]`. On the previous commit: `map[all:[notes/open
+  notes/secret] secret:true]`.
+- **Unchanged and passing:** `TestOnlyAdminsPushAppCode` and
+  `TestQueryLimitAfterReadRules`.
+- The full suite passes after each commit.
+
+### What didn't work
+
+- **The first build after changing `Store.Query`** failed at
+  `pkg/actor/modules.go:502: not enough arguments in call to ts.Query`.
+  That was the stores module, which is how the leak was found.
+- **`p4_test.go`** needed the `store` import for `store.Everything`.
+
+### What I learned
+
+- `files.push` used to refuse non-admins before asking for missing
+  blobs. Now the refusal comes from the store, inside the turn, after
+  the blobs are present. A non-admin pushing to an app store can be
+  asked for blobs and then refused. That is a small change in the order
+  of messages, with no change in outcome.
+
+### What was tricky to build
+
+- **The meaning of "holds app code".** It has to match what
+  `needCodeRight` meant:
+  - the tree as this turn sees it (including earlier writes in the same
+    turn);
+  - or main's snapshot;
+  - or a write of `app.json` itself.
+
+  `guardCode` reads through the turn's writer connection, so a turn that
+  first writes `app.json` and then other files is judged on its own
+  writes.
+
+### What warrants a second pair of eyes
+
+- **Actors never hold the code right.** An app whose actor writes its own
+  store's tree is refused once that tree holds `app.json`. No shipped
+  app does this: the Workshop pushes through verbs as the visitor.
+- **`artifact.publish`** derives the right from the viewer's principal
+  (`viewPrincipal`). `viewMay` already requires the admin role for
+  `code.push`, so this is belt and braces.
+
+### What should be done in the future
+
+- **A2:** `Decide`, now mostly a composition of the declared floor
+  (A4), the epoch-confirmed level (A3), and the store-side rules (A5).
+- **Update the guide's A7 and S1 sections** to the approaches taken.
+- **Push the branch and open a PR** stacked on #13, when the user wants
+  it.
+
+### Code review instructions
+
+- `pkg/authz/code.go`, `pkg/store/files.go` (`guardCode`,
+  `snapshotHoldsApp`, `ErrAppCode`), `pkg/store/turn.go` (`Who.Code`),
+  `pkg/store/docs.go` (`Everything`, `Query`, `QueryDocs`, `GetDoc`),
+  `pkg/verbs/env.go` (`who`, `fileErr`, `storeErr`), `pkg/verbs/files.go`,
+  `pkg/verbs/data.go`, `pkg/actor/modules.go` (stores module),
+  `pkg/server/views.go` (`readable`, `dbGet`, `catchUp`).
+- **Tests:**
+  - `GOWORK=off go test ./pkg/store -count=1`;
+  - `GOWORK=off go test ./pkg/server -run 'TestCatchUpLosesNoCommit|TestActorsCannotWriteAppCode|TestStoresModuleReadsByRules|TestOnlyAdminsPushAppCode|TestQueryLimitAfterReadRules' -count=1`.
+
+### Technical details
+
+```go
+func (t *Turn) guardCode(paths ...string) error {
+	if t.Who.Code.OK() {
+		return nil
+	}
+	for _, p := range paths {
+		if p == appFile {
+			return ErrAppCode
+		}
+	}
+	// the tree as this turn sees it, then what main points at
+	...
+}
+```
