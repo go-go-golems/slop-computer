@@ -122,3 +122,7 @@ Agent verification (39b0b76): pi built agent-poll and added journal tags through
 ### Related Files
 
 - /home/manuel/code/wesen/2026-10-31--slop-v3/web/runtime/src/caps.ts — user.me() carries the visitor
+
+## 2026-11-02
+
+07-build-blocks-pinup.sh is superseded by apps/upstream/blocks/build.sh and apps/upstream/pinup/build-app.sh (web/ moved to apps/upstream/); 07 and 08 are kept as history and still point at web/.

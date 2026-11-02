@@ -1,6 +1,6 @@
 // The site model: which pages a site publishes, their titles, parents,
 // order and URLs. Page semantics follow the editor's Pages object
-// (slop-computer web/blocks/src/blocks.js): a page is a top-level branch
+// (slop-computer apps/upstream/blocks/src/blocks.js): a page is a top-level branch
 // that is not reserved, its parent must exist and must not make a cycle,
 // siblings are ordered by an order cell or by the clock of their first
 // write.

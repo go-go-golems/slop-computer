@@ -1,5 +1,5 @@
 #!/bin/sh
-# 02-deploy-apps.sh <slop-computer checkout>: install the apps that ship
+# deploy-apps.sh [<slop-computer checkout>] (make deploy-apps): install the apps that ship
 # with slop, Blocks and Pinup, and the examples on a v3 server, with their
 # mounts. Uses the default login (an admin token with the admin scope);
 # SLOP_SERVER, LIVE_HOST and STATIC_HOST name the server. Safe to repeat:
@@ -18,13 +18,11 @@
 # Unlike SLOP3-001's demo scripts, no open workspaces are created: guests
 # get nothing they did not get a link to.
 set -eu
-repo=$(cd "$1" && pwd)
+repo=$(cd "${1:-$(dirname "$0")/..}" && pwd)
 SLOP=${SLOP:-slop}
 export SLOP_SERVER=${SLOP_SERVER:-https://slop.yolo.scapegoat.dev}
 LIVE_HOST=${LIVE_HOST:-apps.slop.yolo.scapegoat.dev}
 STATIC_HOST=${STATIC_HOST:-site.slop.yolo.scapegoat.dev}
-build=$(mktemp -d)
-trap 'rm -rf "$build"' EXIT
 
 app() { # app <store> <dir>
 	$SLOP store new "$1" >/dev/null 2>&1 || true
@@ -44,23 +42,25 @@ $SLOP app trust blocks-site workshop >/dev/null
 $SLOP mount set "$LIVE_HOST" /pub/:id --storeParam id --type blocks-site >/dev/null
 $SLOP mount set "$STATIC_HOST" /s/:id --storeParam id --type site >/dev/null
 
-# Claude Blocks and Pinup, built from their upstream sources.
-"$repo/ttmp/2026/11/01/SLOP3-001--slop-v3-core-a-streamlined-store-based-hosting-service-design-and-implementation-guide/scripts/07-build-blocks-pinup.sh" "$repo/web" "$build"
-app blocks "$build/blocks"
+# Claude Blocks and Pinup, built from their upstream sources by their own
+# build scripts (Pinup needs apps/upstream/pinup/vendor installed: npm ci).
+"$repo/apps/upstream/blocks/build.sh" >/dev/null
+"$repo/apps/upstream/pinup/build-app.sh" >/dev/null
+app blocks "$repo/apps/upstream/blocks/dist"
 for aud in @guest @member @subscriber @admin; do $SLOP policy set blocks sample "$aud" on >/dev/null; done
 $SLOP mount set "$LIVE_HOST" /b/:id --storeParam id --type blocks --createApp blocks >/dev/null
-app pinup "$build/pinup"
+app pinup "$repo/apps/upstream/pinup/dist/app"
 for aud in @member @subscriber @admin; do $SLOP policy set pinup sample "$aud" on >/dev/null; done
 $SLOP mount set "$LIVE_HOST" /p/:id --storeParam id --type design --createApp pinup >/dev/null
 
 # The examples.
-app guestbook "$repo/examples/guestbook"
+app guestbook "$repo/apps/examples/guestbook"
 $SLOP grant set guestbook @guest interact >/dev/null
 $SLOP mount set "$LIVE_HOST" /guestbook guestbook >/dev/null
-app journal "$repo/examples/journal"
+app journal "$repo/apps/examples/journal"
 $SLOP grant set journal @member interact >/dev/null
 $SLOP mount set "$LIVE_HOST" /journal journal >/dev/null
-app static-site "$repo/examples/static-site"
+app static-site "$repo/apps/examples/static-site"
 $SLOP grant set static-site @guest view >/dev/null
 $SLOP mount set "$STATIC_HOST" /examples/static-site static-site >/dev/null
 

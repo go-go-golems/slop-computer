@@ -14,7 +14,7 @@ claude.ai Artifact; on slop it runs unchanged on the page runtime
 | Manifest | `app.json` (store type `blocks`): db, user (profile), room (`ops` open to interact), sample (images), assets, downloads. `mcp` (the Claude browser) is left out: slop does not serve it, so Blocks hides its browser feature |
 
 ```sh
-make blocks blocks-push          # build.sh, then slop push web/blocks/dist --store blocks
+make blocks blocks-push          # build.sh, then slop push apps/upstream/blocks/dist --store blocks
 ```
 
 A workspace is a store of type `blocks` running the `blocks` app, opened at
