@@ -102,3 +102,25 @@ func TestAdminPowerNeedsTheAdminScope(t *testing.T) {
 	h.call(full, "grant.ls", map[string]any{"store": "mias"})
 	h.call(full, "files.push", map[string]any{"store": "app", "files": files(map[string]string{"app.json": `{"title":"A"}`, "index.html": "x"})})
 }
+
+// A read token holds its person's levels and cannot change anything: an
+// owner's read token exports the store and lists its grants, and every
+// verb that writes refuses it.
+func TestReadTokensReadAtTheirLevel(t *testing.T) {
+	h := newHarness(t)
+	mia := h.tokenFor("mia@example.com", "read", "write")
+	ro := h.tokenFor("mia@example.com", "read")
+	h.call(mia, "store.new", map[string]any{"id": "mine"})
+	h.call(mia, "docs.set", map[string]any{"store": "mine", "path": "notes/a", "data": map[string]any{"n": 1}})
+	h.call(ro, "store.export", map[string]any{"id": "mine"})
+	h.call(ro, "grant.ls", map[string]any{"store": "mine"})
+	h.call(ro, "docs.get", map[string]any{"store": "mine", "path": "notes/a"})
+	for verb, args := range map[string]map[string]any{
+		"docs.set":  {"store": "mine", "path": "notes/b", "data": map[string]any{"n": 2}},
+		"grant.set": {"store": "mine", "subject": "@member", "level": "view"},
+		"files.put": {"store": "mine", "path": "x.txt", "text": "x"},
+		"store.rm":  {"id": "mine"},
+	} {
+		h.fail(ro, verb, args, "permission_denied")
+	}
+}

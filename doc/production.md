@@ -99,7 +99,7 @@ A token carries scopes, each including the ones before it:
 
 | Scope | The token may |
 | --- | --- |
-| `read` | call verbs that change nothing; at most view on any store |
+| `read` | call verbs that change nothing, with its person's own levels (an owner's read token can export the store, list its grants and read its logs) |
 | `write` | call verbs that change things, with its person's own levels |
 | `admin` | act with its person's admin role: admin-only verbs, admin on every store, pushing app code (D9). Expires within 90 days. |
 
