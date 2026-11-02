@@ -860,6 +860,7 @@
     if (d.body !== void 0 && d.body !== null && !d.patch) remember(d.path, d.version, d.body);
     for (const l of listeners.values()) {
       if (!covers(l, d.path)) continue;
+      l.streamed.add(d.path);
       const r = intoMirror(l, d);
       if (r === "refetch") refetch(l, d.path);
       else if (r) deliver(l);
@@ -881,6 +882,7 @@
     }
   }
   async function register(l) {
+    l.streamed.clear();
     try {
       const res = await rpc("db.subscribe", {
         sub: l.id,
@@ -893,10 +895,9 @@
         });
         return;
       }
-      seenRev(res.rev);
       if (l.coll) {
         const fresh = new Set((res.docs ?? []).map((d) => d.path));
-        for (const p of [...l.mirror.keys()]) if (!fresh.has(p)) l.mirror.delete(p);
+        for (const p of [...l.mirror.keys()]) if (!fresh.has(p) && !l.streamed.has(p)) l.mirror.delete(p);
         for (const d of res.docs ?? []) {
           intoMirror(l, d);
           remember(d.path, d.version, d.body);
@@ -928,7 +929,7 @@
   });
   function subscribe(path, coll, query2, next, error) {
     if (typeof next !== "function") throw new TypeError("onSnapshot needs a callback");
-    const l = { id: randomId(12), path, coll, query: query2, mirror: /* @__PURE__ */ new Map(), seen: /* @__PURE__ */ new Map(), ready: false, dead: false, last: null, next, error };
+    const l = { id: randomId(12), path, coll, query: query2, mirror: /* @__PURE__ */ new Map(), seen: /* @__PURE__ */ new Map(), streamed: /* @__PURE__ */ new Set(), ready: false, dead: false, last: null, next, error };
     queueMicrotask(() => {
       if (l.dead) return;
       if (state.terminal) return kill(l, state.terminal, "this view was closed");

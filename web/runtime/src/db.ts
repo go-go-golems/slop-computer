@@ -6,7 +6,7 @@
 import { applyPatch, diff, patchSize, type Patch } from "./diff.ts";
 import { limits } from "./limits.ts";
 import { apply as applyQuery, validate, type Filter, type Query } from "./query.ts";
-import { connect, on, rpc, seenRev, state } from "./transport.ts";
+import { connect, on, rpc, state } from "./transport.ts";
 import { bytes, checkPath, collOf, depth, fail, freeze, idOf, isPlain, plain, randomId, type Body } from "./util.ts";
 
 type Meta = { fromCache: boolean; hasPendingWrites: boolean };
@@ -57,6 +57,7 @@ type Listener = {
   query: Query;
   mirror: Map<string, Entry>;
   seen: Map<string, number>; // path → newest version, deletions included
+  streamed: Set<string>; // paths the stream changed while db.subscribe was out
   ready: boolean;
   dead: boolean;
   last: DocSnap[] | DocSnap | null;
@@ -165,6 +166,7 @@ on("doc", (d: Wire) => {
   if (d.body !== undefined && d.body !== null && !d.patch) remember(d.path, d.version, d.body as Body);
   for (const l of listeners.values()) {
     if (!covers(l, d.path)) continue;
+    l.streamed.add(d.path);
     const r = intoMirror(l, d);
     if (r === "refetch") refetch(l, d.path);
     else if (r) deliver(l);
@@ -189,6 +191,7 @@ async function refetch(l: Listener, path: string) {
 }
 
 async function register(l: Listener) {
+  l.streamed.clear();
   try {
     const res = await rpc<{ rev: number; doc?: Wire; docs?: Wire[] }>("db.subscribe", {
       sub: l.id,
@@ -200,11 +203,15 @@ async function register(l: Listener) {
       rpc("db.unsubscribe", { sub: l.id }).catch(() => {});
       return;
     }
-    seenRev(res.rev);
+    // res.rev is this subscription's snapshot, not the stream's place: the
+    // stream's cursor moves only with what the stream itself delivered, or
+    // a reconnect would skip what another subscription missed meanwhile.
     if (l.coll) {
-      // A full initial load replaces the mirror (after a new view too).
+      // A full initial load replaces the mirror (after a new view too), but
+      // keeps what the stream changed while it was being read: those are
+      // newer than the snapshot (a deletion streamed meanwhile is in seen).
       const fresh = new Set((res.docs ?? []).map((d) => d.path));
-      for (const p of [...l.mirror.keys()]) if (!fresh.has(p)) l.mirror.delete(p);
+      for (const p of [...l.mirror.keys()]) if (!fresh.has(p) && !l.streamed.has(p)) l.mirror.delete(p);
       for (const d of res.docs ?? []) {
         intoMirror(l, d);
         remember(d.path, d.version, d.body as Body);
@@ -239,7 +246,7 @@ on("terminal", (code: string) => {
 
 function subscribe(path: string, coll: boolean, query: Query, next: (s: any) => void, error?: (e: unknown) => void): () => void {
   if (typeof next !== "function") throw new TypeError("onSnapshot needs a callback");
-  const l: Listener = { id: randomId(12), path, coll, query, mirror: new Map(), seen: new Map(), ready: false, dead: false, last: null, next, error };
+  const l: Listener = { id: randomId(12), path, coll, query, mirror: new Map(), seen: new Map(), streamed: new Set(), ready: false, dead: false, last: null, next, error };
   queueMicrotask(() => {
     if (l.dead) return;
     if (state.terminal) return kill(l, state.terminal, "this view was closed");
