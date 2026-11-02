@@ -257,3 +257,31 @@ func TestLiveStoreFilesIsolated(t *testing.T) {
 		t.Fatalf("static: %d csp %q", r.StatusCode, r.Header.Get("Content-Security-Policy"))
 	}
 }
+
+// A guest who reads a private store through their own grant (a redeemed
+// share link) gets responses no shared cache may keep.
+func TestGuestGrantFilesNotPublic(t *testing.T) {
+	h := newHarness(t)
+	admin := h.tokenFor("admin@example.com", "read", "write", "admin")
+	live := h.cfg.Hosts.Live[0]
+	h.call(admin, "store.new", map[string]any{"id": "priv"})
+	h.call(admin, "files.push", map[string]any{"store": "priv", "files": files(map[string]string{
+		"app.json": `{"title":"P","capabilities":{"db":{}}}`, "index.html": "<!doctype html><title>p</title>", "pic.png": "png"})})
+	h.call(admin, "mount.set", map[string]any{"host": live, "path": "/priv", "store": "priv"})
+	l := h.call(admin, "link.new", map[string]any{"store": "priv", "level": "view", "days": 1}).(map[string]any)
+	g := h.site(live)
+	if st, _ := openView(g, live, "/priv", l["token"].(string)); st != 200 {
+		t.Fatalf("redeem: %d", st)
+	}
+	for _, path := range []string{"/_s/priv/1/pic.png", "/_s/priv/main/pic.png"} {
+		r, _ := g.do("GET", live, path, nil, nil)
+		if r.StatusCode != 200 || r.Header.Get("Cache-Control") != cachePrivate {
+			t.Fatalf("%s for a guest with a link grant: %d %q", path, r.StatusCode, r.Header.Get("Cache-Control"))
+		}
+	}
+	// A store anyone may read stays publicly cacheable.
+	h.call(admin, "grant.set", map[string]any{"store": "priv", "subject": "@guest", "level": "view"})
+	if r, _ := g.do("GET", live, "/_s/priv/1/pic.png", nil, nil); r.Header.Get("Cache-Control") != cacheImmutable {
+		t.Fatalf("public snapshot file: %q", r.Header.Get("Cache-Control"))
+	}
+}

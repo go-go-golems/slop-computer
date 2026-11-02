@@ -178,7 +178,9 @@ func (s *Server) serveStoreFile(w http.ResponseWriter, r *http.Request, p *acces
 		notFound(w)
 		return
 	}
-	public := p == nil || d.Audience == access.AudGuest
+	// Shared caches may keep a response only when anyone could read it:
+	// a guest can read through their own grant (a redeemed share link).
+	public := d.OK && p == nil
 	if !public {
 		pd, _, _ := s.Env.K.Access.Can(ctx, nil, id, rt.LevelView, "", true)
 		public = pd.OK
