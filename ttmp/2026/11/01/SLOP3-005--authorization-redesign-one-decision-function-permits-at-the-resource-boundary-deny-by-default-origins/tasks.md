@@ -1,0 +1,14 @@
+# Tasks
+
+## TODO
+- [x] Guide: intern analysis, design and implementation guide, uploaded to reMarkable <!-- t:wflv -->
+- [ ] A0: inventory and structural tests (verbs/RPCs declare actions; trusted-host headers) <!-- t:veq5 -->
+- [ ] A1: pkg/authn: Subject, Credential, Ceiling, Authenticate (one cross-origin rule) <!-- t:9wcr -->
+- [ ] A2: pkg/authz: actions, resources, Decide beside today's checks; differential test <!-- t:ggzv -->
+- [ ] A3: access epoch; views without Level/Role/Policy; reviewViews becomes UX only <!-- t:1pnu -->
+- [ ] A4: verbs, RPC table and actor routes declare actions and receive permits <!-- t:nj3o -->
+- [ ] A5: permits at the store boundary (PutFile/PutBlob/Snapshot/Query); kernel.SystemPermit; drop needCodeRight <!-- t:wg1w -->
+- [ ] A6: host-class response policy (ShellPage/JSON/Untrusted); back office headers <!-- t:entp -->
+- [ ] A7: spike: SQLite authorizer with the inner trigger/view argument (author authority) <!-- t:kmn0 -->
+- [ ] S1: rev-guarded sync (per-entry rev, cursor from stream only, catch-up in one read transaction) <!-- t:aysd -->
+- [ ] S2: idempotency keys for mutating RPCs; store-owned actor inboxes <!-- t:0n8f -->

@@ -421,3 +421,59 @@ Then retrigger @codex review").
   `web/runtime/src/transport.ts`.
 - **Tests:** `GOWORK=off go test ./pkg/server -run 'TestOnlyAdminsPushAppCode|TestQueryLimitAfterReadRules' -count=1`
   and `cd web/runtime && pnpm test` (7 tests).
+
+## Step 4: Codex's third review (three more findings)
+
+The review of `0469a02` finished with CI green (run 41375024061) and
+raised three more findings. All held, and each is fixed with a test that
+fails on the old code. A fourth review was requested.
+
+### Prompt Context
+
+**User prompts (verbatim):** "reply to the comments." (every thread
+already had a reply; I listed them), then "Check new comments."
+
+**Assistant interpretation:** Look for new findings since the last round,
+fix them, reply, and request another review (the standing request from
+step 2).
+
+**Inferred user intent:** Converge on a review with no findings.
+
+### What I did
+
+- **Triggers on kernel tables** (`pkg/store/sqlpolicy.go`). For
+  CREATE/DROP TRIGGER and INDEX, `arg2` is the table, and only `arg1` (the
+  object's name) was checked. An imported trigger on `_docs` fires inside
+  `RestoreDoc`, whose kernel statements are unchecked, so it could write
+  `_files` and publish an app. Now `appName(a2)` is required too.
+  - `TestAppSQLAuthorizer`: a trigger and an index on `_docs` are denied.
+  - `TestOnlyAdminsPushAppCode`: Codex's import is refused.
+  - Without the change both fail (the import returned 200).
+  - The message of commit `67da8fe` says the tests "pass the old policy";
+    it should say "fail". Left as is to avoid a force push, and noted in
+    the thread reply.
+- **Policy changes** (`recheck`, `policy.set`). `v.Policy` is a snapshot
+  that authorizes assets, email and sample.
+  - `samePolicy` compares the current cells inside `recheck`.
+  - The new `Env.PolicyChanged` hook, wired to `reviewApp`, reviews the
+    views of every store running the app.
+  - `TestPolicyChangeClosesViews`: without the change, `assets.list` still
+    answered through the old view.
+- **Single-document snapshot** (`db.ts`): the missing-document branch
+  keeps a streamed entry, as the collection branch does. Covered in
+  `db.test.ts` (8 runtime tests).
+
+### What warrants a second pair of eyes
+
+- **Triggers on kernel tables are now refused for migrations.** No
+  migration in this repository uses one.
+- **`recheck` costs more:** one `Policy` lookup per cell per view per
+  review.
+
+### Code review instructions
+
+- `pkg/store/sqlpolicy.go`; `pkg/server/live.go` (`samePolicy`,
+  `reviewApp`); `pkg/verbs/policy.go` and `env.go`;
+  `web/runtime/src/db.ts`.
+- **Tests:** `GOWORK=off go test ./pkg/store ./pkg/server -run 'TestAppSQLAuthorizer|TestOnlyAdminsPushAppCode|TestPolicyChangeClosesViews' -count=1`
+  and `cd web/runtime && pnpm test`.
