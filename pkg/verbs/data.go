@@ -10,7 +10,7 @@ import (
 	"strings"
 
 	"github.com/go-go-golems/slop-computer/pkg/access"
-	"github.com/go-go-golems/slop-computer/pkg/apps"
+	"github.com/go-go-golems/slop-computer/pkg/authz"
 	"github.com/go-go-golems/slop-computer/pkg/blobs"
 	"github.com/go-go-golems/slop-computer/pkg/ids"
 	"github.com/go-go-golems/slop-computer/pkg/kernel"
@@ -26,12 +26,12 @@ func init() {
 	rowsArgs := []Arg{{Name: "rows", Type: "json", Doc: "a list of objects"}, {Name: "text", Type: "string", Doc: "CSV, JSONL or a JSON array"},
 		{Name: "format", Type: "string", Doc: "csv, jsonl or json (with text)"}}
 	Register(
-		&Verb{Name: "sql.query", Doc: "Run a read-only SQL statement on a store (admins).", Scope: Admin, AdminOnly: true,
+		&Verb{Name: "sql.query", Doc: "Run a read-only SQL statement on a store (admins).", Scope: Read, AdminOnly: true, Action: authz.StoreAdmin,
 			Args: []Arg{storeArg, {Name: "sql", Type: "string", Pos: 2, Required: true}, {Name: "args", Type: "json", Doc: "positional parameters"}},
 			Run: func(ctx context.Context, e *Env, p *access.Principal, a Args) (any, error) {
 				return runSQL(ctx, e, p, a, store.CallerAdminRead)
 			}},
-		&Verb{Name: "sql.exec", Doc: "Run SQL on a store's app tables (admins); --write allows writes.", Scope: Admin, AdminOnly: true,
+		&Verb{Name: "sql.exec", Doc: "Run SQL on a store's app tables (admins); --write allows writes.", Scope: Write, AdminOnly: true, Action: authz.StoreAdmin,
 			Args: []Arg{storeArg, {Name: "sql", Type: "string", Pos: 2, Required: true}, {Name: "args", Type: "json"},
 				{Name: "write", Type: "bool", Doc: "allow INSERT, UPDATE and DELETE on app tables"}},
 			Run: func(ctx context.Context, e *Env, p *access.Principal, a Args) (any, error) {
@@ -41,7 +41,7 @@ func init() {
 				}
 				return runSQL(ctx, e, p, a, caller)
 			}},
-		&Verb{Name: "sql.schema", Doc: "A store's app tables, indexes, views and triggers.", Scope: Read,
+		&Verb{Name: "sql.schema", Doc: "A store's app tables, indexes, views and triggers.", Scope: Read, Action: authz.StoreAdmin,
 			Args: []Arg{storeArg},
 			Run: func(ctx context.Context, e *Env, p *access.Principal, a Args) (any, error) {
 				s, _, err := e.open(ctx, p, a.S("store"), rt.LevelAdmin, "reading the schema")
@@ -50,7 +50,7 @@ func init() {
 				}
 				return s.AppSchema(ctx)
 			}},
-		&Verb{Name: "store.export", Doc: "A store's current documents, files (with their bytes), schema and table rows.", Scope: Read,
+		&Verb{Name: "store.export", Doc: "A store's current documents, files (with their bytes), schema and table rows.", Scope: Read, Action: authz.StoreAdmin, StoreArg: "id",
 			Args: []Arg{{Name: "id", Type: "string", Pos: 1, Required: true}},
 			Run: func(ctx context.Context, e *Env, p *access.Principal, a Args) (any, error) {
 				s, _, err := e.open(ctx, p, a.S("id"), rt.LevelAdmin, "exporting")
@@ -74,7 +74,7 @@ func init() {
 				}
 				return map[string]any{"id": s.ID, "bundle": b, "blobs": bl}, nil
 			}},
-		&Verb{Name: "import.folder", Doc: "Make a new store from an export bundle {bundle, blobs} (slop import folder reads the folder format).", Scope: Write,
+		&Verb{Name: "import.folder", Doc: "Make a new store from an export bundle {bundle, blobs} (slop import folder reads the folder format).", Scope: Write, Action: authz.Program,
 			Args: []Arg{{Name: "store", Type: "string", Pos: 1, Doc: "the new store's id"}, {Name: "bundle", Type: "json", Required: true},
 				{Name: "blobs", Type: "json", Doc: "{sha256: base64}"}},
 			Run: func(ctx context.Context, e *Env, p *access.Principal, a Args) (any, error) {
@@ -87,15 +87,6 @@ func init() {
 				dec.UseNumber()
 				if err := dec.Decode(&b); err != nil {
 					return nil, Errf("invalid_argument", "bundle: %s", err.Error())
-				}
-				// Decision D9, as files.push enforces it: only admins write
-				// app code, and a tree with app.json is app code.
-				if !p.IsAdmin() {
-					for _, f := range b.Files {
-						if (f.Zone == "" || f.Zone == "tree") && f.Path == apps.File {
-							return nil, Errf("permission_denied", "only admins import app code (the bundle's tree holds app.json; decision D9)")
-						}
-					}
 				}
 				if err := putBlobs(e, a); err != nil {
 					return nil, err
@@ -114,7 +105,7 @@ func init() {
 				if err != nil {
 					return nil, Errf("invalid_argument", "%s", err.Error())
 				}
-				c, err := s.Do(ctx, store.Who{ID: p.ID(), Via: p.ViaLabel(), Level: "owner"}, func(t *store.Turn) error {
+				c, err := s.Do(ctx, store.Who{ID: p.ID(), Via: p.ViaLabel(), Level: "owner", Code: authz.CodeRightOf(p)}, func(t *store.Turn) error {
 					t.Summary = "imported"
 					if err := t.Restore(&b); err != nil {
 						return err
@@ -127,6 +118,9 @@ func init() {
 				})
 				if err != nil {
 					_ = e.K.DeleteStore(ctx, p, row.ID)
+					if errors.Is(err, store.ErrAppCode) {
+						return nil, Errf("permission_denied", "import refused, store removed: %s", err.Error())
+					}
 					return nil, Errf("invalid_argument", "import failed, store removed: %s", err.Error())
 				}
 				out := map[string]any{"store": row.ID, "docs": len(b.Docs), "files": len(b.Files), "tables": len(b.Tables)}
@@ -135,7 +129,7 @@ func init() {
 				}
 				return out, nil
 			}},
-		&Verb{Name: "import.docs", Doc: "Import records as documents in coll, one commit per 500; --id names the field used as document id. CSV numbers and booleans are typed unless --raw.", Scope: Write,
+		&Verb{Name: "import.docs", Doc: "Import records as documents in coll, one commit per 500; --id names the field used as document id. CSV numbers and booleans are typed unless --raw.", Scope: Write, Action: authz.DocWrite,
 			Args: append([]Arg{storeArg, {Name: "coll", Type: "string", Required: true}, {Name: "id", Type: "string", Doc: "field holding each document's id"},
 				{Name: "raw", Type: "bool", Doc: "keep CSV values as strings"}}, rowsArgs...),
 			Run: func(ctx context.Context, e *Env, p *access.Principal, a Args) (any, error) {
@@ -178,7 +172,7 @@ func init() {
 				}
 				return map[string]any{"imported": len(items), "revs": revs}, nil
 			}},
-		&Verb{Name: "import.table", Doc: "Insert records into an app table (it must exist, from a migration), in one commit.", Scope: Write,
+		&Verb{Name: "import.table", Doc: "Insert records into an app table (it must exist, from a migration), in one commit.", Scope: Write, Action: authz.StoreAdmin,
 			Args: append([]Arg{storeArg, {Name: "table", Type: "string", Required: true}}, rowsArgs...),
 			Run: func(ctx context.Context, e *Env, p *access.Principal, a Args) (any, error) {
 				s, d, err := e.open(ctx, p, a.S("store"), rt.LevelAdmin, "importing rows")

@@ -289,20 +289,26 @@ export function connect(): Promise<Hello | null> {
   return ready;
 }
 
-// Methods sent again when the request failed in the network: they read, or
-// set state absolutely, so a server that did run the first one gives the
-// same result. Anything else (an action, a write, an emit, a publish) may
-// have run before the connection broke; resending it could do it twice, so
-// it fails as unavailable and the page decides. A 401 is different: the
-// server refused it, so every method is sent again after a renewal.
-const resendable = new Set([
+// Methods that read, or set state absolutely: a second run gives the same
+// result. Every other method (an action, a write, an emit, a publish)
+// carries a key, and the server answers a repeat of a key with the first
+// result. So a request that failed in the network is sent again whatever
+// it is, and a 401 (refused, not run) is sent again after a renewal.
+const absolute = new Set([
   "db.get", "db.query", "db.subscribe", "db.unsubscribe", "slop.read", "assets.list",
   "user.profiles", "user.search", "sample.limits", "room.join", "room.leave", "room.presence",
 ]);
 
+function newKey(): string {
+  const c = (globalThis as any).crypto;
+  if (c?.randomUUID) return c.randomUUID();
+  return Date.now().toString(36) + Math.random().toString(36).slice(2) + Math.random().toString(36).slice(2);
+}
+
 /** Calls a capability method as this view. Rejects {code, message}. */
 export async function rpc<T = any>(method: string, args?: unknown): Promise<T> {
   if (terminal) throw fail(terminal, "this view was closed");
+  const key = absolute.has(method) ? undefined : newKey();
   for (let attempt = 0; ; attempt++) {
     if (!secret && !(await awaitView(10000))) throw fail("unavailable", "no view");
     let r: Response;
@@ -311,10 +317,10 @@ export async function rpc<T = any>(method: string, args?: unknown): Promise<T> {
         method: "POST",
         headers: { Authorization: "Bearer " + secret, "Content-Type": "application/json" },
         credentials: "omit",
-        body: JSON.stringify({ method, args: args ?? {} }),
+        body: JSON.stringify({ method, args: args ?? {}, key }),
       });
     } catch {
-      if (attempt < 1 && resendable.has(method)) {
+      if (attempt < 1) {
         await new Promise((res) => setTimeout(res, 300 + Math.random() * 400));
         continue;
       }

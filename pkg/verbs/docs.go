@@ -5,6 +5,7 @@ import (
 	"errors"
 
 	"github.com/go-go-golems/slop-computer/pkg/access"
+	"github.com/go-go-golems/slop-computer/pkg/authz"
 	"github.com/go-go-golems/slop-computer/pkg/rt"
 	"github.com/go-go-golems/slop-computer/pkg/store"
 )
@@ -15,29 +16,26 @@ const MaxBatch = 500
 func init() {
 	storeArg := Arg{Name: "store", Type: "string", Pos: 1, Required: true}
 	Register(
-		&Verb{Name: "docs.get", Doc: "Read one document.", Scope: Read,
+		&Verb{Name: "docs.get", Doc: "Read one document.", Scope: Read, Action: authz.DocRead,
 			Args: []Arg{storeArg, {Name: "path", Type: "string", Pos: 2, Required: true}},
 			Run: func(ctx context.Context, e *Env, p *access.Principal, a Args) (any, error) {
 				s, d, err := e.open(ctx, p, a.S("store"), rt.LevelView, "reading")
 				if err != nil {
 					return nil, err
 				}
-				path := a.S("path")
-				if !e.K.Rules(ctx, s.ID).CanRead(path, p.ID(), d.Level) {
-					return nil, Errf("not_found", "no document %s", path)
-				}
-				doc, err := s.GetDoc(ctx, path)
+				path, rules := a.S("path"), e.K.Rules(ctx, s.ID)
+				doc, err := s.GetDoc(ctx, path, func(path string) bool { return rules.CanRead(path, p.ID(), d.Level) })
 				if errors.Is(err, store.ErrNotFound) {
 					return nil, Errf("not_found", "no document %s", path)
 				}
 				return doc, err
 			}},
-		&Verb{Name: "docs.ls", Doc: "List a collection's documents.", Scope: Read,
+		&Verb{Name: "docs.ls", Doc: "List a collection's documents.", Scope: Read, Action: authz.DocRead,
 			Args: []Arg{storeArg, {Name: "coll", Type: "string", Pos: 2, Required: true}, {Name: "limit", Type: "int"}},
 			Run: func(ctx context.Context, e *Env, p *access.Principal, a Args) (any, error) {
 				return queryDocs(ctx, e, p, a.S("store"), rt.Query{Coll: a.S("coll"), Limit: int(a.I("limit", 0))})
 			}},
-		&Verb{Name: "docs.query", Doc: "Query a collection: where [[field, op, value], …], orderBy, desc, limit.", Scope: Read,
+		&Verb{Name: "docs.query", Doc: "Query a collection: where [[field, op, value], …], orderBy, desc, limit.", Scope: Read, Action: authz.DocRead,
 			Args: []Arg{storeArg, {Name: "coll", Type: "string", Pos: 2, Required: true},
 				{Name: "where", Type: "json", Doc: `[["year", ">=", 2000]] or [{"field","op","value"}]`},
 				{Name: "orderBy", Type: "string"}, {Name: "desc", Type: "bool"}, {Name: "limit", Type: "int"}},
@@ -58,19 +56,19 @@ func init() {
 				}
 				return queryDocs(ctx, e, p, a.S("store"), q)
 			}},
-		&Verb{Name: "docs.set", Doc: "Write whole documents: path and data, or batch [{path, data, ifVersion?}] in one commit.", Scope: Write,
+		&Verb{Name: "docs.set", Doc: "Write whole documents: path and data, or batch [{path, data, ifVersion?}] in one commit.", Scope: Write, Action: authz.DocWrite,
 			Args: []Arg{storeArg, {Name: "path", Type: "string", Pos: 2}, {Name: "data", Type: "json"},
 				{Name: "ifVersion", Type: "int", Doc: "fail unless the document is at this version"},
 				{Name: "batch", Type: "json", Doc: "[{path, data, ifVersion?}]"}},
 			Run: func(ctx context.Context, e *Env, p *access.Principal, a Args) (any, error) {
 				return writeDocs(ctx, e, p, a, "set")
 			}},
-		&Verb{Name: "docs.update", Doc: "Deep-merge data into documents (creating them): path and data, or batch [{path, data}].", Scope: Write,
+		&Verb{Name: "docs.update", Doc: "Deep-merge data into documents (creating them): path and data, or batch [{path, data}].", Scope: Write, Action: authz.DocWrite,
 			Args: []Arg{storeArg, {Name: "path", Type: "string", Pos: 2}, {Name: "data", Type: "json"}, {Name: "batch", Type: "json"}},
 			Run: func(ctx context.Context, e *Env, p *access.Principal, a Args) (any, error) {
 				return writeDocs(ctx, e, p, a, "update")
 			}},
-		&Verb{Name: "docs.rm", Doc: "Delete documents: path, or paths [..] in one commit.", Scope: Write,
+		&Verb{Name: "docs.rm", Doc: "Delete documents: path, or paths [..] in one commit.", Scope: Write, Action: authz.DocWrite,
 			Args: []Arg{storeArg, {Name: "path", Type: "string", Pos: 2}, {Name: "paths", Type: "json"}},
 			Run: func(ctx context.Context, e *Env, p *access.Principal, a Args) (any, error) {
 				paths := a.Strings("paths")
@@ -108,28 +106,12 @@ func queryDocs(ctx context.Context, e *Env, p *access.Principal, id string, q rt
 	if err != nil {
 		return nil, err
 	}
-	// The read rules first, then the limit: a limit applied before them
-	// would count documents this caller never sees.
-	if err := q.Validate(); err != nil {
-		return nil, Errf("invalid_argument", "invalid query on %q", q.Coll)
-	}
-	limit := q.Limit
-	q.Limit = 0
-	docs, err := s.Query(ctx, q)
+	rules := e.K.Rules(ctx, s.ID)
+	docs, err := s.Query(ctx, q, func(path string) bool { return rules.CanRead(path, p.ID(), d.Level) })
 	if err != nil {
 		return nil, storeErr(err)
 	}
-	rules := e.K.Rules(ctx, s.ID)
-	out := []store.Doc{}
-	for _, doc := range docs {
-		if limit > 0 && len(out) == limit {
-			break
-		}
-		if rules.CanRead(doc.Path, p.ID(), d.Level) {
-			out = append(out, doc)
-		}
-	}
-	return out, nil
+	return docs, nil
 }
 
 type docItem struct {

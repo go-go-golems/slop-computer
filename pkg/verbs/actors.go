@@ -8,6 +8,7 @@ import (
 	"github.com/go-go-golems/slop-computer/pkg/access"
 	"github.com/go-go-golems/slop-computer/pkg/actor"
 	"github.com/go-go-golems/slop-computer/pkg/apps"
+	"github.com/go-go-golems/slop-computer/pkg/authz"
 	"github.com/go-go-golems/slop-computer/pkg/rt"
 	"github.com/go-go-golems/slop-computer/pkg/store"
 	"github.com/go-go-golems/slop-computer/pkg/system"
@@ -29,7 +30,7 @@ func actorErr(err error) error {
 func init() {
 	storeArg := Arg{Name: "store", Type: "string", Pos: 1, Required: true}
 	Register(
-		&Verb{Name: "actor.call", Doc: "Call an action of a store's actor (the action checks your level itself).", Scope: Write,
+		&Verb{Name: "actor.call", Doc: "Call an action of a store's actor (the action checks your level itself).", Scope: Write, Action: authz.ActorCall,
 			Args: []Arg{storeArg, {Name: "action", Type: "string", Pos: 2, Required: true}, {Name: "args", Type: "json"}},
 			Run: func(ctx context.Context, e *Env, p *access.Principal, a Args) (any, error) {
 				if _, _, err := e.open(ctx, p, a.S("store"), rt.LevelView, "calling"); err != nil {
@@ -45,7 +46,7 @@ func init() {
 				v, err := e.A.Call(ctx, a.S("store"), a.S("action"), args, e.A.VisitorOf(ctx, p, a.S("store")), p.ViaLabel())
 				return v, actorErr(err)
 			}},
-		&Verb{Name: "app.logs", Doc: "The recent log of a store's actor (console.log, ctx.log).", Scope: Read,
+		&Verb{Name: "app.logs", Doc: "The recent log of a store's actor (console.log, ctx.log).", Scope: Read, Action: authz.StoreAdmin,
 			Args: []Arg{storeArg},
 			Run: func(ctx context.Context, e *Env, p *access.Principal, a Args) (any, error) {
 				if _, _, err := e.open(ctx, p, a.S("store"), rt.LevelAdmin, "reading the actor log"); err != nil {
@@ -57,7 +58,7 @@ func init() {
 				}
 				return out, nil
 			}},
-		&Verb{Name: "app.restart", Doc: "Restart a store's actor: clears a broken state and retries activation.", Scope: Write,
+		&Verb{Name: "app.restart", Doc: "Restart a store's actor: clears a broken state and retries activation.", Scope: Write, Action: authz.StoreAdmin,
 			Args: []Arg{storeArg},
 			Run: func(ctx context.Context, e *Env, p *access.Principal, a Args) (any, error) {
 				if _, _, err := e.open(ctx, p, a.S("store"), rt.LevelAdmin, "restarting"); err != nil {
@@ -68,9 +69,9 @@ func init() {
 				if err != nil {
 					return nil, err
 				}
-				return map[string]any{"store": r.Store, "app": r.App, "n": r.N, "broken": r.Broken}, nil
+				return map[string]any{"store": r.Store, "app": r.App, "n": r.N, "broken": r.Broken()}, nil
 			}},
-		&Verb{Name: "app.trust", Doc: "Trust an app with a Go module it declares in app.json slop.modules (system, workshop); restarts its actors.", Scope: Admin, AdminOnly: true,
+		&Verb{Name: "app.trust", Doc: "Trust an app with a Go module it declares in app.json slop.modules (system, workshop); restarts its actors.", Scope: Write, AdminOnly: true, Action: authz.PlatformAdmin,
 			Args: []Arg{{Name: "app", Type: "string", Pos: 1, Required: true}, {Name: "module", Type: "string", Pos: 2, Required: true}},
 			Run: func(ctx context.Context, e *Env, p *access.Principal, a Args) (any, error) {
 				app, mod := a.S("app"), a.S("module")
@@ -90,7 +91,7 @@ func init() {
 				e.A.RestartApp(app) // use() is evaluated at start
 				return map[string]any{"app": app, "module": mod, "trusted": true}, nil
 			}},
-		&Verb{Name: "app.untrust", Doc: "Withdraw an app's trust with a Go module; restarts its actors.", Scope: Admin, AdminOnly: true,
+		&Verb{Name: "app.untrust", Doc: "Withdraw an app's trust with a Go module; restarts its actors.", Scope: Write, AdminOnly: true, Action: authz.PlatformAdmin,
 			Args: []Arg{{Name: "app", Type: "string", Pos: 1, Required: true}, {Name: "module", Type: "string", Pos: 2, Required: true}},
 			Run: func(ctx context.Context, e *Env, p *access.Principal, a Args) (any, error) {
 				app, mod := a.S("app"), a.S("module")
@@ -104,7 +105,7 @@ func init() {
 				e.A.RestartApp(app)
 				return map[string]any{"app": app, "module": mod, "trusted": false}, nil
 			}},
-		&Verb{Name: "app.follow", Doc: "Make a store run the snapshot of its app that a ref points at (main by default; draft runs unpublished code).", Scope: Write, AdminOnly: true,
+		&Verb{Name: "app.follow", Doc: "Make a store run the snapshot of its app that a ref points at (main by default; draft runs unpublished code).", Scope: Write, AdminOnly: true, Action: authz.StoreAdmin,
 			Args: []Arg{storeArg, {Name: "ref", Type: "string", Pos: 2, Required: true}},
 			Run: func(ctx context.Context, e *Env, p *access.Principal, a Args) (any, error) {
 				s, d, err := e.open(ctx, p, a.S("store"), rt.LevelAdmin, "changing the app version")
@@ -133,9 +134,9 @@ func init() {
 				if err != nil {
 					return nil, err
 				}
-				return map[string]any{"store": s.ID, "app": r.App, "ref": ref, "n": r.N, "broken": r.Broken}, nil
+				return map[string]any{"store": s.ID, "app": r.App, "ref": ref, "n": r.N, "broken": r.Broken()}, nil
 			}},
-		&Verb{Name: "app.modules", Doc: "The Go modules apps can use, and which apps are trusted with them (one app: what it declares and is trusted with).", Scope: Read,
+		&Verb{Name: "app.modules", Doc: "The Go modules apps can use, and which apps are trusted with them (one app: what it declares and is trusted with).", Scope: Read, Action: authz.StoreRead, StoreArg: "app",
 			Args: []Arg{{Name: "app", Type: "string", Pos: 1}},
 			Run: func(ctx context.Context, e *Env, p *access.Principal, a Args) (any, error) {
 				reg := []map[string]any{}
@@ -159,7 +160,7 @@ func init() {
 				}
 				return out, nil
 			}},
-		&Verb{Name: "alarm.ls", Doc: "List a store's alarms.", Scope: Read,
+		&Verb{Name: "alarm.ls", Doc: "List a store's alarms.", Scope: Read, Action: authz.StoreAdmin,
 			Args: []Arg{storeArg},
 			Run: func(ctx context.Context, e *Env, p *access.Principal, a Args) (any, error) {
 				s, _, err := e.open(ctx, p, a.S("store"), rt.LevelAdmin, "reading alarms")
@@ -168,7 +169,7 @@ func init() {
 				}
 				return s.ReadQuery(ctx, `SELECT name, at, every, running FROM _alarms ORDER BY at`)
 			}},
-		&Verb{Name: "alarm.fire", Doc: "Fire a store's alarm now.", Scope: Write,
+		&Verb{Name: "alarm.fire", Doc: "Fire a store's alarm now.", Scope: Write, Action: authz.StoreAdmin,
 			Args: []Arg{storeArg, {Name: "name", Type: "string", Pos: 2, Required: true}},
 			Run: func(ctx context.Context, e *Env, p *access.Principal, a Args) (any, error) {
 				if _, _, err := e.open(ctx, p, a.S("store"), rt.LevelAdmin, "firing alarms"); err != nil {
@@ -176,7 +177,7 @@ func init() {
 				}
 				return map[string]any{"fired": a.S("name")}, actorErr(e.A.Fire(ctx, a.S("store"), a.S("name")))
 			}},
-		&Verb{Name: "bind.ls", Doc: "List a store's read aliases.", Scope: Read,
+		&Verb{Name: "bind.ls", Doc: "List a store's read aliases.", Scope: Read, Action: authz.StoreRead,
 			Args: []Arg{storeArg},
 			Run: func(ctx context.Context, e *Env, p *access.Principal, a Args) (any, error) {
 				if _, _, err := e.open(ctx, p, a.S("store"), rt.LevelView, "reading"); err != nil {
@@ -184,7 +185,7 @@ func init() {
 				}
 				return e.Sys.Bindings(ctx, a.S("store"))
 			}},
-		&Verb{Name: "bind.set", Doc: "Point a store's read alias at another store (grant store:<store> view there for actors).", Scope: Write,
+		&Verb{Name: "bind.set", Doc: "Point a store's read alias at another store (grant store:<store> view there for actors).", Scope: Write, Action: authz.StoreAdmin,
 			Args: []Arg{storeArg, {Name: "alias", Type: "string", Pos: 2, Required: true}, {Name: "target", Type: "string", Pos: 3, Required: true},
 				{Name: "assets", Type: "bool", Doc: "also let the store's actor read the target's uploaded files (needs admin on the target)"}},
 			Run: func(ctx context.Context, e *Env, p *access.Principal, a Args) (any, error) {
@@ -201,7 +202,7 @@ func init() {
 				b := system.Binding{Store: a.S("store"), Alias: a.S("alias"), Target: a.S("target"), Assets: a.B("assets")}
 				return b, e.Sys.SetBinding(ctx, p.ID(), p.ViaLabel(), b)
 			}},
-		&Verb{Name: "bind.rm", Doc: "Remove a store's read alias.", Scope: Write,
+		&Verb{Name: "bind.rm", Doc: "Remove a store's read alias.", Scope: Write, Action: authz.StoreAdmin,
 			Args: []Arg{storeArg, {Name: "alias", Type: "string", Pos: 2, Required: true}},
 			Run: func(ctx context.Context, e *Env, p *access.Principal, a Args) (any, error) {
 				if _, _, err := e.open(ctx, p, a.S("store"), rt.LevelAdmin, "unbinding"); err != nil {

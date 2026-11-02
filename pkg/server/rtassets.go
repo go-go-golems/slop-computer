@@ -9,6 +9,7 @@ import (
 	"strings"
 
 	"github.com/go-go-golems/slop-computer/pkg/access"
+	"github.com/go-go-golems/slop-computer/pkg/authz"
 	"github.com/go-go-golems/slop-computer/pkg/httpx"
 	"github.com/go-go-golems/slop-computer/pkg/ids"
 	"github.com/go-go-golems/slop-computer/pkg/rt"
@@ -82,8 +83,8 @@ func (s *Server) serveAssetBlob(w http.ResponseWriter, r *http.Request, storeID,
 		notFound(w)
 		return
 	}
-	w.Header().Set("Content-Security-Policy", "sandbox; default-src 'none'")
-	s.serveBlob(w, r, st, f, cachePrivate)
+	// private: revalidated on every use, so a deleted upload is gone for good
+	s.writeStoreBytes(w, r, storeBytes{st: st, f: f, vis: private, mut: moving})
 }
 
 func (s *Server) rpcAssetsList(ctx context.Context, v *rt.View, _ json.RawMessage) (any, error) {
@@ -155,7 +156,9 @@ func (s *Server) rpcArtifactPublish(ctx context.Context, v *rt.View, raw json.Ra
 	man, _ := s.appManifest(ctx, st, int64(v.Version))
 	entry := man.Entry()
 	var n int64
-	_, err = st.Do(ctx, viewWho(v), func(t *store.Turn) error {
+	who := viewWho(v)
+	who.Code = authz.CodeRightOf(s.viewPrincipal(ctx, v))
+	_, err = st.Do(ctx, who, func(t *store.Turn) error {
 		cur, err := st.Ref(ctx, "main")
 		if err != nil || cur != int64(v.Version) {
 			return rtErr("conflict", "a newer version was published")

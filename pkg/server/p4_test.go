@@ -22,6 +22,7 @@ import (
 	"github.com/go-jose/go-jose/v4"
 
 	"github.com/go-go-golems/slop-computer/pkg/config"
+	"github.com/go-go-golems/slop-computer/pkg/store"
 )
 
 // signInSite runs the live-host handoff for a site client whose browser b
@@ -60,7 +61,7 @@ func privateDoc(t *testing.T, h *harness, storeID, path string) map[string]any {
 	if err != nil {
 		t.Fatal(err)
 	}
-	d, err := st.GetDoc(context.Background(), path)
+	d, err := st.GetDoc(context.Background(), path, store.Everything)
 	if err != nil || d.Body == nil {
 		return nil
 	}

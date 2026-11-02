@@ -8,6 +8,7 @@ import (
 	"time"
 
 	"github.com/go-go-golems/slop-computer/pkg/access"
+	"github.com/go-go-golems/slop-computer/pkg/authz"
 	"github.com/go-go-golems/slop-computer/pkg/kernel"
 	"github.com/go-go-golems/slop-computer/pkg/rt"
 	"github.com/go-go-golems/slop-computer/pkg/store"
@@ -18,7 +19,7 @@ func bytesReader(b []byte) *bytes.Reader { return bytes.NewReader(b) }
 
 func init() {
 	Register(
-		&Verb{Name: "store.ls", Doc: "List the stores you own or hold a grant on (admins: --all).", Scope: Read,
+		&Verb{Name: "store.ls", Doc: "List the stores you own or hold a grant on (admins: --all).", Scope: Read, Action: authz.Account,
 			Args: []Arg{{Name: "all", Type: "bool", Doc: "every store (admins)"}},
 			Run: func(ctx context.Context, e *Env, p *access.Principal, a Args) (any, error) {
 				var rows []system.StoreRow
@@ -42,7 +43,7 @@ func init() {
 				}
 				return out, nil
 			}},
-		&Verb{Name: "store.new", Doc: "Make a store; you become its owner.", Scope: Write,
+		&Verb{Name: "store.new", Doc: "Make a store; you become its owner.", Scope: Write, Action: authz.StoreCreate,
 			Args: []Arg{{Name: "id", Type: "string", Pos: 1, Doc: "lowercase slug; empty makes s-xxxxxxxx"},
 				{Name: "type", Type: "string"}, {Name: "app", Type: "string", Doc: "the app store it runs"}},
 			Run: func(ctx context.Context, e *Env, p *access.Principal, a Args) (any, error) {
@@ -58,7 +59,7 @@ func init() {
 				}
 				return row, nil
 			}},
-		&Verb{Name: "store.rm", Doc: "Delete a store, its documents, files and grants. Owners and admins only.", Scope: Write,
+		&Verb{Name: "store.rm", Doc: "Delete a store, its documents, files and grants. Owners and admins only.", Scope: Write, Action: authz.StoreAdmin, StoreArg: "id",
 			Args: []Arg{{Name: "id", Type: "string", Pos: 1, Required: true}},
 			Run: func(ctx context.Context, e *Env, p *access.Principal, a Args) (any, error) {
 				need := rt.LevelOwner
@@ -73,7 +74,7 @@ func init() {
 				}
 				return map[string]any{"deleted": a.S("id")}, nil
 			}},
-		&Verb{Name: "store.meta", Doc: "A store's settings, head rev, sizes and your level on it.", Scope: Read,
+		&Verb{Name: "store.meta", Doc: "A store's settings, head rev, sizes and your level on it.", Scope: Read, Action: authz.StoreRead, StoreArg: "id",
 			Args: []Arg{{Name: "id", Type: "string", Pos: 1, Required: true}},
 			Run: func(ctx context.Context, e *Env, p *access.Principal, a Args) (any, error) {
 				s, d, err := e.open(ctx, p, a.S("id"), rt.LevelView, "reading")
@@ -86,7 +87,7 @@ func init() {
 				return map[string]any{"store": row, "meta": s.AllMeta(), "head": s.Head(), "docs": s.CountDocs(ctx),
 					"collections": colls, "refs": refs, "level": d.LevelName(), "audience": d.Audience}, nil
 			}},
-		&Verb{Name: "grant.ls", Doc: "List a store's grants.", Scope: Read,
+		&Verb{Name: "grant.ls", Doc: "List a store's grants.", Scope: Read, Action: authz.StoreAdmin,
 			Args: []Arg{{Name: "store", Type: "string", Pos: 1, Required: true}},
 			Run: func(ctx context.Context, e *Env, p *access.Principal, a Args) (any, error) {
 				if _, _, err := e.open(ctx, p, a.S("store"), rt.LevelAdmin, "listing grants"); err != nil {
@@ -94,7 +95,7 @@ func init() {
 				}
 				return e.Sys.Grants(ctx, a.S("store"))
 			}},
-		&Verb{Name: "grant.set", Doc: "Give a subject (usr_…, vis_…, store:<id>, @guest, @member, @subscriber) a level on a store.", Scope: Write,
+		&Verb{Name: "grant.set", Doc: "Give a subject (usr_…, vis_…, store:<id>, @guest, @member, @subscriber) a level on a store.", Scope: Write, Action: authz.StoreAdmin,
 			Args: []Arg{{Name: "store", Type: "string", Pos: 1, Required: true}, {Name: "subject", Type: "string", Pos: 2, Required: true},
 				{Name: "level", Type: "string", Pos: 3, Required: true, Doc: "view, interact, admin or owner"}},
 			Run: func(ctx context.Context, e *Env, p *access.Principal, a Args) (any, error) {
@@ -118,7 +119,7 @@ func init() {
 				}
 				return g, err
 			}},
-		&Verb{Name: "grant.rm", Doc: "Remove a subject's grants on a store.", Scope: Write,
+		&Verb{Name: "grant.rm", Doc: "Remove a subject's grants on a store.", Scope: Write, Action: authz.StoreAdmin,
 			Args: []Arg{{Name: "store", Type: "string", Pos: 1, Required: true}, {Name: "subject", Type: "string", Pos: 2, Required: true},
 				{Name: "via", Type: "string", Doc: "only the grant made this way (direct, lnk_…)"}},
 			Run: func(ctx context.Context, e *Env, p *access.Principal, a Args) (any, error) {
@@ -131,7 +132,7 @@ func init() {
 				}
 				return map[string]any{"removed": n}, err
 			}},
-		&Verb{Name: "log.show", Doc: "A store's commits after a rev (oldest first), or the newest ones.", Scope: Read,
+		&Verb{Name: "log.show", Doc: "A store's commits after a rev (oldest first), or the newest ones.", Scope: Read, Action: authz.StoreRead,
 			Args: []Arg{{Name: "store", Type: "string", Pos: 1, Required: true}, {Name: "after", Type: "int", Doc: "commits after this rev"},
 				{Name: "limit", Type: "int", Doc: "at most this many (default 50)"}},
 			Run: func(ctx context.Context, e *Env, p *access.Principal, a Args) (any, error) {
@@ -145,7 +146,7 @@ func init() {
 				}
 				return s.RecentLog(ctx, limit)
 			}},
-		&Verb{Name: "log.wait", Doc: "Wait for a store's commits after a rev: they return as soon as there is one, or an empty list after the timeout.", Scope: Read,
+		&Verb{Name: "log.wait", Doc: "Wait for a store's commits after a rev: they return as soon as there is one, or an empty list after the timeout.", Scope: Read, Action: authz.StoreRead,
 			Args: []Arg{{Name: "store", Type: "string", Pos: 1, Required: true}, {Name: "after", Type: "int", Required: true, Doc: "commits after this rev"},
 				{Name: "timeout", Type: "int", Doc: "seconds (default 55, at most 300)"}, {Name: "limit", Type: "int", Doc: "at most this many (default 50)"}},
 			Run: func(ctx context.Context, e *Env, p *access.Principal, a Args) (any, error) {

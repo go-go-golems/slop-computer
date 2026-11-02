@@ -291,7 +291,7 @@ There is no single choke point. Correctness depends on each of these call sites 
 
 ## 5. The review findings and their root causes
 
-The review of PR #13 produced eleven findings over three rounds; CI found one more problem. Each was confirmed with a test that fails on the old code, then fixed.
+The review of PR #13 produced thirteen findings over four rounds; CI found one more problem. Each was confirmed with a test that fails on the old code, then fixed.
 
 | # | Finding | Fixed in | Root cause |
 |---|---|---|---|
@@ -306,6 +306,8 @@ The review of PR #13 produced eleven findings over three rounds; CI found one mo
 | 9 | a collection's first snapshot deleted a streamed creation | `1b71424` | R5 sync protocol |
 | 10 | a document subscription's empty read deleted a streamed creation | `8301cf0` | R5 sync protocol |
 | 11 | the runtime resent any RPC after a network error | `40c17e0` | R6 delivery semantics |
+| 12 | `/_s/` files read through a guest's own grant were marked publicly cacheable | `ded3f45` | R7 response facts decided per handler |
+| 13 | after a failed activation no view could open, though the last good version ran | `7571a18` | R8 lifecycle state as loose fields |
 | CI | a call queued while its actor stopped failed with "the actor stopped" | `1d47c2e` | R6 delivery semantics |
 
 ### 5.1 R1: decisions captured once and reused
@@ -324,7 +326,15 @@ The kernel caller bypasses the SQL authorizer completely. Anything that runs ins
 
 Whether bytes from a store may run as a page depends on the origin they are served from. That is a property of the host, but each handler decides it (finding 3), and the main host's back office has no protective headers at all.
 
-### 5.5 R5 and R6: the sync protocol and delivery semantics
+### 5.5 R7: response facts decided per handler
+
+Whether a response may be kept by a shared cache depends on two facts: could an anonymous visitor read the resource (visibility), and can its bytes change (mutability). `Cache-Control` is set in 18 places across 10 files of `pkg/server`, each deriving those facts itself. `serveStoreFile` inferred visibility from the caller's audience ("a guest is reading it, so it is public") instead of asking whether an anonymous visitor could read it; a guest reads private stores through the grant a share link created (finding 12). Four functions serve store bytes (`serveStatic`, `serveStoreFile`, `serveBoundAsset`, `serveAssetBlob`), each resolving a file and choosing headers; finding 3 was one of them forgetting the sandbox.
+
+### 5.6 R8: lifecycle state as loose fields
+
+`kernel.Running` describes what a store runs with `N`, `Manifest` and `Broken` (and, since finding 13, `Fallback`). Callers (16 calls in 8 files) interpret the combinations themselves: `N == 0` means nothing pushed, `Broken != ""` sometimes means "nothing usable" and sometimes "the newest version failed but the previous one runs". `openView` read it the first way when the second was true (finding 13). The actor manager keeps a third notion of broken (an actor that failed to build) in its own map.
+
+### 5.7 R5 and R6: the sync protocol and delivery semantics
 
 These are not authorization problems, but they have the same shape: a local rule ("a snapshot replaces the mirror", "a cursor moves to the newest rev I heard of", "resend on failure") applied without the invariant that makes it safe. They are part of this ticket because the same redesign effort (one invariant, enforced in one place) fixes them, and because the cursor and retry rules interact with view lifecycles. Section 6.7 sketches them; they can be scheduled separately.
 
@@ -603,6 +613,8 @@ func (s *Store) authorize(action int, a1, a2, db, inner string) int {
 | 6 | kernel-table trigger | trigger bodies run as app code (author authority); kernel-table triggers are refused anyway |
 | 7–10 | sync cursors and snapshot merges | rev-guarded merge and atomic catch-up (section 6.7) |
 | 11, CI | duplicate actions, lost queued calls | idempotency keys and store-owned inboxes (section 6.7) |
+| 12 | private files publicly cached | responses carry visibility from `Decide(anonymous, read, resource)`; handlers do not set cache headers (section 6.8) |
+| 13 | views refused on a fallback version | `Running.Usable()` is the one answer to "can this store serve" (section 6.9) |
 
 ### 6.5 What stays the same
 
@@ -630,9 +642,69 @@ func catchUp(st *store.Store, from int64) (docs []Doc, upTo int64, err error) {
 
 **Idempotent mutations (R6).** The runtime gives every mutating RPC a key (`view id + sequence`); the server keeps the result per key for a few minutes and answers a repeat with it. With that, every method can be retried after a network error again, instead of only the safe ones. **Store-owned inboxes:** a store's event queue belongs to the store, not to an actor instance; when a new version replaces an actor, the queue passes to the successor instead of being failed.
 
+### 6.8 Responses: visibility, mutability, one resolver
+
+A response that carries bytes from a store is described by facts, not headers:
+
+```go
+type Visibility int // Public: an anonymous visitor may read it; Private: otherwise
+type Mutability int // Immutable: snapshot n or a blob; Moving: a ref (main, draft); NoStore
+
+type StoreBytes struct {
+	File       store.File
+	Blobs      *blobs.Store
+	Visibility Visibility
+	Mutability Mutability
+}
+```
+
+`Cache-Control`, the sandbox CSP and the attachment disposition are derived from these facts and the host class in one function (`writeStoreBytes`):
+
+| Host | Visibility | Mutability | Cache-Control | Isolation |
+|---|---|---|---|---|
+| any | Private | any | `private, no-cache` | as below |
+| any | Public | Immutable | `public, max-age=31536000, immutable` | as below |
+| any | Public | Moving | `public, max-age=60, stale-while-revalidate=600` | as below |
+| main, live (trusted) | any | any | | `sandbox; default-src 'none'`; attachment unless media |
+| static, sandbox | any | any | | none (pages run there by design) |
+
+Visibility is never inferred from the caller. It is the answer to "may an anonymous visitor read this store" (today `Access.Can(nil, …)`, later `Decide(anonymous, store.read, resource)`). One resolver, `resolveStoreFile(st, at, path) (File, Mutability, error)`, turns a store, a snapshot number, ref or the assets zone, and a path into a file and its mutability, for every serving path.
+
+### 6.9 App lifecycle: one state, one question
+
+```go
+type Version struct {
+	N        int64
+	Manifest *apps.Manifest
+}
+
+type Failure struct {
+	N   int64  // the version that failed
+	Why string // manifest unreadable, migration, smoke check, actor build
+}
+
+type Running struct {
+	Store, App string
+	Newest     int64    // the newest snapshot on the ref the store follows (0: nothing pushed)
+	Active     *Version // what the store runs now; nil: nothing usable
+	Failed     *Failure // the newest version, when it failed
+}
+
+// Usable is the only answer to "can this store serve its app".
+func (r Running) Usable() (Version, bool)
+```
+
+`openView`, the static host, actor routes and status verbs ask `Usable()`; status verbs report `Active` and `Failed` separately. The actor manager's build failures become a `Failure` reported through the same type instead of a parallel map.
+
 ## 7. Implementation plan
 
 Each phase ends with an exit test that must pass before the next phase starts. Commit after each phase and record it in the diary. Phases A0 to A6 are the authorization work; A7 is a spike; S1 and S2 are the adjacent work and can run in parallel with A3 onwards.
+
+### Phase L: lifecycle state (independent, first)
+
+1. Introduce `Version`, `Failure`, `Running.Active`, `Running.Failed`, `Running.Usable()` in `pkg/kernel/apps.go`; keep `N`, `Manifest`, `Broken` as derived accessors during the change.
+2. Convert the callers (`openView`, `serveStatic`, actor `Get`, `app.status`, `mount` status, `site.go`) to `Usable()`.
+3. **Exit:** `TestActors`, `TestViewsOpenOnFallbackVersion` pass; no caller reads `Broken` to decide whether to serve.
 
 ### Phase A0: inventory and structural tests (red first)
 
@@ -679,7 +751,8 @@ Each phase ends with an exit test that must pass before the next phase starts. C
 
 1. Add the response types and `hostPolicy.Write`; convert handlers on the main and live hosts.
 2. Back office headers (frame-ancestors, referrer, nosniff, HSTS on HTTPS).
-3. **Exit:** the A0 header test passes; `TestLiveStoreFilesIsolated` passes without the `isolate` argument (the type decides).
+3. `StoreBytes` with visibility and mutability, `writeStoreBytes`, and `resolveStoreFile`; convert `serveStatic`, `serveStoreFile`, `serveBoundAsset`, `serveAssetBlob`. No handler sets `Cache-Control` for store bytes.
+4. **Exit:** the A0 header test passes; `TestLiveStoreFilesIsolated` and `TestGuestGrantFilesNotPublic` pass without per-handler logic.
 
 ### Phase A7: SQL author authority (spike)
 
@@ -788,6 +861,32 @@ Design references: the v3 intern guide (`ttmp/2026/11/01/SLOP3-001--…/design-d
 - **Audience changes.** Should an audience change alone (same level) change a view's capabilities? With `Decide` it does automatically when a policy cell differs by audience; confirm that this is the intended product behavior for subscriptions ending.
 - **Share links.** Today redemption creates a grant. Should a link instead be a credential with its own ceiling (no grant row), so revoking the link revokes access without a grant cleanup?
 - **Owner versus admin.** `Level` makes store owners owner and admins admin. Some actions (deleting a store) may want owner only; the action table is the place to say so.
-- **SQLite driver.** Patch, fork or switch for the sixth authorizer argument (phase A7).
+- **SQLite driver.** Resolved without the sixth argument (section 12, A7): the kernel never writes app tables, and app tables cannot reference kernel tables.
+- **A change feed for views.** `AccessChanged`, `PersonChanged`, `PolicyChanged`, `reviewViews`, `reloadApp` and the actor manager's activation callback are separate notifications that each code path must remember to call. With the epoch (phase A3) they no longer carry security; the remaining user-experience part (tell pages to reopen or reload) could become one feed over the system log that views subscribe to.
 - **Live-host sign-out.** Signing out on a live host ends only the site session; should it end the main session and the identity provider's session too?
 - **Admin actions and token scopes.** Should every admin-only action require a token with the admin scope (`Ceiling.Admin`), or only the actions that change people and access? Today an admin's read token can call six admin-only read verbs, including `people.ls` and `secret.ls` (names only).
+
+## 12. Implementation status (what was built, and where it differs)
+
+This section records how the phases were implemented on branch `task/slop3-005-authz`. Where the implementation took a different route from section 6, the reason is given here and in the diary (`reference/01-diary.md`, steps 4 to 8).
+
+| Phase | Commit(s) | What was built | Differs from the design |
+|---|---|---|---|
+| L | (step 2) | `Running.Active`, `Failed`, `Usable()` | as designed |
+| A6b, A6 | `0527971`, `f61c5a2` | `writeStoreBytes` over visibility and mutability facts; trusted hosts deny by default | as designed |
+| A3 | `50ff337` | `system.DB.Epoch()` moves on every committed transaction; a view records the epoch its level, audience and policy were decided at; `confirm` decides again on the next use (RPC, upload, sample, stream open, each streamed commit) | the view keeps `Level`, `Role`, `Policy` as a cache with an explicit validity condition instead of removing them; the epoch is coarse (any write), so no writer can be missed |
+| A1 | `a9e00de`, `b8adb03` | `access.PersonPrincipal`, `server.personAs` (a gone or disabled person acts nowhere); the cross-origin cookie rule lives in `sitePrincipal` | no `pkg/authn` and no `Credential`/`Ceiling` types yet: the token-scope ceiling for admin-only verbs waits on the open question above |
+| A0, A4 | `eae9621` | `pkg/authz` actions with floors; every verb (84) and runtime method (21) declares one; `verbs.Call` and `viewRPC` check the floor before running | floors, not full decisions: finer rules stay in the operation (db rules, D9 in the store, policy cells) |
+| A7 | `7a3c37d` | the kernel never writes app tables (authorizer); a schema in which an app table references a kernel table is refused | no driver change: a trigger or a foreign-key cascade runs with the authority of the statement that set it off, which is then never the kernel's |
+| S2 | `d200761` | runtime keys on calls that are not harmless twice, resent once after a network error; server `onceCache` per (store, person, key); a store-owned actor inbox under the manager's mutex | the result cache is in memory, not in `system.db` (a write per RPC would move the epoch) |
+| S1 | `425f66f` | a seam and a test hold the catch-up order (head before documents) | the runtime mirror already merged by per-document version; no runtime change |
+| A5 | `067b50d`, `1cb71d7`, `61c9548` | `authz.CodeRight` on `store.Who`; tree and ref writers refuse app code without it (`needCodeRight` removed); `Store.Query`, `Turn.QueryDocs` and `Store.GetDoc` take the caller's read predicate (`store.Everything` for the store's own reads) | a code right and a read predicate instead of general permits: they are the two rules the store must hold, and both are visible to grep |
+| A2 | `1e57f5d`, `c1294ff` | `authz.Floor(act, level, admin)` used by `viewMay`, `verbs.Check` and `explain.can --action` | `Decide` is the composition of the floor, the epoch-confirmed level and the store-side rules, not one function |
+
+Holes closed along the way, each with a test that fails on the commit before its fix:
+
+- an actor could label a private store's upload or page `public` (A6b);
+- a foreign-key cascade from a kernel table ran an app trigger with kernel authority (A7, found by the spike);
+- an actor's `files.write` could put `app.json` and code into its app store's tree (A5);
+- a store reading another through a binding ignored the target's db rules (A5);
+- platform verbs and modules acted for a disabled payer (A1).

@@ -38,8 +38,12 @@ func decodeBody(raw sql.NullString) (map[string]any, error) {
 	return m, nil
 }
 
-// GetDoc reads a live document (ErrNotFound for missing or deleted).
-func (s *Store) GetDoc(ctx context.Context, path string) (Doc, error) {
+// GetDoc reads a live document that may lets the caller read (ErrNotFound
+// for missing, deleted or unreadable: the caller cannot tell them apart).
+func (s *Store) GetDoc(ctx context.Context, path string, may func(path string) bool) (Doc, error) {
+	if !may(path) {
+		return Doc{}, ErrNotFound
+	}
 	return getDoc(ctx, s.ro, path)
 }
 
@@ -177,15 +181,23 @@ func (t *Turn) writeDoc(path string, body map[string]any, ifVersion int64, op st
 	return version, nil
 }
 
-// Query runs a contract query over a collection's live documents.
-func (s *Store) Query(ctx context.Context, q rt.Query) ([]Doc, error) {
-	return queryDocs(ctx, s.ro, q)
+// Everything reads every document: for the store's own reads (its actor,
+// the kernel). A caller acting for someone passes that someone's read rule.
+func Everything(string) bool { return true }
+
+// Query runs a contract query over the live documents of a collection that
+// may lets the caller read. may applies before the query's filters, order
+// and limit, so a limit never counts documents the caller cannot see.
+func (s *Store) Query(ctx context.Context, q rt.Query, may func(path string) bool) ([]Doc, error) {
+	return queryDocs(ctx, s.ro, q, may)
 }
 
-// Query runs a contract query inside the turn.
-func (t *Turn) QueryDocs(q rt.Query) ([]Doc, error) { return queryDocs(t.ctx, t.s.w, q) }
+// QueryDocs runs a contract query inside the turn (see Query).
+func (t *Turn) QueryDocs(q rt.Query, may func(path string) bool) ([]Doc, error) {
+	return queryDocs(t.ctx, t.s.w, q, may)
+}
 
-func queryDocs(ctx context.Context, db querier, q rt.Query) ([]Doc, error) {
+func queryDocs(ctx context.Context, db querier, q rt.Query, may func(path string) bool) ([]Doc, error) {
 	if err := q.Validate(); err != nil {
 		return nil, &DocError{err.Error()}
 	}
@@ -201,6 +213,9 @@ func queryDocs(ctx context.Context, db querier, q rt.Query) ([]Doc, error) {
 		var body sql.NullString
 		if err := rows.Scan(&d.Path, &body, &d.Version, &d.Rev, &d.By, &d.At); err != nil {
 			return nil, err
+		}
+		if !may(d.Path) {
+			continue
 		}
 		if d.Body, err = decodeBody(body); err != nil {
 			return nil, err

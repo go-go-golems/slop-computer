@@ -157,13 +157,9 @@ func (s *Server) actAs(a *actor.Actor, write bool) *access.Principal {
 	if person == "" {
 		a.Throw("permission_denied", "no person to act as")
 	}
-	pp, err := s.Sys.Person(context.Background(), person)
-	if err != nil {
+	p := s.personAs(context.Background(), person, "app:"+a.App())
+	if p == nil {
 		a.Throw("permission_denied", "no person to act as")
-	}
-	p := &access.Principal{Kind: access.KindUser, Person: &pp, Via: "app:" + a.App()}
-	if pp.Kind == "guest" {
-		p.Kind = access.KindGuest
 	}
 	if v.Scopes != nil {
 		p.Kind, p.Scopes = access.KindToken, v.Scopes

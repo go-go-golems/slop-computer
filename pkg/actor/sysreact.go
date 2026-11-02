@@ -92,12 +92,11 @@ func (m *Manager) queueSystem(a *Actor) {
 			}
 			return nil, err
 		}}
-	go func() {
-		select {
-		case a.inbox <- ev:
-		case <-a.stop:
-		}
-	}()
+	if m.push(a.st.ID, ev) != nil {
+		a.mu.Lock()
+		a.sysQueued = false
+		a.mu.Unlock()
+	}
 }
 
 // reactSystem delivers the system log commits after each system: reactor's

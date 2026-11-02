@@ -70,8 +70,14 @@ func (s *Server) parseState(v string) (state, guest string, ok bool) {
 }
 
 // sitePrincipal is whoever this browser is on this live host: a user, a
-// guest, or nil.
+// guest, or nil. The cookie names the person only on safe requests or on
+// requests from this host's own pages: an unsafe request from another
+// origin acts as nobody (an app's sandbox origin is same-site, so SameSite
+// cookies alone would let its pages post as the person).
 func (s *Server) sitePrincipal(r *http.Request) (*access.Principal, *system.Session) {
+	if r.Method != http.MethodGet && r.Method != http.MethodHead && s.crossOrigin(r) {
+		return nil, nil
+	}
 	c, err := r.Cookie(s.siteCookie())
 	if err != nil || c.Value == "" {
 		return nil, nil
@@ -80,16 +86,14 @@ func (s *Server) sitePrincipal(r *http.Request) (*access.Principal, *system.Sess
 	if err != nil {
 		return nil, nil
 	}
-	p, err := s.Sys.Person(r.Context(), sess.Person)
-	if err != nil || p.Role == system.RoleDisabled {
+	p := s.personAs(r.Context(), sess.Person, "page")
+	if p == nil {
 		return nil, nil
 	}
-	kind := access.KindUser
-	if p.Kind == "guest" {
-		kind = access.KindGuest
+	if p.Kind == access.KindGuest {
 		s.Sys.SeeGuest(r.Context(), c.Value, sess)
 	}
-	return &access.Principal{Kind: kind, Person: &p, Via: "page"}, &sess
+	return p, &sess
 }
 
 // newGuest gives this browser a guest id on this host.
@@ -113,7 +117,7 @@ func (s *Server) newGuest(w http.ResponseWriter, r *http.Request) (*access.Princ
 	// The cookie outlives any guest; the session (renewed while the guest
 	// visits) decides how long the identity lasts.
 	s.setSiteCookie(w, s.siteCookie(), secret, 400*24*3600)
-	return &access.Principal{Kind: access.KindGuest, Person: &g, Via: "page"}, nil
+	return access.PersonPrincipal(g, "page"), nil
 }
 
 // sameOrigin guards /_site/* calls: they must come from this host's pages.
@@ -149,7 +153,7 @@ func (s *Server) serveLive(w http.ResponseWriter, r *http.Request) {
 		serveAsset(w, r)
 	case strings.HasPrefix(p, "/_s/"):
 		pr, _ := s.sitePrincipal(r)
-		s.serveStoreFile(w, r, pr, true)
+		s.serveStoreFile(w, r, pr)
 	case p == "/_site/login" && r.Method == http.MethodGet:
 		s.siteLogin(w, r)
 	case p == "/_site/callback" && r.Method == http.MethodGet:
@@ -164,9 +168,6 @@ func (s *Server) serveLive(w http.ResponseWriter, r *http.Request) {
 		// An actor route on the mount answers first; then the shell.
 		if res, err := s.resolve(r.Context(), r.Host, p); err == nil {
 			pr, _ := s.sitePrincipal(r)
-			if pr != nil && r.Method != http.MethodGet && r.Method != http.MethodHead && s.crossOrigin(r) {
-				pr = nil // a form or fetch from another origin (an app's sandbox is same-site) does not act as the person
-			}
 			if s.serveActorRoute(w, r, res, pr) {
 				return
 			}
@@ -559,11 +560,11 @@ func (s *Server) siteGrant(w http.ResponseWriter, r *http.Request) {
 }
 
 // reviewViews re-checks the open views of a store after its access
-// changed. A view's level, audience and policy are fixed when it opens and
-// authorize every call, so a view whose viewer now has another level or
-// audience is closed: revoked when no access is left, otherwise after an
-// access event, on which the page reopens at the new level (the shell does
-// this). Its secret stops working at once, whether or not the page listens.
+// changed. A view whose viewer now has another level or audience is closed:
+// revoked when no access is left, otherwise after an access event, on which
+// the page reopens at the new level (the shell does this). Calling it is
+// not what makes access correct (confirm does that on the view's next use);
+// it tells idle pages now rather than at their next call.
 func (s *Server) reviewViews(ctx context.Context, id string) {
 	row, err := s.Sys.StoreByID(ctx, id)
 	if err != nil {
@@ -574,20 +575,35 @@ func (s *Server) reviewViews(ctx context.Context, id string) {
 	}
 }
 
+// confirm reports whether v may still act with the level, audience and
+// policy it was opened with. They are a cache of a decision made from
+// system.db, valid at the epoch it was made at; after any write the view's
+// next use decides again and closes it if the answer changed, so access
+// follows the state even when no hook called reviewViews.
+func (s *Server) confirm(ctx context.Context, v *rt.View) bool {
+	e := s.Sys.Epoch()
+	if v.Epoch.Load() == e {
+		return true
+	}
+	row, err := s.Sys.StoreByID(ctx, v.Target)
+	if errors.Is(err, system.ErrNotFound) {
+		s.rt.views.Close(v, true)
+		return false
+	}
+	if err != nil {
+		return false // refuse this call; the next one asks again
+	}
+	if s.recheck(ctx, v, row) {
+		return false
+	}
+	v.Epoch.Store(e)
+	return true
+}
+
 // recheck closes v when its viewer's access to row is no longer the one v
 // was opened with, and reports whether it did.
 func (s *Server) recheck(ctx context.Context, v *rt.View, row system.StoreRow) bool {
-	var p *access.Principal
-	if v.User != "" {
-		if pp, err := s.Sys.Person(ctx, v.User); err == nil {
-			kind := access.KindUser
-			if pp.Kind == "guest" {
-				kind = access.KindGuest
-			}
-			p = &access.Principal{Kind: kind, Person: &pp}
-		}
-	}
-	d := s.Env.K.Access.Level(ctx, p, row)
+	d := s.Env.K.Access.Level(ctx, s.viewPrincipal(ctx, v), row)
 	switch {
 	case d.Level == rt.LevelNone:
 		s.rt.views.Close(v, true)

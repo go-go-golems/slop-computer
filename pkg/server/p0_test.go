@@ -264,3 +264,31 @@ func TestProbesOnAnyHost(t *testing.T) {
 		t.Fatalf("/ on the pod address: %d", r.StatusCode)
 	}
 }
+
+// Trusted origins (main, live) deny by default: every response starts
+// with frame-ancestors 'none', nosniff and a same-origin referrer policy;
+// the main host is never framed, the back office loads only its own code,
+// and HTTPS deployments send HSTS. Static and sandbox hosts do not get
+// these defaults (pages run there by design).
+func TestTrustedHostHeaders(t *testing.T) {
+	h := newHarnessWith(t, func(c *config.Config) { c.Scheme = "https" })
+	main, live := h.cfg.Hosts.Main, h.cfg.Hosts.Live[0]
+	for _, c := range []struct{ host, path string }{{main, "/"}, {main, "/auth/login"}, {main, "/auth/session"}, {live, "/_site/me"}} {
+		r, _ := h.get(c.host, c.path)
+		hd := r.Header
+		if !strings.Contains(hd.Get("Content-Security-Policy"), "frame-ancestors 'none'") || hd.Get("X-Content-Type-Options") != "nosniff" ||
+			hd.Get("Referrer-Policy") != "same-origin" || hd.Get("Strict-Transport-Security") == "" {
+			t.Fatalf("%s%s: csp %q nosniff %q referrer %q hsts %q", c.host, c.path, hd.Get("Content-Security-Policy"),
+				hd.Get("X-Content-Type-Options"), hd.Get("Referrer-Policy"), hd.Get("Strict-Transport-Security"))
+		}
+		if c.host == main && hd.Get("X-Frame-Options") != "DENY" {
+			t.Fatalf("%s%s: X-Frame-Options %q", c.host, c.path, hd.Get("X-Frame-Options"))
+		}
+	}
+	if r, _ := h.get(main, "/"); !strings.Contains(r.Header.Get("Content-Security-Policy"), "default-src 'self'") {
+		t.Fatalf("back office CSP = %q", r.Header.Get("Content-Security-Policy"))
+	}
+	if r, _ := h.get(h.cfg.Hosts.Static[0], "/"); r.Header.Get("Strict-Transport-Security") != "" || r.Header.Get("X-Frame-Options") != "" {
+		t.Fatalf("static host got trusted defaults: %v", r.Header)
+	}
+}

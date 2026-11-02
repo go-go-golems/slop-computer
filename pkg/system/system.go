@@ -12,6 +12,7 @@ import (
 	"io/fs"
 	"sort"
 	"strings"
+	"sync/atomic"
 	"time"
 
 	_ "github.com/mattn/go-sqlite3" // registers "sqlite3"
@@ -27,7 +28,15 @@ type DB struct {
 	// OnLog is called after every committed transaction (the log may have
 	// grown); the actor manager wakes system: reactors with it.
 	OnLog func()
+
+	epoch atomic.Int64
 }
+
+// Epoch counts committed write transactions. A decision made from
+// system.db (a view's level, audience and policy) holds while the epoch is
+// the one it was made at; any write may have changed it, so the next use
+// decides again instead of trusting a hook to have announced the change.
+func (d *DB) Epoch() int64 { return d.epoch.Load() }
 
 // ErrNotFound is returned when a row does not exist.
 var ErrNotFound = errors.New("not found")
@@ -193,6 +202,7 @@ func (d *DB) Tx(ctx context.Context, fn func(tx *sql.Tx) error) error {
 	if err := tx.Commit(); err != nil {
 		return err
 	}
+	d.epoch.Add(1)
 	if d.OnLog != nil {
 		d.OnLog()
 	}

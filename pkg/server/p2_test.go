@@ -190,3 +190,36 @@ func TestQueryLimitAfterReadRules(t *testing.T) {
 		t.Fatalf("docs.query limit 1 as admin: %v", got)
 	}
 }
+
+// A store reading another through a binding holds a level there like
+// anyone, and the target's read rules apply to it: no private documents
+// through stores.open().
+func TestStoresModuleReadsByRules(t *testing.T) {
+	h := newHarness(t)
+	admin := h.tokenFor("admin@example.com", "read", "write", "admin")
+	h.call(admin, "store.new", map[string]any{"id": "vault"})
+	h.call(admin, "files.push", map[string]any{"store": "vault", "files": files(map[string]string{
+		"app.json":   `{"title":"V","capabilities":{"db":{"rules":[{"path":"notes/secret","read":"admin","write":"admin"}]}}}`,
+		"index.html": "x"})})
+	h.call(admin, "docs.set", map[string]any{"store": "vault", "path": "notes/secret", "data": map[string]any{"n": 1}})
+	h.call(admin, "docs.set", map[string]any{"store": "vault", "path": "notes/open", "data": map[string]any{"n": 2}})
+	h.call(admin, "store.new", map[string]any{"id": "reader"})
+	h.call(admin, "files.push", map[string]any{"store": "reader", "files": files(map[string]string{
+		"app.json": `{"title":"Reader","actor":"actor.js"}`,
+		"actor.js": `
+defineActor({
+  actions: {
+    read() {
+      const v = use('stores').open('vault');
+      return { secret: v.docs.get('notes/secret').exists, all: v.docs.query('notes').map((d) => d.path) };
+    },
+  },
+});`,
+		"index.html": "x"})})
+	h.call(admin, "bind.set", map[string]any{"store": "reader", "alias": "vault", "target": "vault"})
+	h.call(admin, "grant.set", map[string]any{"store": "vault", "subject": "store:reader", "level": "view"})
+	out := h.call(admin, "actor.call", map[string]any{"store": "reader", "action": "read"}).(map[string]any)
+	if out["secret"] != false || fmtAny(out["all"]) != `["notes/open"]` {
+		t.Fatalf("a store at view read past the target's rules: %v", out)
+	}
+}

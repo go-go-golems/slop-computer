@@ -12,16 +12,21 @@ import (
 	"strings"
 
 	"github.com/go-go-golems/slop-computer/pkg/access"
+	"github.com/go-go-golems/slop-computer/pkg/authz"
+	"github.com/go-go-golems/slop-computer/pkg/rt"
+	"github.com/go-go-golems/slop-computer/pkg/system"
 )
 
-// Scope is what a token needs to call a verb.
+// Scope says whether a verb changes anything: a token needs the read scope
+// for a Read verb and the write scope for a Write verb. (A token's admin
+// scope is not about verbs: it lets the token act with its person's admin
+// role, which admin-only verbs require; see access.Principal.Role.)
 type Scope string
 
 // Scopes, ordered.
 const (
 	Read  Scope = "read"
 	Write Scope = "write"
-	Admin Scope = "admin"
 )
 
 // Arg describes one argument.
@@ -40,6 +45,12 @@ type Verb struct {
 	Args      []Arg  `json:"args"`
 	Scope     Scope  `json:"scope"`
 	AdminOnly bool   `json:"adminOnly,omitempty"` // the person must be an admin
+	// Action is what the verb does; Call checks its floor before Run. For
+	// an action on a store, StoreArg names the argument holding the store
+	// ("store" when empty); "-" means the store is found from other
+	// arguments, and Run checks it.
+	Action   authz.Action `json:"action"`
+	StoreArg string       `json:"-"`
 
 	Run func(ctx context.Context, e *Env, p *access.Principal, a Args) (any, error) `json:"-"`
 }
@@ -219,7 +230,25 @@ func Call(ctx context.Context, e *Env, p *access.Principal, name string, a Args)
 		return nil, err
 	}
 	v, _ := Get(name)
+	if spec, _ := authz.Of(v.Action); spec.Store {
+		if id := v.store(a); id != "" {
+			if _, _, err := e.open(ctx, p, id, spec.Level, v.Name); err != nil {
+				return nil, err
+			}
+		}
+	}
 	return v.Run(ctx, e, p, a)
+}
+
+// store is the store a verb's action is on ("" when Run finds it).
+func (v *Verb) store(a Args) string {
+	switch v.StoreArg {
+	case "-":
+		return ""
+	case "":
+		return a.S("store")
+	}
+	return a.S(v.StoreArg)
 }
 
 // Check runs the checks Call makes before Run: the verb exists, the token
@@ -232,7 +261,15 @@ func Check(p *access.Principal, name string, a Args) error {
 	if !p.HasScope(string(v.Scope)) {
 		return Errf("permission_denied", "this token lacks the %s scope", v.Scope)
 	}
-	if v.AdminOnly && !p.IsAdmin() {
+	if _, ok := authz.Of(v.Action); !ok {
+		return Errf("internal", "%s declares no action", v.Name)
+	}
+	// the role half of the floor; Call checks the level on the store
+	ok, _ = authz.Floor(v.Action, rt.LevelOwner, p.IsAdmin())
+	if !ok || (v.AdminOnly && !p.IsAdmin()) {
+		if p.Kind == access.KindToken && p.Person != nil && p.Person.Role == system.RoleAdmin {
+			return Errf("permission_denied", "%s needs a token with the admin scope", v.Name)
+		}
 		return Errf("permission_denied", "%s is for admins", v.Name)
 	}
 	if v.Scope != Read && p.Kind == access.KindGuest {

@@ -30,6 +30,9 @@ func (s *Server) adminIndex(w http.ResponseWriter, r *http.Request) {
 	boot, _ := json.Marshal(map[string]any{"hosts": map[string][]string{"live": s.Cfg.Hosts.Live, "static": s.Cfg.Hosts.Static}})
 	w.Header().Set("Content-Type", "text/html; charset=utf-8")
 	w.Header().Set("Cache-Control", "no-store")
+	// The back office loads only its own script and styles and talks only
+	// to this host; its data block is JSON, not script.
+	w.Header().Set("Content-Security-Policy", "default-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data: https:; object-src 'none'; base-uri 'none'; frame-ancestors 'none'")
 	_ = adminPage.Execute(w, map[string]any{"Boot": template.JS(boot), "V": adminVersion})
 }
 

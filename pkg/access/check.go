@@ -4,7 +4,6 @@ import (
 	"context"
 	"errors"
 	"fmt"
-	"slices"
 
 	"github.com/go-go-golems/slop-computer/pkg/rt"
 	"github.com/go-go-golems/slop-computer/pkg/system"
@@ -43,17 +42,6 @@ func capOf(a Audience) rt.Level {
 	return rt.LevelNone
 }
 
-// scopeCap is the highest level a token's scopes allow.
-func scopeCap(scopes []string) rt.Level {
-	if slices.Contains(scopes, system.ScopeWrite) || slices.Contains(scopes, system.ScopeAdmin) {
-		return rt.LevelOwner
-	}
-	if slices.Contains(scopes, system.ScopeRead) {
-		return rt.LevelView
-	}
-	return rt.LevelNone
-}
-
 // Checker answers access questions against system.db.
 type Checker struct {
 	Sys *system.DB
@@ -74,7 +62,7 @@ func (c *Checker) AudienceOf(ctx context.Context, p *Principal) Audience {
 	case p.Person == nil, p.Kind == KindGuest, p.Person.Kind == "guest":
 		return AudGuest
 	}
-	switch p.Person.Role {
+	switch p.Role() {
 	case system.RoleDisabled:
 		return AudNone
 	case system.RolePending:
@@ -168,11 +156,13 @@ func (c *Checker) Level(ctx context.Context, p *Principal, st system.StoreRow) D
 			d.Level = cp
 		}
 	}
-	if p != nil && p.Kind == KindToken {
-		if cp := scopeCap(p.Scopes); d.Level > cp {
-			d.Trace = append(d.Trace, fmt.Sprintf("token scopes %v cap at %s", p.Scopes, cp))
-			d.Level = cp
-		}
+	// A token's scopes do not cap its level: a read token holds its
+	// person's levels, and the verbs it may call (those that change
+	// nothing) keep it from writing. Only a token without scopes holds
+	// nothing.
+	if p != nil && p.Kind == KindToken && len(p.Scopes) == 0 {
+		d.Trace = append(d.Trace, "a token without scopes holds nothing")
+		d.Level = rt.LevelNone
 	}
 	return d
 }

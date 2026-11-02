@@ -20,6 +20,7 @@ import (
 	"time"
 
 	"github.com/go-go-golems/slop-computer/pkg/access"
+	"github.com/go-go-golems/slop-computer/pkg/authz"
 	"github.com/go-go-golems/slop-computer/pkg/httpx"
 	"github.com/go-go-golems/slop-computer/pkg/rt"
 	"github.com/go-go-golems/slop-computer/pkg/store"
@@ -40,6 +41,8 @@ type rtState struct {
 
 	leaseMu sync.Mutex
 	leases  map[string]lease // store \x00 path
+
+	once onceCache // keyed calls: a resend gets the first result
 }
 
 type lease struct {
@@ -135,6 +138,7 @@ type viewOut struct {
 // openView opens a view of a store for p. parent is the origin that will
 // frame it.
 func (s *Server) openView(ctx context.Context, p *access.Principal, storeID, parent string) (*viewOut, error) {
+	epoch := s.Sys.Epoch() // read first: a write during the decision makes the next call decide again
 	d, _, err := s.Env.K.Access.Can(ctx, p, storeID, rt.LevelView, "opening", true)
 	if err != nil {
 		return nil, err
@@ -149,8 +153,8 @@ func (s *Server) openView(ctx context.Context, p *access.Principal, storeID, par
 	if run.N == 0 {
 		return nil, rtErr("unavailable", "nothing has been pushed to %s yet", run.App)
 	}
-	if run.Broken != "" && !run.Fallback { // a fallback runs the last good version
-		return nil, rtErr("unavailable", "the app is broken: %s", run.Broken)
+	if !run.Usable() {
+		return nil, rtErr("unavailable", "the app is broken: %s", run.Broken())
 	}
 	var caps rt.Caps
 	if run.Manifest != nil {
@@ -166,8 +170,10 @@ func (s *Server) openView(ctx context.Context, p *access.Principal, storeID, par
 	for _, c := range system.PolicyCaps {
 		pol[c] = s.Sys.Policy(ctx, run.App, c, string(d.Audience))
 	}
-	v := s.rt.views.Open(&rt.View{Target: storeID, App: run.App, Version: int(run.N), User: p.ID(), Name: name,
-		Role: string(d.Audience), Level: d.Level, Caps: caps, Policy: pol, Kind: "viewer"})
+	v := &rt.View{Target: storeID, App: run.App, Version: int(run.N), User: p.ID(), Name: name,
+		Role: string(d.Audience), Level: d.Level, Caps: caps, Policy: pol, Kind: "viewer"}
+	v.Epoch.Store(epoch)
+	v = s.rt.views.Open(v)
 	u, origin, err := s.sandboxURL(ctx, v, parent)
 	if err != nil {
 		s.rt.views.Close(v, false)
@@ -208,6 +214,9 @@ func (s *Server) viewOf(r *http.Request) *rt.View {
 		return nil
 	}
 	if id, ok := r.Context().Value(originStore{}).(string); ok && id != v.Target {
+		return nil
+	}
+	if !s.confirm(r.Context(), v) {
 		return nil
 	}
 	return v
@@ -297,6 +306,9 @@ func (s *Server) viewEvents(w http.ResponseWriter, r *http.Request) {
 	// head after the documents could move last past a commit never sent.
 	catchUp := func(from int64) error {
 		upTo := st.Head()
+		if s.catchUpGap != nil {
+			s.catchUpGap()
+		}
 		rows, err := st.DocsSince(ctx, from, "")
 		if err != nil {
 			return err
@@ -344,6 +356,8 @@ func (s *Server) viewEvents(w http.ResponseWriter, r *http.Request) {
 			var err error
 			switch {
 			case o.Rev > 0 && o.Rev <= last:
+			case o.Rev > 0 && !s.confirm(ctx, v):
+				// the view was closed: its access or revoked event follows
 			case o.Rev > last+1:
 				err = catchUp(last)
 			case o.Rev > 0:
@@ -427,18 +441,45 @@ func (s *Server) reloadApp(app string) {
 
 type rpcFunc func(ctx context.Context, v *rt.View, args json.RawMessage) (any, error)
 
-func (s *Server) rpcTable() map[string]rpcFunc {
-	return map[string]rpcFunc{
-		"db.get": s.rpcDBGet, "db.query": s.rpcDBQuery, "db.write": s.rpcDBWrite, "db.acquire": s.rpcDBAcquire,
-		"db.subscribe": s.rpcDBSubscribe, "db.unsubscribe": s.rpcDBUnsubscribe,
-		"user.profiles": s.rpcUserProfiles, "user.search": s.rpcUserSearch,
-		"sample.limits": s.rpcSampleLimits,
-		"room.join":     s.rpcRoomJoin, "room.leave": s.rpcRoomLeave, "room.presence": s.rpcRoomPresence, "room.emit": s.rpcRoomEmit,
-		"assets.list": s.rpcAssetsList, "assets.delete": s.rpcAssetsDelete, "artifact.publish": s.rpcArtifactPublish,
-		"room.canSendToClaudeSession": func(context.Context, *rt.View, json.RawMessage) (any, error) { return false, nil },
-		"slop.call":                   s.rpcSlopCall, "slop.read": s.rpcSlopRead,
-		"permissions.state": func(_ context.Context, v *rt.View, _ json.RawMessage) (any, error) { return permissionStates(v), nil },
+// rpcMethod is a runtime method: what it does, and how. viewRPC checks the
+// action's floor against the view before the method runs.
+type rpcMethod struct {
+	act authz.Action
+	fn  rpcFunc
+}
+
+func (s *Server) rpcTable() map[string]rpcMethod {
+	return map[string]rpcMethod{
+		"db.get":                      {authz.DocRead, s.rpcDBGet},
+		"db.query":                    {authz.DocRead, s.rpcDBQuery},
+		"db.subscribe":                {authz.DocRead, s.rpcDBSubscribe},
+		"db.unsubscribe":              {authz.DocRead, s.rpcDBUnsubscribe},
+		"db.write":                    {authz.DocWrite, s.rpcDBWrite},
+		"db.acquire":                  {authz.DocWrite, s.rpcDBAcquire},
+		"user.profiles":               {authz.UserRead, s.rpcUserProfiles},
+		"user.search":                 {authz.UserRead, s.rpcUserSearch},
+		"sample.limits":               {authz.Sample, s.rpcSampleLimits},
+		"room.join":                   {authz.Room, s.rpcRoomJoin},
+		"room.leave":                  {authz.Room, s.rpcRoomLeave},
+		"room.presence":               {authz.Room, s.rpcRoomPresence},
+		"room.emit":                   {authz.Room, s.rpcRoomEmit},
+		"room.canSendToClaudeSession": {authz.Room, func(context.Context, *rt.View, json.RawMessage) (any, error) { return false, nil }},
+		"assets.list":                 {authz.AssetWrite, s.rpcAssetsList},
+		"assets.delete":               {authz.AssetWrite, s.rpcAssetsDelete},
+		"artifact.publish":            {authz.CodePush, s.rpcArtifactPublish},
+		"slop.call":                   {authz.ActorCall, s.rpcSlopCall},
+		"slop.read":                   {authz.DocRead, s.rpcSlopRead},
+		"permissions.state": {authz.StoreRead, func(_ context.Context, v *rt.View, _ json.RawMessage) (any, error) {
+			return permissionStates(v), nil
+		}},
 	}
+}
+
+// viewMay reports whether v clears act's floor on its own store.
+func viewMay(v *rt.View, act authz.Action) bool {
+	spec, _ := authz.Of(act)
+	ok, _ := authz.Floor(act, v.Level, v.Role == string(access.AudAdmin))
+	return ok && spec.Store
 }
 
 func (s *Server) viewRPC(w http.ResponseWriter, r *http.Request) {
@@ -450,12 +491,13 @@ func (s *Server) viewRPC(w http.ResponseWriter, r *http.Request) {
 	var in struct {
 		Method string          `json:"method"`
 		Args   json.RawMessage `json:"args"`
+		Key    string          `json:"key"` // set on calls that are not harmless to run twice
 	}
 	if err := httpx.Read(r, &in, int64(rt.MaxDocBytes)+64<<10); err != nil {
 		httpx.JSON(w, 400, map[string]any{"error": map[string]string{"code": "invalid_argument", "message": "send {method, args}"}})
 		return
 	}
-	fn, ok := s.rpcTable()[in.Method]
+	m, ok := s.rpcTable()[in.Method]
 	if !ok {
 		httpx.JSON(w, 400, map[string]any{"error": map[string]string{"code": "capability_removed", "message": "unknown method " + in.Method}})
 		return
@@ -465,7 +507,23 @@ func (s *Server) viewRPC(w http.ResponseWriter, r *http.Request) {
 		httpx.JSON(w, 403, map[string]any{"error": map[string]string{"code": "not_granted", "message": "this view was not granted " + name}})
 		return
 	}
-	out, err := fn(r.Context(), v, in.Args)
+	if !viewMay(v, m.act) {
+		httpx.JSON(w, 403, map[string]any{"error": map[string]string{"code": "not_granted", "message": in.Method + " needs more access than this view has"}})
+		return
+	}
+	run := func() (any, error) { return m.fn(r.Context(), v, in.Args) }
+	var out any
+	var err error
+	if in.Key != "" && len(in.Key) <= 64 {
+		// The call runs to its end even when the connection breaks: its
+		// resend waits for this result instead of a cancellation.
+		ctx, cancel := context.WithTimeout(context.WithoutCancel(r.Context()), 2*time.Minute)
+		defer cancel()
+		run = func() (any, error) { return m.fn(ctx, v, in.Args) }
+		out, err = s.rt.once.do(onceKey{v.Target, v.User, in.Key}, run)
+	} else {
+		out, err = run()
+	}
 	if err != nil {
 		var f *rtFail
 		if !errors.As(err, &f) {
@@ -517,14 +575,11 @@ func (s *Server) dbGet(ctx context.Context, v *rt.View, path string) (any, error
 		return nil, rtErr("invalid_argument", "%q is not a document path", path)
 	}
 	missing := map[string]any{"path": path, "exists": false}
-	if !v.Caps.Rules.CanRead(path, v.User, v.Level) {
-		return missing, nil
-	}
 	st, err := s.viewStore(ctx, v)
 	if err != nil {
 		return nil, err
 	}
-	d, err := st.GetDoc(ctx, path)
+	d, err := st.GetDoc(ctx, path, func(path string) bool { return v.Caps.Rules.CanRead(path, v.User, v.Level) })
 	if errors.Is(err, store.ErrNotFound) {
 		return missing, nil
 	}
@@ -534,21 +589,19 @@ func (s *Server) dbGet(ctx context.Context, v *rt.View, path string) (any, error
 	return docResult(d), nil
 }
 
-// readable lists a collection's documents the viewer may read.
-func (s *Server) readable(ctx context.Context, v *rt.View, coll string) ([]rt.Doc, error) {
+// readable runs q over the documents the viewer may read.
+func (s *Server) readable(ctx context.Context, v *rt.View, q rt.Query) ([]rt.Doc, error) {
 	st, err := s.viewStore(ctx, v)
 	if err != nil {
 		return nil, err
 	}
-	docs, err := st.Query(ctx, rt.Query{Coll: coll})
+	docs, err := st.Query(ctx, q, func(path string) bool { return v.Caps.Rules.CanRead(path, v.User, v.Level) })
 	if err != nil {
-		return nil, rtErr("invalid_argument", "invalid collection %q", coll)
+		return nil, rtErr("invalid_argument", "invalid query on %q", q.Coll)
 	}
 	out := make([]rt.Doc, 0, len(docs))
 	for _, d := range docs {
-		if v.Caps.Rules.CanRead(d.Path, v.User, v.Level) {
-			out = append(out, rt.Doc{Path: d.Path, Body: d.Body, Version: d.Version})
-		}
+		out = append(out, rt.Doc{Path: d.Path, Body: d.Body, Version: d.Version})
 	}
 	return out, nil
 }
@@ -561,11 +614,11 @@ func (s *Server) rpcDBQuery(ctx context.Context, v *rt.View, raw json.RawMessage
 	if err := q.Validate(); err != nil {
 		return nil, rtErr("invalid_argument", "invalid query on %q", q.Coll)
 	}
-	docs, err := s.readable(ctx, v, q.Coll)
+	docs, err := s.readable(ctx, v, q)
 	if err != nil {
 		return nil, err
 	}
-	return map[string]any{"docs": q.Apply(docs)}, nil
+	return map[string]any{"docs": docs}, nil
 }
 
 type writeIn struct {
@@ -780,11 +833,11 @@ func (s *Server) rpcDBSubscribe(ctx context.Context, v *rt.View, raw json.RawMes
 		}
 		return map[string]any{"rev": head, "doc": d}, nil
 	}
-	docs, err := s.readable(ctx, v, a.Path)
+	docs, err := s.readable(ctx, v, q)
 	if err != nil {
 		return nil, err
 	}
-	return map[string]any{"rev": head, "docs": q.Apply(docs)}, nil
+	return map[string]any{"rev": head, "docs": docs}, nil
 }
 
 func (s *Server) rpcDBUnsubscribe(_ context.Context, v *rt.View, raw json.RawMessage) (any, error) {

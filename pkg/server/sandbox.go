@@ -105,7 +105,7 @@ func (s *Server) serveSandbox(w http.ResponseWriter, r *http.Request) {
 		serveAsset(w, r)
 		return
 	case strings.HasPrefix(p, "/_s/"):
-		s.serveStoreFile(w, r, nil, false) // an untrusted origin by design
+		s.serveStoreFile(w, r, nil)
 		return
 	case strings.HasPrefix(p, "/_blob/"):
 		s.serveAssetBlob(w, r, storeID, strings.TrimPrefix(p, "/_blob/"))
@@ -145,7 +145,10 @@ func (s *Server) serveSandbox(w http.ResponseWriter, r *http.Request) {
 			notFound(w)
 			return
 		}
-		s.serveBlob(w, r, as, f, cacheImmutable)
+		// public: the sandbox serves an app's files to anyone who has its
+		// origin (the label is the capability), so a shared cache adds no
+		// exposure; a snapshot's bytes never change
+		s.writeStoreBytes(w, r, storeBytes{st: as, f: f, vis: public, mut: immutable})
 		return
 	}
 	f, err := as.SnapshotFile(ctx, n, entry)

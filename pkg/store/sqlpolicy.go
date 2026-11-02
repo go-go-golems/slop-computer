@@ -56,6 +56,18 @@ func (s *Store) authorize(action int, a1, a2, dbName string) int {
 		caller = t.caller
 	}
 	if caller == CallerKernel {
+		// The kernel never writes app tables. An app trigger runs inside
+		// the statement that writes its table, with that statement's
+		// authority; so does a foreign key cascade into an app table. With
+		// this rule, and app tables unable to reference kernel tables
+		// (checkAppForeignKeys), no app-authored SQL runs as the kernel.
+		// (mattn drops the trigger-name argument that would say so.)
+		switch action {
+		case sqlite3.SQLITE_INSERT, sqlite3.SQLITE_UPDATE, sqlite3.SQLITE_DELETE:
+			if appName(a1) {
+				return sqlite3.SQLITE_DENY
+			}
+		}
 		return sqlite3.SQLITE_OK
 	}
 	if dbName == "temp" {
@@ -146,4 +158,26 @@ func (s *Store) curNow() int64 {
 		return t.Now
 	}
 	return 0
+}
+
+// checkAppForeignKeys refuses a schema in which an app table references a
+// kernel table. A cascade from the kernel's own statement (deleting a
+// document) would write the app table with the kernel's authority, and the
+// app's triggers on it would run as the kernel.
+func (t *Turn) checkAppForeignKeys() error {
+	rows, err := t.s.w.QueryContext(t.ctx, `SELECT m.name, f."table" FROM sqlite_schema m, pragma_foreign_key_list(m.name) f WHERE m.type = 'table'`)
+	if err != nil {
+		return err
+	}
+	defer rows.Close()
+	for rows.Next() {
+		var table, parent string
+		if err := rows.Scan(&table, &parent); err != nil {
+			return err
+		}
+		if appName(table) && !appName(parent) {
+			return &DocError{Msg: "invalid_argument: app table " + table + " may not reference " + parent}
+		}
+	}
+	return rows.Err()
 }

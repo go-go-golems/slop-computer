@@ -1,5 +1,6 @@
 // Package actor runs a store's server half: actor.js on goja, one runtime
-// per active store, owned by one goroutine that takes events from an inbox.
+// per active store, owned by one goroutine that takes events from the
+// store's inbox.
 // Every event is a turn (one store transaction). An await on real I/O ends
 // the turn: the I/O finishes on another goroutine, which posts a
 // continuation event; that event's turn resolves the promise, and goja runs
@@ -14,6 +15,7 @@ import (
 	"strconv"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	"github.com/dop251/goja"
@@ -64,11 +66,6 @@ func fail(code, format string, args ...any) *Error {
 	return &Error{Code: code, Message: fmt.Sprintf(format, args...)}
 }
 
-// errStopped fails an event that never ran because its actor stopped first
-// (a new version activated, a restart, the actor broke). Nothing of it
-// happened, so the caller sends it again to the actor that replaces it.
-var errStopped = fail("actor_error", "the actor stopped")
-
 type result struct {
 	v   any
 	err error
@@ -84,8 +81,10 @@ type event struct {
 	// run calls into JavaScript inside the turn; its value may be a promise.
 	run    func(a *Actor, ctx *goja.Object) (goja.Value, error)
 	reply  chan result
-	park   *park  // set (on the actor's goroutine) when the handler awaits I/O
-	parent *event // a continuation resumes this event's handler
+	park   *park       // set (on the actor's goroutine) when the handler awaits I/O
+	parent *event      // a continuation resumes this event's handler
+	owner  *Actor      // a continuation's runtime: no other actor can resume it
+	gone   atomic.Bool // its caller stopped waiting: do not run it
 }
 
 // park is an event whose handler awaits real I/O: its root promise settles
@@ -121,7 +120,7 @@ type Actor struct {
 	groups map[string][]string
 	routes map[string]Route
 
-	inbox chan *event
+	wake  chan struct{} // capacity 1: the store's inbox has something
 	stop  chan struct{}
 	cur   *turn
 	parks int
@@ -149,7 +148,7 @@ func (a *Actor) log(level, text string) {
 // defineActor once.
 func build(m *Manager, st *store.Store, run kernel.Running, files map[string][]byte) (*Actor, error) {
 	a := &Actor{m: m, st: st, run: run, key: run.App + "@" + strconv.FormatInt(run.N, 10),
-		vm: goja.New(), inbox: make(chan *event, 256), stop: make(chan struct{})}
+		vm: goja.New(), wake: make(chan struct{}, 1), stop: make(chan struct{})}
 	a.vm.SetFieldNameMapper(goja.TagFieldNameMapper("json", true))
 	entry := run.Manifest.Actor
 	src, ok := files[entry]
@@ -285,51 +284,46 @@ func cleanPath(p string) string {
 	return strings.Join(out, "/")
 }
 
-// loop is the actor's goroutine: one event at a time.
+// loop is the actor's goroutine: one event at a time, from the store's
+// inbox, until the actor no longer runs the store.
 func (a *Actor) loop() {
 	idle := time.NewTimer(IdleTimeout)
 	defer idle.Stop()
 	for {
-		select {
-		case ev := <-a.inbox:
-			a.handle(ev)
-			if !idle.Stop() {
-				select {
-				case <-idle.C:
-				default:
+		ev, ok := a.m.take(a)
+		if !ok {
+			return // replaced, retired or stopped: the queue stays with the store
+		}
+		if ev == nil {
+			select {
+			case <-a.wake:
+			case <-idle.C:
+				if a.parks == 0 && a.m.retire(a) {
+					return
 				}
-			}
-			idle.Reset(IdleTimeout)
-		case <-idle.C:
-			if a.parks == 0 && len(a.inbox) == 0 && a.m.retire(a) {
+				idle.Reset(IdleTimeout)
+			case <-a.stop:
 				return
 			}
-			idle.Reset(IdleTimeout)
-		case <-a.stop:
-			a.drain()
-			return
+			continue
 		}
-	}
-}
-
-// drain fails whatever is still queued when the actor stops.
-func (a *Actor) drain() {
-	for {
-		select {
-		case ev := <-a.inbox:
-			if ev.parent != nil {
-				// the rest of an action that already ran up to an await
-				if ev.parent.reply != nil {
-					ev.parent.reply <- result{err: fail("actor_error", "lost: the actor stopped")}
-				}
-				continue
-			}
-			if ev.reply != nil {
-				ev.reply <- result{err: errStopped}
+		switch {
+		case ev.gone.Load():
+		case ev.owner != nil && ev.owner != a:
+			// the rest of a handler that awaited I/O in a runtime that stopped
+			if ev.parent != nil && ev.parent.reply != nil {
+				ev.parent.reply <- result{err: fail("actor_error", "lost: the actor stopped")}
 			}
 		default:
-			return
+			a.handle(ev)
 		}
+		if !idle.Stop() {
+			select {
+			case <-idle.C:
+			default:
+			}
+		}
+		idle.Reset(IdleTimeout)
 	}
 }
 
@@ -445,11 +439,8 @@ func (pk *park) rootOr(v goja.Value) *goja.Promise {
 // continueWith posts the turn that resumes a parked handler: resolve runs
 // (inside that turn) the JavaScript after the await.
 func (a *Actor) continueWith(ev *event, resolve func() error) {
-	select {
-	case a.inbox <- &event{kind: "cont", visitor: ev.visitor, via: ev.via, parent: ev,
-		run: func(a *Actor, _ *goja.Object) (goja.Value, error) { return nil, resolve() }}:
-	case <-a.stop:
-	}
+	_ = a.m.push(a.st.ID, &event{kind: "cont", visitor: ev.visitor, via: ev.via, parent: ev, owner: a,
+		run: func(a *Actor, _ *goja.Object) (goja.Value, error) { return nil, resolve() }})
 }
 
 // io starts real I/O from inside a turn and returns its promise. work runs
@@ -610,6 +601,9 @@ func (a *Actor) asError(err error) *Error {
 	if errors.As(err, &ie) {
 		return fail("actor_error", "%v", ie.Value())
 	}
+	if errors.Is(err, store.ErrAppCode) {
+		return fail("permission_denied", "%v", err)
+	}
 	var de *store.DocError
 	if errors.As(err, &de) {
 		return fail("invalid_argument", "%s", de.Msg)
@@ -715,22 +709,34 @@ func (a *Actor) fn(group, name string) goja.Callable {
 // keys lists the own keys of def.<group> (any goroutine).
 func (a *Actor) keys(group string) []string { return a.groups[group] }
 
-// send queues an event and waits for its result.
+// send queues an event on the store's inbox and waits for its result. If
+// the actor stops meanwhile (a new version, a restart, an idle retire), the
+// event stays queued for the actor that replaces it: it is never sent
+// twice.
 func (a *Actor) send(ctx context.Context, ev *event) (any, error) {
 	ev.reply = make(chan result, 1)
 	ctx, cancel := context.WithTimeout(ctx, CallTimeout)
 	defer cancel()
-	select {
-	case a.inbox <- ev:
-	case <-ctx.Done():
-		return nil, fail("unavailable", "the actor is busy")
-	case <-a.stop:
-		return nil, errStopped
+	if err := a.m.push(a.st.ID, ev); err != nil {
+		return nil, err
 	}
-	select {
-	case r := <-ev.reply:
-		return r.v, r.err
-	case <-ctx.Done():
-		return nil, fail("unavailable", "the actor did not answer in time")
+	for cur := a; ; {
+		select {
+		case r := <-ev.reply:
+			return r.v, r.err
+		case <-ctx.Done():
+			ev.gone.Store(true)
+			return nil, fail("unavailable", "the actor did not answer in time")
+		case <-cur.stop:
+			next, err := a.m.Get(ctx, a.st.ID)
+			if err == nil && next == nil {
+				err = fail("not_found", "%s has no actor", a.st.ID)
+			}
+			if err != nil {
+				ev.gone.Store(true)
+				return nil, err
+			}
+			cur = next
+		}
 	}
 }

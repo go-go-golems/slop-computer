@@ -13,6 +13,7 @@ import (
 	"time"
 
 	"github.com/go-go-golems/slop-computer/pkg/access"
+	"github.com/go-go-golems/slop-computer/pkg/authz"
 )
 
 // ConfirmTTL is how long a confirmation waits, and how long an approval
@@ -138,7 +139,7 @@ func (e *Env) Confirmations() *Confirmations {
 
 func init() {
 	Register(
-		&Verb{Name: "confirm.approve", Doc: "Allow a change an app asked to make for you (the id from its confirmation_required error).", Scope: Write,
+		&Verb{Name: "confirm.approve", Doc: "Allow a change an app asked to make for you (the id from its confirmation_required error).", Scope: Write, Action: authz.Account,
 			Args: []Arg{{Name: "id", Type: "string", Pos: 1, Required: true}},
 			Run: func(ctx context.Context, e *Env, p *access.Principal, a Args) (any, error) {
 				x, ok := e.Confirmations().Approve(a.S("id"), p.ID())

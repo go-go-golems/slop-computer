@@ -31,15 +31,7 @@ func (s *Server) viewPrincipal(ctx context.Context, v *rt.View) *access.Principa
 	if v.User == "" {
 		return nil
 	}
-	p, err := s.Sys.Person(ctx, v.User)
-	if err != nil {
-		return nil
-	}
-	kind := access.KindUser
-	if p.Kind == "guest" {
-		kind = access.KindGuest
-	}
-	return &access.Principal{Kind: kind, Person: &p, Via: "page"}
+	return s.personAs(ctx, v.User, "page")
 }
 
 func actorFail(err error) error {
@@ -102,10 +94,7 @@ func (s *Server) rpcSlopRead(ctx context.Context, v *rt.View, raw json.RawMessag
 	rules := s.Env.K.Rules(ctx, target)
 	switch a.Op {
 	case "get":
-		if !rules.CanRead(a.Path, p.ID(), d.Level) {
-			return map[string]any{"path": a.Path, "exists": false}, nil
-		}
-		doc, err := st.GetDoc(ctx, a.Path)
+		doc, err := st.GetDoc(ctx, a.Path, func(path string) bool { return rules.CanRead(path, p.ID(), d.Level) })
 		if err != nil {
 			return map[string]any{"path": a.Path, "exists": false}, nil
 		}
@@ -116,24 +105,13 @@ func (s *Server) rpcSlopRead(ctx context.Context, v *rt.View, raw json.RawMessag
 			_ = json.Unmarshal(a.Query, &q)
 		}
 		q.Coll = a.Coll
-		// the read rules first, then the limit (as db.query does)
-		if q.Validate() != nil {
-			return nil, rtErr("invalid_argument", "invalid query on %q", a.Coll)
-		}
-		limit := q.Limit
-		q.Limit = 0
-		docs, err := st.Query(ctx, q)
+		docs, err := st.Query(ctx, q, func(path string) bool { return rules.CanRead(path, p.ID(), d.Level) })
 		if err != nil {
 			return nil, rtErr("invalid_argument", "invalid query on %q", a.Coll)
 		}
 		out := []map[string]any{}
 		for _, doc := range docs {
-			if limit > 0 && len(out) == limit {
-				break
-			}
-			if rules.CanRead(doc.Path, p.ID(), d.Level) {
-				out = append(out, docResult(doc))
-			}
+			out = append(out, docResult(doc))
 		}
 		return map[string]any{"docs": out}, nil
 	case "files", "file":
@@ -227,8 +205,11 @@ func (s *Server) serveActorRoute(w http.ResponseWriter, r *http.Request, res *re
 	if w.Header().Get("Content-Type") == "" && out.Type != "" {
 		w.Header().Set("Content-Type", out.Type)
 	}
-	if w.Header().Get("Cache-Control") == "" {
+	if cc := w.Header().Get("Cache-Control"); cc == "" {
 		w.Header().Set("Cache-Control", "no-store")
+	} else if (strings.Contains(cc, "public") || strings.Contains(cc, "s-maxage")) && s.visibilityOf(r.Context(), res.store) != public {
+		// a shared cache may keep a response only if anyone may read the store
+		w.Header().Set("Cache-Control", cachePrivate)
 	}
 	w.Header().Set("X-Content-Type-Options", "nosniff")
 	w.WriteHeader(out.Status)
@@ -263,14 +244,16 @@ func (s *Server) serveBoundAsset(w http.ResponseWriter, r *http.Request, storeID
 		notFound(w)
 		return
 	}
-	if cache == "" {
-		cache = cachePrivate
+	// The actor may ask for public caching (its Cache-Control); a shared
+	// cache may keep the upload only if anyone could reach this store too.
+	out := storeBytes{st: st, f: f, vis: private, mut: moving}
+	if strings.Contains(cache, "public") && s.visibilityOf(ctx, storeID) == public {
+		out.vis = public
+		if strings.Contains(cache, "immutable") {
+			out.mut = immutable
+		}
 	}
-	w.Header().Set("Content-Security-Policy", "sandbox; default-src 'none'")
-	if !isMedia(f.Type) {
-		w.Header().Set("Content-Disposition", "attachment")
-	}
-	s.serveBlob(w, r, st, f, cache)
+	s.writeStoreBytes(w, r, out)
 }
 
 func isMedia(t string) bool {
