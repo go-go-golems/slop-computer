@@ -455,3 +455,34 @@ Pushed `task/slop3-007-authority-core` (17 commits on `main` at 9d0db5e+) and op
 - no code sets a payer to a store's owner.
 
 `AudienceOf` stays, as the function that names a principal's highest group.
+
+## Step 10: Review on #17, holds that count tools and quota codes that survive
+
+Codex left two findings on the ledger, and both were real. A round's hold left out the tool definitions sent with that round (P1). And the production backend turned the meter's `quota_exceeded` into `upstream_error`, so the new quota handling never ran with gepp (P2). The fake backend returns errors directly instead of as events, which is why phase 5's tests didn't catch the second.
+
+### Prompt Context
+**User prompt (verbatim):** "Address code review comments on https://github.com/go-go-golems/slop-computer/pull/17"
+**Assistant interpretation:** Fix the two findings, with tests; reply on the threads.
+**Inferred user intent:** A sound hard-budget guarantee before merge.
+**Commit (code):** 5493c1a — "Budget holds count tool definitions; quota refusals keep their code (review on #17)"
+
+### What I did
+- `pkg/llm/gepp/sample.go`:
+  - `toolBytes` (name + description + schema, plus 64 per tool) is added to the input estimate on rounds that offer tools;
+  - `framingTokens` (256) is added on every round;
+  - `offersTools` is computed once, and decides both the estimate and the tool registry;
+  - `Sample` passes an `*llm.Failure` through with its code.
+- `pkg/actor/sample.go`: an `error` event with `quota_exceeded` keeps that code (others stay `unavailable`). The page stream already forwards the event's code (`case "error": send("error", e.Error)`).
+- `pkg/llm/gepp/gepp_test.go`: a `meterFunc` test double.
+  - `TestMeterRefusalKeepsQuotaCode`: the code is `quota_exceeded` and `p.bodies` is empty, so the provider was never contacted.
+  - `TestMeterHoldsToolDefinitions`: round 0's estimate exceeds a tool-less request's by at least the definition size; round 1 (no tools) doesn't.
+- Replied on both threads (discussion_r4448283091, discussion_r4448283449).
+
+### What I learned
+- Phase 5's tests exercised only the fake backend. It returns the meter's error straight from `Sample`, while gepp turns every error into an event. Different error boundaries need separate tests; now each backend has one.
+
+### What warrants a second pair of eyes
+- Settlement still charges actual usage without bounding it by the hold, which keeps the accounting honest. The invariant rests on the estimate being conservative: now context + images + tools + framing at one token per byte.
+
+### Code review instructions
+- `GOWORK=off go test ./pkg/llm/gepp -run TestMeter -count=1`.
