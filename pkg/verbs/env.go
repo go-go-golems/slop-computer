@@ -30,6 +30,9 @@ type Env struct {
 	// AccessChanged is called after a verb changed who may open a store
 	// (grants, links), so the server can review its open views.
 	AccessChanged func(ctx context.Context, store string)
+	// PolicyChanged is called after an app's policy matrix changed: the
+	// views of its stores were opened with the old cells.
+	PolicyChanged func(ctx context.Context, app string)
 	// PersonChanged is called after a person's audience may have changed
 	// (role, comps), so the server can review their open views.
 	PersonChanged func(ctx context.Context, person string)

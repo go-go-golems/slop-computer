@@ -328,3 +328,37 @@ func TestSubscribePage(t *testing.T) {
 		t.Fatalf("checkout without csrf: %d", r.StatusCode)
 	}
 }
+
+// A view's policy cells (uploads, email, sample) are fixed when it opens:
+// turning one off closes the views of the app's stores, and the new view
+// does not have it.
+func TestPolicyChangeClosesViews(t *testing.T) {
+	h := newHarness(t)
+	admin := h.tokenFor("admin@example.com", "read", "write", "admin")
+	live := h.cfg.Hosts.Live[0]
+	h.call(admin, "store.new", map[string]any{"id": "pics"})
+	h.call(admin, "files.push", map[string]any{"store": "pics", "files": files(map[string]string{
+		"app.json": `{"title":"Pics","capabilities":{"db":{},"assets":{}}}`, "index.html": "<!doctype html><title>p</title>"})})
+	h.call(admin, "grant.set", map[string]any{"store": "pics", "subject": "@member", "level": "interact"})
+	h.call(admin, "mount.set", map[string]any{"host": live, "path": "/pics", "store": "pics"})
+	h.call(admin, "policy.set", map[string]any{"app": "pics", "capability": "assets", "audience": "@member", "value": "on"})
+	b := h.browser()
+	b.signIn("pia@example.com")
+	s := h.site(live)
+	signInSite(t, h, s, b, live, "/pics")
+	st, v := openView(s, live, "/pics", "")
+	if caps, _ := v["caps"].(map[string]any); st != 200 || caps["assets"] == nil {
+		t.Fatalf("view with assets on: %d %v", st, v)
+	}
+	if out := rpc(s, v, "assets.list", map[string]any{}); out["error"] != nil {
+		t.Fatalf("assets.list with assets on: %v", out)
+	}
+	h.call(admin, "policy.set", map[string]any{"app": "pics", "capability": "assets", "audience": "@member", "value": "off"})
+	if out := rpc(s, v, "assets.list", map[string]any{}); out["error"] == nil {
+		t.Fatalf("the old view still lists assets after the policy turned them off: %v", out)
+	}
+	st, v = openView(s, live, "/pics", "")
+	if caps, _ := v["caps"].(map[string]any); st != 200 || caps["assets"] != nil {
+		t.Fatalf("view with assets off: %d %v", st, v)
+	}
+}

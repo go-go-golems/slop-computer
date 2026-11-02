@@ -98,6 +98,7 @@ func New(cfg *config.Config, sys *system.DB, env *verbs.Env) *Server {
 	if env != nil {
 		env.AccessChanged = s.reviewViews
 		env.PersonChanged = s.reviewPerson
+		env.PolicyChanged = s.reviewApp
 	}
 	if env != nil && env.K != nil {
 		env.K.Subscribe(s.publish)

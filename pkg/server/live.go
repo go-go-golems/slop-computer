@@ -588,13 +588,36 @@ func (s *Server) recheck(ctx context.Context, v *rt.View, row system.StoreRow) b
 	switch {
 	case d.Level == rt.LevelNone:
 		s.rt.views.Close(v, true)
-	case d.Level != v.Level || string(d.Audience) != v.Role:
+	case d.Level != v.Level || string(d.Audience) != v.Role || !s.samePolicy(ctx, v, string(d.Audience)):
 		v.Send(rt.Out{Type: "access", Data: map[string]any{"level": d.Level.String()}})
 		s.rt.views.Close(v, false)
 	default:
 		return false
 	}
 	return true
+}
+
+// samePolicy reports whether the app's policy cells for aud are still the
+// ones v was opened with (they authorize uploads, email, sample).
+func (s *Server) samePolicy(ctx context.Context, v *rt.View, aud string) bool {
+	for _, c := range system.PolicyCaps {
+		if s.Sys.Policy(ctx, v.App, c, aud) != v.Policy[c] {
+			return false
+		}
+	}
+	return true
+}
+
+// reviewApp re-checks the open views of every store running app, after its
+// policy matrix changed.
+func (s *Server) reviewApp(ctx context.Context, app string) {
+	seen := map[string]bool{}
+	for _, v := range s.rt.views.Where(func(v *rt.View) bool { return v.App == app }) {
+		if !seen[v.Target] {
+			seen[v.Target] = true
+			s.reviewViews(ctx, v.Target)
+		}
+	}
 }
 
 var shellPage = template.Must(template.New("shell").Parse(`<!doctype html>
