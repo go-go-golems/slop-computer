@@ -9,4 +9,4 @@
 - [ ] Generic /f/:id mount for imported apps (store type release) instead of 103 mounts <!-- t:07oh -->
 - [ ] Import v2 history: older versions of imported artifacts as snapshots <!-- t:2ghn -->
 - [ ] Cloudflare in front of the slop hosts (later) <!-- t:wcpm -->
-- [ ] Recheck slow-loading imported apps (thought-machines, vitrine) after compression <!-- t:ilxa -->
+- [x] Recheck slow-loading imported apps (thought-machines, vitrine) after compression <!-- t:ilxa -->

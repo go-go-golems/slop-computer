@@ -207,3 +207,38 @@ Codex flagged (P2) that the Apps tab resolved an app's addresses with the type f
 
 ### What should be done in the future
 - Production runs this only after the image pin in GitOps moves to the merge's image. `publish-image.yaml` sets `open_gitops_pr: false`, so the bump is a manual GitOps PR.
+
+## Step 5: Compression live; image bump to sha-30defba (GitOps #409)
+
+The user merged #14, #15, #408 and #407. Compression is live and measured. The live-update stream passes through uncompressed. The two apps that were slow earlier now render quickly. Ramon's admin entry is live. GitOps PR #409 moves the image to `sha-30defba` (the authz work from #14 and the back office from #15) and waits for the user's merge.
+
+### Prompt Context
+**User prompt (verbatim):** "#14 and #15 and #408 merged" — then, mid-turn: "#407 is merged too"
+**Assistant interpretation:** Check the merged infrastructure changes in production and prepare the deploy of the merged code.
+**Inferred user intent:** Get everything that is merged running in production.
+**Commit (gitops):** slop/image-30defba — https://github.com/wesen/2026-03-27--hetzner-k3s/pull/409
+
+### What worked
+- Compression, with `Accept-Encoding: zstd, br, gzip`. Times are dominated by the slow link and vary between runs.
+
+  | URL | Before | After (zstd) |
+  |---|---|---|
+  | site `/` | 7,213 B | 3,365 B |
+  | `/admin/app.js` | 163,558 B | 54,474 B |
+  | `_data/francois-catalog.json` | 377,632 B | 98,352 B |
+
+- SSE: opening `apps…/guestbook` as a guest, the `https://s….sbx…/_rt/events` response was 200, `text/event-stream`, with no `content-encoding`.
+- #407: `slop-config` lists hej@ramonmarc.com in `admin_emails`. The pod restarted at 19:46:35Z with `config-revision: 2`.
+- Task ilxa:
+  - `/f/thought-machines/` reached load in 582 ms, with 8 requests;
+  - `/f/vitrine/` reached load in 176 ms, with 12 requests;
+  - both iframes rendered their UI, with no failed responses and no page errors.
+- Image: `publish-image` for 30defba succeeded, and `docker manifest inspect ghcr.io/go-go-golems/slop-computer:sha-30defba` resolves. Between 1833212 and 30defba, only `doc/production.md` changed outside code (the scope table), so there are no config changes.
+
+### What should be done in the future
+- After #409 merges, smoke-test production:
+  - the back office lists;
+  - the CLI with the admin token (it has the admin scope);
+  - the guestbook;
+  - some `/f/<id>` apps.
+- Remaining tasks: hc66 (caching), 07oh (generic /f/:id), 2ghn (v2 history), wcpm (Cloudflare).
