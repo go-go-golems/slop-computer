@@ -964,3 +964,161 @@ editor shows.
 
 - The demo page now renders `Planned against actual spend` at 92%
   (1930 of 2090).
+
+## Step 9: Deep links inside the editor (the view's fragment is the address bar's)
+
+In step 7 I answered that apps could keep a place in the URL if the shell
+let them, and the user asked me to build it. An app runs in an iframe on
+its own sandbox origin. It cannot change the address bar, and the shell
+cannot read the view's URL. So the runtime and the shell now share one part
+of it, the fragment: the view reports `location.hash`, the shell mirrors it
+with `replaceState`, and a fragment typed into the address bar goes back
+into the view. Claude Blocks opts in with a small slop addition,
+`web/blocks/slop/deep-links.js`, loaded after the unchanged upstream
+`blocks.js`. `/b/ws-team#handbook_care` now opens Care. Following a link
+updates the address bar, and Back and Forward step through pages. v3
+commit `798c459`; slop-computer commit `4e23e3c`, PR #11 (open, for the
+user to merge).
+
+### Prompt Context
+
+**User prompt (verbatim):** "then build the deep links."
+
+The question it answers is quoted in step 7: "can apps do like their URL
+updates so we can deeplink within an app, for example within b/ws-team ?
+would that work?"
+
+**Assistant interpretation:** Implement fragment sync in the v3 runtime and
+shell, make Blocks keep its open page in the fragment, verify it in a
+browser, and send the Blocks part as a slop-computer PR.
+
+**Inferred user intent:** A link to a page inside a workspace that someone
+else can open, and an editor where Back works.
+
+### What I did
+
+- `web/runtime/src/url.ts`, new, called from `index.ts`. In app mode inside
+  a frame, `syncFragment()` posts `{type:"hash", hash}` after `hashchange`,
+  `popstate`, and wrapped `pushState`/`replaceState`, dropping fragments
+  over 1024 characters. On `shell:hash` it checks the fragment and applies
+  it with `location.replace(url + h)`; for an empty fragment it uses
+  `replaceState` plus a synthetic `hashchange`. Rebuilt
+  `pkg/server/assets/claude.js`.
+- `pkg/server/assets/shell.js`:
+  - `case "hash"` checks the fragment (at most 1024 characters, `#`
+    first, no whitespace) and calls
+    `history.replaceState(history.state, "", here() + h)`. It replaces
+    `case "args"`, which nothing sends.
+  - A `hashchange` listener posts the shell's fragment to the view.
+  - `signIn()` appends `location.hash` to the return URL.
+  - The view was already opened at `view.url + location.hash`.
+- slop-computer, branch `task/blocks-deep-links`:
+  - `web/blocks/slop/deep-links.js`. Before the workspace loads, it stores
+    the fragment's page as `cb:page`, the key `Nav.restore()` reads.
+  - It replaces `S.page` with an accessor that writes the fragment: the
+    first write replaces it, later writes add history entries. Only
+    `Nav.go` assigns `S.page`.
+  - On `hashchange`, it calls `blocks.go(p)` when `p` names an existing page.
+  - `build.sh` copies `slop/*.js`, adds
+    `<script src="deep-links.js"></script>` after the `blocks.js` tag, and
+    fails if the tag isn't there. README gets a "slop additions" row.
+    `src/` and `SHA256SUMS` are unchanged.
+- SLOP3-001's `07-build-blocks-pinup.sh` does the same for the v3 app
+  folder when `web/blocks/slop` exists.
+- `scripts/07-deep-links-e2e.mjs` (Playwright): sign-in with a deep link,
+  clicking the Care mention, Back and Forward with a marker on the frame's
+  `window` (same document), a typed fragment, a new tab, a page that does
+  not exist.
+- Guide: section 6.6, phase B6, file rows.
+
+### Why
+
+- **Only the fragment.** A view on a sandbox origin must not move the shell
+  to another path, or to another app on the live host. The fragment
+  never reaches the server and cannot change which app is shown.
+- **`replaceState` in the shell, not `pushState`.** A fragment change
+  inside the iframe already adds an entry to the tab's joint session
+  history, so Back steps the frame back. A `pushState` in the shell would
+  add a second entry for every page, and Back would need two presses.
+- **A slop addition, not a patch to `blocks.js`.** The upstream export
+  stays byte-identical and checkable. `deep-links.js` uses only what
+  `blocks.js` exposes on `window.blocks`: `S`, `go`, `page`.
+
+### What worked
+
+- `07-deep-links-e2e.mjs`: all 7 checks pass. The Back/Forward check
+  confirms the editor was not reloaded (`window.__sameDocument` survives).
+- `pnpm run check`, `pnpm test` (runtime), and `GOWORK=off go test ./...`
+  pass. `web/blocks/build.sh` builds: "10 upstream files + slop.json + 1
+  slop addition(s)".
+
+### What didn't work
+
+- **First e2e run:** the wait for `window.blocks.S.loaded` threw.
+  `window.blocks` is the `#blocks` element (named access) until
+  `blocks.js` runs `boot()` and assigns the API. Fixed by guarding with
+  `window.blocks && window.blocks.S && ...`.
+- **Second run:** `FAIL a link to /b/ws-team#handbook survives sign-in and
+  opens that page (address bar #handbook)`, and no `[data-go]` link to
+  Care. Inside the frame:
+  `{"hash":"#handbook","stored":"\"page_p7sq\"","page":"page_p7sq","accessor":false,...}`,
+  and `deep-links.js` was missing from `document.scripts`.
+  - The shell side worked (the fragment reached the frame), but the
+    deployed Blocks had no addition.
+  - Cause: `07-build-blocks-pinup.sh <web> <out-dir>` writes
+    `<out-dir>/blocks`, while `08-deploy-blocks-pinup.sh <deploy>` pushes
+    `<deploy>/apps/blocks`. I had built into `$S/deploy` instead of
+    `$S/deploy/apps`, so 08 pushed the old folder, and the server reused
+    snapshot 1 ("blocks snapshot 1: 11 files").
+  - Fixed by building into `$S/deploy/apps`; 08 then reported "snapshot 2:
+    12 files".
+
+### What I learned
+
+- The joint session history does the right thing for Back and Forward
+  across the frame boundary. The shell only has to follow the frame, not
+  record its own entries.
+- Blocks' mention links render as `A.b-mention` with `data-go` in the
+  editor itself, so the e2e can click a real link.
+
+### What was tricky to build
+
+- **Order of loading.** `deep-links.js` runs after `blocks.js` but before
+  the workspace finishes loading. `Nav.restore()` runs later and reads
+  `cb:page`, so writing the fragment's page there is enough to open it. A
+  page that doesn't exist falls back to the same default as before. The
+  first `S.page` write then corrects the address bar through
+  `replaceState`, as the last e2e check confirms.
+- **No loops.** When the shell sends a fragment, the runtime sets `last`
+  before applying it, so the resulting `hashchange` isn't reported back.
+  The shell also ignores a fragment equal to `location.hash`.
+
+### What warrants a second pair of eyes
+
+- The runtime wraps `history.pushState`/`replaceState` for every app in
+  app mode. An app that rewrites its URL often (on every keystroke, say)
+  sends one postMessage per change; the shell's work per message is one
+  `replaceState`.
+- The shell trusts nothing in the message beyond a fragment. The checks
+  are in `shell.js` `case "hash"`.
+
+### What should be done in the future
+
+- Pinup could keep its open board or frame the same way.
+- The README of the runtime contract should say that apps can keep a place
+  in the fragment.
+
+### Code review instructions
+
+- v3: `web/runtime/src/url.ts`, `pkg/server/assets/shell.js` (`case
+  "hash"`, the `hashchange` listener, `signIn`), SLOP3-001
+  `scripts/07-build-blocks-pinup.sh`.
+- slop-computer PR #11: `web/blocks/slop/deep-links.js`, `build.sh`.
+- Run: build Blocks with SLOP3-001's 07 into `<deploy>/apps`, deploy with 08,
+  then `node scripts/07-deep-links-e2e.mjs various/b6`.
+
+### Technical details
+
+- Screenshot: `various/b6/b6-deep-link-care.png` (Care opened by a click;
+  the address bar is not in the capture, and the check reads it from
+  `tab.url()`).

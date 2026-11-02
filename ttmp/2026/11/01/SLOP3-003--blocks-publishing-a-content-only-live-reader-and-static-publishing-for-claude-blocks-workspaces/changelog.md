@@ -35,3 +35,12 @@ Runtime: no thinking placeholder through onText (Blocks dropped the first 9 char
 ## 2026-11-01
 
 Reader: en-US numbers in goja (toLocaleString threw), per-block failure isolation, stat/progress as Fruit (19a8f86)
+
+## 2026-11-01
+
+B6: deep links inside apps. The runtime mirrors the view's fragment into the address bar and the shell passes its own fragment in (fragments only, max 1024 chars); Blocks keeps its open page in the fragment via web/blocks/slop/deep-links.js (slop-computer PR #11). e2e 07 passes. v3 798c459.
+
+### Related Files
+
+- /home/manuel/code/wesen/2026-10-31--slop-v3/pkg/server/assets/shell.js — hash message and hashchange in the shell
+- /home/manuel/code/wesen/2026-10-31--slop-v3/web/runtime/src/url.ts — fragment sync in the runtime

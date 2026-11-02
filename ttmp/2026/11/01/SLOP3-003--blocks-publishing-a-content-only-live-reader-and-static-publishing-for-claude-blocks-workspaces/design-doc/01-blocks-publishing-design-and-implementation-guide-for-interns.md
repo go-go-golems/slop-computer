@@ -509,6 +509,21 @@ On the live host, a `POST` (or any method other than `GET` and `HEAD`) to an act
 
 `actor.Res.Asset` (`AssetRef{From, ID}`) is set when a route returns `{asset: {from, id}}` (`toRes`); `serveActorRoute` hands it to `serveBoundAsset`, which rechecks and streams (section 5.8). The store handle's `assets` object is in `storesModule` (`pkg/actor/modules.go`).
 
+### 6.6 Deep links inside an app (phase B6)
+
+The reader gives every page a URL. The editor did not: `/b/ws-team` opened whatever page the browser last had open. An app runs in an iframe on its own sandbox origin, so it cannot change the address bar, and the shell cannot see the view's URL. B6 shares exactly one part of the URL between them: the fragment. The path and query stay the shell's. A view may set nothing else, so it cannot navigate the shell elsewhere.
+
+```text
+view (sandbox origin)                      shell (live host)
+ location.hash changes  ──{type:"hash", hash}──▶  replaceState(path + query + hash)
+ location.replace(url+h) ◀──{type:"shell:hash"}──  hashchange (typed, Back)
+ opened at view.url + location.hash               signIn keeps location.hash
+```
+
+- `web/runtime/src/url.ts` (`syncFragment`, in app mode only) reports `location.hash` after `hashchange`, `popstate`, `pushState` and `replaceState`. On `shell:hash` it applies the shell's fragment with `location.replace`, which adds no entry in the frame.
+- `pkg/server/assets/shell.js` accepts a fragment of at most 1024 characters that starts with `#` and contains no whitespace, and uses `replaceState`, not `pushState`. A fragment change inside the iframe already adds an entry to the tab's joint session history. A `pushState` in the shell would add a second one, so Back would need two presses.
+- An app opts in by keeping its own state in its fragment. For Claude Blocks this is `web/blocks/slop/deep-links.js` in slop-computer, loaded after `blocks.js`; the upstream files stay unchanged. It stores the fragment's page as `cb:page`, which `Nav.restore()` opens. It turns `S.page` into an accessor that writes the fragment, and it goes to the named page on `hashchange`.
+
 ## 7. Implementation plan
 
 Each phase ends with a test that must pass before the next starts. Commit after each phase; record it in the diary.
@@ -542,6 +557,12 @@ Each phase ends with a test that must pass before the next starts. Commit after 
 1. `scripts/03-deploy-blocks-site.sh`: install, trust, mounts; a demo site for `ws-team`.
 2. `scripts/04-blocks-site-e2e.mjs` (Playwright): an editor writes a page in Blocks, the reader shows it, the editor publishes from `/_site`, the static host serves the snapshot; a member creates a workspace, a site and a static store with the CLI only and publishes.
 3. Screenshots for the diary.
+
+### Phase B6: deep links inside the editor (added after B5)
+
+1. The runtime's `syncFragment`, the shell's `hash` message and `hashchange` listener (section 6.6).
+2. slop-computer: `web/blocks/slop/deep-links.js` and `build.sh`. SLOP3-001's `07-build-blocks-pinup.sh` copies it into the app folder.
+3. **Exit test:** `scripts/07-deep-links-e2e.mjs`. It covers sign-in with a deep link, following a mention, Back and Forward in the same document, a typed fragment, a new tab, and a missing page.
 
 ## 8. API reference
 
@@ -601,6 +622,8 @@ Links between pages are relative; the stylesheet is inline.
 | `pkg/system/bindings.go`, `pkg/system/migrations/005_binding_assets.sql` | bindings that share uploads |
 | `pkg/server/b5_test.go` | uploads test |
 | `pkg/server/b1_test.go` … `b3_test.go` | phase tests |
+| `web/runtime/src/url.ts`, `pkg/server/assets/shell.js` | deep links: the view's fragment in the address bar |
+| slop-computer `web/blocks/slop/deep-links.js` | Blocks keeps its open page in the fragment |
 | upstream `web/blocks/src/blocks.js` | `Net.load` (fold), `Pages`, `Markdown.page` (the reference walk) |
 | upstream `web/blocks/src/blocks-kit.js` | prose grammar, `numberLabel`, block kinds' positional props |
 | upstream `web/blocks/src/hypha.js` | `Kernel`: `receive`, `restore`, `batch`, `children`, `cells` |
