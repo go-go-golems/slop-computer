@@ -1,0 +1,15 @@
+json: test/dl/blog.json [
+  'format',      'store',
+  'exported_at', 'clock',
+  'meta',        'rev',
+  'epoch',       'documents',
+  'tables',      'files',
+  'assets',      'snapshots',
+  'refs',        'grants',
+  'log'
+] docs 1 posts rows 3 files 0 log 11
+zip: test/dl/blog-sqlite.zip 3908
+world: test/dl/slop-world-2026-11-01.zip 24774
+console: test/dl/team-board.json
+after import: n | ─ | 0
+errors: []

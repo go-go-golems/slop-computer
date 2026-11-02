@@ -1,0 +1,137 @@
+<!DOCTYPE html><html><body><script type="module">
+const w = new Worker('./kernel.js', { type: 'module' });
+let seq = 0; const calls = {};
+const log = []; window.__log = log;
+w.onmessage = (e) => { const m = e.data; if (m.type === 'res') { const c = calls[m.id]; delete calls[m.id]; m.ok ? c.res(m.value) : c.rej(m.error); } else if (m.type === 'sample') { w.postMessage({ type: 'reply', reqId: m.reqId, ok: true, value: { text: 'A fake summary.' } }); } };
+w.onerror = (e) => { window.__done = { fatal: e.message }; };
+const call = (op, args, transfer) => new Promise((res, rej) => { const id = ++seq; calls[id] = { res, rej }; w.postMessage({ id, op, args }, transfer || []); });
+const run = async (as, line, input) => { try { const r = await call('run', { as, line, input }); log.push(`$ [${as}] ${line}\n${r.text}`); return r; } catch (e) { log.push(`$ [${as}] ${line}\n✗ ${e.code}: ${e.message}${e.trace ? '\n  ' + e.trace.join('\n  ') : ''}`); return null; } };
+const sleep = (ms) => new Promise(r => setTimeout(r, ms));
+try {
+  const t0 = performance.now();
+  const ov = await call('boot', {});
+  log.push(`booted in ${(performance.now() - t0).toFixed(0)} ms: ${ov.stores.map(s => s.id + '@' + s.rev).join(' ')}`);
+  await sleep(300);
+  for (const l of ['stores', 'tables blog', 'sql blog "SELECT id, title, status, author FROM posts"', 'get blog stats/main', 'log blog --n 6']) await run('usr_me', l);
+  await run('usr_ramon', 'sql blog "SELECT 1"');
+  await run('usr_me', 'sql blog "DELETE FROM posts"');
+  await run('usr_me', 'sql blog "SELECT count(*) AS n FROM _log"');
+  await run('usr_me', 'get team-board data/users/usr_me/notes');
+  await run('usr_ramon', 'get team-board data/users/usr_me/notes');
+  await run('usr_me', 'can usr_ramon team-board doc.read data/users/usr_me/notes');
+  await run('gst_ana', 'call blog draft {"title":"guest post"}');
+  await run('anon', 'call blog draft {"title":"anon post"}');
+  await run('usr_me', 'resolve site.lab/feed.json');
+  await run('anon', 'resolve site.lab/');
+  await run('usr_kim', 'resolve site.lab/t/kims-board');
+  // slow publish: await ends a turn
+  const d = await run('usr_ramon', 'sql blog "SELECT id FROM posts WHERE status = \'draft\'"');
+  const r1 = await call('run', { as: 'usr_me', line: 'sql blog "SELECT id FROM posts WHERE status = \'draft\'"' });
+  const draftId = r1.value[0].id;
+  const slow = call('run', { as: 'usr_ramon', line: `call blog slowPublish {"id":"${draftId}","delayMs":60000}` });
+  await sleep(100);
+  await run('usr_me', 'sql blog "SELECT title, status FROM posts WHERE id = \'' + draftId + '\'"');
+  await call('clockSet', { advance: 61000 });
+  log.push('slow → ' + JSON.stringify((await slow).value));
+  await sleep(200);
+  await run('usr_me', 'get blog stats/main');
+  await run('usr_me', 'turns --n 8');
+  // alarms
+  await run('usr_me', 'alarms blog');
+  await call('clockSet', { advance: 3 * 3600000 });
+  await sleep(200);
+  await run('usr_me', 'colls blog');
+  // edit + publish with a broken smoke → rollback
+  await run('usr_me', `edit journal actor.js --old "sql.one('SELECT count(*) AS n FROM published_posts');" --new "throw new Error('smoke failed on purpose');"`);
+  await run('usr_me', 'publish journal broken smoke');
+  await run('usr_me', 'stores');
+  await run('usr_me', 'call blog publish {"id":"nope"}');
+  // fix with a migration adding a column
+  await run('usr_me', `edit journal actor.js --old "throw new Error('smoke failed on purpose');" --new "sql.one('SELECT count(*) AS n FROM published_posts');"`);
+  await run('usr_me', 'write journal sql/002_tags.sql', "ALTER TABLE posts ADD COLUMN tags TEXT NOT NULL DEFAULT '';");
+  await run('usr_me', 'publish journal tags column');
+  await run('usr_me', 'tables blog');
+  await run('usr_me', 'diff journal 2 3');
+  // agent step + revert
+  await call('startStep', { as: 'tok_agent', message: 'test step' });
+  await run('tok_agent', 'set team-board cards/c9 {"text":"agent card","col":"todo"}');
+  await run('tok_agent', 'set team-board settings/board {"name":"renamed by agent"}');
+  await call('endStep', { as: 'tok_agent' });
+  await run('usr_me', 'steps');
+  const st = (await call('overview', {})).steps[0];
+  await run('usr_me', `revert ${st.id}`);
+  await run('usr_me', 'get team-board settings/board');
+  await run('tok_ci', 'set team-board cards/c10 {"text":"ci"}');
+  // sample approval
+  await run('usr_me', `call blog summarize {"id":"${draftId}"}`);
+  await run('usr_me', 'approve journal 3 sample');
+  await run('usr_me', `call blog summarize {"id":"${draftId}"}`);
+  // crash fault
+  await run('usr_me', 'fault crash blog');
+  await run('usr_me', `call blog draft {"title":"lost?"}`);
+  await run('usr_me', `call blog draft {"title":"after crash"}`);
+  await run('usr_me', 'actors');
+
+  // ---- the counter + counter-display scenario that failed for the agent
+  const W = (store, path, text) => run('usr_me', `write ${store} ${path}`, text);
+  await run('usr_me', 'new counter');
+  await W('counter', 'app.json', JSON.stringify({ name: 'Counter', capabilities: { db: { rules: [{ path: 'counter', read: 'view', write: 'admin' }] }, user: {} } }));
+  await W('counter', 'actor.js', `const db = use('db');
+const bump = (ctx, f) => { const cur = db.doc('counter/main').get(); const value = f(cur.exists ? cur.data().value : 0); db.doc('counter/main').set({ value, by: ctx.principal.id }); return { value }; };
+defineActor({
+  setup() { if (!db.doc('counter/main').get().exists) db.doc('counter/main').set({ value: 0 }); },
+  actions: {
+    increment(ctx) { ctx.need('interact'); if (ctx.principal.kind === 'guest') throw Object.assign(new Error('guests can only decrement'), { code: 'permission_denied' }); return bump(ctx, v => v + 1); },
+    decrement(ctx) { ctx.need('interact'); return bump(ctx, v => v - 1); },
+    double(ctx) { if (ctx.principal.id !== 'usr_ramon') throw Object.assign(new Error('only Ramon doubles'), { code: 'permission_denied' }); return bump(ctx, v => v * 2); },
+  },
+});`);
+  await W('counter', 'index.html', '<!DOCTYPE html><html><body><div id="v">…</div><scr'+'ipt>(async()=>{const db=await claude.use("db");db.doc("counter/main").onSnapshot(s=>{document.getElementById("v").textContent=s.exists?s.data().value:0;});})();</scr'+'ipt></body></html>');
+  await run('usr_me', 'publish counter first');
+  await run('usr_me', 'new global-counter --app counter');
+  await run('usr_me', 'grant global-counter *anyone view');
+  await run('usr_me', 'grant global-counter *signed-in interact');
+  await run('usr_me', 'grant global-counter counter-view view');   // the agent's mistake: should be refused with a hint
+  await run('usr_me', 'new counter-display');
+  await W('counter-display', 'app.json', JSON.stringify({ name: 'Counter display', capabilities: { db: { rules: [{ path: 'shown', read: 'view', write: 'admin' }] } } }));
+  await W('counter-display', 'actor.js', `const stores = use('stores'), db = use('db');
+const copy = () => { const s = stores.open('global-counter').get('counter/main'); db.doc('shown/main').set({ value: s.exists ? s.data().value : 0 }); };
+defineActor({
+  setup() { copy(); },
+  on: { 'store:global-counter doc:counter/*'(ctx, commit) { copy(); } },
+});`);
+  await W('counter-display', 'index.html', '<!DOCTYPE html><html><body><div id="v">…</div><scr'+'ipt>(async()=>{const db=await claude.use("db");db.doc("shown/main").onSnapshot(s=>{document.getElementById("v").textContent=s.exists?s.data().value:0;});})();</scr'+'ipt></body></html>');
+  await run('usr_me', 'publish counter-display first');
+  await run('usr_me', 'new counter-view --app counter-display');
+  await run('usr_me', 'grant counter-view *anyone view');
+  await run('usr_me', 'can app:counter-display global-counter doc.read counter/main');
+  await run('usr_me', 'get counter-view shown/main');
+  await run('usr_ramon', 'call global-counter increment');
+  await run('usr_ramon', 'call global-counter increment');
+  await run('usr_ramon', 'call global-counter double');
+  await run('gst_ana', 'call global-counter increment');
+  await run('usr_me', 'grant global-counter gst_ana interact');
+  await run('gst_ana', 'call global-counter decrement');
+  await sleep(200);
+  await run('usr_me', 'get counter-view shown/main');
+  await run('usr_me', 'log counter-view --n 4');
+  // a private store: the display can't follow it without a grant
+  await run('usr_me', 'revoke global-counter *anyone');
+  await run('usr_ramon', 'call global-counter increment');
+  await sleep(100);
+  await run('usr_me', 'actors');
+  await run('usr_me', 'grant global-counter app:counter-display view');
+  await sleep(200);
+  await run('usr_me', 'get counter-view shown/main');
+  await call('startStep', { as: 'tok_agent', message: 'x' });
+  await run('tok_agent', 'step begin nested');
+  await call('endStep', { as: 'tok_agent' });
+  const ex = await call('exportImages', {});
+  log.push('export: ' + Object.entries(ex.stores).map(([k, v]) => `${k} ${(v.length / 1024).toFixed(0)}K`).join(', '));
+  const ov2 = await call('boot', { images: ex.stores });
+  await run('usr_me', 'stores');
+  await run('usr_me', 'sql blog "SELECT count(*) AS n FROM posts"');
+  const turn = (await call('turns', {})).slice(-1)[0];
+  window.__done = { ok: true, log };
+} catch (e) { window.__done = { error: e.message || JSON.stringify(e), stack: e.stack, log }; }
+</script></body></html>

@@ -1,0 +1,37 @@
+ghost: Agent split bottom
+after split: [
+  'Start here,Site,Stores,Data,Code,Log,Actor @0,52 834x423',
+  'Agent @0,476 834x423',
+  'Turns,Console,Access @835,52 604x848'
+]
+ghost: Console move here
+after move: [
+  'Start here,Console,Site,Stores,Data,Code,Log,Actor @0,52 834x423',
+  'Agent @0,476 834x423',
+  'Turns,Access @835,52 604x848'
+]
+console lines kept: true
+ghost: Turns add as a tab
+after join: [
+  'Start here,Console,Site,Stores,Data,Code,Log,Actor @0,52 834x423',
+  'Agent,Turns @0,476 834x423',
+  'Access @835,52 604x848'
+]
+after close: [
+  'Start here,Console,Site,Stores,Data,Code,Log,Actor @0,52 834x423',
+  'Agent,Turns @0,476 834x423',
+  ' @835,52 604x848'
+]
+after gutter: [
+  'Start here,Console,Site,Stores,Data,Code,Log,Actor @0,52 634x423',
+  'Agent,Turns @0,476 634x423',
+  ' @635,52 804x848'
+]
+site frame posts: 2
+after reload: [
+  'Start here,Console,Site,Stores,Data,Code,Log,Actor @0,52 1440x423',
+  'Agent,Turns @0,476 1440x423'
+]
+plus menu: Access
+levels, grants, approvals, can()
+errors: []

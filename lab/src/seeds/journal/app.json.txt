@@ -1,0 +1,19 @@
+{
+  "name": "Journal",
+  "description": "A small blog. Posts live in a SQL table; an actor drafts, publishes and keeps stats; pages read through exposed views.",
+  "capabilities": {
+    "db": { "rules": [
+      { "path": "stats", "read": "view", "write": "admin" },
+      { "path": "digests", "read": "view", "write": "admin" }
+    ] },
+    "user": {},
+    "room": { "topics": { "published": "admin" } }
+  },
+  "slop": {
+    "sql": { "expose": {
+      "published_posts": { "read": "view" },
+      "my_drafts": { "read": "interact" }
+    } },
+    "sample": {}
+  }
+}

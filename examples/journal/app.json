@@ -1,0 +1,13 @@
+{
+  "title": "Journal",
+  "actor": "actor.js",
+  "type": "journal",
+  "capabilities": {
+    "db": { "rules": [
+      { "path": "stats", "read": "view", "write": "admin" },
+      { "path": "digests", "read": "view", "write": "admin" }
+    ] },
+    "user": { "scopes": ["profile"] },
+    "room": { "topics": { "published": "admin" } }
+  }
+}

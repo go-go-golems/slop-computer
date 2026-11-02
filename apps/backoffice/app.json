@@ -1,0 +1,6 @@
+{
+  "title": "Back office",
+  "actor": "actor.js",
+  "capabilities": { "user": { "scopes": ["profile"] }, "db": { "rules": [{ "path": "ui", "read": "view", "write": "admin" }] } },
+  "slop": { "modules": ["system"] }
+}

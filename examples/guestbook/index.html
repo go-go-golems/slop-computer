@@ -1,0 +1,36 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Guestbook</title>
+<link rel="stylesheet" href="style.css">
+</head>
+<body>
+<h1>Guestbook</h1>
+<form id="f"><input name="text" placeholder="Say something" autocomplete="off" maxlength="500"><button>Sign</button></form>
+<p id="msg" role="status"></p>
+<ul id="entries"></ul>
+<script>
+(async () => {
+  const $ = (id) => document.getElementById(id);
+  const esc = (s) => String(s == null ? '' : s).replace(/[&<>"]/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' })[c]);
+  const [db, user, slop] = await Promise.all(['db', 'user', 'slop'].map((n) => claude.use(n)));
+  const me = user ? await user.me() : null;
+  $('f').hidden = !me || !['interact', 'admin', 'owner'].includes(me.level);
+  const names = {};
+  db.collection('entries').orderBy('at', 'desc').limit(50).onSnapshot(async (s) => {
+    const rows = s.docs.map((d) => d.data());
+    const missing = [...new Set(rows.map((r) => r.by))].filter((id) => !(id in names));
+    if (missing.length) Object.entries(await user.profiles(missing)).forEach(([id, p]) => { names[id] = p.name || 'A guest'; });
+    $('entries').innerHTML = rows.map((r) => `<li><p>${esc(r.text)}</p><span>${esc(names[r.by] || 'A guest')} · ${new Date(r.at).toLocaleString()}</span>${r.reply ? `<p class="reply">${esc(r.reply)}</p>` : ''}</li>`).join('') || '<li class="dim">Be the first to sign.</li>';
+  });
+  $('f').onsubmit = async (e) => {
+    e.preventDefault();
+    try { await slop.actions.sign({ text: e.target.text.value }); e.target.reset(); $('msg').textContent = ''; }
+    catch (err) { $('msg').textContent = `${err.code || 'error'}: ${err.message}`; }
+  };
+})();
+</script>
+</body>
+</html>

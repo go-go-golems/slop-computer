@@ -1,0 +1,33 @@
+Done. The journal store now supports tags.
+
+## Files changed (in `./journal`)
+
+- **`sql/002_post_tags.sql`** (new) — `post_tags(post_id, tag, position)` table with `PRIMARY KEY (post_id, tag)` and a `post_tags_tag` index. `sql/001_posts.sql` was not touched.
+- **`actor.js`** — tag normalization (lowercase, `#`/spaces handled, dedupe, ≤10 tags, ≤40 chars), `draft` accepts `tags` as a comma string or array and inserts rows; `posts` and `drafts` attach a `tags` array; new `tagged(ctx, {tag})` action (view level) returns published posts joined on the tag; `/feed.json` items include tags too.
+- **`app.js`** — `tags` input sent with new drafts; posts render tags as small label buttons; clicking a tag calls `tagged`, re-clicking the active tag (or “Show all”) restores all posts.
+- **`index.html`** — tags field in the compose form and a filter bar above the post list.
+- **`style.css`** — label and filter-bar styles.
+
+Pushed to store `journal` (rev 4, app snapshot `n: 2`).
+
+## Checks run
+
+- `slop app status journal` → `broken: ""`, `n: 2` (new snapshot).
+- `slop sql schema journal` → shows `post_tags` table + `post_tags_tag` index alongside the untouched 001 tables/views.
+- `slop call journal draft` with `"tags":"notes, Testing, notes"` → `{id, tags:["notes","testing"]}` (deduped/normalized).
+- `slop call journal publish` → `{ok:true}`.
+- `slop call journal posts` → post with `"tags":["notes","testing"]`.
+- `slop call journal tagged '{"tag":"testing"}'` → that post; `'{"tag":"nope"}'` → `[]`; `'{"tag":"  TESTING "}'` and `"Deep Work"` normalize correctly.
+- Regression checks: untagged draft works (`tags: []`), `drafts` still lists, `slowPublish` (1.5 s) still commits/republishes with tags intact, `stats/main` reactor still updates (`published: 2, drafts: 1`), `/feed.json` returns 200 with tags, `slop app logs journal` empty.
+- `curl http://apps.localhost:18300/x/journal/` → 200 (shell page titled Journal); `/x/journal/feed.json` → 200.
+- Pulled the snapshot to a temp dir: its tree matches `./journal` exactly; 001 and `app.json` unchanged.
+
+Note: an optional `slop sql query` to inspect raw rows was refused with `permission_denied: this token lacks the admin scope`; I did not work around it. Verifying rows directly would need admin scope. Test posts (2 published, 1 draft) remain in the store since the app has no delete action.
+
+<summary>
+This turn: Added SQL-backed tags to the journal app, pushed it, and verified all required checks.
+Session so far: Pulled reference/journal, added 002 migration, tag logic/actions, tag labels + filtering UI, pushed snapshot 2.
+Issues: Optional `slop sql query` refused (token lacks admin scope); not worked around.
+Next steps: None required; test posts remain in store.
+</summary>
+exit 0

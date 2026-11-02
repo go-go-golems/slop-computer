@@ -1,0 +1,63 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Workshop</title>
+<link rel="stylesheet" href="styles.css">
+</head>
+<body>
+<header class="top">
+  <b class="brand">Workshop</b>
+  <span id="crumb" class="dim"></span>
+  <span class="sp"></span>
+  <span id="refs" class="dim"></span>
+</header>
+<main class="grid">
+  <nav class="col stores">
+    <h2>Stores</h2>
+    <ul id="stores" class="list"><li class="dim">Loading…</li></ul>
+    <h2 id="snaps-h" hidden>Snapshots</h2>
+    <ul id="snaps" class="list"></ul>
+    <button id="publish" class="btn primary" hidden></button>
+  </nav>
+  <section class="col stage">
+    <div class="bar">
+      <span id="at" class="dim">Pick a store.</span>
+      <span class="seg"><button id="v-preview" class="btn" aria-pressed="true" disabled>Preview</button><button id="v-files" class="btn" aria-pressed="false" disabled>Files</button></span>
+      <span class="sp"></span>
+      <button id="pick" class="btn" aria-pressed="false" disabled>⊕ Comment on an element</button>
+    </div>
+    <iframe id="frame" title="Preview" referrerpolicy="no-referrer"></iframe>
+    <div id="files" class="files" hidden>
+      <div class="fcol">
+        <ul id="flist" class="list"></ul>
+      </div>
+      <div class="viewer">
+        <code id="fpath" class="dim">Pick a file.</code>
+        <div class="row">
+          <input id="fmsg" class="inp" placeholder="What changed (optional)" autocomplete="off">
+          <label class="btn">Add files…<input id="fadd" type="file" multiple hidden></label>
+          <label class="btn">Push a folder…<input id="fdir" type="file" webkitdirectory hidden></label>
+          <button id="frm" type="button" class="btn" disabled>Remove</button>
+        </div>
+        <div id="fconfirm" class="row confirm" hidden><span id="fcq"></span><span class="sp"></span>
+          <button id="fcyes" type="button" class="btn primary"></button><button id="fcno" type="button" class="btn">Cancel</button></div>
+        <pre id="fview" class="fview"></pre>
+      </div>
+    </div>
+  </section>
+  <aside class="col threads">
+    <h2>Threads <span id="count" class="dim"></span></h2>
+    <form id="composer" class="card" hidden>
+      <p class="anchor" id="anchor"></p>
+      <textarea id="ctext" rows="3" placeholder="What should change here?" required></textarea>
+      <div class="row"><button class="btn primary">Comment</button><button type="button" id="cancel" class="btn">Cancel</button></div>
+    </form>
+    <ol id="threads" class="threadlist"></ol>
+  </aside>
+</main>
+<p id="msg" class="msg" role="status"></p>
+<script src="app.js"></script>
+</body>
+</html>

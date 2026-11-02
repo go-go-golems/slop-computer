@@ -1,0 +1,18 @@
+shell up in 1023 ms
+shot 01-start
+posts: [ 'Turns, not requests', 'Stores are the unit' ]
+shot 02-site
+drafts: [ 'Hello from the lab', 'Half-written thoughts on mounts' ]
+ana sees: [ 'Hello from the lab', 'Turns, not requests', 'Stores are the unit' ] | ana stats: 3 published · 1 drafts · 46 words | ana compose hidden: false
+shot 03-site-two
+shot 04-turns
+shot 05-console
+shot 06-access
+shot 07-data
+shot 08-code
+shot 09-actor
+shot 10-agent
+shot 11-stores
+kim cards: [ "First card on Kim's board" ]
+shot 12-tracker
+errors: []

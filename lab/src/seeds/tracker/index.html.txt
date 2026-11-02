@@ -1,0 +1,94 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Tracker</title>
+<style>
+  body { font: 14px/1.45 Arial, Helvetica, sans-serif; color: #1a1a1a; background: #fff; margin: 0; padding: 16px 18px 40px; }
+  header { display: flex; align-items: baseline; gap: 12px; border-bottom: 1px solid #1a1a1a; padding-bottom: 8px; margin-bottom: 12px; }
+  h1 { font-size: 22px; margin: 0; }
+  h2 { font-size: 12px; text-transform: uppercase; letter-spacing: 0.06em; color: #737373; margin: 0 0 8px; }
+  .sp { flex: 1; } .dim { color: #737373; font-size: 12px; }
+  .cols { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 12px; }
+  .col { border-top: 1px solid #d6d6d6; padding-top: 8px; min-height: 120px; }
+  .card { border: 1px solid #d6d6d6; padding: 8px 9px; margin-bottom: 8px; background: #fff; }
+  .card .t { font-weight: 700; } .card .by { color: #737373; font-size: 12px; }
+  .card .row { display: flex; gap: 4px; margin-top: 6px; }
+  button { font: inherit; font-size: 12px; background: #fff; border: 1px solid #1a1a1a; padding: 3px 9px; cursor: pointer; }
+  button:hover { background: #f6f6f6; } button:disabled { color: #a3a3a3; border-color: #ededed; cursor: default; }
+  input, textarea { font: inherit; border: 1px solid #d6d6d6; padding: 6px 8px; box-sizing: border-box; }
+  form { display: flex; gap: 6px; margin: 10px 0 14px; } form input { flex: 1; }
+  .mine { margin-top: 18px; border-top: 1px solid #ededed; padding-top: 10px; }
+  .mine textarea { width: 100%; min-height: 64px; }
+  .msg { color: #737373; font-size: 12px; min-height: 1.4em; } .msg.bad { color: #e2001a; }
+</style>
+</head>
+<body>
+<header><h1 id="name">Board</h1><button id="rename" hidden>Rename</button><span class="sp"></span><span id="who" class="dim"></span></header>
+<form id="add"><input id="text" placeholder="A new card" autocomplete="off"><button>Add</button></form>
+<div class="cols">
+  <div class="col"><h2>To do</h2><div id="todo"></div></div>
+  <div class="col"><h2>Doing</h2><div id="doing"></div></div>
+  <div class="col"><h2>Done</h2><div id="done"></div></div>
+</div>
+<div class="mine"><h2>Your notes · only you can read these</h2><textarea id="notes" placeholder="Private to you, even from the owner"></textarea></div>
+<p id="msg" class="msg" role="status"></p>
+<script>
+(async () => {
+  const $ = (id) => document.getElementById(id);
+  const say = (t, bad) => { $('msg').textContent = t; $('msg').className = 'msg' + (bad ? ' bad' : ''); };
+  const esc = (s) => String(s == null ? '' : s).replace(/[&<>"]/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' })[c]);
+  const COLS = ['todo', 'doing', 'done'];
+  const [db, user] = await Promise.all([claude.use('db'), claude.use('user')]);
+  if (!db) { say('No database in this view.', true); return; }
+  const me = user ? await user.me() : null;
+  const uid = user ? await user.id() : null;
+  $('who').textContent = me ? `${me.name || me.id} · ${me.level}` : '';
+  const canWrite = me ? ['interact', 'admin', 'owner'].includes(me.level) : false;
+  if (!canWrite) { $('add').hidden = true; }
+  if (user && await user.canEdit()) $('rename').hidden = false;
+
+  db.doc('settings/board').onSnapshot((s) => { $('name').textContent = (s.data() || {}).name || 'Board'; });
+  $('rename').onclick = async () => {
+    const name = window.__lab_prompt ? await window.__lab_prompt('Board name', $('name').textContent) : null;
+    if (name) db.doc('settings/board').set({ name }).catch((e) => say(e.message, true));
+  };
+
+  const names = {};
+  db.collection('cards').orderBy('at').onSnapshot(async (snap) => {
+    const ids = [...new Set(snap.docs.map((d) => d.data().by).filter((x) => x && !(x in names)))];
+    if (ids.length && user) Object.entries(await user.profiles(ids)).forEach(([id, p]) => { names[id] = p.name || 'Someone'; });
+    for (const c of COLS) $(c).innerHTML = '';
+    for (const d of snap.docs) {
+      const c = d.data(); const i = COLS.indexOf(c.col);
+      const el = document.createElement('div'); el.className = 'card';
+      el.innerHTML = `<div class="t">${esc(c.text)}</div><div class="by">${esc(names[c.by] || '')}</div>` + (canWrite ? `<div class="row"><button data-m="-1" ${i <= 0 ? 'disabled' : ''}>←</button><button data-m="1" ${i >= 2 ? 'disabled' : ''}>→</button><button data-x>Remove</button></div>` : '');
+      el.onclick = async (ev) => {
+        const b = ev.target.closest('button'); if (!b) return;
+        try {
+          if (b.dataset.x !== undefined) await db.doc('cards/' + d.id).delete();
+          else await db.doc('cards/' + d.id).update({ col: COLS[i + Number(b.dataset.m)] });
+        } catch (e) { say(`${e.code}: ${e.message}`, true); }
+      };
+      $(COLS[Math.max(0, i)]).appendChild(el);
+    }
+  }, (e) => say(e.message, true));
+
+  $('add').onsubmit = async (ev) => {
+    ev.preventDefault();
+    const text = $('text').value.trim(); if (!text) return;
+    try { await db.collection('cards').add({ text, col: 'todo', by: uid, at: Date.now() }); $('text').value = ''; }
+    catch (e) { say(`${e.code}: ${e.message}`, true); }
+  };
+
+  if (uid) {
+    const notes = db.doc(`data/users/${uid}/notes`);
+    const s = await notes.get(); $('notes').value = s.exists ? s.data().text : '';
+    let timer = null;
+    $('notes').oninput = () => { clearTimeout(timer); timer = setTimeout(() => notes.set({ text: $('notes').value }).then(() => say('Notes saved.')).catch((e) => say(`${e.code}: ${e.message}`, true)), 600); };
+  } else $('notes').disabled = true;
+})();
+</script>
+</body>
+</html>
