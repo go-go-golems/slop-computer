@@ -3,7 +3,6 @@ package server
 import (
 	"context"
 	"encoding/json"
-	"os"
 	"path/filepath"
 	"strings"
 	"testing"
@@ -12,24 +11,10 @@ import (
 	"github.com/go-go-golems/slop-computer/pkg/store"
 )
 
-// exampleFiles reads examples/<name> as files.push entries.
+// exampleFiles reads apps/examples/<name> as files.push entries.
 func exampleFiles(t *testing.T, name string) []any {
 	t.Helper()
-	root := filepath.Join("..", "..", "examples", name)
-	m := map[string]string{}
-	err := filepath.WalkDir(root, func(p string, d os.DirEntry, err error) error {
-		if err != nil || d.IsDir() {
-			return err
-		}
-		b, err := os.ReadFile(p)
-		rel, _ := filepath.Rel(root, p)
-		m[filepath.ToSlash(rel)] = string(b)
-		return err
-	})
-	if err != nil {
-		t.Fatal(err)
-	}
-	return files(m)
+	return appDir(t, filepath.Join("examples", name))
 }
 
 func docBody(h *harness, tok, storeID, path string) map[string]any {
@@ -41,7 +26,7 @@ func docBody(h *harness, tok, storeID, path string) map[string]any {
 	return b
 }
 
-// P3 exit: examples/journal works — drafts per person through a view that
+// P3 exit: apps/examples/journal works — drafts per person through a view that
 // uses slop_principal(), publishing, a publish across an await, the feed
 // route, the stats reactor, and a missed alarm that fires once, late.
 func TestJournalExample(t *testing.T) {
@@ -182,7 +167,7 @@ defineActor({ on: { 'doc:items/*'(ctx, commit) {
 	}
 }
 
-// P3 exit: examples/guestbook — a guest signs through the page.
+// P3 exit: apps/examples/guestbook — a guest signs through the page.
 func TestGuestbookExample(t *testing.T) {
 	h := newHarness(t)
 	admin := h.tokenFor("admin@example.com", "read", "write", "admin")

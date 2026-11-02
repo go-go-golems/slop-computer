@@ -14,8 +14,10 @@
 
 - `cmd/`: CLI commands and entry points
 - `pkg/`: Library code organized by domain
-- `examples/`: Example configurations and usage
-- `doc/`: Documentation
+- `apps/`: apps pushed as stores (`apps/examples/`, `apps/upstream/` for unmodified Claude artifacts)
+- `web/`: frontend sources whose build output is committed and embedded (`make runtime`, `make admin`)
+- `doc/`: Documentation (the v3 design is `doc/design/slop-v3.md`)
+- `scripts/`: deployment scripts
 - `ttmp/YYYY-MM-DD/`: this is where all temporary documentation as well as debugging logs and other reports go
 
 <runningProcessesGuidelines>

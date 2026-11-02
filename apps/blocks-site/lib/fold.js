@@ -1,5 +1,5 @@
 // The fold: a workspace's stored ops replayed into a fresh kernel, exactly
-// as the editor's Net.load does (slop-computer web/blocks/src/blocks.js),
+// as the editor's Net.load does (slop-computer apps/upstream/blocks/src/blocks.js),
 // so that a published page is what its author sees. The source is a store
 // handle (use('stores').open(alias)) or anything with the same docs API.
 const { H } = require('./blocks.js');

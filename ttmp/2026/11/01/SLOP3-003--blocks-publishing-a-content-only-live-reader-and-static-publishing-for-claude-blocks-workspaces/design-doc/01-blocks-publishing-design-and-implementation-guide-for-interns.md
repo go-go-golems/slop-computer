@@ -12,11 +12,11 @@ DocType: design-doc
 Intent: long-term
 Owners: []
 RelatedFiles:
-    - Path: abs:///home/manuel/workspaces/2026-10-28/slop-computer/slop-computer/web/blocks/src/blocks-kit.js
+    - Path: repo://apps/upstream/blocks/src/blocks-kit.js
       Note: prose grammar and block kinds' positional props; tokens() loops on nested markup
-    - Path: abs:///home/manuel/workspaces/2026-10-28/slop-computer/slop-computer/web/blocks/src/blocks.js
+    - Path: repo://apps/upstream/blocks/src/blocks.js
       Note: 'Net.load (the fold), Pages, Markdown.page: the reference implementations ported'
-    - Path: abs:///home/manuel/workspaces/2026-10-28/slop-computer/slop-computer/web/blocks/src/hypha.js
+    - Path: repo://apps/upstream/blocks/src/hypha.js
       Note: the Kernel the fold replays ops into
     - Path: repo://apps/blocks-site/actor.js
       Note: 'the app: reader routes, settings forms, publish'

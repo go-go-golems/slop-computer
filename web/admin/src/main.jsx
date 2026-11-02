@@ -1,5 +1,5 @@
 // slop's back office: one window, a strip of surfaces, the lab's design
-// system (lab/dist/styles.css).
+// system (kiln.css).
 import React, { useCallback, useEffect, useState } from 'react';
 import { createRoot } from 'react-dom/client';
 import { hosts as loadHosts, session, signIn, signOut } from './api.js';

@@ -62,7 +62,7 @@ The user then said: "oh omg, ok, rebase main, and let's do it again, from scratc
   (`use()` catalog, `stores.open`), `pkg/actor/sysreact.go`,
   `web/runtime/src/index.ts` and `caps.ts` (page capabilities,
   `slop.stores.open`), `apps/backoffice/app.json` (the `system` module),
-  `design/slop-v3-design.md` §1, §5.5–5.8, §8.
+  `doc/design/slop-v3.md` §1, §5.5–5.8, §8.
 - Wrote the design doc from scratch.
 
 ### Why

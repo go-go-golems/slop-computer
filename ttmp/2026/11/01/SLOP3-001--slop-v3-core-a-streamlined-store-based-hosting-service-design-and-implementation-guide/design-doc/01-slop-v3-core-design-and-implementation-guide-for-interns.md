@@ -20,15 +20,15 @@ RelatedFiles:
       Note: Stripe Checkout, Portal, webhook ingest and worker copied into pkg/billing/stripe
     - Path: abs:///home/manuel/workspaces/2026-10-28/slop-computer/slop-computer/pkg/server/live.go
       Note: SLOP-011 live sites, guests and handoff to port
-    - Path: repo://design/slop-v3-design.md
+    - Path: repo://doc/design/slop-v3.md
       Note: The full slop-v3 design this guide cuts down
-    - Path: repo://lab/dist/styles.css
+    - Path: repo://ttmp/2026/10/31/SLOP3-000--slop-v3-design-session-archive-31-october-2026-lab-transcripts-design-pdf/sources/lab/dist/styles.css
       Note: The Form Skate design system, the back office's look
-    - Path: repo://lab/src/kernel/actors.js
+    - Path: repo://ttmp/2026/10/31/SLOP3-000--slop-v3-design-session-archive-31-october-2026-lab-transcripts-design-pdf/sources/lab/src/kernel/actors.js
       Note: Turns, continuations and reactors to port into pkg/actor
-    - Path: repo://lab/src/kernel/sqlite.js
+    - Path: repo://ttmp/2026/10/31/SLOP3-000--slop-v3-design-session-archive-31-october-2026-lab-transcripts-design-pdf/sources/lab/src/kernel/sqlite.js
       Note: Authorizer policy to port into pkg/sqlpolicy
-    - Path: repo://lab/src/seeds/journal/actor.js.txt
+    - Path: repo://ttmp/2026/10/31/SLOP3-000--slop-v3-design-session-archive-31-october-2026-lab-transcripts-design-pdf/sources/lab/src/seeds/journal/actor.js.txt
       Note: Example actor; becomes examples/journal
 ExternalSources: []
 Summary: 'What slop v3 core is, how its parts fit together, and how to build it: stores, apps, actors, mounts, audiences, the app policy matrix, LLM budgets, the verb table with CLI/HTTP/eval, the back office, and a phased plan reusing slop-computer, francois and go-go-goja.'

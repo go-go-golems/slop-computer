@@ -2,7 +2,7 @@
 # Builds Pinup as a slop app folder, dist/app: upstream build.js's
 # dist/pinup.html (the published artifact, unchanged) inside the document
 # skeleton the Artifact host wrapped it in, plus app.json (store type
-# design). The result is what `slop push web/pinup/dist/app --store pinup`
+# design). The result is what `slop push apps/upstream/pinup/dist/app --store pinup`
 # stores. Needs vendor/ installed (cd vendor && npm ci).
 set -eu
 cd "$(dirname "$0")"
@@ -17,4 +17,4 @@ rm -rf dist/app && mkdir -p dist/app
 	printf '\n%s\n' '</body></html>'
 } >dist/app/index.html
 cp app.json dist/app/
-echo "built web/pinup/dist/app: $(wc -c <dist/app/index.html) bytes (pinup.html sha256 $(sha256sum dist/pinup.html | cut -c1-16))"
+echo "built apps/upstream/pinup/dist/app: $(wc -c <dist/app/index.html) bytes (pinup.html sha256 $(sha256sum dist/pinup.html | cut -c1-16))"

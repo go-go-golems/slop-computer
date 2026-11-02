@@ -12,7 +12,7 @@ checked against them.
 | [people-and-collaboration.md](people-and-collaboration.md) | `user`, `room`, `comments`, `sendToClaudeSession` |
 | [sample-spec.md](sample-spec.md) | `sample`, `sample.json`, `sample.limits`, tools, errors |
 
-Claude Blocks (`web/blocks`) and Pinup (`web/pinup`) were written as
+Claude Blocks (`apps/upstream/blocks`) and Pinup (`apps/upstream/pinup`) were written as
 claude.ai Artifacts against this contract and run on slop unchanged: every
 host call goes through `claude.use(name)`, and both apps treat `null` as
 "this feature is off". The table below is what a page sees differently on
@@ -43,7 +43,7 @@ carry over.
 
 ## Blocks and Pinup on slop
 
-**Blocks** (`web/blocks`, store type `blocks`, opened at `/b/<workspace>`):
+**Blocks** (`apps/upstream/blocks`, store type `blocks`, opened at `/b/<workspace>`):
 the workspace's Hypha log lives in the store's documents (`chunks/<id>`,
 one per open tab, plus the `meta/snap` checkpoint and its `snaps/*` parts).
 Live ops also travel on the room's `ops` topic, which the manifest opens to
@@ -67,7 +67,7 @@ slop app trust blocks-site workshop
 slop call team-site publish '{"to":"team-static","live":true}'
 ```
 
-**Pinup** (`web/pinup`, store type `design`, opened at `/p/<file>`): one
+**Pinup** (`apps/upstream/pinup`, store type `design`, opened at `/p/<file>`): one
 document per layer (`nodes/<id>`), plus `meta/file` (pages and tokens),
 `feedback/*` and `log/*` (the revertible history). It subscribes to all of
 these with `onSnapshot`. `inbox/*` takes HTML that anyone (a person or

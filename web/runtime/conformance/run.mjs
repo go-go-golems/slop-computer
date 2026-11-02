@@ -2,10 +2,10 @@
 // prints the results; then checks that two tabs on one store see each
 // other's writes, presence and moments. Exits 1 on any failure.
 //
-//   node conformance/run.mjs http://apps.localhost:18300/conformance [email]
+//   node web/runtime/conformance/run.mjs http://apps.localhost:18300/conformance [email]
 //
 // Needs playwright (NODE_PATH) and a --local server with the app mounted:
-//   slop store new rt-conformance && slop push conformance/app --store rt-conformance
+//   slop store new rt-conformance && slop push web/runtime/conformance/app --store rt-conformance
 //   slop mount set apps.localhost:18300 /conformance rt-conformance
 // It signs in through the live host's handoff with the local form, and
 // accepts the shell's consent dialogs as a person would.

@@ -7,7 +7,8 @@ import (
 	"testing"
 )
 
-// appDir reads an app folder of the repository (apps/<name>).
+// appDir reads an app folder of the repository (apps/<name>) as files.push
+// entries.
 func appDir(t *testing.T, name string) []any {
 	t.Helper()
 	root := filepath.Join("..", "..", "apps", name)

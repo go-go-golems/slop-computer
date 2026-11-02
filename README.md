@@ -29,14 +29,14 @@ make build           # ./slop, server and CLI (cgo: SQLite)
 | --- | --- |
 | `cmd/slop` | the binary: `serve` and every verb as a command |
 | `pkg/` | the server (`server`), stores (`store`), actors (`actor`), the system database (`system`), access, verbs, identity (OIDC), LLM access (`llm`), blobs |
-| `web/runtime` | the page runtime (`window.claude`), built into `pkg/server/assets/claude.js` |
-| `web/admin` | the back office, built into `pkg/server/admin/` |
-| `apps/` | apps that ship with slop: the Workshop, the back office as an app, `blocks-site` (Blocks workspaces as web pages) |
-| `web/blocks`, `web/pinup` | Claude Blocks and Pinup, upstream sources built as apps (`make blocks pinup`) |
-| `examples/` | small example apps |
-| `conformance/` | the runtime conformance page and its browser runner |
+| `apps/` | every app pushed as a store: the Workshop, the back office as an app (`/office`) and `blocks-site`, which ship with slop |
+| `apps/examples/` | small example apps (guestbook, journal, a static site), deployed and used by the tests |
+| `apps/upstream/` | Claude Blocks and Pinup: unmodified claude.ai artifacts with their build steps (`make blocks pinup`) |
+| `web/runtime` | the page runtime (`window.claude`), built into `pkg/server/assets/claude.js`; `conformance/` checks it in a browser (`make conformance`) |
+| `web/admin` | the back office, built into `pkg/server/admin/` (`/admin`) and `apps/backoffice/` (`make admin`) |
+| `doc/` | the v3 design (`doc/design/slop-v3.md`), the claude.ai artifact guides (`doc/claude-apis/`), production notes |
+| `scripts/` | `deploy-apps.sh`: every app and example with its mounts (`make deploy-apps`) |
 | `ttmp/` | tickets: designs, intern guides and diaries (v3: `ttmp/2026/11/01/SLOP3-*`) |
-| `design/`, `lab/`, `transcripts/`, `references/` | the v3 design workspace and its in-browser lab (`design/WORKSPACE.md`) |
 
 The intern guide to v3 is
 `ttmp/2026/11/01/SLOP3-001--…/design-doc/01-slop-v3-core-design-and-implementation-guide-for-interns.md`.

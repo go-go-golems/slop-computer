@@ -12,7 +12,7 @@ DocType: design-doc
 Intent: long-term
 Owners: []
 RelatedFiles:
-    - Path: repo://design/slop-v3-design.md
+    - Path: repo://doc/design/slop-v3.md
       Note: The v3 design this review measures; sections 4 (store), 8 (events), 9 (access), 10 (serving)
     - Path: repo://doc/claude-apis/README.md
       Note: What slop's runtime serves differently from the claude.ai artifact contract
@@ -516,7 +516,7 @@ Each phase is useful without the next.
 
 ## 11. References
 
-- `design/slop-v3-design.md` §4 (the store), §5.8 (two kinds of data), §8
+- `doc/design/slop-v3.md` §4 (the store), §5.8 (two kinds of data), §8
   (events), §9 (identity and access), §10 (serving)
 - `doc/claude-apis/` — the claude.ai artifact guides, and slop's
   differences in `README.md`

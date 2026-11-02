@@ -2,7 +2,7 @@
 // (SLOP-009 phase 4 and 5 exits): an agent completes the chat protocol with
 // slop data, two tabs edit one workspace, a reload converges, a 3,000-op
 // session checkpoints, and diff sync is measured.
-//   SLOP_SERVER=… SLOP_TOKEN=… SLOP_BIN=slop node web/blocks/test/live.js <workspace>
+//   SLOP_SERVER=… SLOP_TOKEN=… SLOP_BIN=slop node apps/upstream/blocks/test/live.js <workspace>
 // Needs blocks pushed, the workspace created with app = blocks (empty),
 // local mode, playwright on NODE_PATH.
 const { execFileSync } = require('child_process');
