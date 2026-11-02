@@ -42,7 +42,6 @@ func capOf(a Audience) rt.Level {
 	return rt.LevelNone
 }
 
-
 // Checker answers access questions against system.db.
 type Checker struct {
 	Sys *system.DB
