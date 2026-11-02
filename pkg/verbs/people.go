@@ -5,12 +5,13 @@ import (
 	"errors"
 
 	"github.com/go-go-golems/slop-computer/pkg/access"
+	"github.com/go-go-golems/slop-computer/pkg/authz"
 	"github.com/go-go-golems/slop-computer/pkg/system"
 )
 
 func init() {
 	Register(
-		&Verb{Name: "whoami", Doc: "Who this call acts as: person, role, audience, token and scopes.", Scope: Read,
+		&Verb{Name: "whoami", Doc: "Who this call acts as: person, role, audience, token and scopes.", Scope: Read, Action: authz.Account,
 			Run: func(ctx context.Context, e *Env, p *access.Principal, a Args) (any, error) {
 				out := map[string]any{"kind": p.Kind, "id": p.ID(), "via": p.ViaLabel()}
 				if p.Person != nil {
@@ -22,7 +23,7 @@ func init() {
 				}
 				return out, nil
 			}},
-		&Verb{Name: "token.ls", Doc: "List your API tokens (admins: --all for everyone's).", Scope: Read,
+		&Verb{Name: "token.ls", Doc: "List your API tokens (admins: --all for everyone's).", Scope: Read, Action: authz.Account,
 			Args: []Arg{{Name: "all", Type: "bool", Doc: "every person's tokens (admins)"}},
 			Run: func(ctx context.Context, e *Env, p *access.Principal, a Args) (any, error) {
 				who := p.ID()
@@ -34,7 +35,7 @@ func init() {
 				}
 				return e.Sys.Tokens(ctx, who)
 			}},
-		&Verb{Name: "token.new", Doc: "Make an API token; its secret is shown once.", Scope: Write,
+		&Verb{Name: "token.new", Doc: "Make an API token; its secret is shown once.", Scope: Write, Action: authz.Account,
 			Args: []Arg{{Name: "name", Type: "string", Required: true, Pos: 1}, {Name: "scopes", Type: "string", Doc: "comma-separated: read,write,admin"},
 				{Name: "days", Type: "int", Doc: "lifetime in days; 0 = no expiry (not with admin)"}},
 			Run: func(ctx context.Context, e *Env, p *access.Principal, a Args) (any, error) {
@@ -66,7 +67,7 @@ func init() {
 				}
 				return map[string]any{"token": secret, "info": t}, nil
 			}},
-		&Verb{Name: "token.rm", Doc: "Revoke a token.", Scope: Write,
+		&Verb{Name: "token.rm", Doc: "Revoke a token.", Scope: Write, Action: authz.Account,
 			Args: []Arg{{Name: "id", Type: "string", Required: true, Pos: 1}},
 			Run: func(ctx context.Context, e *Env, p *access.Principal, a Args) (any, error) {
 				t, err := e.Sys.Token(ctx, a.S("id"))
@@ -84,7 +85,7 @@ func init() {
 				}
 				return map[string]any{"revoked": t.ID}, nil
 			}},
-		&Verb{Name: "people.ls", Doc: "List people: users, or guests with --kind guest.", Scope: Read, AdminOnly: true,
+		&Verb{Name: "people.ls", Doc: "List people: users, or guests with --kind guest.", Scope: Read, AdminOnly: true, Action: authz.PlatformAdmin,
 			Args: []Arg{{Name: "kind", Type: "string", Doc: "user or guest (default: user)"}},
 			Run: func(ctx context.Context, e *Env, p *access.Principal, a Args) (any, error) {
 				kind := a.S("kind")
@@ -93,7 +94,7 @@ func init() {
 				}
 				return e.Sys.People(ctx, kind)
 			}},
-		&Verb{Name: "people.role", Doc: "Set a user's role: pending, member, admin or disabled.", Scope: Admin, AdminOnly: true,
+		&Verb{Name: "people.role", Doc: "Set a user's role: pending, member, admin or disabled.", Scope: Admin, AdminOnly: true, Action: authz.PlatformAdmin,
 			Args: []Arg{{Name: "id", Type: "string", Required: true, Pos: 1}, {Name: "role", Type: "string", Required: true, Pos: 2}},
 			Run: func(ctx context.Context, e *Env, p *access.Principal, a Args) (any, error) {
 				if a.S("id") == p.ID() && a.S("role") != system.RoleAdmin {
@@ -111,7 +112,7 @@ func init() {
 				}
 				return pp, nil
 			}},
-		&Verb{Name: "log.system", Doc: "The platform log: sign-ups, roles, tokens, grants, mounts, policy.", Scope: Read, AdminOnly: true,
+		&Verb{Name: "log.system", Doc: "The platform log: sign-ups, roles, tokens, grants, mounts, policy.", Scope: Read, AdminOnly: true, Action: authz.PlatformAdmin,
 			Args: []Arg{{Name: "limit", Type: "int"}},
 			Run: func(ctx context.Context, e *Env, p *access.Principal, a Args) (any, error) {
 				return e.Sys.Logs(ctx, int(a.I("limit", 100)))

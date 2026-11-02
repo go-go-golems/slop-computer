@@ -9,6 +9,7 @@ import (
 	"time"
 
 	"github.com/go-go-golems/slop-computer/pkg/access"
+	"github.com/go-go-golems/slop-computer/pkg/authz"
 	"github.com/go-go-golems/slop-computer/pkg/rt"
 	"github.com/go-go-golems/slop-computer/pkg/system"
 )
@@ -38,7 +39,7 @@ func (e *Env) subjectPrincipal(ctx context.Context, subject string) (*access.Pri
 func init() {
 	storeArg := Arg{Name: "store", Type: "string", Pos: 1, Required: true}
 	Register(
-		&Verb{Name: "explain.can", Doc: "Explain whether someone (you, a person, store:<id> or anonymous) holds a level on a store, or may read/write a document path, with the trace.", Scope: Read,
+		&Verb{Name: "explain.can", Doc: "Explain whether someone (you, a person, store:<id> or anonymous) holds a level on a store, or may read/write a document path, with the trace.", Scope: Read, Action: authz.Account,
 			Args: []Arg{storeArg, {Name: "level", Type: "string", Pos: 2, Doc: "view, interact, admin or owner (default view)"},
 				{Name: "subject", Type: "string", Doc: "usr_…, vis_…, an email, store:<id> or anonymous (default: you)"},
 				{Name: "path", Type: "string", Doc: "a document path: apply the app's rules"},
@@ -99,7 +100,7 @@ func init() {
 				}
 				return out, nil
 			}},
-		&Verb{Name: "link.new", Doc: "Make a share link to a store: whoever opens it gets view or interact. The token is shown once.", Scope: Write,
+		&Verb{Name: "link.new", Doc: "Make a share link to a store: whoever opens it gets view or interact. The token is shown once.", Scope: Write, Action: authz.StoreOwner,
 			Args: []Arg{storeArg, {Name: "level", Type: "string", Pos: 2, Doc: "view or interact (default view)"},
 				{Name: "days", Type: "int", Doc: "how long it works (0: until revoked)"},
 				{Name: "url", Type: "string", Doc: "the page's address on a live host, to build the link's URL"}},
@@ -129,7 +130,7 @@ func init() {
 				}
 				return out, nil
 			}},
-		&Verb{Name: "link.ls", Doc: "List a store's share links (uses: grants they gave that still stand).", Scope: Read,
+		&Verb{Name: "link.ls", Doc: "List a store's share links (uses: grants they gave that still stand).", Scope: Read, Action: authz.StoreOwner,
 			Args: []Arg{storeArg},
 			Run: func(ctx context.Context, e *Env, p *access.Principal, a Args) (any, error) {
 				if _, _, err := e.open(ctx, p, a.S("store"), rt.LevelOwner, "reading links"); err != nil && !p.IsAdmin() {
@@ -137,7 +138,7 @@ func init() {
 				}
 				return e.Sys.Links(ctx, a.S("store"))
 			}},
-		&Verb{Name: "link.rm", Doc: "Revoke a share link; the access it gave ends at once.", Scope: Write,
+		&Verb{Name: "link.rm", Doc: "Revoke a share link; the access it gave ends at once.", Scope: Write, Action: authz.StoreOwner, StoreArg: "-",
 			Args: []Arg{{Name: "id", Type: "string", Pos: 1, Required: true}},
 			Run: func(ctx context.Context, e *Env, p *access.Principal, a Args) (any, error) {
 				l, err := e.Sys.LinkByID(ctx, a.S("id"))
@@ -155,7 +156,7 @@ func init() {
 				}
 				return map[string]any{"revoked": l.ID, "store": l.Store}, nil
 			}},
-		&Verb{Name: "guest.sweep", Doc: "Delete guests unseen for 90 days (or --days), with their grants and private documents.", Scope: Admin, AdminOnly: true,
+		&Verb{Name: "guest.sweep", Doc: "Delete guests unseen for 90 days (or --days), with their grants and private documents.", Scope: Admin, AdminOnly: true, Action: authz.PlatformAdmin,
 			Args: []Arg{{Name: "days", Type: "int", Doc: "unseen for at least this many days (default 90)"}},
 			Run: func(ctx context.Context, e *Env, p *access.Principal, a Args) (any, error) {
 				days := a.I("days", system.GuestDays)

@@ -7,6 +7,7 @@ import (
 
 	"github.com/go-go-golems/slop-computer/pkg/access"
 	"github.com/go-go-golems/slop-computer/pkg/apps"
+	"github.com/go-go-golems/slop-computer/pkg/authz"
 	"github.com/go-go-golems/slop-computer/pkg/rt"
 	"github.com/go-go-golems/slop-computer/pkg/store"
 	"github.com/go-go-golems/slop-computer/pkg/system"
@@ -16,12 +17,12 @@ func init() {
 	hostArg := Arg{Name: "host", Type: "string", Pos: 1, Required: true}
 	pathArg := Arg{Name: "path", Type: "string", Pos: 2, Required: true}
 	Register(
-		&Verb{Name: "server.hosts", Doc: "This server's hosts: main, live, static and sandbox.", Scope: Read,
+		&Verb{Name: "server.hosts", Doc: "This server's hosts: main, live, static and sandbox.", Scope: Read, Action: authz.Platform,
 			Run: func(ctx context.Context, e *Env, p *access.Principal, a Args) (any, error) {
 				h := e.Cfg.Hosts
 				return map[string]any{"main": h.Main, "live": h.Live, "static": h.Static, "sandbox": h.Sandbox}, nil
 			}},
-		&Verb{Name: "mount.ls", Doc: "List mounts (of one host).", Scope: Read,
+		&Verb{Name: "mount.ls", Doc: "List mounts (of one host).", Scope: Read, Action: authz.Platform,
 			Args: []Arg{{Name: "host", Type: "string", Pos: 1}},
 			Run: func(ctx context.Context, e *Env, p *access.Principal, a Args) (any, error) {
 				ms, err := e.Sys.Mounts(ctx, a.S("host"))
@@ -34,7 +35,7 @@ func init() {
 				}
 				return out, nil
 			}},
-		&Verb{Name: "mount.set", Doc: "Mount a store (or a :param naming stores) at host+path. A host is live or static, set in configuration.", Scope: Write, AdminOnly: true,
+		&Verb{Name: "mount.set", Doc: "Mount a store (or a :param naming stores) at host+path. A host is live or static, set in configuration.", Scope: Write, AdminOnly: true, Action: authz.PlatformAdmin,
 			Args: []Arg{hostArg, pathArg, {Name: "store", Type: "string", Pos: 3},
 				{Name: "storeParam", Type: "string", Doc: "the path parameter naming the store, e.g. store for /r/:store"},
 				{Name: "type", Type: "string", Doc: "with storeParam: the store type required"},
@@ -61,7 +62,7 @@ func init() {
 				}
 				return out, nil
 			}},
-		&Verb{Name: "mount.rm", Doc: "Remove a mount (mount undo brings it back).", Scope: Write, AdminOnly: true,
+		&Verb{Name: "mount.rm", Doc: "Remove a mount (mount undo brings it back).", Scope: Write, AdminOnly: true, Action: authz.PlatformAdmin,
 			Args: []Arg{hostArg, pathArg},
 			Run: func(ctx context.Context, e *Env, p *access.Principal, a Args) (any, error) {
 				err := e.Sys.RemoveMount(ctx, p.ID(), p.ViaLabel(), a.S("host"), a.S("path"))
@@ -70,7 +71,7 @@ func init() {
 				}
 				return map[string]any{"removed": a.S("host") + a.S("path")}, err
 			}},
-		&Verb{Name: "mount.undo", Doc: "Restore a mount to its value before its last change.", Scope: Write, AdminOnly: true,
+		&Verb{Name: "mount.undo", Doc: "Restore a mount to its value before its last change.", Scope: Write, AdminOnly: true, Action: authz.PlatformAdmin,
 			Args: []Arg{hostArg, pathArg},
 			Run: func(ctx context.Context, e *Env, p *access.Principal, a Args) (any, error) {
 				m, err := e.Sys.UndoMount(ctx, p.ID(), p.ViaLabel(), a.S("host"), a.S("path"))
@@ -82,7 +83,7 @@ func init() {
 				}
 				return map[string]any{"restored": m}, nil
 			}},
-		&Verb{Name: "app.status", Doc: "The app a store runs: app store, snapshot, manifest, and why it is broken if it is.", Scope: Read,
+		&Verb{Name: "app.status", Doc: "The app a store runs: app store, snapshot, manifest, and why it is broken if it is.", Scope: Read, Action: authz.StoreRead,
 			Args: []Arg{{Name: "store", Type: "string", Pos: 1, Required: true}},
 			Run: func(ctx context.Context, e *Env, p *access.Principal, a Args) (any, error) {
 				st, _, err := e.open(ctx, p, a.S("store"), rt.LevelView, "reading")
@@ -105,7 +106,7 @@ func init() {
 				}
 				return out, nil
 			}},
-		&Verb{Name: "app.ls", Doc: "List the stores that are apps (their tree's main snapshot holds app.json).", Scope: Read,
+		&Verb{Name: "app.ls", Doc: "List the stores that are apps (their tree's main snapshot holds app.json).", Scope: Read, Action: authz.Platform,
 			Run: func(ctx context.Context, e *Env, p *access.Principal, a Args) (any, error) {
 				rows, err := visibleStores(ctx, e, p)
 				if p.IsAdmin() {

@@ -20,6 +20,7 @@ import (
 	"time"
 
 	"github.com/go-go-golems/slop-computer/pkg/access"
+	"github.com/go-go-golems/slop-computer/pkg/authz"
 	"github.com/go-go-golems/slop-computer/pkg/httpx"
 	"github.com/go-go-golems/slop-computer/pkg/rt"
 	"github.com/go-go-golems/slop-computer/pkg/store"
@@ -435,18 +436,44 @@ func (s *Server) reloadApp(app string) {
 
 type rpcFunc func(ctx context.Context, v *rt.View, args json.RawMessage) (any, error)
 
-func (s *Server) rpcTable() map[string]rpcFunc {
-	return map[string]rpcFunc{
-		"db.get": s.rpcDBGet, "db.query": s.rpcDBQuery, "db.write": s.rpcDBWrite, "db.acquire": s.rpcDBAcquire,
-		"db.subscribe": s.rpcDBSubscribe, "db.unsubscribe": s.rpcDBUnsubscribe,
-		"user.profiles": s.rpcUserProfiles, "user.search": s.rpcUserSearch,
-		"sample.limits": s.rpcSampleLimits,
-		"room.join":     s.rpcRoomJoin, "room.leave": s.rpcRoomLeave, "room.presence": s.rpcRoomPresence, "room.emit": s.rpcRoomEmit,
-		"assets.list": s.rpcAssetsList, "assets.delete": s.rpcAssetsDelete, "artifact.publish": s.rpcArtifactPublish,
-		"room.canSendToClaudeSession": func(context.Context, *rt.View, json.RawMessage) (any, error) { return false, nil },
-		"slop.call":                   s.rpcSlopCall, "slop.read": s.rpcSlopRead,
-		"permissions.state": func(_ context.Context, v *rt.View, _ json.RawMessage) (any, error) { return permissionStates(v), nil },
+// rpcMethod is a runtime method: what it does, and how. viewRPC checks the
+// action's floor against the view before the method runs.
+type rpcMethod struct {
+	act authz.Action
+	fn  rpcFunc
+}
+
+func (s *Server) rpcTable() map[string]rpcMethod {
+	return map[string]rpcMethod{
+		"db.get":                      {authz.DocRead, s.rpcDBGet},
+		"db.query":                    {authz.DocRead, s.rpcDBQuery},
+		"db.subscribe":                {authz.DocRead, s.rpcDBSubscribe},
+		"db.unsubscribe":              {authz.DocRead, s.rpcDBUnsubscribe},
+		"db.write":                    {authz.DocWrite, s.rpcDBWrite},
+		"db.acquire":                  {authz.DocWrite, s.rpcDBAcquire},
+		"user.profiles":               {authz.UserRead, s.rpcUserProfiles},
+		"user.search":                 {authz.UserRead, s.rpcUserSearch},
+		"sample.limits":               {authz.Sample, s.rpcSampleLimits},
+		"room.join":                   {authz.Room, s.rpcRoomJoin},
+		"room.leave":                  {authz.Room, s.rpcRoomLeave},
+		"room.presence":               {authz.Room, s.rpcRoomPresence},
+		"room.emit":                   {authz.Room, s.rpcRoomEmit},
+		"room.canSendToClaudeSession": {authz.Room, func(context.Context, *rt.View, json.RawMessage) (any, error) { return false, nil }},
+		"assets.list":                 {authz.AssetWrite, s.rpcAssetsList},
+		"assets.delete":               {authz.AssetWrite, s.rpcAssetsDelete},
+		"artifact.publish":            {authz.CodePush, s.rpcArtifactPublish},
+		"slop.call":                   {authz.ActorCall, s.rpcSlopCall},
+		"slop.read":                   {authz.DocRead, s.rpcSlopRead},
+		"permissions.state": {authz.StoreRead, func(_ context.Context, v *rt.View, _ json.RawMessage) (any, error) {
+			return permissionStates(v), nil
+		}},
 	}
+}
+
+// viewMay reports whether v clears act's floor on its own store.
+func viewMay(v *rt.View, act authz.Action) bool {
+	spec, ok := authz.Of(act)
+	return ok && spec.Store && v.Level >= spec.Level && (!spec.Admin || v.Role == string(access.AudAdmin))
 }
 
 func (s *Server) viewRPC(w http.ResponseWriter, r *http.Request) {
@@ -463,7 +490,7 @@ func (s *Server) viewRPC(w http.ResponseWriter, r *http.Request) {
 		httpx.JSON(w, 400, map[string]any{"error": map[string]string{"code": "invalid_argument", "message": "send {method, args}"}})
 		return
 	}
-	fn, ok := s.rpcTable()[in.Method]
+	m, ok := s.rpcTable()[in.Method]
 	if !ok {
 		httpx.JSON(w, 400, map[string]any{"error": map[string]string{"code": "capability_removed", "message": "unknown method " + in.Method}})
 		return
@@ -473,7 +500,11 @@ func (s *Server) viewRPC(w http.ResponseWriter, r *http.Request) {
 		httpx.JSON(w, 403, map[string]any{"error": map[string]string{"code": "not_granted", "message": "this view was not granted " + name}})
 		return
 	}
-	out, err := fn(r.Context(), v, in.Args)
+	if !viewMay(v, m.act) {
+		httpx.JSON(w, 403, map[string]any{"error": map[string]string{"code": "not_granted", "message": in.Method + " needs more access than this view has"}})
+		return
+	}
+	out, err := m.fn(r.Context(), v, in.Args)
 	if err != nil {
 		var f *rtFail
 		if !errors.As(err, &f) {

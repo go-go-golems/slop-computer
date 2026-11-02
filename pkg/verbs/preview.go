@@ -9,6 +9,7 @@ import (
 	"time"
 
 	"github.com/go-go-golems/slop-computer/pkg/access"
+	"github.com/go-go-golems/slop-computer/pkg/authz"
 	"github.com/go-go-golems/slop-computer/pkg/rt"
 	"github.com/go-go-golems/slop-computer/pkg/system"
 )
@@ -18,7 +19,7 @@ const PreviewTTL = time.Hour
 
 func init() {
 	Register(
-		&Verb{Name: "preview.url", Doc: "A private preview of a store's snapshot on its own sandbox origin, with the pick-and-pin bridge, framed only by parent (an origin of this server); it serves for an hour.", Scope: Read,
+		&Verb{Name: "preview.url", Doc: "A private preview of a store's snapshot on its own sandbox origin, with the pick-and-pin bridge, framed only by parent (an origin of this server); it serves for an hour.", Scope: Read, Action: authz.StoreRead,
 			Args: []Arg{{Name: "store", Type: "string", Pos: 1, Required: true}, {Name: "at", Type: "string", Pos: 2, Doc: "a snapshot number or ref (default draft, else main)"},
 				{Name: "parent", Type: "string", Pos: 3, Required: true, Doc: "the origin of the page that frames it"}},
 			Run: func(ctx context.Context, e *Env, p *access.Principal, a Args) (any, error) {

@@ -11,6 +11,7 @@ import (
 	"github.com/dop251/goja"
 
 	"github.com/go-go-golems/slop-computer/pkg/access"
+	"github.com/go-go-golems/slop-computer/pkg/authz"
 )
 
 // EvalTimeout bounds one eval program.
@@ -19,7 +20,7 @@ var EvalTimeout = 60 * time.Second
 const maxEvalLogs = 1000
 
 func init() {
-	Register(&Verb{Name: "eval", Doc: "Run a JavaScript program on the server with every verb in scope as slop.<group>.<verb>(args).", Scope: Read,
+	Register(&Verb{Name: "eval", Doc: "Run a JavaScript program on the server with every verb in scope as slop.<group>.<verb>(args).", Scope: Read, Action: authz.Program,
 		Args: []Arg{{Name: "source", Type: "string", Required: true, Doc: "the program body; top-level return gives the result"},
 			{Name: "args", Type: "json", Doc: "passed to the program as args"},
 			{Name: "readOnly", Type: "bool", Doc: "writing verbs throw permission_denied"}},

@@ -12,6 +12,7 @@ import (
 	"strings"
 
 	"github.com/go-go-golems/slop-computer/pkg/access"
+	"github.com/go-go-golems/slop-computer/pkg/authz"
 )
 
 // Scope is what a token needs to call a verb.
@@ -40,6 +41,12 @@ type Verb struct {
 	Args      []Arg  `json:"args"`
 	Scope     Scope  `json:"scope"`
 	AdminOnly bool   `json:"adminOnly,omitempty"` // the person must be an admin
+	// Action is what the verb does; Call checks its floor before Run. For
+	// an action on a store, StoreArg names the argument holding the store
+	// ("store" when empty); "-" means the store is found from other
+	// arguments, and Run checks it.
+	Action   authz.Action `json:"action"`
+	StoreArg string       `json:"-"`
 
 	Run func(ctx context.Context, e *Env, p *access.Principal, a Args) (any, error) `json:"-"`
 }
@@ -219,7 +226,25 @@ func Call(ctx context.Context, e *Env, p *access.Principal, name string, a Args)
 		return nil, err
 	}
 	v, _ := Get(name)
+	if spec, _ := authz.Of(v.Action); spec.Store {
+		if id := v.store(a); id != "" {
+			if _, _, err := e.open(ctx, p, id, spec.Level, v.Name); err != nil {
+				return nil, err
+			}
+		}
+	}
 	return v.Run(ctx, e, p, a)
+}
+
+// store is the store a verb's action is on ("" when Run finds it).
+func (v *Verb) store(a Args) string {
+	switch v.StoreArg {
+	case "-":
+		return ""
+	case "":
+		return a.S("store")
+	}
+	return a.S(v.StoreArg)
 }
 
 // Check runs the checks Call makes before Run: the verb exists, the token
@@ -231,6 +256,11 @@ func Check(p *access.Principal, name string, a Args) error {
 	}
 	if !p.HasScope(string(v.Scope)) {
 		return Errf("permission_denied", "this token lacks the %s scope", v.Scope)
+	}
+	if spec, ok := authz.Of(v.Action); !ok {
+		return Errf("internal", "%s declares no action", v.Name)
+	} else if spec.Admin && !p.IsAdmin() {
+		return Errf("permission_denied", "%s is for admins", v.Name)
 	}
 	if v.AdminOnly && !p.IsAdmin() {
 		return Errf("permission_denied", "%s is for admins", v.Name)

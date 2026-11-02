@@ -8,6 +8,7 @@ import (
 	"time"
 
 	"github.com/go-go-golems/slop-computer/pkg/access"
+	"github.com/go-go-golems/slop-computer/pkg/authz"
 	"github.com/go-go-golems/slop-computer/pkg/billing/stripe"
 	"github.com/go-go-golems/slop-computer/pkg/system"
 )
@@ -55,7 +56,7 @@ func (e *Env) personChanged(ctx context.Context, id string) {
 
 func init() {
 	Register(
-		&Verb{Name: "sub.grant", Doc: "Give a person complimentary subscriber access until a date (2027-06-30) or for days (30d).", Scope: Admin, AdminOnly: true,
+		&Verb{Name: "sub.grant", Doc: "Give a person complimentary subscriber access until a date (2027-06-30) or for days (30d).", Scope: Admin, AdminOnly: true, Action: authz.PlatformAdmin,
 			Args: []Arg{{Name: "person", Type: "string", Pos: 1, Required: true, Doc: "usr_… or an email"},
 				{Name: "until", Type: "string", Required: true}, {Name: "note", Type: "string"}},
 			Run: func(ctx context.Context, e *Env, p *access.Principal, a Args) (any, error) {
@@ -77,7 +78,7 @@ func init() {
 				e.personChanged(ctx, pp.ID)
 				return c, nil
 			}},
-		&Verb{Name: "sub.revoke", Doc: "End a comp now.", Scope: Admin, AdminOnly: true,
+		&Verb{Name: "sub.revoke", Doc: "End a comp now.", Scope: Admin, AdminOnly: true, Action: authz.PlatformAdmin,
 			Args: []Arg{{Name: "id", Type: "string", Pos: 1, Required: true, Doc: "cmp_…"}},
 			Run: func(ctx context.Context, e *Env, p *access.Principal, a Args) (any, error) {
 				person, err := e.Sys.RevokeComp(ctx, p.ID(), p.ViaLabel(), a.S("id"))
@@ -90,7 +91,7 @@ func init() {
 				e.personChanged(ctx, person)
 				return map[string]any{"revoked": a.S("id"), "person": person}, nil
 			}},
-		&Verb{Name: "sub.ls", Doc: "List comps (of one person, or everyone's).", Scope: Read, AdminOnly: true,
+		&Verb{Name: "sub.ls", Doc: "List comps (of one person, or everyone's).", Scope: Read, AdminOnly: true, Action: authz.PlatformAdmin,
 			Args: []Arg{{Name: "person", Type: "string", Pos: 1}},
 			Run: func(ctx context.Context, e *Env, p *access.Principal, a Args) (any, error) {
 				id := ""
@@ -103,7 +104,7 @@ func init() {
 				}
 				return e.Sys.CompRows(ctx, id)
 			}},
-		&Verb{Name: "sub.show", Doc: "Show a person's standing access (yours by default): the decision, comps and subscriptions.", Scope: Read,
+		&Verb{Name: "sub.show", Doc: "Show a person's standing access (yours by default): the decision, comps and subscriptions.", Scope: Read, Action: authz.Account,
 			Args: []Arg{{Name: "person", Type: "string", Pos: 1}},
 			Run: func(ctx context.Context, e *Env, p *access.Principal, a Args) (any, error) {
 				id := p.ID()
@@ -130,7 +131,7 @@ func init() {
 				return map[string]any{"person": id, "audience": e.K.Access.AudienceOf(ctx, q), "decision": e.K.Standing(ctx, id),
 					"comps": comps, "subscriptions": subs}, nil
 			}},
-		&Verb{Name: "billing.checkout", Doc: "Start a Stripe Checkout for a subscription price; returns its URL.", Scope: Write,
+		&Verb{Name: "billing.checkout", Doc: "Start a Stripe Checkout for a subscription price; returns its URL.", Scope: Write, Action: authz.Account,
 			Args: []Arg{{Name: "price", Type: "string", Pos: 1, Doc: "a price from the server's stripe.prices (default the first)"}},
 			Run: func(ctx context.Context, e *Env, p *access.Principal, a Args) (any, error) {
 				if e.Billing == nil {
@@ -156,7 +157,7 @@ func init() {
 				}
 				return map[string]any{"url": u}, nil
 			}},
-		&Verb{Name: "billing.portal", Doc: "Open the Stripe Customer Portal for your subscription; returns its URL.", Scope: Write,
+		&Verb{Name: "billing.portal", Doc: "Open the Stripe Customer Portal for your subscription; returns its URL.", Scope: Write, Action: authz.Account,
 			Run: func(ctx context.Context, e *Env, p *access.Principal, a Args) (any, error) {
 				if e.Billing == nil {
 					return nil, Errf("unavailable", "this server has no Stripe")
@@ -173,7 +174,7 @@ func init() {
 				}
 				return map[string]any{"url": u}, nil
 			}},
-		&Verb{Name: "billing.refresh", Doc: "Ask Stripe for a person's current subscriptions now (yours, or anyone's for admins).", Scope: Write,
+		&Verb{Name: "billing.refresh", Doc: "Ask Stripe for a person's current subscriptions now (yours, or anyone's for admins).", Scope: Write, Action: authz.Account,
 			Args: []Arg{{Name: "person", Type: "string", Pos: 1}},
 			Run: func(ctx context.Context, e *Env, p *access.Principal, a Args) (any, error) {
 				if e.Billing == nil {
