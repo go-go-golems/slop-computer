@@ -70,8 +70,14 @@ func (s *Server) parseState(v string) (state, guest string, ok bool) {
 }
 
 // sitePrincipal is whoever this browser is on this live host: a user, a
-// guest, or nil.
+// guest, or nil. The cookie names the person only on safe requests or on
+// requests from this host's own pages: an unsafe request from another
+// origin acts as nobody (an app's sandbox origin is same-site, so SameSite
+// cookies alone would let its pages post as the person).
 func (s *Server) sitePrincipal(r *http.Request) (*access.Principal, *system.Session) {
+	if r.Method != http.MethodGet && r.Method != http.MethodHead && s.crossOrigin(r) {
+		return nil, nil
+	}
 	c, err := r.Cookie(s.siteCookie())
 	if err != nil || c.Value == "" {
 		return nil, nil
@@ -162,9 +168,6 @@ func (s *Server) serveLive(w http.ResponseWriter, r *http.Request) {
 		// An actor route on the mount answers first; then the shell.
 		if res, err := s.resolve(r.Context(), r.Host, p); err == nil {
 			pr, _ := s.sitePrincipal(r)
-			if pr != nil && r.Method != http.MethodGet && r.Method != http.MethodHead && s.crossOrigin(r) {
-				pr = nil // a form or fetch from another origin (an app's sandbox is same-site) does not act as the person
-			}
 			if s.serveActorRoute(w, r, res, pr) {
 				return
 			}
