@@ -220,3 +220,204 @@ pipeline, with no surprises at cutover.
   - `621db35` the doc's Vault path.
 - **Other commits:** `73c4c11` on `task/remove-v2`; `fa7c596` on GitOps
   `slop/v3-cutover`.
+
+## Step 2: Codex's review of #13, the "conflict", and a CI failure
+
+The user merged #12, which retargeted #13 to `main`, and asked about the
+review comments and the conflicts. GitHub's "conflicting" status was an
+artifact of the history: `main` held only commits that #13 already
+contained. A no-op merge commit settled it.
+
+Codex raised five findings, and all held:
+- views kept their old level after a downgrade;
+- catch-up could skip a commit;
+- member files ran on the live host's origin;
+- the runtime's resume cursor moved too early;
+- a collection's first snapshot could delete a streamed creation.
+
+CI also failed once, on a real race in the actor lifecycle (a call queued
+just as its actor stopped). Each fix has a test that fails without it.
+
+### Prompt Context
+
+**User prompts (verbatim):**
+
+- "Look at code review comments https://github.com/go-go-golems/slop-computer/pull/13 and also those conflicts?"
+- "More code review comments if you haven't seen them: https://github.com/go-go-golems/slop-computer/pull/13
+
+  Then retrigger @codex review to start a new review"
+
+**Assistant interpretation:** Make #13 mergeable again. Verify each review
+finding, then fix it and reply, or explain why it does not hold. Ask Codex
+for a fresh review.
+
+**Inferred user intent:** Merge #13 with the reviewer's concerns settled.
+
+### What I did
+
+- **Conflict.** `origin/main` = `39ae926`: merges of #11 (`4e23e3c`) and
+  #12 (`73c4c11`), both already in `task/slop-v3`.
+  - `git merge --no-commit origin/main` was clean with an empty diff.
+  - Committed it as `4538c21`; GitHub then reported `MERGEABLE`.
+- **P1, view downgrades** (`live.go` `reviewViews`). A level change only
+  sent an `access` event, while `v.Level` (fixed at open) kept authorizing
+  `db.write`, and renewal did not recheck.
+  - New `recheck`: a view whose level or audience differs is revoked when
+    no level is left, otherwise closed after the event.
+  - Renewal calls `recheck` (404 → the shell reopens).
+  - `notified` removed.
+  - The SLOP3-001 guide (line 1155) and `transport.ts` already described
+    closing.
+- **P2, catch-up cursor** (`views.go`): `catchUp` reads `st.Head()`
+  before `DocsSince`. `Head()` is `max(rev)` of committed `_log` rows.
+- **CI failure**: `TestModuleTrust` (`w1_test.go:47`) failed with
+  `actor.call ...: 500 ... lost: the actor stopped`.
+  - Cause: the call queued just as the actor's `stop` closed, after a
+    version activated right after the push.
+  - `errStopped` now marks events that never ran (refused by `send`, or
+    drained without a parent); `Call` and `Serve` resend them up to twice
+    via `Get`.
+  - Continuations (`ev.parent`) still fail with `lost`.
+  - Probably also the unexplained local failure from step 1.
+- **P1, live-host files** (`site.go` `serveStoreFile`). New `isolate`
+  argument, true only on the live host: CSP `sandbox; default-src 'none'`,
+  and an attachment for non-media.
+- **P2 × 2, runtime** (`db.ts`):
+  - `register` no longer calls `seenRev`.
+  - A per-listener `streamed` set keeps entries that the stream changed
+    while `db.subscribe` was out.
+  - `test/db.test.ts` mocks `transport.ts` with
+    `--experimental-test-module-mocks`, now in the `test` script.
+- **Replies and re-review.** Replied on each thread with the fixing commit,
+  then commented `@codex review` for `1b71424`.
+
+### Why
+
+- **Close views rather than lower their level in place.** `v.Level`,
+  `v.Role` and `v.Policy` are read without locks across handlers, so
+  changing them in place would race. The shell already reopens on
+  `access`.
+- **Resend only events that never ran.** That keeps actions at-most-once.
+
+### What worked
+
+- **Each fix's test failed on the old code:**
+  - `TestDowngradeClosesView`: `write through the downgraded view: 200`.
+  - `TestCallsSurviveActorRestart`: `a call queued when the actor stopped:
+    actor_error: the actor stopped` (twice in 3 runs).
+  - `TestLiveStoreFilesIsolated`: `live /_s/pub/assets/up.html: 200
+    text/html; charset=utf-8, csp "", disposition ""`.
+  - `db.test.ts`: `actual: [], expected: [ 'n1' ]`, and the cursor moved
+    to 9.
+- `go vet ./...`, `go test ./...` and the runtime tests (5/5) pass.
+
+### What didn't work
+
+- **`TestShareLinks` failed after the P1 change:**
+  `view with @guest view left: map[error:map[code:revoked ...]]`. It
+  asserted the old rule (a level change keeps the view open). Updated it:
+  the interact view stops writing once the link is revoked, and a new view
+  opens at `view`.
+- **The first restart test hit the turn limit** (`turn took longer than
+  5s`): the harness's virtual clock does not move `Date.now()`. It now
+  spins by counting, calibrated to about 400 ms.
+- **`toolApp` with no modules** writes `"modules":[""]`
+  (`busy has no actor`), so the test pushes its app directly.
+
+### What I learned
+
+- `gh run view --log` returned nothing for that job;
+  `gh api repos/.../actions/jobs/<id>/logs` had the log.
+
+### What was tricky to build
+
+- **Retry safety.** `drain()` also fails continuation events, which belong
+  to an action that already ran up to an `await`. Only parentless queued
+  events may be resent.
+
+### What warrants a second pair of eyes
+
+- **Closing views on audience changes too.** Anything that recomputes a
+  different audience than the view's open did will now close views on
+  every review, where before it re-sent an `access` event. Equally noisy,
+  but more visible.
+- **No deterministic test for the catch-up race.** The fix rests on
+  `Head()` reading committed state.
+
+### What should be done in the future
+
+- Retire actors on idle with a close and drain, so an event queued in that
+  window cannot wait until `CallTimeout`.
+
+### Code review instructions
+
+- `pkg/server/live.go` (`recheck`, `reviewViews`, renew),
+  `pkg/server/views.go` (`catchUp`), `pkg/server/site.go`
+  (`serveStoreFile`), `pkg/actor/actor.go` and `manager.go`
+  (`errStopped`, `Call`, `Serve`), `web/runtime/src/db.ts`.
+- **Tests:** `GOWORK=off go test ./pkg/server -run 'TestDowngradeClosesView|TestShareLinks|TestCallsSurviveActorRestart|TestLiveStoreFilesIsolated' -count=1`
+  and `cd web/runtime && pnpm test`.
+
+### Technical details
+
+- **Commits:** `4538c21` (merge of main), `ac0b5a9` (views, catch-up),
+  `1d47c2e` (actors), `50de31d` (live files), `1b71424` (runtime).
+- **Codex review threads:** `4438074257`, `4438074260`, `4438227643`,
+  `4438227647`, `4438227649`.
+
+## Step 3: Codex's second review (three more findings)
+
+The re-review of `1b71424` finished with CI green (run 41374232349) and
+raised three new findings. All held, and each is fixed with a test that
+fails on the old code. A third review was requested afterwards.
+
+### Prompt Context
+
+**User prompt (verbatim):** see step 2 ("More code review comments ...
+Then retrigger @codex review").
+
+**Assistant interpretation:** Same as step 2, for the new findings.
+
+**Inferred user intent:** Merge #13 with no open findings.
+
+### What I did
+
+- **D9 through imports** (`pkg/verbs/data.go` `import.folder`). A member's
+  bundle restored `app.json` and `actor.js` and snapshotted them onto
+  `main`, skipping `needCodeRight`. A non-admin bundle whose tree holds
+  `app.json` is now refused (`permission_denied`). The check is extended
+  in `TestOnlyAdminsPushAppCode`; without it: `want permission_denied, got
+  200 ... store:bobs-app`.
+- **Read rules before the limit** (`queryDocs` for `docs.ls` and
+  `docs.query`, and `rpcSlopRead` `query`). `Store.Query` applied the
+  limit before the read rules.
+  - Now the query is validated, then run without its limit; unreadable
+    documents are dropped, then the result is cut to the limit.
+  - `TestQueryLimitAfterReadRules`: without the fix, `docs.query limit 1
+    as a member: []`.
+  - `rpcSlopRead` has the same change, without its own test.
+- **Network retries** (`web/runtime/src/transport.ts` `rpc`). A fetch that
+  threw was resent for every method, so an action could run twice. Only
+  the methods in `resendable` (reads, subscriptions, room membership and
+  presence) are resent now. The 401-and-renew resend stays for all,
+  since the server refused those requests.
+  - `test/transport.test.ts` stubs `document`/`window`, hands the module a
+    view through a `message` event, and scripts `fetch`.
+  - On the old code, an action that failed once was resent and resolved.
+
+### What warrants a second pair of eyes
+
+- **Methods outside `resendable`** now fail as `unavailable` on one
+  network error, where they used to get a second try. Pages that call
+  `slop.call` or `db.write` must handle that, as they always had to for a
+  second failure.
+- **The bundle check covers `app.json` in the tree only**, as
+  `needCodeRight` does. A bundle's `schema` (tables, triggers) goes through
+  `Restore` as before.
+
+### Code review instructions
+
+- `pkg/verbs/data.go`, `pkg/verbs/docs.go`, `pkg/server/actors.go`,
+  `web/runtime/src/transport.ts`.
+- **Tests:** `GOWORK=off go test ./pkg/server -run 'TestOnlyAdminsPushAppCode|TestQueryLimitAfterReadRules' -count=1`
+  and `cd web/runtime && pnpm test` (7 tests).
