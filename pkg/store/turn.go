@@ -223,8 +223,13 @@ func (t *Turn) Meta(key string) string {
 	return v
 }
 
-// scanMaps reads rows into maps, converting []byte to string.
+// scanMaps reads rows into maps, converting []byte (a BLOB) to string.
 func scanMaps(rows *sql.Rows, max int) ([]map[string]any, error) {
+	return scanRows(rows, max, func(b []byte) any { return string(b) })
+}
+
+// scanRows reads rows into maps; blob converts BLOB values.
+func scanRows(rows *sql.Rows, max int, blob func([]byte) any) ([]map[string]any, error) {
 	defer rows.Close()
 	cols, err := rows.Columns()
 	if err != nil {
@@ -246,7 +251,7 @@ func scanMaps(rows *sql.Rows, max int) ([]map[string]any, error) {
 		m := make(map[string]any, len(cols))
 		for i, c := range cols {
 			if b, ok := vals[i].([]byte); ok {
-				m[c] = string(b)
+				m[c] = blob(b)
 			} else {
 				m[c] = vals[i]
 			}

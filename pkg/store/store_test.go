@@ -1,7 +1,9 @@
 package store
 
 import (
+	"bytes"
 	"context"
+	"encoding/json"
 	"errors"
 	"path/filepath"
 	"strings"
@@ -233,5 +235,43 @@ func TestFilesAndSnapshots(t *testing.T) {
 	}
 	if !ValidFilePath("a/b.txt") || ValidFilePath("/a") || ValidFilePath("a/../b") || ValidFilePath("") {
 		t.Fatal("ValidFilePath")
+	}
+}
+
+// An export round trip keeps BLOB cells as BLOBs, byte for byte (through
+// JSON, as import.folder receives a bundle).
+func TestExportKeepsBlobs(t *testing.T) {
+	ctx := context.Background()
+	src, dst := openTest(t), openTest(t)
+	raw := []byte{0x00, 0xff, 0xfe, 'h', 'i', 0x80}
+	if _, err := src.Do(ctx, me, func(t *Turn) error {
+		if _, err := t.Exec(CallerMigration, `CREATE TABLE bins (id INTEGER PRIMARY KEY, data BLOB, note TEXT) STRICT`); err != nil {
+			return err
+		}
+		_, err := t.Exec(CallerActor, `INSERT INTO bins (data, note) VALUES (?, 'x')`, raw)
+		return err
+	}); err != nil {
+		t.Fatal(err)
+	}
+	b, err := src.Export(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	j, _ := json.Marshal(b)
+	var back Bundle
+	dec := json.NewDecoder(bytes.NewReader(j))
+	dec.UseNumber()
+	if err := dec.Decode(&back); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := dst.Do(ctx, me, func(t *Turn) error { return t.Restore(&back) }); err != nil {
+		t.Fatalf("restore: %v", err)
+	}
+	rows, err := dst.ReadQuery(ctx, `SELECT typeof(data) AS kind, hex(data) AS hex, note FROM bins`)
+	if err != nil || len(rows) != 1 {
+		t.Fatalf("rows = %v, %v", rows, err)
+	}
+	if rows[0]["kind"] != "blob" || rows[0]["hex"] != "00FFFE686980" || rows[0]["note"] != "x" {
+		t.Fatalf("after the round trip: %v", rows[0])
 	}
 }

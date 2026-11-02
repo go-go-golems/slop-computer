@@ -2,6 +2,7 @@ package store
 
 import (
 	"context"
+	"encoding/base64"
 	"encoding/json"
 	"fmt"
 	"sort"
@@ -122,7 +123,7 @@ func (s *Store) Export(ctx context.Context) (*Bundle, error) {
 		if o.Type != "table" && !ownContent(o) {
 			continue
 		}
-		rs, err := s.ReadQuery(ctx, `SELECT * FROM `+quoteIdent(o.Name))
+		rs, err := s.tableRows(ctx, o.Name)
 		if err != nil {
 			return nil, err
 		}
@@ -214,8 +215,31 @@ func (t *Turn) insertRowsRaw(table string, rows []map[string]any) error {
 	return nil
 }
 
+// blobKey marks a BLOB in exported rows: {"$blob": base64}. JSON has no
+// bytes, and a string would lose both the type and any bytes that are not
+// UTF-8.
+const blobKey = "$blob"
+
+// tableRows reads an app table for export, BLOBs as {"$blob": base64}.
+func (s *Store) tableRows(ctx context.Context, table string) ([]map[string]any, error) {
+	rows, err := s.ro.QueryContext(ctx, `SELECT * FROM `+quoteIdent(table))
+	if err != nil {
+		return nil, err
+	}
+	return scanRows(rows, 10000, func(b []byte) any {
+		return map[string]any{blobKey: base64.StdEncoding.EncodeToString(b)}
+	})
+}
+
 // sqlValue converts a decoded JSON value to a SQLite argument.
 func sqlValue(v any) any {
+	if m, ok := v.(map[string]any); ok && len(m) == 1 {
+		if s, ok := m[blobKey].(string); ok {
+			if b, err := base64.StdEncoding.DecodeString(s); err == nil {
+				return b
+			}
+		}
+	}
 	switch x := v.(type) {
 	case json.Number:
 		if n, err := strconv.ParseInt(string(x), 10, 64); err == nil {
