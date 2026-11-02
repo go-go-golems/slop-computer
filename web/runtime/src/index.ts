@@ -7,6 +7,7 @@ import { lobby } from "./room.ts";
 import { sample } from "./sample.ts";
 import { staticDb, staticUser } from "./static.ts";
 import { boot, connect, type Hello } from "./transport.ts";
+import { syncFragment } from "./url.ts";
 import type { Body } from "./util.ts";
 
 const memo = new Map<string, Promise<unknown>>();
@@ -72,3 +73,6 @@ try {
 // reload after a publish to every open page, including pages that never
 // call use().
 if (boot.mode === "app") void connect();
+
+// The page's fragment and the address bar's, kept the same (deep links).
+syncFragment();

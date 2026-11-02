@@ -4,7 +4,9 @@
 # as claude.ai Artifacts and use only the contract (claude.use), which v3
 # serves, so neither is changed:
 #
-#   blocks/  web/blocks/src/* (checked against SHA256SUMS) + app.json
+#   blocks/  web/blocks/src/* (checked against SHA256SUMS) + app.json,
+#            plus slop's additions in web/blocks/slop/ (deep-links.js,
+#            loaded after blocks.js: the page is the URL's fragment)
 #   pinup/   upstream build.js's dist/pinup.html (the published artifact)
 #            in the document skeleton the Artifact host wrapped it in,
 #            + app.json. v2's slop/js layer (Workshop publishing through
@@ -22,6 +24,11 @@ mkdir "$out/blocks" "$out/pinup"
 
 (cd "$web/blocks/src" && sha256sum -c --quiet ../SHA256SUMS)
 cp "$web/blocks/src/"* "$out/blocks/"
+if [ -d "$web/blocks/slop" ]; then
+	cp "$web/blocks/slop/"*.js "$out/blocks/"
+	sed -i 's|<script src="blocks.js"></script>|&\n<script src="deep-links.js"></script>|' "$out/blocks/index.html"
+	grep -q '<script src="deep-links.js"></script>' "$out/blocks/index.html"
+fi
 cat >"$out/blocks/app.json" <<'EOF'
 {
   "title": "Claude Blocks",

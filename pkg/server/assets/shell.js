@@ -34,9 +34,10 @@
     history.replaceState(history.state, "", location.pathname + (q ? "?" + q : "") + location.hash);
   }
   const here = () => location.pathname + location.search;
-  // signIn keeps a share link that has not been used yet across the handoff.
+  // signIn keeps a share link that has not been used yet across the
+  // handoff, and the page's place (the fragment).
   const signIn = () => {
-    const back = here() + (link ? (location.search ? "&" : "?") + "k=" + encodeURIComponent(link) : "");
+    const back = here() + (link ? (location.search ? "&" : "?") + "k=" + encodeURIComponent(link) : "") + location.hash;
     return "/_site/login?return=" + encodeURIComponent(back);
   };
   const el = (tag, props, ...kids) => {
@@ -241,16 +242,19 @@
       case "signin": location.assign(signIn()); return; // the page asked: claude.use("slop").signIn()
       case "reload": await open(false); return; // the route serves the new version
       case "reopen": await open(false); return; // access changed: a new view, a fresh frame
-      case "args": {
-        const q = new URLSearchParams();
-        for (const [k, v] of Object.entries(m.args || {})) if (typeof v === "string" && v) q.set(k, v);
-        const h = q.toString();
-        history.replaceState(history.state, "", here() + (h ? "#" + h : ""));
+      case "hash": {
+        // the page's place in itself, mirrored into the address bar (a deep
+        // link); only the fragment, never the path
+        const h = typeof m.hash === "string" ? m.hash : "";
+        if (h.length > 1024 || (h && h[0] !== "#") || /\s/.test(h)) return;
+        if (h !== location.hash) history.replaceState(history.state, "", here() + h);
         return;
       }
     }
   });
   addEventListener("pagehide", () => { if (view) close(view); });
+  // a fragment typed into the address bar (or Back over one) goes to the page
+  addEventListener("hashchange", () => post({ type: "hash", hash: location.hash }));
   setInterval(renew, RENEW_MS);
   // offer asks once whether to keep what this person did as a guest before
   // signing in; dismissing the dialog asks again next time.

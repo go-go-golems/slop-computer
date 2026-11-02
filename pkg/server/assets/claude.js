@@ -1539,6 +1539,39 @@
     profiles: async () => freeze({})
   });
 
+  // src/url.ts
+  var MAX = 1024;
+  function syncFragment() {
+    if (window.parent === window || boot.mode !== "app") return;
+    let last = location.hash;
+    const report = () => {
+      if (location.hash === last) return;
+      last = location.hash;
+      post({ type: "hash", hash: last.length <= MAX ? last : "" });
+    };
+    addEventListener("hashchange", report);
+    addEventListener("popstate", report);
+    for (const k of ["pushState", "replaceState"]) {
+      const f = history[k].bind(history);
+      history[k] = (data, unused, url) => {
+        f(data, unused, url);
+        report();
+      };
+    }
+    on("shell:hash", (m) => {
+      const h = m.hash;
+      if (typeof h !== "string" || h.length > MAX || h !== "" && h[0] !== "#" || h === location.hash) return;
+      const oldURL = location.href;
+      last = h;
+      if (h) {
+        location.replace(oldURL.split("#")[0] + h);
+      } else {
+        history.replaceState(history.state, "", location.pathname + location.search);
+        dispatchEvent(new HashChangeEvent("hashchange", { oldURL, newURL: location.href }));
+      }
+    });
+  }
+
   // src/index.ts
   var memo = /* @__PURE__ */ new Map();
   async function resolve(name) {
@@ -1594,4 +1627,5 @@
     window.claude = claude;
   }
   if (boot.mode === "app") void connect();
+  syncFragment();
 })();
