@@ -275,3 +275,40 @@ func TestExportKeepsBlobs(t *testing.T) {
 		t.Fatalf("after the round trip: %v", rows[0])
 	}
 }
+
+// No app-authored SQL runs as the kernel. A trigger or a foreign key
+// cascade runs inside the statement that set it off, with its authority;
+// so the kernel never writes app tables, and app tables may not reference
+// kernel tables (a document delete would cascade into them).
+func TestNoAppSQLRunsAsTheKernel(t *testing.T) {
+	ctx := context.Background()
+	s := openTest(t)
+	migrate := func(q string) error {
+		_, err := s.Do(ctx, me, func(t *Turn) error { _, err := t.Exec(CallerMigration, q); return err })
+		return err
+	}
+	if err := migrate(`CREATE TABLE notes (path TEXT REFERENCES _docs(path) ON DELETE CASCADE)`); err == nil {
+		t.Fatal("an app table referencing _docs: expected denial")
+	}
+	// References between app tables are fine, and kernel work goes on.
+	if err := migrate(`CREATE TABLE parent (id TEXT PRIMARY KEY)`); err != nil {
+		t.Fatal(err)
+	}
+	if err := migrate(`CREATE TABLE kid (p TEXT REFERENCES parent(id) ON DELETE CASCADE)`); err != nil {
+		t.Fatal(err)
+	}
+	if err := migrate(`CREATE TRIGGER kid_gone AFTER DELETE ON kid BEGIN INSERT INTO parent (id) VALUES ('again'); END`); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := s.Do(ctx, me, func(t *Turn) error { _, err := t.SetDoc("notes/a", map[string]any{"x": 1}, 0); return err }); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := s.Do(ctx, me, func(t *Turn) error { _, err := t.DeleteDoc("notes/a"); return err }); err != nil {
+		t.Fatal(err)
+	}
+	// The kernel itself may not write an app table (its triggers would run
+	// as the kernel).
+	if _, err := s.Do(ctx, me, func(t *Turn) error { _, err := t.Exec(CallerKernel, `DELETE FROM parent`); return err }); err == nil {
+		t.Fatal("a kernel write to an app table: expected denial")
+	}
+}

@@ -94,6 +94,12 @@ func (s *Store) doLocked(ctx context.Context, who Who, fn func(t *Turn) error) (
 		return nil, err
 	}
 	t.caller = CallerKernel
+	if t.schema {
+		if err := t.checkAppForeignKeys(); err != nil {
+			_, _ = s.w.ExecContext(context.Background(), `ROLLBACK`)
+			return nil, err
+		}
+	}
 	changes := t.allChanges()
 	if len(changes) > 0 {
 		if err := t.writeLog(changes); err != nil {
