@@ -861,3 +861,106 @@ as written; link to a page inside the editor.
 - The demo's `sample` model: `llm: pi` with
   `models: {quick, default, complex: "lunaroute/deepseek-4.1-flash:high"}`
   in `v3run/slop.yaml`.
+
+## Step 8: The reader crashed on numbers (goja has no locales)
+
+The user opened the budget page in the live reader and got raw JSON:
+`{"error":{"code":"actor_error","message":"RangeError: toString() radix argument must be between 2 and 36 at toLocaleString (native)"}}`.
+goja's `Number.prototype.toLocaleString` passes its argument to `toString`
+as a radix, so `toLocaleString("en-US")`, which Hypha's `money()` and
+Fruit's number formatting call, throws. Node implements locales, so the
+Node harness never saw it, and the Go fixtures had no number of 1000 or
+more and no `money()`. The fix installs an en-US `toLocaleString` in the
+actor's runtime where the native one throws, and the reader now degrades
+per block and per page instead of answering JSON. Reading the repaired
+page also showed the progress bar ignoring `max`; `stat` and `progress`
+now follow Fruit exactly. Commit `19a8f86`.
+
+### Prompt Context
+
+**User prompt (verbatim):** "http://apps.localhost:18300/pub/team-site/no-no-no-no
+
+{"error":{"code":"actor_error","message":"RangeError: toString() radix argument must be between 2 and 36 at toLocaleString (native)"}}"
+
+**Assistant interpretation:** The reader fails on a real page; fix it.
+
+**Inferred user intent:** The published reader must show whatever the
+editor shows.
+
+### What I did
+
+- Grepped the vendored libraries for locale calls: `fruit.js:260`
+  (`fmt`, twice) and `hypha.js:237` (`money`) call
+  `toLocaleString("en-US")`; `hypha.js:255` calls `localeCompare`.
+- Probed goja directly (a throwaway Go test): `(1234).toLocaleString()`
+  gives `1234` (no grouping), `(1234).toLocaleString("en-US")` throws the
+  RangeError, `localeCompare` works.
+- `lib/blocks.js`: before loading the vendor files, if
+  `(1).toLocaleString('en-US')` throws, replace
+  `Number.prototype.toLocaleString` with an en-US formatter (groups of
+  three, at most three decimals, `minimum/maximumFractionDigits`).
+- `lib/render.js`: `safely(q, f)` around every block and list item: a
+  block that throws is left out and logged with `console.warn`.
+  `actor.js`: `show()` catches and answers a 500 page.
+- `stat` and `progress` ported from `fruit.js` `R.stat` / `R.progress`
+  (`F.label`, `F.fmt(v, {unit, pre, pct, fixed})`, `sub`, `max` defaulting
+  to 1 for a share and 100 otherwise).
+- `b2_test.go` adds `money()` of a large and a negative number, a large
+  `stat`, a `progress` with `max`, a `pct` stat; `b1_test.go` follows the
+  new progress markup.
+- Redeployed the app on the demo; `/pub/team-site/no-no-no-no` answers 200.
+
+### Why
+
+- The polyfill only activates where the native method throws, so Node and
+  browsers keep their own formatting, and it lives in the site actor's own
+  runtime (each store's actor has its own goja VM).
+- Per-block isolation: the editor itself survives a bad block; the reader
+  should too, and a visitor should never see an actor error as JSON.
+
+### What worked
+
+- Negative control: with the polyfill's detection replaced by `return;`,
+  `TestBlocksSiteReader` fails at `faq numbers:` (the paragraph is left
+  out by `safely`); restored, it passes. Full suite passes.
+
+### What didn't work
+
+- My B1 to B5 tests and the Node harness never exercised `money()` or a
+  number of 1000 or more in goja; the bug reached the demo.
+
+### What I learned
+
+- By the time I looked, the user had repaired the page in the editor
+  (`page_o1p8.budget -`, rows 0 to 3, `sum(budget.*.planned)`), which
+  confirms the step 7 diagnosis: the totals compute (€1,930 planned,
+  €2,090 spent). "Biggest gap" still shows `—`:
+  `nth(budget, 0).actual` is an error in Hypha too (`!` in the editor).
+
+### What was tricky to build
+
+- Matching the editor's numbers exactly: `fmt` decides by magnitude
+  (whole numbers from 1000, any number from 10000) before calling
+  `toLocaleString`, so `1234567.5` shows as `1,234,568`.
+
+### What warrants a second pair of eyes
+
+- Other goja gaps in the vendored code would surface the same way; with
+  `safely` they now drop a block instead of the page, and log the error
+  to the actor's log (`slop actor logs <site>`).
+
+### What should be done in the future
+
+- A goja smoke test over every Hypha built-in function would catch the
+  next gap before a visitor does.
+
+### Code review instructions
+
+- `apps/blocks-site/lib/blocks.js` (the polyfill), `lib/render.js`
+  (`safely`, `stat`, `progress`), `actor.js` (`show`).
+- `GOWORK=off go test ./pkg/server -run TestBlocksSite -count=1`.
+
+### Technical details
+
+- The demo page now renders `Planned against actual spend` at 92%
+  (1930 of 2090).

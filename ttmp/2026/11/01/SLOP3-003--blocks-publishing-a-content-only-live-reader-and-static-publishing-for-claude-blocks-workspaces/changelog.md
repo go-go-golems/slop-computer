@@ -31,3 +31,7 @@ B5: uploaded files; bindings share uploads only with --assets (admin on target);
 ## 2026-11-01
 
 Runtime: no thinking placeholder through onText (Blocks dropped the first 9 characters of every Claude answer) (d3c270b)
+
+## 2026-11-01
+
+Reader: en-US numbers in goja (toLocaleString threw), per-block failure isolation, stat/progress as Fruit (19a8f86)
