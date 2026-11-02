@@ -26,12 +26,12 @@ func init() {
 	rowsArgs := []Arg{{Name: "rows", Type: "json", Doc: "a list of objects"}, {Name: "text", Type: "string", Doc: "CSV, JSONL or a JSON array"},
 		{Name: "format", Type: "string", Doc: "csv, jsonl or json (with text)"}}
 	Register(
-		&Verb{Name: "sql.query", Doc: "Run a read-only SQL statement on a store (admins).", Scope: Admin, AdminOnly: true, Action: authz.StoreAdmin,
+		&Verb{Name: "sql.query", Doc: "Run a read-only SQL statement on a store (admins).", Scope: Read, AdminOnly: true, Action: authz.StoreAdmin,
 			Args: []Arg{storeArg, {Name: "sql", Type: "string", Pos: 2, Required: true}, {Name: "args", Type: "json", Doc: "positional parameters"}},
 			Run: func(ctx context.Context, e *Env, p *access.Principal, a Args) (any, error) {
 				return runSQL(ctx, e, p, a, store.CallerAdminRead)
 			}},
-		&Verb{Name: "sql.exec", Doc: "Run SQL on a store's app tables (admins); --write allows writes.", Scope: Admin, AdminOnly: true, Action: authz.StoreAdmin,
+		&Verb{Name: "sql.exec", Doc: "Run SQL on a store's app tables (admins); --write allows writes.", Scope: Write, AdminOnly: true, Action: authz.StoreAdmin,
 			Args: []Arg{storeArg, {Name: "sql", Type: "string", Pos: 2, Required: true}, {Name: "args", Type: "json"},
 				{Name: "write", Type: "bool", Doc: "allow INSERT, UPDATE and DELETE on app tables"}},
 			Run: func(ctx context.Context, e *Env, p *access.Principal, a Args) (any, error) {

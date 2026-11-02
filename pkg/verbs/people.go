@@ -94,7 +94,7 @@ func init() {
 				}
 				return e.Sys.People(ctx, kind)
 			}},
-		&Verb{Name: "people.role", Doc: "Set a user's role: pending, member, admin or disabled.", Scope: Admin, AdminOnly: true, Action: authz.PlatformAdmin,
+		&Verb{Name: "people.role", Doc: "Set a user's role: pending, member, admin or disabled.", Scope: Write, AdminOnly: true, Action: authz.PlatformAdmin,
 			Args: []Arg{{Name: "id", Type: "string", Required: true, Pos: 1}, {Name: "role", Type: "string", Required: true, Pos: 2}},
 			Run: func(ctx context.Context, e *Env, p *access.Principal, a Args) (any, error) {
 				if a.S("id") == p.ID() && a.S("role") != system.RoleAdmin {

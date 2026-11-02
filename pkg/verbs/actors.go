@@ -71,7 +71,7 @@ func init() {
 				}
 				return map[string]any{"store": r.Store, "app": r.App, "n": r.N, "broken": r.Broken()}, nil
 			}},
-		&Verb{Name: "app.trust", Doc: "Trust an app with a Go module it declares in app.json slop.modules (system, workshop); restarts its actors.", Scope: Admin, AdminOnly: true, Action: authz.PlatformAdmin,
+		&Verb{Name: "app.trust", Doc: "Trust an app with a Go module it declares in app.json slop.modules (system, workshop); restarts its actors.", Scope: Write, AdminOnly: true, Action: authz.PlatformAdmin,
 			Args: []Arg{{Name: "app", Type: "string", Pos: 1, Required: true}, {Name: "module", Type: "string", Pos: 2, Required: true}},
 			Run: func(ctx context.Context, e *Env, p *access.Principal, a Args) (any, error) {
 				app, mod := a.S("app"), a.S("module")
@@ -91,7 +91,7 @@ func init() {
 				e.A.RestartApp(app) // use() is evaluated at start
 				return map[string]any{"app": app, "module": mod, "trusted": true}, nil
 			}},
-		&Verb{Name: "app.untrust", Doc: "Withdraw an app's trust with a Go module; restarts its actors.", Scope: Admin, AdminOnly: true, Action: authz.PlatformAdmin,
+		&Verb{Name: "app.untrust", Doc: "Withdraw an app's trust with a Go module; restarts its actors.", Scope: Write, AdminOnly: true, Action: authz.PlatformAdmin,
 			Args: []Arg{{Name: "app", Type: "string", Pos: 1, Required: true}, {Name: "module", Type: "string", Pos: 2, Required: true}},
 			Run: func(ctx context.Context, e *Env, p *access.Principal, a Args) (any, error) {
 				app, mod := a.S("app"), a.S("module")

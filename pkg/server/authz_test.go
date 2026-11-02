@@ -76,3 +76,29 @@ func TestExplainAction(t *testing.T) {
 		t.Fatalf("an admin's code.push: %v", out)
 	}
 }
+
+// Admin power needs an admin token: without the admin scope an admin's
+// token acts as a member (no admin-only verbs, no admin level on others'
+// stores, no app code). The scope is the token's ceiling on the role.
+func TestAdminPowerNeedsTheAdminScope(t *testing.T) {
+	h := newHarness(t)
+	full := h.tokenFor("admin@example.com", "read", "write", "admin")
+	read := h.tokenFor("admin@example.com", "read")
+	write := h.tokenFor("admin@example.com", "read", "write")
+	mia := h.tokenFor("mia@example.com", "read", "write")
+	h.call(mia, "store.new", map[string]any{"id": "mias"})
+	h.call(full, "store.new", map[string]any{"id": "app"})
+
+	for _, tok := range []string{read, write} {
+		h.fail(tok, "people.ls", map[string]any{}, "permission_denied")
+		h.fail(tok, "secret.ls", map[string]any{}, "permission_denied")
+		h.fail(tok, "log.system", map[string]any{}, "permission_denied")
+		h.fail(tok, "grant.ls", map[string]any{"store": "mias"}, "not_found") // no admin level on a stranger's store
+	}
+	h.fail(write, "mount.set", map[string]any{"host": h.cfg.Hosts.Live[0], "path": "/x", "store": "mias"}, "permission_denied")
+	h.fail(write, "files.push", map[string]any{"store": "app", "files": files(map[string]string{"app.json": `{"title":"A"}`, "index.html": "x"})}, "permission_denied")
+
+	h.call(full, "people.ls", map[string]any{})
+	h.call(full, "grant.ls", map[string]any{"store": "mias"})
+	h.call(full, "files.push", map[string]any{"store": "app", "files": files(map[string]string{"app.json": `{"title":"A"}`, "index.html": "x"})})
+}

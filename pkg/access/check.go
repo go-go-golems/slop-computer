@@ -74,7 +74,7 @@ func (c *Checker) AudienceOf(ctx context.Context, p *Principal) Audience {
 	case p.Person == nil, p.Kind == KindGuest, p.Person.Kind == "guest":
 		return AudGuest
 	}
-	switch p.Person.Role {
+	switch p.Role() {
 	case system.RoleDisabled:
 		return AudNone
 	case system.RolePending:

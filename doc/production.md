@@ -95,6 +95,17 @@ back office.
 **Agents** use the CLI with a personal token: `slop auth login --server
 https://<main>` approves a device code in the browser.
 
+A token carries scopes, each including the ones before it:
+
+| Scope | The token may |
+| --- | --- |
+| `read` | call verbs that change nothing; at most view on any store |
+| `write` | call verbs that change things, with its person's own levels |
+| `admin` | act with its person's admin role: admin-only verbs, admin on every store, pushing app code (D9). Expires within 90 days. |
+
+Without `admin`, an admin's token acts as a member. Members can choose
+`read` and `write`.
+
 ## Kubernetes
 
 The deployment on the hetzner k3s cluster lives in the GitOps repository as

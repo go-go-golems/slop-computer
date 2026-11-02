@@ -170,7 +170,7 @@ func init() {
 				}
 				return map[string]any{"revoked": l.ID, "store": l.Store}, nil
 			}},
-		&Verb{Name: "guest.sweep", Doc: "Delete guests unseen for 90 days (or --days), with their grants and private documents.", Scope: Admin, AdminOnly: true, Action: authz.PlatformAdmin,
+		&Verb{Name: "guest.sweep", Doc: "Delete guests unseen for 90 days (or --days), with their grants and private documents.", Scope: Write, AdminOnly: true, Action: authz.PlatformAdmin,
 			Args: []Arg{{Name: "days", Type: "int", Doc: "unseen for at least this many days (default 90)"}},
 			Run: func(ctx context.Context, e *Env, p *access.Principal, a Args) (any, error) {
 				days := a.I("days", system.GuestDays)

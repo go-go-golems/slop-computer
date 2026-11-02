@@ -64,7 +64,7 @@ func init() {
 				cells, err := e.Sys.PolicyMatrix(ctx, a.S("app"), caps)
 				return map[string]any{"app": a.S("app"), "declared": caps, "cells": cells}, err
 			}},
-		&Verb{Name: "policy.set", Doc: "Turn a policy cell on or off: app, capability (assets, sample, user.email, fetch, secrets, platform), @audience, on|off.", Scope: Admin, AdminOnly: true, Action: authz.PlatformAdmin,
+		&Verb{Name: "policy.set", Doc: "Turn a policy cell on or off: app, capability (assets, sample, user.email, fetch, secrets, platform), @audience, on|off.", Scope: Write, AdminOnly: true, Action: authz.PlatformAdmin,
 			Args: []Arg{{Name: "app", Type: "string", Pos: 1, Required: true}, {Name: "capability", Type: "string", Pos: 2, Required: true},
 				{Name: "audience", Type: "string", Pos: 3, Required: true}, {Name: "value", Type: "string", Pos: 4, Required: true}},
 			Run: func(ctx context.Context, e *Env, p *access.Principal, a Args) (any, error) {
@@ -98,7 +98,7 @@ func init() {
 			}},
 		&Verb{Name: "llm.ls", Doc: "List LLM access rows (people and audience defaults) with their monthly budgets.", Scope: Read, AdminOnly: true, Action: authz.PlatformAdmin,
 			Run: func(ctx context.Context, e *Env, p *access.Principal, a Args) (any, error) { return e.Sys.LLMRows(ctx) }},
-		&Verb{Name: "llm.set", Doc: "Give a person (usr_…, vis_…, an email) or an audience (@guest, @member, @subscriber, @admin) LLM access on or off, with a monthly token budget.", Scope: Admin, AdminOnly: true, Action: authz.PlatformAdmin,
+		&Verb{Name: "llm.set", Doc: "Give a person (usr_…, vis_…, an email) or an audience (@guest, @member, @subscriber, @admin) LLM access on or off, with a monthly token budget.", Scope: Write, AdminOnly: true, Action: authz.PlatformAdmin,
 			Args: []Arg{{Name: "subject", Type: "string", Pos: 1, Required: true}, {Name: "value", Type: "string", Pos: 2, Required: true},
 				{Name: "budget", Type: "int", Doc: "tokens per calendar month (omit: no limit)"}},
 			Run: func(ctx context.Context, e *Env, p *access.Principal, a Args) (any, error) {
@@ -132,7 +132,7 @@ func init() {
 				}
 				return map[string]any{"subject": sub, "allowed": on, "budget": budget}, nil
 			}},
-		&Verb{Name: "llm.rm", Doc: "Remove a person's own LLM row (they fall back to their audience's).", Scope: Admin, AdminOnly: true, Action: authz.PlatformAdmin,
+		&Verb{Name: "llm.rm", Doc: "Remove a person's own LLM row (they fall back to their audience's).", Scope: Write, AdminOnly: true, Action: authz.PlatformAdmin,
 			Args: []Arg{{Name: "subject", Type: "string", Pos: 1, Required: true}},
 			Run: func(ctx context.Context, e *Env, p *access.Principal, a Args) (any, error) {
 				return map[string]any{"removed": a.S("subject")}, e.Sys.RemoveLLM(ctx, p.ID(), p.ViaLabel(), a.S("subject"))
@@ -154,7 +154,7 @@ func init() {
 				aud := e.K.Access.AudienceOf(ctx, q)
 				return map[string]any{"person": q.ID(), "audience": aud, "llm": e.Sys.LLMFor(ctx, q.ID(), string(aud))}, nil
 			}},
-		&Verb{Name: "llm.reset", Doc: "Set a person's usage this month to zero.", Scope: Admin, AdminOnly: true, Action: authz.PlatformAdmin,
+		&Verb{Name: "llm.reset", Doc: "Set a person's usage this month to zero.", Scope: Write, AdminOnly: true, Action: authz.PlatformAdmin,
 			Args: []Arg{{Name: "person", Type: "string", Pos: 1, Required: true}},
 			Run: func(ctx context.Context, e *Env, p *access.Principal, a Args) (any, error) {
 				pp, err := e.personArg(ctx, a.S("person"))
@@ -168,7 +168,7 @@ func init() {
 			Run: func(ctx context.Context, e *Env, p *access.Principal, a Args) (any, error) {
 				return e.Sys.SecretNames(ctx, a.S("app"))
 			}},
-		&Verb{Name: "secret.set", Doc: "Set an app's secret (encrypted at rest); the actor reads it if app.json slop.secrets lists it and the policy allows.", Scope: Admin, AdminOnly: true, Action: authz.PlatformAdmin,
+		&Verb{Name: "secret.set", Doc: "Set an app's secret (encrypted at rest); the actor reads it if app.json slop.secrets lists it and the policy allows.", Scope: Write, AdminOnly: true, Action: authz.PlatformAdmin,
 			Args: []Arg{{Name: "app", Type: "string", Pos: 1, Required: true}, {Name: "name", Type: "string", Pos: 2, Required: true},
 				{Name: "value", Type: "string", Pos: 3, Required: true}},
 			Run: func(ctx context.Context, e *Env, p *access.Principal, a Args) (any, error) {
@@ -181,7 +181,7 @@ func init() {
 				}
 				return map[string]any{"app": a.S("app"), "name": a.S("name"), "length": strconv.Itoa(len(a.S("value")))}, nil
 			}},
-		&Verb{Name: "secret.rm", Doc: "Remove an app's secret.", Scope: Admin, AdminOnly: true, Action: authz.PlatformAdmin,
+		&Verb{Name: "secret.rm", Doc: "Remove an app's secret.", Scope: Write, AdminOnly: true, Action: authz.PlatformAdmin,
 			Args: []Arg{{Name: "app", Type: "string", Pos: 1, Required: true}, {Name: "name", Type: "string", Pos: 2, Required: true}},
 			Run: func(ctx context.Context, e *Env, p *access.Principal, a Args) (any, error) {
 				err := e.Sys.RemoveSecret(ctx, p.ID(), p.ViaLabel(), a.S("app"), a.S("name"))

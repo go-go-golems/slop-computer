@@ -67,17 +67,25 @@ func (p *Principal) ViaLabel() string {
 	return v
 }
 
-// Role is the person's platform role ("" for id-less guests, stores, system).
+// Role is the platform role p acts with ("" for id-less guests, stores,
+// system): the person's role, except that a token without the admin scope
+// acts as a member even for an admin. The scope is the token's ceiling on
+// the role, so admin-only verbs, an admin's level on every store and the
+// right to push app code (D9) all need an admin token.
 func (p *Principal) Role() string {
 	if p == nil || p.Person == nil {
 		return ""
 	}
+	if p.Kind == KindToken && p.Person.Role == system.RoleAdmin && !slices.Contains(p.Scopes, system.ScopeAdmin) {
+		return system.RoleMember
+	}
 	return p.Person.Role
 }
 
-// IsAdmin reports a signed-in admin (or an admin's token).
+// IsAdmin reports someone acting as an admin: a signed-in admin, an
+// admin's token with the admin scope, or the kernel.
 func (p *Principal) IsAdmin() bool {
-	return p != nil && (p.Kind == KindSystem || (p.Person != nil && p.Person.Role == system.RoleAdmin))
+	return p != nil && (p.Kind == KindSystem || p.Role() == system.RoleAdmin)
 }
 
 // HasScope reports whether a token carries a scope; sessions carry all.

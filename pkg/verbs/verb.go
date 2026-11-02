@@ -14,16 +14,19 @@ import (
 	"github.com/go-go-golems/slop-computer/pkg/access"
 	"github.com/go-go-golems/slop-computer/pkg/authz"
 	"github.com/go-go-golems/slop-computer/pkg/rt"
+	"github.com/go-go-golems/slop-computer/pkg/system"
 )
 
-// Scope is what a token needs to call a verb.
+// Scope says whether a verb changes anything: a token needs the read scope
+// for a Read verb and the write scope for a Write verb. (A token's admin
+// scope is not about verbs: it lets the token act with its person's admin
+// role, which admin-only verbs require; see access.Principal.Role.)
 type Scope string
 
 // Scopes, ordered.
 const (
 	Read  Scope = "read"
 	Write Scope = "write"
-	Admin Scope = "admin"
 )
 
 // Arg describes one argument.
@@ -262,10 +265,11 @@ func Check(p *access.Principal, name string, a Args) error {
 		return Errf("internal", "%s declares no action", v.Name)
 	}
 	// the role half of the floor; Call checks the level on the store
-	if ok, _ := authz.Floor(v.Action, rt.LevelOwner, p.IsAdmin()); !ok {
-		return Errf("permission_denied", "%s is for admins", v.Name)
-	}
-	if v.AdminOnly && !p.IsAdmin() {
+	ok, _ = authz.Floor(v.Action, rt.LevelOwner, p.IsAdmin())
+	if !ok || (v.AdminOnly && !p.IsAdmin()) {
+		if p.Kind == access.KindToken && p.Person != nil && p.Person.Role == system.RoleAdmin {
+			return Errf("permission_denied", "%s needs a token with the admin scope", v.Name)
+		}
 		return Errf("permission_denied", "%s is for admins", v.Name)
 	}
 	if v.Scope != Read && p.Kind == access.KindGuest {
