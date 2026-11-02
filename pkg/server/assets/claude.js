@@ -1,4 +1,4 @@
-/* slop page runtime (window.claude), built from web/runtime: do not edit */
+/* slop page runtime (window.claude), built from web/runtime: do not edit. source sha256:4a5e9772f38a958dd69699953e32deede49e4871975a8b8d37a69ab234a5bdd2 */
 "use strict";
 (() => {
   // src/limits.ts
