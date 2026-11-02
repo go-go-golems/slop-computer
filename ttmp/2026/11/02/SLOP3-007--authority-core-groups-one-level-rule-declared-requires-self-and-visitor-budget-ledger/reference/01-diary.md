@@ -220,3 +220,58 @@ Every "is this person in this class?" question now goes through one nesting func
 ### Code review instructions
 - `pkg/access/check.go` from `Level` to `deadLink`; `pkg/system/stores.go` (`Grants`, `GrantLink`).
 - Validate with `GOWORK=off go test ./pkg/access ./pkg/server -count=1`.
+
+## Step 5: Phase 3, actions declare what they require
+
+An action now states its level (`{ requires, run }`), and the kernel checks it before any of the action's code runs. Undeclared actions need admin. Every shipped actor, and every test actor that members call, declares its levels. The conversion was done by a small script, kept as `scripts/01-declare-requires.py`.
+
+### Prompt Context
+**User prompt (verbatim):** see Step 1.
+**Assistant interpretation:** Phase 3 (decision 4, amended to admin).
+**Inferred user intent:** An action is closed unless it says otherwise, and the check can't be forgotten in a refactor.
+**Commit (code):** 0c0fcd5 — "SLOP3-007 phase 3: actions declare what they require"
+
+### What I did
+- `pkg/actor/actor.go`:
+  - `Actor.requires map[string]rt.Level` and `Actor.undeclared`;
+  - `readShape` returns an error. It reads `requires` from object-form actions. Missing → admin, recorded as undeclared. `none`, `self` or an unknown word → `action X requires "self": use view, interact, admin or owner`, which fails the build and so the activation.
+- `pkg/actor/manager.go`:
+  - `Actor.mayCall` runs in `Manager.Call` before the event is sent. Level none → `not_found`; undeclared → `… declares no requires, so it needs admin; you have …`; otherwise `… needs X; you have Y`.
+  - `activate` logs a `warn` line per undeclared action.
+- Confirmed `Manager.Call` is the only path into actions: the `actor.call` verb, page `rpcSlopCall` (`server/actors.go:62`) and store-to-store `call` (`actor/modules.go:570`).
+- Shipped actors converted with `scripts/01-declare-requires.py`: a leading `ctx.need('x')` becomes `requires: 'x'`. The workshop has 11 actions, the journal 6, blocks-site 3, the back office 1; the guestbook's 2 were done by hand. Every action had a leading `ctx.need`. A check listed each file's action keys and `requires` lines: all object form, counts equal.
+- Test fixtures declared:
+  - p3 tracker `add` and `vote`;
+  - p6 `ask`, `can` (view), `token`, `make`;
+  - w1 `people`, `role`, `grant`;
+  - w2 `letIn`, `verb`, `mount`.
+  These tests check refusals from inside the action (the verb's own rule), so the caller must get in.
+- Tests: `TestActionWithoutRequiresNeedsAdmin` (unskipped) and `TestActionRequiresBadLevelFailsActivation` (new).
+- `design/slop-v3-design.md`: both actor examples use `requires`; the access table's "Call an action" row says `requires`, default `admin`.
+
+### Why
+- One check in `Manager.Call` rather than per entry point: the pattern doc's "evidence at the resource", applied to actions.
+- `TestActors` asserts the message contains "needs interact". The kernel's message for a declared action (`add needs interact; you have view`) keeps that, so the test's meaning is unchanged.
+
+### What worked
+- All Go tests, vet and gofmt pass; `web/runtime` passes 9/9.
+
+### What didn't work
+- First run after the kernel change: 9 failures, every one an undeclared action that its test expected a member or viewer to reach. For example `p6_test.go:85: member: … ask declares no requires, so it needs admin; you have interact` and `w2_test.go:65: letIn as member: …`. The fix was declarations in the fixtures, not changes to the rule.
+
+### What I learned
+- `Actor.fn` already accepted `{ run }` objects. That makes the deploy order safe: the converted actors run unchanged on the current production image.
+
+### What was tricky to build
+- Checking `requires` before `send`. `Manager.Call` runs outside the actor's goroutine, so `readShape` stores the levels as Go data at build time, as it already did for routes; the call path never touches the JS object.
+
+### What warrants a second pair of eyes
+- **Deploy order for production.** Stores hold the old actor code. With the new image alone, every action in workshop, blocks-site and the back office becomes admin-only until the apps are re-pushed. Re-pushing first (`ttmp/…SLOP3-004…/scripts/02-deploy-apps.sh`) is safe, because the old image ignores `requires` and runs `run`.
+- Imported francois apps have no actors, so they're unaffected.
+
+### What should be done in the future
+- Phase 7: bring `lab/src/kernel/prelude.js` and the lab seeds to the object form.
+
+### Code review instructions
+- `Actor.readShape` and `Actor.mayCall`; then the diff of `apps/*/actor.js` and `examples/*/actor.js` (mechanical).
+- Validate with `GOWORK=off go test ./pkg/server -run 'TestAction|TestActors|TestJournalExample|TestGuestbookExample' -count=1`.
