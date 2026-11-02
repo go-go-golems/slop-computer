@@ -340,3 +340,61 @@ Code with no person behind it now acts as `store:<id>`, everywhere: alarms, reac
 ### Code review instructions
 - `pkg/server/modules.go` (`callVerb`, `actAs`), `pkg/server/platform.go`, `pkg/actor/manager.go` (`storeVisitor`), `pkg/actor/modules.go` (`fresh`), `pkg/system/modules.go` (`Trusted`).
 - Validate with `GOWORK=off go test ./pkg/server -run 'TestAlarm|TestStoresOpen|TestTrust|TestModuleTrust|TestSystemModule|TestLLMBudgets' -count=1`.
+
+## Step 7: Phase 5, the budget ledger
+
+Model budgets are hard now. Each model round holds what it may cost before the provider is contacted, its output is capped at that hold, and it settles with its actual usage. Parallel calls can no longer spend past a limit. The phase-0 overspend test passes 30 runs in 30.
+
+### Prompt Context
+**User prompt (verbatim):** see Step 1.
+**Assistant interpretation:** Phase 5 (decision 6): a ledger with a hold per model round.
+**Inferred user intent:** Budgets that mean what they say, however many tabs or alarms run at once.
+**Commit (code):** f43f854 — "SLOP3-007 phase 5: model budgets as a ledger, held per round"
+
+### What I did
+- Migration `008_ledger.sql`: `llm_usage.reserved_tokens` and `llm_holds` (id = `<call>/<round>`, account, period, amount, output, used, state, created/expires).
+- `pkg/system/ledger.go`:
+  - `Reserve(account, limit, input, maxOut, key)`. In one transaction: the existing hold for the key (a retry), else read used+reserved; avail = limit − used − reserved − input; avail ≤ 0 → `ErrQuota`; output cap = min(maxOut, avail); amount = input + cap; insert the hold; add to reserved.
+  - `Settle(id, used)`, where used < 0 means the whole hold; `Release(id)`; `ExpireHolds()`.
+  - `Meter`, implementing `llm.Meter`: `Before` settles a previous round that reported no usage in full, then reserves; `Usage` settles the open round; `Close` settles anything still open in full.
+  - All through `ledgerTx` (no epoch move, no `OnLog`).
+- `pkg/llm`:
+  - `Request.Meter`, the `Meter` interface and `Estimate`;
+  - gepp calls `Before` before each round with `contextBytes(t)` plus 2000 per image, and lowers `perRound` to the returned cap;
+  - `Fake` calls it once and truncates its text to the cap.
+- `pkg/server/sample.go` and `pkg/actor/sample.go`:
+  - make a meter for the payer and limit;
+  - settle on each `usage` event and `Close` after `Sample`;
+  - a `*llm.Failure` with `quota_exceeded` is reported with that code (the page stream used to say `upstream_error`);
+  - `AddLLMUsage` deleted.
+- `LLMFor`: remaining = budget − used − reserved.
+- The minute ticker calls `ExpireHolds`.
+- Tests:
+  - `TestConcurrentSamplesCannotOverspend` unskipped: 0 failures in 30 runs;
+  - `pkg/system/ledger_test.go`: `TestReservationsDoNotMoveEpoch`, `TestHoldExpiresAtFullAmount` (with the settable clock), `TestRetryReusesHold`, `TestConcurrentReservationsStayWithinLimit` (50 goroutines, limit 500, input 20, output up to 80; the sum of holds stays ≤ 500 and some are refused).
+
+### Why
+- **Holds cap output.** Without the cap, a round could settle more than it held, and the invariant (spent + reserved ≤ limit) would depend on estimates. With the cap, only the input estimate must be conservative.
+- **One token per byte as the input estimate, not bytes/3 as the plan suggested.** The fake model counts bytes as tokens, so bytes/3 would let it settle above its hold. For real models one per byte overestimates about 3–4×. That's the safe direction: it only refuses a little earlier near the end of a budget.
+- **Settling from the caller's usage events, not inside the backend.** Both backends already emit one usage event per round, so the backend change is a single `Before` call per round.
+
+### What worked
+- All Go tests, vet, gofmt and runtime tests pass. `go test ./pkg/system -count=3` is green.
+
+### What didn't work
+- `TestLLMBudgets`: `p6_test.go:96: call 2: 200 map[result:map[text:slop is conn usage:map[input:4 output:12]]]`. This is the intended change: with 16 tokens left and 4 held for input, the third call may write 12. It is cut short and spends exactly the budget (used 60, not 66). Test updated to expect it.
+
+### What I learned
+- With no `maxTokens` from the page, a budgeted caller's round holds everything that's left. Parallel calls from one person then run one after another rather than overspending. The plan's note stands: the server should set an output cap per call (today 65,536 when the page sends 0).
+
+### What warrants a second pair of eyes
+- `Meter.Close` charges an open round in full. If `Sample` fails after `Before` but before the provider was contacted (for example engine construction fails), the payer is charged the hold. That's conservative; `Release` exists if we later want to tell the cases apart.
+- `ResetLLMUsage` zeroes used but leaves reserved, so open holds still count after a reset.
+
+### What should be done in the future
+- A server-side default output cap per call.
+- Phase 6 (cost units) stays deferred: every tier is deepseek-4.1-flash.
+
+### Code review instructions
+- `pkg/system/ledger.go`; the `Before` call in `pkg/llm/gepp/sample.go`; the meter wiring in `pkg/server/sample.go` and `pkg/actor/sample.go`.
+- Validate with `GOWORK=off go test ./pkg/system ./pkg/server -run 'Ledger|Reserv|Hold|Retry|TestConcurrent|TestLLMBudgets|TestPageSample' -count=1`.
