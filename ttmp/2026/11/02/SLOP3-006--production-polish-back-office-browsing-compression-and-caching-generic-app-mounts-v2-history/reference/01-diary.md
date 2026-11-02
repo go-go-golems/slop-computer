@@ -242,3 +242,39 @@ The user merged #14, #15, #408 and #407. Compression is live and measured. The l
   - the guestbook;
   - some `/f/<id>` apps.
 - Remaining tasks: hc66 (caching), 07oh (generic /f/:id), 2ghn (v2 history), wcpm (Cloudflare).
+
+## Step 6: Models for the sample capability (Vault policy applied; GitOps #410)
+
+The vitrine agent didn't work in production because slop.yaml had no `llm:` setting; v2 never had model keys either. The user copied francois's LunaRoute files to `kv/apps/slop/test/pi` and asked me to apply "the terraform". The repo's Terraform only manages the Hetzner servers. Vault policies are applied by `scripts/bootstrap-vault-kubernetes-auth.sh`, which rewrites every policy and role from the checkout that runs it. I applied only the slop policy instead. GitOps PR #410 wires in the rest.
+
+### Prompt Context
+**User prompt (verbatim):** "does the agent in vitrine work?"; "you can use the keys from francois or the previous version (if they had some)?"; "I moevd the kv thing, can you apply the terraform?"
+**Assistant interpretation:** Make sampling work in production with francois's LunaRoute key: apply the Vault policy, then prepare the deployment change.
+**Inferred user intent:** vitrine's agent, and other `sample` apps, work on slop.yolo.
+
+### What I did
+- Diagnosed the agent:
+  - vitrine calls `claude.use('sample')` with a page tool, streaming and `limits()`. It attaches images only when `limits().images` is set.
+  - As a guest, the panel reads "The agent needs Claude, which this view does not offer".
+  - A member would hit `503 unavailable: this server has no model backend`.
+- Vault:
+  - `vault policy write slop-test vault/policies/kubernetes/slop-test.hcl`, adding read on `kv/data/apps/slop/test/pi`.
+  - Checked the secret's key names only: auth.json, models-store.json, settings.json.
+- GitOps #410 (branch `slop/llm`):
+  - `pi-secret.yaml`;
+  - the deployment's command copies the files into `/var/lib/slop/pi`, then `exec slop`;
+  - config revision 3;
+  - `llm: pi` with tiers quick=`glm-5.3-flash`, default/complex=`glm-5.3`;
+  - egress on 443.
+
+### What I learned
+- francois runs Pi through its own setup (geppetto only appears as an indirect dependency). slop uses geppetto v0.13.13's `pi.LoadAgentDir`, which reads settings.json, models-store.json, models.json and auth.json.
+- For `lunaroute`, an OAuth entry's access token is the key and a refresh returns the same credential (resolve.go:186). Sharing francois's copy can't break francois through token rotation.
+- `llm.ls` in production holds only `@admin: allowed, no budget`. Members get nothing until someone runs `llm.set @member`.
+
+### What should be done in the future
+- After #410 merges, check the log for `Pi models ready (Geppetto): 2`, then have an admin try vitrine's agent.
+- Optionally:
+  - set `sample: {images: true}` for vitrine (both glm models take image input);
+  - give slop its own LunaRoute key;
+  - decide member budgets.
