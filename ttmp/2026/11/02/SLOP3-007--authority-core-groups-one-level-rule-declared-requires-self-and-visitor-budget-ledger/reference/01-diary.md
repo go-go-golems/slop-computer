@@ -161,3 +161,62 @@ Every "is this person in this class?" question now goes through one nesting func
 ### Code review instructions
 - `pkg/system/policy.go` (`GroupsOf`, `Policy`, `groupLLMRow`), then `pkg/access/check.go` (`Matches`, `In`).
 - Validate with `GOWORK=off go test ./pkg/system ./pkg/server -count=1`.
+
+## Step 4: Phase 2, one level rule and live link grants
+
+`access.Level` is now the plan's expression: the max over sources, then the min with one ceiling, and no other branch. Link grants count only while their link is live and its creator still holds the link's level. The phase-2 exit tests pass. A new property test checks `Level` against an independent model, and it fails on `main` with exactly the pending-owner bug.
+
+### Prompt Context
+**User prompt (verbatim):** see Step 1.
+**Assistant interpretation:** Phase 2 (decisions 2 and 7).
+**Inferred user intent:** Make the owner-skips-cap bug unwritable, and make derived authority die with its origin.
+**Commit (code):** 2fb7a86 — "SLOP3-007 phase 2: one level rule, and links that end with their creator"
+
+### What I did
+- `pkg/access/check.go`:
+  - `Level` → `level(ctx, p, st, withLinks)`. Sources are the kernel, a store on itself, the owner column, `@admin` and live matching grants, each grant capped at admin. Then `kindCap`: none for disabled or a scope-less token, interact for guest/pending, otherwise owner.
+  - `deadLink` checks the link: revoked or expired, else the creator's level computed with `withLinks=false`.
+  - `GrantInactive` exposes that for `grant.ls`.
+  - `capOf` deleted.
+- `pkg/system/stores.go`:
+  - `Grants` LEFT JOINs `links` on `g.via = l.id`;
+  - `Grant.Link *GrantLink` (creator, level, revoked_at, expires_at), with `GrantLink.Live(now)`;
+  - `Grant.Inactive` for listings.
+- `pkg/verbs/stores.go`: `grant.ls` fills `inactive`.
+- Tests:
+  - the three phase-2 exit tests are unskipped;
+  - the expired-link test also checks `grant.ls` shows the reason;
+  - `pkg/access/level_test.go`: `TestLevelNeverAboveCap`, 300 seeded cases (role × owner × grant level × grant to self or `@member` × token shape) against a model written separately from `Level`.
+
+### Why
+- The trace keeps the lines tests read: `audience …`, `grant <subject> <level> on <store> (<via>)`, `owner of …`, `no grant on … matches`. A ceiling line appears only when it lowers the level, so traces stay short.
+- The creator's level ignores link grants, so links can't hold each other up and there is no recursion. A link created by `system` (or with no creator) always qualifies.
+- I didn't add the per-creator/epoch cache the plan suggests. Every check is one extra `Grants` query and one `Person` lookup per matching link grant, cheap on SQLite. Worth revisiting only if `reviewAll` shows up in profiles.
+
+### What worked
+- All Go tests and vet pass.
+- The property test copied into a `main` worktree (adapted to `AtLeast`) fails: `case 3: role pending owns true …: level owner, want interact`.
+
+### What didn't work
+- `TestModuleTrust` became flaky: 1 failure in 10 runs, then 1 in 30, against 0 in 20 and 0 in 30 on `main` (a separate worktree at `$CLAUDE_JOB_DIR/tmp/main-wt`). The failing log had `store tool runs tool@1` (via `activate`) among the last three rows, pushing out the `trust tool with system` row the test looks for.
+  - Cause: `Kernel.Running` activates lazily in whichever caller arrives first. When a background caller wins, the test's own call sees the version already active and continues, while the background caller writes its system log row later.
+  - That race exists on `main`; the new `Level` (a join per check) changed the timing enough to expose it.
+  - Fix: the test reads 10 rows. After the fix: 0 failures in 40.
+
+### What I learned
+- `MoveGrants` keeps `via`, so a guest's link grant keeps its provenance after they sign up; the liveness rule still applies.
+
+### What warrants a second pair of eyes
+- New behavior, by decision 7:
+  - grants from expired links stop counting (they used to stay);
+  - links made by someone later disabled or removed stop working;
+  - a pending creator still holds interact on their own store, so their interact links keep working.
+- `grant.set` still accepts `owner`. Such a grant now counts as admin (as before for members via `capOf`). The plan suggests refusing it; I left that for a separate change because existing tests set owner grants on purpose (`p4_test.go:116`).
+
+### What should be done in the future
+- Consider refusing `owner` in `grant.set`.
+- Cache creator levels per epoch if profiling shows a need.
+
+### Code review instructions
+- `pkg/access/check.go` from `Level` to `deadLink`; `pkg/system/stores.go` (`Grants`, `GrantLink`).
+- Validate with `GOWORK=off go test ./pkg/access ./pkg/server -count=1`.
