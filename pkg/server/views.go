@@ -306,6 +306,9 @@ func (s *Server) viewEvents(w http.ResponseWriter, r *http.Request) {
 	// head after the documents could move last past a commit never sent.
 	catchUp := func(from int64) error {
 		upTo := st.Head()
+		if s.catchUpGap != nil {
+			s.catchUpGap()
+		}
 		rows, err := st.DocsSince(ctx, from, "")
 		if err != nil {
 			return err

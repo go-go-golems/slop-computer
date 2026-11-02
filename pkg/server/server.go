@@ -40,6 +40,9 @@ type Server struct {
 	oidc      *identity.Provider
 	billing   *stripe.Service
 	samples   samples
+	// catchUpGap runs between a catch-up's head read and its document
+	// read (tests commit there; nil otherwise).
+	catchUpGap func()
 }
 
 // Build makes the server with everything the configuration enables.

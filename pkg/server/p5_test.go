@@ -5,8 +5,10 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"fmt"
 	"net/http"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 
@@ -475,5 +477,61 @@ func TestDisabledAccountActsNowhere(t *testing.T) {
 	}
 	if h.srv.personAs(ctx, una.ID, "test") != nil {
 		t.Fatal("a disabled account acts")
+	}
+}
+
+// A commit that lands between a catch-up's head read and its document read
+// is not lost: the documents read include it, or it arrives live.
+func TestCatchUpLosesNoCommit(t *testing.T) {
+	h := newHarness(t)
+	admin := h.tokenFor("admin@example.com", "read", "write", "admin")
+	s, _, _ := clubSite(t, h, "una@example.com")
+	h.call(admin, "sub.grant", map[string]any{"person": "una@example.com", "until": "30d"})
+	st, v := openView(s, h.cfg.Hosts.Live[0], "/club", "")
+	if st != 200 {
+		t.Fatalf("view: %d %v", st, v)
+	}
+	sbx := strings.TrimPrefix(strings.Split(v["url"].(string), "/v/")[0], "http://")
+	auth := map[string]string{"Authorization": "Bearer " + v["secret"].(string)}
+	h.call(admin, "docs.set", map[string]any{"store": "club", "path": "notes/a", "data": map[string]any{"n": 1}})
+	// subscribe (the stream filters by subscription), then resume from
+	// before notes/a
+	ev := openStream(t, s, v)
+	ev.next(t, "hello", 2*time.Second)
+	if r, _ := s.do("POST", sbx, "/_rt/rpc", map[string]any{"method": "db.subscribe", "args": map[string]any{"sub": "s1", "path": "notes", "coll": true}}, auth); r.StatusCode != 200 {
+		t.Fatalf("subscribe: %d", r.StatusCode)
+	}
+	ev.resp.Body.Close()
+	var once sync.Once
+	h.srv.catchUpGap = func() {
+		once.Do(func() {
+			h.call(admin, "docs.set", map[string]any{"store": "club", "path": "notes/gap", "data": map[string]any{"n": 2}})
+		})
+	}
+	defer func() { h.srv.catchUpGap = nil }()
+	resp, _ := s.do("GET", sbx, "/_rt/events?after=0", nil, auth)
+	defer resp.Body.Close()
+	got := make(chan string, 16)
+	go func() {
+		sc := bufio.NewScanner(resp.Body)
+		for sc.Scan() {
+			if line := sc.Text(); strings.HasPrefix(line, "data: ") && strings.Contains(line, `"path"`) {
+				d := map[string]any{}
+				_ = json.Unmarshal([]byte(line[6:]), &d)
+				got <- fmt.Sprint(d["path"])
+			}
+		}
+		close(got)
+	}()
+	deadline := time.After(2 * time.Second)
+	for {
+		select {
+		case p := <-got:
+			if p == "notes/gap" {
+				return
+			}
+		case <-deadline:
+			t.Fatal("the commit made during the catch-up never arrived")
+		}
 	}
 }
