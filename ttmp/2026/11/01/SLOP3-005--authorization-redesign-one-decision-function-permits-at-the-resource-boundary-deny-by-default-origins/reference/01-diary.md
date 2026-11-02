@@ -120,3 +120,110 @@ control before more features accumulate on the current structure.
 
 - Read the guide's sections 4 and 5 against the referenced files at
   `8301cf0`; check the counts with the command in section 4.10.
+
+## Step 2: Guide v2, and phase L (one lifecycle state)
+
+The user agreed to fold the caching, serving and lifecycle refactors into
+the plan and asked for implementation with commits and a detailed diary.
+Guide v2 adds:
+- findings 12 and 13, and root causes R7 (response facts decided per
+  handler) and R8 (lifecycle state as loose fields);
+- sections 6.8 (visibility, mutability, one resolver) and 6.9 (one
+  lifecycle state);
+- phase L and an extended phase A6;
+- the change feed as an open question.
+
+It is uploaded as "SLOP3-005 Authorization Redesign Intern Guide v2", a
+new name so the annotations on v1 survive. Phase L then replaced
+`Running.Broken`/`Fallback` with `Active`, `Failed` and `Usable()`. That
+showed the actor manager never checked failures: it built actors for
+never-activated versions. Work happens on branch `task/slop3-005-authz`,
+stacked on #13. Commits: `2145b10` (guide v2), `272cb51` (phase L).
+
+### Prompt Context
+
+**User prompt (verbatim):** "Go ahead. then implement, commit at appropriate intervals and keep a detailed diary as you work (using the diary format from the skill)"
+
+The proposal it answers: fold refactors 1 (caching facts) and 2 (one
+resolver) into phase A6, add 3 (lifecycle) as its own phase, and keep 4
+(the change feed) as an open question. Then update the guide and
+re-upload it.
+
+**Assistant interpretation:** Update the guide and re-upload it. Then
+implement the SLOP3-005 phases in order of value and risk, each with
+tests, commits and a diary entry.
+
+**Inferred user intent:** Get the systemic fixes into the code, not just
+the design.
+
+### What I did
+
+- **Guide v2:** edited with anchored replacements; uploaded
+  (`OK: uploaded SLOP3-005 Authorization Redesign Intern Guide v2.pdf ->
+  /ai/2026/11/01/SLOP3-005`); added tasks L and A6b.
+- **Phase L** (`pkg/kernel/apps.go`):
+  - `Running{Store, App, N, Manifest, Active, Failed *Failure}`, with
+    `Usable()` = `N > 0 && Active` and `Broken()` = `Failed.Why`.
+  - `Running()` sets `Active` when the newest version is already active
+    or activates, and otherwise sets `Failed` and falls back to the last
+    active version (`Active` again) when there is one.
+- **Callers:**
+  - `openView` refuses `!Usable()`.
+  - `serveStatic` serves only a usable version.
+  - The status verbs (`app.status`, `app.follow`, `mount.status`) report
+    `Broken()`.
+  - The actor manager's `Get` refuses a store with something pushed but
+    nothing usable.
+- **Test:** `TestNothingUsableAfterFirstActivationFails`.
+
+### Why
+
+- **Keep `N` and `Manifest` as fields.** About 40 call sites read them
+  (actors, the static host, status). Their meaning, "the version
+  served", did not change, so making them methods would have been churn
+  without benefit.
+- **Make `Broken` a method.** `Broken()` keeps the status output, but no
+  caller can mistake it for "nothing usable" any more.
+
+### What worked
+
+- The full Go suite passes.
+- Negative control: with the `Get` check disabled, the never-activated
+  actor ran (`ReferenceError: sql is not defined at count (actor.js:1:46(1))`,
+  an error from inside the actor). With it, `actor_error: the app is
+  broken: ...`.
+
+### What didn't work
+
+- **A silent JSON break.** The status verbs put `r.Broken` into a
+  `map[string]any`, which still compiled once `Broken` became a method:
+  the map would hold a method value and the JSON encoding would fail at
+  runtime. I found it by listing every field use before relying on the
+  compiler.
+
+### What I learned
+
+- `kernel.Running` is called on every request to a mount, and it is also
+  what activates a store, so its result is the natural place for "can
+  serve".
+
+### What was tricky to build
+
+- The order inside `Running()`. `r.Manifest` must be set before
+  `activate`, which reads it, and reset to the fallback version's
+  manifest after a failure.
+
+### What warrants a second pair of eyes
+
+- **The static host no longer serves a store whose only version failed
+  activation.** Before, it served that snapshot's files. That is
+  consistent with views and actors, but it is a behavior change for sites
+  with failing migrations.
+- **The actor manager still keeps its own `broken` map** for actor build
+  failures. Merging it into `Failure` is left for later.
+
+### Code review instructions
+
+- `pkg/kernel/apps.go` (`Running`), `pkg/actor/manager.go` (`Get`),
+  `pkg/server/views.go` (`openView`), `pkg/server/site.go`.
+- **Tests:** `GOWORK=off go test ./pkg/server -run 'TestActors|TestViewsOpenOnFallbackVersion|TestNothingUsableAfterFirstActivationFails' -count=1`.
