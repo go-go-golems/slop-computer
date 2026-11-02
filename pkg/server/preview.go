@@ -83,7 +83,7 @@ func (s *Server) servePreview(w http.ResponseWriter, r *http.Request, label stri
 		return
 	}
 	if !strings.HasPrefix(f.Type, "text/html") {
-		s.serveBlob(w, r, st, f, "private, no-store")
+		s.writeStoreBytes(w, r, storeBytes{st: st, f: f, vis: private, mut: noStore})
 		return
 	}
 	page, err := st.ReadFile(f)

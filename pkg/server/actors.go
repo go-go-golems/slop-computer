@@ -227,8 +227,11 @@ func (s *Server) serveActorRoute(w http.ResponseWriter, r *http.Request, res *re
 	if w.Header().Get("Content-Type") == "" && out.Type != "" {
 		w.Header().Set("Content-Type", out.Type)
 	}
-	if w.Header().Get("Cache-Control") == "" {
+	if cc := w.Header().Get("Cache-Control"); cc == "" {
 		w.Header().Set("Cache-Control", "no-store")
+	} else if (strings.Contains(cc, "public") || strings.Contains(cc, "s-maxage")) && s.visibilityOf(r.Context(), res.store) != public {
+		// a shared cache may keep a response only if anyone may read the store
+		w.Header().Set("Cache-Control", cachePrivate)
 	}
 	w.Header().Set("X-Content-Type-Options", "nosniff")
 	w.WriteHeader(out.Status)
@@ -263,14 +266,16 @@ func (s *Server) serveBoundAsset(w http.ResponseWriter, r *http.Request, storeID
 		notFound(w)
 		return
 	}
-	if cache == "" {
-		cache = cachePrivate
+	// The actor may ask for public caching (its Cache-Control); a shared
+	// cache may keep the upload only if anyone could reach this store too.
+	out := storeBytes{st: st, f: f, vis: private, mut: moving}
+	if strings.Contains(cache, "public") && s.visibilityOf(ctx, storeID) == public {
+		out.vis = public
+		if strings.Contains(cache, "immutable") {
+			out.mut = immutable
+		}
 	}
-	w.Header().Set("Content-Security-Policy", "sandbox; default-src 'none'")
-	if !isMedia(f.Type) {
-		w.Header().Set("Content-Disposition", "attachment")
-	}
-	s.serveBlob(w, r, st, f, cache)
+	s.writeStoreBytes(w, r, out)
 }
 
 func isMedia(t string) bool {

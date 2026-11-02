@@ -6,14 +6,11 @@ import (
 	"io"
 	"net/http"
 	"path"
-	"strconv"
 	"strings"
-	"time"
 
 	"github.com/go-go-golems/slop-computer/pkg/access"
 	"github.com/go-go-golems/slop-computer/pkg/kernel"
 	"github.com/go-go-golems/slop-computer/pkg/rt"
-	"github.com/go-go-golems/slop-computer/pkg/store"
 	"github.com/go-go-golems/slop-computer/pkg/system"
 )
 
@@ -73,7 +70,7 @@ func (s *Server) serveStatic(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if strings.HasPrefix(r.URL.Path, "/_s/") {
-		s.serveStoreFile(w, r, nil, false) // the static host has no sessions
+		s.serveStoreFile(w, r, nil)
 		return
 	}
 	ctx := r.Context()
@@ -117,7 +114,7 @@ func (s *Server) serveStatic(w http.ResponseWriter, r *http.Request) {
 		name = strings.TrimSuffix(name, "/") + "/index.html"
 	}
 	if f, err := as.SnapshotFile(ctx, res.run.N, name); err == nil {
-		s.serveBlob(w, r, as, f, cacheMoving)
+		s.writeStoreBytes(w, r, storeBytes{st: as, f: f, vis: public, mut: moving}) // anyone may read (checked above)
 		return
 	}
 	// A directory without its slash: send it to the slash.
@@ -147,7 +144,7 @@ func (s *Server) serveStatic(w http.ResponseWriter, r *http.Request) {
 	// Client-side routes: a path without an extension gets the entry page.
 	if path.Ext(name) == "" {
 		if f, err := as.SnapshotFile(ctx, res.run.N, entry); err == nil {
-			s.serveBlob(w, r, as, f, cacheMoving)
+			s.writeStoreBytes(w, r, storeBytes{st: as, f: f, vis: public, mut: moving}) // anyone may read (checked above)
 			return
 		}
 	}
@@ -156,11 +153,9 @@ func (s *Server) serveStatic(w http.ResponseWriter, r *http.Request) {
 
 // serveStoreFile serves /_s/<store>/<n|ref>/<path> (the tree at a snapshot
 // or ref) and /_s/<store>/assets/<path>, to whoever may read the store.
-// isolate is for a host whose origin is trusted (the live host: the shell
-// and its sessions): the files are anyone's who can push to a store, so they
-// get a sandbox CSP (no scripts, no requests), and what is not media is a
-// download rather than a page.
-func (s *Server) serveStoreFile(w http.ResponseWriter, r *http.Request, p *access.Principal, isolate bool) {
+// The files are anyone's who can push to the store: writeStoreBytes keeps
+// them from running as pages on a trusted host.
+func (s *Server) serveStoreFile(w http.ResponseWriter, r *http.Request, p *access.Principal) {
 	ctx := r.Context()
 	parts := strings.SplitN(strings.TrimPrefix(r.URL.Path, "/_s/"), "/", 3)
 	if len(parts) < 3 || parts[2] == "" {
@@ -178,66 +173,12 @@ func (s *Server) serveStoreFile(w http.ResponseWriter, r *http.Request, p *acces
 		notFound(w)
 		return
 	}
-	// Shared caches may keep a response only when anyone could read it:
-	// a guest can read through their own grant (a redeemed share link).
-	public := d.OK && p == nil
-	if !public {
-		pd, _, _ := s.Env.K.Access.Can(ctx, nil, id, rt.LevelView, "", true)
-		public = pd.OK
-	}
-	cache := cachePrivate
-	var f store.File
-	if at == "assets" {
-		f, err = st.File(ctx, "assets", name)
-		if public {
-			cache = cacheMoving
-		}
-	} else {
-		var n int64
-		n, err = st.Ref(ctx, at)
-		if err == nil {
-			f, err = st.SnapshotFile(ctx, n, name)
-		}
-		if public {
-			cache = cacheMoving
-			if _, numErr := strconv.ParseInt(at, 10, 64); numErr == nil {
-				cache = cacheImmutable
-			}
-		}
-	}
+	f, mut, err := resolveStoreFile(ctx, st, at, name)
 	if err != nil {
 		notFound(w)
 		return
 	}
-	if isolate {
-		w.Header().Set("Content-Security-Policy", "sandbox; default-src 'none'")
-		if !isMedia(f.Type) {
-			w.Header().Set("Content-Disposition", "attachment")
-		}
-	}
-	s.serveBlob(w, r, st, f, cache)
-}
-
-// serveBlob writes a file's bytes with its type, an ETag (its hash) and a
-// cache class; ranges and conditional requests are handled.
-func (s *Server) serveBlob(w http.ResponseWriter, r *http.Request, st *store.Store, f store.File, cache string) {
-	etag := `"` + f.SHA256 + `"`
-	h := w.Header()
-	h.Set("ETag", etag)
-	h.Set("Cache-Control", cache)
-	h.Set("X-Content-Type-Options", "nosniff")
-	if match := r.Header.Get("If-None-Match"); match != "" && strings.Contains(match, etag) {
-		w.WriteHeader(http.StatusNotModified)
-		return
-	}
-	file, err := st.Blobs.Open(f.SHA256)
-	if err != nil {
-		http.Error(w, "file unavailable", http.StatusServiceUnavailable)
-		return
-	}
-	defer file.Close()
-	h.Set("Content-Type", f.Type)
-	http.ServeContent(w, r, "", time.Time{}, file)
+	s.writeStoreBytes(w, r, storeBytes{st: st, f: f, vis: s.visibilityOf(ctx, id), mut: mut})
 }
 
 func notFound(w http.ResponseWriter) {

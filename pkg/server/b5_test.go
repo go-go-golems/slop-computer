@@ -153,3 +153,48 @@ func TestBlocksSiteUploads(t *testing.T) {
 		t.Fatalf("static upload = %d", res.StatusCode)
 	}
 }
+
+// Store bytes get their headers from facts (SLOP3-005 §6.8): an actor may
+// ask for public caching of an upload it serves, but a shared cache keeps
+// it only when anyone may read the serving store; and uploads never run
+// as pages, on the static host either.
+func TestStoreBytesFacts(t *testing.T) {
+	h := newHarness(t)
+	admin := h.tokenFor("admin@example.com", "read", "write", "admin")
+	live, static := h.cfg.Hosts.Live[0], h.cfg.Hosts.Static[0]
+	png, _ := base64.StdEncoding.DecodeString(onePNG)
+	h.call(admin, "store.new", map[string]any{"id": "src"})
+	h.call(admin, "import.files", map[string]any{"store": "src", "zone": "assets", "files": []any{
+		map[string]any{"path": "pic", "data": base64.StdEncoding.EncodeToString(png), "type": "image/png"},
+		map[string]any{"path": "page.html", "data": base64.StdEncoding.EncodeToString([]byte("<script>alert(1)</script>")), "type": "text/html"},
+	}})
+	h.call(admin, "store.new", map[string]any{"id": "cacher"})
+	h.call(admin, "files.push", map[string]any{"store": "cacher", "files": files(map[string]string{"app.json": `{"title":"c","actor":"actor.js"}`,
+		"actor.js": `defineActor({ http: {
+  'GET /x/:id': { level: 'public', run: (ctx, req) => ({ asset: { from: 'source', id: req.params.id }, headers: { 'Cache-Control': 'public, max-age=31536000, immutable' } }) },
+  'GET /page': { level: 'public', run: () => ({ html: '<p>hi</p>', headers: { 'Cache-Control': 'public, max-age=600' } }) },
+} });`})})
+	h.call(admin, "store.new", map[string]any{"id": "cacher-1", "app": "cacher"})
+	h.call(admin, "bind.set", map[string]any{"store": "cacher-1", "alias": "source", "target": "src", "assets": true})
+	h.call(admin, "grant.set", map[string]any{"store": "src", "subject": "store:cacher-1", "level": "view"})
+	h.call(admin, "mount.set", map[string]any{"host": live, "path": "/c/:id", "storeParam": "id"})
+	if r, _ := h.get(live, "/c/cacher-1/x/pic"); r.StatusCode != 200 || r.Header.Get("Cache-Control") != cachePrivate {
+		t.Fatalf("an upload through a store nobody anonymous may read: %d %q", r.StatusCode, r.Header.Get("Cache-Control"))
+	}
+	if r, _ := h.get(live, "/c/cacher-1/page"); r.StatusCode != 200 || r.Header.Get("Cache-Control") != cachePrivate {
+		t.Fatalf("an actor page asking public caching on a private store: %d %q", r.StatusCode, r.Header.Get("Cache-Control"))
+	}
+	h.call(admin, "grant.set", map[string]any{"store": "cacher-1", "subject": "@guest", "level": "view"})
+	if r, _ := h.get(live, "/c/cacher-1/page"); r.Header.Get("Cache-Control") != "public, max-age=600" {
+		t.Fatalf("an actor page on a public store keeps its caching: %q", r.Header.Get("Cache-Control"))
+	}
+	if r, _ := h.get(live, "/c/cacher-1/x/pic"); r.Header.Get("Cache-Control") != cacheImmutable {
+		t.Fatalf("an upload through a public store, asked immutable: %q", r.Header.Get("Cache-Control"))
+	}
+	// Uploads are not pages anywhere: the static host isolates them too.
+	h.call(admin, "grant.set", map[string]any{"store": "src", "subject": "@guest", "level": "view"})
+	r, _ := h.get(static, "/_s/src/assets/page.html")
+	if r.StatusCode != 200 || r.Header.Get("Content-Security-Policy") != "sandbox; default-src 'none'" || r.Header.Get("Content-Disposition") != "attachment" {
+		t.Fatalf("an uploaded page on the static host: %d csp %q disposition %q", r.StatusCode, r.Header.Get("Content-Security-Policy"), r.Header.Get("Content-Disposition"))
+	}
+}

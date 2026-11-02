@@ -82,8 +82,8 @@ func (s *Server) serveAssetBlob(w http.ResponseWriter, r *http.Request, storeID,
 		notFound(w)
 		return
 	}
-	w.Header().Set("Content-Security-Policy", "sandbox; default-src 'none'")
-	s.serveBlob(w, r, st, f, cachePrivate)
+	// private: revalidated on every use, so a deleted upload is gone for good
+	s.writeStoreBytes(w, r, storeBytes{st: st, f: f, vis: private, mut: moving})
 }
 
 func (s *Server) rpcAssetsList(ctx context.Context, v *rt.View, _ json.RawMessage) (any, error) {

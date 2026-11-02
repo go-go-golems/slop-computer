@@ -149,7 +149,7 @@ func (s *Server) serveLive(w http.ResponseWriter, r *http.Request) {
 		serveAsset(w, r)
 	case strings.HasPrefix(p, "/_s/"):
 		pr, _ := s.sitePrincipal(r)
-		s.serveStoreFile(w, r, pr, true)
+		s.serveStoreFile(w, r, pr)
 	case p == "/_site/login" && r.Method == http.MethodGet:
 		s.siteLogin(w, r)
 	case p == "/_site/callback" && r.Method == http.MethodGet:
