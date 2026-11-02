@@ -7,6 +7,8 @@ import (
 	"sort"
 	"strings"
 	"time"
+
+	"github.com/go-go-golems/slop-computer/pkg/authz"
 )
 
 // Who acts in a turn.
@@ -15,6 +17,9 @@ type Who struct {
 	Via   string // page, actor, reactor:<name>, cli, http, eval:<tok>, ...
 	Level string // the actor's level on this store, for slop_level()
 	App   string // app@version running, for the log
+	// Code is the right to change app code (D9); without it the turn's
+	// tree and ref writes refuse to touch a store that holds app.json.
+	Code authz.CodeRight
 }
 
 // Change is one changed thing in a commit.

@@ -6,10 +6,8 @@ import (
 	"slices"
 
 	"github.com/go-go-golems/slop-computer/pkg/access"
-	"github.com/go-go-golems/slop-computer/pkg/apps"
 	"github.com/go-go-golems/slop-computer/pkg/authz"
 	"github.com/go-go-golems/slop-computer/pkg/rt"
-	"github.com/go-go-golems/slop-computer/pkg/store"
 	"github.com/go-go-golems/slop-computer/pkg/system"
 )
 
@@ -203,30 +201,4 @@ func splitSlash(p string) []string {
 		}
 	}
 	return out
-}
-
-// needCodeRight enforces decision D9: only admins write app code, meaning
-// the tree or refs of a store whose tree holds app.json (or a push that
-// adds one).
-func needCodeRight(ctx context.Context, s *store.Store, p *access.Principal, paths ...string) error {
-	if p.IsAdmin() {
-		return nil
-	}
-	isApp := slices.Contains(paths, apps.File)
-	if !isApp {
-		if _, err := s.File(ctx, "tree", apps.File); err == nil {
-			isApp = true
-		}
-	}
-	if !isApp {
-		if n, err := s.Ref(ctx, "main"); err == nil {
-			if _, err := s.SnapshotFile(ctx, n, apps.File); err == nil {
-				isApp = true
-			}
-		}
-	}
-	if isApp {
-		return Errf("permission_denied", "only admins push app code (this tree holds app.json; decision D9)")
-	}
-	return nil
 }

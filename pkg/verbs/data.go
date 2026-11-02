@@ -10,7 +10,6 @@ import (
 	"strings"
 
 	"github.com/go-go-golems/slop-computer/pkg/access"
-	"github.com/go-go-golems/slop-computer/pkg/apps"
 	"github.com/go-go-golems/slop-computer/pkg/authz"
 	"github.com/go-go-golems/slop-computer/pkg/blobs"
 	"github.com/go-go-golems/slop-computer/pkg/ids"
@@ -89,15 +88,6 @@ func init() {
 				if err := dec.Decode(&b); err != nil {
 					return nil, Errf("invalid_argument", "bundle: %s", err.Error())
 				}
-				// Decision D9, as files.push enforces it: only admins write
-				// app code, and a tree with app.json is app code.
-				if !p.IsAdmin() {
-					for _, f := range b.Files {
-						if (f.Zone == "" || f.Zone == "tree") && f.Path == apps.File {
-							return nil, Errf("permission_denied", "only admins import app code (the bundle's tree holds app.json; decision D9)")
-						}
-					}
-				}
 				if err := putBlobs(e, a); err != nil {
 					return nil, err
 				}
@@ -115,7 +105,7 @@ func init() {
 				if err != nil {
 					return nil, Errf("invalid_argument", "%s", err.Error())
 				}
-				c, err := s.Do(ctx, store.Who{ID: p.ID(), Via: p.ViaLabel(), Level: "owner"}, func(t *store.Turn) error {
+				c, err := s.Do(ctx, store.Who{ID: p.ID(), Via: p.ViaLabel(), Level: "owner", Code: authz.CodeRightOf(p)}, func(t *store.Turn) error {
 					t.Summary = "imported"
 					if err := t.Restore(&b); err != nil {
 						return err
@@ -128,6 +118,9 @@ func init() {
 				})
 				if err != nil {
 					_ = e.K.DeleteStore(ctx, p, row.ID)
+					if errors.Is(err, store.ErrAppCode) {
+						return nil, Errf("permission_denied", "import refused, store removed: %s", err.Error())
+					}
 					return nil, Errf("invalid_argument", "import failed, store removed: %s", err.Error())
 				}
 				out := map[string]any{"store": row.ID, "docs": len(b.Docs), "files": len(b.Files), "tables": len(b.Tables)}

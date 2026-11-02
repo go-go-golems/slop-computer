@@ -9,6 +9,7 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/go-go-golems/slop-computer/pkg/authz"
 	"github.com/go-go-golems/slop-computer/pkg/blobs"
 	"github.com/go-go-golems/slop-computer/pkg/rt"
 )
@@ -28,7 +29,7 @@ func openTest(t *testing.T) *Store {
 	return s
 }
 
-var me = Who{ID: "usr_me", Via: "test", Level: "owner"}
+var me = Who{ID: "usr_me", Via: "test", Level: "owner", Code: authz.KernelCodeRight()}
 
 func TestDocsAndLog(t *testing.T) {
 	ctx := context.Background()
@@ -310,5 +311,49 @@ func TestNoAppSQLRunsAsTheKernel(t *testing.T) {
 	// as the kernel).
 	if _, err := s.Do(ctx, me, func(t *Turn) error { _, err := t.Exec(CallerKernel, `DELETE FROM parent`); return err }); err == nil {
 		t.Fatal("a kernel write to an app table: expected denial")
+	}
+}
+
+// D9 lives in the store: without the code right, a turn cannot change the
+// tree or refs of a store that holds app.json, nor write app.json anywhere.
+func TestStoreGuardsAppCode(t *testing.T) {
+	ctx := context.Background()
+	s := openTest(t)
+	member := Who{ID: "usr_m", Via: "test", Level: "admin"} // no code right
+	do := func(who Who, fn func(t *Turn) error) error { _, err := s.Do(ctx, who, fn); return err }
+	put := func(p string) func(t *Turn) error {
+		return func(t *Turn) error { _, err := t.PutFile("tree", p, []byte("x"), ""); return err }
+	}
+	snap := func(t *Turn) error { _, err := t.Snapshot("s", ""); return err }
+
+	// A store without app code: trees, snapshots and assets are anyone's.
+	if err := do(member, put("index.html")); err != nil {
+		t.Fatal(err)
+	}
+	if err := do(member, snap); err != nil {
+		t.Fatal(err)
+	}
+	if err := do(member, put("app.json")); !errors.Is(err, ErrAppCode) {
+		t.Fatalf("writing app.json without the right: %v", err)
+	}
+	// Once the tree holds app.json, every tree and ref change needs it.
+	if err := do(me, put("app.json")); err != nil {
+		t.Fatal(err)
+	}
+	for name, fn := range map[string]func(t *Turn) error{
+		"put":      put("index.html"),
+		"remove":   func(t *Turn) error { _, err := t.RemoveFile("tree", "app.json"); return err },
+		"snapshot": snap,
+		"move ref": func(t *Turn) error { return t.MoveRef("draft", 1) },
+	} {
+		if err := do(member, fn); !errors.Is(err, ErrAppCode) {
+			t.Errorf("%s in an app store without the right: %v", name, err)
+		}
+	}
+	if err := do(member, func(t *Turn) error { _, err := t.PutFile("assets", "a.txt", []byte("x"), ""); return err }); err != nil {
+		t.Fatalf("assets are not app code: %v", err)
+	}
+	if err := do(me, snap); err != nil {
+		t.Fatal(err)
 	}
 }

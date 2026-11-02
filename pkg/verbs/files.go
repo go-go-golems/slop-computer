@@ -87,11 +87,6 @@ func init() {
 				if err != nil {
 					return nil, err
 				}
-				if zoneOf(a) == "tree" {
-					if err := needCodeRight(ctx, s, p, a.S("path")); err != nil {
-						return nil, err
-					}
-				}
 				data := []byte(a.S("text"))
 				if a.Has("data") {
 					if data, err = base64.StdEncoding.DecodeString(a.S("data")); err != nil {
@@ -105,7 +100,7 @@ func init() {
 					return err
 				})
 				if err != nil {
-					return nil, Errf("invalid_argument", "%s", err.Error())
+					return nil, fileErr(err)
 				}
 				return f, nil
 			}},
@@ -116,11 +111,6 @@ func init() {
 				s, d, err := e.open(ctx, p, a.S("store"), rt.LevelAdmin, "deleting files")
 				if err != nil {
 					return nil, err
-				}
-				if zoneOf(a) == "tree" {
-					if err := needCodeRight(ctx, s, p); err != nil {
-						return nil, err
-					}
 				}
 				paths := []string{a.S("path")}
 				if a.B("recursive") {
@@ -145,7 +135,7 @@ func init() {
 					}
 					return nil
 				})
-				return map[string]any{"removed": n}, err
+				return map[string]any{"removed": n}, fileErr(err)
 			}},
 		&Verb{Name: "files.push", Doc: "Replace the tree with a manifest [{path, sha256, size, type?} or {path, text|data}] and snapshot it. Send blobs {sha256: base64} the server lacks; it answers missing_blobs otherwise.", Scope: Write, Action: authz.StoreAdmin,
 			Args: []Arg{storeArg, {Name: "files", Type: "json", Required: true}, {Name: "blobs", Type: "json"},
@@ -179,9 +169,6 @@ func init() {
 				if err != nil {
 					return nil, err
 				}
-				if err := needCodeRight(ctx, s, p); err != nil {
-					return nil, err
-				}
 				var n int64
 				c, err := s.Do(ctx, who(p, d), func(t *store.Turn) error {
 					var err error
@@ -189,7 +176,7 @@ func init() {
 					return err
 				})
 				if err != nil {
-					return nil, Errf("invalid_argument", "%s", err.Error())
+					return nil, fileErr(err)
 				}
 				return map[string]any{"n": n, "rev": c.Rev}, nil
 			}},
@@ -218,12 +205,9 @@ func init() {
 				if err != nil {
 					return nil, err
 				}
-				if err := needCodeRight(ctx, s, p); err != nil {
-					return nil, err
-				}
 				c, err := s.Do(ctx, who(p, d), func(t *store.Turn) error { return t.MoveRef(a.S("ref"), a.I("n", 0)) })
 				if err != nil {
-					return nil, Errf("invalid_argument", "%s", err.Error())
+					return nil, fileErr(err)
 				}
 				return map[string]any{"ref": a.S("ref"), "n": a.I("n", 0), "rev": c.Rev}, nil
 			}},
@@ -351,15 +335,6 @@ func push(ctx context.Context, e *Env, p *access.Principal, a Args, full bool) (
 		seen[f.Path] = true
 		sums = append(sums, f.SHA256)
 	}
-	if zone == "tree" {
-		paths := make([]string, 0, len(files))
-		for _, f := range files {
-			paths = append(paths, f.Path)
-		}
-		if err := needCodeRight(ctx, s, p, paths...); err != nil {
-			return nil, err
-		}
-	}
 	if missing := s.Blobs.Missing(sums); len(missing) > 0 {
 		sort.Strings(missing)
 		return nil, &Error{Code: "missing_blobs", Message: "send these blobs", Extra: map[string]any{"missing": missing}}
@@ -396,7 +371,7 @@ func push(ctx context.Context, e *Env, p *access.Principal, a Args, full bool) (
 		return nil
 	})
 	if err != nil {
-		return nil, Errf("invalid_argument", "%s", err.Error())
+		return nil, fileErr(err)
 	}
 	out := map[string]any{"files": len(files), "removed": removed}
 	if n > 0 {

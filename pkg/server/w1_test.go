@@ -2,6 +2,7 @@ package server
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"strings"
 	"testing"
@@ -203,5 +204,39 @@ defineActor({
 	body, _ := doc["body"].(map[string]any)
 	if got := fmt.Sprint(body["seen"]); got != "[0 1 2 3 4]" {
 		t.Fatalf("calls ran as %s, want each once in order", got)
+	}
+}
+
+// An actor (acting as its store, never an admin) cannot write app code:
+// D9 is enforced by the store, not by the verbs that used to check it.
+func TestActorsCannotWriteAppCode(t *testing.T) {
+	h := newHarness(t)
+	admin := h.tokenFor("admin@example.com", "read", "write", "admin")
+	h.call(admin, "store.new", map[string]any{"id": "maker"})
+	h.call(admin, "files.push", map[string]any{"store": "maker", "files": files(map[string]string{
+		"app.json": `{"title":"Maker","actor":"actor.js"}`,
+		"actor.js": `
+const files = use('files');
+defineActor({
+  actions: {
+    note(ctx) { files.write('notes.txt', 'hi'); return 'ok'; },
+    plant(ctx, { path }) { files.write(path, '{}', { zone: 'tree' }); return 'planted'; },
+  },
+});`,
+		"index.html": "<!doctype html><title>maker</title>",
+	})})
+	owner := actor.Visitor{ID: "store:maker", Level: "owner"}
+	call := func(action string, args map[string]any) (any, error) {
+		return h.srv.Env.A.Call(context.Background(), "maker", action, args, owner, "test")
+	}
+	if v, err := call("note", nil); err != nil || v != "ok" {
+		t.Fatalf("an asset write: %v %v", v, err)
+	}
+	for _, path := range []string{"app.json", "actor.js", "index.html"} {
+		_, err := call("plant", map[string]any{"path": path})
+		var ae *actor.Error
+		if !errors.As(err, &ae) || ae.Code != "permission_denied" {
+			t.Fatalf("an actor writing %s into its app's tree: %v", path, err)
+		}
 	}
 }

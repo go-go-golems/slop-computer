@@ -9,6 +9,7 @@ import (
 
 	"github.com/go-go-golems/slop-computer/pkg/access"
 	"github.com/go-go-golems/slop-computer/pkg/actor"
+	"github.com/go-go-golems/slop-computer/pkg/authz"
 	"github.com/go-go-golems/slop-computer/pkg/billing/stripe"
 	"github.com/go-go-golems/slop-computer/pkg/config"
 	"github.com/go-go-golems/slop-computer/pkg/kernel"
@@ -66,7 +67,20 @@ func (e *Env) open(ctx context.Context, p *access.Principal, id string, need rt.
 
 // who is the store.Who for a principal acting with a decided level.
 func who(p *access.Principal, d access.Decision) store.Who {
-	return store.Who{ID: p.ID(), Via: p.ViaLabel(), Level: d.LevelName()}
+	return store.Who{ID: p.ID(), Via: p.ViaLabel(), Level: d.LevelName(), Code: authz.CodeRightOf(p)}
+}
+
+// fileErr maps an error from a file, snapshot or ref write: a D9 refusal
+// keeps its code; anything else is a bad argument.
+func fileErr(err error) error {
+	if err == nil || errors.Is(err, store.ErrAppCode) {
+		return storeErr(err)
+	}
+	var ve *Error
+	if errors.As(err, &ve) {
+		return ve
+	}
+	return Errf("invalid_argument", "%s", err.Error())
 }
 
 // storeErr maps store errors to verb errors.
@@ -78,6 +92,8 @@ func storeErr(err error) error {
 		return nil
 	case errors.As(err, &ve):
 		return ve
+	case errors.Is(err, store.ErrAppCode):
+		return &Error{Code: "permission_denied", Message: err.Error()}
 	case errors.As(err, &de):
 		code := "invalid_argument"
 		if strings.HasPrefix(de.Msg, "conflict") {

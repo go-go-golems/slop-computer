@@ -601,6 +601,9 @@ func (a *Actor) asError(err error) *Error {
 	if errors.As(err, &ie) {
 		return fail("actor_error", "%v", ie.Value())
 	}
+	if errors.Is(err, store.ErrAppCode) {
+		return fail("permission_denied", "%v", err)
+	}
 	var de *store.DocError
 	if errors.As(err, &de) {
 		return fail("invalid_argument", "%s", de.Msg)

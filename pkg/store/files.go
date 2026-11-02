@@ -92,6 +92,11 @@ func (t *Turn) PutBlob(zone, p, sum string, size int64, ctype string) (File, err
 	if err := checkFile(zone, p, size); err != nil {
 		return File{}, err
 	}
+	if zone == "tree" {
+		if err := t.guardCode(p); err != nil {
+			return File{}, err
+		}
+	}
 	if n, ok := t.s.Blobs.Stat(sum); !ok || n != size {
 		return File{}, fmt.Errorf("no blob %s of %d bytes for %s", sum, size, p)
 	}
@@ -116,6 +121,11 @@ func (t *Turn) PutBlob(zone, p, sum string, size int64, ctype string) (File, err
 
 // RemoveFile deletes a file from a zone.
 func (t *Turn) RemoveFile(zone, p string) (bool, error) {
+	if zone == "tree" {
+		if err := t.guardCode(p); err != nil {
+			return false, err
+		}
+	}
 	res, err := t.s.w.ExecContext(t.ctx, `DELETE FROM _files WHERE zone = ? AND path = ?`, zone, p)
 	if err != nil {
 		return false, err
@@ -174,6 +184,9 @@ func (t *Turn) Snapshot(message, ref string) (int64, error) {
 	if ref == "" {
 		ref = "main"
 	}
+	if err := t.guardCode(); err != nil {
+		return 0, err
+	}
 	files, err := t.TreeFiles()
 	if err != nil {
 		return 0, err
@@ -222,6 +235,12 @@ func (t *Turn) MoveRef(ref string, n int64) error {
 	}
 	if exists == 0 {
 		return fmt.Errorf("no snapshot %d", n)
+	}
+	if err := t.guardCode(); err != nil {
+		return err
+	}
+	if !t.Who.Code.OK() && t.snapshotHoldsApp(n) {
+		return ErrAppCode
 	}
 	if _, err := t.s.w.ExecContext(t.ctx, `INSERT INTO _refs (name, n, at, by) VALUES (?, ?, ?, ?) ON CONFLICT (name) DO UPDATE SET n = excluded.n, at = excluded.at, by = excluded.by`,
 		ref, n, t.Now, nullStr(t.Who.ID)); err != nil {
@@ -386,4 +405,42 @@ func (s *Store) RecentLog(ctx context.Context, limit int) ([]Commit, error) {
 		cs[i], cs[j] = cs[j], cs[i]
 	}
 	return cs, err
+}
+
+// appFile is apps.File, the manifest that makes a tree app code.
+const appFile = "app.json"
+
+// ErrAppCode refuses a change to app code made without the code right.
+var ErrAppCode = errors.New("only admins change app code (this store holds app.json; decision D9)")
+
+// guardCode refuses, without the code right, a change to the tree or refs
+// of a store that holds app code (its tree or main holds app.json) and any
+// write of app.json itself. Every tree and ref writer calls it, so no
+// caller can forget it.
+func (t *Turn) guardCode(paths ...string) error {
+	if t.Who.Code.OK() {
+		return nil
+	}
+	for _, p := range paths {
+		if p == appFile {
+			return ErrAppCode
+		}
+	}
+	var n int
+	_ = t.s.w.QueryRowContext(t.ctx, `SELECT count(*) FROM _files WHERE zone = 'tree' AND path = ?`, appFile).Scan(&n)
+	if n > 0 {
+		return ErrAppCode
+	}
+	var main int64
+	if err := t.s.w.QueryRowContext(t.ctx, `SELECT n FROM _refs WHERE name = 'main'`).Scan(&main); err == nil && t.snapshotHoldsApp(main) {
+		return ErrAppCode
+	}
+	return nil
+}
+
+// snapshotHoldsApp reports whether snapshot n holds app.json.
+func (t *Turn) snapshotHoldsApp(n int64) bool {
+	var c int
+	_ = t.s.w.QueryRowContext(t.ctx, `SELECT count(*) FROM _snapshot_files WHERE n = ? AND path = ?`, n, appFile).Scan(&c)
+	return c > 0
 }
