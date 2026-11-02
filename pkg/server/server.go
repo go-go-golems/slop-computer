@@ -39,7 +39,6 @@ type Server struct {
 	oidcLogin func(w http.ResponseWriter, r *http.Request, ret string)
 	oidc      *identity.Provider
 	billing   *stripe.Service
-	told      notified
 	samples   samples
 }
 

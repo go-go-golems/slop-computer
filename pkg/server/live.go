@@ -311,6 +311,11 @@ func (s *Server) siteViewCall(w http.ResponseWriter, r *http.Request, rest strin
 	}
 	switch {
 	case op == "renew" && r.Method == http.MethodPost:
+		// a view whose access changed is not renewed: the shell opens a new one
+		if row, err := s.Sys.StoreByID(r.Context(), v.Target); err != nil || s.recheck(r.Context(), v, row) {
+			httpx.Fail(w, 404, "not_found", "no such view")
+			return
+		}
 		s.rt.views.Renew(v)
 		httpx.JSON(w, 200, map[string]any{"view": v.ID, "secret": v.Secret, "expiresAt": v.Expires})
 	case op == "" && r.Method == http.MethodDelete:
@@ -551,32 +556,45 @@ func (s *Server) siteGrant(w http.ResponseWriter, r *http.Request) {
 }
 
 // reviewViews re-checks the open views of a store after its access
-// changed: a view whose level changed gets access (reopen) or revoked.
+// changed. A view's level, audience and policy are fixed when it opens and
+// authorize every call, so a view whose viewer now has another level or
+// audience is closed: revoked when no access is left, otherwise after an
+// access event, on which the page reopens at the new level (the shell does
+// this). Its secret stops working at once, whether or not the page listens.
 func (s *Server) reviewViews(ctx context.Context, id string) {
 	row, err := s.Sys.StoreByID(ctx, id)
 	if err != nil {
 		return
 	}
 	for _, v := range s.rt.views.Of(id) {
-		var p *access.Principal
-		if v.User != "" {
-			if pp, err := s.Sys.Person(ctx, v.User); err == nil {
-				kind := access.KindUser
-				if pp.Kind == "guest" {
-					kind = access.KindGuest
-				}
-				p = &access.Principal{Kind: kind, Person: &pp}
+		s.recheck(ctx, v, row)
+	}
+}
+
+// recheck closes v when its viewer's access to row is no longer the one v
+// was opened with, and reports whether it did.
+func (s *Server) recheck(ctx context.Context, v *rt.View, row system.StoreRow) bool {
+	var p *access.Principal
+	if v.User != "" {
+		if pp, err := s.Sys.Person(ctx, v.User); err == nil {
+			kind := access.KindUser
+			if pp.Kind == "guest" {
+				kind = access.KindGuest
 			}
-		}
-		d := s.Env.K.Access.Level(ctx, p, row)
-		switch {
-		case d.Level == rt.LevelNone:
-			s.rt.views.Close(v, true)
-		case s.told.changed(v.ID, v.Level, d.Level):
-			// The page reopens at the new level (the shell does this).
-			v.Send(rt.Out{Type: "access", Data: map[string]any{"level": d.Level.String()}})
+			p = &access.Principal{Kind: kind, Person: &pp}
 		}
 	}
+	d := s.Env.K.Access.Level(ctx, p, row)
+	switch {
+	case d.Level == rt.LevelNone:
+		s.rt.views.Close(v, true)
+	case d.Level != v.Level || string(d.Audience) != v.Role:
+		v.Send(rt.Out{Type: "access", Data: map[string]any{"level": d.Level.String()}})
+		s.rt.views.Close(v, false)
+	default:
+		return false
+	}
+	return true
 }
 
 var shellPage = template.Must(template.New("shell").Parse(`<!doctype html>

@@ -13,6 +13,7 @@ import (
 	"github.com/go-go-golems/slop-computer/pkg/billing"
 	"github.com/go-go-golems/slop-computer/pkg/billing/stripe"
 	"github.com/go-go-golems/slop-computer/pkg/config"
+	"github.com/go-go-golems/slop-computer/pkg/system"
 )
 
 // stream follows a view's event stream and hands over each event.
@@ -164,6 +165,66 @@ func TestCompsMakeSubscribers(t *testing.T) {
 	// Guests cannot be comped.
 	g, _ := h.sys.CreateGuest(context.Background(), "192.0.2.9")
 	h.fail(admin, "sub.grant", map[string]any{"person": g.ID, "until": "30d"}, "invalid_argument")
+}
+
+// A view's level authorizes its calls, so a page that ignores the access
+// event must not keep its old level: a downgrade closes the view (its
+// secret stops working and is not renewed), and a renewal rechecks access
+// that changed without a review.
+func TestDowngradeClosesView(t *testing.T) {
+	h := newHarness(t)
+	admin := h.tokenFor("admin@example.com", "read", "write", "admin")
+	s, _, _ := clubSite(t, h, "una@example.com")
+	live := h.cfg.Hosts.Live[0]
+	asSubscriber := func() map[string]any {
+		t.Helper()
+		st, v := openView(s, live, "/club", "")
+		if st != 200 || v["level"] != "interact" {
+			t.Fatalf("subscriber view: %d %v", st, v)
+		}
+		return v
+	}
+	write := func(v map[string]any, text string) int {
+		sbx := strings.TrimPrefix(strings.Split(v["url"].(string), "/v/")[0], "http://")
+		r, _ := s.do("POST", sbx, "/_rt/rpc", map[string]any{"method": "db.write",
+			"args": map[string]any{"path": "notes/n1", "op": "set", "body": map[string]any{"text": text}}},
+			map[string]string{"Authorization": "Bearer " + v["secret"].(string)})
+		return r.StatusCode
+	}
+	renew := func(v map[string]any) int {
+		r, _ := s.do("POST", live, "/_site/views/"+v["view"].(string)+"/renew", nil, nil)
+		return r.StatusCode
+	}
+
+	// Revoking the subscription (a review): the old view is gone.
+	c := h.call(admin, "sub.grant", map[string]any{"person": "una@example.com", "until": "30d"}).(map[string]any)
+	v := asSubscriber()
+	if st := write(v, "as a subscriber"); st != 200 {
+		t.Fatalf("write as a subscriber: %d", st)
+	}
+	h.call(admin, "sub.revoke", map[string]any{"id": c["id"]})
+	if st := write(v, "after the downgrade"); st != 401 {
+		t.Fatalf("write through the downgraded view: %d", st)
+	}
+	if st := renew(v); st != 404 {
+		t.Fatalf("renew the downgraded view: %d", st)
+	}
+	if st, v2 := openView(s, live, "/club", ""); st != 200 || v2["level"] != "view" {
+		t.Fatalf("reopen: %d %v", st, v2)
+	}
+
+	// Access changed underneath, without a review: the renewal notices.
+	h.call(admin, "sub.grant", map[string]any{"person": "una@example.com", "until": "30d"})
+	v = asSubscriber()
+	if _, err := h.sys.SetGrant(context.Background(), "", "test", system.Grant{Store: "club", Subject: "@subscriber", Level: "view"}); err != nil {
+		t.Fatal(err)
+	}
+	if st := renew(v); st != 404 {
+		t.Fatalf("renew after the grant changed: %d", st)
+	}
+	if st := write(v, "after the renewal"); st != 401 {
+		t.Fatalf("write after the renewal: %d", st)
+	}
 }
 
 func jsonInt(n int64) string { b, _ := json.Marshal(n); return string(b) }

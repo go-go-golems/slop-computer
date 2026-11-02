@@ -153,7 +153,8 @@ func TestAccessScenarios(t *testing.T) {
 
 // P4 exit: share links — redemption, never lowering, an invalid token, and
 // revocation, which closes the views the link opened; and reopen (a level
-// change) versus revoked (no level left).
+// change closes the view, a new one has the new level) versus revoked (no
+// level left).
 func TestShareLinks(t *testing.T) {
 	h := newHarness(t)
 	admin := h.tokenFor("admin@example.com", "read", "write", "admin")
@@ -207,13 +208,23 @@ func TestShareLinks(t *testing.T) {
 		t.Fatalf("link uses = %v", uses)
 	}
 
-	// Reopen versus revoked. A level change keeps the view open...
+	// Reopen versus revoked. A grant that leaves the guest's level as it
+	// was keeps the view open...
 	h.call(admin, "grant.set", map[string]any{"store": "notes", "subject": "@guest", "level": "view"})
 	if out := rpc(g, v, "db.get", map[string]any{"path": "items/a"}); out["error"] != nil {
-		t.Fatalf("view after a level change: %v", out)
+		t.Fatalf("view after a grant that changed nothing: %v", out)
 	}
-	// ...revoking the link leaves the guest @guest view: still open.
+	// ...revoking the link leaves the guest @guest view: a level change. The
+	// interact view is closed (it must not go on writing); the shell opens
+	// a new one at view.
 	h.call(admin, "link.rm", map[string]any{"id": l["link"].(map[string]any)["id"]})
+	if out := rpc(g, v, "db.write", map[string]any{"path": "items/b", "op": "set", "body": map[string]any{"x": 2}}); out["error"] == nil {
+		t.Fatalf("the interact view still writes after the link was revoked: %v", out)
+	}
+	st, v = openView(g, live, "/notes", "")
+	if st != 200 || v["level"] != "view" {
+		t.Fatalf("reopen with @guest view left: %d %v", st, v)
+	}
 	if out := rpc(g, v, "db.get", map[string]any{"path": "items/a"}); out["error"] != nil {
 		t.Fatalf("view with @guest view left: %v", out)
 	}

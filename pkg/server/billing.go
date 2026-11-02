@@ -8,7 +8,6 @@ import (
 	"log"
 	"net/http"
 	"strings"
-	"sync"
 
 	"github.com/go-go-golems/slop-computer/pkg/access"
 	"github.com/go-go-golems/slop-computer/pkg/billing/stripe"
@@ -198,36 +197,4 @@ func (s *Server) reviewAll(ctx context.Context) {
 			s.reviewViews(ctx, v.Target)
 		}
 	}
-}
-
-// notified remembers the level each view was last told about (its open
-// level until then), so a review sends an access event only when that
-// changes: not again while the page has not reopened, but again if the
-// level goes back before it does.
-type notified struct {
-	mu sync.Mutex
-	m  map[string]rt.Level
-}
-
-func (n *notified) changed(id string, open, now rt.Level) bool {
-	n.mu.Lock()
-	defer n.mu.Unlock()
-	if n.m == nil {
-		n.m = map[string]rt.Level{}
-	}
-	last, ok := n.m[id]
-	if !ok {
-		last = open
-	}
-	if now == last {
-		return false
-	}
-	n.m[id] = now
-	return true
-}
-
-func (n *notified) forget(id string) {
-	n.mu.Lock()
-	delete(n.m, id)
-	n.mu.Unlock()
 }

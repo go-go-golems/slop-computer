@@ -291,7 +291,12 @@ func (s *Server) viewEvents(w http.ResponseWriter, r *http.Request) {
 		}
 		return nil
 	}
+	// catchUp sends what changed after from. The head is read first: every
+	// commit up to it is committed, so the documents read next include it,
+	// and one that lands later is in those rows or arrives on ch. Reading the
+	// head after the documents could move last past a commit never sent.
 	catchUp := func(from int64) error {
+		upTo := st.Head()
 		rows, err := st.DocsSince(ctx, from, "")
 		if err != nil {
 			return err
@@ -309,7 +314,7 @@ func (s *Server) viewEvents(w http.ResponseWriter, r *http.Request) {
 			docs, revs = append(docs, o), append(revs, d.Rev)
 			last = max(last, d.Rev)
 		}
-		last = max(last, st.Head())
+		last = max(last, upTo)
 		return sendAll(docs, revs)
 	}
 	if writeSSE(w, "hello", s.hello(ctx, v, head)) != nil {
@@ -967,7 +972,6 @@ func (s *Server) announceRooms(v *rt.View) {
 }
 
 func (s *Server) roomClosed(v *rt.View, rooms []string) {
-	s.told.forget(v.ID)
 	s.rt.roomMu.Lock()
 	delete(s.rt.joined, v.ID)
 	s.rt.roomMu.Unlock()
