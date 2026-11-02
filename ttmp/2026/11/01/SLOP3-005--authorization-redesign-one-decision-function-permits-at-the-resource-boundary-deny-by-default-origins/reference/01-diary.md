@@ -227,3 +227,138 @@ the design.
 - `pkg/kernel/apps.go` (`Running`), `pkg/actor/manager.go` (`Get`),
   `pkg/server/views.go` (`openView`), `pkg/server/site.go`.
 - **Tests:** `GOWORK=off go test ./pkg/server -run 'TestActors|TestViewsOpenOnFallbackVersion|TestNothingUsableAfterFirstActivationFails' -count=1`.
+
+## Step 3: Phase A6b (store bytes by facts), a sign-out bug from #13, phase A6 (trusted origins deny by default)
+
+Phase A6b gave store bytes two facts: visibility (may an anonymous
+visitor read the store) and mutability (snapshot, moving ref or upload,
+no-store). One writer, `writeStoreBytes` (`pkg/server/storebytes.go`),
+now derives every header from those facts and the host. Converting the
+six serving paths found two more holes of the finding-12 class:
+- an actor could label a private store's upload `public, immutable`;
+- an actor could label its own page public on a private store.
+
+Reading the back office before adding a CSP showed that my ZITADEL logout
+change in #13 broke its sign-out: it uses `fetch`, which cannot follow
+the redirect to the provider. I fixed that on the #13 branch and merged
+it here. Phase A6 then made trusted origins deny by default, and the back
+office passed a Chromium walk-through under its new CSP. Commits:
+- `0527971` (A6b);
+- `5e85b02` (sign-out fix, on `task/slop-v3`, pushed to #13);
+- `209ce57` (merge);
+- `f61c5a2` (A6).
+
+### Prompt Context
+
+**User prompt (verbatim):** see step 2 ("Go ahead. then implement ...").
+
+**Assistant interpretation:** Continue the phases. A6b and A6 come first
+because they follow directly from the last two review findings.
+
+**Inferred user intent:** Systemic fixes, landed one phase at a time.
+
+### What I did
+
+- **`storebytes.go`:**
+  - the `visibility` type (`private`, `public`) and the `mutability` type
+    (`moving`, `immutable`, `noStore`);
+  - `storeBytes{st, f, vis, mut}` and `cacheControl()`;
+  - `visibilityOf(ctx, store)` = `Access.Can(nil, store, view)`;
+  - `trustedHost(host)`;
+  - `resolveStoreFile(ctx, st, at, name)`;
+  - `writeStoreBytes`: sandbox CSP and attachment on trusted hosts and
+    for uploads anywhere, then ETag, cache class, conditional and range
+    requests.
+- **Callers converted:**
+  - `serveStatic` (public, moving);
+  - `serveStoreFile` (no more `isolate` flag);
+  - sandbox app files (public, immutable; see below);
+  - `serveAssetBlob` (private);
+  - previews (no-store);
+  - `serveBoundAsset`: the actor's caching is honored only if anyone may
+    read the serving store.
+  - `serveBlob` is removed.
+- **Actor route responses:** an actor's public `Cache-Control` becomes
+  `private, no-cache` when the store is not anonymously readable.
+- **Sign-out fix (on #13):** `/auth/logout` answers `{ok, next}` when
+  asked for JSON. The back office's `signOut` sends
+  `Accept: application/json` and navigates to `next`. The bundle was
+  rebuilt; its diff is one line.
+- **A6:** `trustedDefaults` in `ServeHTTP` for main and live hosts.
+  - frame-ancestors 'none', nosniff, a same-origin referrer policy, HSTS
+    on HTTPS, and `X-Frame-Options: DENY` on main;
+  - the back office CSP: `default-src 'self'; style-src 'self'
+    'unsafe-inline'; img-src 'self' data: https:; object-src 'none';
+    base-uri 'none'; frame-ancestors 'none'`.
+- **Tests:**
+  - `TestStoreBytesFacts`: an actor's upload and page on a private store;
+    an uploaded page on the static host.
+  - `TestTrustedHostHeaders`.
+  - `TestOIDCSignIn`: the JSON logout answer.
+- **Browser check:** `scripts/01-backoffice-csp-check.mjs` against a
+  `--local` server on :18350 built from this branch.
+
+### Why
+
+- **Sandbox app files stay public.** The sandbox serves an app's files to
+  anyone who has its origin, with no access check; the origin label works
+  as a capability. A shared cache therefore exposes nothing more.
+  `TestLiveHostViews` expects this.
+- **The back office CSP has no `form-action`.** The billing forms post to
+  `/billing/checkout`, which redirects to Stripe, and Chrome applies
+  `form-action` to redirects after a submission.
+
+### What worked
+
+- **Negative control** (the new test run against `HEAD` in a scratch
+  worktree): `an upload through a store nobody anonymous may read: 200
+  "public, max-age=31536000, immutable"`.
+- **Browser walk-through:** Activity, People, Stores, Apps, Explain, then
+  sign-out to `/auth/login` with `signedIn:false`; no console errors or
+  CSP reports. The screenshot is `various/a6-backoffice-csp.png`.
+- The full Go suite passes after each phase.
+
+### What didn't work
+
+- **First conversion of the sandbox app files** used
+  `visibilityOf(app)`, which failed `TestLiveHostViews` (`p2b_test.go:153:
+  app file: 200 "body{}"`: the cache header was private). Reverted to
+  public, with the reason in a comment.
+- **A name clash in `serveBoundAsset`:** the variable `b` already held the
+  binding (`no new variables on left side of :=`). Renamed it to `out`.
+- **`pkill -f` matched its own shell**, which then exited with 144. The
+  server was stopped all the same: `healthz` gave `000`.
+
+### What I learned
+
+- The sign-out regression from #13 could not show up in Go tests: they
+  post without `fetch` semantics. Reading the client code was what found
+  it.
+
+### What was tricky to build
+
+- **Ordering the trusted defaults.** They are set before dispatch so
+  handlers can replace them. `writeStoreBytes` replaces the CSP with the
+  sandbox policy, so that response carries no frame-ancestors, which is
+  harmless for attachments and media.
+
+### What warrants a second pair of eyes
+
+- **The static host now isolates uploads** (`/_s/<store>/assets/...`):
+  sandbox CSP, and a download unless media. Before, an uploaded HTML file
+  ran as a page there.
+- **`img-src` in the back office CSP allows `https:`**, for avatars.
+  Narrow it if no remote images are used.
+- **The sandbox host serves app files without an access check.** That is
+  a design question (capability URLs), noted but not changed.
+
+### What should be done in the future
+
+- Phase A0's verb/RPC inventory, then A1 to A3.
+
+### Code review instructions
+
+- `pkg/server/storebytes.go`, `site.go`, `actors.go` (`serveBoundAsset`,
+  the actor route headers), `server.go` (`trustedDefaults`), `admin.go`,
+  `auth.go` (`logout`), `web/admin/src/api.js`.
+- **Tests:** `GOWORK=off go test ./pkg/server -run 'TestStoreBytesFacts|TestTrustedHostHeaders|TestOIDCSignIn|TestLiveStoreFilesIsolated|TestGuestGrantFilesNotPublic|TestLiveHostViews' -count=1`.
