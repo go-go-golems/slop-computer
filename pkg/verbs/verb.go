@@ -262,8 +262,8 @@ func Check(p *access.Principal, name string, a Args) error {
 		return Errf("internal", "%s declares no action", v.Name)
 	}
 	// the role half of the floor; Call checks the level on the store
-	if ok, why := authz.Floor(v.Action, rt.LevelOwner, p.IsAdmin()); !ok {
-		return Errf("permission_denied", "%s: %s", v.Name, why)
+	if ok, _ := authz.Floor(v.Action, rt.LevelOwner, p.IsAdmin()); !ok {
+		return Errf("permission_denied", "%s is for admins", v.Name)
 	}
 	if v.AdminOnly && !p.IsAdmin() {
 		return Errf("permission_denied", "%s is for admins", v.Name)
