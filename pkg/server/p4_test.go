@@ -503,6 +503,18 @@ func TestOIDCSignIn(t *testing.T) {
 	if info := readJSON(t, b.do("GET", "/auth/session", h.cfg.Hosts.Main, nil, nil)); info["signedIn"] != false {
 		t.Fatalf("session after logout = %v", info)
 	}
+	// The back office signs out with fetch, which cannot follow the
+	// redirect to the provider: asked for JSON, the server names it.
+	r = b.do("GET", "/auth/login?return=/", h.cfg.Hosts.Main, nil, nil)
+	auth, _ = url.Parse(r.Header.Get("Location"))
+	resp, _ = (&http.Client{CheckRedirect: func(*http.Request, []*http.Request) error { return http.ErrUseLastResponse }}).Get(auth.String())
+	resp.Body.Close()
+	back, _ = url.Parse(resp.Header.Get("Location"))
+	b.do("GET", back.RequestURI(), h.cfg.Hosts.Main, nil, nil)
+	out2 := readJSON(t, b.do("POST", "/auth/logout", h.cfg.Hosts.Main, nil, map[string]string{"Accept": "application/json"}))
+	if next, _ := out2["next"].(string); !strings.HasPrefix(next, op.ts.URL+"/logout?") || !strings.Contains(next, "id_token_hint=") {
+		t.Fatalf("logout asked for JSON = %v", out2)
+	}
 	// The local form is off.
 	if r := b.do("POST", "/auth/local", h.cfg.Hosts.Main, strings.NewReader("email=x@example.com"), map[string]string{"Content-Type": "application/x-www-form-urlencoded"}); r.StatusCode != 404 {
 		t.Fatalf("local sign-in with OIDC: %d", r.StatusCode)

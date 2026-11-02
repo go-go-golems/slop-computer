@@ -29,9 +29,15 @@ export async function call(verb, args = {}) {
   return out.result;
 }
 
+// signOut ends the session; after an OIDC sign-in the server names the
+// provider's logout page (next), which a fetch cannot follow itself.
 export async function signOut() {
-  await fetch('/auth/logout', { method: 'POST', credentials: 'same-origin' });
-  location.assign('/auth/login');
+  let next = '';
+  try {
+    const r = await fetch('/auth/logout', { method: 'POST', credentials: 'same-origin', headers: { Accept: 'application/json' } });
+    next = (await r.json()).next || '';
+  } catch { /* signed out on the server anyway */ }
+  location.assign(next || '/auth/login');
 }
 
 export function signIn() { location.assign('/auth/login?return=/'); }

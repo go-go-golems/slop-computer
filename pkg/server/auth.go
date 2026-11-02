@@ -159,16 +159,24 @@ func (s *Server) logout(w http.ResponseWriter, r *http.Request) {
 		_ = s.Sys.DeleteSession(r.Context(), c.Value)
 	}
 	s.setCookie(w, s.sessionCookie(), "", -1, http.SameSiteLaxMode)
+	next := ""
 	if s.oidc != nil && idToken != "" {
 		target, err := s.oidc.LogoutURL(r.Context(), idToken, s.Cfg.MainURL()+"/", "")
 		if err != nil {
 			log.Printf("oidc logout: %v", err)
-		} else if target != "" {
-			http.Redirect(w, r, target, http.StatusSeeOther)
-			return
 		}
+		next = target
 	}
-	http.Redirect(w, r, "/", http.StatusSeeOther)
+	// A page that signs out with fetch cannot follow a redirect to the
+	// provider (another origin): it asks for JSON and navigates to next.
+	if strings.Contains(r.Header.Get("Accept"), "application/json") {
+		httpx.JSON(w, 200, map[string]any{"ok": true, "next": next})
+		return
+	}
+	if next == "" {
+		next = "/"
+	}
+	http.Redirect(w, r, next, http.StatusSeeOther)
 }
 
 // sessionInfo tells the back office who is signed in and its CSRF token.
