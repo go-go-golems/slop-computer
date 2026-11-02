@@ -47,6 +47,13 @@ func (b *Backend) Sample(ctx context.Context, r llm.Request, emit func(llm.Event
 		return ctx.Err() // cancelled: the server sends nothing more
 	}
 	if err != nil {
+		// A contract failure from outside the backend (the meter's
+		// quota_exceeded) keeps its code: the caller reports it as is.
+		var lf *llm.Failure
+		if stdErrors.As(err, &lf) {
+			emit(llm.Event{Type: "error", CallID: r.CallID, Error: &llm.Failure{Code: lf.Code, Message: lf.Message, Text: c.visible}})
+			return nil
+		}
 		f, ok := err.(*failure)
 		if !ok {
 			f = classify(err)
@@ -67,8 +74,24 @@ type call struct {
 	thinking string
 }
 
-// imageTokens is the input allowance held for each image.
-const imageTokens = 2000
+// imageTokens is the input allowance held for each image; framingTokens
+// is held for each request's roles, model settings and tool-call wrapping.
+const (
+	imageTokens   = 2000
+	framingTokens = 256
+)
+
+// toolBytes is what the tool definitions add to a request that offers
+// them: each name, description and input schema, plus the wrapper the
+// provider's tool format puts around each (one token per byte, like the
+// context).
+func toolBytes(ts []llm.Tool) int64 {
+	var n int64
+	for _, t := range ts {
+		n += int64(len(t.Name)+len(t.Description)+len(t.InputSchema)) + 64
+	}
+	return n
+}
 
 func (c *call) run(ctx context.Context) error {
 	ch, applied := c.b.pick(c.r.Options)
@@ -106,12 +129,19 @@ func (c *call) run(ctx context.Context) error {
 		if err != nil {
 			return err
 		}
+		offersTools := round < rounds-1 && len(c.r.Tools) > 0 // the last round offers no tools
 		if c.r.Meter != nil {
 			// Hold this round's cost before the provider is contacted
 			// (SLOP3-007): one token per byte of context is conservative,
-			// plus a fixed allowance per image; the hold caps the round's
-			// output, so the round cannot spend past it.
-			est := llm.Estimate{InputTokens: int64(contextBytes(t)) + int64(len(c.r.Images))*imageTokens, MaxOutputTokens: int64(perRound)}
+			// plus a fixed allowance per image and for the request's
+			// framing, plus the tool definitions sent with this round;
+			// the hold caps the round's output, so the round cannot spend
+			// past it.
+			in := int64(contextBytes(t)) + int64(len(c.r.Images))*imageTokens + framingTokens
+			if offersTools {
+				in += toolBytes(c.r.Tools)
+			}
+			est := llm.Estimate{InputTokens: in, MaxOutputTokens: int64(perRound)}
 			capped, err := c.r.Meter.Before(ctx, round, est)
 			if err != nil {
 				return err
@@ -128,7 +158,7 @@ func (c *call) run(ctx context.Context) error {
 			return err
 		}
 		rctx := ctx
-		if round < rounds-1 && len(c.r.Tools) > 0 { // the last round offers no tools
+		if offersTools {
 			rctx = tools.WithRegistry(rctx, registry)
 		}
 		s := &sink{c: c, round: round, model: m.Ref()}

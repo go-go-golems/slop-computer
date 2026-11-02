@@ -390,3 +390,60 @@ func TestImagesJoinTheLastUserTurn(t *testing.T) {
 	assert.Contains(t, string(raw), "what is this?")
 	assert.Contains(t, string(raw), "data:image/jpeg;base64,/9j/AA==")
 }
+
+// meterFunc is an llm.Meter from a function; it records each estimate.
+type meterFunc struct {
+	mu   sync.Mutex
+	ests []llm.Estimate
+	fn   func(round int, est llm.Estimate) (int64, error)
+}
+
+func (m *meterFunc) Before(_ context.Context, round int, est llm.Estimate) (int64, error) {
+	m.mu.Lock()
+	m.ests = append(m.ests, est)
+	m.mu.Unlock()
+	return m.fn(round, est)
+}
+
+// A refused hold ends the call with the meter's quota_exceeded code (not
+// upstream_error), before the provider is contacted.
+func TestMeterRefusalKeepsQuotaCode(t *testing.T) {
+	b, p := setup(t, nil, text("never"))
+	r := req("hi", llm.Options{})
+	r.Meter = &meterFunc{fn: func(int, llm.Estimate) (int64, error) {
+		return 0, &llm.Failure{Code: "quota_exceeded", Message: "token budget used up for this month"}
+	}}
+	rec := &recorder{}
+	require.NoError(t, b.Sample(context.Background(), r, rec.emit, noTools))
+	e := rec.last("error").Error
+	require.NotNil(t, e)
+	assert.Equal(t, "quota_exceeded", e.Code)
+	assert.Empty(t, p.bodies, "the provider is not contacted")
+}
+
+// A round that offers tools holds their definitions too (they are sent
+// with it); the last round, which offers none, does not.
+func TestMeterHoldsToolDefinitions(t *testing.T) {
+	b, _ := setup(t, nil,
+		toolCalls("", [3]string{"call_1", "get_weather", `{"city":"Oslo"}`}),
+		text("done"))
+	m := &meterFunc{fn: func(int, llm.Estimate) (int64, error) { return 0, nil }}
+	r := req("weather?", llm.Options{}, weather)
+	r.MaxRounds = 2
+	r.Meter = m
+	exec := func(context.Context, llm.Event) (llm.ToolResult, error) {
+		return llm.ToolResult{Value: json.RawMessage(`1`)}, nil
+	}
+	require.NoError(t, b.Sample(context.Background(), r, (&recorder{}).emit, exec))
+	require.Len(t, m.ests, 2)
+
+	plain := &meterFunc{fn: func(int, llm.Estimate) (int64, error) { return 0, nil }}
+	b2, _ := setup(t, nil, text("done"))
+	r2 := req("weather?", llm.Options{})
+	r2.Meter = plain
+	require.NoError(t, b2.Sample(context.Background(), r2, (&recorder{}).emit, noTools))
+
+	defs := int64(len(weather.Name) + len(weather.Description) + len(weather.InputSchema))
+	assert.GreaterOrEqual(t, m.ests[0].InputTokens-plain.ests[0].InputTokens, defs, "round 0 offers the tool: its definition is held")
+	assert.Less(t, m.ests[1].InputTokens-plain.ests[0].InputTokens, defs+int64(200), "the last round offers no tools: only its grown context")
+}

@@ -112,6 +112,9 @@ func (a *Actor) sampleModule() goja.Value {
 				return nil, fail("unavailable", "the model failed: %v", err)
 			}
 			if failure != nil {
+				if failure.Code == "quota_exceeded" {
+					return nil, fail(failure.Code, "%s", failure.Message)
+				}
 				return nil, fail("unavailable", "%s", failure.Message)
 			}
 			return ans, nil
