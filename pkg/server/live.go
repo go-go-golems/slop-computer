@@ -87,6 +87,7 @@ func (s *Server) sitePrincipal(r *http.Request) (*access.Principal, *system.Sess
 	kind := access.KindUser
 	if p.Kind == "guest" {
 		kind = access.KindGuest
+		s.Sys.SeeGuest(r.Context(), c.Value, sess)
 	}
 	return &access.Principal{Kind: kind, Person: &p, Via: "page"}, &sess
 }
@@ -105,10 +106,12 @@ func (s *Server) newGuest(w http.ResponseWriter, r *http.Request) (*access.Princ
 	if err != nil {
 		return nil, err
 	}
-	secret, _, err := s.Sys.CreateSession(r.Context(), g.ID, r.Host, "")
+	secret, _, err := s.Sys.CreateSessionFor(r.Context(), g.ID, r.Host, "", system.GuestDays)
 	if err != nil {
 		return nil, err
 	}
+	// The cookie outlives any guest; the session (renewed while the guest
+	// visits) decides how long the identity lasts.
 	s.setSiteCookie(w, s.siteCookie(), secret, 400*24*3600)
 	return &access.Principal{Kind: access.KindGuest, Person: &g, Via: "page"}, nil
 }

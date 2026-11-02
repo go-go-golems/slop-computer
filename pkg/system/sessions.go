@@ -20,15 +20,35 @@ type Session struct {
 	ExpiresAt int64
 }
 
-// SessionDays is the absolute lifetime of a session.
+// SessionDays is the absolute lifetime of a signed-in session. A guest's
+// session lasts GuestDays from the guest's last visit instead (SeeGuest).
 const SessionDays = 30
+
+const dayMs = 24 * int64(time.Hour/time.Millisecond)
+
+// SeeGuest keeps an active guest: their session and their record (which
+// the sweep deletes after GuestDays unseen) both run GuestDays from now. It
+// writes at most once a day per session.
+func (d *DB) SeeGuest(ctx context.Context, secret string, s Session) {
+	now := d.NowMs()
+	if now+GuestDays*dayMs-s.ExpiresAt < dayMs {
+		return
+	}
+	_, _ = d.ExecContext(ctx, `UPDATE sessions SET expires_at = ? WHERE id_hash = ?`, now+GuestDays*dayMs, ids.Hash(secret))
+	_, _ = d.ExecContext(ctx, `UPDATE people SET last_seen_at = ? WHERE id = ?`, now, s.Person)
+}
 
 // CreateSession starts a session for person on host and returns its secret.
 func (d *DB) CreateSession(ctx context.Context, person, host, fromGuest string) (string, Session, error) {
+	return d.CreateSessionFor(ctx, person, host, fromGuest, SessionDays)
+}
+
+// CreateSessionFor starts a session that lasts days.
+func (d *DB) CreateSessionFor(ctx context.Context, person, host, fromGuest string, days int) (string, Session, error) {
 	secret := ids.Secret("ses_")
 	now := d.NowMs()
 	s := Session{Person: person, Host: host, CSRF: ids.New("", 16), FromGuest: fromGuest,
-		ExpiresAt: now + SessionDays*24*int64(time.Hour/time.Millisecond)}
+		ExpiresAt: now + int64(days)*dayMs}
 	_, err := d.ExecContext(ctx, `INSERT INTO sessions (id_hash, person, host, csrf, from_guest, created_at, expires_at) VALUES (?, ?, ?, ?, ?, ?, ?)`,
 		ids.Hash(secret), person, host, s.CSRF, nullStr(fromGuest), now, s.ExpiresAt)
 	return secret, s, err

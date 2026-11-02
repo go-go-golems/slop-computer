@@ -520,3 +520,46 @@ func TestOIDCSignIn(t *testing.T) {
 		t.Fatalf("local sign-in with OIDC: %d", r.StatusCode)
 	}
 }
+
+// A guest keeps their identity while they keep visiting: their session
+// lasts GuestDays from the last visit, not a signed-in session's 30 days.
+func TestGuestSessionsLastWhileUsed(t *testing.T) {
+	h := newHarness(t)
+	admin := h.tokenFor("admin@example.com", "read", "write", "admin")
+	live := h.cfg.Hosts.Live[0]
+	h.call(admin, "store.new", map[string]any{"id": "open"})
+	h.call(admin, "files.push", map[string]any{"store": "open", "files": files(map[string]string{
+		"app.json": `{"title":"Open","capabilities":{"db":{}}}`, "index.html": "<!doctype html><title>o</title>"})})
+	h.call(admin, "grant.set", map[string]any{"store": "open", "subject": "@guest", "level": "interact"})
+	h.call(admin, "mount.set", map[string]any{"host": live, "path": "/open", "store": "open"})
+	s := h.site(live)
+	if st, v := openView(s, live, "/open", ""); st != 200 {
+		t.Fatalf("guest: %d %v", st, v)
+	}
+	who := func() any { _, me := s.do("GET", live, "/_site/me", nil, nil); return me["id"] }
+	vis := who()
+	if vis == nil {
+		t.Fatal("no guest id")
+	}
+	start := time.Now()
+	at := func(days int) {
+		h.sys.Now = func() time.Time { return start.Add(time.Duration(days) * 24 * time.Hour) }
+	}
+	defer func() { h.sys.Now = time.Now }()
+	at(45) // past a signed-in session's 30 days
+	if got := who(); got != vis {
+		t.Fatalf("day 45: %v, want %v", got, vis)
+	}
+	at(130) // 85 days after the last visit
+	if got := who(); got != vis {
+		t.Fatalf("day 130: %v, want %v", got, vis)
+	}
+	p, err := h.sys.Person(context.Background(), vis.(string))
+	if err != nil || p.LastSeenAt < start.Add(129*24*time.Hour).UnixMilli() {
+		t.Fatalf("the visit was not recorded: %v %v", p.LastSeenAt, err)
+	}
+	at(230) // 100 days unseen: gone, as the sweep would have it
+	if got := who(); got == vis {
+		t.Fatal("a guest unseen for 100 days kept their session")
+	}
+}
