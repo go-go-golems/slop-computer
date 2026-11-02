@@ -39,11 +39,20 @@ export const fmtDate = (ms) => {
 };
 export const fmtNum = (n) => (n == null ? '∞' : Number(n).toLocaleString());
 
-export function Table({ rows, cols, empty = 'Nothing here.', onRow, sel, rowKey = (r, i) => r.id || r.subject || r.name || i }) {
+export function Table({ rows, cols, empty = 'Nothing here.', onRow, sel, rowKey = (r, i) => r.id || r.subject || r.name || i, sort, onSort }) {
   if (!rows || !rows.length) return <p className="empty">{empty}</p>;
+  const head = (c) => {
+    if (!c.sort || !onSort) return c.h;
+    const on = sort && sort.by === c.h;
+    return (
+      <button type="button" className={'sorth' + (on ? ' on' : '')} onClick={() => onSort(c.h)} aria-label={`Sort by ${c.h}`}>
+        {c.h}<span className="sortmark" aria-hidden="true">{on ? (sort.desc ? '↓' : '↑') : ''}</span>
+      </button>
+    );
+  };
   return (
     <div className="tablewrap"><table className="rt">
-      <thead><tr>{cols.map(c => <th key={c.h} className={c.h === '' ? 'r' : ''}>{c.h}</th>)}</tr></thead>
+      <thead><tr>{cols.map(c => <th key={c.h} className={c.h === '' ? 'r' : ''} aria-sort={sort && sort.by === c.h ? (sort.desc ? 'descending' : 'ascending') : undefined}>{head(c)}</th>)}</tr></thead>
       <tbody>{rows.map((r, i) => (
         <tr key={rowKey(r, i)} className={(onRow ? 'clickable ' : '') + (sel != null && sel === rowKey(r, i) ? 'sel' : '')} onClick={onRow ? () => onRow(r) : undefined}>
           {cols.map(c => <td key={c.h} className={(c.cls || '') + (c.h === '' ? ' r' : '')}>{c.r ? c.r(r) : String(r[c.k] ?? '')}</td>)}
@@ -80,4 +89,87 @@ export function Section({ title, tools, children }) {
 // Field is a labelled control in a form row.
 export function Field({ label, children }) {
   return <label className="field"><span className="lbl">{label}</span>{children}</label>;
+}
+
+// useHashParams keeps a view's state in the hash after its name
+// (#stores?q=weft&p=2&sel=weft): a view can be linked, and survives a
+// reload. set(patch) merges; an empty value removes the key.
+export function useHashParams() {
+  const read = () => {
+    const i = location.hash.indexOf('?');
+    return Object.fromEntries(new URLSearchParams(i < 0 ? '' : location.hash.slice(i + 1)));
+  };
+  const [params, setParams] = useState(read);
+  useEffect(() => { const f = () => setParams(read()); addEventListener('hashchange', f); return () => removeEventListener('hashchange', f); }, []);
+  const set = useCallback((patch) => {
+    const next = { ...read(), ...patch };
+    Object.keys(next).forEach(k => { if (next[k] === '' || next[k] == null) delete next[k]; });
+    const name = location.hash.slice(1).split('?')[0];
+    const q = new URLSearchParams(next).toString();
+    history.replaceState(null, '', '#' + name + (q ? '?' + q : ''));
+    setParams(next);
+  }, []);
+  return [params, set];
+}
+
+const PAGE_SIZES = [25, 50, 100];
+
+// Browse is a table for long lists: a search box, filters, sortable
+// columns and pages, with its state in the hash (useHashParams).
+//   text(r)   the text a row is searched by
+//   filters   [[key, label, test(r)]], the first one shows everything
+//   cols      Table columns; a column with sort: r => value sorts
+//   defaultSort, defaultDesc   the order before anyone picks one
+export function Browse({ rows, cols, text, filters, rowKey = r => r.id, sel, onRow, empty, noun = 'items', defaultSort, defaultDesc }) {
+  const [p, set] = useHashParams();
+  const q = p.q || '';
+  const filter = filters && (filters.find(f => f[0] === p.f) || filters[0]);
+  const sort = { by: p.s || defaultSort || '', desc: p.d ? p.d === '1' : !p.s && !!defaultDesc };
+  const size = PAGE_SIZES.includes(Number(p.n)) ? Number(p.n) : PAGE_SIZES[0];
+  const all = rows || [];
+  const words = q.toLowerCase().split(/\s+/).filter(Boolean);
+  let shown = all.filter(r => (!filter || filter[2](r)) && (!words.length || words.every(w => text(r).toLowerCase().includes(w))));
+  const col = cols.find(c => c.h === sort.by && c.sort);
+  if (col) {
+    shown = shown.slice().sort((a, b) => {
+      const x = col.sort(a), y = col.sort(b);
+      const c = (typeof x === 'number' && typeof y === 'number' ? x - y : String(x ?? '').localeCompare(String(y ?? ''), undefined, { numeric: true }))
+        || String(rowKey(a)).localeCompare(String(rowKey(b)), undefined, { numeric: true });
+      return sort.desc ? -c : c;
+    });
+  }
+  const pages = Math.max(1, Math.ceil(shown.length / size));
+  const page = Math.min(Math.max(1, Number(p.p) || 1), pages);
+  const from = (page - 1) * size;
+  const onSort = (h) => set({ s: h, d: sort.by === h ? (sort.desc ? '0' : '1') : '', p: '' });
+  return (
+    <div className="browse">
+      <div className="browsebar">
+        <input className="inp" type="search" placeholder={`Search ${noun}`} value={q} aria-label={`Search ${noun}`}
+          onChange={ev => set({ q: ev.target.value, p: '' })} />
+        {filters && <Seg value={filter[0]} onChange={f => set({ f: f === filters[0][0] ? '' : f, p: '' })}
+          options={filters.map(([k, label]) => [k, `${label} ${all.filter(filters.find(x => x[0] === k)[2]).length}`])} />}
+        <span className="sp" />
+        <span className="dim">{shown.length === all.length ? `${all.length} ${noun}` : `${shown.length} of ${all.length} ${noun}`}</span>
+      </div>
+      <Table rows={shown.slice(from, from + size)} cols={cols} rowKey={rowKey} sel={sel} onRow={onRow}
+        empty={all.length ? `No ${noun} match.` : empty} sort={sort} onSort={onSort} />
+      {shown.length > PAGE_SIZES[0] && (
+        <div className="pager">
+          <button type="button" className="btn sm" disabled={page <= 1} onClick={() => set({ p: String(page - 1) })} aria-label="Previous page">‹</button>
+          <span className="dim">{from + 1}–{Math.min(from + size, shown.length)} of {shown.length}</span>
+          <button type="button" className="btn sm" disabled={page >= pages} onClick={() => set({ p: String(page + 1) })} aria-label="Next page">›</button>
+          <select className="inp sm" value={size} aria-label="Rows per page" onChange={ev => set({ n: ev.target.value === '25' ? '' : ev.target.value, p: '' })}>
+            {PAGE_SIZES.map(n => <option key={n} value={n}>{n} per page</option>)}
+          </select>
+        </div>
+      )}
+    </div>
+  );
+}
+
+// Kv is a definition list of [label, value] pairs (empty values are left out).
+export function Kv({ items }) {
+  const shown = items.filter(([, v]) => v !== '' && v != null && v !== false);
+  return <dl className="kv">{shown.map(([k, v]) => [<dt key={k + 't'}>{k}</dt>, <dd key={k + 'd'}>{v}</dd>])}</dl>;
 }

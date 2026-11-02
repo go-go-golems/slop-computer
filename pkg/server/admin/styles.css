@@ -1007,7 +1007,9 @@ body.dragging-view iframe { pointer-events: none; }
 /* The back office on top of the lab's stylesheet: one window, a strip of
    surfaces, a table per surface. */
 html, body { height: 100%; margin: 0; }
-body { background: var(--bg); color: var(--ink); font: var(--fs-m)/1.45 var(--font-ui, Arial, sans-serif); }
+/* The lab's stylesheet is for one-screen apps (body { overflow: hidden });
+   the back office is a page that grows, so the page scrolls. */
+body { background: var(--bg); color: var(--ink); font: var(--fs-m)/1.45 var(--font-ui, Arial, sans-serif); overflow: auto; }
 .shell { display: flex; flex-direction: column; min-height: 100vh; }
 .bar .sp, .toolbar .sp { flex: 1; }
 .dtabs { display: flex; gap: 0; height: 100%; overflow-x: auto; }
@@ -1055,4 +1057,34 @@ body { background: var(--bg); color: var(--ink); font: var(--fs-m)/1.45 var(--fo
   .split .detail { border-left: 0; padding-left: 0; border-top: 1px solid var(--hair); padding-top: 12px; }
   .bar { height: auto; flex-wrap: wrap; padding: 6px 12px; }
   .sbody { padding: 10px 12px 40px; }
+}
+
+/* Browsing long lists: search, filters, sortable headers, pages. */
+.browsebar { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; margin: 4px 0 10px; }
+.browsebar .inp[type=search] { min-width: 220px; flex: 0 1 320px; }
+.pager { display: flex; align-items: center; gap: 8px; margin: 10px 0 0; }
+.pager .inp.sm { width: auto; }
+.sorth { all: unset; cursor: pointer; display: inline-flex; gap: 4px; align-items: baseline; }
+.sorth:hover, .sorth.on { color: var(--ink); text-decoration: underline; text-underline-offset: 3px; }
+.sorth:focus-visible { outline: 2px solid var(--ink); outline-offset: 1px; }
+.sortmark { display: inline-block; min-width: 0.8em; }
+/* The detail pane follows the list while it scrolls. */
+.split .detail { position: sticky; top: 8px; max-height: calc(100vh - 16px); overflow-y: auto; }
+.dtitle { font-size: var(--fs-l); margin: 0 0 10px; font-weight: 700; overflow-wrap: anywhere; }
+.dtitle .dim { font-weight: 400; font-size: var(--fs-s); margin-left: 6px; }
+.addrs { list-style: none; margin: 0; padding: 0; }
+.addrs li { overflow-wrap: anywhere; }
+.small { font-size: var(--fs-s); }
+.kv { display: grid; grid-template-columns: max-content 1fr; gap: 3px 14px; margin: 6px 0 12px; }
+.kv dt { color: var(--ink-2); }
+.kv dd { margin: 0; min-width: 0; overflow-wrap: anywhere; text-align: left; font-weight: 400; }
+.kv dt { font-size: var(--fs-s); }
+/* On a narrow screen the filters wrap and a wide table scrolls by itself,
+   so the page never scrolls sideways. */
+.split > * { min-width: 0; }
+.browse .tablewrap { overflow-x: auto; }
+.browsebar .seg { flex-wrap: wrap; max-width: 100%; }
+@media (max-width: 760px) {
+  .split .detail { position: static; max-height: none; overflow: visible; }
+  .browsebar .inp[type=search] { min-width: 0; flex: 1 1 100%; }
 }
