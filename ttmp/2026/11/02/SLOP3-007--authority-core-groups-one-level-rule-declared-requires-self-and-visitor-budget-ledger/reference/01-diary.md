@@ -446,3 +446,12 @@ Model budgets are hard now. Each model round holds what it may cost before the p
 
 ### Code review instructions
 - `pkg/server/testdata/authz/cases.json`, `TestWorkedExamples`, `lab/src/kernel/access.js` `level()`.
+
+## Step 9: Pull request
+
+Pushed `task/slop3-007-authority-core` (17 commits on `main` at 9d0db5e+) and opened https://github.com/go-go-golems/slop-computer/pull/17. The PR body lists the behavior changes, the tests changed on purpose, and the deploy order: re-push the built-in apps first, so their declared `requires` is in place before the image that enforces it. The plan's done-when checks hold:
+- no `AtLeast(`, `audRank` or `capOf` remain;
+- `AddLLMUsage` is gone;
+- no code sets a payer to a store's owner.
+
+`AudienceOf` stays, as the function that names a principal's highest group.
