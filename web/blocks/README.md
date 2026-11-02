@@ -10,6 +10,7 @@ claude.ai Artifact; on slop it runs unchanged on the native runtime
 |---|---|
 | Source | `~/code/others/ramon/claude-blocks/` (10 files), copied unchanged into `src/` |
 | Check | `SHA256SUMS`; `build.sh` refuses to build if a file changed |
+| slop additions | `slop/deep-links.js`, added after `blocks.js` by `build.sh`: the open page is the URL's fragment (`/b/ws-team#page_o1p8`), Back and Forward step through pages. Uses only `window.blocks` |
 | Manifest | `slop.json`: db, user (profile), room (`ops` open to interact), sample (images), assets, downloads. `mcp` (the Claude browser) is left out: slop does not serve it, so Blocks hides its browser feature |
 
 ```sh
