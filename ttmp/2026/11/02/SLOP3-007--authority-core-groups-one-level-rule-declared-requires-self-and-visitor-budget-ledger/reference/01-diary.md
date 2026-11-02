@@ -275,3 +275,68 @@ An action now states its level (`{ requires, run }`), and the kernel checks it b
 ### Code review instructions
 - `Actor.readShape` and `Actor.mayCall`; then the diff of `apps/*/actor.js` and `examples/*/actor.js` (mechanical).
 - Validate with `GOWORK=off go test ./pkg/server -run 'TestAction|TestActors|TestJournalExample|TestGuestbookExample' -count=1`.
+
+## Step 6: Phase 4, self and visitor in actors
+
+Code with no person behind it now acts as `store:<id>`, everywhere: alarms, reactors, setup, platform calls, trusted-module calls and store-to-store calls. Nothing borrows the owner. Trust in a module gained provenance, the same rule as links: it counts only while the admin who made it is still an admin, checked on every call. Cross-store handles decide again on every use.
+
+### Prompt Context
+**User prompt (verbatim):** see Step 1.
+**Assistant interpretation:** Phase 4 (decisions 3 and 5), with the amendment that trusted modules act as the store.
+**Inferred user intent:** One rule for whose authority code uses, and no confused deputy.
+**Commit (code):** fd9c626 — "SLOP3-007 phase 4: self and visitor in actors"
+
+### What I did
+- Tests first (`core_test.go`), each failing on phase 3's code:
+  - `TestAlarmPlatformActsAsStore`: `policy.set … @store` refused, `audience is guest, member, subscriber or admin`;
+  - `TestAlarmSampleNeedsStoreCellAndBudget`: the alarm sampled through the owner's `@admin` cell;
+  - `TestStoresOpenRechecks`: a kept handle still read after `grant.rm` (`got 200 map[result:true]`).
+- `pkg/system`:
+  - migration `007_store_audience.sql` rebuilds `app_policy` so its CHECK allows `store`;
+  - `PolicyAudiences` gains `store`;
+  - `DefaultPolicy` gives `assets` to `InGroup(aud, "member")`, so not to stores;
+  - `Trusted` joins `people` and requires `granted_by` to be `system` or still `role = 'admin'`.
+- `pkg/access`:
+  - `AudStore`;
+  - `AudienceOf(KindStore)` is `store`, or `admin` when `Principal.Trusted`;
+  - `IsAdmin` is true for a trusted store principal.
+- `pkg/actor`:
+  - `storeVisitor` is `store:<id>`, level owner, audience `store`, payer `store:<id>`;
+  - the policy fallback outside a turn is `store` (was `admin`);
+  - `stores.open` gets `fresh()`, which re-runs `Can` and reloads the target's rules in the calling turn; every handle function uses it, and `call` passes the fresh level with audience `store`.
+- `pkg/server`:
+  - `verbModule` and `callVerb` take the module name;
+  - every module call re-checks `Trusted`;
+  - `actAs` returns a store principal for `store:` visitors (read-only as before; `Trusted` set from the live trust row);
+  - `platformModule` acts as the store principal for `store:` visitors;
+  - a `Confirm` function refuses when there is no person.
+- `pkg/verbs/policy.go`: `llm.set` accepts `@store` and `store:<id>` (checked to exist); `llm.usage store:<id>` for admins.
+- Back office: a `store` column in the policy matrix, and `@store` in the LLM subject list.
+- Added `TestTrustEndsWithItsAdmin`: ada (an admin) trusts the tool app; after ada is demoted, the next module call is refused with `… is no longer trusted with system`.
+
+### Why
+- The doc's original rule for trusted modules ("act as `granted_by`") borrows a person; the amendment keeps one rule. The back office's system reactor (`w2_test.go`) still lists stores, as a trusted store principal with admin reads, and its write attempt (`grants.set`) is still refused (module writes need a person).
+- Re-checking `Trusted` on every call. Without it, trust revoked by demotion would persist in a running actor until restart, because `use()` is evaluated only at start.
+
+### What worked
+- All Go tests, vet, gofmt and runtime tests pass.
+
+### What didn't work
+- `TestAlarmPlatformActsAsStore` first expected `permission_denied` and got `code:not_found`. That is correct behavior: a principal with no level on a store isn't told it exists. The test now accepts either refusal, but not success.
+- `TestLLMBudgets` timed out at `p6_test.go:123` (`waiting for the digest`): the alarm no longer had the owner's cell. Updated on purpose, as the plan's table says: the test sets the `@store` cell and a `store:ai` row, checks the owner and sam aren't charged, and that `store:ai` is.
+- My phase-1 `TestPolicyThroughGroups` expected `effective` true for every non-guest column; the new `store` column is outside `@member`. Fixed the expectation to `InGroup(aud, "member")`.
+
+### What I learned
+- `stores.open` captured the opening turn's `ctx`. Using the calling turn's context in `fresh()` also fixes handles used in a later turn, which ran with the older context.
+
+### What warrants a second pair of eyes
+- A trusted store principal is `IsAdmin()` and audience admin, but only for reads (`actAs` refuses writes for `store:` visitors). If a later change lets store principals write through modules, `Trusted` would grant admin writes; that must stay deliberate.
+- `Trusted` now hides trust rows whose admin was demoted. `app.modules` still lists the row (it reads `app_modules` directly). Showing it as inactive would mirror `grant.ls`.
+
+### What should be done in the future
+- `app.modules`: mark trust rows that no longer count.
+- Production: before alarms that sample keep working, the operator sets the `@store` cell and a `store:<id>` or `@store` LLM row (today's production has no sampling alarms).
+
+### Code review instructions
+- `pkg/server/modules.go` (`callVerb`, `actAs`), `pkg/server/platform.go`, `pkg/actor/manager.go` (`storeVisitor`), `pkg/actor/modules.go` (`fresh`), `pkg/system/modules.go` (`Trusted`).
+- Validate with `GOWORK=off go test ./pkg/server -run 'TestAlarm|TestStoresOpen|TestTrust|TestModuleTrust|TestSystemModule|TestLLMBudgets' -count=1`.
