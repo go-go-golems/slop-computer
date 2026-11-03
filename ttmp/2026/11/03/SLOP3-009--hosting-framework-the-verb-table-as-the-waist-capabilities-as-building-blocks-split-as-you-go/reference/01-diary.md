@@ -406,3 +406,81 @@ The page path space moved out of `pkg/server` into `pkg/caps/db`, and an actor's
 ### Code review instructions
 - `pkg/caps/sample/*.go`, `pkg/llm/request.go`, then the two callers, `pkg/server/sample.go` and `pkg/actor/sample.go`, then `apiStream` and `client.CallStream`.
 - `GOWORK=off go test ./pkg/server -run 'TestSampleRunVerb|TestLLM|Sample' -count=1 -v`
+
+## Step 6: the MCP door, generated from the verb table
+
+Agents can now use slop as MCP tools. `POST /mcp` lists every verb the caller's token may call as a tool, with the schemas from step 2, and runs calls through `verbs.Call` like the HTTP API. The door is about 250 lines, because the table already had names, schemas, effects and authority.
+
+### Prompt Context
+**User prompt (verbatim):** see Step 2 ("let's leave #415, and now build SLOP3-009").
+**Assistant interpretation:** Design-doc §11 step 6.
+**Inferred user intent:** Agents reach slop over MCP, with input and output schemas.
+**Commit (code):** 34afeaf — "SLOP3-009 step 6: the MCP door, generated from the verb table"
+
+### What I did
+- `pkg/server/mcp.go` handles the streamable HTTP transport on the main host:
+  - `initialize` negotiates 2025-06-18, 2025-03-26 or 2024-11-05;
+  - `ping`, `tools/list`, `tools/call`;
+  - notifications get 202; batches are refused; GET and DELETE get 405.
+- `tools/list` is filtered by `verbs.Callable(p, v)`, which is `Check` split into an authority part (scope, floor, admin, guest) and an argument part.
+- `tools/call`:
+  - the tool name is mapped back to its verb through `Verb.Tool().Name`;
+  - the result goes out as `content` text, plus `structuredContent` when it is an object;
+  - a verb error becomes `isError: true` with "code: message";
+  - an unknown tool or method is a JSON-RPC error.
+- Stream verbs with `_meta.progressToken` and an SSE-accepting client get `notifications/progress` per part (its delta as the message), then the response, all as SSE `message` events.
+- Auth: bearer tokens only, with `WWW-Authenticate: Bearer` on 401. An `Origin` other than the main host gets 403. Via is `mcp`.
+- `TestMCPDoor`.
+
+### Why
+- **Tokens only.** MCP clients send bearer tokens. Accepting the back office's session cookie would let any page the person visits call tools as them, unless the door also required CSRF headers, which no MCP client sends. The spec also asks servers to check `Origin`.
+- **No sessions, no GET stream.** The server sends no message of its own (no list changes, no sampling requests), so `Mcp-Session-Id` would only be state to expire.
+- **Tool errors versus protocol errors.** MCP wants a refused call reported inside the result, so the model can read it and recover. An unknown tool is the client's mistake, so it's a protocol error.
+
+### What worked
+- `TestMCPDoor`:
+  - 401 without a token, 403 for a foreign origin;
+  - `initialize` at 2025-03-26 is echoed back; a notification gets 202;
+  - `docs_query` has its `where` schema and `readOnlyHint: true`; `grant_set` has `readOnlyHint: false`;
+  - a read token lists no `docs_set`, `grant_set` or `store_type`;
+  - `docs_get` returns structured content; `docs_query` (a list) returns text only;
+  - a refused `docs_set` is a tool error starting `permission_denied`;
+  - the store log's via is `mcp`;
+  - unknown tool or method → JSON-RPC errors;
+  - `sample_run` with a progress token gives three progress messages, then the result.
+- **Against a real client:** the official `modelcontextprotocol/go-sdk` v1.7.0 from the module cache, built offline as a throwaway program in the job's tmp directory. A temporary harness-serving test fed it; neither is committed. Output:
+  ```text
+  server: slop 2025-06-18
+  tools: 86
+  docs_get: false {"at":…,"body":{"name":"Ada"},…,"version":1}
+  progress 1 "first "
+  progress 2 "second "
+  progress 3 "third"
+  sample_run: false {"model":"","text":"first second third",…}
+  ```
+- Mutations, each caught:
+  - unfiltered `tools/list` → `mcp_test.go:104: the read token lists docs_set`;
+  - no Origin check → `mcp_test.go:68: foreign origin: 200`;
+  - no progress emitter → `mcp_test.go:151: sample_run did not stream: {…}`.
+- `GOWORK=off go test ./... -count=1`: all pass. Lint: 0 issues.
+
+### What didn't work
+- Nothing failed in this step. `TestMCPDoor` passed on its first run; I didn't take that as proof, which is why I ran the mutations and the SDK client.
+
+### What I learned
+- The SDK client accepted the generated schemas as they are: 86 tools, including the `oneOf` for `where` and the `any` input of `sample.run`. It also accepted `structuredContent` alongside the output schemas. Step 2's choice to drop output schemas for non-object results matters here, because MCP requires structured content to be an object.
+
+### What was tricky to build
+- **Lazy SSE again.** As in step 5's HTTP door, the response becomes a stream only at the first part. A stream verb that's refused before emitting still answers with plain JSON.
+
+### What warrants a second pair of eyes
+- **Every callable verb is a tool**, including `eval`, `actor.call` and the governance verbs, for an admin token. Govern verbs are not confirmed here: a token acts as its person directly, as from the CLI. An agent holding an admin token can change grants. Tool annotations could add `destructiveHint` for govern verbs. The real limit is token scope.
+- **No OAuth discovery.** Clients must be configured with a slop token by hand (`slop token.new`). MCP's authorization spec (protected-resource metadata, OAuth) is not implemented.
+
+### What should be done in the future
+- `destructiveHint` on govern-effect tools; OAuth protected-resource metadata if a client needs it.
+- Step 7, ongoing: type the remaining verbs (better tool schemas) and shrink the ratchet's allowlist.
+
+### Code review instructions
+- `pkg/server/mcp.go`, then `verbs.Callable` in `pkg/verbs/verb.go`.
+- `GOWORK=off go test ./pkg/server -run TestMCPDoor -count=1 -v`
