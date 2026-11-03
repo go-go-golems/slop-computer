@@ -14,9 +14,9 @@ import (
 	"github.com/go-go-golems/slop-computer/pkg/blobs"
 	"github.com/go-go-golems/slop-computer/pkg/ids"
 	"github.com/go-go-golems/slop-computer/pkg/kernel"
+	"github.com/go-go-golems/slop-computer/pkg/registry"
 	"github.com/go-go-golems/slop-computer/pkg/rt"
 	"github.com/go-go-golems/slop-computer/pkg/store"
-	"github.com/go-go-golems/slop-computer/pkg/system"
 	"github.com/go-go-golems/slop-computer/pkg/verbs"
 )
 
@@ -100,7 +100,7 @@ func dataVerbs(e *Env) []*verbs.Verb {
 					return nil, &verbs.Error{Code: "missing_blobs", Message: "send these blobs", Extra: map[string]any{"missing": missing}}
 				}
 				row, s, err := e.K.CreateStore(ctx, p, kernel.NewStore{ID: a.S("store"), Type: b.Meta["type"], App: b.Meta["app"]})
-				if errors.Is(err, system.ErrExists) {
+				if errors.Is(err, registry.ErrExists) {
 					return nil, verbs.Errf("conflict", "store %s exists", a.S("store"))
 				}
 				if err != nil {

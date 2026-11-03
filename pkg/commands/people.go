@@ -6,7 +6,8 @@ import (
 
 	"github.com/go-go-golems/slop-computer/pkg/access"
 	"github.com/go-go-golems/slop-computer/pkg/authz"
-	"github.com/go-go-golems/slop-computer/pkg/system"
+	"github.com/go-go-golems/slop-computer/pkg/identity"
+	"github.com/go-go-golems/slop-computer/pkg/sysdb"
 	"github.com/go-go-golems/slop-computer/pkg/verbs"
 )
 
@@ -34,7 +35,7 @@ func peopleVerbs(e *Env) []*verbs.Verb {
 					}
 					who = ""
 				}
-				return e.Sys.Tokens(ctx, who)
+				return e.K.People.Tokens(ctx, who)
 			}},
 		{Name: "token.new", Doc: "Make an API token; its secret is shown once.", Scope: verbs.Write, Action: authz.Account,
 			Args: []verbs.Arg{{Name: "name", Type: "string", Required: true, Pos: 1}, {Name: "scopes", Type: "string", Doc: "comma-separated: read,write,admin"},
@@ -45,7 +46,7 @@ func peopleVerbs(e *Env) []*verbs.Verb {
 				}
 				scopes := a.Strings("scopes")
 				if len(scopes) == 0 {
-					scopes = []string{system.ScopeRead, system.ScopeWrite}
+					scopes = []string{sysdb.ScopeRead, sysdb.ScopeWrite}
 				}
 				if p.Kind == access.KindToken {
 					for _, sc := range scopes {
@@ -54,15 +55,15 @@ func peopleVerbs(e *Env) []*verbs.Verb {
 						}
 					}
 				}
-				scopes, err := system.CheckTokenGrant(p.Role(), scopes, int(a.I("days", 30)))
+				scopes, err := identity.CheckTokenGrant(p.Role(), scopes, int(a.I("days", 30)))
 				if err != nil {
-					var ge *system.GrantError
+					var ge *identity.GrantError
 					if errors.As(err, &ge) {
 						return nil, verbs.Errf(ge.Code, "%s", ge.Message)
 					}
 					return nil, err
 				}
-				secret, t, err := e.Sys.CreateToken(ctx, p.ID(), a.S("name"), scopes, int(a.I("days", 30)))
+				secret, t, err := e.K.People.CreateToken(ctx, p.ID(), a.S("name"), scopes, int(a.I("days", 30)))
 				if err != nil {
 					return nil, err
 				}
@@ -71,8 +72,8 @@ func peopleVerbs(e *Env) []*verbs.Verb {
 		{Name: "token.rm", Doc: "Revoke a token.", Scope: verbs.Write, Action: authz.Account,
 			Args: []verbs.Arg{{Name: "id", Type: "string", Required: true, Pos: 1}},
 			Run: func(ctx context.Context, p *access.Principal, a verbs.Args) (any, error) {
-				t, err := e.Sys.Token(ctx, a.S("id"))
-				if errors.Is(err, system.ErrNotFound) {
+				t, err := e.K.People.Token(ctx, a.S("id"))
+				if errors.Is(err, sysdb.ErrNotFound) {
 					return nil, verbs.Errf("not_found", "no token %s", a.S("id"))
 				}
 				if err != nil {
@@ -81,7 +82,7 @@ func peopleVerbs(e *Env) []*verbs.Verb {
 				if t.Person != p.ID() && !p.IsAdmin() {
 					return nil, verbs.Errf("permission_denied", "that token is not yours")
 				}
-				if err := e.Sys.RevokeToken(ctx, p.ID(), p.ViaLabel(), t.ID); err != nil {
+				if err := e.K.People.RevokeToken(ctx, p.ID(), p.ViaLabel(), t.ID); err != nil {
 					return nil, err
 				}
 				return map[string]any{"revoked": t.ID}, nil
@@ -93,16 +94,16 @@ func peopleVerbs(e *Env) []*verbs.Verb {
 				if kind == "" {
 					kind = "user"
 				}
-				return e.Sys.People(ctx, kind)
+				return e.K.People.People(ctx, kind)
 			}},
 		{Name: "people.role", Effect: verbs.EffectGovern, Doc: "Set a user's role: pending, member, admin or disabled.", Scope: verbs.Write, AdminOnly: true, Action: authz.PlatformAdmin,
 			Args: []verbs.Arg{{Name: "id", Type: "string", Required: true, Pos: 1}, {Name: "role", Type: "string", Required: true, Pos: 2}},
 			Run: func(ctx context.Context, p *access.Principal, a verbs.Args) (any, error) {
-				if a.S("id") == p.ID() && a.S("role") != system.RoleAdmin {
+				if a.S("id") == p.ID() && a.S("role") != sysdb.RoleAdmin {
 					return nil, verbs.Errf("invalid_argument", "you cannot demote yourself")
 				}
-				pp, err := e.Sys.SetRole(ctx, p.ID(), p.ViaLabel(), a.S("id"), a.S("role"))
-				if errors.Is(err, system.ErrNotFound) {
+				pp, err := e.K.People.SetRole(ctx, p.ID(), p.ViaLabel(), a.S("id"), a.S("role"))
+				if errors.Is(err, sysdb.ErrNotFound) {
 					return nil, verbs.Errf("not_found", "no person %s", a.S("id"))
 				}
 				if err != nil {
@@ -113,7 +114,7 @@ func peopleVerbs(e *Env) []*verbs.Verb {
 		{Name: "log.system", Doc: "The platform log: sign-ups, roles, tokens, grants, mounts, policy.", Scope: verbs.Read, AdminOnly: true, Action: authz.PlatformAdmin,
 			Args: []verbs.Arg{{Name: "limit", Type: "int"}},
 			Run: func(ctx context.Context, p *access.Principal, a verbs.Args) (any, error) {
-				return e.Sys.Logs(ctx, int(a.I("limit", 100)))
+				return e.K.Sys.Logs(ctx, int(a.I("limit", 100)))
 			}},
 	}
 }

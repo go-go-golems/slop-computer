@@ -17,12 +17,12 @@ func (k *Kernel) GuestPlaces(ctx context.Context, guest string) []string {
 			out = append(out, id)
 		}
 	}
-	if gs, err := k.Sys.SubjectGrants(ctx, guest); err == nil {
+	if gs, err := k.People.SubjectGrants(ctx, guest); err == nil {
 		for _, g := range gs {
 			add(g.Store)
 		}
 	}
-	if rows, err := k.Sys.StoresGranted(ctx, []string{"@guest"}); err == nil {
+	if rows, err := k.Registry.StoresGranted(ctx, []string{"@guest"}); err == nil {
 		for _, r := range rows {
 			add(r.ID)
 		}
@@ -60,7 +60,7 @@ func (k *Kernel) PrivateDocs(ctx context.Context, guest string) []PrivateDoc {
 // SweepGuests deletes the guests unseen since cutoff (ms), with their
 // private documents and grants. It returns how many it deleted.
 func (k *Kernel) SweepGuests(ctx context.Context, cutoff int64) (int, error) {
-	ids, err := k.Sys.StaleGuests(ctx, cutoff)
+	ids, err := k.People.StaleGuests(ctx, cutoff)
 	if err != nil {
 		return 0, err
 	}
@@ -85,7 +85,7 @@ func (k *Kernel) SweepGuests(ctx context.Context, cutoff int64) (int, error) {
 				return 0, err
 			}
 		}
-		if err := k.Sys.DeleteGuest(ctx, g); err != nil {
+		if err := k.People.DeleteGuest(ctx, g); err != nil {
 			return 0, err
 		}
 	}

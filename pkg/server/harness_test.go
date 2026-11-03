@@ -25,7 +25,7 @@ import (
 	"github.com/go-go-golems/slop-computer/pkg/config"
 	"github.com/go-go-golems/slop-computer/pkg/kernel"
 	"github.com/go-go-golems/slop-computer/pkg/store"
-	"github.com/go-go-golems/slop-computer/pkg/system"
+	"github.com/go-go-golems/slop-computer/pkg/sysdb"
 )
 
 // harness runs a server behind httptest and lets requests choose a Host.
@@ -33,7 +33,7 @@ type harness struct {
 	t   *testing.T
 	ts  *httptest.Server
 	cfg *config.Config
-	sys *system.DB
+	sys *sysdb.DB
 	k   *kernel.Kernel
 	a   *actor.Manager
 	srv *Server
@@ -53,7 +53,7 @@ func newHarnessWith(t *testing.T, change func(*config.Config)) *harness {
 		change(cfg)
 	}
 	cfg.Defaults()
-	sys, err := system.Open(context.Background(), filepath.Join(cfg.Data, "system.db"))
+	sys, err := sysdb.Open(context.Background(), filepath.Join(cfg.Data, "system.db"))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -63,7 +63,7 @@ func newHarnessWith(t *testing.T, change func(*config.Config)) *harness {
 		t.Fatal(err)
 	}
 	t.Cleanup(k.Close)
-	env := &commands.Env{Cfg: cfg, Sys: sys, K: k, A: actor.New(k)}
+	env := &commands.Env{Cfg: cfg, K: k, A: actor.New(k)}
 	srv, err := Build(context.Background(), cfg, sys, env)
 	if err != nil {
 		t.Fatal(err)
@@ -140,14 +140,14 @@ func api(t *testing.T, h *harness, token, verb string, args any) (int, map[strin
 func (h *harness) tokenFor(email string, scopes ...string) string {
 	h.t.Helper()
 	ctx := context.Background()
-	p, _, err := h.sys.SignInUser(ctx, email, "", "sub-"+email, h.cfg.AdminEmails, true)
+	p, _, err := h.k.People.SignInUser(ctx, email, "", "sub-"+email, h.cfg.AdminEmails, true)
 	if err != nil {
 		h.t.Fatal(err)
 	}
 	if len(scopes) == 0 {
 		scopes = []string{"read", "write"}
 	}
-	secret, _, err := h.sys.CreateToken(ctx, p.ID, "test", scopes, 30)
+	secret, _, err := h.k.People.CreateToken(ctx, p.ID, "test", scopes, 30)
 	if err != nil {
 		h.t.Fatal(err)
 	}

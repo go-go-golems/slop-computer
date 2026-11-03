@@ -15,7 +15,7 @@ import (
 	"github.com/go-go-golems/slop-computer/pkg/config"
 	"github.com/go-go-golems/slop-computer/pkg/kernel"
 	"github.com/go-go-golems/slop-computer/pkg/server"
-	"github.com/go-go-golems/slop-computer/pkg/system"
+	"github.com/go-go-golems/slop-computer/pkg/sysdb"
 )
 
 func serveCmd() *cobra.Command {
@@ -73,7 +73,7 @@ func runServer(parent context.Context, cfg *config.Config) error {
 	if err := os.MkdirAll(cfg.Data, 0o755); err != nil {
 		return err
 	}
-	sys, err := system.Open(ctx, filepath.Join(cfg.Data, "system.db"))
+	sys, err := sysdb.Open(ctx, filepath.Join(cfg.Data, "system.db"))
 	if err != nil {
 		return err
 	}
@@ -83,7 +83,7 @@ func runServer(parent context.Context, cfg *config.Config) error {
 		return err
 	}
 	defer k.Close()
-	env := &commands.Env{Cfg: cfg, Sys: sys, K: k, A: actor.New(k)}
+	env := &commands.Env{Cfg: cfg, K: k, A: actor.New(k)}
 	srv, err := server.Build(ctx, cfg, sys, env)
 	if err != nil {
 		return err

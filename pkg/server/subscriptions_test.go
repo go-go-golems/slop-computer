@@ -17,7 +17,7 @@ import (
 	"github.com/go-go-golems/slop-computer/pkg/billing"
 	"github.com/go-go-golems/slop-computer/pkg/billing/stripe"
 	"github.com/go-go-golems/slop-computer/pkg/config"
-	"github.com/go-go-golems/slop-computer/pkg/system"
+	"github.com/go-go-golems/slop-computer/pkg/sysdb"
 )
 
 // stream follows a view's event stream and hands over each event.
@@ -167,7 +167,7 @@ func TestCompsMakeSubscribers(t *testing.T) {
 	case <-time.After(200 * time.Millisecond):
 	}
 	// Guests cannot be comped.
-	g, _ := h.sys.CreateGuest(context.Background(), "192.0.2.9")
+	g, _ := h.k.People.CreateGuest(context.Background(), "192.0.2.9")
 	h.fail(admin, "sub.grant", map[string]any{"person": g.ID, "until": "30d"}, "invalid_argument")
 }
 
@@ -220,7 +220,7 @@ func TestDowngradeClosesView(t *testing.T) {
 	// Access changed underneath, without a review: the renewal notices.
 	h.call(admin, "sub.grant", map[string]any{"person": "una@example.com", "until": "30d"})
 	v = asSubscriber()
-	if _, err := h.sys.SetGrant(context.Background(), "", "test", system.Grant{Store: "club", Subject: "@subscriber", Level: "view"}); err != nil {
+	if _, err := h.k.Registry.SetGrant(context.Background(), "", "test", sysdb.Grant{Store: "club", Subject: "@subscriber", Level: "view"}); err != nil {
 		t.Fatal(err)
 	}
 	if st := renew(v); st != 404 {
@@ -234,7 +234,7 @@ func TestDowngradeClosesView(t *testing.T) {
 	// cached at a system epoch, and any write moves the epoch.
 	grant := func(level string) {
 		t.Helper()
-		if _, err := h.sys.SetGrant(context.Background(), "", "test", system.Grant{Store: "club", Subject: "@subscriber", Level: level}); err != nil {
+		if _, err := h.k.Registry.SetGrant(context.Background(), "", "test", sysdb.Grant{Store: "club", Subject: "@subscriber", Level: level}); err != nil {
 			t.Fatal(err)
 		}
 	}
@@ -251,7 +251,7 @@ func TestDowngradeClosesView(t *testing.T) {
 	// the same answer and keeps working.
 	grant("interact")
 	v = asSubscriber()
-	if err := h.sys.SetPolicy(context.Background(), "", "test", "another-app", "sample", "member", true); err != nil {
+	if err := h.k.Gov.SetPolicy(context.Background(), "", "test", "another-app", "sample", "member", true); err != nil {
 		t.Fatal(err)
 	}
 	if st := write(v, "after an unrelated write"); st != 200 {
@@ -284,7 +284,7 @@ func TestStripeSubscription(t *testing.T) {
 		t.Fatalf("checkout = %v, again %v", out, again)
 	}
 	h.fail(sol, "billing.checkout", map[string]any{"price": "price_other"}, "invalid_argument")
-	customer, err := h.sys.CustomerFor(ctx, me)
+	customer, err := h.k.Book.CustomerFor(ctx, me)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -418,7 +418,7 @@ func TestStreamFollowsSystemState(t *testing.T) {
 	if d := ev.next(t, "doc", 2*time.Second); d["path"] != "notes/a" {
 		t.Fatalf("first doc: %v", d)
 	}
-	if _, err := h.sys.SetGrant(context.Background(), "", "test", system.Grant{Store: "club", Subject: "@subscriber", Level: "view"}); err != nil {
+	if _, err := h.k.Registry.SetGrant(context.Background(), "", "test", sysdb.Grant{Store: "club", Subject: "@subscriber", Level: "view"}); err != nil {
 		t.Fatal(err)
 	}
 	h.call(admin, "docs.set", map[string]any{"store": "club", "path": "notes/b", "data": map[string]any{"n": 2}})
@@ -457,14 +457,14 @@ func TestDisabledAccountActsNowhere(t *testing.T) {
 		t.Fatalf("subscriber view: %d %v", st, v)
 	}
 	ctx := context.Background()
-	una, err := h.sys.PersonByEmail(ctx, "una@example.com")
+	una, err := h.k.People.PersonByEmail(ctx, "una@example.com")
 	if err != nil {
 		t.Fatal(err)
 	}
 	if h.srv.personAs(ctx, una.ID, "test") == nil {
 		t.Fatal("an active member should act")
 	}
-	if _, err := h.sys.SetRole(ctx, "", "test", una.ID, system.RoleDisabled); err != nil {
+	if _, err := h.k.People.SetRole(ctx, "", "test", una.ID, sysdb.RoleDisabled); err != nil {
 		t.Fatal(err)
 	}
 	sbx := strings.TrimPrefix(strings.Split(v["url"].(string), "/v/")[0], "http://")

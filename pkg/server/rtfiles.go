@@ -25,7 +25,7 @@ import (
 	"github.com/go-go-golems/slop-computer/pkg/commands"
 	"github.com/go-go-golems/slop-computer/pkg/rt"
 	"github.com/go-go-golems/slop-computer/pkg/store"
-	"github.com/go-go-golems/slop-computer/pkg/system"
+	"github.com/go-go-golems/slop-computer/pkg/sysdb"
 )
 
 const (
@@ -35,12 +35,12 @@ const (
 
 // reachableStores are the stores v's viewer may open, at their level there
 // capped by ceil: owned or granted ones (every store for a platform admin).
-func (s *Server) reachableStores(ctx context.Context, v *rt.View, ceil rt.Level) ([]system.StoreRow, error) {
+func (s *Server) reachableStores(ctx context.Context, v *rt.View, ceil rt.Level) ([]sysdb.StoreRow, error) {
 	p := s.viewPrincipal(ctx, v)
-	var rows []system.StoreRow
+	var rows []sysdb.StoreRow
 	var err error
 	if p.IsAdmin() {
-		rows, err = s.Sys.Stores(ctx, "")
+		rows, err = s.Registry.Stores(ctx, "")
 	} else if p != nil {
 		rows, err = commands.VisibleStores(ctx, s.Env, p)
 	}
@@ -70,7 +70,7 @@ func (s *Server) filesStore(ctx context.Context, v *rt.View, path string) (strin
 		storeID, inner, _ = strings.Cut(path, "/")
 		ceil = v.Space.Stores
 	} else {
-		b, err := s.Sys.BindingOf(ctx, v.Target, v.Caps.Files)
+		b, err := s.Registry.BindingOf(ctx, v.Target, v.Caps.Files)
 		if err != nil {
 			return "", "", rtErr("not_found", "no store is bound to %q", v.Caps.Files)
 		}
@@ -81,8 +81,8 @@ func (s *Server) filesStore(ctx context.Context, v *rt.View, path string) (strin
 	}
 	held := v.Level
 	if storeID != v.Target {
-		row, err := s.Sys.StoreByID(ctx, storeID)
-		if errors.Is(err, system.ErrNotFound) {
+		row, err := s.Registry.StoreByID(ctx, storeID)
+		if errors.Is(err, sysdb.ErrNotFound) {
 			return "", "", rtErr("not_found", "no such file or folder")
 		}
 		if err != nil {

@@ -1,4 +1,4 @@
-package system
+package registry
 
 import (
 	"context"
@@ -7,6 +7,8 @@ import (
 	"errors"
 	"sort"
 	"strings"
+
+	"github.com/go-go-golems/slop-computer/pkg/sysdb"
 )
 
 // Mount maps a host and path pattern to a store.
@@ -33,7 +35,7 @@ func scanMount(row interface{ Scan(...any) error }) (Mount, error) {
 	var aliases string
 	err := row.Scan(&m.Host, &m.Path, &m.Store, &m.StoreParam, &m.Type, &m.CreateApp, &m.CreateAudience, &aliases, &m.ChangedBy, &m.ChangedAt)
 	if errors.Is(err, sql.ErrNoRows) {
-		return m, ErrNotFound
+		return m, sysdb.ErrNotFound
 	}
 	if err == nil && aliases != "" {
 		err = json.Unmarshal([]byte(aliases), &m.Aliases)
@@ -42,7 +44,7 @@ func scanMount(row interface{ Scan(...any) error }) (Mount, error) {
 }
 
 // Mounts lists the mounts of a host (all hosts when host is "").
-func (d *DB) Mounts(ctx context.Context, host string) ([]Mount, error) {
+func (d *Registry) Mounts(ctx context.Context, host string) ([]Mount, error) {
 	q, args := `SELECT `+mountCols+` FROM mounts ORDER BY host, path`, []any{}
 	if host != "" {
 		q, args = `SELECT `+mountCols+` FROM mounts WHERE host = ? ORDER BY path`, []any{host}
@@ -108,7 +110,7 @@ func mountJSON(m *Mount) string {
 }
 
 // SetMount creates or replaces a mount, recording the previous value.
-func (d *DB) SetMount(ctx context.Context, actor, via string, m Mount) (Mount, error) {
+func (d *Registry) SetMount(ctx context.Context, actor, via string, m Mount) (Mount, error) {
 	m.ChangedBy, m.ChangedAt = actor, d.NowMs()
 	err := d.Tx(ctx, func(tx *sql.Tx) error {
 		var before *Mount
@@ -119,7 +121,7 @@ func (d *DB) SetMount(ctx context.Context, actor, via string, m Mount) (Mount, e
 			VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?) ON CONFLICT (host, path) DO UPDATE SET store = excluded.store, store_param = excluded.store_param,
 			type = excluded.type, create_app = excluded.create_app, create_audience = excluded.create_audience, aliases = excluded.aliases,
 			changed_by = excluded.changed_by, changed_at = excluded.changed_at`,
-			m.Host, m.Path, nullStr(m.Store), nullStr(m.StoreParam), nullStr(m.Type), nullStr(m.CreateApp), nullStr(m.CreateAudience), aliasesJSON(m.Aliases), nullStr(actor), m.ChangedAt); err != nil {
+			m.Host, m.Path, sysdb.NullStr(m.Store), sysdb.NullStr(m.StoreParam), sysdb.NullStr(m.Type), sysdb.NullStr(m.CreateApp), sysdb.NullStr(m.CreateAudience), aliasesJSON(m.Aliases), sysdb.NullStr(actor), m.ChangedAt); err != nil {
 			return err
 		}
 		return d.logMount(ctx, tx, actor, via, m.Host, m.Path, before, &m)
@@ -128,7 +130,7 @@ func (d *DB) SetMount(ctx context.Context, actor, via string, m Mount) (Mount, e
 }
 
 // RemoveMount deletes a mount, recording it so it can be undone.
-func (d *DB) RemoveMount(ctx context.Context, actor, via, host, path string) error {
+func (d *Registry) RemoveMount(ctx context.Context, actor, via, host, path string) error {
 	return d.Tx(ctx, func(tx *sql.Tx) error {
 		old, err := scanMount(tx.QueryRowContext(ctx, `SELECT `+mountCols+` FROM mounts WHERE host = ? AND path = ?`, host, path))
 		if err != nil {
@@ -142,13 +144,13 @@ func (d *DB) RemoveMount(ctx context.Context, actor, via, host, path string) err
 }
 
 // UndoMount restores a mount's value from before its last change.
-func (d *DB) UndoMount(ctx context.Context, actor, via, host, path string) (*Mount, error) {
+func (d *Registry) UndoMount(ctx context.Context, actor, via, host, path string) (*Mount, error) {
 	var restored *Mount
 	err := d.Tx(ctx, func(tx *sql.Tx) error {
 		var before sql.NullString
 		err := tx.QueryRowContext(ctx, `SELECT before FROM mount_log WHERE host = ? AND path = ? ORDER BY id DESC LIMIT 1`, host, path).Scan(&before)
 		if errors.Is(err, sql.ErrNoRows) {
-			return ErrNotFound
+			return sysdb.ErrNotFound
 		}
 		if err != nil {
 			return err
@@ -167,8 +169,8 @@ func (d *DB) UndoMount(ctx context.Context, actor, via, host, path string) (*Mou
 			}
 			m.ChangedBy, m.ChangedAt = actor, d.NowMs()
 			if _, err := tx.ExecContext(ctx, `INSERT INTO mounts (host, path, store, store_param, type, create_app, create_audience, aliases, changed_by, changed_at)
-				VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`, m.Host, m.Path, nullStr(m.Store), nullStr(m.StoreParam), nullStr(m.Type),
-				nullStr(m.CreateApp), nullStr(m.CreateAudience), aliasesJSON(m.Aliases), nullStr(actor), m.ChangedAt); err != nil {
+				VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`, m.Host, m.Path, sysdb.NullStr(m.Store), sysdb.NullStr(m.StoreParam), sysdb.NullStr(m.Type),
+				sysdb.NullStr(m.CreateApp), sysdb.NullStr(m.CreateAudience), aliasesJSON(m.Aliases), sysdb.NullStr(actor), m.ChangedAt); err != nil {
 				return err
 			}
 			restored = &m
@@ -178,9 +180,9 @@ func (d *DB) UndoMount(ctx context.Context, actor, via, host, path string) (*Mou
 	return restored, err
 }
 
-func (d *DB) logMount(ctx context.Context, tx *sql.Tx, actor, via, host, path string, before, after *Mount) error {
+func (d *Registry) logMount(ctx context.Context, tx *sql.Tx, actor, via, host, path string, before, after *Mount) error {
 	if _, err := tx.ExecContext(ctx, `INSERT INTO mount_log (host, path, before, after, by, at) VALUES (?, ?, ?, ?, ?, ?)`,
-		host, path, nullStr(mountJSON(before)), nullStr(mountJSON(after)), nullStr(actor), d.NowMs()); err != nil {
+		host, path, sysdb.NullStr(mountJSON(before)), sysdb.NullStr(mountJSON(after)), sysdb.NullStr(actor), d.NowMs()); err != nil {
 		return err
 	}
 	op, summary := "set", "mounted "+host+path
@@ -192,7 +194,7 @@ func (d *DB) logMount(ctx context.Context, tx *sql.Tx, actor, via, host, path st
 	default:
 		summary += " → :" + after.StoreParam
 	}
-	_, err := Log(ctx, tx, d.NowMs(), actor, via, summary, Change{Kind: "mount", Key: host + path, Op: op, Before: mountJSON(before), After: mountJSON(after)})
+	_, err := sysdb.Log(ctx, tx, d.NowMs(), actor, via, summary, sysdb.Change{Kind: "mount", Key: host + path, Op: op, Before: mountJSON(before), After: mountJSON(after)})
 	return err
 }
 

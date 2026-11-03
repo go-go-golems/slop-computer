@@ -14,6 +14,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/go-go-golems/slop-computer/pkg/billing"
 	"github.com/go-go-golems/slop-computer/pkg/billing/stripe"
 	capsdb "github.com/go-go-golems/slop-computer/pkg/caps/db"
 	"github.com/go-go-golems/slop-computer/pkg/commands"
@@ -23,17 +24,24 @@ import (
 	"github.com/go-go-golems/slop-computer/pkg/ids"
 	"github.com/go-go-golems/slop-computer/pkg/llm"
 	"github.com/go-go-golems/slop-computer/pkg/llm/gepp"
+	"github.com/go-go-golems/slop-computer/pkg/policy"
 	"github.com/go-go-golems/slop-computer/pkg/registry"
 	"github.com/go-go-golems/slop-computer/pkg/rt"
-	"github.com/go-go-golems/slop-computer/pkg/system"
+	"github.com/go-go-golems/slop-computer/pkg/sysdb"
 	"github.com/go-go-golems/slop-computer/pkg/verbs"
 )
 
 // Server holds the shared state of every host.
 type Server struct {
 	Cfg *config.Config
-	Sys *system.DB
-	Env *commands.Env
+	Sys *sysdb.DB
+	// system.db's domains: the kernel's, or built over Sys without one.
+	People   *identity.Accounts
+	Registry *registry.Registry
+	Ledger   *llm.Ledger
+	Gov      *policy.Governance
+	Book     *billing.Book
+	Env      *commands.Env
 	// Verbs is the table every door calls (the commands installed with Env).
 	Verbs *verbs.Table
 	main  *http.ServeMux
@@ -56,7 +64,7 @@ type Server struct {
 }
 
 // Build makes the server with everything the configuration enables.
-func Build(ctx context.Context, cfg *config.Config, sys *system.DB, env *commands.Env) (*Server, error) {
+func Build(ctx context.Context, cfg *config.Config, sys *sysdb.DB, env *commands.Env) (*Server, error) {
 	s := New(cfg, sys, env)
 	if err := s.setupOIDC(); err != nil {
 		return nil, err
@@ -99,8 +107,13 @@ func (s *Server) setupLLM(ctx context.Context) error {
 }
 
 // New builds a server.
-func New(cfg *config.Config, sys *system.DB, env *commands.Env) *Server {
+func New(cfg *config.Config, sys *sysdb.DB, env *commands.Env) *Server {
 	s := &Server{Cfg: cfg, Sys: sys, Env: env, main: http.NewServeMux(), Verbs: verbs.NewTable()}
+	if env != nil && env.K != nil {
+		s.People, s.Registry, s.Ledger, s.Gov, s.Book = env.K.People, env.K.Registry, env.K.Ledger, env.K.Gov, env.K.Book
+	} else if sys != nil {
+		s.People, s.Registry, s.Ledger, s.Gov, s.Book = identity.NewAccounts(sys), registry.NewRegistry(sys), llm.NewLedger(sys), policy.NewGovernance(sys), billing.NewBook(sys)
+	}
 	if env != nil {
 		if env.Verbs == nil {
 			commands.Install(verbs.NewTable(), env) // not verbs.Default: the CLI lists its commands there
@@ -117,7 +130,8 @@ func New(cfg *config.Config, sys *system.DB, env *commands.Env) *Server {
 		s.roomClosed(v, rooms)
 		s.reg.Live.Forget(v.ID, "")
 	}
-	s.reg = &registry.Docs{Sys: s.Sys, Verbs: s.Verbs, Host: regHost{s}, Live: registry.NewLive()}
+	s.reg = &registry.Docs{Verbs: s.Verbs, Host: regHost{s}, Live: registry.NewLive()}
+	s.reg.Sys = s.Registry
 	if env != nil {
 		s.reg.Confirm = env.Confirm
 		if env.K != nil {
@@ -140,9 +154,9 @@ func New(cfg *config.Config, sys *system.DB, env *commands.Env) *Server {
 	}
 	if env != nil && env.A != nil {
 		env.A.Policy = func(app, capability, audience string) bool {
-			return sys.Policy(context.Background(), app, capability, audience)
+			return s.Gov.Policy(context.Background(), app, capability, audience)
 		}
-		env.A.Secret = func(ctx context.Context, app, name string) (string, error) { return sys.Secret(ctx, key, app, name) }
+		env.A.Secret = func(ctx context.Context, app, name string) (string, error) { return s.Gov.Secret(ctx, key, app, name) }
 		env.A.Platform = s.platformModule
 		env.A.Paths = s.db
 		env.A.Sample = actorSampler{s}
@@ -255,8 +269,8 @@ func (s *Server) ListenAndServe(ctx context.Context) error {
 				return
 			case now := <-t.C:
 				s.rt.views.Sweep(now)
-				s.reviewAll(ctx)              // comps and subscription periods that ended
-				_, _ = s.Sys.ExpireHolds(ctx) // model rounds whose outcome never arrived: charged in full
+				s.reviewAll(ctx)                 // comps and subscription periods that ended
+				_, _ = s.Ledger.ExpireHolds(ctx) // model rounds whose outcome never arrived: charged in full
 			}
 		}
 	}()
@@ -265,7 +279,7 @@ func (s *Server) ListenAndServe(ctx context.Context) error {
 		t := time.NewTicker(24 * time.Hour)
 		defer t.Stop()
 		for {
-			if n, err := s.Env.K.SweepGuests(ctx, system.GuestCutoff(time.Now())); err != nil {
+			if n, err := s.Env.K.SweepGuests(ctx, identity.GuestCutoff(time.Now())); err != nil {
 				log.Printf("guest sweep: %v", err)
 			} else if n > 0 {
 				log.Printf("swept %d guests", n)

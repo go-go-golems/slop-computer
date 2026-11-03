@@ -10,8 +10,9 @@ import (
 
 	"github.com/go-go-golems/slop-computer/pkg/access"
 	"github.com/go-go-golems/slop-computer/pkg/authz"
+	"github.com/go-go-golems/slop-computer/pkg/identity"
 	"github.com/go-go-golems/slop-computer/pkg/rt"
-	"github.com/go-go-golems/slop-computer/pkg/system"
+	"github.com/go-go-golems/slop-computer/pkg/sysdb"
 	"github.com/go-go-golems/slop-computer/pkg/verbs"
 )
 
@@ -24,12 +25,12 @@ func (e *Env) subjectPrincipal(ctx context.Context, subject string) (*access.Pri
 	case strings.HasPrefix(subject, "store:"):
 		return &access.Principal{Kind: access.KindStore, Store: strings.TrimPrefix(subject, "store:")}, nil
 	}
-	var p system.Person
+	var p sysdb.Person
 	var err error
 	if strings.Contains(subject, "@") {
-		p, err = e.Sys.PersonByEmail(ctx, subject)
+		p, err = e.K.People.PersonByEmail(ctx, subject)
 	} else {
-		p, err = e.Sys.Person(ctx, subject)
+		p, err = e.K.People.Person(ctx, subject)
 	}
 	if err != nil {
 		return nil, verbs.Errf("not_found", "no person %s", subject)
@@ -67,8 +68,8 @@ func accessVerbs(e *Env) []*verbs.Verb {
 					return nil, verbs.Errf("invalid_argument", "unknown level %q", lv)
 				}
 				id := a.S("store")
-				st, err := e.Sys.StoreByID(ctx, id)
-				if errors.Is(err, system.ErrNotFound) {
+				st, err := e.K.Registry.StoreByID(ctx, id)
+				if errors.Is(err, sysdb.ErrNotFound) {
 					return nil, verbs.Errf("not_found", "no store %s", id)
 				}
 				if err != nil {
@@ -131,7 +132,7 @@ func accessVerbs(e *Env) []*verbs.Verb {
 				if d := a.I("days", 0); d > 0 {
 					until = time.Now().Add(time.Duration(d) * 24 * time.Hour).UnixMilli()
 				}
-				l, token, err := e.Sys.CreateLink(ctx, p.ID(), p.ViaLabel(), a.S("store"), lv, until)
+				l, token, err := e.K.Registry.CreateLink(ctx, p.ID(), p.ViaLabel(), a.S("store"), lv, until)
 				if err != nil {
 					return nil, verbs.Errf("invalid_argument", "%s", err.Error())
 				}
@@ -151,19 +152,19 @@ func accessVerbs(e *Env) []*verbs.Verb {
 				if _, _, err := e.open(ctx, p, a.S("store"), rt.LevelOwner, "reading links"); err != nil && !p.IsAdmin() {
 					return nil, err
 				}
-				return e.Sys.Links(ctx, a.S("store"))
+				return e.K.Registry.Links(ctx, a.S("store"))
 			}},
 		{Name: "link.rm", Doc: "Revoke a share link; the access it gave ends at once.", Scope: verbs.Write, Action: authz.StoreOwner, StoreArg: "-",
 			Args: []verbs.Arg{{Name: "id", Type: "string", Pos: 1, Required: true}},
 			Run: func(ctx context.Context, p *access.Principal, a verbs.Args) (any, error) {
-				l, err := e.Sys.LinkByID(ctx, a.S("id"))
+				l, err := e.K.Registry.LinkByID(ctx, a.S("id"))
 				if err != nil {
 					return nil, verbs.Errf("not_found", "no link %s", a.S("id"))
 				}
 				if _, _, err := e.open(ctx, p, l.Store, rt.LevelOwner, "revoking links"); err != nil && !p.IsAdmin() {
 					return nil, err
 				}
-				if _, err := e.Sys.RevokeLink(ctx, p.ID(), p.ViaLabel(), l.ID); err != nil {
+				if _, err := e.K.Registry.RevokeLink(ctx, p.ID(), p.ViaLabel(), l.ID); err != nil {
 					return nil, err
 				}
 				return map[string]any{"revoked": l.ID, "store": l.Store}, nil
@@ -171,7 +172,7 @@ func accessVerbs(e *Env) []*verbs.Verb {
 		{Name: "guest.sweep", Doc: "Delete guests unseen for 90 days (or --days), with their grants and private documents.", Scope: verbs.Write, AdminOnly: true, Action: authz.PlatformAdmin,
 			Args: []verbs.Arg{{Name: "days", Type: "int", Doc: "unseen for at least this many days (default 90)"}},
 			Run: func(ctx context.Context, p *access.Principal, a verbs.Args) (any, error) {
-				days := a.I("days", system.GuestDays)
+				days := a.I("days", identity.GuestDays)
 				n, err := e.K.SweepGuests(ctx, time.Now().Add(-time.Duration(days)*24*time.Hour).UnixMilli())
 				return map[string]any{"deleted": n}, err
 			}},

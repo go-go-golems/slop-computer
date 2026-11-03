@@ -10,7 +10,6 @@ import (
 	"strings"
 	"sync"
 	"time"
-
 )
 
 // ConfirmTTL is how long a confirmation waits, and how long an approval

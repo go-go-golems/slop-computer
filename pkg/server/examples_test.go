@@ -71,10 +71,10 @@ func TestJournalExample(t *testing.T) {
 	}); err != nil {
 		t.Fatal(err)
 	}
-	if err := h.sys.SetSchedule(ctx, "journal", missed); err != nil {
+	if err := h.k.Registry.SetSchedule(ctx, "journal", missed); err != nil {
 		t.Fatal(err)
 	}
-	due, _ := h.sys.DueSchedules(ctx, time.Now().UnixMilli())
+	due, _ := h.k.Registry.DueSchedules(ctx, time.Now().UnixMilli())
 	for _, id := range due {
 		_ = h.a.Fire(ctx, id, "") // what the scheduler's tick does
 	}

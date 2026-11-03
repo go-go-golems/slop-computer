@@ -9,7 +9,8 @@ import (
 	"strings"
 
 	"github.com/go-go-golems/slop-computer/pkg/httpx"
-	"github.com/go-go-golems/slop-computer/pkg/system"
+	"github.com/go-go-golems/slop-computer/pkg/identity"
+	"github.com/go-go-golems/slop-computer/pkg/sysdb"
 )
 
 // Device login: the CLI asks for a code, a person approves it in the
@@ -44,12 +45,12 @@ func (s *Server) deviceStart(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	for _, sc := range in.Scopes {
-		if sc != system.ScopeRead && sc != system.ScopeWrite && sc != system.ScopeAdmin {
+		if sc != sysdb.ScopeRead && sc != sysdb.ScopeWrite && sc != sysdb.ScopeAdmin {
 			httpx.Fail(w, 400, "invalid_argument", "unknown scope "+sc)
 			return
 		}
 	}
-	secret, dc, err := s.Sys.StartDevice(r.Context(), name, in.Scopes, days)
+	secret, dc, err := s.People.StartDevice(r.Context(), name, in.Scopes, days)
 	if err != nil {
 		httpx.Fail(w, 500, "internal", err.Error())
 		return
@@ -69,16 +70,16 @@ func (s *Server) deviceToken(w http.ResponseWriter, r *http.Request) {
 		httpx.Fail(w, 400, "invalid_argument", "send {deviceCode}")
 		return
 	}
-	secret, t, err := s.Sys.PollDevice(r.Context(), in.DeviceCode)
+	secret, t, err := s.People.PollDevice(r.Context(), in.DeviceCode)
 	switch {
-	case errors.Is(err, system.ErrPending):
+	case errors.Is(err, identity.ErrPending):
 		httpx.Fail(w, 428, "authorization_pending", "waiting for approval in the browser")
-	case errors.Is(err, system.ErrDenied):
+	case errors.Is(err, identity.ErrDenied):
 		httpx.Fail(w, 403, "access_denied", "the login was denied")
 	case err != nil:
 		httpx.Fail(w, 404, "expired_token", "this login expired or was already used")
 	default:
-		p, _ := s.Sys.Person(r.Context(), t.Person)
+		p, _ := s.People.Person(r.Context(), t.Person)
 		httpx.JSON(w, 200, map[string]any{"token": secret, "tokenId": t.ID, "name": t.Name, "scopes": t.Scopes,
 			"expiresAt": t.ExpiresAt, "user": p})
 	}
@@ -110,11 +111,11 @@ func (s *Server) devicePage(w http.ResponseWriter, r *http.Request) {
 	}
 	data := map[string]any{"CSRF": sess.CSRF, "Problem": r.URL.Query().Get("problem")}
 	if code := r.URL.Query().Get("code"); code != "" {
-		dc, err := s.Sys.DeviceByUserCode(r.Context(), code)
+		dc, err := s.People.DeviceByUserCode(r.Context(), code)
 		if err != nil {
 			data["Problem"] = "That code is unknown or expired."
 		} else {
-			allowed := system.ScopesForRole(p.Person.Role)
+			allowed := identity.ScopesForRole(p.Person.Role)
 			checked := map[string]bool{}
 			for _, sc := range dc.Scopes {
 				checked[sc] = true
@@ -125,8 +126,8 @@ func (s *Server) devicePage(w http.ResponseWriter, r *http.Request) {
 				}
 			}
 			days := dc.Days
-			if checked[system.ScopeAdmin] && (days < 1 || days > system.MaxAdminTokenDays) {
-				days = system.MaxAdminTokenDays
+			if checked[sysdb.ScopeAdmin] && (days < 1 || days > identity.MaxAdminTokenDays) {
+				days = identity.MaxAdminTokenDays
 			}
 			data["Code"], data["Name"], data["Who"] = dc.UserCode, dc.Name, p.Person.Name+" ("+p.Person.Role+")"
 			data["Allowed"], data["Checked"], data["Days"] = allowed, checked, days
@@ -153,17 +154,17 @@ func (s *Server) deviceDecide(w http.ResponseWriter, r *http.Request) {
 	code := r.PostForm.Get("code")
 	back := "/device?code=" + url.QueryEscape(code)
 	if r.PostForm.Get("decision") == "deny" {
-		_ = s.Sys.ApproveDevice(r.Context(), code, p.ID(), nil, 0, true)
+		_ = s.People.ApproveDevice(r.Context(), code, p.ID(), nil, 0, true)
 		writeDone(w, "Denied. You can close this page.")
 		return
 	}
 	days, _ := strconv.Atoi(r.PostForm.Get("days"))
-	scopes, err := system.CheckTokenGrant(p.Person.Role, r.PostForm["scope"], days)
+	scopes, err := identity.CheckTokenGrant(p.Person.Role, r.PostForm["scope"], days)
 	if err != nil {
 		http.Redirect(w, r, back+"&problem="+url.QueryEscape(err.Error()), http.StatusSeeOther)
 		return
 	}
-	if err := s.Sys.ApproveDevice(r.Context(), code, p.ID(), scopes, days, false); err != nil {
+	if err := s.People.ApproveDevice(r.Context(), code, p.ID(), scopes, days, false); err != nil {
 		http.Redirect(w, r, back+"&problem="+url.QueryEscape(err.Error()), http.StatusSeeOther)
 		return
 	}

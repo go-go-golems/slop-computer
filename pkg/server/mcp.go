@@ -109,7 +109,7 @@ func (s *Server) mcpPost(w http.ResponseWriter, r *http.Request) {
 		w.WriteHeader(http.StatusAccepted)
 		return
 	}
-	s.Sys.TouchPerson(r.Context(), p.ID())
+	s.People.TouchPerson(r.Context(), p.ID())
 	switch req.Method {
 	case "initialize":
 		var in struct {

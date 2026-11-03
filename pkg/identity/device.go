@@ -1,4 +1,4 @@
-package system
+package identity
 
 import (
 	"context"
@@ -8,6 +8,7 @@ import (
 	"time"
 
 	"github.com/go-go-golems/slop-computer/pkg/ids"
+	"github.com/go-go-golems/slop-computer/pkg/sysdb"
 )
 
 // DeviceCode is a pending CLI login.
@@ -25,7 +26,7 @@ type DeviceCode struct {
 const DeviceMinutes = 10
 
 // StartDevice records a device login and returns the device secret.
-func (d *DB) StartDevice(ctx context.Context, name string, scopes []string, days int) (string, DeviceCode, error) {
+func (d *Accounts) StartDevice(ctx context.Context, name string, scopes []string, days int) (string, DeviceCode, error) {
 	secret := ids.Secret("dev_")
 	now := d.NowMs()
 	dc := DeviceCode{UserCode: ids.UserCode(), Name: name, Scopes: scopes, Days: days,
@@ -41,9 +42,9 @@ func scanDevice(row interface{ Scan(...any) error }) (DeviceCode, error) {
 	var by sql.NullString
 	err := row.Scan(&dc.UserCode, &dc.Name, &scopes, &dc.Days, &by, &dc.Denied, &dc.ExpiresAt)
 	if errors.Is(err, sql.ErrNoRows) {
-		return dc, ErrNotFound
+		return dc, sysdb.ErrNotFound
 	}
-	dc.Scopes = splitScopes(scopes)
+	dc.Scopes = sysdb.SplitScopes(scopes)
 	dc.ApprovedBy = by.String
 	return dc, err
 }
@@ -51,14 +52,14 @@ func scanDevice(row interface{ Scan(...any) error }) (DeviceCode, error) {
 const deviceCols = `user_code, name, scopes, days, approved_by, denied, expires_at`
 
 // DeviceByUserCode returns a live device login by the code people type.
-func (d *DB) DeviceByUserCode(ctx context.Context, code string) (DeviceCode, error) {
+func (d *Accounts) DeviceByUserCode(ctx context.Context, code string) (DeviceCode, error) {
 	dc, err := scanDevice(d.QueryRowContext(ctx, `SELECT `+deviceCols+` FROM device_codes WHERE user_code = ? AND expires_at > ?`,
 		strings.ToUpper(strings.TrimSpace(code)), d.NowMs()))
 	return dc, err
 }
 
 // ApproveDevice approves (with a token made for person) or denies a device login.
-func (d *DB) ApproveDevice(ctx context.Context, code, person string, scopes []string, days int, deny bool) error {
+func (d *Accounts) ApproveDevice(ctx context.Context, code, person string, scopes []string, days int, deny bool) error {
 	dc, err := d.DeviceByUserCode(ctx, code)
 	if err != nil {
 		return err
@@ -87,14 +88,14 @@ var (
 
 // PollDevice returns the token once a device login is approved. The secret
 // is handed out exactly once.
-func (d *DB) PollDevice(ctx context.Context, deviceSecret string) (string, Token, error) {
+func (d *Accounts) PollDevice(ctx context.Context, deviceSecret string) (string, Token, error) {
 	var tokenID, plain sql.NullString
 	var denied bool
 	var exp int64
 	err := d.QueryRowContext(ctx, `SELECT token_id, token_plain, denied, expires_at FROM device_codes WHERE device_hash = ?`,
 		ids.Hash(deviceSecret)).Scan(&tokenID, &plain, &denied, &exp)
 	if errors.Is(err, sql.ErrNoRows) {
-		return "", Token{}, ErrNotFound
+		return "", Token{}, sysdb.ErrNotFound
 	}
 	if err != nil {
 		return "", Token{}, err
@@ -103,11 +104,11 @@ func (d *DB) PollDevice(ctx context.Context, deviceSecret string) (string, Token
 	case denied:
 		return "", Token{}, ErrDenied
 	case !tokenID.Valid && exp <= d.NowMs():
-		return "", Token{}, ErrNotFound
+		return "", Token{}, sysdb.ErrNotFound
 	case !tokenID.Valid:
 		return "", Token{}, ErrPending
 	case !plain.Valid:
-		return "", Token{}, ErrNotFound // already collected
+		return "", Token{}, sysdb.ErrNotFound // already collected
 	}
 	if _, err := d.ExecContext(ctx, `UPDATE device_codes SET token_plain = NULL WHERE device_hash = ?`, ids.Hash(deviceSecret)); err != nil {
 		return "", Token{}, err

@@ -20,9 +20,9 @@ import (
 	"github.com/go-go-golems/slop-computer/pkg/access"
 	"github.com/go-go-golems/slop-computer/pkg/kernel"
 	"github.com/go-go-golems/slop-computer/pkg/llm"
+	"github.com/go-go-golems/slop-computer/pkg/policy"
 	"github.com/go-go-golems/slop-computer/pkg/rt"
 	"github.com/go-go-golems/slop-computer/pkg/store"
-	"github.com/go-go-golems/slop-computer/pkg/system"
 )
 
 // Manager owns the actors of all stores.
@@ -85,7 +85,7 @@ func (m *Manager) allowedAny(a *Actor, capability string) bool {
 	if m.Policy == nil {
 		return true
 	}
-	for _, aud := range system.PolicyAudiences {
+	for _, aud := range policy.PolicyAudiences {
 		if m.Policy(a.run.App, capability, aud) {
 			return true
 		}
@@ -305,10 +305,10 @@ func (m *Manager) storeVisitor(ctx context.Context, id string) Visitor {
 // withLLM adds what the payer may spend on the LLM this month.
 func (m *Manager) withLLM(ctx context.Context, v *Visitor) {
 	if v.Payer == "" {
-		v.LLM = &system.LLM{}
+		v.LLM = &llm.LLM{}
 		return
 	}
-	l := m.K.Sys.LLMFor(ctx, v.Payer, v.Audience)
+	l := m.K.Ledger.LLMFor(ctx, v.Payer, v.Audience)
 	v.LLM = &l
 }
 
@@ -325,7 +325,7 @@ func (m *Manager) VisitorOf(ctx context.Context, p *access.Principal, storeID st
 		}
 		v.Guest = p.Person.Kind == "guest"
 	}
-	if row, err := m.K.Sys.StoreByID(ctx, storeID); err == nil {
+	if row, err := m.K.Registry.StoreByID(ctx, storeID); err == nil {
 		d := m.K.Access.Level(ctx, p, row)
 		v.Level, v.Audience = d.LevelName(), string(d.Audience)
 	}
@@ -855,10 +855,10 @@ func (m *Manager) refreshSchedule(ctx context.Context, id string) {
 	}
 	rows, err := st.ReadQuery(ctx, `SELECT min(at) AS next FROM _alarms WHERE running = 0`)
 	if err != nil || len(rows) == 0 || rows[0]["next"] == nil {
-		_ = m.K.Sys.ClearSchedule(ctx, id)
+		_ = m.K.Registry.ClearSchedule(ctx, id)
 		return
 	}
-	_ = m.K.Sys.SetSchedule(ctx, id, toInt(rows[0]["next"]))
+	_ = m.K.Registry.SetSchedule(ctx, id, toInt(rows[0]["next"]))
 }
 
 // Start runs the alarm scheduler until ctx ends: it wakes the stores whose
@@ -873,7 +873,7 @@ func (m *Manager) Start(ctx context.Context) {
 			case <-ctx.Done():
 				return
 			case now := <-t.C:
-				due, err := m.K.Sys.DueSchedules(ctx, now.UnixMilli())
+				due, err := m.K.Registry.DueSchedules(ctx, now.UnixMilli())
 				if err != nil {
 					continue
 				}
@@ -894,12 +894,12 @@ func (m *Manager) Fire(ctx context.Context, id, name string) error {
 		return err
 	}
 	if a == nil {
-		_ = m.K.Sys.ClearSchedule(ctx, id)
+		_ = m.K.Registry.ClearSchedule(ctx, id)
 		return fail("not_found", "%s has no actor", id)
 	}
 	// Push the schedule forward so the ticker does not queue it again
 	// while the alarm runs; afterTurn sets the real next time.
-	_ = m.K.Sys.SetSchedule(ctx, id, time.Now().Add(time.Minute).UnixMilli())
+	_ = m.K.Registry.SetSchedule(ctx, id, time.Now().Add(time.Minute).UnixMilli())
 	ev := &event{kind: "alarm", name: name, visitor: m.storeVisitor(ctx, id), via: "alarm",
 		run: func(a *Actor, cx *goja.Object) (goja.Value, error) { return a.alarm(cx, name) }}
 	return m.push(id, ev)

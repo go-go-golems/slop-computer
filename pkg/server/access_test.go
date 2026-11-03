@@ -39,7 +39,7 @@ func TestAccessScenarios(t *testing.T) {
 	h.tokenFor("ada@example.com")  // an admin who did not create the store
 	people := map[string]string{}
 	for _, e := range []string{"mia", "sam", "pete", "dan", "ada"} {
-		p, err := h.sys.PersonByEmail(ctx, e+"@example.com")
+		p, err := h.k.People.PersonByEmail(ctx, e+"@example.com")
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -49,7 +49,7 @@ func TestAccessScenarios(t *testing.T) {
 	h.call(admin, "people.role", map[string]any{"id": people["dan"], "role": "disabled"})
 	h.call(admin, "people.role", map[string]any{"id": people["ada"], "role": "admin"})
 	h.k.Access.Subscribed = func(_ context.Context, id string) bool { return id == people["sam"] }
-	guest, err := h.sys.CreateGuest(ctx, "192.0.2.1")
+	guest, err := h.k.People.CreateGuest(ctx, "192.0.2.1")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -309,7 +309,7 @@ func TestGuestLimitAndSweep(t *testing.T) {
 	if out["deleted"] != 1.0 {
 		t.Fatalf("sweep = %v", out)
 	}
-	if _, err := h.sys.Person(ctx, vis); err == nil {
+	if _, err := h.k.People.Person(ctx, vis); err == nil {
 		t.Fatal("the guest is still there")
 	}
 	if d := privateDoc(t, h, "open", "data/users/"+vis+"/n"); d != nil {
@@ -513,7 +513,7 @@ func TestGuestSessionsLastWhileUsed(t *testing.T) {
 	if got := who(); got != vis {
 		t.Fatalf("day 130: %v, want %v", got, vis)
 	}
-	p, err := h.sys.Person(context.Background(), vis.(string))
+	p, err := h.k.People.Person(context.Background(), vis.(string))
 	if err != nil || p.LastSeenAt < start.Add(129*24*time.Hour).UnixMilli() {
 		t.Fatalf("the visit was not recorded: %v %v", p.LastSeenAt, err)
 	}

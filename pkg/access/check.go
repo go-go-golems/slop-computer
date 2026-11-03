@@ -6,7 +6,7 @@ import (
 	"fmt"
 
 	"github.com/go-go-golems/slop-computer/pkg/rt"
-	"github.com/go-go-golems/slop-computer/pkg/system"
+	"github.com/go-go-golems/slop-computer/pkg/sysdb"
 )
 
 // Audience is computed for every request and turn, never stored.
@@ -26,7 +26,7 @@ const (
 
 // Group is a set of principals computed from role, kind and subscription
 // (SLOP3-007): @guest, @member, @subscriber, @admin, @store. Nesting is
-// decided once, in system.GroupsOf.
+// decided once, in sysdb.GroupsOf.
 type Group string
 
 const (
@@ -40,14 +40,14 @@ const (
 // Groups is the audience's groups, nesting included.
 func (a Audience) Groups() []Group {
 	var out []Group
-	for _, g := range system.GroupsOf(string(a)) {
+	for _, g := range sysdb.GroupsOf(string(a)) {
 		out = append(out, Group("@"+g))
 	}
 	return out
 }
 
 // In reports whether the audience is in group g ("@member" or "member").
-func (a Audience) In(g Group) bool { return system.InGroup(string(a), string(g)) }
+func (a Audience) In(g Group) bool { return sysdb.InGroup(string(a), string(g)) }
 
 // Groups computes a principal's groups.
 func (c *Checker) Groups(ctx context.Context, p *Principal) []Group {
@@ -68,9 +68,19 @@ func ValidAudience(s string) bool {
 	return false
 }
 
-// Checker answers access questions against system.db.
+// Directory is what the checker reads (SLOP3-010 PR 2): stores and their
+// grants (the registry), people (identity) and the clock. The host passes
+// sysdb.db's domains; access owns no database handle.
+type Directory interface {
+	StoreByID(ctx context.Context, id string) (sysdb.StoreRow, error)
+	Grants(ctx context.Context, store string) ([]sysdb.Grant, error)
+	Person(ctx context.Context, id string) (sysdb.Person, error)
+	NowMs() int64
+}
+
+// Checker answers access questions against a Directory.
 type Checker struct {
-	Sys *system.DB
+	Dir Directory
 	// Subscribed reports standing access (subscription or comp). Billing
 	// installs it; until then nobody is a subscriber.
 	Subscribed func(ctx context.Context, person string) bool
@@ -93,13 +103,13 @@ func (c *Checker) AudienceOf(ctx context.Context, p *Principal) Audience {
 		return AudGuest
 	}
 	switch p.Role() {
-	case system.RoleDisabled:
+	case sysdb.RoleDisabled:
 		return AudNone
-	case system.RolePending:
+	case sysdb.RolePending:
 		return AudGuest
-	case system.RoleAdmin:
+	case sysdb.RoleAdmin:
 		return AudAdmin
-	case system.RoleMember:
+	case sysdb.RoleMember:
 		if c.Subscribed != nil && c.Subscribed(ctx, p.Person.ID) {
 			return AudSubscriber
 		}
@@ -143,14 +153,14 @@ func (d Decision) LevelName() string { return d.Level.String() }
 //	          live grant matching p (at most admin)
 //	ceilings  kindCap: none for a disabled account or a token without
 //	          scopes, interact for guests and pending people, else owner
-func (c *Checker) Level(ctx context.Context, p *Principal, st system.StoreRow) Decision {
+func (c *Checker) Level(ctx context.Context, p *Principal, st sysdb.StoreRow) Decision {
 	return c.level(ctx, p, st, true)
 }
 
 // level is Level; withLinks false leaves out grants that came from links,
 // which is how a link's creator is judged (so links can't hold each other
 // up).
-func (c *Checker) level(ctx context.Context, p *Principal, st system.StoreRow, withLinks bool) Decision {
+func (c *Checker) level(ctx context.Context, p *Principal, st sysdb.StoreRow, withLinks bool) Decision {
 	d := Decision{Audience: c.AudienceOf(ctx, p)}
 	who := p.ID()
 	if who == "" {
@@ -174,7 +184,7 @@ func (c *Checker) level(ctx context.Context, p *Principal, st system.StoreRow, w
 	if d.Audience.In(GroupAdmin) && p.Kind != KindSystem {
 		from(rt.LevelAdmin, "admins are admin on every store")
 	}
-	grants, err := c.Sys.Grants(ctx, st.ID)
+	grants, err := c.Dir.Grants(ctx, st.ID)
 	if err != nil {
 		d.Trace = append(d.Trace, "grants unreadable: "+err.Error())
 	}
@@ -225,7 +235,7 @@ func kindCap(p *Principal, aud Audience) (rt.Level, string) {
 
 // GrantInactive says why a grant no longer counts, or "" while it does
 // (only link grants can stop counting on their own).
-func (c *Checker) GrantInactive(ctx context.Context, g system.Grant, st system.StoreRow) string {
+func (c *Checker) GrantInactive(ctx context.Context, g sysdb.Grant, st sysdb.StoreRow) string {
 	if g.Link == nil {
 		return ""
 	}
@@ -236,14 +246,14 @@ func (c *Checker) GrantInactive(ctx context.Context, g system.Grant, st system.S
 // "" while it does: the link is revoked or expired, or its creator no
 // longer holds the link's level on the store (decision 7). The creator's
 // level leaves link grants out, so links can't hold each other up.
-func (c *Checker) deadLink(ctx context.Context, g system.Grant, st system.StoreRow) string {
-	if !g.Link.Live(c.Sys.NowMs()) {
+func (c *Checker) deadLink(ctx context.Context, g sysdb.Grant, st sysdb.StoreRow) string {
+	if !g.Link.Live(c.Dir.NowMs()) {
 		return "its link was revoked or has expired"
 	}
 	if g.Link.Creator == "system" || g.Link.Creator == "" {
 		return ""
 	}
-	creator, err := c.Sys.Person(ctx, g.Link.Creator)
+	creator, err := c.Dir.Person(ctx, g.Link.Creator)
 	if err != nil {
 		return "its link's creator is gone"
 	}
@@ -256,9 +266,9 @@ func (c *Checker) deadLink(ctx context.Context, g system.Grant, st system.StoreR
 
 // Can checks that p holds at least need on store. hidden makes a failure
 // read as not_found (reads of things the caller may not know exist).
-func (c *Checker) Can(ctx context.Context, p *Principal, store string, need rt.Level, what string, hidden bool) (Decision, system.StoreRow, error) {
-	st, err := c.Sys.StoreByID(ctx, store)
-	if errors.Is(err, system.ErrNotFound) {
+func (c *Checker) Can(ctx context.Context, p *Principal, store string, need rt.Level, what string, hidden bool) (Decision, sysdb.StoreRow, error) {
+	st, err := c.Dir.StoreByID(ctx, store)
+	if errors.Is(err, sysdb.ErrNotFound) {
 		return Decision{Code: "not_found", Trace: []string{"no store " + store}}, st, nil
 	}
 	if err != nil {

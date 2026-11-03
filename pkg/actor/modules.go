@@ -577,7 +577,7 @@ func (a *Actor) storesModule() goja.Value {
 	_ = o.Set("open", func(alias string) goja.Value {
 		t := a.turn()
 		ctx := t.t.Context()
-		b, err := a.m.K.Sys.BindingOf(ctx, a.st.ID, alias)
+		b, err := a.m.K.Registry.BindingOf(ctx, a.st.ID, alias)
 		if err != nil {
 			a.throw(fail("not_found", "no binding for %q on %s", alias, a.st.ID))
 		}

@@ -28,7 +28,7 @@ import (
 
 	"github.com/go-go-golems/slop-computer/pkg/access"
 	"github.com/go-go-golems/slop-computer/pkg/rt"
-	"github.com/go-go-golems/slop-computer/pkg/system"
+	"github.com/go-go-golems/slop-computer/pkg/sysdb"
 	"github.com/go-go-golems/slop-computer/pkg/verbs"
 )
 
@@ -74,7 +74,7 @@ func grantID(g map[string]any) string {
 	return id
 }
 
-func storeBody(r system.StoreRow, level rt.Level) map[string]any {
+func storeBody(r sysdb.StoreRow, level rt.Level) map[string]any {
 	return map[string]any{"id": r.ID, "type": r.Type, "app": r.App, "owner": r.Owner, "createdAt": r.CreatedAt, "level": level.String()}
 }
 
@@ -87,7 +87,7 @@ func (d *Docs) Coll(ctx context.Context, v *rt.View, tgt rt.Target, pageColl str
 		return nil
 	}
 	add := func(id string, body map[string]any, kind, key string) {
-		ver := lastChangeUpTo(ctx, d.Sys, kind, key, head)
+		ver := lastChangeUpTo(ctx, d.Sys.DB, kind, key, head)
 		docs = append(docs, rt.Doc{Path: pageColl + "/" + id, Body: body, Version: max(ver, 1)})
 	}
 	switch {
@@ -99,7 +99,7 @@ func (d *Docs) Coll(ctx context.Context, v *rt.View, tgt rt.Target, pageColl str
 		p := d.Host.Viewer(ctx, v)
 		for _, r := range rows {
 			docs = append(docs, rt.Doc{Path: pageColl + "/" + r.ID, Body: storeBody(r, min(d.Access.Level(ctx, p, r).Level, v.Space.Stores)),
-				Version: max(storeVersion(ctx, d.Sys, r.ID, v.User, head), 1)})
+				Version: max(storeVersion(ctx, d.Sys.DB, r.ID, v.User, head), 1)})
 		}
 	case tgt.Store == "" && tgt.Path == rt.PeopleRoot:
 		for _, r := range d.regRows(ctx, v, "people.ls", verbs.Args{}) {
@@ -141,7 +141,7 @@ func (d *Docs) Doc(ctx context.Context, v *rt.View, tgt rt.Target, path string) 
 		if level < rt.LevelView {
 			return nil
 		}
-		return &rt.Doc{Path: path, Body: storeBody(row, level), Version: max(storeVersion(ctx, d.Sys, row.ID, v.User, head), 1)}
+		return &rt.Doc{Path: path, Body: storeBody(row, level), Version: max(storeVersion(ctx, d.Sys.DB, row.ID, v.User, head), 1)}
 	}
 	coll, id := tgt, rt.IDOf(tgt.Path)
 	coll.Path = rt.CollOf(tgt.Path)
@@ -253,7 +253,7 @@ func (d *Docs) Write(ctx context.Context, v *rt.View, tgt rt.Target, in WriteIn)
 		return 0, errf("permission_denied", "only a signed-in person changes the registry")
 	}
 	if in.IfVersion != nil {
-		if have := LastChange(ctx, d.Sys, w.kind, w.key); have != *in.IfVersion {
+		if have := LastChange(ctx, d.Sys.DB, w.kind, w.key); have != *in.IfVersion {
 			return 0, errf("conflict", "the document is at version %d, not %d", have, *in.IfVersion)
 		}
 	}
@@ -270,5 +270,5 @@ func (d *Docs) Write(ctx context.Context, v *rt.View, tgt rt.Target, in WriteIn)
 		ve := verbs.AsError(err)
 		return 0, errf(ve.Code, "%s", ve.Message)
 	}
-	return LastChange(ctx, d.Sys, w.kind, w.key), nil
+	return LastChange(ctx, d.Sys.DB, w.kind, w.key), nil
 }

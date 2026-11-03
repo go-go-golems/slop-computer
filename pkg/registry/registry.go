@@ -13,7 +13,7 @@ import (
 
 	"github.com/go-go-golems/slop-computer/pkg/access"
 	"github.com/go-go-golems/slop-computer/pkg/rt"
-	"github.com/go-go-golems/slop-computer/pkg/system"
+	"github.com/go-go-golems/slop-computer/pkg/sysdb"
 	"github.com/go-go-golems/slop-computer/pkg/verbs"
 )
 
@@ -25,14 +25,14 @@ type Host interface {
 	// app:<app>); nil for a visitor without an id.
 	ActingApp(ctx context.Context, v *rt.View) *access.Principal
 	// Reachable lists the stores the viewer may open, at most at ceil.
-	Reachable(ctx context.Context, v *rt.View, ceil rt.Level) ([]system.StoreRow, error)
+	Reachable(ctx context.Context, v *rt.View, ceil rt.Level) ([]sysdb.StoreRow, error)
 	// WithPrincipal is ctx carrying p, as verb calls expect.
 	WithPrincipal(ctx context.Context, p *access.Principal) context.Context
 }
 
 // Docs serves the registry's documents.
 type Docs struct {
-	Sys *system.DB
+	Sys *Registry // the registry's queries
 	// Verbs runs the verbs that own the rows; Confirm asks the person to
 	// confirm a governance change; Access decides levels.
 	Verbs   *verbs.Table
@@ -63,7 +63,7 @@ func errf(code, format string, args ...any) error {
 // (a store id, "<store> <subject>" for a grant, "<store> <alias>" for a
 // binding, a person id): the row's version as a document. 0 when it never
 // changed.
-func LastChange(ctx context.Context, db *system.DB, kind, key string) int64 {
+func LastChange(ctx context.Context, db *sysdb.DB, kind, key string) int64 {
 	var n sql.NullInt64
 	_ = db.QueryRowContext(ctx, `SELECT max(rev) FROM _changes WHERE kind = ? AND key = ?`, kind, key).Scan(&n)
 	return n.Int64
@@ -76,7 +76,7 @@ func LastChange(ctx context.Context, db *system.DB, kind, key string) int64 {
 // (role), comp and billing rows (the subscriber audience). A grant changed
 // elsewhere then moves the document's version, and the live refresh sends
 // it (the runtime keeps only higher versions).
-func storeVersion(ctx context.Context, db *system.DB, store, viewer string, head int64) int64 {
+func storeVersion(ctx context.Context, db *sysdb.DB, store, viewer string, head int64) int64 {
 	var n sql.NullInt64
 	_ = db.QueryRowContext(ctx, `SELECT max(rev) FROM _changes WHERE rev <= ? AND (
 		   (kind = 'store' AND key = ?)
@@ -92,7 +92,7 @@ func storeVersion(ctx context.Context, db *system.DB, store, viewer string, head
 // between reading the row and reading its version would otherwise give an
 // old body the new version, and the live document would never be sent the
 // new body (its version would not move again).
-func lastChangeUpTo(ctx context.Context, db *system.DB, kind, key string, head int64) int64 {
+func lastChangeUpTo(ctx context.Context, db *sysdb.DB, kind, key string, head int64) int64 {
 	var n sql.NullInt64
 	_ = db.QueryRowContext(ctx, `SELECT max(rev) FROM _changes WHERE kind = ? AND key = ? AND rev <= ?`, kind, key, head).Scan(&n)
 	return n.Int64

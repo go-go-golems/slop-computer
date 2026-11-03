@@ -17,13 +17,12 @@ import (
 	"errors"
 
 	"github.com/go-go-golems/slop-computer/pkg/llm"
-	"github.com/go-go-golems/slop-computer/pkg/system"
 )
 
 // Sampler runs calls on a backend, metered in the system ledger.
 type Sampler struct {
 	Backend llm.Backend // nil: no model on this server
-	Sys     *system.DB
+	Ledger  *llm.Ledger
 }
 
 func fail(code, msg string) *llm.Failure { return &llm.Failure{Code: code, Message: msg} }
@@ -41,22 +40,22 @@ func (s *Sampler) Models() []llm.Model {
 
 // Limits is what payer may spend as a member of audience (nothing for a
 // payer without an id).
-func (s *Sampler) Limits(ctx context.Context, payer, audience string) system.LLM {
-	if payer == "" || s == nil || s.Sys == nil {
-		return system.LLM{}
+func (s *Sampler) Limits(ctx context.Context, payer, audience string) llm.LLM {
+	if payer == "" || s == nil || s.Ledger == nil {
+		return llm.LLM{}
 	}
-	return s.Sys.LLMFor(ctx, payer, audience)
+	return s.Ledger.LLMFor(ctx, payer, audience)
 }
 
 // Check refuses a call payer may not make now: no backend (unavailable), no
 // id or no LLM access (permission_denied), the month's budget used up
 // (quota_exceeded). It returns the payer's limits.
-func (s *Sampler) Check(ctx context.Context, payer, audience string) (system.LLM, error) {
+func (s *Sampler) Check(ctx context.Context, payer, audience string) (llm.LLM, error) {
 	if !s.Available() {
-		return system.LLM{}, fail("unavailable", "this server has no model backend")
+		return llm.LLM{}, fail("unavailable", "this server has no model backend")
 	}
 	if payer == "" {
-		return system.LLM{}, fail("permission_denied", "a visitor without an id cannot use the LLM")
+		return llm.LLM{}, fail("permission_denied", "a visitor without an id cannot use the LLM")
 	}
 	l := s.Limits(ctx, payer, audience)
 	if !l.Allowed {
@@ -79,14 +78,14 @@ func noTools(context.Context, llm.Event) (llm.ToolResult, error) {
 // error event of the backend is the answer's Failure, already emitted. The
 // error is the backend's own: a *llm.Failure quota_exceeded when the
 // budget ran out mid-call, else upstream_error.
-func (s *Sampler) Run(ctx context.Context, payer string, l system.LLM, req llm.Request, emit func(llm.Event), execute llm.ExecuteTool) (llm.Answer, error) {
+func (s *Sampler) Run(ctx context.Context, payer string, l llm.LLM, req llm.Request, emit func(llm.Event), execute llm.ExecuteTool) (llm.Answer, error) {
 	if !s.Available() {
 		return llm.Answer{}, fail("unavailable", "this server has no model backend")
 	}
 	if execute == nil {
 		execute = noTools
 	}
-	meter := s.Sys.NewMeter(payer, l.Budget, req.CallID)
+	meter := s.Ledger.NewMeter(payer, l.Budget, req.CallID)
 	req.Meter = meter
 	var ans llm.Answer
 	err := s.Backend.Sample(ctx, req, func(e llm.Event) {

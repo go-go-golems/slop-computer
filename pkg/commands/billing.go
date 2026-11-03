@@ -10,7 +10,7 @@ import (
 	"github.com/go-go-golems/slop-computer/pkg/access"
 	"github.com/go-go-golems/slop-computer/pkg/authz"
 	"github.com/go-go-golems/slop-computer/pkg/billing/stripe"
-	"github.com/go-go-golems/slop-computer/pkg/system"
+	"github.com/go-go-golems/slop-computer/pkg/sysdb"
 	"github.com/go-go-golems/slop-computer/pkg/verbs"
 )
 
@@ -35,21 +35,18 @@ func parseUntil(s string) (int64, error) {
 }
 
 // personArg resolves a person by id or email.
-func (e *Env) personArg(ctx context.Context, s string) (system.Person, error) {
-	var p system.Person
+func (e *Env) personArg(ctx context.Context, s string) (sysdb.Person, error) {
+	var p sysdb.Person
 	var err error
 	if strings.Contains(s, "@") {
-		p, err = e.Sys.PersonByEmail(ctx, s)
+		p, err = e.K.People.PersonByEmail(ctx, s)
 	} else {
-		p, err = e.Sys.Person(ctx, s)
+		p, err = e.K.People.Person(ctx, s)
 	}
 	if err != nil {
 		return p, verbs.Errf("not_found", "no person %s", s)
 	}
 	return p, nil
-}
-
-func (e *Env) personChanged(ctx context.Context, id string) {
 }
 
 func billingVerbs(e *Env) []*verbs.Verb {
@@ -69,7 +66,7 @@ func billingVerbs(e *Env) []*verbs.Verb {
 				if err != nil {
 					return nil, verbs.Errf("invalid_argument", "%s", err.Error())
 				}
-				c, err := e.Sys.GrantComp(ctx, p.ID(), p.ViaLabel(), pp.ID, until, a.S("note"))
+				c, err := e.K.Book.GrantComp(ctx, p.ID(), p.ViaLabel(), pp.ID, until, a.S("note"))
 				if err != nil {
 					return nil, err
 				}
@@ -78,8 +75,8 @@ func billingVerbs(e *Env) []*verbs.Verb {
 		{Name: "sub.revoke", Effect: verbs.EffectGovern, Doc: "End a comp now.", Scope: verbs.Write, AdminOnly: true, Action: authz.PlatformAdmin,
 			Args: []verbs.Arg{{Name: "id", Type: "string", Pos: 1, Required: true, Doc: "cmp_…"}},
 			Run: func(ctx context.Context, p *access.Principal, a verbs.Args) (any, error) {
-				person, err := e.Sys.RevokeComp(ctx, p.ID(), p.ViaLabel(), a.S("id"))
-				if errors.Is(err, system.ErrNotFound) {
+				person, err := e.K.Book.RevokeComp(ctx, p.ID(), p.ViaLabel(), a.S("id"))
+				if errors.Is(err, sysdb.ErrNotFound) {
 					return nil, verbs.Errf("not_found", "no comp %s", a.S("id"))
 				}
 				if err != nil {
@@ -98,7 +95,7 @@ func billingVerbs(e *Env) []*verbs.Verb {
 					}
 					id = pp.ID
 				}
-				return e.Sys.CompRows(ctx, id)
+				return e.K.Book.CompRows(ctx, id)
 			}},
 		{Name: "sub.show", Doc: "Show a person's standing access (yours by default): the decision, comps and subscriptions.", Scope: verbs.Read, Action: authz.Account,
 			Args: []verbs.Arg{{Name: "person", Type: "string", Pos: 1}},
@@ -114,15 +111,15 @@ func billingVerbs(e *Env) []*verbs.Verb {
 					}
 					id = pp.ID
 				}
-				comps, err := e.Sys.CompRows(ctx, id)
+				comps, err := e.K.Book.CompRows(ctx, id)
 				if err != nil {
 					return nil, err
 				}
-				subs, err := e.Sys.Subscriptions(ctx, id)
+				subs, err := e.K.Book.Subscriptions(ctx, id)
 				if err != nil {
 					return nil, err
 				}
-				pp, _ := e.Sys.Person(ctx, id)
+				pp, _ := e.K.People.Person(ctx, id)
 				q := access.PersonPrincipal(pp, "")
 				return map[string]any{"person": id, "audience": e.K.Access.AudienceOf(ctx, q), "decision": e.K.Standing(ctx, id),
 					"comps": comps, "subscriptions": subs}, nil

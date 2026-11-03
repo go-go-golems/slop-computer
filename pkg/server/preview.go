@@ -21,7 +21,7 @@ func (s *Server) servePreview(w http.ResponseWriter, r *http.Request, label stri
 		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
 		return
 	}
-	pv, err := s.Sys.PreviewByLabel(ctx, label)
+	pv, err := s.Registry.PreviewByLabel(ctx, label)
 	if err != nil {
 		notFound(w)
 		return

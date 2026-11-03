@@ -60,14 +60,14 @@ func sampleDeps(e *Env) capsample.Deps {
 	if e == nil {
 		return capsample.Deps{}
 	}
-	d := capsample.Deps{Sys: e.Sys, Backend: func() llm.Backend {
+	d := capsample.Deps{Backend: func() llm.Backend {
 		if e.A == nil {
 			return nil
 		}
 		return e.A.LLM
 	}}
 	if e.K != nil {
-		d.Access = e.K.Access
+		d.Access, d.Ledger = e.K.Access, e.K.Ledger
 	}
 	return d
 }

@@ -10,8 +10,9 @@ import (
 
 	"github.com/go-go-golems/slop-computer/pkg/access"
 	"github.com/go-go-golems/slop-computer/pkg/kernel"
+	"github.com/go-go-golems/slop-computer/pkg/registry"
 	"github.com/go-go-golems/slop-computer/pkg/rt"
-	"github.com/go-go-golems/slop-computer/pkg/system"
+	"github.com/go-go-golems/slop-computer/pkg/sysdb"
 )
 
 // Cache classes (SLOP-012): a URL naming a version or hash never changes;
@@ -25,9 +26,9 @@ const (
 
 // resolved is a request matched to a mount and a store.
 type resolved struct {
-	m     system.Match
+	m     registry.Match
 	store string
-	row   system.StoreRow
+	row   sysdb.StoreRow
 	run   kernel.Running
 }
 
@@ -36,20 +37,20 @@ var errNoStore = errors.New("no store here")
 
 // resolve finds the mount and store for a site-host request.
 func (s *Server) resolve(ctx context.Context, host, reqPath string) (*resolved, error) {
-	mounts, err := s.Sys.Mounts(ctx, host)
+	mounts, err := s.Registry.Mounts(ctx, host)
 	if err != nil {
 		return nil, err
 	}
-	m, ok := system.BestMount(mounts, reqPath)
+	m, ok := registry.BestMount(mounts, reqPath)
 	if !ok {
-		return nil, system.ErrNotFound
+		return nil, sysdb.ErrNotFound
 	}
 	res := &resolved{m: m, store: m.Mount.Store}
 	if res.store == "" {
 		res.store = m.Params[m.Mount.StoreParam]
 	}
-	row, err := s.Sys.StoreByID(ctx, res.store)
-	if errors.Is(err, system.ErrNotFound) || (err == nil && m.Mount.Type != "" && row.Type != m.Mount.Type) {
+	row, err := s.Registry.StoreByID(ctx, res.store)
+	if errors.Is(err, sysdb.ErrNotFound) || (err == nil && m.Mount.Type != "" && row.Type != m.Mount.Type) {
 		return res, errNoStore
 	}
 	if err != nil {
