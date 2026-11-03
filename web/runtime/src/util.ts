@@ -17,9 +17,14 @@ export const bytes = (s: string) => utf8.encode(s).length;
  *  segments) or a collection (odd). Throws TypeError like the contract. */
 export function checkPath(p: unknown, doc: boolean): string {
   if (typeof p !== "string" || p === "") throw new TypeError("a db path is a non-empty string");
-  if (bytes(p) > limits.MaxPathBytes) throw new TypeError(`a db path is at most ${limits.MaxPathBytes} bytes`);
+  // Another store's documents are reached at _stores/<id>/<path> (SLOP3-008):
+  // the store's own path keeps its full length, two segments further in.
+  const nested = p.startsWith("_stores/");
+  const maxBytes = limits.MaxPathBytes + (nested ? "_stores/".length + limits.MaxSegmentBytes + 1 : 0);
+  const maxSegs = limits.MaxPathSegments + (nested ? 2 : 0);
+  if (bytes(p) > maxBytes) throw new TypeError(`a db path is at most ${maxBytes} bytes`);
   const segs = p.split("/");
-  if (segs.length > limits.MaxPathSegments) throw new TypeError(`a db path has at most ${limits.MaxPathSegments} segments`);
+  if (segs.length > maxSegs) throw new TypeError(`a db path has at most ${maxSegs} segments`);
   for (const s of segs) {
     if (s === "" || s === "." || s === ".." || !segment.test(s)) throw new TypeError(`invalid path segment ${JSON.stringify(s)} in ${p}`);
     if (bytes(s) > limits.MaxSegmentBytes) throw new TypeError(`a path segment is at most ${limits.MaxSegmentBytes} bytes`);

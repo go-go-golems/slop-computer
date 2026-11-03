@@ -1,4 +1,4 @@
-/* slop page runtime (window.claude), built from web/runtime: do not edit. source sha256:4a5e9772f38a958dd69699953e32deede49e4871975a8b8d37a69ab234a5bdd2 */
+/* slop page runtime (window.claude), built from web/runtime: do not edit. source sha256:ff66afe01c876883e60f657d2bf6fbd54878cfc0597c198234f4fd507499349d */
 "use strict";
 (() => {
   // src/limits.ts
@@ -38,9 +38,12 @@
   var bytes = (s) => utf8.encode(s).length;
   function checkPath(p, doc) {
     if (typeof p !== "string" || p === "") throw new TypeError("a db path is a non-empty string");
-    if (bytes(p) > limits.MaxPathBytes) throw new TypeError(`a db path is at most ${limits.MaxPathBytes} bytes`);
+    const nested = p.startsWith("_stores/");
+    const maxBytes = limits.MaxPathBytes + (nested ? "_stores/".length + limits.MaxSegmentBytes + 1 : 0);
+    const maxSegs = limits.MaxPathSegments + (nested ? 2 : 0);
+    if (bytes(p) > maxBytes) throw new TypeError(`a db path is at most ${maxBytes} bytes`);
     const segs = p.split("/");
-    if (segs.length > limits.MaxPathSegments) throw new TypeError(`a db path has at most ${limits.MaxPathSegments} segments`);
+    if (segs.length > maxSegs) throw new TypeError(`a db path has at most ${maxSegs} segments`);
     for (const s of segs) {
       if (s === "" || s === "." || s === ".." || !segment.test(s)) throw new TypeError(`invalid path segment ${JSON.stringify(s)} in ${p}`);
       if (bytes(s) > limits.MaxSegmentBytes) throw new TypeError(`a path segment is at most ${limits.MaxSegmentBytes} bytes`);
