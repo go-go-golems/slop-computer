@@ -56,7 +56,7 @@ func (a *Actor) module(name string) goja.Value {
 			return a.secretsModule()
 		}
 	case "sample":
-		if a.run.Manifest.Caps.Declared["sample"] && a.m.LLM != nil && a.m.allowedAny(a, "sample") {
+		if a.run.Manifest.Caps.Declared["sample"] && a.m.Sample != nil && a.m.Sample.Available() && a.m.allowedAny(a, "sample") {
 			return a.sampleModule()
 		}
 	case "platform":

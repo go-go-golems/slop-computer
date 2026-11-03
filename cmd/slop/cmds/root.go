@@ -99,7 +99,24 @@ func verbCommand(v *verbs.Verb) *cobra.Command {
 			if err != nil {
 				return err
 			}
-			res, err := c.Call(v.Name, in)
+			var res any
+			if v.Effect == verbs.EffectStream {
+				// parts with a delta show on stderr as they arrive; the
+				// result is printed as usual
+				streamed := false
+				res, err = c.CallStream(v.Name, in, func(raw json.RawMessage) {
+					var p struct{ Delta string }
+					if json.Unmarshal(raw, &p) == nil && p.Delta != "" {
+						_, _ = fmt.Fprint(cmd.ErrOrStderr(), p.Delta)
+						streamed = true
+					}
+				})
+				if streamed {
+					_, _ = fmt.Fprintln(cmd.ErrOrStderr())
+				}
+			} else {
+				res, err = c.Call(v.Name, in)
+			}
 			if err != nil {
 				return err
 			}

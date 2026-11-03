@@ -94,8 +94,7 @@ func TestEffects(t *testing.T) {
 		case EffectRead, EffectWrite:
 		case EffectGovern:
 			gov[v.Name] = true
-		case EffectStream:
-			t.Fatalf("%s streams: no verb does yet", v.Name)
+		case EffectStream: // sample.run (pkg/caps/sample, not linked here)
 		default:
 			t.Fatalf("%s: effect %q", v.Name, v.Effect)
 		}

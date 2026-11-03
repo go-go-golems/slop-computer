@@ -41,7 +41,7 @@ const (
 	EffectRead   Effect = "read"
 	EffectWrite  Effect = "write"
 	EffectGovern Effect = "govern" // grants, roles, policy: an app's call needs the person's confirmation
-	EffectStream Effect = "stream" // the result arrives in parts (reserved: SLOP3-009 step 5)
+	EffectStream Effect = "stream" // the result arrives in parts (Req.Emit), then whole
 )
 
 // Req is what a typed verb's Run receives, whichever door it came through.
@@ -50,6 +50,27 @@ type Req struct {
 	Env       *Env
 	Principal *access.Principal
 }
+
+type emitKey struct{}
+
+// WithEmit is ctx with an emitter for a streaming verb's partial results:
+// a door that can stream (SSE in the HTTP door) installs one.
+func WithEmit(ctx context.Context, fn func(part any) error) context.Context {
+	return context.WithValue(ctx, emitKey{}, fn)
+}
+
+// Emit sends a partial result of a stream verb (Effect stream) to its
+// caller; with a caller that does not stream, it does nothing, and the
+// caller receives only the result.
+func Emit(ctx context.Context, part any) error {
+	if fn, ok := ctx.Value(emitKey{}).(func(any) error); ok {
+		return fn(part)
+	}
+	return nil
+}
+
+// Emit sends a partial result; see the function Emit.
+func (r Req) Emit(part any) error { return Emit(r.Context, part) }
 
 // Def is a typed verb.
 type Def[In, Out any] struct {

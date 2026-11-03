@@ -48,6 +48,7 @@ type Manager struct {
 	LLM       llm.Backend // the sample backend (nil: no LLM)
 	Secret    func(ctx context.Context, app, name string) (string, error)
 	Platform  func(a *Actor) goja.Value
+	Sample    Sampler                                            // the sample capability (nil: none)
 	Paths     Paths                                              // the db paths outside the store (aliases, _stores); nil: the store's own only
 	Trusted   func(ctx context.Context, app, module string) bool // app.trust
 

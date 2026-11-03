@@ -204,7 +204,7 @@ func (e *Error) Error() string { return e.Code + ": " + e.Message }
 // Status is the HTTP status for an error code.
 func (e *Error) Status() int {
 	switch e.Code {
-	case "invalid_argument", "eval_error":
+	case "invalid_argument", "eval_error", "prompt_too_large":
 		return 400
 	case "unauthenticated":
 		return 401
@@ -218,6 +218,8 @@ func (e *Error) Status() int {
 		return 429
 	case "unavailable":
 		return 503
+	case "upstream_error":
+		return 502
 	}
 	return 500
 }
