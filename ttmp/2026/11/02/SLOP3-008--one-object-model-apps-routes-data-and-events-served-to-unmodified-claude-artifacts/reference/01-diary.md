@@ -259,3 +259,67 @@ From this step on, entries use the diary skill's investigation format.
 - Resolution order: `_stores` (if `Stores > none`), then any other `_` name (reserved), then an alias by first segment, then the holder's own path.
 - `_stores` (a collection) and `_stores/<id>` (a document) resolve to `Registry: true` targets: the registry's documents, phase 3.
 - `_stores/<holder>/…` and an alias pointing at the holder resolve to `Own: true` with the route's ceiling as `Cap`.
+
+## Step 6: Aliases and _stores in the page protocol, the stream and /_blob
+
+This step wires `rt.Space` into the server: bindings become aliases (a prefix and a level), every db RPC resolves its page path through the view's space, the stream follows the other stores a page subscribed into, and `/_blob/<id>` falls back to the stores an alias shares uploads with. Five integration tests pass, and three deliberate breakages each made the intended test fail.
+
+### Prompt Context
+**User prompt (verbatim):** see Step 5.
+**Assistant interpretation:** Continue phase 1: the server half of the path space.
+**Inferred user intent:** An unmodified Claude page reads, writes and watches other stores and shows their uploads, with access as the viewer.
+**Commit (code):** 2dadf12 — "SLOP3-008: pages read other stores through aliases and _stores; uploads by bare id"
+
+### What I did
+- `pkg/system/migrations/009_binding_prefix.sql`, `pkg/system/bindings.go`: `bindings.prefix` (default `''`), `bindings.level` (default `view`); `Binding.Prefix`, `Binding.Level`. A binding without a prefix keeps its old meaning (an actor/`slop.stores` read alias, e.g. blocks-site's `source`).
+- `pkg/verbs/actors.go`: `bind.set --prefix --level` (validated by `rt.ValidAlias`; the caller needs `--level` on the target, admin with `--assets`); `bind.set`/`bind.rm` call `AccessChanged` so the holder's open views are rechecked.
+- `pkg/system/policy.go`, `pkg/verbs/policy.go`: a `stores` policy cell, a matrix row when `capabilities.db.stores` is declared, off by default.
+- `pkg/rt/views.go`: `View.Space`; per-view `remote` cursors (`Watch`, `Watching`, `Caught`, `Remotes`); `Out.Store`; `Registry.Reaching(store)` (own views plus views following the store).
+- `pkg/server/space.go`: `spaceOf` (bindings with a prefix → aliases; `_stores` when declared and the cell is on), `route`/`remoteRoute` (store, path, `min(level there, ceiling)`, that store's rules), `storeReader.pageDocs` (a committed document → the subscribed page paths that show it), `assetStores`.
+- `pkg/server/views.go`: `openView` sets `Space`; `dbGet`, `readable`, `dbWrite` (new `writeRoute`, `writeWho`), `rpcDBAcquire` (lease key = target store + path), `rpcDBSubscribe` (`v.Watch(store, head)` before reading); `viewEvents` uses `own.pageDocs`, plus `catchUpRemote` on connect and a `remote` handler for other stores' commits; `publish` sets `Out.Store` and sends to `Reaching`.
+- `pkg/server/live.go`: `recheck` also reopens a view whose space changed.
+- `pkg/server/rtassets.go`: `serveAssetBlob` walks the origin's store, then `assetStores`; new ids `ids.New("a", 16)`.
+- `pkg/rt/query.go`: `ValidateShape` (everything but the collection path, which the space checks).
+- `pkg/server/pathspace_test.go`: `TestAliasReadsAnotherStore`, `TestAliasNeedsTheLevelOnTheTarget`, `TestAliasStream`, `TestStoresSpace`, `TestAliasAssets`.
+
+### Why
+- Remote cursors live on the server-side `rt.View`, which survives stream reconnects; remote docs carry no `rev`, so the runtime's single `lastRev` (the holder's) stays correct and the runtime needs no change for catch-up.
+- Own commits go through the same `pageDocs` mapping as remote ones, so an alias onto the holder and `_stores/<holder>/…` subscriptions are fed without a special case.
+- The view's space is decided at open, like its level, and compared on recheck; a changed binding reopens the view instead of patching a live one.
+
+### What worked
+- `GOWORK=off go test ./pkg/server -run 'TestAlias|TestStoresSpace' -count=1 -v`: all five PASS.
+- Mutation checks, each restored afterwards:
+  - no remote catch-up on connect → `TestAliasStream` FAIL (`catch-up after reconnect: [map[_type:hello …]]`);
+  - no level ceiling (`level: v.Level`, `r.level = d.Level`) → `TestAliasReadsAnotherStore` FAIL (`write through a view alias: map[result:…]`) and `TestStoresSpace` FAIL (`write under a view _stores: …`);
+  - no blob fallback → `TestAliasAssets` FAIL (`with --assets: 404 …`).
+- `GOWORK=off go test ./... -count=1`: all ok. `golangci-lint run --new-from-rev=origin/main ./...`: 0 issues after two fixes (below).
+
+### What didn't work
+- `golangci-lint --new-from-rev=origin/main` first reported `pkg/rt/views.go:43:1: File is not properly formatted (gofmt)` and `pkg/rt/space.go:123:45: param cap has same name as predeclared identifier (predeclared)`. Fixed with `gofmt -w` and renaming the parameter to `ceil`.
+- `Query.Validate` rejected page collections like `_stores/crm/contacts` (`ValidCollPath`); split out `ValidateShape` for page queries.
+
+### What I learned
+- `ids.New("a", 8)` is 8 random **bytes** as 16 hex characters (64 bits), not 8 characters as I wrote in the design and in Step 5. Cross-store collisions were already negligible; 16 bytes (128 bits) is chosen for the id's role as a capability.
+- `confirm` runs on stream delivery and RPC once the epoch moves, and `recheck` already closes and reopens a view whose level, audience or policy changed; adding the space to that comparison was enough for alias changes.
+
+### What was tricky to build
+- Ordering for a remote subscription: `Subscribe` (so live changes reach the view), then `Watch(store, head)` with the head read **before** the documents, then the read. A commit after the head arrives on the stream; one before it is in the documents; a gap (commits while no stream is attached) triggers `catchUpRemote` from the cursor. `Watch` keeps an existing cursor, so a second subscription into the same store cannot move it backwards past changes the first one has not been sent.
+- Another store's private documents: `Resolve` returns a `not_found` `PathError`; `route` turns it into an empty route, so reads are missing and queries empty (as the contract treats hidden documents), and `writeRoute` refuses writes.
+
+### What warrants a second pair of eyes
+- `serveAssetBlob`'s fallback: the bytes of another store's upload are served to anyone with the holder's sandbox origin and the id, as the holder's own uploads already are. It relies on `--assets` needing admin on the target.
+- `remoteRoute` computes the viewer's level per RPC and per streamed commit (`Access.Level`), with no cache. Fine at today's scale; a view following a busy store pays it per commit.
+- `Registry.Reaching` walks every open view per commit, as `Of` did.
+
+### What should be done in the future
+- The runtime still caps paths at 16 segments, so `_stores/<id>/` + 16 fails in the browser before reaching the server (next step).
+- Design doc §5.3 and §10 need the corrections above (asset capability model; 8 bytes).
+
+### Code review instructions
+- Start at `pkg/server/space.go` (`route`, `remoteRoute`, `pageDocs`), then `viewEvents` in `pkg/server/views.go` (`catchUpRemote`, `remote`), then `pkg/server/pathspace_test.go`.
+- `GOWORK=off go test ./pkg/server -run 'TestAlias|TestStoresSpace' -count=1 -v`
+
+### Technical details
+- Effective level on a route: own store `min(v.Level, Cap)` (Cap is `owner` for plain own paths); another store `min(Access.Level(viewer, store), Cap)`. Rules are those of the app the target store runs (`Kernel.Rules`).
+- `bind.set dash contacts crm --prefix contacts --level interact` logs `bound dash contacts → crm:contacts (in pages at contacts, interact)`.
