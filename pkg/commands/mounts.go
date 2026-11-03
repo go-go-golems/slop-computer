@@ -15,13 +15,13 @@ import (
 
 func mountVerbs(e mountEnv) []*verbs.Verb {
 	return []*verbs.Verb{
-		verbs.Def[ServerHostsIn, any]{Name: "server.hosts", Doc: "This server's hosts: main, live, static and sandbox.", Scope: verbs.Read, Action: authz.Platform,
-			Run: func(req verbs.Req, in ServerHostsIn) (any, error) {
+		verbs.Def[ServerHostsIn, ServerHostsOut]{Name: "server.hosts", Doc: "This server's hosts: main, live, static and sandbox.", Scope: verbs.Read, Action: authz.Platform,
+			Run: func(req verbs.Req, in ServerHostsIn) (ServerHostsOut, error) {
 				h := e.Cfg.Hosts
-				return map[string]any{"main": h.Main, "live": h.Live, "static": h.Static, "sandbox": h.Sandbox}, nil
+				return ServerHostsOut{Main: h.Main, Live: h.Live, Static: h.Static, Sandbox: h.Sandbox}, nil
 			}}.Verb(),
-		verbs.Def[MountLsIn, any]{Name: "mount.ls", Doc: "List mounts (of one host).", Scope: verbs.Read, Action: authz.Platform,
-			Run: func(req verbs.Req, in MountLsIn) (any, error) {
+		verbs.Def[MountLsIn, []map[string]any]{Name: "mount.ls", Doc: "List mounts (of one host).", Scope: verbs.Read, Action: authz.Platform,
+			Run: func(req verbs.Req, in MountLsIn) ([]map[string]any, error) {
 				ctx := req.Context
 				ms, err := e.K.Registry.Mounts(ctx, in.Host)
 				if err != nil {
@@ -62,55 +62,55 @@ func mountVerbs(e mountEnv) []*verbs.Verb {
 				}
 				return out, nil
 			}}.Verb(),
-		verbs.Def[MountRmIn, any]{Name: "mount.rm", Doc: "Remove a mount (mount undo brings it back).", Scope: verbs.Write, AdminOnly: true, Action: authz.PlatformAdmin,
-			Run: func(req verbs.Req, in MountRmIn) (any, error) {
+		verbs.Def[MountRmIn, MountRmOut]{Name: "mount.rm", Doc: "Remove a mount (mount undo brings it back).", Scope: verbs.Write, AdminOnly: true, Action: authz.PlatformAdmin,
+			Run: func(req verbs.Req, in MountRmIn) (MountRmOut, error) {
 				ctx := req.Context
 				p := req.Principal
 				err := e.K.Registry.RemoveMount(ctx, p.ID(), p.ViaLabel(), in.Host, in.Path)
 				if errors.Is(err, sysdb.ErrNotFound) {
-					return nil, verbs.Errf("not_found", "nothing is mounted at %s%s", in.Host, in.Path)
+					return MountRmOut{}, verbs.Errf("not_found", "nothing is mounted at %s%s", in.Host, in.Path)
 				}
-				return map[string]any{"removed": in.Host + in.Path}, err
+				return MountRmOut{Removed: in.Host + in.Path}, err
 			}}.Verb(),
-		verbs.Def[MountUndoIn, any]{Name: "mount.undo", Doc: "Restore a mount to its value before its last change.", Scope: verbs.Write, AdminOnly: true, Action: authz.PlatformAdmin,
-			Run: func(req verbs.Req, in MountUndoIn) (any, error) {
+		verbs.Def[MountUndoIn, MountUndoOut]{Name: "mount.undo", Doc: "Restore a mount to its value before its last change.", Scope: verbs.Write, AdminOnly: true, Action: authz.PlatformAdmin,
+			Run: func(req verbs.Req, in MountUndoIn) (MountUndoOut, error) {
 				ctx := req.Context
 				p := req.Principal
 				m, err := e.K.Registry.UndoMount(ctx, p.ID(), p.ViaLabel(), in.Host, in.Path)
 				if errors.Is(err, sysdb.ErrNotFound) {
-					return nil, verbs.Errf("not_found", "no history for %s%s", in.Host, in.Path)
+					return MountUndoOut{}, verbs.Errf("not_found", "no history for %s%s", in.Host, in.Path)
 				}
 				if err != nil {
-					return nil, err
+					return MountUndoOut{}, err
 				}
-				return map[string]any{"restored": m}, nil
+				return MountUndoOut{Restored: m}, nil
 			}}.Verb(),
-		verbs.Def[AppStatusIn, any]{Name: "app.status", Doc: "The app a store runs: app store, snapshot, manifest, and why it is broken if it is.", Scope: verbs.Read, Action: authz.StoreRead,
-			Run: func(req verbs.Req, in AppStatusIn) (any, error) {
+		verbs.Def[AppStatusIn, AppStatusOut]{Name: "app.status", Doc: "The app a store runs: app store, snapshot, manifest, and why it is broken if it is.", Scope: verbs.Read, Action: authz.StoreRead,
+			Run: func(req verbs.Req, in AppStatusIn) (AppStatusOut, error) {
 				ctx := req.Context
 				p := req.Principal
 				st, _, err := e.open(ctx, p, in.Store, rt.LevelView, "reading")
 				if err != nil {
-					return nil, err
+					return AppStatusOut{}, err
 				}
 				r, err := e.K.Running(ctx, in.Store)
 				if err != nil {
-					return nil, err
+					return AppStatusOut{}, err
 				}
-				out := map[string]any{"store": r.Store, "app": r.App, "ref": st.Meta("app_ref"), "n": r.N, "broken": r.Broken()}
+				out := AppStatusOut{Store: r.Store, App: r.App, Ref: st.Meta("app_ref"), N: r.N, Broken: r.Broken()}
 				if m := r.Manifest; m != nil {
 					caps := []string{}
 					for c := range m.Caps.Declared {
 						caps = append(caps, c)
 					}
 					slices.Sort(caps)
-					out["manifest"] = map[string]any{"title": m.Title, "page": m.Entry(), "actor": m.Actor, "type": m.Type,
-						"capabilities": caps, "slop": m.Slop, "live": m.Live()}
+					out.Manifest = (map[string]any{"title": m.Title, "page": m.Entry(), "actor": m.Actor, "type": m.Type,
+						"capabilities": caps, "slop": m.Slop, "live": m.Live()})
 				}
 				return out, nil
 			}}.Verb(),
-		verbs.Def[AppLsIn, any]{Name: "app.ls", Doc: "List the stores that are apps (their tree's main snapshot holds app.json).", Scope: verbs.Read, Action: authz.Platform,
-			Run: func(req verbs.Req, in AppLsIn) (any, error) {
+		verbs.Def[AppLsIn, []map[string]any]{Name: "app.ls", Doc: "List the stores that are apps (their tree's main snapshot holds app.json).", Scope: verbs.Read, Action: authz.Platform,
+			Run: func(req verbs.Req, in AppLsIn) ([]map[string]any, error) {
 				ctx := req.Context
 				p := req.Principal
 				rows, err := e.K.VisibleStores(ctx, p)
@@ -290,4 +290,32 @@ type AppStatusIn struct {
 
 // AppLsIn is app.ls's input.
 type AppLsIn struct {
+}
+
+// ServerHostsOut is server.hosts's result.
+type ServerHostsOut struct {
+	Live    []string `json:"live"`
+	Main    string   `json:"main"`
+	Sandbox string   `json:"sandbox"`
+	Static  []string `json:"static"`
+}
+
+// MountRmOut is mount.rm's result.
+type MountRmOut struct {
+	Removed string `json:"removed"`
+}
+
+// MountUndoOut is mount.undo's result.
+type MountUndoOut struct {
+	Restored *registry.Mount `json:"restored"`
+}
+
+// AppStatusOut is app.status's result.
+type AppStatusOut struct {
+	App      string         `json:"app"`
+	Broken   string         `json:"broken"`
+	Manifest map[string]any `json:"manifest,omitempty"` // set only to a non-empty object
+	N        int64          `json:"n"`
+	Ref      string         `json:"ref"`
+	Store    string         `json:"store"`
 }

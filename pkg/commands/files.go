@@ -21,8 +21,8 @@ import (
 
 func filesVerbs(e kernelEnv) []*verbs.Verb {
 	return []*verbs.Verb{
-		verbs.Def[FilesLsIn, any]{Name: "files.ls", Doc: "List files: the working tree, a snapshot (--at 3, --at main) or the assets zone.", Scope: verbs.Read, Action: authz.StoreRead,
-			Run: func(req verbs.Req, in FilesLsIn) (any, error) {
+		verbs.Def[FilesLsIn, []store.File]{Name: "files.ls", Doc: "List files: the working tree, a snapshot (--at 3, --at main) or the assets zone.", Scope: verbs.Read, Action: authz.StoreRead,
+			Run: func(req verbs.Req, in FilesLsIn) ([]store.File, error) {
 				ctx := req.Context
 				p := req.Principal
 				s, _, err := e.open(ctx, p, in.Store, rt.LevelView, "reading files")
@@ -78,18 +78,18 @@ func filesVerbs(e kernelEnv) []*verbs.Verb {
 				}
 				return decodeAs(f, data, in.As)
 			}}.Verb(),
-		verbs.Def[FilesPutIn, any]{Name: "files.put", Doc: "Write one file: text, or data as base64. Tree files show after the next snapshot.", Scope: verbs.Write, Action: authz.StoreAdmin,
-			Run: func(req verbs.Req, in FilesPutIn) (any, error) {
+		verbs.Def[FilesPutIn, store.File]{Name: "files.put", Doc: "Write one file: text, or data as base64. Tree files show after the next snapshot.", Scope: verbs.Write, Action: authz.StoreAdmin,
+			Run: func(req verbs.Req, in FilesPutIn) (store.File, error) {
 				ctx := req.Context
 				p := req.Principal
 				s, d, err := e.open(ctx, p, in.Store, rt.LevelAdmin, "writing files")
 				if err != nil {
-					return nil, err
+					return store.File{}, err
 				}
 				data := []byte(in.Text)
 				if in.Data != nil {
 					if data, err = base64.StdEncoding.DecodeString(*in.Data); err != nil {
-						return nil, verbs.Errf("invalid_argument", "data must be base64")
+						return store.File{}, verbs.Errf("invalid_argument", "data must be base64")
 					}
 				}
 				var f store.File
@@ -99,23 +99,23 @@ func filesVerbs(e kernelEnv) []*verbs.Verb {
 					return err
 				})
 				if err != nil {
-					return nil, fileErr(err)
+					return store.File{}, fileErr(err)
 				}
 				return f, nil
 			}}.Verb(),
-		verbs.Def[FilesRmIn, any]{Name: "files.rm", Doc: "Delete files under a path (or one file).", Scope: verbs.Write, Action: authz.StoreAdmin,
-			Run: func(req verbs.Req, in FilesRmIn) (any, error) {
+		verbs.Def[FilesRmIn, FilesRmOut]{Name: "files.rm", Doc: "Delete files under a path (or one file).", Scope: verbs.Write, Action: authz.StoreAdmin,
+			Run: func(req verbs.Req, in FilesRmIn) (FilesRmOut, error) {
 				ctx := req.Context
 				p := req.Principal
 				s, d, err := e.open(ctx, p, in.Store, rt.LevelAdmin, "deleting files")
 				if err != nil {
-					return nil, err
+					return FilesRmOut{}, err
 				}
 				paths := []string{in.Path}
 				if in.Recursive {
 					fs, err := s.Files(ctx, zoneOf(in.Zone), strings.TrimSuffix(in.Path, "/")+"/")
 					if err != nil {
-						return nil, err
+						return FilesRmOut{}, err
 					}
 					for _, f := range fs {
 						paths = append(paths, f.Path)
@@ -134,7 +134,7 @@ func filesVerbs(e kernelEnv) []*verbs.Verb {
 					}
 					return nil
 				})
-				return map[string]any{"removed": n}, fileErr(err)
+				return FilesRmOut{Removed: n}, fileErr(err)
 			}}.Verb(),
 		verbs.Def[FilesPushIn, any]{Name: "files.push", Doc: "Replace the tree with a manifest [{path, sha256, size, type?} or {path, text|data}] and snapshot it. Send blobs {sha256: base64} the server lacks; it answers missing_blobs otherwise.", Scope: verbs.Write, Action: authz.StoreAdmin,
 			Run: func(req verbs.Req, in FilesPushIn) (any, error) {
@@ -143,18 +143,18 @@ func filesVerbs(e kernelEnv) []*verbs.Verb {
 				return push(ctx, e, p, pushArgs{store: in.Store, zone: in.Zone, files: in.Files, blobs: in.Blobs,
 					message: in.Message, ref: in.Ref, prune: or(in.Prune, true), snapshot: or(in.Snapshot, true)}, true)
 			}}.Verb(),
-		verbs.Def[FilesBlobsIn, any]{Name: "files.blobs", Doc: "Upload blobs {sha256: base64} ahead of a push too large for one request.", Scope: verbs.Write, Action: authz.StoreAdmin,
-			Run: func(req verbs.Req, in FilesBlobsIn) (any, error) {
+		verbs.Def[FilesBlobsIn, FilesBlobsOut]{Name: "files.blobs", Doc: "Upload blobs {sha256: base64} ahead of a push too large for one request.", Scope: verbs.Write, Action: authz.StoreAdmin,
+			Run: func(req verbs.Req, in FilesBlobsIn) (FilesBlobsOut, error) {
 				ctx := req.Context
 				p := req.Principal
 				if _, _, err := e.open(ctx, p, in.Store, rt.LevelAdmin, "uploading files"); err != nil {
-					return nil, err
+					return FilesBlobsOut{}, err
 				}
 				if err := putBlobs(e, in.Blobs); err != nil {
-					return nil, err
+					return FilesBlobsOut{}, err
 				}
 				m, _ := objOf(in.Blobs)
-				return map[string]any{"stored": len(m)}, nil
+				return FilesBlobsOut{Stored: len(m)}, nil
 			}}.Verb(),
 		verbs.Def[ImportFilesIn, any]{Name: "import.files", Doc: "Add files to a zone without pruning or snapshotting (files.push's arguments).", Scope: verbs.Write, Action: authz.StoreAdmin,
 			Run: func(req verbs.Req, in ImportFilesIn) (any, error) {
@@ -162,13 +162,13 @@ func filesVerbs(e kernelEnv) []*verbs.Verb {
 				p := req.Principal
 				return push(ctx, e, p, pushArgs{store: in.Store, zone: in.Zone, files: in.Files, blobs: in.Blobs}, false)
 			}}.Verb(),
-		verbs.Def[SnapNewIn, any]{Name: "snap.new", Doc: "Snapshot the working tree and move a ref (default main) to it.", Scope: verbs.Write, Action: authz.StoreAdmin,
-			Run: func(req verbs.Req, in SnapNewIn) (any, error) {
+		verbs.Def[SnapNewIn, SnapNewOut]{Name: "snap.new", Doc: "Snapshot the working tree and move a ref (default main) to it.", Scope: verbs.Write, Action: authz.StoreAdmin,
+			Run: func(req verbs.Req, in SnapNewIn) (SnapNewOut, error) {
 				ctx := req.Context
 				p := req.Principal
 				s, d, err := e.open(ctx, p, in.Store, rt.LevelAdmin, "snapshotting")
 				if err != nil {
-					return nil, err
+					return SnapNewOut{}, err
 				}
 				var n int64
 				c, err := s.Do(ctx, who(p, d), func(t *store.Turn) error {
@@ -177,12 +177,12 @@ func filesVerbs(e kernelEnv) []*verbs.Verb {
 					return err
 				})
 				if err != nil {
-					return nil, fileErr(err)
+					return SnapNewOut{}, fileErr(err)
 				}
-				return map[string]any{"n": n, "rev": c.Rev}, nil
+				return SnapNewOut{N: n, Rev: c.Rev}, nil
 			}}.Verb(),
-		verbs.Def[SnapLsIn, any]{Name: "snap.ls", Doc: "List a store's snapshots, newest first.", Scope: verbs.Read, Action: authz.StoreRead,
-			Run: func(req verbs.Req, in SnapLsIn) (any, error) {
+		verbs.Def[SnapLsIn, []store.Snapshot]{Name: "snap.ls", Doc: "List a store's snapshots, newest first.", Scope: verbs.Read, Action: authz.StoreRead,
+			Run: func(req verbs.Req, in SnapLsIn) ([]store.Snapshot, error) {
 				ctx := req.Context
 				p := req.Principal
 				s, _, err := e.open(ctx, p, in.Store, rt.LevelView, "reading snapshots")
@@ -191,8 +191,8 @@ func filesVerbs(e kernelEnv) []*verbs.Verb {
 				}
 				return s.Snapshots(ctx)
 			}}.Verb(),
-		verbs.Def[RefLsIn, any]{Name: "ref.ls", Doc: "List a store's refs.", Scope: verbs.Read, Action: authz.StoreRead,
-			Run: func(req verbs.Req, in RefLsIn) (any, error) {
+		verbs.Def[RefLsIn, map[string]int64]{Name: "ref.ls", Doc: "List a store's refs.", Scope: verbs.Read, Action: authz.StoreRead,
+			Run: func(req verbs.Req, in RefLsIn) (map[string]int64, error) {
 				ctx := req.Context
 				p := req.Principal
 				s, _, err := e.open(ctx, p, in.Store, rt.LevelView, "reading refs")
@@ -201,19 +201,19 @@ func filesVerbs(e kernelEnv) []*verbs.Verb {
 				}
 				return s.Refs(ctx)
 			}}.Verb(),
-		verbs.Def[RefMoveIn, any]{Name: "ref.move", Doc: "Point a ref at a snapshot (moving main back is a rollback).", Scope: verbs.Write, Action: authz.StoreAdmin,
-			Run: func(req verbs.Req, in RefMoveIn) (any, error) {
+		verbs.Def[RefMoveIn, RefMoveOut]{Name: "ref.move", Doc: "Point a ref at a snapshot (moving main back is a rollback).", Scope: verbs.Write, Action: authz.StoreAdmin,
+			Run: func(req verbs.Req, in RefMoveIn) (RefMoveOut, error) {
 				ctx := req.Context
 				p := req.Principal
 				s, d, err := e.open(ctx, p, in.Store, rt.LevelAdmin, "moving refs")
 				if err != nil {
-					return nil, err
+					return RefMoveOut{}, err
 				}
 				c, err := s.Do(ctx, who(p, d), func(t *store.Turn) error { return t.MoveRef(in.Ref, in.N) })
 				if err != nil {
-					return nil, fileErr(err)
+					return RefMoveOut{}, fileErr(err)
 				}
-				return map[string]any{"ref": in.Ref, "n": in.N, "rev": c.Rev}, nil
+				return RefMoveOut{Ref: in.Ref, N: in.N, Rev: c.Rev}, nil
 			}}.Verb(),
 	}
 }
@@ -478,4 +478,27 @@ type ImportFilesIn struct {
 	Files any    `json:"files"`
 	Blobs any    `json:"blobs,omitempty"`
 	Zone  string `json:"zone,omitempty" jsonschema_description:"tree (default) or assets"`
+}
+
+// FilesRmOut is files.rm's result.
+type FilesRmOut struct {
+	Removed int `json:"removed"`
+}
+
+// FilesBlobsOut is files.blobs's result.
+type FilesBlobsOut struct {
+	Stored int `json:"stored"`
+}
+
+// SnapNewOut is snap.new's result.
+type SnapNewOut struct {
+	N   int64 `json:"n"`
+	Rev int64 `json:"rev"`
+}
+
+// RefMoveOut is ref.move's result.
+type RefMoveOut struct {
+	N   int64  `json:"n"`
+	Ref string `json:"ref"`
+	Rev int64  `json:"rev"`
 }

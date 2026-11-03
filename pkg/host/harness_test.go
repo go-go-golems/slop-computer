@@ -68,6 +68,7 @@ func newHarnessWith(t *testing.T, change func(*config.Config)) *harness {
 	if err != nil {
 		t.Fatal(err)
 	}
+	checkOutputs(t, srv.Verbs)
 	ts := httptest.NewServer(srv)
 	t.Cleanup(ts.Close)
 	return &harness{t: t, ts: ts, cfg: cfg, sys: sys, k: k, a: env.A, srv: srv}

@@ -7,8 +7,8 @@ import (
 
 func confirmVerbs(e confirmEnv) []*verbs.Verb {
 	return []*verbs.Verb{
-		verbs.Def[ConfirmApproveIn, any]{Name: "confirm.approve", Doc: "Allow a change an app asked to make for you (the id from its confirmation_required error).", Scope: verbs.Write, Action: authz.Account,
-			Run: func(req verbs.Req, in ConfirmApproveIn) (any, error) {
+		verbs.Def[ConfirmApproveIn, *verbs.Confirmation]{Name: "confirm.approve", Doc: "Allow a change an app asked to make for you (the id from its confirmation_required error).", Scope: verbs.Write, Action: authz.Account,
+			Run: func(req verbs.Req, in ConfirmApproveIn) (*verbs.Confirmation, error) {
 				p := req.Principal
 				x, ok := e.Confirm.Approve(in.ID, p.ID())
 				if !ok {

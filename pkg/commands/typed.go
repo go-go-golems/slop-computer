@@ -8,3 +8,6 @@ func or[T any](p *T, d T) T {
 	}
 	return *p
 }
+
+// ptr is &v: a typed result's optional field, set (even to a zero value).
+func ptr[T any](v T) *T { return &v }

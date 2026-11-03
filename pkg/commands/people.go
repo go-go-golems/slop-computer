@@ -12,21 +12,21 @@ import (
 
 func peopleVerbs(e peopleEnv) []*verbs.Verb {
 	return []*verbs.Verb{
-		verbs.Def[WhoamiIn, any]{Name: "whoami", Doc: "Who this call acts as: person, role, audience, token and scopes.", Scope: verbs.Read, Action: authz.Account,
-			Run: func(req verbs.Req, in WhoamiIn) (any, error) {
+		verbs.Def[WhoamiIn, WhoamiOut]{Name: "whoami", Doc: "Who this call acts as: person, role, audience, token and scopes.", Scope: verbs.Read, Action: authz.Account,
+			Run: func(req verbs.Req, in WhoamiIn) (WhoamiOut, error) {
 				p := req.Principal
-				out := map[string]any{"kind": p.Kind, "id": p.ID(), "via": p.ViaLabel()}
+				out := WhoamiOut{Kind: p.Kind, ID: p.ID(), Via: p.ViaLabel()}
 				if p.Person != nil {
-					out["person"] = p.Person
+					out.Person = p.Person
 				}
 				if p.TokenID != "" {
-					out["token"] = p.TokenID
-					out["scopes"] = p.Scopes
+					out.Token = ptr[string](p.TokenID)
+					out.Scopes = ptr[[]string](p.Scopes)
 				}
 				return out, nil
 			}}.Verb(),
-		verbs.Def[TokenLsIn, any]{Name: "token.ls", Doc: "List your API tokens (admins: --all for everyone's).", Scope: verbs.Read, Action: authz.Account,
-			Run: func(req verbs.Req, in TokenLsIn) (any, error) {
+		verbs.Def[TokenLsIn, []identity.Token]{Name: "token.ls", Doc: "List your API tokens (admins: --all for everyone's).", Scope: verbs.Read, Action: authz.Account,
+			Run: func(req verbs.Req, in TokenLsIn) ([]identity.Token, error) {
 				ctx := req.Context
 				p := req.Principal
 				who := p.ID()
@@ -38,12 +38,12 @@ func peopleVerbs(e peopleEnv) []*verbs.Verb {
 				}
 				return e.People.Tokens(ctx, who)
 			}}.Verb(),
-		verbs.Def[TokenNewIn, any]{Name: "token.new", Doc: "Make an API token; its secret is shown once.", Scope: verbs.Write, Action: authz.Account,
-			Run: func(req verbs.Req, in TokenNewIn) (any, error) {
+		verbs.Def[TokenNewIn, TokenNewOut]{Name: "token.new", Doc: "Make an API token; its secret is shown once.", Scope: verbs.Write, Action: authz.Account,
+			Run: func(req verbs.Req, in TokenNewIn) (TokenNewOut, error) {
 				ctx := req.Context
 				p := req.Principal
 				if p.Person == nil || p.Person.Kind != "user" {
-					return nil, verbs.Errf("permission_denied", "only signed-in people make tokens")
+					return TokenNewOut{}, verbs.Errf("permission_denied", "only signed-in people make tokens")
 				}
 				scopes := []string(in.Scopes)
 				if len(scopes) == 0 {
@@ -52,7 +52,7 @@ func peopleVerbs(e peopleEnv) []*verbs.Verb {
 				if p.Kind == access.KindToken {
 					for _, sc := range scopes {
 						if !p.HasScope(sc) {
-							return nil, verbs.Errf("permission_denied", "a token cannot make a token with more scopes than its own")
+							return TokenNewOut{}, verbs.Errf("permission_denied", "a token cannot make a token with more scopes than its own")
 						}
 					}
 				}
@@ -60,37 +60,37 @@ func peopleVerbs(e peopleEnv) []*verbs.Verb {
 				if err != nil {
 					var ge *identity.GrantError
 					if errors.As(err, &ge) {
-						return nil, verbs.Errf(ge.Code, "%s", ge.Message)
+						return TokenNewOut{}, verbs.Errf(ge.Code, "%s", ge.Message)
 					}
-					return nil, err
+					return TokenNewOut{}, err
 				}
 				secret, t, err := e.People.CreateToken(ctx, p.ID(), in.Name, scopes, int(or(in.Days, 30)))
 				if err != nil {
-					return nil, err
+					return TokenNewOut{}, err
 				}
-				return map[string]any{"token": secret, "info": t}, nil
+				return TokenNewOut{Token: secret, Info: t}, nil
 			}}.Verb(),
-		verbs.Def[TokenRmIn, any]{Name: "token.rm", Doc: "Revoke a token.", Scope: verbs.Write, Action: authz.Account,
-			Run: func(req verbs.Req, in TokenRmIn) (any, error) {
+		verbs.Def[TokenRmIn, TokenRmOut]{Name: "token.rm", Doc: "Revoke a token.", Scope: verbs.Write, Action: authz.Account,
+			Run: func(req verbs.Req, in TokenRmIn) (TokenRmOut, error) {
 				ctx := req.Context
 				p := req.Principal
 				t, err := e.People.Token(ctx, in.ID)
 				if errors.Is(err, sysdb.ErrNotFound) {
-					return nil, verbs.Errf("not_found", "no token %s", in.ID)
+					return TokenRmOut{}, verbs.Errf("not_found", "no token %s", in.ID)
 				}
 				if err != nil {
-					return nil, err
+					return TokenRmOut{}, err
 				}
 				if t.Person != p.ID() && !p.IsAdmin() {
-					return nil, verbs.Errf("permission_denied", "that token is not yours")
+					return TokenRmOut{}, verbs.Errf("permission_denied", "that token is not yours")
 				}
 				if err := e.People.RevokeToken(ctx, p.ID(), p.ViaLabel(), t.ID); err != nil {
-					return nil, err
+					return TokenRmOut{}, err
 				}
-				return map[string]any{"revoked": t.ID}, nil
+				return TokenRmOut{Revoked: t.ID}, nil
 			}}.Verb(),
-		verbs.Def[PeopleLsIn, any]{Name: "people.ls", Doc: "List people: users, or guests with --kind guest.", Scope: verbs.Read, AdminOnly: true, Action: authz.PlatformAdmin,
-			Run: func(req verbs.Req, in PeopleLsIn) (any, error) {
+		verbs.Def[PeopleLsIn, []sysdb.Person]{Name: "people.ls", Doc: "List people: users, or guests with --kind guest.", Scope: verbs.Read, AdminOnly: true, Action: authz.PlatformAdmin,
+			Run: func(req verbs.Req, in PeopleLsIn) ([]sysdb.Person, error) {
 				ctx := req.Context
 				kind := in.Kind
 				if kind == "" {
@@ -98,24 +98,24 @@ func peopleVerbs(e peopleEnv) []*verbs.Verb {
 				}
 				return e.People.People(ctx, kind)
 			}}.Verb(),
-		verbs.Def[PeopleRoleIn, any]{Name: "people.role", Effect: verbs.EffectGovern, Doc: "Set a user's role: pending, member, admin or disabled.", Scope: verbs.Write, AdminOnly: true, Action: authz.PlatformAdmin,
-			Run: func(req verbs.Req, in PeopleRoleIn) (any, error) {
+		verbs.Def[PeopleRoleIn, sysdb.Person]{Name: "people.role", Effect: verbs.EffectGovern, Doc: "Set a user's role: pending, member, admin or disabled.", Scope: verbs.Write, AdminOnly: true, Action: authz.PlatformAdmin,
+			Run: func(req verbs.Req, in PeopleRoleIn) (sysdb.Person, error) {
 				ctx := req.Context
 				p := req.Principal
 				if in.ID == p.ID() && in.Role != sysdb.RoleAdmin {
-					return nil, verbs.Errf("invalid_argument", "you cannot demote yourself")
+					return sysdb.Person{}, verbs.Errf("invalid_argument", "you cannot demote yourself")
 				}
 				pp, err := e.People.SetRole(ctx, p.ID(), p.ViaLabel(), in.ID, in.Role)
 				if errors.Is(err, sysdb.ErrNotFound) {
-					return nil, verbs.Errf("not_found", "no person %s", in.ID)
+					return sysdb.Person{}, verbs.Errf("not_found", "no person %s", in.ID)
 				}
 				if err != nil {
-					return nil, verbs.Errf("invalid_argument", "%s", err.Error())
+					return sysdb.Person{}, verbs.Errf("invalid_argument", "%s", err.Error())
 				}
 				return pp, nil
 			}}.Verb(),
-		verbs.Def[LogSystemIn, any]{Name: "log.system", Doc: "The platform log: sign-ups, roles, tokens, grants, mounts, policy.", Scope: verbs.Read, AdminOnly: true, Action: authz.PlatformAdmin,
-			Run: func(req verbs.Req, in LogSystemIn) (any, error) {
+		verbs.Def[LogSystemIn, []sysdb.LogEntry]{Name: "log.system", Doc: "The platform log: sign-ups, roles, tokens, grants, mounts, policy.", Scope: verbs.Read, AdminOnly: true, Action: authz.PlatformAdmin,
+			Run: func(req verbs.Req, in LogSystemIn) ([]sysdb.LogEntry, error) {
 				ctx := req.Context
 				return e.Sys.Logs(ctx, int(or(in.Limit, 100)))
 			}}.Verb(),
@@ -157,4 +157,25 @@ type PeopleRoleIn struct {
 // LogSystemIn is log.system's input.
 type LogSystemIn struct {
 	Limit *int64 `json:"limit,omitempty"`
+}
+
+// WhoamiOut is whoami's result.
+type WhoamiOut struct {
+	ID     string        `json:"id"`
+	Kind   string        `json:"kind"`
+	Person *sysdb.Person `json:"person,omitempty"` // set only when there is one
+	Scopes *[]string     `json:"scopes,omitempty"` // present (even empty) for a token
+	Token  *string       `json:"token,omitempty"`
+	Via    string        `json:"via"`
+}
+
+// TokenNewOut is token.new's result.
+type TokenNewOut struct {
+	Info  identity.Token `json:"info"`
+	Token string         `json:"token"`
+}
+
+// TokenRmOut is token.rm's result.
+type TokenRmOut struct {
+	Revoked string `json:"revoked"`
 }

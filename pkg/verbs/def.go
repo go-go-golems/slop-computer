@@ -89,7 +89,7 @@ type Def[In, Out any] struct {
 func (d Def[In, Out]) Verb() *Verb {
 	in := schemaOf(reflect.TypeFor[In]())
 	v := &Verb{Name: d.Name, Doc: d.Doc, Scope: d.Scope, Effect: d.Effect, AdminOnly: d.AdminOnly,
-		Action: d.Action, StoreArg: d.StoreArg, Input: in, Output: schemaOf(reflect.TypeFor[Out]()),
+		Action: d.Action, StoreArg: d.StoreArg, Input: in, Output: outputSchema(reflect.TypeFor[Out]()),
 		Args: argsOf(reflect.TypeFor[In](), in)}
 	if v.Effect == "" {
 		v.Effect = EffectRead
@@ -146,6 +146,81 @@ func schemaOf(t reflect.Type) *jsonschema.Schema {
 	s := reflector.ReflectFromType(t)
 	s.Version = ""
 	return s
+}
+
+// outputSchema is t's schema as a result's: wherever Go can encode null (a
+// nil pointer, slice or map), the schema allows it, so a client checking
+// structured results against it (MCP) accepts what the verb returns.
+func outputSchema(t reflect.Type) *jsonschema.Schema {
+	s := schemaOf(t)
+	if s != nil {
+		nullable(t, s, map[reflect.Type]int{})
+	}
+	return s
+}
+
+// nullable walks t and its schema s together, letting null through for
+// every nilable value.
+func nullable(t reflect.Type, s *jsonschema.Schema, depth map[reflect.Type]int) {
+	if s == nil || depth[t] > 2 { // recursive types: their schema is finite
+		return
+	}
+	depth[t]++
+	defer func() { depth[t]-- }()
+	orNull := false
+	for t.Kind() == reflect.Pointer {
+		orNull, t = true, t.Elem()
+	}
+	if k := t.Kind(); k == reflect.Slice && t.Elem().Kind() != reflect.Uint8 { // []byte is a string
+		orNull = true
+		nullable(t.Elem(), s.Items, depth)
+	} else if k == reflect.Map {
+		orNull = true
+		if s.AdditionalProperties != nil && s.AdditionalProperties != jsonschema.TrueSchema && s.AdditionalProperties != jsonschema.FalseSchema {
+			nullable(t.Elem(), s.AdditionalProperties, depth)
+		}
+	} else if k == reflect.Struct && s.Properties != nil {
+		structFields(t, func(name string, ft reflect.Type) {
+			if ps, ok := s.Properties.Get(name); ok {
+				nullable(ft, ps, depth)
+			}
+		})
+	}
+	if orNull && s.Type != "" && s.Type != "null" {
+		inner := *s
+		inner.Description = ""
+		*s = jsonschema.Schema{Description: s.Description, OneOf: []*jsonschema.Schema{&inner, {Type: "null"}}}
+	}
+}
+
+// structFields calls fn with the JSON name and type of each field of t
+// that encodes, embedded structs flattened as encoding/json does.
+func structFields(t reflect.Type, fn func(name string, ft reflect.Type)) {
+	for i := 0; i < t.NumField(); i++ {
+		f := t.Field(i)
+		tag := f.Tag.Get("json")
+		name, _, _ := strings.Cut(tag, ",")
+		if name == "-" {
+			continue
+		}
+		if f.Anonymous && name == "" {
+			ft := f.Type
+			for ft.Kind() == reflect.Pointer {
+				ft = ft.Elem()
+			}
+			if ft.Kind() == reflect.Struct {
+				structFields(ft, fn)
+				continue
+			}
+		}
+		if !f.IsExported() {
+			continue
+		}
+		if name == "" {
+			name = f.Name
+		}
+		fn(name, f.Type)
+	}
 }
 
 // argsOf lists a struct type's fields as verb arguments, for the doors that

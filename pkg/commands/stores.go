@@ -20,8 +20,8 @@ func bytesReader(b []byte) *bytes.Reader { return bytes.NewReader(b) }
 
 func storeVerbs(e kernelEnv) []*verbs.Verb {
 	return []*verbs.Verb{
-		verbs.Def[StoreLsIn, any]{Name: "store.ls", Doc: "List the stores you own or hold a grant on (admins: --all).", Scope: verbs.Read, Action: authz.Account,
-			Run: func(req verbs.Req, in StoreLsIn) (any, error) {
+		verbs.Def[StoreLsIn, []map[string]any]{Name: "store.ls", Doc: "List the stores you own or hold a grant on (admins: --all).", Scope: verbs.Read, Action: authz.Account,
+			Run: func(req verbs.Req, in StoreLsIn) ([]map[string]any, error) {
 				ctx := req.Context
 				p := req.Principal
 				var rows []sysdb.StoreRow
@@ -45,24 +45,24 @@ func storeVerbs(e kernelEnv) []*verbs.Verb {
 				}
 				return out, nil
 			}}.Verb(),
-		verbs.Def[StoreNewIn, any]{Name: "store.new", Doc: "Make a store; you become its owner.", Scope: verbs.Write, Action: authz.StoreCreate,
-			Run: func(req verbs.Req, in StoreNewIn) (any, error) {
+		verbs.Def[StoreNewIn, sysdb.StoreRow]{Name: "store.new", Doc: "Make a store; you become its owner.", Scope: verbs.Write, Action: authz.StoreCreate,
+			Run: func(req verbs.Req, in StoreNewIn) (sysdb.StoreRow, error) {
 				ctx := req.Context
 				p := req.Principal
 				if !e.K.Access.In(ctx, p, access.GroupMember) {
-					return nil, verbs.Errf("permission_denied", "only members make stores")
+					return sysdb.StoreRow{}, verbs.Errf("permission_denied", "only members make stores")
 				}
 				row, _, err := e.K.CreateStore(ctx, p, kernel.NewStore{ID: in.ID, Type: in.Type, App: in.App})
 				if errors.Is(err, registry.ErrExists) {
-					return nil, verbs.Errf("conflict", "store %s exists", in.ID)
+					return sysdb.StoreRow{}, verbs.Errf("conflict", "store %s exists", in.ID)
 				}
 				if err != nil {
-					return nil, verbs.Errf("invalid_argument", "%s", err.Error())
+					return sysdb.StoreRow{}, verbs.Errf("invalid_argument", "%s", err.Error())
 				}
 				return row, nil
 			}}.Verb(),
-		verbs.Def[StoreRmIn, any]{Name: "store.rm", Doc: "Delete a store, its documents, files and grants. Owners and admins only.", Scope: verbs.Write, Action: authz.StoreAdmin, StoreArg: "id",
-			Run: func(req verbs.Req, in StoreRmIn) (any, error) {
+		verbs.Def[StoreRmIn, StoreRmOut]{Name: "store.rm", Doc: "Delete a store, its documents, files and grants. Owners and admins only.", Scope: verbs.Write, Action: authz.StoreAdmin, StoreArg: "id",
+			Run: func(req verbs.Req, in StoreRmIn) (StoreRmOut, error) {
 				ctx := req.Context
 				p := req.Principal
 				need := rt.LevelOwner
@@ -70,39 +70,38 @@ func storeVerbs(e kernelEnv) []*verbs.Verb {
 					need = rt.LevelAdmin
 				}
 				if _, _, err := e.open(ctx, p, in.ID, need, "deleting"); err != nil {
-					return nil, err
+					return StoreRmOut{}, err
 				}
 				if err := e.K.DeleteStore(ctx, p, in.ID); err != nil {
-					return nil, err
+					return StoreRmOut{}, err
 				}
-				return map[string]any{"deleted": in.ID}, nil
+				return StoreRmOut{Deleted: in.ID}, nil
 			}}.Verb(),
-		verbs.Def[StoreTypeIn, any]{Name: "store.type", Doc: "Set a store's type, which decides the typed mounts that serve it (/b/:id --type blocks); empty clears it. Admins only.", Scope: verbs.Write, AdminOnly: true, Action: authz.PlatformAdmin,
-			Run: func(req verbs.Req, in StoreTypeIn) (any, error) {
+		verbs.Def[StoreTypeIn, sysdb.StoreRow]{Name: "store.type", Doc: "Set a store's type, which decides the typed mounts that serve it (/b/:id --type blocks); empty clears it. Admins only.", Scope: verbs.Write, AdminOnly: true, Action: authz.PlatformAdmin,
+			Run: func(req verbs.Req, in StoreTypeIn) (sysdb.StoreRow, error) {
 				ctx := req.Context
 				p := req.Principal
 				row, err := e.K.SetStoreType(ctx, p, in.ID, in.Type)
 				if errors.Is(err, sysdb.ErrNotFound) {
-					return nil, verbs.Errf("not_found", "no store %s", in.ID)
+					return sysdb.StoreRow{}, verbs.Errf("not_found", "no store %s", in.ID)
 				}
 				return row, err
 			}}.Verb(),
-		verbs.Def[StoreMetaIn, any]{Name: "store.meta", Doc: "A store's settings, head rev, sizes and your level on it.", Scope: verbs.Read, Action: authz.StoreRead, StoreArg: "id",
-			Run: func(req verbs.Req, in StoreMetaIn) (any, error) {
+		verbs.Def[StoreMetaIn, StoreMetaOut]{Name: "store.meta", Doc: "A store's settings, head rev, sizes and your level on it.", Scope: verbs.Read, Action: authz.StoreRead, StoreArg: "id",
+			Run: func(req verbs.Req, in StoreMetaIn) (StoreMetaOut, error) {
 				ctx := req.Context
 				p := req.Principal
 				s, d, err := e.open(ctx, p, in.ID, rt.LevelView, "reading")
 				if err != nil {
-					return nil, err
+					return StoreMetaOut{}, err
 				}
 				row, _ := e.K.Registry.StoreByID(ctx, s.ID)
 				colls, _ := s.Collections(ctx)
 				refs, _ := s.Refs(ctx)
-				return map[string]any{"store": row, "meta": s.AllMeta(), "head": s.Head(), "docs": s.CountDocs(ctx),
-					"collections": colls, "refs": refs, "level": d.LevelName(), "audience": d.Audience}, nil
+				return StoreMetaOut{Store: row, Meta: s.AllMeta(), Head: s.Head(), Docs: s.CountDocs(ctx), Collections: colls, Refs: refs, Level: d.LevelName(), Audience: d.Audience}, nil
 			}}.Verb(),
-		verbs.Def[GrantLsIn, any]{Name: "grant.ls", Doc: "List a store's grants.", Scope: verbs.Read, Action: authz.StoreAdmin,
-			Run: func(req verbs.Req, in GrantLsIn) (any, error) {
+		verbs.Def[GrantLsIn, []sysdb.Grant]{Name: "grant.ls", Doc: "List a store's grants.", Scope: verbs.Read, Action: authz.StoreAdmin,
+			Run: func(req verbs.Req, in GrantLsIn) ([]sysdb.Grant, error) {
 				ctx := req.Context
 				p := req.Principal
 				if _, _, err := e.open(ctx, p, in.Store, rt.LevelAdmin, "listing grants"); err != nil {
@@ -142,18 +141,18 @@ func storeVerbs(e kernelEnv) []*verbs.Verb {
 				g, err := e.K.Registry.SetGrant(r, p.ID(), p.ViaLabel(), sysdb.Grant{Store: in.Store, Subject: in.Subject, Level: in.Level})
 				return g, err
 			}}.Verb(),
-		verbs.Def[GrantRmIn, any]{Name: "grant.rm", Doc: "Remove a subject's grants on a store.", Scope: verbs.Write, Action: authz.StoreAdmin,
-			Run: func(req verbs.Req, in GrantRmIn) (any, error) {
+		verbs.Def[GrantRmIn, GrantRmOut]{Name: "grant.rm", Doc: "Remove a subject's grants on a store.", Scope: verbs.Write, Action: authz.StoreAdmin,
+			Run: func(req verbs.Req, in GrantRmIn) (GrantRmOut, error) {
 				ctx := req.Context
 				p := req.Principal
 				if _, _, err := e.open(ctx, p, in.Store, rt.LevelAdmin, "revoking"); err != nil {
-					return nil, err
+					return GrantRmOut{}, err
 				}
 				n, err := e.K.Registry.RemoveGrant(ctx, p.ID(), p.ViaLabel(), in.Store, in.Subject, in.Via)
-				return map[string]any{"removed": n}, err
+				return GrantRmOut{Removed: n}, err
 			}}.Verb(),
-		verbs.Def[LogShowIn, any]{Name: "log.show", Doc: "A store's commits after a rev (oldest first), or the newest ones.", Scope: verbs.Read, Action: authz.StoreRead,
-			Run: func(req verbs.Req, in LogShowIn) (any, error) {
+		verbs.Def[LogShowIn, []store.Commit]{Name: "log.show", Doc: "A store's commits after a rev (oldest first), or the newest ones.", Scope: verbs.Read, Action: authz.StoreRead,
+			Run: func(req verbs.Req, in LogShowIn) ([]store.Commit, error) {
 				ctx := req.Context
 				p := req.Principal
 				s, _, err := e.open(ctx, p, in.Store, rt.LevelView, "reading the log")
@@ -166,8 +165,8 @@ func storeVerbs(e kernelEnv) []*verbs.Verb {
 				}
 				return s.RecentLog(ctx, limit)
 			}}.Verb(),
-		verbs.Def[LogWaitIn, any]{Name: "log.wait", Doc: "Wait for a store's commits after a rev: they return as soon as there is one, or an empty list after the timeout.", Scope: verbs.Read, Action: authz.StoreRead,
-			Run: func(req verbs.Req, in LogWaitIn) (any, error) {
+		verbs.Def[LogWaitIn, []store.Commit]{Name: "log.wait", Doc: "Wait for a store's commits after a rev: they return as soon as there is one, or an empty list after the timeout.", Scope: verbs.Read, Action: authz.StoreRead,
+			Run: func(req verbs.Req, in LogWaitIn) ([]store.Commit, error) {
 				ctx := req.Context
 				p := req.Principal
 				s, _, err := e.open(ctx, p, in.Store, rt.LevelView, "reading the log")
@@ -280,4 +279,26 @@ type LogWaitIn struct {
 	After   int64  `json:"after" jsonschema_description:"commits after this rev"`
 	Timeout *int64 `json:"timeout,omitempty" jsonschema_description:"seconds (default 55, at most 300)"`
 	Limit   *int64 `json:"limit,omitempty" jsonschema_description:"at most this many (default 50)"`
+}
+
+// StoreRmOut is store.rm's result.
+type StoreRmOut struct {
+	Deleted string `json:"deleted"`
+}
+
+// StoreMetaOut is store.meta's result.
+type StoreMetaOut struct {
+	Audience    access.Audience   `json:"audience"`
+	Collections map[string]int    `json:"collections"`
+	Docs        int               `json:"docs"`
+	Head        int64             `json:"head"`
+	Level       string            `json:"level"`
+	Meta        map[string]string `json:"meta"`
+	Refs        map[string]int64  `json:"refs"`
+	Store       sysdb.StoreRow    `json:"store"`
+}
+
+// GrantRmOut is grant.rm's result.
+type GrantRmOut struct {
+	Removed int64 `json:"removed"`
 }

@@ -138,3 +138,37 @@ func TestListAndExactNumbers(t *testing.T) {
 		t.Fatal("List is not an argument")
 	}
 }
+
+// A result schema lets null through wherever Go encodes it (nil pointers,
+// slices and maps), and nowhere else.
+func TestOutputSchemaAllowsNull(t *testing.T) {
+	type inner struct {
+		N *int64 `json:"n"`
+	}
+	type out struct {
+		List  []string       `json:"list"`
+		Ptr   *inner         `json:"ptr"`
+		Map   map[string]int `json:"map"`
+		Plain string         `json:"plain"`
+		Raw   []byte         `json:"raw"`
+	}
+	s := outputSchema(reflect.TypeFor[out]())
+	nullOK := func(name string) bool {
+		p, _ := s.Properties.Get(name)
+		for _, o := range p.OneOf {
+			if o.Type == "null" {
+				return true
+			}
+		}
+		return false
+	}
+	for name, want := range map[string]bool{"list": true, "ptr": true, "map": true, "plain": false, "raw": false} {
+		if got := nullOK(name); got != want {
+			t.Errorf("%s: null allowed %v, want %v", name, got, want)
+		}
+	}
+	p, _ := s.Properties.Get("ptr")
+	if n, _ := p.OneOf[0].Properties.Get("n"); len(n.OneOf) != 2 {
+		t.Errorf("a nested nil pointer is not nullable: %+v", n)
+	}
+}

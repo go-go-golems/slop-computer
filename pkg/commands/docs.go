@@ -19,23 +19,23 @@ const MaxBatch = 500
 
 func docsVerbs(e kernelEnv) []*verbs.Verb {
 	return []*verbs.Verb{
-		verbs.Def[DocsGetIn, any]{Name: "docs.get", Doc: "Read one document.", Scope: verbs.Read, Action: authz.DocRead,
-			Run: func(req verbs.Req, in DocsGetIn) (any, error) {
+		verbs.Def[DocsGetIn, store.Doc]{Name: "docs.get", Doc: "Read one document.", Scope: verbs.Read, Action: authz.DocRead,
+			Run: func(req verbs.Req, in DocsGetIn) (store.Doc, error) {
 				ctx := req.Context
 				p := req.Principal
 				s, d, err := e.open(ctx, p, in.Store, rt.LevelView, "reading")
 				if err != nil {
-					return nil, err
+					return store.Doc{}, err
 				}
 				path, rules := in.Path, e.K.Rules(ctx, s.ID)
 				doc, err := s.GetDoc(ctx, path, func(path string) bool { return rules.CanRead(path, p.ID(), d.Level) })
 				if errors.Is(err, store.ErrNotFound) {
-					return nil, verbs.Errf("not_found", "no document %s", path)
+					return store.Doc{}, verbs.Errf("not_found", "no document %s", path)
 				}
 				return doc, err
 			}}.Verb(),
-		verbs.Def[DocsLsIn, any]{Name: "docs.ls", Doc: "List a collection's documents.", Scope: verbs.Read, Action: authz.DocRead,
-			Run: func(req verbs.Req, in DocsLsIn) (any, error) {
+		verbs.Def[DocsLsIn, []store.Doc]{Name: "docs.ls", Doc: "List a collection's documents.", Scope: verbs.Read, Action: authz.DocRead,
+			Run: func(req verbs.Req, in DocsLsIn) ([]store.Doc, error) {
 				ctx := req.Context
 				p := req.Principal
 				return queryDocs(ctx, e, p, in.Store, rt.Query{Coll: in.Coll, Limit: int(in.Limit)})
