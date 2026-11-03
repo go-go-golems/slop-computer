@@ -24,6 +24,7 @@ var (
 	table    = []string{"pkg/verbs"}
 	commands = []string{"pkg/commands"}
 	doors    = []string{"pkg/doors"}
+	host     = []string{"pkg/host"}
 	netHTTP  = "net/http"
 	gojaPath = "github.com/dop251/goja"
 )
@@ -33,14 +34,33 @@ var rules = []struct {
 	why      string
 	from, to []string
 }{
-	{"the verb table imports no domain, capability, runtime or door", table, concat(domains, caps, runtime, doors, []string{gojaPath})},
+	{"the verb table imports no domain, capability, runtime, door or host", table, concat(domains, caps, runtime, doors, host, []string{gojaPath})},
 	{"domains know nothing of HTTP, goja, capabilities, the table's callers or doors", domains, concat(caps, runtime, doors, []string{netHTTP, gojaPath})},
 	{"capabilities know nothing of HTTP, goja, the runtime or doors", caps, concat(runtime, doors, []string{netHTTP, gojaPath})},
 	{"the actor runtime is given its capabilities by a door, through interfaces", runtime, caps},
 	{"core imports no domain, capability, runtime, table or door", core, concat(domains, caps, runtime, table, doors)},
 	{"identity imports no slop package but sysdb and ids (design §8: it can leave as its own module)", []string{"pkg/identity"}, concat(without(core, "pkg/sysdb", "pkg/ids"), without(domains, "pkg/identity"), caps, runtime, table, commands, doors)},
-	{"only cmd/ imports the server", concat(core, domains, caps, runtime, table, commands), doors},
+	{"only the host (and cmd/) builds doors", concat(core, domains, caps, runtime, table, commands), doors},
+	{"only cmd/ imports the host", concat(core, domains, caps, runtime, table, commands, doors), host},
 	{"commands are installed by the host and reached through the table, not imported by doors, domains, capabilities or the runtime", concat(core, domains, caps, runtime, table, doors), commands},
+}
+
+// doorOf is the door a package belongs to ("pages" for pkg/doors/pages/x),
+// or "" outside pkg/doors.
+func doorOf(pkg string) string {
+	rest, ok := strings.CutPrefix(pkg, "pkg/doors/")
+	if !ok {
+		return ""
+	}
+	d, _, _ := strings.Cut(rest, "/")
+	return d
+}
+
+// doorsApart: a door imports no other door but doors/web, the plumbing
+// they share (SLOP3-010 PR 3); what two doors both need lives below them.
+func doorsApart(from, to string) bool {
+	a, b := doorOf(from), doorOf(to)
+	return a == "" || b == "" || a == b || b == "web"
 }
 
 // allowed are today's violations. Remove an entry when its import goes.
@@ -112,6 +132,12 @@ func TestDependencyRules(t *testing.T) {
 				if !allowed[e] {
 					bad = append(bad, e+" ("+r.why+")")
 				}
+			}
+		}
+		if !doorsApart(from, to) {
+			broken[e] = true
+			if !allowed[e] {
+				bad = append(bad, e+" (a door imports no other door but doors/web)")
 			}
 		}
 	}
