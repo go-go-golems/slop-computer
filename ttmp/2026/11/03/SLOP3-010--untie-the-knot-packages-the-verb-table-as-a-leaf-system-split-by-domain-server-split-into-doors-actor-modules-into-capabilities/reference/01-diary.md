@@ -71,11 +71,58 @@ SLOP3-010 makes the package reorganization that SLOP3-009 left to "split as you 
 - **`pkg/commands` as a staging package in PR 1.** Domain packages don't exist until PR 2, so commands can't move to their owners yet. Moving them all at once makes the table a leaf in one PR, and PRs 2 and 4 then empty `pkg/commands`.
 - **`Run` without `Env`.** The `*Env` parameter is the only reason `pkg/verbs` imports domains. Capturing dependencies when a verb is built removes the edge. It also makes a second table (a second host) possible.
 
+### What worked
+- PR #22 opened: `gh pr create --base main --head task/slop3-009-typed-verbs` → https://github.com/go-go-golems/slop-computer/pull/22
+- The ticket and its docs: `docmgr ticket create-ticket --ticket SLOP3-010 …`, plus `docmgr doc add` for the design doc and the diary. They were written in a temporary worktree of `origin/main` and pushed to main as 1ddf9b1, because ticket-doc commits go straight to main.
+- The guide was uploaded to reMarkable by a small-model subagent: `OK: uploaded SLOP3-010 Untying the knot packages - intern guide.pdf -> /ai/2026/11/03/SLOP3-010`, on the first attempt.
+
+### What didn't work
+- The first count of verbs in the guide ("about 150") was a guess. It came from a grep that also counted the `Name:` fields of arguments. `slop verbs | grep -c verb:` gave 86, and the guide was corrected before committing.
+
+### What I learned
+- `pkg/system`'s files map almost one-to-one onto domains by the tables their SQL touches. Three files cross domains:
+  - `guests.go` (people, sessions, grants);
+  - `modules.go` (app_modules, people);
+  - `stores.go` (stores, grants, links).
+- 95 distinct `Sys.X` methods are called outside `pkg/system`, which is the size of PR 2's call-site work.
+
+### What was tricky to build
+- **Making the guide readable from zero without inventing anything.** Every term in Part 2 is introduced only after the terms it uses, and every claim names its file. The two request traces (Part 3) follow the code path by path (`views.go` → `caps/db` → `store.Do`, and `api.go` → `verbs.Call` → `Def.Run` → `system.Tx` → the follower).
+
+### What warrants a second pair of eyes
+- **Part 8.5** (`access.Directory`) is the one design change in the plan, not a move. `pkg/access` reads `system.Person`, `StoreRow`, `Grant`, the role constants, `GroupsOf`/`InGroup` and `ErrNotFound`. `pkg/authz` imports `access`, and `pkg/store` imports `authz`. So the boundary decision affects core.
+
 ### What should be done in the future
 - Step 2: PR 1.
 
 ### Code review instructions
 - Read the guide's Part 7, then check each call site in its table 7.5 against the code.
+
+### Technical details
+- **Line counts** (non-test Go on the branch):
+
+  | Package | Lines |
+  |---|---:|
+  | `server` | 5,872 |
+  | `verbs` | 3,634 |
+  | `system` | 3,129 |
+  | `actor` | 3,024 |
+  | `store` | 1,716 |
+  | `rt` | 1,670 |
+  | `kernel` | 561 |
+  | `registry` | 472 |
+  | `caps/db` | 421 |
+  | `caps/sample` | 201 |
+- **Imports of `pkg/verbs` before PR 1** (slop and third-party): access, actor, apps, authz, billing/stripe, blobs, config, ids, kernel, rt, store, system, goja, jsonschema.
+- **The SQL of each `pkg/system` file** maps to these tables:
+  - `billing.go`: comps, stripe_*, checkout_attempts;
+  - `bindings.go`: bindings, schedules;
+  - `ledger.go`: llm_holds, llm_usage;
+  - `policy.go`: app_policy, llm_access, llm_usage, secrets;
+  - `stores.go`: stores, grants, links;
+  - `sessions.go` and `people.go`: people, sessions, tokens;
+  - `system.go`: `_log`, `_changes`, `_schema`.
+- The guide's file is `design-doc/01-untying-the-knot-packages-an-intern-s-guide-to-slop-computer-and-its-reorganization.md`. Diagrams are ASCII, so they render in the reMarkable PDF.
 
 ## Step 2: PR 1, the verb table as a leaf
 
@@ -153,3 +200,24 @@ SLOP3-010 makes the package reorganization that SLOP3-009 left to "split as you 
 - `git show -M bce5df8 -- pkg/commands/commands.go pkg/commands/env.go`: Install and the Env.
 - One command file, e.g. `git show -M bce5df8 -- pkg/commands/stores.go`: the mechanical change.
 - To repeat the identity check: build `cmd/slop` on #22's head and on #23's, then `cmp` the outputs of `slop verbs -o json` and `slop verbs tools -o json`.
+
+### Technical details
+- **The table** (`pkg/verbs/verb.go`):
+  ```go
+  type Run func(ctx context.Context, p *access.Principal, a Args) (any, error)
+  type Stores interface {
+      Check(ctx context.Context, p *access.Principal, store string, need rt.Level, what string) error
+  }
+  type Table struct { Stores Stores; byName map[string]*Verb }
+  func NewTable() *Table
+  func (t *Table) Register(vs ...*Verb)
+  func (t *Table) Get(name string) (*Verb, bool)
+  func (t *Table) All() []*Verb
+  func (t *Table) Check(p, name, a) error
+  func (t *Table) Callable(p, v) bool
+  func (t *Table) Call(ctx, p, name, a) (any, error)   // Stores.Check on the verb's store, then Run
+  var Default = NewTable()                            // the CLI's listing table; no package-level Call/Get/Check
+  ```
+- **The commands** (`pkg/commands/commands.go`): `Verbs(e *Env)` concatenates 13 group functions and `capsample.Verbs(sampleDeps(e))`. `Install(t, e)` registers them, and with an Env sets `e.Confirm` (if nil), `e.Verbs = t` and `t.Stores = e`.
+- **The rewriter**, `$CLAUDE_JOB_DIR/tmp/qualify/main.go` (not committed): it parses `pkg/verbs` for exported top-level names, then rewrites every `*ast.Ident` in `pkg/commands` with `Obj == nil`, unless it is skipped or the target declares the name. Selectors' `Sel`, `KeyValueExpr` keys and `Field` names are skipped.
+- **Byte counts of the identity check:** `verbs -o json` 13,963, `verbs tools -o json` 49,815, the help of 86 verbs 42,166 (1,308 lines).
