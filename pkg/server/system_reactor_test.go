@@ -1,5 +1,7 @@
 package server
 
+// Tests from SLOP3-002 phase W3 (system: reactors); formerly w3_test.go.
+
 import (
 	"fmt"
 	"strings"

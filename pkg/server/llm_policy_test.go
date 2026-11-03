@@ -1,5 +1,7 @@
 package server
 
+// Tests from SLOP3-001 phase P6 (policy matrix, LLM budgets, secrets); formerly p6_test.go.
+
 import (
 	"context"
 	"strings"

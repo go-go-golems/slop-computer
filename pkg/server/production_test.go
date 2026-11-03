@@ -1,5 +1,7 @@
 package server
 
+// Tests from SLOP3-001 phase P8 (fixes found deploying: static 404s, presence, guest limits); formerly p8_test.go.
+
 import (
 	"strings"
 	"testing"

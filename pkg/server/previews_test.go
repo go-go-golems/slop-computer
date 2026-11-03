@@ -1,5 +1,7 @@
 package server
 
+// Tests from SLOP3-002 phase W5 (inspect previews); formerly w5_test.go.
+
 import (
 	"context"
 	"strings"

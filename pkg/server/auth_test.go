@@ -1,133 +1,18 @@
 package server
 
+// Tests from SLOP3-001 phase P0 (sign-in, tokens, probes, hosts); formerly p0_test.go.
+
 import (
-	"bytes"
 	"context"
-	"encoding/json"
 	"io"
 	"net/http"
-	"net/http/cookiejar"
-	"net/http/httptest"
 	"net/url"
-	"path/filepath"
 	"regexp"
 	"strings"
 	"testing"
 
-	"github.com/go-go-golems/slop-computer/pkg/actor"
 	"github.com/go-go-golems/slop-computer/pkg/config"
-	"github.com/go-go-golems/slop-computer/pkg/kernel"
-	"github.com/go-go-golems/slop-computer/pkg/system"
-	"github.com/go-go-golems/slop-computer/pkg/verbs"
 )
-
-// harness runs a server behind httptest and lets requests choose a Host.
-type harness struct {
-	t   *testing.T
-	ts  *httptest.Server
-	cfg *config.Config
-	sys *system.DB
-	k   *kernel.Kernel
-	a   *actor.Manager
-	srv *Server
-}
-
-func newHarness(t *testing.T) *harness {
-	t.Helper()
-	return newHarnessWith(t, nil)
-}
-
-// newHarnessWith lets a test change the configuration before the server
-// is built.
-func newHarnessWith(t *testing.T, change func(*config.Config)) *harness {
-	t.Helper()
-	cfg := &config.Config{Local: true, Data: t.TempDir(), Listen: "127.0.0.1:18399", AdminEmails: []string{"admin@example.com"}}
-	if change != nil {
-		change(cfg)
-	}
-	cfg.Defaults()
-	sys, err := system.Open(context.Background(), filepath.Join(cfg.Data, "system.db"))
-	if err != nil {
-		t.Fatal(err)
-	}
-	t.Cleanup(func() { _ = sys.Close() })
-	k, err := kernel.New(cfg, sys)
-	if err != nil {
-		t.Fatal(err)
-	}
-	t.Cleanup(k.Close)
-	env := &verbs.Env{Cfg: cfg, Sys: sys, K: k, A: actor.New(k)}
-	srv, err := Build(context.Background(), cfg, sys, env)
-	if err != nil {
-		t.Fatal(err)
-	}
-	ts := httptest.NewServer(srv)
-	t.Cleanup(ts.Close)
-	return &harness{t: t, ts: ts, cfg: cfg, sys: sys, k: k, a: env.A, srv: srv}
-}
-
-// browser is a cookie-keeping client that sends Host: main.
-type browser struct {
-	h  *harness
-	c  *http.Client
-	jr http.CookieJar
-}
-
-func (h *harness) browser() *browser {
-	jar, _ := cookiejar.New(nil)
-	return &browser{h: h, jr: jar, c: &http.Client{Jar: jar, CheckRedirect: func(*http.Request, []*http.Request) error { return http.ErrUseLastResponse }}}
-}
-
-func (b *browser) do(method, path, host string, body io.Reader, hdr map[string]string) *http.Response {
-	b.h.t.Helper()
-	u := b.h.ts.URL + path
-	req, err := http.NewRequest(method, u, body)
-	if err != nil {
-		b.h.t.Fatal(err)
-	}
-	req.Host = host
-	for k, v := range hdr {
-		req.Header.Set(k, v)
-	}
-	// Cookies are kept per test server URL, whatever the Host.
-	resp, err := b.c.Do(req)
-	if err != nil {
-		b.h.t.Fatal(err)
-	}
-	return resp
-}
-
-func readJSON(t *testing.T, r *http.Response) map[string]any {
-	t.Helper()
-	defer r.Body.Close()
-	var m map[string]any
-	if err := json.NewDecoder(r.Body).Decode(&m); err != nil {
-		t.Fatalf("decode (%d): %v", r.StatusCode, err)
-	}
-	return m
-}
-
-func (b *browser) signIn(email string) {
-	b.h.t.Helper()
-	form := url.Values{"email": {email}, "name": {"Test"}, "return": {"/"}}
-	r := b.do("POST", "/auth/local", b.h.cfg.Hosts.Main, strings.NewReader(form.Encode()), map[string]string{"Content-Type": "application/x-www-form-urlencoded"})
-	if r.StatusCode != 303 {
-		b.h.t.Fatalf("sign in: %d", r.StatusCode)
-	}
-}
-
-func api(t *testing.T, h *harness, token, verb string, args any) (int, map[string]any) {
-	t.Helper()
-	body, _ := json.Marshal(args)
-	req, _ := http.NewRequest("POST", h.ts.URL+"/api/v1/"+verb, bytes.NewReader(body))
-	req.Host = h.cfg.Hosts.Main
-	req.Header.Set("Authorization", "Bearer "+token)
-	resp, err := http.DefaultClient.Do(req)
-	if err != nil {
-		t.Fatal(err)
-	}
-	return resp.StatusCode, readJSON(t, resp)
-}
 
 func TestDeviceLoginWhoamiRevoke(t *testing.T) {
 	h := newHarness(t)

@@ -1,5 +1,7 @@
 package server
 
+// Tests from SLOP3-002 phase W6 (confirmations for governance writes); formerly w6_test.go.
+
 import (
 	"strings"
 	"testing"

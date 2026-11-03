@@ -1,5 +1,7 @@
 package server
 
+// Tests from SLOP3-002 phase W8 (the Workshop app); formerly w8_test.go.
+
 import (
 	"strings"
 	"testing"

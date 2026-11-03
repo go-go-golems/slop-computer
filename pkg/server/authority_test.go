@@ -1,5 +1,7 @@
 package server
 
+// Tests from SLOP3-007 (the authority core); formerly core_test.go.
+
 // SLOP3-007, the authority core: exit tests written before the code they
 // test (phase 0). Each is skipped until its phase lands and fails on the
 // code before that phase.

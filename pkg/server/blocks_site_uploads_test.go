@@ -1,5 +1,7 @@
 package server
 
+// Tests from SLOP3-003 phase B5 (uploaded files); formerly b5_test.go.
+
 import (
 	"encoding/base64"
 	"strings"

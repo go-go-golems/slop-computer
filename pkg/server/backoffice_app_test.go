@@ -1,32 +1,11 @@
 package server
 
+// Tests from SLOP3-002 phase W7 (the back office as an app); formerly w7_test.go.
+
 import (
-	"os"
-	"path/filepath"
 	"strings"
 	"testing"
 )
-
-// appDir reads an app folder of the repository (apps/<name>) as files.push
-// entries.
-func appDir(t *testing.T, name string) []any {
-	t.Helper()
-	root := filepath.Join("..", "..", "apps", name)
-	m := map[string]string{}
-	err := filepath.WalkDir(root, func(p string, d os.DirEntry, err error) error {
-		if err != nil || d.IsDir() {
-			return err
-		}
-		b, err := os.ReadFile(p)
-		rel, _ := filepath.Rel(root, p)
-		m[filepath.ToSlash(rel)] = string(b)
-		return err
-	})
-	if err != nil {
-		t.Fatal(err)
-	}
-	return files(m)
-}
 
 // W7: apps/backoffice installs as documented, refuses until trusted, and
 // its one action runs the back office's verbs as the visitor.
