@@ -221,3 +221,122 @@ SLOP3-010 makes the package reorganization that SLOP3-009 left to "split as you 
 - **The commands** (`pkg/commands/commands.go`): `Verbs(e *Env)` concatenates 13 group functions and `capsample.Verbs(sampleDeps(e))`. `Install(t, e)` registers them, and with an Env sets `e.Confirm` (if nil), `e.Verbs = t` and `t.Stores = e`.
 - **The rewriter**, `$CLAUDE_JOB_DIR/tmp/qualify/main.go` (not committed): it parses `pkg/verbs` for exported top-level names, then rewrites every `*ast.Ident` in `pkg/commands` with `Obj == nil`, unless it is skipped or the target declares the name. Selectors' `Sel`, `KeyValueExpr` keys and `Field` names are skipped.
 - **Byte counts of the identity check:** `verbs -o json` 13,963, `verbs tools -o json` 49,815, the help of 86 verbs 42,166 (1,308 lines).
+
+## Step 3: PR 2, system.db split by domain (the moves)
+
+`pkg/system` held six domains' queries in one package. Seven commits moved them out. Each commit compiles and passes the full gate:
+
+- `pkg/sysdb` takes the core and the shared rows;
+- `pkg/identity`, `pkg/registry`, `pkg/llm`, `pkg/policy` and `pkg/billing` take their queries;
+- one commit gives `pkg/access` a `Directory` instead of a database handle.
+
+Callers have not changed yet. `system.DB` is a temporary composite that embeds every domain type and forwards the moved names. The next step points each caller at its domain and deletes `pkg/system`.
+
+### Prompt Context
+**User prompt (verbatim):** "go ahead. commit at appropriate intervals and keep a detailed diary as you work (using the diary format from the skill)"; mid-step: "backfill the diary using the right format from the diary skill, if necessary" (done: db8b394 on main, 4610d52 on #22's branch), "#22 merged", "merged #23 as well", and then "oh sorry i haven't merged #22".
+**Assistant interpretation:** Implement PR 2 of the guide (Part 8), committing per domain, with a diary entry per milestone.
+**Inferred user intent:** Continue untying the knots, reviewably and with a record.
+**Commit (code):** on `task/slop3-010-pr2-sysdb`, stacked on #22's branch (which now also holds #23):
+
+| Commit | Change |
+|---|---|
+| 9179752 | (1/7) `pkg/sysdb` |
+| e2c1476 | (2/7) identity |
+| d4622f5 | (3/7) `access.Directory` |
+| 9a4883b | (4/7) registry |
+| 0d382f8 | (5/7) llm |
+| ed9a240 | (6/7) policy |
+| 2cb14e5 | (7a/7) billing |
+
+### What I did
+- **`pkg/sysdb`**:
+  - `system.go` moved here: `Open`, migrations, `Tx`, `Listen`, `Epoch`, `Log`/`LogAfter`/`LogHead`/`Logs`, `Change`, `Execer`, `LogEntry`, `ErrNotFound`. The unexported helpers are exported as `NullStr`, `NullInt` and `SplitScopes`;
+  - `migrations/001…010` moved unchanged;
+  - new `records.go` holds the rows several domains and `access` read: `Person` and the roles, the scopes, `StoreRow`, `Grant`, `GrantLink`, `Link`, `LevelRank`/`ValidLevel`, `GroupsOf`/`InGroup`.
+- **The transitional composite** (`pkg/system/compat.go`): `type DB struct{ *sysdb.DB; *identity.Accounts; *registry.Registry; *llm.Ledger; *policy.Governance; *billing.Book }`, with `Open` building every domain over one `*sysdb.DB`, plus aliases for every exported name that moved.
+- **The domains.** Each moved file's methods hang off its domain type, an `*sysdb.DB` with a constructor in `<type>_db.go`:
+
+  | Package | Type | Files from `pkg/system` |
+  |---|---|---|
+  | `pkg/identity` (next to `oidc.go`) | `identity.Accounts` | people, sessions, device, flows, handoffs, guests |
+  | `pkg/registry` (next to the registry documents) | `registry.Registry` | stores, links, bindings, previews, mounts |
+  | `pkg/llm` | `llm.Ledger` | `ledger.go`, plus the LLM half of `policy.go` (split out first as `llmaccess.go`) |
+  | `pkg/policy` (new) | `policy.Governance` | `policy.go` (cells and secrets), `modules.go` |
+  | `pkg/billing` | `billing.Book` | `billing.go` |
+- **`access.Directory`:** `access.Directory{StoreByID, Grants, Person, NowMs}` replaces `Checker.Sys`; the kernel passes `sys`. `access` imports only `rt` and `sysdb`. The ratchet's `pkg/access -> pkg/system` entry is gone, so the allowlist is down to `pkg/server -> pkg/commands`.
+- **`registry.Docs.Sys` is now `*registry.Registry`.** `LastChange`, `lastChangeUpTo` and `storeVersion` take `*sysdb.DB`, so `registry` no longer imports `system`, which would have been a cycle.
+- **`TestLevelNeverAboveCap` is now an external test** (`package access_test`). It opens system.db through `pkg/system`, which imports `registry`, which imports `access`: an internal test would be a cycle.
+- **Ratchet:**
+  - `pkg/sysdb` joins core and `pkg/policy` joins domains;
+  - the identity rule now allows exactly `sysdb` and `ids` (design §8), with a `without` helper.
+- **Tools** (job tmp, not committed):
+  - `movedom.py <dir> <pkg> <Type> <files>` does `git mv`, renames the package, rewrites `(d *DB)` → `(d *Type)` and the four unexported helpers, qualifies `sysdb` names with the go/ast qualifier, writes the domain type, and extends the composite and aliases;
+  - `gate.sh` runs build, vet, the full suite and lint, failing on the first non-zero exit.
+
+### Why
+- **Shared rows in `sysdb` rather than copies in `access`.** The guide (Part 8.5) proposed that `access` keep its own `Person`, `StoreRow` and `Grant`. `Principal.Person` is used across the code (`p.Person.ID`, `.Role`, `.Name`), so copies would have rippled everywhere for no gain. `sysdb` is core, so `access` may import it. The queries go through `Directory`, which is the part that matters for the layering.
+- **The composite.** It keeps every commit compiling and every caller untouched, so each domain commit is a pure move that reviewers can read as one. The rewire is then one compiler-driven commit.
+- **Type names that don't collide with methods.** An embedded field takes its type's name, so `policy.Policy` would have shadowed the promoted `Policy(ctx, app, capability, audience)` method. Hence `Governance`, `Accounts`, `Book`.
+
+### What worked
+- `gate.sh` printed `GATE: ok` after every commit: build, vet, `go test ./... -count=1`, and `golangci-lint run --new-from-rev=origin/main` with 0 issues.
+- **Ratchet mutation:** `pkg/access` importing `pkg/system` again → `forbidden import: pkg/access -> pkg/system (core imports no domain, capability, runtime, table or door)`.
+- `pkg/access` imports `context errors fmt pkg/rt pkg/sysdb slices`; `pkg/sysdb` imports the standard library and sqlite3.
+
+### What didn't work
+- **The qualifier rewrote a declaration's own name.** `panic: format.Node internal error (25:25: expected '(', found '.')` on `pkg/identity/people.go`: the method `func (d *Accounts) Person(…)` matched sysdb's `Person` type. The tool now skips `FuncDecl`, `TypeSpec`, `ValueSpec` and label names. The four files it had already processed couldn't have been affected, since `format.Node` would have failed on them too.
+- **A lint failure was committed.** The identity commit's chain `… | tail -3 && git commit` committed despite `3 issues: nonamedreturns: 1, unused: 2`, because the pipe hid lint's exit status. I fixed it (`Origin` without named returns; two unused aliases) and amended the unpushed commit (e2c1476). After that, every commit went through `gate.sh`.
+- **The ratchet's old identity rule failed:** `forbidden import: pkg/identity -> pkg/sysdb (identity imports no other slop package)` (and `-> pkg/ids`). The rule was relaxed as described above.
+- **A nil pointer in the composite.** After the registry move, `TestWorkshopModule`: `http: panic serving …: runtime error: invalid memory address or nil pointer dereference` at `pkg/registry/stores.go:36` (`AddStore`). `movedom.py` set the composite's new field by replacing `return &DB{DB: d}, nil`, which no longer existed after the first domain, so `Registry` was never set. I fixed `compat.go` and made the script replace with a regex that asserts one match.
+- **An untracked file can't be `git mv`'d:** `fatal: not under version control, source=pkg/system/llmaccess.go` (created by the split). The script had already moved `ledger.go`, so I moved it back, ran `git add`, and reran.
+- **My regex mangled the meter rename:** `\bMeter\b(?!\))` turned `var _ llm.Meter = (*Meter)(nil)` into `var _ llm.BudgetMeter = (*Meter)(nil)`. Fixed by hand: `var _ llm.Meter = (*BudgetMeter)(nil)`, `func (m *BudgetMeter)`.
+- **Moved code counts as new to lint,** which flagged pre-existing code:
+  - `errcheck` on `defer rows.Close()` (`pkg/llm/llmaccess.go:145`, `pkg/policy/policy.go:80,208`), now `defer func() { _ = rows.Close() }()`;
+  - `nonamedreturns` on `Origin`;
+  - each `unused` compat alias, once its last user moved.
+
+### What I learned
+- `pkg/system`'s files are nearly independent. A script found only shared types crossing files, plus two calls that stay inside one domain (device → sessions in identity, `LLMFor` → `LLMReserved` in llm). That's why every domain could move as a single `git mv` plus a rename of the receiver.
+- `golangci-lint --new-from-rev` treats a moved file as new, so a pure move inherits lint debt. Expect small cleanups in every move PR.
+
+### What was tricky to build
+- **The order of the domains, driven by cycles:**
+  - `system` (composite) imports `registry`, `registry` imports `access`, and `access` imported `system`. So `access.Directory` had to land before the registry move;
+  - `registry.Docs` held a `*system.DB`, the same cycle. Pointing it at `*registry.Registry` fixed that.
+- **Packages that call into themselves after the move.** `pkg/llm` and `pkg/billing` already existed, and the moved files referred to `llm.Usage` and `billing.Comp`. Inside their own package those would be self-imports, so the `llm.`/`billing.` qualifiers were stripped.
+
+### What warrants a second pair of eyes
+- **Cross-domain SQL stays.** Moved queries still touch other domains' tables, for example `registry.DeleteStore` (grants, links), `identity` guests (grants), and `policy` modules (people). The ratchet can't see SQL. These are the next seams if a domain ever leaves.
+- **Shared record types in `sysdb` widen its role** from the database handle to the platform's row shapes. Review whether `Grant`/`Link` belong there or should stay in registry behind `Directory`.
+
+### What should be done in the future
+- Step 4: rewire the callers to the domain types, delete `pkg/system`, move `groups_test.go` and `ledger_test.go`.
+- Moving domain commands next to their domains (guide 8.6) is not done. It is a candidate for PR 2's last commit or its own PR.
+
+### Code review instructions
+- Read commit by commit; each is mostly renames. Start with `git show -M 9179752 -- pkg/sysdb/records.go pkg/system/compat.go`, then `git show -M d4622f5 -- pkg/access`.
+- `GOWORK=off go test ./pkg/access ./pkg/registry ./internal/archtest ./pkg/server -count=1`
+
+### Technical details
+- **The composite during the transition:**
+  ```go
+  type DB struct {
+      *sysdb.DB
+      *identity.Accounts
+      *registry.Registry
+      *llm.Ledger
+      *policy.Governance
+      *billing.Book
+  }
+  ```
+  `sysdb`'s methods are found at depth 1; each domain embeds `*sysdb.DB` too, at depth 2, so the shallower one wins with no ambiguity.
+- **`access.Directory`:**
+  ```go
+  type Directory interface {
+      StoreByID(ctx, id) (sysdb.StoreRow, error)
+      Grants(ctx, store) ([]sysdb.Grant, error)
+      Person(ctx, id) (sysdb.Person, error)
+      NowMs() int64
+  }
+  ```
+- **The qualifier now skips** `SelectorExpr.Sel`, `KeyValueExpr` keys, `Field` names, `FuncDecl`/`TypeSpec`/`ValueSpec` names and labels. It rewrites only idents with `Obj == nil` that are exported by the source and not declared by the target.
