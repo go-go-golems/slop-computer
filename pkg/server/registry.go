@@ -2,14 +2,15 @@ package server
 
 // The registry as documents (SLOP3-008 phase 3): an app allowed _stores
 // reads the registry rows of the stores it reaches as documents, and writes
-// some of them, through the db API:
+// some of them, through the db API (people are account governance, changed
+// in the back office, not through db):
 //
 //	_stores                         the stores the viewer may open
 //	_stores/<id>                    a store's row (type, app, owner, …)
 //	_stores/<id>/_grants/<subject>  its grants        write: grant.set / grant.rm
 //	_stores/<id>/_bindings/<alias>  its aliases       write: bind.set / bind.rm
 //	_stores/<id>/_llm/budget        its LLM budget    read-only
-//	_people/<id>                    people            write: people.role (admins)
+//	_people/<id>                    people            read-only (platform admins)
 //
 // Every read and write runs the verb that owns the row, as the viewer
 // (labelled app:<app>), so it is allowed exactly when the viewer may do it
@@ -215,14 +216,6 @@ func registryWriteOf(tgt rt.Target, in writeIn, body map[string]any) (regWrite, 
 		}
 		w.verb, w.args = "bind.set", a
 		return w, nil
-	case tgt.Store == "" && collOf == rt.PeopleRoot:
-		if in.Op != "update" {
-			return regWrite{}, rtErr("invalid_argument", "a person takes update {role}")
-		}
-		if err := only("role"); err != nil {
-			return regWrite{}, err
-		}
-		return regWrite{verb: "people.role", args: verbs.Args{"id": id, "role": str("role")}, kind: "person", key: id}, nil
 	}
 	return regWrite{}, rtErr("invalid_argument", "this registry document is read-only")
 }

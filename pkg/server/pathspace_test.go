@@ -479,9 +479,13 @@ func TestRegistryDocuments(t *testing.T) {
 	if out := rpc(s, v, "db.write", map[string]any{"path": "_stores/crm/_llm/budget", "op": "set", "body": map[string]any{}}); errCode(out) != "invalid_argument" {
 		t.Fatalf("writing the LLM budget: %v", out)
 	}
-	// People are listed for platform admins.
-	if got := ids(rpc(s, v, "db.query", map[string]any{"coll": "_people"})); len(got) == 0 || !strings.HasPrefix(got[0], "_people/usr_") {
-		t.Fatalf("_people: %v", got)
+	// People are listed for platform admins, and read-only.
+	people := ids(rpc(s, v, "db.query", map[string]any{"coll": "_people"}))
+	if len(people) == 0 || !strings.HasPrefix(people[0], "_people/usr_") {
+		t.Fatalf("_people: %v", people)
+	}
+	if out := rpc(s, v, "db.write", map[string]any{"path": people[0], "op": "update", "body": map[string]any{"role": "admin"}}); errCode(out) != "invalid_argument" {
+		t.Fatalf("writing a person's role: %v", out)
 	}
 
 	// A guest sees the stores it may open, but not their grants (grant.ls
