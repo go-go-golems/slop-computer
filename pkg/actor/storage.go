@@ -22,10 +22,13 @@ import (
 var storageJS string
 
 // storageKeyID is a storage key's document id under storage/: the key itself
-// when it is a valid path segment that does not begin with ~, otherwise ~ and
-// the hex SHA-256 of the key. The two never collide.
+// when it is one valid path segment (no /) that does not begin with ~,
+// otherwise ~ and the hex SHA-256 of the key. The two never collide. A key
+// with slashes is hashed even when storage/<key> is a valid document path
+// (a/b/c): that document would sit in a nested collection, out of list's and
+// deleteAll's sight.
 func storageKeyID(key string) string {
-	if !strings.HasPrefix(key, "~") && rt.ValidDocPath("storage/"+key) {
+	if !strings.HasPrefix(key, "~") && !strings.Contains(key, "/") && rt.ValidDocPath("storage/"+key) {
 		return key
 	}
 	sum := sha256.Sum256([]byte(key))

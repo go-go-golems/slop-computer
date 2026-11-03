@@ -5,7 +5,8 @@
 // listed in doc/design/slop-v3.md.
 //
 //   keys    documents storage/<id> with body {key, value}: <id> is the key
-//           itself when it is a valid path segment, else ~<sha256 of the key>
+//           itself when it is one valid path segment (no /, no leading ~),
+//           else ~<sha256 of the key>
 //   order   by key, as UTF-8 bytes, like Durable Objects
 //   values  JSON values only (no Date, Map, ArrayBuffer...)
 //   sql     sql.exec(query, ...bindings) over the store's tables (made by

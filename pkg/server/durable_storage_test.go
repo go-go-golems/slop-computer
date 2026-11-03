@@ -16,7 +16,7 @@ defineActor({
     async kv(ctx) {
       const s = ctx.storage;
       await s.put('a', 1);
-      await s.put({ b: { x: [1, 2] }, 'c/d': 'slash', '~t': true, '！': 'bmp', '\u{1F600}': 'astral' });
+      await s.put({ b: { x: [1, 2] }, 'c/d': 'slash', 'a/b/c': 'deep', 'x/y': 'two', '~t': true, '！': 'bmp', '\u{1F600}': 'astral' });
       const many = await s.get(['b', 'missing', 'a']);
       const out = {
         same: storage === ctx.storage,
@@ -128,15 +128,15 @@ func TestDurableStorage(t *testing.T) {
 	eq("missing", out["missing"], true)
 	eq("many", out["many"], []any{[]any{"a", 1.0}, []any{"b", map[string]any{"x": []any{1.0, 2.0}}}})
 	// UTF-8 byte order: U+FF01 before U+1F600 (UTF-16 order would swap them).
-	eq("all", out["all"], []any{"a", "b", "c/d", "~t", "！", "\U0001F600"})
+	eq("all", out["all"], []any{"a", "a/b/c", "b", "c/d", "x/y", "~t", "！", "\U0001F600"})
 	eq("prefix", out["prefix"], []any{[]any{"c/d", "slash"}})
 	eq("reverse", out["reverse"], []any{"\U0001F600", "！"})
-	eq("range", out["range"], []any{"a", "b"})
+	eq("range", out["range"], []any{"a", "a/b/c", "b"})
 	eq("after", out["after"], []any{"c/d"})
 	eq("deleted", out["deleted"], true)
 	eq("deletedAgain", out["deletedAgain"], false)
 	eq("n", out["n"], 1.0)
-	eq("left", out["left"], []any{"c/d", "~t", "！", "\U0001F600"})
+	eq("left", out["left"], []any{"a/b/c", "c/d", "x/y", "~t", "！", "\U0001F600"})
 	// Keys are documents: a plain key is its own id, others are hashed.
 	h.fail(admin, "docs.get", map[string]any{"store": "obj", "path": "storage/~t"}, "not_found")
 	if d := h.call(admin, "docs.get", map[string]any{"store": "obj", "path": "storage/plain"}); d == nil {
@@ -147,6 +147,11 @@ func TestDurableStorage(t *testing.T) {
 		t.Errorf("storage documents: %s", s)
 	}
 	eq("clear", h.call(admin, "actor.call", map[string]any{"store": "obj", "action": "clear"}), []any{})
+	// A key with slashes is hashed into storage/, so deleteAll reaches it: no
+	// nested collection is left behind (review of PR #20).
+	if left := docPaths(h.call(admin, "docs.ls", map[string]any{"store": "obj", "coll": "storage/a/b"})); len(left) != 0 {
+		t.Errorf("storage/a/b after deleteAll: %v", left)
+	}
 
 	out = act("tx", nil)
 	eq("tx failed", out["failed"], "conflict")
