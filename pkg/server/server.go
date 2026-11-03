@@ -218,6 +218,7 @@ func (s *Server) mainRoutes(m *http.ServeMux) {
 	s.deviceRoutes(m)
 	s.billingRoutes(m)
 	s.apiRoutes(m)
+	s.mcpRoutes(m)
 	s.adminRoutes(m)
 }
 

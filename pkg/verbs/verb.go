@@ -275,6 +275,22 @@ func Check(p *access.Principal, name string, a Args) error {
 	if !ok {
 		return Errf("not_found", "no verb %q", name)
 	}
+	if err := callable(p, v); err != nil {
+		return err
+	}
+	for _, arg := range v.Args {
+		if arg.Required && !a.Has(arg.Name) {
+			return Errf("invalid_argument", "%s needs %s", v.Name, arg.Name)
+		}
+	}
+	return nil
+}
+
+// Callable reports whether p may call v at all (scope, role, sign-in), as
+// Check decides before looking at arguments: what a door lists for p.
+func Callable(p *access.Principal, v *Verb) bool { return callable(p, v) == nil }
+
+func callable(p *access.Principal, v *Verb) error {
 	if !p.HasScope(string(v.Scope)) {
 		return Errf("permission_denied", "this token lacks the %s scope", v.Scope)
 	}
@@ -282,7 +298,7 @@ func Check(p *access.Principal, name string, a Args) error {
 		return Errf("internal", "%s declares no action", v.Name)
 	}
 	// the role half of the floor; Call checks the level on the store
-	ok, _ = authz.Floor(v.Action, rt.LevelOwner, p.IsAdmin())
+	ok, _ := authz.Floor(v.Action, rt.LevelOwner, p.IsAdmin())
 	if !ok || (v.AdminOnly && !p.IsAdmin()) {
 		if p.Kind == access.KindToken && p.Person != nil && p.Person.Role == system.RoleAdmin {
 			return Errf("permission_denied", "%s needs a token with the admin scope", v.Name)
@@ -291,11 +307,6 @@ func Check(p *access.Principal, name string, a Args) error {
 	}
 	if v.Scope != Read && p.Kind == access.KindGuest {
 		return Errf("permission_denied", "sign in to %s", v.Name)
-	}
-	for _, arg := range v.Args {
-		if arg.Required && !a.Has(arg.Name) {
-			return Errf("invalid_argument", "%s needs %s", v.Name, arg.Name)
-		}
 	}
 	return nil
 }
