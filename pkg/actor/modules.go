@@ -35,6 +35,8 @@ func (a *Actor) module(name string) goja.Value {
 		return a.roomModule()
 	case "alarm":
 		return a.alarmModule()
+	case "storage":
+		return a.storageModule()
 	case "time":
 		return a.timeModule()
 	case "log":

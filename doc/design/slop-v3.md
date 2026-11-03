@@ -490,6 +490,8 @@ defineActor({
 
 Capabilities come from `use(name)`, which in an actor returns at once, because the manifest is known when the actor starts.
 
+**Durable-Object-shaped storage.** `use('storage')`, also `ctx.storage`, has the shape of Cloudflare's `DurableObjectStorage`, written in JavaScript over `db`, `sql` and `alarm` (`pkg/actor/storage.js`). Keys are documents `storage/<id>` with body `{key, value}`: `<id>` is the key when it is a valid path segment not beginning with `~`, otherwise `~` and the key's SHA-256. `list` orders keys by UTF-8 bytes, as Durable Objects do, with `start`, `startAfter`, `end`, `prefix`, `reverse` and `limit`; batches take up to 128 keys, a key up to 2048 bytes. `transaction(fn)` buffers its writes, reads its own writes, and applies them when `fn` settles (a throw or `txn.rollback()` discards them); `transactionSync(fn)` also runs `fn` inside an SQL savepoint. `sql.exec(query, ...bindings)` returns a cursor (`toArray`, `one`, `raw`, `columnNames`, `rowsRead`, `rowsWritten`, iteration). The single alarm is the alarm named `alarm`, handled by `alarms.alarm`. Every promise is already settled, so awaiting one does not end the turn. The differences are the honest ones: values are JSON (no `Date`, `Map` or `ArrayBuffer`); tables come from migrations, so DDL in `sql.exec` is refused; `storage/` is an ordinary collection, so pages read it under the app's rules unless a rule closes it (`{path: "storage", read: "self", write: "self"}`); and none of the Workers runtime (`Request`, `fetch` semantics, `WebSocketPair`) comes with it. Code written for `ctx.storage` reads naturally here; it is shape compatibility, not Cloudflare compatibility.
+
 ### 6.3 Turns are transactions
 
 The actor's guarantees are Durable Objects' input and output gates, made concrete with SQLite.
@@ -579,6 +581,7 @@ There is one list of capabilities, and each has the same name and the same rules
 | `stores` | `slop.stores.open` | `use('stores')` | `store.*` | always on for open; platform `stores:create` to create | other stores, by grant |
 | `spawn` | `slop.spawn` | `use('spawn')` | none | yes, approval | child views and handles with fewer capabilities |
 | `alarm` | none | `use('alarm')` | `alarm.*` | always on | wake-ups |
+| `storage` | none | `use('storage')`, also `ctx.storage` | `docs.*` on `storage/` | always on | Durable-Object-shaped storage (SLOP3-008): `get/put/delete/list/deleteAll`, `transaction`, `transactionSync`, `kv`, `sql.exec` cursors, `getAlarm/setAlarm/deleteAlarm` |
 | `fetch` | none | `use('fetch')` | none | yes, approval per origin | outbound HTTP to allowed origins |
 | `secrets` | none | `use('secrets')` | `secret.set` (admin) | yes, approval per name | values admins set for this app |
 | `platform` | `slop.platform` | `use('platform')` | the management verbs | yes, approval per permission | mounts, grants, refs, stores, questions |
