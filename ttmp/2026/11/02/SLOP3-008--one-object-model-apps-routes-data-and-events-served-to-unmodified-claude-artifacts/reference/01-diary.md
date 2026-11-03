@@ -597,3 +597,91 @@ Two commits. First, a correction to step 10: `_people/<id>` had been writable (`
 
 ### Technical details
 - CLI: `slop mount set apps.example /d/:id --storeParam id --createApp dash --aliases '[{"alias":"contacts","target":"crm","prefix":"contacts","level":"view"}]'`.
+
+## Step 12: Phase 5, Durable-Object-shaped storage for actors
+
+Phase 5 gives actors `use('storage')`, also available as `ctx.storage`, with the shape of Cloudflare's `DurableObjectStorage`: key-value get/put/delete/list, transactions, a synchronous `kv`, `sql.exec` cursors and the single alarm. It is a JavaScript adapter over the actor's existing `db`, `sql` and `alarm` modules. Only the cursor needed new Go code, to keep column order and count rows written.
+
+### Prompt Context
+**User prompt (verbatim):** see Step 9.
+**Assistant interpretation:** Design §6.2's recommendation, "the adapter … Durable-Object-shaped, never compatible", built and tested.
+**Inferred user intent:** Code written with the DO storage model reads naturally on slop, without claiming Workers compatibility.
+**Commit (code):** e339f8a — "SLOP3-008 phase 5: Durable-Object-shaped storage for actors"
+
+### What I did
+- `pkg/actor/storage.js` (embedded) is a factory over `(db, sql, alarm, keyID, sqlTable)` that returns a frozen storage object:
+  - `get` and `put` take a single key, an array or an object; `delete` takes a key or an array. Both return settled promises.
+  - `list`, with `start`, `startAfter`, `end`, `prefix`, `reverse` and `limit`; `deleteAll`.
+  - `transaction` (writes buffered in an `overlay`) and `transactionSync` (the overlay inside an SQL savepoint).
+  - `kv`, the synchronous API.
+  - `sql.exec` returns a cursor.
+  - `getAlarm`, `setAlarm` and `deleteAlarm` work on the alarm named `alarm`; `sync()`.
+- `pkg/actor/storage.go`:
+  - `storageKeyID` returns the key itself, or `~`+sha256 when the key isn't a valid segment or starts with `~`;
+  - `storageModule` builds the object once per VM and caches it on `Actor.storage`;
+  - `sqlTable` wraps `QueryTable`.
+- `pkg/actor/modules.go`: a `case "storage"`. `pkg/actor/actor.go`: the `storage` field, and a `ctx.storage` accessor in `ctxObject`.
+- `pkg/store/turn.go`: `Turn.QueryTable(caller, q, args)` returns the columns, rows as arrays in column order, and rows written (the change in `total_changes()`).
+- `pkg/server/durable_storage_test.go`: `TestDurableStorage`, with these actions:
+  - `kv`: batches; UTF-8 order with U+FF01 vs U+1F600; each list option; delete return values.
+  - `clear`.
+  - `tx`: a failed transaction leaves nothing; `rollback()`; reads its own writes; isolated from `storage.get`.
+  - `sync`: savepoint rollback of SQL and kv together; cursor shapes.
+  - `alarm`: set, get, fire through `alarms.alarm`, delete.
+  - `bad`: seven `invalid_argument` cases, and DDL refused.
+- `doc/design/slop-v3.md`: a `storage` row in the capability table, and a paragraph in §6 listing the differences.
+
+### Why
+- **Documents rather than a kernel table.** The design maps `storage.get/put` to `db` documents, and documents bring the log, export, reactors and the back office for free. A hidden `_storage` collection would need `Turn.SetDoc` to accept `_`-prefixed paths, which `validPath` refuses everywhere (the phase 1 reservation). So the collection is the ordinary `storage/`, and the docs say how to close it with a `self` rule.
+- **`{key, value}` bodies and hashed ids.** DO keys are arbitrary strings up to 2 KiB; path segments are at most 200 bytes from `[A-Za-z0-9_.~:@+-]`. Keeping the real key in the body lets `orderBy('key')` sort on the server with `strings.Compare`, which is UTF-8 byte order, the same as DO.
+- **Buffered transactions.** Rolling `_docs` back to an SQL savepoint would leave the Turn's in-memory change records (`t.record`) out of step with the database, publishing events for writes that never happened. A JS-side buffer avoids touching savepoints for documents. `transactionSync` still uses the existing `sql.transaction` savepoint for app tables, which the Turn reports only as "tables written", where over-reporting is harmless.
+- **Settled promises.** goja runs the job queue before a turn ends, so `await storage.get(k)` resolves in the same turn. `actors_test`'s `boom` (`await Promise.resolve(1)`) already relies on this.
+
+### What worked
+- `GOWORK=off go test ./pkg/server -run TestDurableStorage -count=1`: ok.
+- Mutations, each restored from `$CLAUDE_JOB_DIR/tmp/storage.*.bak`:
+  - `if (false) t.commit()` → `tx keys = []interface {}{"k"}, want … {"w"}`
+  - `r = fn()` (no savepoint) → `rows = [… "x" … "y"], want [… "y"]`, `read = 2`, `raw = [[4]]`
+  - `HasPrefix(key, "~~~")` → `docs.get storage/~t: want not_found, got 200`
+- `GOWORK=off go test ./... -count=1` ok; `golangci-lint run --new-from-rev=origin/main ./...` 0 issues after one fix.
+
+### What didn't work
+- My first `QueryTable` read `rows.Columns()` after `scanMaps` had closed the rows. That would have failed with "Rows are closed", and maps would also have collapsed duplicate column names (`SELECT v, v AS w` is fine, but `SELECT v, v` is not). I rewrote it to scan into arrays before testing.
+- Lint: `pkg/store/turn.go:237:19: Error return value of rows.Close is not checked (errcheck)` (and :263); fixed with `defer func() { _ = rows.Close() }()` and a checked explicit close.
+- Test harness: `h.call` aborts on a 404, so the "not stored under its own name" check needed `h.fail(…, "not_found")`; `docs.ls` takes `coll`, not `path`.
+- The first run of the key-hash mutation printed nothing: removing `strings.HasPrefix` left `strings` unused, so the package didn't compile. I reran it as `HasPrefix(key, "~~~")`.
+
+### What I learned
+- `total_changes()` is per connection and cumulative, so the difference before and after one statement on the turn's writer connection is exactly what that statement wrote, including `INSERT … RETURNING`, which also returns rows.
+
+### What was tricky to build
+- The order of prefix and reverse in `base.list`. The server query filters `key >= prefix`, so ascending, the first key past the prefix ends the scan. Descending, keys past the prefix come first and are skipped, not treated as the end.
+- `transactionSync` sets `current` so that `storage.kv.*`/`storage.put` inside `fn` go to the buffer, resets it in `finally`, and only then commits. That way the commit writes to the base store, and a throw from `fn` leaves nothing behind.
+
+### What warrants a second pair of eyes
+- `deleteAll` inside `transactionSync` bypasses the buffer and deletes directly. A throw then still rolls the SQL back but not the deletions, though the turn as a whole rolls back if the throw is not caught.
+- The `storage/` collection is readable by pages under the app's rules by default, while DO storage is private. That choice is documented rather than enforced.
+
+### What should be done in the future
+- A `storage.collection` setting in `app.json`, if an app already uses `storage/` for something else.
+
+### Code review instructions
+- `pkg/actor/storage.js` top to bottom (header comment, `base`, `overlay`, `transaction`, `transactionSync`), then `pkg/actor/storage.go`, `Turn.QueryTable`, and `TestDurableStorage`.
+- `GOWORK=off go test ./pkg/server -run TestDurableStorage -count=1 -v`
+
+### Technical details
+- Example:
+
+```js
+export default defineActor({
+  actions: {
+    async incr(ctx) {
+      const n = ((await ctx.storage.get('n')) || 0) + 1;
+      await ctx.storage.put('n', n);
+      if (!(await ctx.storage.getAlarm())) await ctx.storage.setAlarm(ctx.now + 60000);
+      return n;
+    },
+  },
+  alarms: { alarm(ctx) { /* runs once, at the time set */ } },
+});
+```
