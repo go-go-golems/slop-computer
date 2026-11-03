@@ -11,7 +11,6 @@ import (
 	"log"
 	"net/http"
 	"net/url"
-	"regexp"
 	"slices"
 	"sort"
 	"strconv"
@@ -22,6 +21,7 @@ import (
 	"github.com/go-go-golems/slop-computer/pkg/access"
 	"github.com/go-go-golems/slop-computer/pkg/authz"
 	capsdb "github.com/go-go-golems/slop-computer/pkg/caps/db"
+	caproom "github.com/go-go-golems/slop-computer/pkg/caps/room"
 	"github.com/go-go-golems/slop-computer/pkg/doors/web"
 	"github.com/go-go-golems/slop-computer/pkg/httpx"
 	"github.com/go-go-golems/slop-computer/pkg/policy"
@@ -40,9 +40,6 @@ type rtState struct {
 	views *rt.Registry
 	key   []byte
 
-	roomMu sync.Mutex
-	joined map[string][]string // view → named rooms
-
 	leaseMu sync.Mutex
 	leases  map[string]lease // store \x00 path
 
@@ -55,7 +52,7 @@ type lease struct {
 }
 
 func newRT(key []byte) *rtState {
-	return &rtState{views: rt.NewRegistry(), key: key, joined: map[string][]string{}, leases: map[string]lease{}}
+	return &rtState{views: rt.NewRegistry(), key: key, leases: map[string]lease{}}
 }
 
 // rtFail is a protocol error with a code the runtime understands.
@@ -281,10 +278,10 @@ func (s *Door) viewEvents(w http.ResponseWriter, r *http.Request) {
 	ch := v.Attach()
 	// The view is a peer while its stream is attached: its rooms hear it
 	// arrive and leave.
-	s.announceRooms(v)
+	s.rooms.AnnounceAll(v)
 	defer func() {
 		v.Detach(ch)
-		s.announceRooms(v)
+		s.rooms.AnnounceAll(v)
 	}()
 	resume := r.URL.Query().Has("after")
 	after, _ := strconv.ParseInt(r.URL.Query().Get("after"), 10, 64)
@@ -424,8 +421,8 @@ func (s *Door) viewEvents(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 	}
-	for _, room := range s.roomsOf(v) {
-		_ = web.WriteSSE(w, "peers", s.peersOf(v.Target, room))
+	for _, room := range s.rooms.Of(v) {
+		_ = web.WriteSSE(w, "peers", s.rooms.Peers(v.Target, room))
 	}
 	flusher.Flush()
 	ping := time.NewTicker(25 * time.Second)
@@ -1020,60 +1017,7 @@ func permissionStates(v *rt.View) map[string]string {
 }
 
 // --- rooms -------------------------------------------------------------
-
-var (
-	topicName = regexp.MustCompile(`^[a-z][a-z0-9_.-]{0,47}$`)
-	roomName  = regexp.MustCompile(`^[a-z0-9][a-z0-9_.-]{0,47}$`)
-)
-
-func (s *Door) roomsOf(v *rt.View) []string {
-	s.rt.roomMu.Lock()
-	names := append([]string{""}, s.rt.joined[v.ID]...)
-	s.rt.roomMu.Unlock()
-	var out []string
-	for _, name := range names {
-		if v.In(name) {
-			out = append(out, name)
-		}
-	}
-	return out
-}
-
-func (s *Door) peersOf(target, room string) map[string]any {
-	peers := []rt.Peer{}
-	for _, o := range s.rt.views.Of(target) {
-		if p, ok := o.AsPeer(room); ok {
-			peers = append(peers, p)
-		}
-	}
-	sort.Slice(peers, func(i, j int) bool { return peers[i].Peer < peers[j].Peer })
-	return map[string]any{"room": room, "peers": peers}
-}
-
-func (s *Door) announce(target, room string) {
-	ev := rt.Out{Type: "peers", Data: s.peersOf(target, room)}
-	for _, o := range s.rt.views.Of(target) {
-		if o.In(room) {
-			o.Send(ev)
-		}
-	}
-}
-
-// announceRooms tells every room v is in who is there now.
-func (s *Door) announceRooms(v *rt.View) {
-	for _, room := range s.roomsOf(v) {
-		s.announce(v.Target, room)
-	}
-}
-
-func (s *Door) roomClosed(v *rt.View, rooms []string) {
-	s.rt.roomMu.Lock()
-	delete(s.rt.joined, v.ID)
-	s.rt.roomMu.Unlock()
-	for _, room := range rooms {
-		s.announce(v.Target, room)
-	}
-}
+// The room capability is pkg/caps/room; these are its page protocol.
 
 type roomArgs struct {
 	Room  string          `json:"room"`
@@ -1082,26 +1026,22 @@ type roomArgs struct {
 	Patch map[string]any  `json:"patch"`
 }
 
+// roomErr is the room capability's refusal as the runtime's error.
+func roomErr(err error) error {
+	var e *caproom.Error
+	if errors.As(err, &e) {
+		return &rtFail{Code: e.Code, Message: e.Message}
+	}
+	return err
+}
+
 func (s *Door) rpcRoomJoin(_ context.Context, v *rt.View, raw json.RawMessage) (any, error) {
 	a, err := args[roomArgs](raw)
 	if err != nil {
 		return nil, err
 	}
-	if a.Room != "" && !roomName.MatchString(a.Room) {
-		return nil, rtErr("invalid_argument", "a room name matches %s", roomName)
-	}
-	if !v.Join(a.Room) {
-		return nil, rtErr("limit_reached", "at most %d rooms", rt.MaxRooms)
-	}
-	if a.Room != "" {
-		s.rt.roomMu.Lock()
-		if !slices.Contains(s.rt.joined[v.ID], a.Room) {
-			s.rt.joined[v.ID] = append(s.rt.joined[v.ID], a.Room)
-		}
-		s.rt.roomMu.Unlock()
-	}
-	s.announce(v.Target, a.Room)
-	return s.peersOf(v.Target, a.Room), nil
+	peers, err := s.rooms.Join(v, a.Room)
+	return peers, roomErr(err)
 }
 
 func (s *Door) rpcRoomLeave(_ context.Context, v *rt.View, raw json.RawMessage) (any, error) {
@@ -1109,12 +1049,7 @@ func (s *Door) rpcRoomLeave(_ context.Context, v *rt.View, raw json.RawMessage) 
 	if err != nil {
 		return nil, err
 	}
-	if v.Leave(a.Room) {
-		s.rt.roomMu.Lock()
-		s.rt.joined[v.ID] = slices.DeleteFunc(s.rt.joined[v.ID], func(n string) bool { return n == a.Room })
-		s.rt.roomMu.Unlock()
-		s.announce(v.Target, a.Room)
-	}
+	s.rooms.Leave(v, a.Room)
 	return map[string]bool{"ok": true}, nil
 }
 
@@ -1123,13 +1058,9 @@ func (s *Door) rpcRoomPresence(_ context.Context, v *rt.View, raw json.RawMessag
 	if err != nil {
 		return nil, err
 	}
-	if !v.In(a.Room) {
-		v.Join(a.Room)
+	if err := s.rooms.Presence(v, a.Room, a.Patch); err != nil {
+		return nil, roomErr(err)
 	}
-	if err := v.SetPresence(a.Room, a.Patch); err != nil {
-		return nil, rtErr("invalid_argument", "%v", err)
-	}
-	s.announce(v.Target, a.Room)
 	return map[string]bool{"ok": true}, nil
 }
 
@@ -1138,40 +1069,12 @@ func (s *Door) rpcRoomEmit(_ context.Context, v *rt.View, raw json.RawMessage) (
 	if err != nil {
 		return nil, err
 	}
-	if !topicName.MatchString(a.Topic) {
-		return nil, rtErr("invalid_argument", "a topic matches %s", topicName)
+	dropped, err := s.rooms.Emit(v, a.Room, a.Topic, a.Data, time.Now())
+	if err != nil {
+		return nil, roomErr(err)
 	}
-	if len(a.Data) > rt.MaxRoomData {
-		return nil, rtErr("invalid_argument", "data is at most %d bytes of JSON", rt.MaxRoomData)
-	}
-	need := rt.LevelAdmin
-	if l, ok := v.Caps.Topics[a.Topic]; ok {
-		need = l
-	}
-	if v.Level < need {
-		return nil, rtErr("not_permitted", "topic %q needs %s", a.Topic, need)
-	}
-	if !v.In(a.Room) {
-		return nil, rtErr("invalid_argument", "not in room %q", a.Room)
-	}
-	if !v.AllowEmit(time.Now()) {
+	if dropped {
 		return map[string]bool{"dropped": true}, nil
-	}
-	var by *string
-	if v.Caps.Declared["user"] && v.User != "" {
-		u := v.User
-		by = &u
-	}
-	data := a.Data
-	if len(data) == 0 {
-		data = json.RawMessage("null")
-	}
-	ev := rt.Out{Type: "room", Data: map[string]any{"room": a.Room, "topic": a.Topic, "data": data, "peer": v.ID, "by": by,
-		"kind": v.Kind, "guest": strings.HasPrefix(v.User, "vis_")}}
-	for _, o := range s.rt.views.Of(v.Target) {
-		if o.In(a.Room) {
-			o.Send(ev)
-		}
 	}
 	return map[string]bool{"ok": true}, nil
 }

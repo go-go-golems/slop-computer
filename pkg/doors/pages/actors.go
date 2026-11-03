@@ -13,19 +13,6 @@ import (
 	"github.com/go-go-golems/slop-computer/pkg/rt"
 )
 
-// actorEmit sends an actor's room message to the store's views (after the
-// actor's turn committed).
-func (s *Door) actorEmit(storeID, topic string, data any) {
-	raw, _ := json.Marshal(data)
-	ev := rt.Out{Type: "room", Data: map[string]any{"room": "", "topic": topic, "data": json.RawMessage(raw), "peer": "actor",
-		"by": "store:" + storeID, "kind": "actor", "guest": false}}
-	for _, v := range s.rt.views.Of(storeID) {
-		if v.In("") {
-			v.Send(ev)
-		}
-	}
-}
-
 // viewPrincipal rebuilds the principal of a view's person (for an actor's
 // view, its event's visitor).
 func (s *Door) viewPrincipal(ctx context.Context, v *rt.View) *access.Principal {
