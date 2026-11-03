@@ -2,7 +2,6 @@ package server
 
 import (
 	"context"
-	"sync"
 	"testing"
 
 	"github.com/go-go-golems/slop-computer/pkg/access"
@@ -34,17 +33,13 @@ func TestEveryRPCDeclaresAnAction(t *testing.T) {
 	}
 }
 
-var registerForgetful sync.Once
-
 // The floor holds even for a verb whose Run checks nothing: Call opens the
 // declared store at the declared level first.
 func TestCallChecksTheFloor(t *testing.T) {
-	registerForgetful.Do(func() {
-		verbs.Register(&verbs.Verb{Name: "test.forgetful", Scope: verbs.Read, Action: authz.StoreAdmin,
-			Args: []verbs.Arg{{Name: "store", Type: "string", Pos: 1}},
-			Run:  func(context.Context, *verbs.Env, *access.Principal, verbs.Args) (any, error) { return "ran", nil }})
-	})
 	h := newHarness(t)
+	h.srv.Verbs.Register(&verbs.Verb{Name: "test.forgetful", Scope: verbs.Read, Action: authz.StoreAdmin,
+		Args: []verbs.Arg{{Name: "store", Type: "string", Pos: 1}},
+		Run:  func(context.Context, *access.Principal, verbs.Args) (any, error) { return "ran", nil }})
 	admin := h.tokenFor("admin@example.com", "read", "write", "admin")
 	h.call(admin, "store.new", map[string]any{"id": "vault"})
 	mia := h.tokenFor("mia@example.com", "read", "write")

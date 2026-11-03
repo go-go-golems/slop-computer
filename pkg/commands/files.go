@@ -1,4 +1,4 @@
-package verbs
+package commands
 
 import (
 	"bytes"
@@ -16,16 +16,17 @@ import (
 	"github.com/go-go-golems/slop-computer/pkg/blobs"
 	"github.com/go-go-golems/slop-computer/pkg/rt"
 	"github.com/go-go-golems/slop-computer/pkg/store"
+	"github.com/go-go-golems/slop-computer/pkg/verbs"
 )
 
-func init() {
-	storeArg := Arg{Name: "store", Type: "string", Pos: 1, Required: true}
-	zoneArg := Arg{Name: "zone", Type: "string", Doc: "tree (default) or assets"}
-	atArg := Arg{Name: "at", Type: "string", Doc: "a snapshot number or ref; empty = the working tree"}
-	Register(
-		&Verb{Name: "files.ls", Doc: "List files: the working tree, a snapshot (--at 3, --at main) or the assets zone.", Scope: Read, Action: authz.StoreRead,
-			Args: []Arg{storeArg, {Name: "prefix", Type: "string", Pos: 2}, zoneArg, atArg},
-			Run: func(ctx context.Context, e *Env, p *access.Principal, a Args) (any, error) {
+func filesVerbs(e *Env) []*verbs.Verb {
+	storeArg := verbs.Arg{Name: "store", Type: "string", Pos: 1, Required: true}
+	zoneArg := verbs.Arg{Name: "zone", Type: "string", Doc: "tree (default) or assets"}
+	atArg := verbs.Arg{Name: "at", Type: "string", Doc: "a snapshot number or ref; empty = the working tree"}
+	return []*verbs.Verb{
+		{Name: "files.ls", Doc: "List files: the working tree, a snapshot (--at 3, --at main) or the assets zone.", Scope: verbs.Read, Action: authz.StoreRead,
+			Args: []verbs.Arg{storeArg, {Name: "prefix", Type: "string", Pos: 2}, zoneArg, atArg},
+			Run: func(ctx context.Context, p *access.Principal, a verbs.Args) (any, error) {
 				s, _, err := e.open(ctx, p, a.S("store"), rt.LevelView, "reading files")
 				if err != nil {
 					return nil, err
@@ -33,7 +34,7 @@ func init() {
 				if at := a.S("at"); at != "" {
 					n, err := s.Ref(ctx, at)
 					if err != nil {
-						return nil, Errf("not_found", "no snapshot or ref %s", at)
+						return nil, verbs.Errf("not_found", "no snapshot or ref %s", at)
 					}
 					fs, err := s.SnapshotFiles(ctx, n)
 					if err != nil {
@@ -49,10 +50,10 @@ func init() {
 				}
 				return s.Files(ctx, zoneOf(a), a.S("prefix"))
 			}},
-		&Verb{Name: "files.cat", Doc: "Read a file as text, base64, json, csv (rows) or lines.", Scope: Read, Action: authz.StoreRead,
-			Args: []Arg{storeArg, {Name: "path", Type: "string", Pos: 2, Required: true}, zoneArg, atArg,
+		{Name: "files.cat", Doc: "Read a file as text, base64, json, csv (rows) or lines.", Scope: verbs.Read, Action: authz.StoreRead,
+			Args: []verbs.Arg{storeArg, {Name: "path", Type: "string", Pos: 2, Required: true}, zoneArg, atArg,
 				{Name: "as", Type: "string", Doc: "text, base64, json, csv or lines (default: text, or base64 for binary)"}},
-			Run: func(ctx context.Context, e *Env, p *access.Principal, a Args) (any, error) {
+			Run: func(ctx context.Context, p *access.Principal, a verbs.Args) (any, error) {
 				s, _, err := e.open(ctx, p, a.S("store"), rt.LevelView, "reading files")
 				if err != nil {
 					return nil, err
@@ -61,14 +62,14 @@ func init() {
 				if at := a.S("at"); at != "" {
 					n, rerr := s.Ref(ctx, at)
 					if rerr != nil {
-						return nil, Errf("not_found", "no snapshot or ref %s", at)
+						return nil, verbs.Errf("not_found", "no snapshot or ref %s", at)
 					}
 					f, err = s.SnapshotFile(ctx, n, a.S("path"))
 				} else {
 					f, err = s.File(ctx, zoneOf(a), a.S("path"))
 				}
 				if errors.Is(err, store.ErrNotFound) {
-					return nil, Errf("not_found", "no file %s", a.S("path"))
+					return nil, verbs.Errf("not_found", "no file %s", a.S("path"))
 				}
 				if err != nil {
 					return nil, err
@@ -79,10 +80,10 @@ func init() {
 				}
 				return decodeAs(f, data, a.S("as"))
 			}},
-		&Verb{Name: "files.put", Doc: "Write one file: text, or data as base64. Tree files show after the next snapshot.", Scope: Write, Action: authz.StoreAdmin,
-			Args: []Arg{storeArg, {Name: "path", Type: "string", Pos: 2, Required: true}, {Name: "text", Type: "string"},
+		{Name: "files.put", Doc: "Write one file: text, or data as base64. Tree files show after the next snapshot.", Scope: verbs.Write, Action: authz.StoreAdmin,
+			Args: []verbs.Arg{storeArg, {Name: "path", Type: "string", Pos: 2, Required: true}, {Name: "text", Type: "string"},
 				{Name: "data", Type: "string", Doc: "base64"}, {Name: "type", Type: "string"}, zoneArg},
-			Run: func(ctx context.Context, e *Env, p *access.Principal, a Args) (any, error) {
+			Run: func(ctx context.Context, p *access.Principal, a verbs.Args) (any, error) {
 				s, d, err := e.open(ctx, p, a.S("store"), rt.LevelAdmin, "writing files")
 				if err != nil {
 					return nil, err
@@ -90,7 +91,7 @@ func init() {
 				data := []byte(a.S("text"))
 				if a.Has("data") {
 					if data, err = base64.StdEncoding.DecodeString(a.S("data")); err != nil {
-						return nil, Errf("invalid_argument", "data must be base64")
+						return nil, verbs.Errf("invalid_argument", "data must be base64")
 					}
 				}
 				var f store.File
@@ -104,10 +105,10 @@ func init() {
 				}
 				return f, nil
 			}},
-		&Verb{Name: "files.rm", Doc: "Delete files under a path (or one file).", Scope: Write, Action: authz.StoreAdmin,
-			Args: []Arg{storeArg, {Name: "path", Type: "string", Pos: 2, Required: true}, zoneArg,
+		{Name: "files.rm", Doc: "Delete files under a path (or one file).", Scope: verbs.Write, Action: authz.StoreAdmin,
+			Args: []verbs.Arg{storeArg, {Name: "path", Type: "string", Pos: 2, Required: true}, zoneArg,
 				{Name: "recursive", Type: "bool", Doc: "everything under path/"}},
-			Run: func(ctx context.Context, e *Env, p *access.Principal, a Args) (any, error) {
+			Run: func(ctx context.Context, p *access.Principal, a verbs.Args) (any, error) {
 				s, d, err := e.open(ctx, p, a.S("store"), rt.LevelAdmin, "deleting files")
 				if err != nil {
 					return nil, err
@@ -137,34 +138,34 @@ func init() {
 				})
 				return map[string]any{"removed": n}, fileErr(err)
 			}},
-		&Verb{Name: "files.push", Doc: "Replace the tree with a manifest [{path, sha256, size, type?} or {path, text|data}] and snapshot it. Send blobs {sha256: base64} the server lacks; it answers missing_blobs otherwise.", Scope: Write, Action: authz.StoreAdmin,
-			Args: []Arg{storeArg, {Name: "files", Type: "json", Required: true}, {Name: "blobs", Type: "json"},
+		{Name: "files.push", Doc: "Replace the tree with a manifest [{path, sha256, size, type?} or {path, text|data}] and snapshot it. Send blobs {sha256: base64} the server lacks; it answers missing_blobs otherwise.", Scope: verbs.Write, Action: authz.StoreAdmin,
+			Args: []verbs.Arg{storeArg, {Name: "files", Type: "json", Required: true}, {Name: "blobs", Type: "json"},
 				{Name: "message", Type: "string"}, {Name: "ref", Type: "string", Doc: "the ref to move (default main)"},
 				{Name: "prune", Type: "bool", Doc: "delete tree files not in the manifest (default true)"},
 				{Name: "snapshot", Type: "bool", Doc: "take a snapshot (default true)"}, zoneArg},
-			Run: func(ctx context.Context, e *Env, p *access.Principal, a Args) (any, error) {
+			Run: func(ctx context.Context, p *access.Principal, a verbs.Args) (any, error) {
 				return push(ctx, e, p, a, true)
 			}},
-		&Verb{Name: "files.blobs", Doc: "Upload blobs {sha256: base64} ahead of a push too large for one request.", Scope: Write, Action: authz.StoreAdmin,
-			Args: []Arg{storeArg, {Name: "blobs", Type: "json", Required: true}},
-			Run: func(ctx context.Context, e *Env, p *access.Principal, a Args) (any, error) {
+		{Name: "files.blobs", Doc: "Upload blobs {sha256: base64} ahead of a push too large for one request.", Scope: verbs.Write, Action: authz.StoreAdmin,
+			Args: []verbs.Arg{storeArg, {Name: "blobs", Type: "json", Required: true}},
+			Run: func(ctx context.Context, p *access.Principal, a verbs.Args) (any, error) {
 				if _, _, err := e.open(ctx, p, a.S("store"), rt.LevelAdmin, "uploading files"); err != nil {
 					return nil, err
 				}
 				if err := putBlobs(e, a); err != nil {
 					return nil, err
 				}
-				m, _ := a.obj("blobs")
+				m, _ := argObj(a, "blobs")
 				return map[string]any{"stored": len(m)}, nil
 			}},
-		&Verb{Name: "import.files", Doc: "Add files to a zone without pruning or snapshotting (files.push's arguments).", Scope: Write, Action: authz.StoreAdmin,
-			Args: []Arg{storeArg, {Name: "files", Type: "json", Required: true}, {Name: "blobs", Type: "json"}, zoneArg},
-			Run: func(ctx context.Context, e *Env, p *access.Principal, a Args) (any, error) {
+		{Name: "import.files", Doc: "Add files to a zone without pruning or snapshotting (files.push's arguments).", Scope: verbs.Write, Action: authz.StoreAdmin,
+			Args: []verbs.Arg{storeArg, {Name: "files", Type: "json", Required: true}, {Name: "blobs", Type: "json"}, zoneArg},
+			Run: func(ctx context.Context, p *access.Principal, a verbs.Args) (any, error) {
 				return push(ctx, e, p, a, false)
 			}},
-		&Verb{Name: "snap.new", Doc: "Snapshot the working tree and move a ref (default main) to it.", Scope: Write, Action: authz.StoreAdmin,
-			Args: []Arg{storeArg, {Name: "message", Type: "string", Pos: 2}, {Name: "ref", Type: "string"}},
-			Run: func(ctx context.Context, e *Env, p *access.Principal, a Args) (any, error) {
+		{Name: "snap.new", Doc: "Snapshot the working tree and move a ref (default main) to it.", Scope: verbs.Write, Action: authz.StoreAdmin,
+			Args: []verbs.Arg{storeArg, {Name: "message", Type: "string", Pos: 2}, {Name: "ref", Type: "string"}},
+			Run: func(ctx context.Context, p *access.Principal, a verbs.Args) (any, error) {
 				s, d, err := e.open(ctx, p, a.S("store"), rt.LevelAdmin, "snapshotting")
 				if err != nil {
 					return nil, err
@@ -180,27 +181,27 @@ func init() {
 				}
 				return map[string]any{"n": n, "rev": c.Rev}, nil
 			}},
-		&Verb{Name: "snap.ls", Doc: "List a store's snapshots, newest first.", Scope: Read, Action: authz.StoreRead,
-			Args: []Arg{storeArg},
-			Run: func(ctx context.Context, e *Env, p *access.Principal, a Args) (any, error) {
+		{Name: "snap.ls", Doc: "List a store's snapshots, newest first.", Scope: verbs.Read, Action: authz.StoreRead,
+			Args: []verbs.Arg{storeArg},
+			Run: func(ctx context.Context, p *access.Principal, a verbs.Args) (any, error) {
 				s, _, err := e.open(ctx, p, a.S("store"), rt.LevelView, "reading snapshots")
 				if err != nil {
 					return nil, err
 				}
 				return s.Snapshots(ctx)
 			}},
-		&Verb{Name: "ref.ls", Doc: "List a store's refs.", Scope: Read, Action: authz.StoreRead,
-			Args: []Arg{storeArg},
-			Run: func(ctx context.Context, e *Env, p *access.Principal, a Args) (any, error) {
+		{Name: "ref.ls", Doc: "List a store's refs.", Scope: verbs.Read, Action: authz.StoreRead,
+			Args: []verbs.Arg{storeArg},
+			Run: func(ctx context.Context, p *access.Principal, a verbs.Args) (any, error) {
 				s, _, err := e.open(ctx, p, a.S("store"), rt.LevelView, "reading refs")
 				if err != nil {
 					return nil, err
 				}
 				return s.Refs(ctx)
 			}},
-		&Verb{Name: "ref.move", Doc: "Point a ref at a snapshot (moving main back is a rollback).", Scope: Write, Action: authz.StoreAdmin,
-			Args: []Arg{storeArg, {Name: "ref", Type: "string", Pos: 2, Required: true}, {Name: "n", Type: "int", Pos: 3, Required: true}},
-			Run: func(ctx context.Context, e *Env, p *access.Principal, a Args) (any, error) {
+		{Name: "ref.move", Doc: "Point a ref at a snapshot (moving main back is a rollback).", Scope: verbs.Write, Action: authz.StoreAdmin,
+			Args: []verbs.Arg{storeArg, {Name: "ref", Type: "string", Pos: 2, Required: true}, {Name: "n", Type: "int", Pos: 3, Required: true}},
+			Run: func(ctx context.Context, p *access.Principal, a verbs.Args) (any, error) {
 				s, d, err := e.open(ctx, p, a.S("store"), rt.LevelAdmin, "moving refs")
 				if err != nil {
 					return nil, err
@@ -211,10 +212,10 @@ func init() {
 				}
 				return map[string]any{"ref": a.S("ref"), "n": a.I("n", 0), "rev": c.Rev}, nil
 			}},
-	)
+	}
 }
 
-func zoneOf(a Args) string {
+func zoneOf(a verbs.Args) string {
 	if z := a.S("zone"); z != "" {
 		return z
 	}
@@ -238,7 +239,7 @@ func decodeAs(f store.File, data []byte, as string) (any, error) {
 	case "json":
 		v := decodeJSON(data)
 		if v == nil && strings.TrimSpace(string(data)) != "null" {
-			return nil, Errf("invalid_argument", "%s is not JSON", f.Path)
+			return nil, verbs.Errf("invalid_argument", "%s is not JSON", f.Path)
 		}
 		return v, nil
 	case "lines":
@@ -246,7 +247,7 @@ func decodeAs(f store.File, data []byte, as string) (any, error) {
 	case "csv":
 		return parseCSV(data)
 	}
-	return nil, Errf("invalid_argument", "as must be text, base64, json, csv or lines")
+	return nil, verbs.Errf("invalid_argument", "as must be text, base64, json, csv or lines")
 }
 
 // parseCSV reads a CSV with a header row into objects.
@@ -255,7 +256,7 @@ func parseCSV(data []byte) ([]map[string]any, error) {
 	r.FieldsPerRecord = -1
 	recs, err := r.ReadAll()
 	if err != nil {
-		return nil, Errf("invalid_argument", "csv: %s", err.Error())
+		return nil, verbs.Errf("invalid_argument", "csv: %s", err.Error())
 	}
 	out := []map[string]any{}
 	if len(recs) == 0 {
@@ -285,23 +286,23 @@ type pushFile struct {
 
 // push applies a manifest. full=true is files.push (prune and snapshot by
 // default); false is import.files (neither).
-func push(ctx context.Context, e *Env, p *access.Principal, a Args, full bool) (any, error) {
+func push(ctx context.Context, e *Env, p *access.Principal, a verbs.Args, full bool) (any, error) {
 	s, d, err := e.open(ctx, p, a.S("store"), rt.LevelAdmin, "pushing files")
 	if err != nil {
 		return nil, err
 	}
 	zone := zoneOf(a)
-	raw, ok := a.list("files")
+	raw, ok := argList(a, "files")
 	if !ok {
-		return nil, Errf("invalid_argument", "files is a list of {path, sha256, size}")
+		return nil, verbs.Errf("invalid_argument", "files is a list of {path, sha256, size}")
 	}
 	var files []pushFile
 	b, _ := json.Marshal(raw)
 	if err := json.Unmarshal(b, &files); err != nil {
-		return nil, Errf("invalid_argument", "files is a list of {path, sha256, size}")
+		return nil, verbs.Errf("invalid_argument", "files is a list of {path, sha256, size}")
 	}
 	if len(files) > store.MaxTreeFiles {
-		return nil, Errf("invalid_argument", "at most %d files", store.MaxTreeFiles)
+		return nil, verbs.Errf("invalid_argument", "at most %d files", store.MaxTreeFiles)
 	}
 	if err := putBlobs(e, a); err != nil {
 		return nil, err
@@ -314,7 +315,7 @@ func push(ctx context.Context, e *Env, p *access.Principal, a Args, full bool) (
 		if f.Data != "" {
 			var err error
 			if data, err = base64.StdEncoding.DecodeString(f.Data); err != nil {
-				return nil, Errf("invalid_argument", "%s: data must be base64", f.Path)
+				return nil, verbs.Errf("invalid_argument", "%s: data must be base64", f.Path)
 			}
 		}
 		sum, err := s.Blobs.Put(data)
@@ -327,17 +328,17 @@ func push(ctx context.Context, e *Env, p *access.Principal, a Args, full bool) (
 	seen := map[string]bool{}
 	for _, f := range files {
 		if !blobs.ValidSum(f.SHA256) || !store.ValidFilePath(f.Path) {
-			return nil, Errf("invalid_argument", "bad manifest entry %q", f.Path)
+			return nil, verbs.Errf("invalid_argument", "bad manifest entry %q", f.Path)
 		}
 		if seen[f.Path] {
-			return nil, Errf("invalid_argument", "%s appears twice", f.Path)
+			return nil, verbs.Errf("invalid_argument", "%s appears twice", f.Path)
 		}
 		seen[f.Path] = true
 		sums = append(sums, f.SHA256)
 	}
 	if missing := s.Blobs.Missing(sums); len(missing) > 0 {
 		sort.Strings(missing)
-		return nil, &Error{Code: "missing_blobs", Message: "send these blobs", Extra: map[string]any{"missing": missing}}
+		return nil, &verbs.Error{Code: "missing_blobs", Message: "send these blobs", Extra: map[string]any{"missing": missing}}
 	}
 	prune := full && (!a.Has("prune") || a.B("prune"))
 	snap := full && zone == "tree" && (!a.Has("snapshot") || a.B("snapshot"))

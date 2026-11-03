@@ -45,9 +45,9 @@ const (
 )
 
 // Req is what a typed verb's Run receives, whichever door it came through.
+// Dependencies are not here: the Def's Run closes over them.
 type Req struct {
 	context.Context
-	Env       *Env
 	Principal *access.Principal
 }
 
@@ -98,12 +98,12 @@ func (d Def[In, Out]) Verb() *Verb {
 		}
 	}
 	run := d.Run
-	v.Run = func(ctx context.Context, e *Env, p *access.Principal, a Args) (any, error) {
+	v.Run = func(ctx context.Context, p *access.Principal, a Args) (any, error) {
 		x, err := decodeArgs[In](d.Name, a)
 		if err != nil {
 			return nil, err
 		}
-		return run(Req{Context: ctx, Env: e, Principal: p}, x)
+		return run(Req{Context: ctx, Principal: p}, x)
 	}
 	return v
 }

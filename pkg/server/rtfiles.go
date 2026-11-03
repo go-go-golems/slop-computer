@@ -22,10 +22,10 @@ import (
 	"strconv"
 	"strings"
 
+	"github.com/go-go-golems/slop-computer/pkg/commands"
 	"github.com/go-go-golems/slop-computer/pkg/rt"
 	"github.com/go-go-golems/slop-computer/pkg/store"
 	"github.com/go-go-golems/slop-computer/pkg/system"
-	"github.com/go-go-golems/slop-computer/pkg/verbs"
 )
 
 const (
@@ -42,7 +42,7 @@ func (s *Server) reachableStores(ctx context.Context, v *rt.View, ceil rt.Level)
 	if p.IsAdmin() {
 		rows, err = s.Sys.Stores(ctx, "")
 	} else if p != nil {
-		rows, err = verbs.VisibleStores(ctx, s.Env, p)
+		rows, err = commands.VisibleStores(ctx, s.Env, p)
 	}
 	if err != nil {
 		return nil, err

@@ -48,7 +48,7 @@ func (d *Docs) regRows(ctx context.Context, v *rt.View, verb string, args verbs.
 	if p == nil {
 		return nil
 	}
-	out, err := verbs.Call(d.Host.WithPrincipal(ctx, p), d.Env, p, verb, args)
+	out, err := d.Verbs.Call(d.Host.WithPrincipal(ctx, p), p, verb, args)
 	if err != nil {
 		return nil
 	}
@@ -98,7 +98,7 @@ func (d *Docs) Coll(ctx context.Context, v *rt.View, tgt rt.Target, pageColl str
 		}
 		p := d.Host.Viewer(ctx, v)
 		for _, r := range rows {
-			docs = append(docs, rt.Doc{Path: pageColl + "/" + r.ID, Body: storeBody(r, min(d.Env.K.Access.Level(ctx, p, r).Level, v.Space.Stores)),
+			docs = append(docs, rt.Doc{Path: pageColl + "/" + r.ID, Body: storeBody(r, min(d.Access.Level(ctx, p, r).Level, v.Space.Stores)),
 				Version: max(storeVersion(ctx, d.Sys, r.ID, v.User, head), 1)})
 		}
 	case tgt.Store == "" && tgt.Path == rt.PeopleRoot:
@@ -137,7 +137,7 @@ func (d *Docs) Doc(ctx context.Context, v *rt.View, tgt rt.Target, path string) 
 		if err != nil {
 			return nil
 		}
-		level := min(d.Env.K.Access.Level(ctx, d.Host.Viewer(ctx, v), row).Level, v.Space.Stores)
+		level := min(d.Access.Level(ctx, d.Host.Viewer(ctx, v), row).Level, v.Space.Stores)
 		if level < rt.LevelView {
 			return nil
 		}
@@ -259,14 +259,14 @@ func (d *Docs) Write(ctx context.Context, v *rt.View, tgt rt.Target, in WriteIn)
 	}
 	// Refuse what the verb would refuse before asking anyone to allow it,
 	// then ask the person in the shell (once per view and call).
-	if err := verbs.Check(p, w.verb, w.args); err != nil {
+	if err := d.Verbs.Check(p, w.verb, w.args); err != nil {
 		ve := verbs.AsError(err)
 		return 0, errf(ve.Code, "%s", ve.Message)
 	}
-	if c, ok := d.Env.Confirmations().Check(p.Person.ID, v.ID, v.App, v.App, w.verb, w.args); !ok {
+	if c, ok := d.Confirm.Check(p.Person.ID, v.ID, v.App, v.App, w.verb, w.args); !ok {
 		return 0, &Error{Code: "confirmation_required", Message: v.App + " asks to " + c.Summary, Confirm: c.ID}
 	}
-	if _, err := verbs.Call(d.Host.WithPrincipal(ctx, p), d.Env, p, w.verb, w.args); err != nil {
+	if _, err := d.Verbs.Call(d.Host.WithPrincipal(ctx, p), p, w.verb, w.args); err != nil {
 		ve := verbs.AsError(err)
 		return 0, errf(ve.Code, "%s", ve.Message)
 	}

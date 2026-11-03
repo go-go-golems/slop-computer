@@ -1,5 +1,8 @@
-// Package verbs is the table of every operation of the platform. The CLI,
-// the HTTP API and eval programs are all generated from it.
+// Package verbs is the table of every operation of the platform: the
+// machinery only (SLOP3-010 PR 1). The commands live with their owners
+// (pkg/commands until their domains take them) and are registered into a
+// Table by the host; the CLI, the HTTP API, MCP and eval programs are all
+// generated from that table. This package imports only core packages.
 package verbs
 
 import (
@@ -16,7 +19,6 @@ import (
 	"github.com/go-go-golems/slop-computer/pkg/access"
 	"github.com/go-go-golems/slop-computer/pkg/authz"
 	"github.com/go-go-golems/slop-computer/pkg/rt"
-	"github.com/go-go-golems/slop-computer/pkg/system"
 )
 
 // Scope says whether a verb changes anything: a token needs the read scope
@@ -61,8 +63,12 @@ type Verb struct {
 	Input  *jsonschema.Schema `json:"input,omitempty"`
 	Output *jsonschema.Schema `json:"output,omitempty"`
 
-	Run func(ctx context.Context, e *Env, p *access.Principal, a Args) (any, error) `json:"-"`
+	Run Run `json:"-"`
 }
+
+// Run is a verb's body. Its dependencies are captured when the verb is
+// built (a command's Env), not passed per call.
+type Run func(ctx context.Context, p *access.Principal, a Args) (any, error)
 
 // Group is the part before the dot ("grant" of "grant.set").
 func (v *Verb) Group() string { g, _, _ := strings.Cut(v.Name, "."); return g }
@@ -75,12 +81,33 @@ func (v *Verb) Short() string {
 	return v.Name
 }
 
-var registry = map[string]*Verb{}
+// Stores is the table's one dependency: the floor check on the store a
+// verb's action is on, before Run (a not_found, or the level it needs).
+type Stores interface {
+	Check(ctx context.Context, p *access.Principal, store string, need rt.Level, what string) error
+}
+
+// Table is a set of verbs. A host owns one; Default serves the package
+// functions.
+type Table struct {
+	// Stores checks a verb's store before it runs (nil: verbs on a store
+	// cannot be called, only listed).
+	Stores Stores
+	byName map[string]*Verb
+}
+
+// NewTable is an empty table.
+func NewTable() *Table { return &Table{byName: map[string]*Verb{}} }
+
+// Default is the CLI's table: the commands, unbound, for listing. A host
+// builds its own (there are no package-level Call or Get, so a door cannot
+// reach Default by accident).
+var Default = NewTable()
 
 // Register adds verbs to the table.
-func Register(vs ...*Verb) {
+func (t *Table) Register(vs ...*Verb) {
 	for _, v := range vs {
-		if _, dup := registry[v.Name]; dup {
+		if _, dup := t.byName[v.Name]; dup {
 			panic("duplicate verb " + v.Name)
 		}
 		if v.Effect == "" {
@@ -89,17 +116,17 @@ func Register(vs ...*Verb) {
 				v.Effect = EffectWrite
 			}
 		}
-		registry[v.Name] = v
+		t.byName[v.Name] = v
 	}
 }
 
 // Get returns a verb by name.
-func Get(name string) (*Verb, bool) { v, ok := registry[name]; return v, ok }
+func (t *Table) Get(name string) (*Verb, bool) { v, ok := t.byName[name]; return v, ok }
 
 // All returns every verb, sorted by name.
-func All() []*Verb {
-	out := make([]*Verb, 0, len(registry))
-	for _, v := range registry {
+func (t *Table) All() []*Verb {
+	out := make([]*Verb, 0, len(t.byName))
+	for _, v := range t.byName {
 		out = append(out, v)
 	}
 	sort.Slice(out, func(i, j int) bool { return out[i].Name < out[j].Name })
@@ -239,22 +266,25 @@ func AsError(err error) *Error {
 }
 
 // Call runs a verb for a principal: scope, admin check, required args, Run.
-func Call(ctx context.Context, e *Env, p *access.Principal, name string, a Args) (any, error) {
+func (t *Table) Call(ctx context.Context, p *access.Principal, name string, a Args) (any, error) {
 	if a == nil {
 		a = Args{}
 	}
-	if err := Check(p, name, a); err != nil {
+	if err := t.Check(p, name, a); err != nil {
 		return nil, err
 	}
-	v, _ := Get(name)
+	v, _ := t.Get(name)
 	if spec, _ := authz.Of(v.Action); spec.Store {
 		if id := v.store(a); id != "" {
-			if _, _, err := e.open(ctx, p, id, spec.Level, v.Name); err != nil {
+			if t.Stores == nil {
+				return nil, Errf("unavailable", "%s: this table has no stores", v.Name)
+			}
+			if err := t.Stores.Check(ctx, p, id, spec.Level, v.Name); err != nil {
 				return nil, err
 			}
 		}
 	}
-	return v.Run(ctx, e, p, a)
+	return v.Run(ctx, p, a)
 }
 
 // store is the store a verb's action is on ("" when Run finds it).
@@ -270,8 +300,8 @@ func (v *Verb) store(a Args) string {
 
 // Check runs the checks Call makes before Run: the verb exists, the token
 // has its scope, admins only, no guest writes, required arguments.
-func Check(p *access.Principal, name string, a Args) error {
-	v, ok := Get(name)
+func (t *Table) Check(p *access.Principal, name string, a Args) error {
+	v, ok := t.Get(name)
 	if !ok {
 		return Errf("not_found", "no verb %q", name)
 	}
@@ -290,6 +320,9 @@ func Check(p *access.Principal, name string, a Args) error {
 // Check decides before looking at arguments: what a door lists for p.
 func Callable(p *access.Principal, v *Verb) bool { return callable(p, v) == nil }
 
+// Callable reports whether p may call v at all; see the function Callable.
+func (t *Table) Callable(p *access.Principal, v *Verb) bool { return Callable(p, v) }
+
 func callable(p *access.Principal, v *Verb) error {
 	if !p.HasScope(string(v.Scope)) {
 		return Errf("permission_denied", "this token lacks the %s scope", v.Scope)
@@ -300,7 +333,7 @@ func callable(p *access.Principal, v *Verb) error {
 	// the role half of the floor; Call checks the level on the store
 	ok, _ := authz.Floor(v.Action, rt.LevelOwner, p.IsAdmin())
 	if !ok || (v.AdminOnly && !p.IsAdmin()) {
-		if p.Kind == access.KindToken && p.Person != nil && p.Person.Role == system.RoleAdmin {
+		if p.Kind == access.KindToken && p.Person != nil && p.Person.Role == "admin" { // system.RoleAdmin
 			return Errf("permission_denied", "%s needs a token with the admin scope", v.Name)
 		}
 		return Errf("permission_denied", "%s is for admins", v.Name)

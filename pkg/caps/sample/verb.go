@@ -1,8 +1,10 @@
 package sample
 
 import (
+	"github.com/go-go-golems/slop-computer/pkg/access"
 	"github.com/go-go-golems/slop-computer/pkg/authz"
 	"github.com/go-go-golems/slop-computer/pkg/llm"
+	"github.com/go-go-golems/slop-computer/pkg/system"
 	"github.com/go-go-golems/slop-computer/pkg/verbs"
 )
 
@@ -22,20 +24,29 @@ type Part struct {
 	Delta string `json:"delta"`
 }
 
-func init() {
-	verbs.Register(verbs.Def[RunIn, llm.Answer]{
+// Deps is what sample.run needs.
+type Deps struct {
+	Sys     *system.DB
+	Backend func() llm.Backend // read per call: a host sets its backend after building
+	Access  *access.Checker
+}
+
+// Verbs are the sample capability's verbs, bound to d (with zero Deps they
+// can be listed, not run).
+func Verbs(d Deps) []*verbs.Verb {
+	return []*verbs.Verb{verbs.Def[RunIn, llm.Answer]{
 		Name: "sample.run",
 		Doc: "Ask the model, as yourself: charged to your LLM budget, with no app in between. " +
 			"The answer streams to callers that accept it (the CLI shows it on stderr).",
 		Scope: verbs.Write, Effect: verbs.EffectStream, Action: authz.Account,
 		Run: func(r verbs.Req, in RunIn) (llm.Answer, error) {
-			sp := &Sampler{Sys: r.Env.Sys}
-			if r.Env.A != nil {
-				sp.Backend = r.Env.A.LLM
+			sp := &Sampler{Sys: d.Sys}
+			if d.Backend != nil {
+				sp.Backend = d.Backend()
 			}
 			aud := ""
-			if r.Env.K != nil && r.Env.K.Access != nil {
-				aud = string(r.Env.K.Access.AudienceOf(r, r.Principal))
+			if d.Access != nil {
+				aud = string(d.Access.AudienceOf(r, r.Principal))
 			}
 			payer := ""
 			if r.Principal != nil && r.Principal.Person != nil {
@@ -66,7 +77,7 @@ func init() {
 			}
 			return ans, nil
 		},
-	}.Verb())
+	}.Verb()}
 }
 
 // asVerbError is a sample refusal as a verb error, with its code.

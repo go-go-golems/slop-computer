@@ -1,4 +1,4 @@
-package verbs
+package commands
 
 import (
 	"context"
@@ -11,17 +11,18 @@ import (
 	"github.com/go-go-golems/slop-computer/pkg/authz"
 	"github.com/go-go-golems/slop-computer/pkg/rt"
 	"github.com/go-go-golems/slop-computer/pkg/store"
+	"github.com/go-go-golems/slop-computer/pkg/verbs"
 )
 
 // MaxBatch is the most documents one docs.* call writes (in one turn).
 const MaxBatch = 500
 
-func init() {
-	storeArg := Arg{Name: "store", Type: "string", Pos: 1, Required: true}
-	Register(
-		&Verb{Name: "docs.get", Doc: "Read one document.", Scope: Read, Action: authz.DocRead,
-			Args: []Arg{storeArg, {Name: "path", Type: "string", Pos: 2, Required: true}},
-			Run: func(ctx context.Context, e *Env, p *access.Principal, a Args) (any, error) {
+func docsVerbs(e *Env) []*verbs.Verb {
+	storeArg := verbs.Arg{Name: "store", Type: "string", Pos: 1, Required: true}
+	return []*verbs.Verb{
+		{Name: "docs.get", Doc: "Read one document.", Scope: verbs.Read, Action: authz.DocRead,
+			Args: []verbs.Arg{storeArg, {Name: "path", Type: "string", Pos: 2, Required: true}},
+			Run: func(ctx context.Context, p *access.Principal, a verbs.Args) (any, error) {
 				s, d, err := e.open(ctx, p, a.S("store"), rt.LevelView, "reading")
 				if err != nil {
 					return nil, err
@@ -29,39 +30,39 @@ func init() {
 				path, rules := a.S("path"), e.K.Rules(ctx, s.ID)
 				doc, err := s.GetDoc(ctx, path, func(path string) bool { return rules.CanRead(path, p.ID(), d.Level) })
 				if errors.Is(err, store.ErrNotFound) {
-					return nil, Errf("not_found", "no document %s", path)
+					return nil, verbs.Errf("not_found", "no document %s", path)
 				}
 				return doc, err
 			}},
-		&Verb{Name: "docs.ls", Doc: "List a collection's documents.", Scope: Read, Action: authz.DocRead,
-			Args: []Arg{storeArg, {Name: "coll", Type: "string", Pos: 2, Required: true}, {Name: "limit", Type: "int"}},
-			Run: func(ctx context.Context, e *Env, p *access.Principal, a Args) (any, error) {
+		{Name: "docs.ls", Doc: "List a collection's documents.", Scope: verbs.Read, Action: authz.DocRead,
+			Args: []verbs.Arg{storeArg, {Name: "coll", Type: "string", Pos: 2, Required: true}, {Name: "limit", Type: "int"}},
+			Run: func(ctx context.Context, p *access.Principal, a verbs.Args) (any, error) {
 				return queryDocs(ctx, e, p, a.S("store"), rt.Query{Coll: a.S("coll"), Limit: int(a.I("limit", 0))})
 			}},
-		Def[DocsQueryIn, []store.Doc]{Name: "docs.query", Doc: "Query a collection: where [[field, op, value], …], orderBy, desc, limit.",
-			Scope: Read, Action: authz.DocRead,
-			Run: func(r Req, in DocsQueryIn) ([]store.Doc, error) {
+		verbs.Def[DocsQueryIn, []store.Doc]{Name: "docs.query", Doc: "Query a collection: where [[field, op, value], …], orderBy, desc, limit.",
+			Scope: verbs.Read, Action: authz.DocRead,
+			Run: func(r verbs.Req, in DocsQueryIn) ([]store.Doc, error) {
 				q := rt.Query{Coll: in.Coll, Order: in.OrderBy, Desc: in.Desc, Limit: in.Limit}
 				for _, c := range in.Where {
 					q.Filters = append(q.Filters, rt.Filter(c))
 				}
-				return queryDocs(r, r.Env, r.Principal, in.Store, q)
+				return queryDocs(r, e, r.Principal, in.Store, q)
 			}}.Verb(),
-		&Verb{Name: "docs.set", Doc: "Write whole documents: path and data, or batch [{path, data, ifVersion?}] in one commit.", Scope: Write, Action: authz.DocWrite,
-			Args: []Arg{storeArg, {Name: "path", Type: "string", Pos: 2}, {Name: "data", Type: "json"},
+		{Name: "docs.set", Doc: "Write whole documents: path and data, or batch [{path, data, ifVersion?}] in one commit.", Scope: verbs.Write, Action: authz.DocWrite,
+			Args: []verbs.Arg{storeArg, {Name: "path", Type: "string", Pos: 2}, {Name: "data", Type: "json"},
 				{Name: "ifVersion", Type: "int", Doc: "fail unless the document is at this version"},
 				{Name: "batch", Type: "json", Doc: "[{path, data, ifVersion?}]"}},
-			Run: func(ctx context.Context, e *Env, p *access.Principal, a Args) (any, error) {
+			Run: func(ctx context.Context, p *access.Principal, a verbs.Args) (any, error) {
 				return writeDocs(ctx, e, p, a, "set")
 			}},
-		&Verb{Name: "docs.update", Doc: "Deep-merge data into documents (creating them): path and data, or batch [{path, data}].", Scope: Write, Action: authz.DocWrite,
-			Args: []Arg{storeArg, {Name: "path", Type: "string", Pos: 2}, {Name: "data", Type: "json"}, {Name: "batch", Type: "json"}},
-			Run: func(ctx context.Context, e *Env, p *access.Principal, a Args) (any, error) {
+		{Name: "docs.update", Doc: "Deep-merge data into documents (creating them): path and data, or batch [{path, data}].", Scope: verbs.Write, Action: authz.DocWrite,
+			Args: []verbs.Arg{storeArg, {Name: "path", Type: "string", Pos: 2}, {Name: "data", Type: "json"}, {Name: "batch", Type: "json"}},
+			Run: func(ctx context.Context, p *access.Principal, a verbs.Args) (any, error) {
 				return writeDocs(ctx, e, p, a, "update")
 			}},
-		&Verb{Name: "docs.rm", Doc: "Delete documents: path, or paths [..] in one commit.", Scope: Write, Action: authz.DocWrite,
-			Args: []Arg{storeArg, {Name: "path", Type: "string", Pos: 2}, {Name: "paths", Type: "json"}},
-			Run: func(ctx context.Context, e *Env, p *access.Principal, a Args) (any, error) {
+		{Name: "docs.rm", Doc: "Delete documents: path, or paths [..] in one commit.", Scope: verbs.Write, Action: authz.DocWrite,
+			Args: []verbs.Arg{storeArg, {Name: "path", Type: "string", Pos: 2}, {Name: "paths", Type: "json"}},
+			Run: func(ctx context.Context, p *access.Principal, a verbs.Args) (any, error) {
 				paths := a.Strings("paths")
 				if a.S("path") != "" {
 					paths = append(paths, a.S("path"))
@@ -72,7 +73,7 @@ func init() {
 				}
 				return applyDocs(ctx, e, p, a.S("store"), items, "rm")
 			}},
-	)
+	}
 }
 
 func filterOf(w any) (rt.Filter, bool) {
@@ -111,29 +112,29 @@ type docItem struct {
 	IfVersion int64
 }
 
-func writeDocs(ctx context.Context, e *Env, p *access.Principal, a Args, op string) (any, error) {
+func writeDocs(ctx context.Context, e *Env, p *access.Principal, a verbs.Args, op string) (any, error) {
 	var items []docItem
 	if a.Has("batch") {
-		l, ok := a.list("batch")
+		l, ok := argList(a, "batch")
 		if !ok {
-			return nil, Errf("invalid_argument", "batch is a list of {path, data}")
+			return nil, verbs.Errf("invalid_argument", "batch is a list of {path, data}")
 		}
 		for _, x := range l {
 			m, ok := x.(map[string]any)
 			if !ok {
-				return nil, Errf("invalid_argument", "batch is a list of {path, data}")
+				return nil, verbs.Errf("invalid_argument", "batch is a list of {path, data}")
 			}
-			it := docItem{Path: Args(m).S("path"), IfVersion: Args(m).I("ifVersion", 0)}
-			if it.Data, ok = Args(m).obj("data"); !ok {
-				return nil, Errf("invalid_argument", "%s: data must be an object", it.Path)
+			it := docItem{Path: verbs.Args(m).S("path"), IfVersion: verbs.Args(m).I("ifVersion", 0)}
+			if it.Data, ok = argObj(verbs.Args(m), "data"); !ok {
+				return nil, verbs.Errf("invalid_argument", "%s: data must be an object", it.Path)
 			}
 			items = append(items, it)
 		}
 	}
 	if a.S("path") != "" {
-		data, ok := a.obj("data")
+		data, ok := argObj(a, "data")
 		if !ok {
-			return nil, Errf("invalid_argument", "data must be a JSON object")
+			return nil, verbs.Errf("invalid_argument", "data must be a JSON object")
 		}
 		items = append(items, docItem{Path: a.S("path"), Data: data, IfVersion: a.I("ifVersion", 0)})
 	}
@@ -143,10 +144,10 @@ func writeDocs(ctx context.Context, e *Env, p *access.Principal, a Args, op stri
 // applyDocs writes items in one turn after checking every path's rule.
 func applyDocs(ctx context.Context, e *Env, p *access.Principal, id string, items []docItem, op string) (any, error) {
 	if len(items) == 0 {
-		return nil, Errf("invalid_argument", "nothing to write: give path and data, or batch")
+		return nil, verbs.Errf("invalid_argument", "nothing to write: give path and data, or batch")
 	}
 	if len(items) > MaxBatch {
-		return nil, Errf("invalid_argument", "at most %d documents per call", MaxBatch)
+		return nil, verbs.Errf("invalid_argument", "at most %d documents per call", MaxBatch)
 	}
 	s, d, err := e.open(ctx, p, id, rt.LevelView, "writing")
 	if err != nil {
@@ -156,10 +157,10 @@ func applyDocs(ctx context.Context, e *Env, p *access.Principal, id string, item
 	for _, it := range items {
 		if !rules.CanWrite(it.Path, p.ID(), d.Level) {
 			if !rules.CanRead(it.Path, p.ID(), d.Level) {
-				return nil, Errf("not_found", "no document %s", it.Path)
+				return nil, verbs.Errf("not_found", "no document %s", it.Path)
 			}
 			_, need := rules.Need(it.Path, p.ID())
-			return nil, &Error{Code: "permission_denied", Message: "writing " + it.Path + " needs " + need.String(),
+			return nil, &verbs.Error{Code: "permission_denied", Message: "writing " + it.Path + " needs " + need.String(),
 				Trace: append(d.Trace, "rule "+it.Path+": write needs "+need.String())}
 		}
 	}

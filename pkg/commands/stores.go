@@ -1,4 +1,4 @@
-package verbs
+package commands
 
 import (
 	"bytes"
@@ -13,20 +13,21 @@ import (
 	"github.com/go-go-golems/slop-computer/pkg/rt"
 	"github.com/go-go-golems/slop-computer/pkg/store"
 	"github.com/go-go-golems/slop-computer/pkg/system"
+	"github.com/go-go-golems/slop-computer/pkg/verbs"
 )
 
 func bytesReader(b []byte) *bytes.Reader { return bytes.NewReader(b) }
 
-func init() {
-	Register(
-		&Verb{Name: "store.ls", Doc: "List the stores you own or hold a grant on (admins: --all).", Scope: Read, Action: authz.Account,
-			Args: []Arg{{Name: "all", Type: "bool", Doc: "every store (admins)"}},
-			Run: func(ctx context.Context, e *Env, p *access.Principal, a Args) (any, error) {
+func storeVerbs(e *Env) []*verbs.Verb {
+	return []*verbs.Verb{
+		{Name: "store.ls", Doc: "List the stores you own or hold a grant on (admins: --all).", Scope: verbs.Read, Action: authz.Account,
+			Args: []verbs.Arg{{Name: "all", Type: "bool", Doc: "every store (admins)"}},
+			Run: func(ctx context.Context, p *access.Principal, a verbs.Args) (any, error) {
 				var rows []system.StoreRow
 				var err error
 				if a.B("all") {
 					if !p.IsAdmin() {
-						return nil, Errf("permission_denied", "only admins list every store")
+						return nil, verbs.Errf("permission_denied", "only admins list every store")
 					}
 					rows, err = e.Sys.Stores(ctx, "")
 				} else {
@@ -43,25 +44,25 @@ func init() {
 				}
 				return out, nil
 			}},
-		&Verb{Name: "store.new", Doc: "Make a store; you become its owner.", Scope: Write, Action: authz.StoreCreate,
-			Args: []Arg{{Name: "id", Type: "string", Pos: 1, Doc: "lowercase slug; empty makes s-xxxxxxxx"},
+		{Name: "store.new", Doc: "Make a store; you become its owner.", Scope: verbs.Write, Action: authz.StoreCreate,
+			Args: []verbs.Arg{{Name: "id", Type: "string", Pos: 1, Doc: "lowercase slug; empty makes s-xxxxxxxx"},
 				{Name: "type", Type: "string"}, {Name: "app", Type: "string", Doc: "the app store it runs"}},
-			Run: func(ctx context.Context, e *Env, p *access.Principal, a Args) (any, error) {
+			Run: func(ctx context.Context, p *access.Principal, a verbs.Args) (any, error) {
 				if !e.K.Access.In(ctx, p, access.GroupMember) {
-					return nil, Errf("permission_denied", "only members make stores")
+					return nil, verbs.Errf("permission_denied", "only members make stores")
 				}
 				row, _, err := e.K.CreateStore(ctx, p, kernel.NewStore{ID: a.S("id"), Type: a.S("type"), App: a.S("app")})
 				if errors.Is(err, system.ErrExists) {
-					return nil, Errf("conflict", "store %s exists", a.S("id"))
+					return nil, verbs.Errf("conflict", "store %s exists", a.S("id"))
 				}
 				if err != nil {
-					return nil, Errf("invalid_argument", "%s", err.Error())
+					return nil, verbs.Errf("invalid_argument", "%s", err.Error())
 				}
 				return row, nil
 			}},
-		&Verb{Name: "store.rm", Doc: "Delete a store, its documents, files and grants. Owners and admins only.", Scope: Write, Action: authz.StoreAdmin, StoreArg: "id",
-			Args: []Arg{{Name: "id", Type: "string", Pos: 1, Required: true}},
-			Run: func(ctx context.Context, e *Env, p *access.Principal, a Args) (any, error) {
+		{Name: "store.rm", Doc: "Delete a store, its documents, files and grants. Owners and admins only.", Scope: verbs.Write, Action: authz.StoreAdmin, StoreArg: "id",
+			Args: []verbs.Arg{{Name: "id", Type: "string", Pos: 1, Required: true}},
+			Run: func(ctx context.Context, p *access.Principal, a verbs.Args) (any, error) {
 				need := rt.LevelOwner
 				if p.IsAdmin() {
 					need = rt.LevelAdmin
@@ -74,18 +75,18 @@ func init() {
 				}
 				return map[string]any{"deleted": a.S("id")}, nil
 			}},
-		&Verb{Name: "store.type", Doc: "Set a store's type, which decides the typed mounts that serve it (/b/:id --type blocks); empty clears it. Admins only.", Scope: Write, AdminOnly: true, Action: authz.PlatformAdmin,
-			Args: []Arg{{Name: "id", Type: "string", Pos: 1, Required: true}, {Name: "type", Type: "string", Pos: 2, Doc: "the new type; empty clears it"}},
-			Run: func(ctx context.Context, e *Env, p *access.Principal, a Args) (any, error) {
+		{Name: "store.type", Doc: "Set a store's type, which decides the typed mounts that serve it (/b/:id --type blocks); empty clears it. Admins only.", Scope: verbs.Write, AdminOnly: true, Action: authz.PlatformAdmin,
+			Args: []verbs.Arg{{Name: "id", Type: "string", Pos: 1, Required: true}, {Name: "type", Type: "string", Pos: 2, Doc: "the new type; empty clears it"}},
+			Run: func(ctx context.Context, p *access.Principal, a verbs.Args) (any, error) {
 				row, err := e.K.SetStoreType(ctx, p, a.S("id"), a.S("type"))
 				if errors.Is(err, system.ErrNotFound) {
-					return nil, Errf("not_found", "no store %s", a.S("id"))
+					return nil, verbs.Errf("not_found", "no store %s", a.S("id"))
 				}
 				return row, err
 			}},
-		&Verb{Name: "store.meta", Doc: "A store's settings, head rev, sizes and your level on it.", Scope: Read, Action: authz.StoreRead, StoreArg: "id",
-			Args: []Arg{{Name: "id", Type: "string", Pos: 1, Required: true}},
-			Run: func(ctx context.Context, e *Env, p *access.Principal, a Args) (any, error) {
+		{Name: "store.meta", Doc: "A store's settings, head rev, sizes and your level on it.", Scope: verbs.Read, Action: authz.StoreRead, StoreArg: "id",
+			Args: []verbs.Arg{{Name: "id", Type: "string", Pos: 1, Required: true}},
+			Run: func(ctx context.Context, p *access.Principal, a verbs.Args) (any, error) {
 				s, d, err := e.open(ctx, p, a.S("id"), rt.LevelView, "reading")
 				if err != nil {
 					return nil, err
@@ -96,9 +97,9 @@ func init() {
 				return map[string]any{"store": row, "meta": s.AllMeta(), "head": s.Head(), "docs": s.CountDocs(ctx),
 					"collections": colls, "refs": refs, "level": d.LevelName(), "audience": d.Audience}, nil
 			}},
-		&Verb{Name: "grant.ls", Doc: "List a store's grants.", Scope: Read, Action: authz.StoreAdmin,
-			Args: []Arg{{Name: "store", Type: "string", Pos: 1, Required: true}},
-			Run: func(ctx context.Context, e *Env, p *access.Principal, a Args) (any, error) {
+		{Name: "grant.ls", Doc: "List a store's grants.", Scope: verbs.Read, Action: authz.StoreAdmin,
+			Args: []verbs.Arg{{Name: "store", Type: "string", Pos: 1, Required: true}},
+			Run: func(ctx context.Context, p *access.Principal, a verbs.Args) (any, error) {
 				if _, _, err := e.open(ctx, p, a.S("store"), rt.LevelAdmin, "listing grants"); err != nil {
 					return nil, err
 				}
@@ -115,41 +116,41 @@ func init() {
 				}
 				return gs, nil
 			}},
-		Def[GrantSetIn, system.Grant]{Name: "grant.set", Doc: "Give a subject (usr_…, vis_…, store:<id>, @guest, @member, @subscriber) a level on a store.",
-			Scope: Write, Action: authz.StoreAdmin,
-			Run: func(r Req, in GrantSetIn) (system.Grant, error) {
-				e, p := r.Env, r.Principal
+		verbs.Def[GrantSetIn, system.Grant]{Name: "grant.set", Doc: "Give a subject (usr_…, vis_…, store:<id>, @guest, @member, @subscriber) a level on a store.",
+			Scope: verbs.Write, Action: authz.StoreAdmin,
+			Run: func(r verbs.Req, in GrantSetIn) (system.Grant, error) {
+				e, p := e, r.Principal
 				_, d, err := e.open(r, p, in.Store, rt.LevelAdmin, "granting")
 				if err != nil {
 					return system.Grant{}, err
 				}
 				if !validSubject(in.Subject) {
-					return system.Grant{}, Errf("invalid_argument", "a subject is usr_…, vis_…, store:<id>, @guest, @member or @subscriber")
+					return system.Grant{}, verbs.Errf("invalid_argument", "a subject is usr_…, vis_…, store:<id>, @guest, @member or @subscriber")
 				}
 				lvl, ok := rt.ParseLevel(in.Level)
 				if !ok || lvl == rt.LevelSelf {
-					return system.Grant{}, Errf("invalid_argument", "level must be view, interact, admin or owner")
+					return system.Grant{}, verbs.Errf("invalid_argument", "level must be view, interact, admin or owner")
 				}
 				if lvl > d.Level {
-					return system.Grant{}, &Error{Code: "permission_denied", Message: "you cannot grant more than your own level", Trace: d.Trace}
+					return system.Grant{}, &verbs.Error{Code: "permission_denied", Message: "you cannot grant more than your own level", Trace: d.Trace}
 				}
 				g, err := e.Sys.SetGrant(r, p.ID(), p.ViaLabel(), system.Grant{Store: in.Store, Subject: in.Subject, Level: in.Level})
 				return g, err
 			}}.Verb(),
-		&Verb{Name: "grant.rm", Doc: "Remove a subject's grants on a store.", Scope: Write, Action: authz.StoreAdmin,
-			Args: []Arg{{Name: "store", Type: "string", Pos: 1, Required: true}, {Name: "subject", Type: "string", Pos: 2, Required: true},
+		{Name: "grant.rm", Doc: "Remove a subject's grants on a store.", Scope: verbs.Write, Action: authz.StoreAdmin,
+			Args: []verbs.Arg{{Name: "store", Type: "string", Pos: 1, Required: true}, {Name: "subject", Type: "string", Pos: 2, Required: true},
 				{Name: "via", Type: "string", Doc: "only the grant made this way (direct, lnk_…)"}},
-			Run: func(ctx context.Context, e *Env, p *access.Principal, a Args) (any, error) {
+			Run: func(ctx context.Context, p *access.Principal, a verbs.Args) (any, error) {
 				if _, _, err := e.open(ctx, p, a.S("store"), rt.LevelAdmin, "revoking"); err != nil {
 					return nil, err
 				}
 				n, err := e.Sys.RemoveGrant(ctx, p.ID(), p.ViaLabel(), a.S("store"), a.S("subject"), a.S("via"))
 				return map[string]any{"removed": n}, err
 			}},
-		&Verb{Name: "log.show", Doc: "A store's commits after a rev (oldest first), or the newest ones.", Scope: Read, Action: authz.StoreRead,
-			Args: []Arg{{Name: "store", Type: "string", Pos: 1, Required: true}, {Name: "after", Type: "int", Doc: "commits after this rev"},
+		{Name: "log.show", Doc: "A store's commits after a rev (oldest first), or the newest ones.", Scope: verbs.Read, Action: authz.StoreRead,
+			Args: []verbs.Arg{{Name: "store", Type: "string", Pos: 1, Required: true}, {Name: "after", Type: "int", Doc: "commits after this rev"},
 				{Name: "limit", Type: "int", Doc: "at most this many (default 50)"}},
-			Run: func(ctx context.Context, e *Env, p *access.Principal, a Args) (any, error) {
+			Run: func(ctx context.Context, p *access.Principal, a verbs.Args) (any, error) {
 				s, _, err := e.open(ctx, p, a.S("store"), rt.LevelView, "reading the log")
 				if err != nil {
 					return nil, err
@@ -160,17 +161,17 @@ func init() {
 				}
 				return s.RecentLog(ctx, limit)
 			}},
-		&Verb{Name: "log.wait", Doc: "Wait for a store's commits after a rev: they return as soon as there is one, or an empty list after the timeout.", Scope: Read, Action: authz.StoreRead,
-			Args: []Arg{{Name: "store", Type: "string", Pos: 1, Required: true}, {Name: "after", Type: "int", Required: true, Doc: "commits after this rev"},
+		{Name: "log.wait", Doc: "Wait for a store's commits after a rev: they return as soon as there is one, or an empty list after the timeout.", Scope: verbs.Read, Action: authz.StoreRead,
+			Args: []verbs.Arg{{Name: "store", Type: "string", Pos: 1, Required: true}, {Name: "after", Type: "int", Required: true, Doc: "commits after this rev"},
 				{Name: "timeout", Type: "int", Doc: "seconds (default 55, at most 300)"}, {Name: "limit", Type: "int", Doc: "at most this many (default 50)"}},
-			Run: func(ctx context.Context, e *Env, p *access.Principal, a Args) (any, error) {
+			Run: func(ctx context.Context, p *access.Principal, a verbs.Args) (any, error) {
 				s, _, err := e.open(ctx, p, a.S("store"), rt.LevelView, "reading the log")
 				if err != nil {
 					return nil, err
 				}
 				secs := a.I("timeout", 55)
 				if secs < 0 || secs > 300 {
-					return nil, Errf("invalid_argument", "the timeout is 0 to 300 seconds")
+					return nil, verbs.Errf("invalid_argument", "the timeout is 0 to 300 seconds")
 				}
 				// Subscribe before reading, so a commit in between is not missed.
 				woke := make(chan struct{}, 1)
@@ -199,7 +200,7 @@ func init() {
 					}
 				}
 			}},
-	)
+	}
 }
 
 func validSubject(s string) bool {

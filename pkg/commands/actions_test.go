@@ -1,4 +1,4 @@
-package verbs
+package commands
 
 import (
 	"testing"
@@ -10,7 +10,7 @@ import (
 // and Call checks it before Run.
 func TestEveryVerbDeclaresAnAction(t *testing.T) {
 	counts := map[authz.Action]int{}
-	for _, v := range All() {
+	for _, v := range listed().All() {
 		spec, ok := authz.Of(v.Action)
 		if !ok {
 			t.Errorf("%s declares no action (%q)", v.Name, v.Action)

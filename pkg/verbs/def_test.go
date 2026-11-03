@@ -1,110 +1,114 @@
 package verbs
 
 import (
+	"context"
 	"reflect"
 	"strings"
 	"testing"
 
-	"github.com/go-go-golems/slop-computer/pkg/rt"
+	"github.com/go-go-golems/slop-computer/pkg/access"
+	"github.com/go-go-golems/slop-computer/pkg/authz"
 )
+
+// The machinery, on test-only verbs (the real commands are tested in
+// pkg/commands).
+
+type tItem struct {
+	Alias string `json:"alias"`
+	Level string `json:"level,omitempty" jsonschema:"enum=view,enum=interact"`
+}
+
+type tIn struct {
+	Store string  `json:"store" slop:"pos=1" jsonschema_description:"the store"`
+	Level string  `json:"level" slop:"pos=2" jsonschema:"enum=view,enum=interact,enum=admin" jsonschema_description:"the level"`
+	Items []tItem `json:"items,omitempty" jsonschema_description:"the items"`
+	Limit int     `json:"limit,omitempty"`
+}
+
+func tDef() Def[tIn, map[string]any] {
+	return Def[tIn, map[string]any]{Name: "test.def", Doc: "a test", Scope: Write, Action: authz.Account,
+		Run: func(r Req, in tIn) (map[string]any, error) {
+			return map[string]any{"store": in.Store, "n": len(in.Items)}, nil
+		}}
+}
 
 // A typed verb's arguments come from its input struct: names, positions,
 // required (no omitempty), types, docs with enums and JSON shapes.
 func TestDefArgs(t *testing.T) {
-	v, _ := Get("grant.set")
+	v := tDef().Verb()
 	want := []Arg{
 		{Name: "store", Type: "string", Pos: 1, Required: true, Doc: "the store"},
-		{Name: "subject", Type: "string", Pos: 2, Required: true, Doc: "usr_…, vis_…, store:<id>, @guest, @member or @subscriber"},
-		{Name: "level", Type: "string", Pos: 3, Required: true, Doc: "the level to give (one of view, interact, admin, owner)"},
+		{Name: "level", Type: "string", Pos: 2, Required: true, Doc: "the level (one of view, interact, admin)"},
+		{Name: "items", Type: "json", Doc: "the items, as JSON: [{alias, level?}, …]"},
+		{Name: "limit", Type: "int"},
 	}
 	if !reflect.DeepEqual(v.Args, want) {
-		t.Fatalf("grant.set args = %+v", v.Args)
+		t.Fatalf("args = %+v", v.Args)
 	}
-	q, _ := Get("docs.query")
-	var where Arg
-	for _, a := range q.Args {
-		if a.Name == "where" {
-			where = a
-		}
-	}
-	if where.Type != "json" || where.Required || !strings.Contains(where.Doc, "[[string, string, any] | {field, op, value}, …]") {
-		t.Fatalf("docs.query where = %+v", where)
-	}
-	m, _ := Get("mount.set")
-	if m.Output == nil || m.Output.Properties == nil {
-		t.Fatal("mount.set has no output schema")
-	}
-	if _, ok := m.Output.Properties.Get("mount"); !ok {
-		t.Fatalf("mount.set output has no mount: %+v", m.Output)
+	if v.Effect != EffectWrite || v.Input == nil || v.Output == nil {
+		t.Fatalf("verb = %+v", v)
 	}
 }
 
-// Arguments the input does not have are refused, at any depth; both forms
-// of a where condition decode.
+// Arguments the input does not have are refused, at any depth.
 func TestDecodeArgs(t *testing.T) {
-	if _, err := decodeArgs[GrantSetIn]("grant.set", Args{"store": "s", "subject": "@guest", "level": "view", "levle": "x"}); err == nil ||
+	if _, err := decodeArgs[tIn]("test.def", Args{"store": "s", "level": "view", "levle": "x"}); err == nil ||
 		AsError(err).Code != "invalid_argument" || !strings.Contains(err.Error(), `"levle"`) {
 		t.Fatalf("unknown argument: %v", err)
 	}
-	if _, err := decodeArgs[MountSetIn]("mount.set", Args{"host": "h", "path": "/d/:id", "aliases": []any{map[string]any{"alias": "a", "target": "t", "to": "x"}}}); err == nil {
-		t.Fatal("unknown field in an alias template accepted")
+	if _, err := decodeArgs[tIn]("test.def", Args{"store": "s", "level": "view", "items": []any{map[string]any{"alias": "a", "to": "x"}}}); err == nil {
+		t.Fatal("unknown field in an item accepted")
 	}
-	in, err := decodeArgs[DocsQueryIn]("docs.query", Args{"store": "s", "coll": "books",
-		"where": []any{[]any{"year", ">=", 2000}, map[string]any{"field": "lang", "op": "==", "value": "en"}}})
-	if err != nil {
-		t.Fatal(err)
-	}
-	want := []Cond{{Field: "year", Op: ">=", Value: 2000.0}, {Field: "lang", Op: "==", Value: "en"}}
-	if !reflect.DeepEqual(in.Where, want) {
-		t.Fatalf("where = %+v", in.Where)
-	}
-	if _, err := decodeArgs[DocsQueryIn]("docs.query", Args{"store": "s", "coll": "c", "where": []any{[]any{"year", ">="}}}); err == nil {
-		t.Fatal("a two-element condition accepted")
-	}
-	if rt.Filter(want[0]).Field != "year" {
-		t.Fatal("Cond is not an rt.Filter")
+	in, err := decodeArgs[tIn]("test.def", Args{"store": "s", "level": "view", "items": []any{map[string]any{"alias": "a"}}})
+	if err != nil || in.Store != "s" || len(in.Items) != 1 {
+		t.Fatalf("decode: %+v %v", in, err)
 	}
 }
 
-// Every verb has an input schema and a tool form; an untyped verb's schema
-// comes from its Args.
-func TestToolForms(t *testing.T) {
-	for _, v := range All() {
-		tl := v.Tool()
-		if tl.InputSchema == nil || tl.InputSchema.Type != "object" || strings.Contains(tl.Name, ".") {
-			t.Fatalf("%s: tool %+v", v.Name, tl)
-		}
+// A table runs its verbs, checks scope and required arguments, and an
+// untyped verb's schema comes from its Args.
+func TestTable(t *testing.T) {
+	tb := NewTable()
+	tb.Register(tDef().Verb(), &Verb{Name: "test.get", Scope: Read, Action: authz.Account,
+		Args: []Arg{{Name: "path", Type: "string", Pos: 1, Required: true}, {Name: "n", Type: "int"}},
+		Run:  func(context.Context, *access.Principal, Args) (any, error) { return "ok", nil }})
+	reader := &access.Principal{Kind: access.KindToken, Scopes: []string{"read"}}
+	if out, err := tb.Call(context.Background(), reader, "test.get", Args{"path": "x"}); err != nil || out != "ok" {
+		t.Fatalf("call: %v %v", out, err)
 	}
-	g, _ := Get("docs.get") // untyped
+	if _, err := tb.Call(context.Background(), reader, "test.def", Args{"store": "s", "level": "view"}); err == nil || AsError(err).Code != "permission_denied" {
+		t.Fatalf("a read token writes: %v", err)
+	}
+	if tb.Callable(reader, mustGet(t, tb, "test.def")) || !tb.Callable(reader, mustGet(t, tb, "test.get")) {
+		t.Fatal("Callable")
+	}
+	if _, err := tb.Call(context.Background(), reader, "test.get", Args{}); err == nil || AsError(err).Code != "invalid_argument" {
+		t.Fatalf("missing argument: %v", err)
+	}
+	if _, ok := Default.Get("test.get"); ok {
+		t.Fatal("a table's verb leaked into Default")
+	}
+	g := mustGet(t, tb, "test.get")
 	s := g.InputSchema()
-	if p, ok := s.Properties.Get("path"); !ok || p.Type != "string" || len(s.Required) != 2 {
-		t.Fatalf("docs.get schema: %+v", s)
+	if p, ok := s.Properties.Get("path"); !ok || p.Type != "string" || len(s.Required) != 1 {
+		t.Fatalf("test.get schema: %+v", s)
 	}
-	if !g.Tool().Annotations["readOnlyHint"] {
-		t.Fatal("docs.get is not read-only")
+	if tl := g.Tool(); tl.Name != "test_get" || !tl.Annotations["readOnlyHint"] {
+		t.Fatalf("tool: %+v", tl)
 	}
+	defer func() {
+		if recover() == nil {
+			t.Fatal("a duplicate registered")
+		}
+	}()
+	tb.Register(g)
 }
 
-// Effects: read or write from the scope, govern on the verbs an app's call
-// must have its person confirm (SLOP3-002's list).
-func TestEffects(t *testing.T) {
-	gov := map[string]bool{}
-	for _, v := range All() {
-		switch v.Effect {
-		case EffectRead, EffectWrite:
-		case EffectGovern:
-			gov[v.Name] = true
-		case EffectStream: // sample.run (pkg/caps/sample, not linked here)
-		default:
-			t.Fatalf("%s: effect %q", v.Name, v.Effect)
-		}
-		if v.Effect == EffectRead && v.Scope == Write {
-			t.Fatalf("%s writes but says read", v.Name)
-		}
+func mustGet(t *testing.T, tb *Table, name string) *Verb {
+	t.Helper()
+	v, ok := tb.Get(name)
+	if !ok {
+		t.Fatalf("no %s", name)
 	}
-	want := map[string]bool{"people.role": true, "policy.set": true, "llm.set": true, "llm.rm": true, "llm.reset": true,
-		"sub.grant": true, "sub.revoke": true, "secret.set": true, "secret.rm": true}
-	if !reflect.DeepEqual(gov, want) {
-		t.Fatalf("govern verbs = %v", gov)
-	}
+	return v
 }

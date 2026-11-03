@@ -133,8 +133,8 @@ func (s *Server) mcpPost(w http.ResponseWriter, r *http.Request) {
 		mcpReply(w, req.ID, map[string]any{}, nil)
 	case "tools/list":
 		tools := []verbs.Tool{}
-		for _, v := range verbs.All() {
-			if verbs.Callable(p, v) {
+		for _, v := range s.Verbs.All() {
+			if s.Verbs.Callable(p, v) {
 				tools = append(tools, v.Tool())
 			}
 		}
@@ -147,8 +147,8 @@ func (s *Server) mcpPost(w http.ResponseWriter, r *http.Request) {
 }
 
 // mcpVerb is the verb a tool name stands for.
-func mcpVerb(tool string) (*verbs.Verb, bool) {
-	for _, v := range verbs.All() {
+func (s *Server) mcpVerb(tool string) (*verbs.Verb, bool) {
+	for _, v := range s.Verbs.All() {
 		if v.Tool().Name == tool {
 			return v, true
 		}
@@ -171,7 +171,7 @@ func (s *Server) mcpCall(w http.ResponseWriter, r *http.Request, p *access.Princ
 		mcpReply(w, req.ID, nil, &mcpError{rpcInvalidParams, "tools/call takes {name, arguments}"})
 		return
 	}
-	v, ok := mcpVerb(in.Name)
+	v, ok := s.mcpVerb(in.Name)
 	if !ok {
 		mcpReply(w, req.ID, nil, &mcpError{rpcInvalidParams, "no tool " + in.Name})
 		return
@@ -219,7 +219,7 @@ func (s *Server) mcpCall(w http.ResponseWriter, r *http.Request, p *access.Princ
 }
 
 func (s *Server) callTool(ctx context.Context, p *access.Principal, verb string, args map[string]any) (any, error) {
-	return verbs.Call(ctx, s.Env, p, verb, verbs.Args(args))
+	return s.Verbs.Call(ctx, p, verb, verbs.Args(args))
 }
 
 // partMessage is a part as a progress message: its delta when it has one.
