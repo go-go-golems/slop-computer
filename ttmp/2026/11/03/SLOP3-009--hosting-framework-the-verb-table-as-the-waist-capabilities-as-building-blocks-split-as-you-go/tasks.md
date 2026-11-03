@@ -8,6 +8,6 @@
 - [x] Step 4: caps/db — one db for page RPCs and actor use('db') via rt.Space; db.* as Subject: View verbs; actors get aliases and _stores; benchmark db.query <!-- t:e9pk -->
 - [x] Step 5: caps/sample behind Backend and Meter, streaming via Emit; same sample for pages, actors, CLI <!-- t:m67c -->
 - [x] Step 6: MCP door generated from the verb table <!-- t:v231 -->
-- [ ] Step 7 (ongoing): type remaining verbs as touched (the ratchet allowlist is empty since SLOP3-010 PR 3; policy/person changes reach views through the log follower) <!-- t:xmr1 -->
+- [ ] Step 7 (ongoing): type remaining verbs as touched — all 86 typed (inputs; 76 results) in PR #29; check when it merges. The ratchet allowlist is empty since SLOP3-010 PR 3; policy/person changes reach views through the log follower <!-- t:xmr1 -->
 - [ ] Step 8 (when there is a reason): a desktop host (identity's reuse rule is in the ratchet and pkg/host exists since SLOP3-010 PR 2/3) <!-- t:edbl -->
 - [ ] Step 4b (deferred from step 4): page db.* RPCs as hidden Subject: View verbs, removing the RPC switch — when a door needs it (MCP shipped without it) <!-- t:sa3u -->

@@ -637,3 +637,118 @@ Codex reviewed #22 and found two places where a live registry document could sta
   ```
   `:head` is the `LogHead` read before the rows (the race fix 1e6220f).
 - `Live.Saw(view, sub, docs)`: for each doc, `seen[path] = max(seen[path], version)`. It does nothing for an unknown subscription.
+
+## Step 8: every verb typed (plan step 7)
+
+All 86 verbs are `verbs.Def` now. Before, four were (`grant.set`, `docs.query`, `mount.set`, `sample.run`). Every verb has a typed input, and 76 have a typed result whose output schema the MCP door publishes. The other ten return values that are untyped on purpose. PR #29.
+
+The conversion was mostly mechanical, done by two rewriters, and checked against a dump of every verb taken before the change. Checking every end-to-end result against its output schema turned up a real gap, nil versus null, now fixed in `verbs`, along with a pre-existing CLI precision bug.
+
+### Prompt Context
+**User prompt (verbatim):** "do all verbs."
+**Assistant interpretation:** Plan step 7's remaining work: convert the 82 untyped verbs to `verbs.Def[In, Out]` with input and output types, keeping each verb's interface as it is.
+**Inferred user intent:** Agents (MCP), the CLI and the docs see exact argument and result schemas for every operation.
+**Commits (code):** 9f52777 (1/3: 67 verbs, mechanically), 01010c5 (2/3: the 15 whose helpers took `Args`), 91dca37 (3/3: results and nullable output schemas), 897f6a3 (the CLI keeps every digit of a JSON argument's numbers). PR: https://github.com/go-go-golems/slop-computer/pull/29
+
+### What I did
+- **Inventory** (`inv`, a go/ast tool in job tmp): every untyped verb, its declared `Args`, and every way its `Run` reads them. 82 verbs; 15 hand `Args` to a helper. No verb reads an argument it doesn't declare.
+- **`verbs`:**
+  - `decodeArgs` decodes with `UseNumber`;
+  - new type `List` (a JSON array of strings, or a comma-separated string, with a oneOf schema);
+  - `argsOf` no longer appends ", as JSON: any";
+  - `outputSchema`/`nullable` allow null wherever Go encodes it.
+- **`commands/typed.go`:** `or(p, d)` and `ptr(v)`.
+- **Rewriter 1** (`typer`, go/ast with byte-offset splicing), for each verb literal:
+  - an `XxxIn` struct from the declared `Args`: `string`/`bool` as they are, `int` as `int64` (or `*int64` when a nonzero default must stay apart from an explicit 0), `json` as `any`, lists as `verbs.List`, plus `json`/`slop:"pos=N"`/`jsonschema_description` tags;
+  - each read spliced (`a.S("k")` → `in.K`, `a.I("k", 30)` → `or(in.K, 30)`, `a.Strings` → `[]string(in.K)`, `a.Has` → `in.K != nil`);
+  - the literal rewrapped as `verbs.Def[XxxIn, any]{…}.Verb()`, with a `ctx`/`p` prelude only where the body uses them.
+- **The 15 by hand, then rewriter 1:**
+  - helpers take values: `writeDocs`, `runSQL`, `records`, `putBlobs`, `zoneOf`, `push` with a `pushArgs` struct, `runEval`;
+  - `argObj`/`argList` became `objOf`/`listOf`, still accepting a JSON-encoded string;
+  - pointer fixes for `text`/`data`, and `or(in.Prune, true)`.
+- **Rewriter 2** (`outer`, go/types via x/tools/packages):
+  - a verb whose results are all one named type gets that type as `Out`, with zero values for `return nil, err`;
+  - a verb whose results are `map[string]any` maps built in its body gets an `XxxOut` struct and the matching rewrites;
+  - `app.modules` by hand.
+- **Tests:**
+  - `verbs`: `TestListAndExactNumbers`, `TestOutputSchemaAllowsNull`;
+  - `pkg/host/schema_check_test.go`: the harness wraps every verb's `Run` and checks its result against its output schema.
+- **Audit** (`audit.py`): literal call sites in Go and JS, and the actor modules' `Pos`/`Fixed`/`Default` names, against the new arguments.
+
+### Why
+- **Rewriters, not hand edits.** 82 verbs across 13 files. A splice from the AST changes only the reads and the wrapper, so each verb's logic is byte-for-byte what it was, which also makes review practical.
+- **`*int64` with `or`, not `int64`.** `token.new`'s `days` defaults to 30, and 0 means "no expiry". With a plain `int64`, an explicit 0 would become 30.
+- **Result structs in map key order.** `encoding/json` sorts map keys; a struct emits declaration order. Declaring fields in key order keeps every result's bytes, not just its meaning.
+
+### What worked
+- **Verb comparison** (`cmp.py` over a `TestDumpVerbs` dump of `commands.Verbs(nil)`, before from a worktree of main, after from the branch): `typed 86/86; problems 1`. The one is `token.new`'s `scopes` (`string` → `json`, intended); plus `sample.run`'s doc losing its empty note.
+- **Call-site audit:** `call sites checked 767; with unknown keys 1` (a test that sends `levle` on purpose); `modFuncs 47 bad 0`.
+- **Output schemas:** `with output schema: 76 / 86`. The host suite passes with every result checked against its schema.
+- **Real server and CLI** (`slop serve --local`, curl for a session, then the CLI with a token):
+  - `token.new` with `"scopes": "read,write"` and `days: 0` → `['read', 'write'] expiresAt: None`;
+  - an unknown argument on a real store → `grant.ls takes no argument "bogus"`;
+  - `docs.set`/`docs.get` with 9007199254740993 through the API → exact;
+  - after the CLI fix, through the CLI → exact.
+- **Gate:** `0 issues.` and `GATE: ok` after each commit.
+
+### What didn't work
+- **The first output-rewriter run panicked:** `package requires newer Go version go1.26 (application built with go1.25)` (the tool's module defaulted to the 1.25 toolchain). Then `index out of range [0] with length 0` (`CompiledGoFiles` needs `packages.NeedCompiledGoFiles`).
+- **`slop verbs -o json` lists summaries only** (`KeyError: 'name'`: it has `verb`, `doc`, `effect`, `schema`). Hence the `TestDumpVerbs` dump of the full `Verb` structs.
+- **The first smoke script ran no server:** `go: go.mod file not found in current directory` (I built from outside the module), so every request failed.
+- **The schema check failed seven host tests**, for example `explain.can: result does not match its output schema: explain.can.groups: <nil>, want an array`, and the same for `llm.usage.llm.remaining`, `llm.set.budget`, `store.export.bundle.docs`/`files`. Go encodes nil pointers, slices and maps as null, and invopop's schemas don't allow it. `nullable` fixed all of them.
+- **Lint on `nullable`:** `missing cases in switch of type reflect.Kind (exhaustive)` → an if-chain.
+- **Precision through the CLI:** `docs set … --data '{"n":9007199254740993}'` read back `…992`. The CLI's `convert` parsed JSON into a `float64` before sending. It predates this PR, and I fixed it in its own commit.
+
+### What I learned
+- **The table was already consistent.** No verb read an undeclared argument, and no caller sent one, so strict decoding cost nothing in practice. The audit says so; it isn't a guess.
+- **A schema is a promise a client checks.** Schemas from Go types aren't automatically true of Go's JSON: nil becomes null. Checking real results from the whole end-to-end suite was what found it; reading the schemas hadn't.
+- **The `map[string]any` results followed two patterns:** a base literal plus conditional keys, or a literal per return. That is regular enough for a type-checked rewrite that keeps the bytes.
+
+### What was tricky to build
+- **Optional keys whose values are already nilable** (`out["person"] = p.Person`) became `**sysdb.Person`/`*[]string`/`*map`. A pointer to a pointer is exact, but plain `omitempty` drops an empty slice that the map kept. By hand:
+  - `person` and `manifest` became plain, because they are only ever set non-nil;
+  - `scopes` stays `*[]string`, because a token with no scopes still shows `"scopes"`.
+- **Strictness surfaces in an order.** The table's floor check (store access) runs before `Run` decodes. An unknown argument on a store the caller can't reach reads as `not_found`, and on a reachable one as `invalid_argument`.
+
+### What warrants a second pair of eyes
+- **The generated result structs' optional fields.** Each pointer field is right only if the old code set the key exactly when the struct sets the pointer. The rewriter derived both from the same assignments, but explain.can's two branches (two different `out` maps merged into one type) deserve a read.
+- **`verbs.List` changes `token.new`'s `scopes` to CLI type `json`.** `--scopes read,write` works (the CLI passes non-JSON text through), and `--scopes '["read"]'` now works too.
+- **`nullable` walks the Go type and the schema in parallel by JSON name.** An embedded struct with a json name, or a type whose schema invopop maps specially (e.g. `time.Time`), is handled by falling through. Worth a look if a result type gets exotic.
+
+### What should be done in the future
+- Plan step 4b (page `db.*` RPCs as hidden verbs) can now reuse these input types.
+- Consider enum tags on the string arguments whose docs list their values (levels, zones, formats). The schema would then constrain them, with a doc suffix "(one of …)".
+- Check task xmr1 when #29 merges.
+
+### Code review instructions
+- `pkg/verbs/def.go`: `decodeArgs`, `List`, `outputSchema`/`nullable`/`structFields`.
+- `pkg/commands/typed.go`.
+- `git show 9f52777 -- pkg/commands/people.go` (a representative conversion).
+- `git show 01010c5 -- pkg/commands/docs.go pkg/commands/files.go pkg/commands/data.go` (the hand part).
+- `git show 91dca37 -- pkg/commands/access.go` (`ExplainCanOut`) and `pkg/commands/actors.go` (`AppModulesOut`).
+- `pkg/host/schema_check_test.go`.
+- Validate: `GOWORK=off go test ./... -count=1`, then `slop verbs tools -o json` to see the schemas.
+
+### Technical details
+- **A converted verb** (`token.new`):
+  ```go
+  verbs.Def[TokenNewIn, TokenNewOut]{Name: "token.new", …,
+      Run: func(req verbs.Req, in TokenNewIn) (TokenNewOut, error) {
+          ctx := req.Context
+          p := req.Principal
+          scopes := []string(in.Scopes)
+          …
+          secret, t, err := e.People.CreateToken(ctx, p.ID(), in.Name, scopes, int(or(in.Days, 30)))
+  ```
+  ```go
+  type TokenNewIn struct {
+      Name   string     `json:"name" slop:"pos=1"`
+      Scopes verbs.List `json:"scopes,omitempty" jsonschema_description:"comma-separated: read,write,admin"`
+      Days   *int64     `json:"days,omitempty" jsonschema_description:"lifetime in days; 0 = no expiry (not with admin)"`
+  }
+  ```
+- **A nullable output field** (`groups []access.Group`) in the schema:
+  ```json
+  {"oneOf": [{"type": "array", "items": {"type": "string"}}, {"type": "null"}]}
+  ```
+- **The tools** (job tmp, not committed): `inv`, `typer`, `outer`, `cmp.py`, `audit.py`, and `TestDumpVerbs` (copied in and removed after each dump).
