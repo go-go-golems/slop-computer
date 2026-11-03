@@ -22,10 +22,10 @@ run-local:
 
 # Committed build outputs. The server embeds them, so `go build` needs no
 # node; each output's first line stamps the hash of its sources, and
-# TestBuildOutputsFresh (pkg/server) fails when a source changed without a
+# TestBuildOutputsFresh (pkg/host) fails when a source changed without a
 # rebuild.
 #
-# The page runtime (window.claude): web/runtime → pkg/server/assets/claude.js.
+# The page runtime (window.claude): web/runtime → pkg/doors/pages/assets/claude.js.
 runtime:
 	cd web/runtime && pnpm install --frozen-lockfile && pnpm check && pnpm build
 

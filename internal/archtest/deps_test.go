@@ -23,7 +23,7 @@ var (
 	runtime  = []string{"pkg/actor"}
 	table    = []string{"pkg/verbs"}
 	commands = []string{"pkg/commands"}
-	doors    = []string{"pkg/server", "pkg/doors"}
+	doors    = []string{"pkg/doors"}
 	netHTTP  = "net/http"
 	gojaPath = "github.com/dop251/goja"
 )
@@ -44,11 +44,7 @@ var rules = []struct {
 }
 
 // allowed are today's violations. Remove an entry when its import goes.
-var allowed = map[string]bool{
-	// the server assembles today (Server.Env is a *commands.Env); SLOP3-010
-	// PR 3 moves assembly to pkg/host
-	"pkg/server -> pkg/commands": true,
-}
+var allowed = map[string]bool{}
 
 func concat(xs ...[]string) []string {
 	var out []string
