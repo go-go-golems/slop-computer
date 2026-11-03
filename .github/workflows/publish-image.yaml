@@ -1,7 +1,9 @@
 # Builds and tests on pull requests; on main, publishes
-# ghcr.io/go-go-golems/slop-computer:sha-<short> (SLOP-002). Copied from
-# francois's publish-image workflow without the GitOps pin PR: the slop
-# deployment pins its image by hand until a gitops-pr Vault role exists.
+# ghcr.io/go-go-golems/slop-computer:sha-<short> (SLOP-002) and opens a PR in
+# the k3s GitOps repo that pins the slop deployment to it
+# (deploy/gitops-targets.json). The PR is opened as the GitOps GitHub App,
+# whose credential the Vault role slop-computer-gitops-pr may read
+# (wesen/terraform, vault/github-actions/envs/k3s), on main pushes only.
 name: publish-image
 
 on:
@@ -40,6 +42,12 @@ jobs:
       image_name: ghcr.io/go-go-golems/slop-computer
       platforms: linux/amd64
       push_image: ${{ github.event_name != 'pull_request' }}
-      open_gitops_pr: false
+      gitops_target_config: deploy/gitops-targets.json
+      open_gitops_pr: ${{ github.event_name != 'pull_request' && github.ref == 'refs/heads/main' }}
+      gitops_pr_token_source: github_app
+      vault_role: slop-computer-gitops-pr
+      gitops_app_secret_path: kv/data/ci/github/slop-computer/gitops-pr-app
+      gitops_app_owner: wesen
+      gitops_app_repositories: 2026-03-27--hetzner-k3s
       tooling_repository: go-go-golems/infra-tooling
       tooling_ref: main
