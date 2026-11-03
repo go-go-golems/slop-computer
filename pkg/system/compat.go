@@ -8,12 +8,15 @@ package system
 import (
 	"context"
 
+	"github.com/go-go-golems/slop-computer/pkg/identity"
+
 	"github.com/go-go-golems/slop-computer/pkg/sysdb"
 )
 
 // DB is system.db with every domain's queries.
 type DB struct {
 	*sysdb.DB
+	*identity.Accounts
 }
 
 // Open opens (and migrates) system.db at path.
@@ -22,7 +25,7 @@ func Open(ctx context.Context, path string) (*DB, error) {
 	if err != nil {
 		return nil, err
 	}
-	return &DB{DB: d}, nil
+	return &DB{DB: d, Accounts: identity.NewAccounts(d)}, nil
 }
 
 type (
@@ -55,6 +58,32 @@ var (
 	ValidLevel  = sysdb.ValidLevel
 	levelRank   = sysdb.LevelRank
 	nullStr     = sysdb.NullStr
-	nullInt     = sysdb.NullInt
-	splitScopes = sysdb.SplitScopes
+)
+
+// forwarded from pkg/identity
+type (
+	Session    = identity.Session
+	Token      = identity.Token
+	GrantError = identity.GrantError
+	DeviceCode = identity.DeviceCode
+	LoginFlow  = identity.LoginFlow
+	Handoff    = identity.Handoff
+)
+
+const (
+	SessionDays       = identity.SessionDays
+	MaxAdminTokenDays = identity.MaxAdminTokenDays
+	DeviceMinutes     = identity.DeviceMinutes
+	HandoffTTL        = identity.HandoffTTL
+	GuestsPerHour     = identity.GuestsPerHour
+	GuestDays         = identity.GuestDays
+)
+
+var (
+	ErrPending       = identity.ErrPending
+	ErrDenied        = identity.ErrDenied
+	ErrTooManyGuests = identity.ErrTooManyGuests
+	ScopesForRole    = identity.ScopesForRole
+	CheckTokenGrant  = identity.CheckTokenGrant
+	GuestCutoff      = identity.GuestCutoff
 )

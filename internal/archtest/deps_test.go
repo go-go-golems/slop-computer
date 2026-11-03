@@ -38,7 +38,7 @@ var rules = []struct {
 	{"capabilities know nothing of HTTP, goja, the runtime or doors", caps, concat(runtime, doors, []string{netHTTP, gojaPath})},
 	{"the actor runtime is given its capabilities by a door, through interfaces", runtime, caps},
 	{"core imports no domain, capability, runtime, table or door", core, concat(domains, caps, runtime, table, doors)},
-	{"identity imports no other slop package", []string{"pkg/identity"}, concat(core, domains, caps, runtime, table, doors)},
+	{"identity imports no slop package but sysdb and ids (design §8: it can leave as its own module)", []string{"pkg/identity"}, concat(without(core, "pkg/sysdb", "pkg/ids"), without(domains, "pkg/identity"), caps, runtime, table, commands, doors)},
 	{"only cmd/ imports the server", concat(core, domains, caps, runtime, table, commands), doors},
 	{"commands are installed by the host and reached through the table, not imported by doors, domains, capabilities or the runtime", concat(core, domains, caps, runtime, table, doors), commands},
 }
@@ -55,6 +55,22 @@ func concat(xs ...[]string) []string {
 	var out []string
 	for _, x := range xs {
 		out = append(out, x...)
+	}
+	return out
+}
+
+func without(xs []string, drop ...string) []string {
+	var out []string
+	for _, x := range xs {
+		keep := true
+		for _, d := range drop {
+			if x == d {
+				keep = false
+			}
+		}
+		if keep {
+			out = append(out, x)
+		}
 	}
 	return out
 }

@@ -1,4 +1,4 @@
-package system
+package identity
 
 import (
 	"context"
@@ -6,6 +6,7 @@ import (
 	"errors"
 
 	"github.com/go-go-golems/slop-computer/pkg/ids"
+	"github.com/go-go-golems/slop-computer/pkg/sysdb"
 )
 
 // HandoffTTL is how long a sign-in handoff code is good for (ms).
@@ -21,7 +22,7 @@ type Handoff struct {
 
 // CreateHandoff makes a one-time code for person to sign in on host. The
 // state binds it to the browser that asked (the live host's state cookie).
-func (d *DB) CreateHandoff(ctx context.Context, h Handoff) (string, error) {
+func (d *Accounts) CreateHandoff(ctx context.Context, h Handoff) (string, error) {
 	code := ids.Secret("hnd_")
 	_, err := d.ExecContext(ctx, `INSERT INTO handoffs (code_hash, person, host, return_path, state, expires_at) VALUES (?, ?, ?, ?, ?, ?)`,
 		ids.Hash(code), h.Person, h.Host, h.Return, h.State, d.NowMs()+HandoffTTL)
@@ -29,14 +30,14 @@ func (d *DB) CreateHandoff(ctx context.Context, h Handoff) (string, error) {
 }
 
 // TakeHandoff consumes a code for host (it works once).
-func (d *DB) TakeHandoff(ctx context.Context, code, host string) (Handoff, error) {
+func (d *Accounts) TakeHandoff(ctx context.Context, code, host string) (Handoff, error) {
 	var h Handoff
 	err := d.Tx(ctx, func(tx *sql.Tx) error {
 		var exp int64
 		err := tx.QueryRowContext(ctx, `SELECT person, host, return_path, state, expires_at FROM handoffs WHERE code_hash = ?`, ids.Hash(code)).
 			Scan(&h.Person, &h.Host, &h.Return, &h.State, &exp)
 		if errors.Is(err, sql.ErrNoRows) {
-			return ErrNotFound
+			return sysdb.ErrNotFound
 		}
 		if err != nil {
 			return err
@@ -45,7 +46,7 @@ func (d *DB) TakeHandoff(ctx context.Context, code, host string) (Handoff, error
 			return err
 		}
 		if exp < d.NowMs() || h.Host != host {
-			return ErrNotFound
+			return sysdb.ErrNotFound
 		}
 		return nil
 	})
@@ -53,16 +54,17 @@ func (d *DB) TakeHandoff(ctx context.Context, code, host string) (Handoff, error
 }
 
 // SetOrigin records which store and app a sandbox label serves.
-func (d *DB) SetOrigin(ctx context.Context, label, store, app string) error {
+func (d *Accounts) SetOrigin(ctx context.Context, label, store, app string) error {
 	_, err := d.ExecContext(ctx, `INSERT INTO origins (label, store, app) VALUES (?, ?, ?) ON CONFLICT DO NOTHING`, label, store, app)
 	return err
 }
 
 // Origin returns the store and app of a sandbox label.
-func (d *DB) Origin(ctx context.Context, label string) (store, app string, err error) {
-	err = d.QueryRowContext(ctx, `SELECT store, app FROM origins WHERE label = ?`, label).Scan(&store, &app)
+func (d *Accounts) Origin(ctx context.Context, label string) (string, string, error) {
+	var store, app string
+	err := d.QueryRowContext(ctx, `SELECT store, app FROM origins WHERE label = ?`, label).Scan(&store, &app)
 	if errors.Is(err, sql.ErrNoRows) {
-		err = ErrNotFound
+		err = sysdb.ErrNotFound
 	}
 	return store, app, err
 }
