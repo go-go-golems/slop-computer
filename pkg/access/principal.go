@@ -5,7 +5,7 @@ package access
 import (
 	"slices"
 
-	"github.com/go-go-golems/slop-computer/pkg/system"
+	"github.com/go-go-golems/slop-computer/pkg/sysdb"
 )
 
 // Kinds of principal.
@@ -19,11 +19,11 @@ const (
 
 // Principal is whoever acts on a request or a turn.
 type Principal struct {
-	Kind    string         // user, guest, token, store, system; guest with an empty Person is an id-less visitor
-	Person  *system.Person // the user or guest (the token's user for tokens)
-	TokenID string         // tokens only
-	Scopes  []string       // tokens only
-	Store   string         // store principals: the store id
+	Kind    string        // user, guest, token, store, system; guest with an empty Person is an id-less visitor
+	Person  *sysdb.Person // the user or guest (the token's user for tokens)
+	TokenID string        // tokens only
+	Scopes  []string      // tokens only
+	Store   string        // store principals: the store id
 	// Trusted marks a store principal admitted by a live trust row (an
 	// admin trusted its app with the module it is calling through): set
 	// only by the module bridge, never from a request.
@@ -35,7 +35,7 @@ type Principal struct {
 // a guest when the account is a guest's. It does not refuse a disabled
 // account (its audience is none, so it holds nothing); code that
 // authenticates someone refuses one before acting.
-func PersonPrincipal(p system.Person, via string) *Principal {
+func PersonPrincipal(p sysdb.Person, via string) *Principal {
 	kind := KindUser
 	if p.Kind == "guest" {
 		kind = KindGuest
@@ -80,8 +80,8 @@ func (p *Principal) Role() string {
 	if p == nil || p.Person == nil {
 		return ""
 	}
-	if p.Kind == KindToken && p.Person.Role == system.RoleAdmin && !slices.Contains(p.Scopes, system.ScopeAdmin) {
-		return system.RoleMember
+	if p.Kind == KindToken && p.Person.Role == sysdb.RoleAdmin && !slices.Contains(p.Scopes, sysdb.ScopeAdmin) {
+		return sysdb.RoleMember
 	}
 	return p.Person.Role
 }
@@ -89,7 +89,7 @@ func (p *Principal) Role() string {
 // IsAdmin reports someone acting as an admin: a signed-in admin, an
 // admin's token with the admin scope, or the kernel.
 func (p *Principal) IsAdmin() bool {
-	return p != nil && (p.Kind == KindSystem || p.Role() == system.RoleAdmin || (p.Kind == KindStore && p.Trusted))
+	return p != nil && (p.Kind == KindSystem || p.Role() == sysdb.RoleAdmin || (p.Kind == KindStore && p.Trusted))
 }
 
 // HasScope reports whether a token carries a scope; sessions carry all.
@@ -99,12 +99,12 @@ func (p *Principal) HasScope(need string) bool {
 		return true
 	}
 	switch need {
-	case system.ScopeRead:
+	case sysdb.ScopeRead:
 		return len(p.Scopes) > 0
-	case system.ScopeWrite:
-		return slices.Contains(p.Scopes, system.ScopeWrite) || slices.Contains(p.Scopes, system.ScopeAdmin)
-	case system.ScopeAdmin:
-		return slices.Contains(p.Scopes, system.ScopeAdmin)
+	case sysdb.ScopeWrite:
+		return slices.Contains(p.Scopes, sysdb.ScopeWrite) || slices.Contains(p.Scopes, sysdb.ScopeAdmin)
+	case sysdb.ScopeAdmin:
+		return slices.Contains(p.Scopes, sysdb.ScopeAdmin)
 	}
 	return false
 }

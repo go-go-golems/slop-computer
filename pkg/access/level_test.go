@@ -1,4 +1,4 @@
-package access
+package access_test
 
 import (
 	"context"
@@ -7,6 +7,7 @@ import (
 	"path/filepath"
 	"testing"
 
+	"github.com/go-go-golems/slop-computer/pkg/access"
 	"github.com/go-go-golems/slop-computer/pkg/rt"
 	"github.com/go-go-golems/slop-computer/pkg/system"
 )
@@ -24,7 +25,7 @@ func TestLevelNeverAboveCap(t *testing.T) {
 		t.Fatal(err)
 	}
 	t.Cleanup(func() { _ = d.Close() })
-	c := &Checker{Sys: d}
+	c := &access.Checker{Dir: d}
 	admin, _, err := d.SignInUser(ctx, "root@example.com", "", "sub-root", []string{"root@example.com"}, true)
 	if err != nil {
 		t.Fatal(err)
@@ -62,10 +63,10 @@ func TestLevelNeverAboveCap(t *testing.T) {
 				t.Fatal(err)
 			}
 		}
-		pr := PersonPrincipal(p, "")
+		pr := access.PersonPrincipal(p, "")
 		tok := tokens[r.Intn(len(tokens))]
 		if tok != nil {
-			pr.Kind, pr.Scopes = KindToken, tok
+			pr.Kind, pr.Scopes = access.KindToken, tok
 		}
 
 		// The model.
@@ -74,18 +75,18 @@ func TestLevelNeverAboveCap(t *testing.T) {
 		if owns {
 			src = rt.LevelOwner
 		}
-		if aud == AudAdmin {
+		if aud == access.AudAdmin {
 			src = max(src, rt.LevelAdmin)
 		}
-		if grant != "" && (!toMember || aud.In(GroupMember)) {
+		if grant != "" && (!toMember || aud.In(access.GroupMember)) {
 			l, _ := rt.ParseLevel(grant)
 			src = max(src, min(l, rt.LevelAdmin))
 		}
 		ceil := rt.LevelOwner
 		switch {
-		case tok != nil && len(tok) == 0, aud == AudNone:
+		case tok != nil && len(tok) == 0, aud == access.AudNone:
 			ceil = rt.LevelNone
-		case aud == AudGuest:
+		case aud == access.AudGuest:
 			ceil = rt.LevelInteract
 		}
 		want := min(src, ceil)

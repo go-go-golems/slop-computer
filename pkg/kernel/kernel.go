@@ -48,7 +48,7 @@ func New(cfg *config.Config, sys *system.DB) (*Kernel, error) {
 	if err != nil {
 		return nil, err
 	}
-	k := &Kernel{Cfg: cfg, Sys: sys, Blobs: b, Access: &access.Checker{Sys: sys},
+	k := &Kernel{Cfg: cfg, Sys: sys, Blobs: b, Access: &access.Checker{Dir: sys},
 		open: map[string]*store.Store{}, subs: map[int]func(*store.Commit){}}
 	k.Access.Subscribed = func(ctx context.Context, person string) bool { return k.Standing(ctx, person).Allowed }
 	return k, nil

@@ -45,7 +45,6 @@ var rules = []struct {
 
 // allowed are today's violations. Remove an entry when its import goes.
 var allowed = map[string]bool{
-	"pkg/access -> pkg/system": true, // SLOP3-010 PR 2: access.Directory
 	// the server assembles today (Server.Env is a *commands.Env); SLOP3-010
 	// PR 3 moves assembly to pkg/host
 	"pkg/server -> pkg/commands": true,
