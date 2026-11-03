@@ -1,4 +1,4 @@
-/* slop page runtime (window.claude), built from web/runtime: do not edit. source sha256:ff66afe01c876883e60f657d2bf6fbd54878cfc0597c198234f4fd507499349d */
+/* slop page runtime (window.claude), built from web/runtime: do not edit. source sha256:df6f3e121ee80812a07ebe41cdeefb295d8fe684225260a7dccab8ac0e178011 */
 "use strict";
 (() => {
   // src/limits.ts
@@ -643,6 +643,76 @@
       signIn: () => post({ type: "signin" }),
       subscribeUrl: () => String(cfg.subscribeUrl ?? "")
     });
+  }
+  var blockedDownload = /\.(exe|msi|com|scr|bat|cmd|ps1|sh|vbs|jar|js|mjs|cjs)$/i;
+  var fileCodes = /* @__PURE__ */ new Set(["not_found", "not_granted", "changed", "rate_limited", "too_large", "declined", "bad_request"]);
+  function fileFail(e) {
+    const code = e?.code === "invalid_argument" ? "bad_request" : fileCodes.has(e?.code) ? e.code : "unavailable";
+    return fail(code, e?.message || "project files are unavailable");
+  }
+  function fromBase64(s) {
+    const bin = atob(s);
+    const out = new Uint8Array(bin.length);
+    for (let i = 0; i < bin.length; i++) out[i] = bin.charCodeAt(i);
+    return out;
+  }
+  function files() {
+    const list = async (o) => {
+      try {
+        const r = await rpc("files.list", { path: o?.path ?? "", recursive: !!o?.recursive, cursor: o?.cursor ?? "" });
+        const entries = r.entries.map((e) => freeze({ path: e.path, isDirectory: !!e.isDirectory, size: e.size }));
+        return freeze(r.cursor ? { entries, cursor: String(r.cursor) } : { entries });
+      } catch (e) {
+        throw fileFail(e);
+      }
+    };
+    const read = async (path, o) => {
+      if (typeof path !== "string" || !path) throw fail("bad_request", "read takes a file path");
+      try {
+        const r = await rpc("files.read", { path, offset: o?.offset ?? 0, length: o?.length });
+        return freeze({ bytes: fromBase64(r.bytes), size: r.size, revision: String(r.revision) });
+      } catch (e) {
+        throw fileFail(e);
+      }
+    };
+    const download = async (path) => {
+      if (typeof path !== "string" || !path) throw fail("bad_request", "download takes a file path");
+      if (blockedDownload.test(path)) throw fail("bad_request", "this file type cannot be saved from a page");
+      const chunks = [];
+      let offset = 0, size = 0, rev = "";
+      do {
+        const r = await read(path, { offset });
+        if (rev && r.revision !== rev) throw fail("changed", "the file changed while it was read");
+        rev = r.revision;
+        size = r.size;
+        chunks.push(r.bytes);
+        offset += r.bytes.length;
+        if (!r.bytes.length) break;
+      } while (offset < size);
+      const name = path.split("/").pop() || "file";
+      const res = await ask("download", { filename: name, data: new Blob(chunks) }).catch(() => ({ status: "unavailable" }));
+      if (res.status === "saved") return freeze({ status: "saved" });
+      throw fail(res.status === "declined" ? "declined" : "unavailable", "the file was not saved");
+    };
+    const asSampleTools = async () => freeze([
+      freeze({
+        name: "list_project_files",
+        description: "List files and folders of the project. path: a folder (omit for the top level); recursive: everything below it.",
+        inputSchema: { type: "object", properties: { path: { type: "string" }, recursive: { type: "boolean" } } },
+        execute: async (i) => (await list(i)).entries.slice(0, 200)
+      }),
+      freeze({
+        name: "read_project_file",
+        description: "Read a text file of the project (about 12 KB per call; pass offset to continue).",
+        inputSchema: { type: "object", properties: { path: { type: "string" }, offset: { type: "number" } }, required: ["path"] },
+        execute: async (i) => {
+          const r = await read(i.path, { offset: i.offset ?? 0, length: 12 * 1024 });
+          const next = (i.offset ?? 0) + r.bytes.length;
+          return { text: new TextDecoder().decode(r.bytes), size: r.size, ...next < r.size ? { next } : {} };
+        }
+      })
+    ]);
+    return Object.freeze({ list, read, download, asSampleTools });
   }
 
   // src/diff.ts
@@ -1623,6 +1693,8 @@
         return assets;
       case "downloads":
         return downloads;
+      case "files":
+        return files();
       case "artifact":
         return artifact;
       case "sample":

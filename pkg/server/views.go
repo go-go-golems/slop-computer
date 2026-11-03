@@ -93,6 +93,12 @@ func grantedCaps(v *rt.View) map[string]any {
 		switch name {
 		case "db", "room", "downloads":
 			out[name] = map[string]any{}
+		case "files":
+			// A project is a store's main snapshot (SLOP3-008): the stores
+			// _stores reaches, or one alias's target.
+			if v.Caps.Files != "" && (v.Caps.Files != rt.StoresRoot || v.Space.Stores != rt.LevelNone) {
+				out[name] = map[string]any{"project": v.Caps.Files}
+			}
 		case "assets":
 			// The policy decides by audience (members and up by default);
 			// a visitor without an id answers to nobody and stores nothing.
@@ -529,6 +535,8 @@ func (s *Server) rpcTable() map[string]rpcMethod {
 		"artifact.publish":            {authz.CodePush, s.rpcArtifactPublish},
 		"slop.call":                   {authz.ActorCall, s.rpcSlopCall},
 		"slop.read":                   {authz.DocRead, s.rpcSlopRead},
+		"files.list":                  {authz.DocRead, s.rpcFilesList},
+		"files.read":                  {authz.DocRead, s.rpcFilesRead},
 		"permissions.state": {authz.StoreRead, func(_ context.Context, v *rt.View, _ json.RawMessage) (any, error) {
 			return permissionStates(v), nil
 		}},

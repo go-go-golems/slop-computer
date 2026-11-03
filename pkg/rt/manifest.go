@@ -30,6 +30,7 @@ type Caps struct {
 	Composer   bool             // comments: composer_only
 	Images     bool             // sample: images
 	Stores     Level            // db: stores, how far the app asks to reach _stores/<id>/… (SLOP3-008)
+	Files      string           // files: project, "_stores" or one of the store's aliases (SLOP3-008)
 	Permission []string         // slop: management API permissions
 }
 
@@ -83,6 +84,17 @@ func ParseManifest(raw []byte, slopPermissions map[string]string) (Caps, error) 
 				return c, fmt.Errorf("capabilities.db: %v", err)
 			}
 			c.RuleList = d.Rules
+		case "files":
+			var f struct {
+				Project string `json:"project"`
+			}
+			if err := unmarshalCfg(cfg, &f); err != nil {
+				return c, fmt.Errorf("capabilities.files: %v", err)
+			}
+			if f.Project != StoresRoot && (!segmentRe.MatchString(f.Project) || Reserved(f.Project)) {
+				return c, fmt.Errorf("capabilities.files.project: %q is not _stores or an alias name", f.Project)
+			}
+			c.Files = f.Project
 		case "user":
 			var u struct {
 				Scopes []string `json:"scopes"`

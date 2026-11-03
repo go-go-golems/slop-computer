@@ -6,6 +6,7 @@ package server
 import (
 	"bytes"
 	"context"
+	"encoding/base64"
 	"io"
 	"net/http"
 	"net/url"
@@ -320,5 +321,89 @@ func TestAliasRevokeReopens(t *testing.T) {
 	v = guestView(t, s, "/dash")
 	if d := result(t, rpc(s, v, "db.get", map[string]any{"path": "contacts/c1"})); d["exists"] != false {
 		t.Fatalf("the reopened page still reads crm: %v", d)
+	}
+}
+
+// pushApp pushes files into a new store and mounts it at path for guests.
+func pushApp(h *harness, admin, storeID, path string, fs map[string]string) {
+	h.t.Helper()
+	h.call(admin, "store.new", map[string]any{"id": storeID})
+	h.call(admin, "files.push", map[string]any{"store": storeID, "files": files(fs)})
+	if path != "" {
+		h.call(admin, "mount.set", map[string]any{"host": h.cfg.Hosts.Live[0], "path": path, "store": storeID})
+		h.call(admin, "grant.set", map[string]any{"store": storeID, "subject": "@guest", "level": "interact"})
+	}
+}
+
+// The contract's files capability reads a store's main snapshot as the
+// viewer: through an alias, or every store under _stores (phase 2).
+func TestFilesCapability(t *testing.T) {
+	h := newHarness(t)
+	admin := h.tokenFor("admin@example.com", "read", "write", "admin")
+	pushApp(h, admin, "crm", "", map[string]string{
+		"app.json":       `{"title":"CRM","capabilities":{"db":{}}}`,
+		"index.html":     `<!doctype html><title>crm</title>`,
+		"src/a.js":       `console.log("a")`,
+		"src/lib/b.js":   `export const b = 1`,
+		"docs/readme.md": "# CRM",
+	})
+	page := `<!doctype html><title>p</title>`
+	pushApp(h, admin, "viewer", "/viewer", map[string]string{"app.json": `{"title":"v","capabilities":{"files":{"project":"source"}}}`, "index.html": page})
+	h.call(admin, "bind.set", map[string]any{"store": "viewer", "alias": "source", "target": "crm"})
+
+	s := h.site(h.cfg.Hosts.Live[0])
+	v := guestView(t, s, "/viewer")
+	if out := rpc(s, v, "files.list", map[string]any{}); errCode(out) != "not_found" {
+		t.Fatalf("without a grant on crm: %v", out)
+	}
+	h.call(admin, "grant.set", map[string]any{"store": "crm", "subject": "@guest", "level": "view"})
+	names := func(out map[string]any) []string {
+		var n []string
+		for _, e := range result(t, out)["entries"].([]any) {
+			m := e.(map[string]any)
+			p := m["path"].(string)
+			if m["isDirectory"] == true {
+				p += "/"
+			}
+			n = append(n, p)
+		}
+		return n
+	}
+	if got := strings.Join(names(rpc(s, v, "files.list", map[string]any{})), " "); got != "app.json docs/ index.html src/" {
+		t.Fatalf("top level: %s", got)
+	}
+	if got := strings.Join(names(rpc(s, v, "files.list", map[string]any{"path": "src"})), " "); got != "src/a.js src/lib/" {
+		t.Fatalf("src: %s", got)
+	}
+	if got := strings.Join(names(rpc(s, v, "files.list", map[string]any{"path": "src", "recursive": true})), " "); got != "src/a.js src/lib/ src/lib/b.js" {
+		t.Fatalf("src, recursive: %s", got)
+	}
+	r := result(t, rpc(s, v, "files.read", map[string]any{"path": "src/a.js", "offset": 8, "length": 3}))
+	if b, _ := base64.StdEncoding.DecodeString(r["bytes"].(string)); string(b) != `log` || r["size"].(float64) != 16 || len(r["revision"].(string)) != 64 {
+		t.Fatalf("read: %v", r)
+	}
+	for _, c := range []struct{ method, path, code string }{
+		{"files.read", "src", "bad_request"}, {"files.list", "src/a.js", "bad_request"},
+		{"files.read", "nope.js", "not_found"}, {"files.list", "nope", "not_found"},
+	} {
+		if out := rpc(s, v, c.method, map[string]any{"path": c.path}); errCode(out) != c.code {
+			t.Fatalf("%s %s: %v", c.method, c.path, out)
+		}
+	}
+
+	// _stores: every store the viewer may open, as folders.
+	pushApp(h, admin, "console", "/console", map[string]string{"app.json": `{"title":"c","capabilities":{"db":{"stores":"view"},"files":{"project":"_stores"}}}`, "index.html": page})
+	if code, v := openView(s, s.host, "/console", ""); code != 200 || v["caps"].(map[string]any)["files"] != nil {
+		t.Fatalf("files over _stores before the policy allows _stores: %d %v", code, v["caps"])
+	}
+	h.call(admin, "policy.set", map[string]any{"app": "console", "capability": "stores", "audience": "@guest", "value": "on"})
+	v = guestView(t, s, "/console")
+	top := strings.Join(names(rpc(s, v, "files.list", map[string]any{})), " ")
+	if !strings.Contains(top, "crm/") || strings.Contains(top, "nope") {
+		t.Fatalf("_stores top level: %s", top)
+	}
+	r = result(t, rpc(s, v, "files.read", map[string]any{"path": "crm/docs/readme.md"}))
+	if b, _ := base64.StdEncoding.DecodeString(r["bytes"].(string)); string(b) != "# CRM" {
+		t.Fatalf("read under _stores: %v", r)
 	}
 }

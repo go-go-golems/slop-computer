@@ -30,7 +30,7 @@ func init() {
 					}
 					rows, err = e.Sys.Stores(ctx, "")
 				} else {
-					rows, err = visibleStores(ctx, e, p)
+					rows, err = VisibleStores(ctx, e, p)
 				}
 				if err != nil {
 					return nil, err
@@ -220,8 +220,8 @@ func validSubject(s string) bool {
 	return false
 }
 
-// visibleStores lists what p owns or holds a grant on.
-func visibleStores(ctx context.Context, e *Env, p *access.Principal) ([]system.StoreRow, error) {
+// VisibleStores lists what p owns or holds a grant on.
+func VisibleStores(ctx context.Context, e *Env, p *access.Principal) ([]system.StoreRow, error) {
 	aud := e.K.Access.AudienceOf(ctx, p)
 	subjects := []string{}
 	if id := p.ID(); id != "" {

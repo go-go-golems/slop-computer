@@ -106,7 +106,7 @@ func init() {
 			}},
 		&Verb{Name: "app.ls", Doc: "List the stores that are apps (their tree's main snapshot holds app.json).", Scope: Read, Action: authz.Platform,
 			Run: func(ctx context.Context, e *Env, p *access.Principal, a Args) (any, error) {
-				rows, err := visibleStores(ctx, e, p)
+				rows, err := VisibleStores(ctx, e, p)
 				if p.IsAdmin() {
 					rows, err = e.Sys.Stores(ctx, "")
 				}
