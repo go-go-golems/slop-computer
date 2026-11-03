@@ -15,12 +15,15 @@ import (
 	"time"
 
 	"github.com/go-go-golems/slop-computer/pkg/billing/stripe"
+	capsdb "github.com/go-go-golems/slop-computer/pkg/caps/db"
+	"github.com/go-go-golems/slop-computer/pkg/commands"
 	"github.com/go-go-golems/slop-computer/pkg/config"
 	"github.com/go-go-golems/slop-computer/pkg/httpx"
 	"github.com/go-go-golems/slop-computer/pkg/identity"
 	"github.com/go-go-golems/slop-computer/pkg/ids"
 	"github.com/go-go-golems/slop-computer/pkg/llm"
 	"github.com/go-go-golems/slop-computer/pkg/llm/gepp"
+	"github.com/go-go-golems/slop-computer/pkg/registry"
 	"github.com/go-go-golems/slop-computer/pkg/rt"
 	"github.com/go-go-golems/slop-computer/pkg/system"
 	"github.com/go-go-golems/slop-computer/pkg/verbs"
@@ -28,11 +31,18 @@ import (
 
 // Server holds the shared state of every host.
 type Server struct {
-	Cfg  *config.Config
-	Sys  *system.DB
-	Env  *verbs.Env
-	main *http.ServeMux
-	rt   *rtState
+	Cfg *config.Config
+	Sys *system.DB
+	Env *commands.Env
+	// Verbs is the table every door calls (the commands installed with Env).
+	Verbs *verbs.Table
+	main  *http.ServeMux
+	rt    *rtState
+	// reg serves the registry as documents (pkg/registry); follow is the
+	// page door's place in the system log (registry.go).
+	reg    *registry.Docs
+	db     *capsdb.DB
+	follow sysFollower
 	// Extra host handlers, set by later phases (live, static, sandbox).
 	Live, Static, Sandbox http.Handler
 	// oidcLogin starts an OIDC sign-in (nil until OIDC is configured).
@@ -46,7 +56,7 @@ type Server struct {
 }
 
 // Build makes the server with everything the configuration enables.
-func Build(ctx context.Context, cfg *config.Config, sys *system.DB, env *verbs.Env) (*Server, error) {
+func Build(ctx context.Context, cfg *config.Config, sys *system.DB, env *commands.Env) (*Server, error) {
 	s := New(cfg, sys, env)
 	if err := s.setupOIDC(); err != nil {
 		return nil, err
@@ -89,19 +99,41 @@ func (s *Server) setupLLM(ctx context.Context) error {
 }
 
 // New builds a server.
-func New(cfg *config.Config, sys *system.DB, env *verbs.Env) *Server {
-	s := &Server{Cfg: cfg, Sys: sys, Env: env, main: http.NewServeMux()}
+func New(cfg *config.Config, sys *system.DB, env *commands.Env) *Server {
+	s := &Server{Cfg: cfg, Sys: sys, Env: env, main: http.NewServeMux(), Verbs: verbs.NewTable()}
+	if env != nil {
+		if env.Verbs == nil {
+			commands.Install(verbs.NewTable(), env) // not verbs.Default: the CLI lists its commands there
+		}
+		s.Verbs = env.Verbs
+	}
 	key, err := cfg.Key()
 	if err != nil {
 		log.Printf("server key: %v (using a temporary one: sandbox labels change on restart)", err)
 		key = []byte(ids.Secret("key_"))
 	}
 	s.rt = newRT(key)
-	s.rt.views.OnClose = s.roomClosed
+	s.rt.views.OnClose = func(v *rt.View, rooms []string) {
+		s.roomClosed(v, rooms)
+		s.reg.Live.Forget(v.ID, "")
+	}
+	s.reg = &registry.Docs{Sys: s.Sys, Verbs: s.Verbs, Host: regHost{s}, Live: registry.NewLive()}
 	if env != nil {
-		env.AccessChanged = s.reviewViews
-		env.PersonChanged = s.reviewPerson
-		env.PolicyChanged = s.reviewApp
+		s.reg.Confirm = env.Confirm
+		if env.K != nil {
+			s.reg.Access = env.K.Access
+		}
+	}
+	s.db = &capsdb.DB{Host: dbHost{s}, Reg: dbHost{s}}
+	if env != nil {
+		s.db.K = env.K
+	}
+	if s.Sys != nil {
+		// Views follow the system log: a change of access, a person's role
+		// or comps, or an app's policy rechecks the views it may affect,
+		// and live registry documents hear what moved (SLOP3-009 step 3).
+		s.follow.cursor, _ = s.Sys.LogHead(context.Background())
+		s.Sys.Listen(func() { go s.followSystem() })
 	}
 	if env != nil && env.K != nil {
 		env.K.Subscribe(s.publish)
@@ -112,6 +144,8 @@ func New(cfg *config.Config, sys *system.DB, env *verbs.Env) *Server {
 		}
 		env.A.Secret = func(ctx context.Context, app, name string) (string, error) { return sys.Secret(ctx, key, app, name) }
 		env.A.Platform = s.platformModule
+		env.A.Paths = s.db
+		env.A.Sample = actorSampler{s}
 		s.registerModules()
 		env.A.RoomEmit = s.actorEmit
 		env.A.RoomPeers = func(store string) []rt.Peer {
@@ -199,6 +233,7 @@ func (s *Server) mainRoutes(m *http.ServeMux) {
 	s.deviceRoutes(m)
 	s.billingRoutes(m)
 	s.apiRoutes(m)
+	s.mcpRoutes(m)
 	s.adminRoutes(m)
 }
 

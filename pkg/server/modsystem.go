@@ -8,12 +8,13 @@ import (
 
 // systemFuncs is the system module: the platform's governance verbs, each
 // called as the visitor. Changes to roles, policy, LLM budgets, comps and
-// secrets are governance: made through an app, the person confirms them.
+// secrets are governance (their verbs' Effect is govern): made through an
+// app, the person confirms them.
 // Trust (app.trust) is deliberately absent, so no app can widen its own
 // powers.
 var systemFuncs = []modFunc{
 	{JS: "people.list", Verb: "people.ls", Pos: []string{"kind"}},
-	{JS: "people.setRole", Verb: "people.role", Pos: []string{"id", "role"}, Confirm: true},
+	{JS: "people.setRole", Verb: "people.role", Pos: []string{"id", "role"}},
 	{JS: "grants.list", Verb: "grant.ls", Pos: []string{"store"}},
 	{JS: "grants.set", Verb: "grant.set", Pos: []string{"store", "subject", "level"}},
 	{JS: "grants.remove", Verb: "grant.rm", Pos: []string{"store", "subject"}},
@@ -25,18 +26,18 @@ var systemFuncs = []modFunc{
 	{JS: "mounts.remove", Verb: "mount.rm", Pos: []string{"host", "path"}},
 	{JS: "mounts.undo", Verb: "mount.undo", Pos: []string{"host", "path"}},
 	{JS: "policy.list", Verb: "policy.ls", Pos: []string{"app"}},
-	{JS: "policy.set", Verb: "policy.set", Pos: []string{"app", "capability", "audience", "value"}, Confirm: true},
+	{JS: "policy.set", Verb: "policy.set", Pos: []string{"app", "capability", "audience", "value"}},
 	{JS: "llm.list", Verb: "llm.ls"},
 	{JS: "llm.usage", Verb: "llm.usage", Pos: []string{"person"}},
-	{JS: "llm.set", Verb: "llm.set", Pos: []string{"subject", "value", "budget"}, Confirm: true},
-	{JS: "llm.remove", Verb: "llm.rm", Pos: []string{"subject"}, Confirm: true},
-	{JS: "llm.reset", Verb: "llm.reset", Pos: []string{"person"}, Confirm: true},
+	{JS: "llm.set", Verb: "llm.set", Pos: []string{"subject", "value", "budget"}},
+	{JS: "llm.remove", Verb: "llm.rm", Pos: []string{"subject"}},
+	{JS: "llm.reset", Verb: "llm.reset", Pos: []string{"person"}},
 	{JS: "subs.list", Verb: "sub.ls", Pos: []string{"person"}},
-	{JS: "subs.grant", Verb: "sub.grant", Pos: []string{"person", "until", "note"}, Confirm: true},
-	{JS: "subs.revoke", Verb: "sub.revoke", Pos: []string{"id"}, Confirm: true},
+	{JS: "subs.grant", Verb: "sub.grant", Pos: []string{"person", "until", "note"}},
+	{JS: "subs.revoke", Verb: "sub.revoke", Pos: []string{"id"}},
 	{JS: "secrets.list", Verb: "secret.ls", Pos: []string{"app"}},
-	{JS: "secrets.set", Verb: "secret.set", Pos: []string{"app", "name", "value"}, Confirm: true},
-	{JS: "secrets.remove", Verb: "secret.rm", Pos: []string{"app", "name"}, Confirm: true},
+	{JS: "secrets.set", Verb: "secret.set", Pos: []string{"app", "name", "value"}},
+	{JS: "secrets.remove", Verb: "secret.rm", Pos: []string{"app", "name"}},
 	{JS: "stores.list", Verb: "store.ls", Fixed: map[string]any{"all": true}},
 	{JS: "stores.meta", Verb: "store.meta", Pos: []string{"id"}},
 	{JS: "apps.list", Verb: "app.ls"},

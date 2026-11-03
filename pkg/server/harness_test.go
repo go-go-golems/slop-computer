@@ -21,11 +21,11 @@ import (
 	"time"
 
 	"github.com/go-go-golems/slop-computer/pkg/actor"
+	"github.com/go-go-golems/slop-computer/pkg/commands"
 	"github.com/go-go-golems/slop-computer/pkg/config"
 	"github.com/go-go-golems/slop-computer/pkg/kernel"
 	"github.com/go-go-golems/slop-computer/pkg/store"
 	"github.com/go-go-golems/slop-computer/pkg/system"
-	"github.com/go-go-golems/slop-computer/pkg/verbs"
 )
 
 // harness runs a server behind httptest and lets requests choose a Host.
@@ -63,7 +63,7 @@ func newHarnessWith(t *testing.T, change func(*config.Config)) *harness {
 		t.Fatal(err)
 	}
 	t.Cleanup(k.Close)
-	env := &verbs.Env{Cfg: cfg, Sys: sys, K: k, A: actor.New(k)}
+	env := &commands.Env{Cfg: cfg, Sys: sys, K: k, A: actor.New(k)}
 	srv, err := Build(context.Background(), cfg, sys, env)
 	if err != nil {
 		t.Fatal(err)

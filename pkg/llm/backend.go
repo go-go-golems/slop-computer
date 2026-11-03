@@ -116,3 +116,20 @@ type Backend interface {
 	Sample(context.Context, Request, func(Event), ExecuteTool) error
 	Close() error
 }
+
+// Answer is what one whole call came to (pkg/caps/sample): the final text,
+// the model that answered, and the tokens it used. Failure is an error the
+// backend reported as an event (already streamed to a caller that streams).
+type Answer struct {
+	Text    string      `json:"text"`
+	Model   string      `json:"model"`
+	Usage   AnswerUsage `json:"usage"`
+	Result  *Result     `json:"-"`
+	Failure *Failure    `json:"-"`
+}
+
+// AnswerUsage is an answer's tokens, over all its rounds.
+type AnswerUsage struct {
+	Input  int64 `json:"input"`
+	Output int64 `json:"output"`
+}

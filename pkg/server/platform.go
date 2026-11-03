@@ -49,7 +49,7 @@ func (s *Server) platformModule(a *actor.Actor) goja.Value {
 			if args == nil {
 				args = map[string]any{}
 			}
-			out, err := verbs.Call(withPrincipal(ctx, p), s.Env, p, platformOps[name], args)
+			out, err := s.Verbs.Call(withPrincipal(ctx, p), p, platformOps[name], args)
 			if err != nil {
 				code, msg := "actor_error", err.Error()
 				if ve, ok := err.(*verbs.Error); ok {

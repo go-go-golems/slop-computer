@@ -1,7 +1,6 @@
 package verbs
 
 import (
-	"context"
 	"crypto/rand"
 	"crypto/sha256"
 	"encoding/hex"
@@ -12,8 +11,6 @@ import (
 	"sync"
 	"time"
 
-	"github.com/go-go-golems/slop-computer/pkg/access"
-	"github.com/go-go-golems/slop-computer/pkg/authz"
 )
 
 // ConfirmTTL is how long a confirmation waits, and how long an approval
@@ -131,22 +128,6 @@ func summarize(verb string, args map[string]any) string {
 	return strings.Join(parts, " ")
 }
 
-// Confirmations is the server's confirmation book.
-func (e *Env) Confirmations() *Confirmations {
-	e.confirmsOnce.Do(func() { e.confirms = &Confirmations{} })
-	return e.confirms
-}
-
-func init() {
-	Register(
-		&Verb{Name: "confirm.approve", Doc: "Allow a change an app asked to make for you (the id from its confirmation_required error).", Scope: Write, Action: authz.Account,
-			Args: []Arg{{Name: "id", Type: "string", Pos: 1, Required: true}},
-			Run: func(ctx context.Context, e *Env, p *access.Principal, a Args) (any, error) {
-				x, ok := e.Confirmations().Approve(a.S("id"), p.ID())
-				if !ok {
-					return nil, Errf("not_found", "no confirmation %s waits for you", a.S("id"))
-				}
-				return x, nil
-			}},
-	)
-}
+// NewConfirmations is an empty confirmation book: the host owns one, and
+// hands it to the doors that ask people to confirm.
+func NewConfirmations() *Confirmations { return &Confirmations{} }

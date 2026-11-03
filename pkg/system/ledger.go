@@ -21,7 +21,7 @@ import (
 // transaction and each round's output is capped at what its hold covers.
 //
 // Ledger writes go through ledgerTx, which neither moves the epoch nor
-// calls OnLog: balances are never part of a cached decision, and a write
+// calls the Listen functions: balances are never part of a cached decision, and a write
 // per model round must not make every open view decide again or wake the
 // system:* reactors.
 

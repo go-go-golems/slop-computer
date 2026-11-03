@@ -23,6 +23,10 @@ const (
 	IdleGrace    = 2 * time.Minute
 )
 
+// KindActor is the kind of an actor's event seen as a view of its store by
+// the event's visitor (pkg/caps/db): it has no stream.
+const KindActor = "actor"
+
 // View is one open page (or agent) on a target: who, at which level, with
 // which capabilities. It lives in memory only; a server restart ends every
 // view and the shell opens new ones.
@@ -42,7 +46,7 @@ type View struct {
 	// Space is the view's path space (SLOP3-008): its aliases and how far
 	// _stores reaches. Decided at open, like Level; a change reopens it.
 	Space   *Space    `json:"-"`
-	Kind    string    `json:"kind"` // viewer | agent
+	Kind    string    `json:"kind"` // viewer | agent | actor (KindActor)
 	Expires time.Time `json:"expiresAt"`
 	Created time.Time `json:"-"`
 	// Epoch is the system epoch at which Level, Role and Policy were last

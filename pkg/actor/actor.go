@@ -103,6 +103,7 @@ type turn struct {
 	out    []func() // released after the commit: room messages, replies
 	rev    int64    // the store's rev when the turn began
 	alarms bool     // _alarms changed: refresh the schedule after the commit
+	view   *rt.View // the turn as a view of the store by its visitor (dbView)
 }
 
 // Actor is one store's running actor.

@@ -1,7 +1,10 @@
 package server
 
 import (
+	"context"
 	"net/http"
+	"strings"
+	"sync"
 
 	"github.com/go-go-golems/slop-computer/pkg/access"
 	"github.com/go-go-golems/slop-computer/pkg/httpx"
@@ -15,7 +18,7 @@ const maxAPIBody = 96 << 20
 
 func (s *Server) apiRoutes(m *http.ServeMux) {
 	m.HandleFunc("GET /api/v1/verbs", func(w http.ResponseWriter, r *http.Request) {
-		httpx.JSON(w, 200, map[string]any{"verbs": verbs.All()})
+		httpx.JSON(w, 200, map[string]any{"verbs": s.Verbs.All()})
 	})
 	m.HandleFunc("POST /api/v1/{verb}", s.apiCall)
 }
@@ -57,11 +60,62 @@ func (s *Server) apiCall(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 	s.Sys.TouchPerson(r.Context(), p.ID())
-	res, err := verbs.Call(withPrincipal(r.Context(), p), s.Env, p, name, args)
+	ctx := withPrincipal(r.Context(), p)
+	if v, ok := s.Verbs.Get(name); ok && v.Effect == verbs.EffectStream && strings.Contains(r.Header.Get("Accept"), "text/event-stream") {
+		s.apiStream(ctx, w, p, name, args)
+		return
+	}
+	res, err := s.Verbs.Call(ctx, p, name, args)
 	if err != nil {
 		e := verbs.AsError(err)
 		httpx.JSON(w, e.Status(), map[string]any{"error": e})
 		return
 	}
 	httpx.JSON(w, 200, map[string]any{"result": res})
+}
+
+// apiStream runs a stream verb for a caller that accepts text/event-stream:
+// each part is a "part" event, then one "result" or "error" event. Until
+// the first part the answer is not yet a stream, so a refusal (arguments,
+// authority) is an ordinary JSON error with its status.
+func (s *Server) apiStream(ctx context.Context, w http.ResponseWriter, p *access.Principal, name string, args verbs.Args) {
+	flusher, _ := w.(http.Flusher)
+	var mu sync.Mutex
+	started := false
+	send := func(typ string, data any) {
+		if !started {
+			w.Header().Set("Content-Type", "text/event-stream")
+			w.Header().Set("Cache-Control", "no-store")
+			w.Header().Set("X-Accel-Buffering", "no")
+			w.WriteHeader(http.StatusOK)
+			started = true
+		}
+		_ = writeSSE(w, typ, data)
+		if flusher != nil {
+			flusher.Flush()
+		}
+	}
+	ctx = verbs.WithEmit(ctx, func(part any) error {
+		mu.Lock()
+		defer mu.Unlock()
+		if ctx.Err() != nil {
+			return ctx.Err()
+		}
+		send("part", part)
+		return nil
+	})
+	res, err := s.Verbs.Call(ctx, p, name, args)
+	mu.Lock()
+	defer mu.Unlock()
+	switch {
+	case err != nil && !started:
+		e := verbs.AsError(err)
+		httpx.JSON(w, e.Status(), map[string]any{"error": e})
+	case err != nil:
+		send("error", map[string]any{"error": verbs.AsError(err)})
+	case !started:
+		httpx.JSON(w, 200, map[string]any{"result": res})
+	default:
+		send("result", map[string]any{"result": res})
+	}
 }

@@ -1,4 +1,4 @@
-package verbs
+package commands
 
 import (
 	"context"
@@ -12,22 +12,23 @@ import (
 	"github.com/go-go-golems/slop-computer/pkg/authz"
 	"github.com/go-go-golems/slop-computer/pkg/rt"
 	"github.com/go-go-golems/slop-computer/pkg/system"
+	"github.com/go-go-golems/slop-computer/pkg/verbs"
 )
 
 // PreviewTTL is how long a preview origin serves.
 const PreviewTTL = time.Hour
 
-func init() {
-	Register(
-		&Verb{Name: "preview.url", Doc: "A private preview of a store's snapshot on its own sandbox origin, with the pick-and-pin bridge, framed only by parent (an origin of this server); it serves for an hour.", Scope: Read, Action: authz.StoreRead,
-			Args: []Arg{{Name: "store", Type: "string", Pos: 1, Required: true}, {Name: "at", Type: "string", Pos: 2, Doc: "a snapshot number or ref (default draft, else main)"},
+func previewVerbs(e *Env) []*verbs.Verb {
+	return []*verbs.Verb{
+		{Name: "preview.url", Doc: "A private preview of a store's snapshot on its own sandbox origin, with the pick-and-pin bridge, framed only by parent (an origin of this server); it serves for an hour.", Scope: verbs.Read, Action: authz.StoreRead,
+			Args: []verbs.Arg{{Name: "store", Type: "string", Pos: 1, Required: true}, {Name: "at", Type: "string", Pos: 2, Doc: "a snapshot number or ref (default draft, else main)"},
 				{Name: "parent", Type: "string", Pos: 3, Required: true, Doc: "the origin of the page that frames it"}},
-			Run: func(ctx context.Context, e *Env, p *access.Principal, a Args) (any, error) {
+			Run: func(ctx context.Context, p *access.Principal, a verbs.Args) (any, error) {
 				if e.Cfg.Hosts.Sandbox == "" {
-					return nil, Errf("unavailable", "this server has no sandbox host")
+					return nil, verbs.Errf("unavailable", "this server has no sandbox host")
 				}
 				if p.Person == nil {
-					return nil, Errf("unauthenticated", "previews are for people")
+					return nil, verbs.Errf("unauthenticated", "previews are for people")
 				}
 				s, _, err := e.open(ctx, p, a.S("store"), rt.LevelView, "previewing")
 				if err != nil {
@@ -35,7 +36,7 @@ func init() {
 				}
 				parent := strings.TrimSuffix(a.S("parent"), "/")
 				if !e.serverOrigin(parent) {
-					return nil, Errf("invalid_argument", "parent must be an origin of this server, not %q", parent)
+					return nil, verbs.Errf("invalid_argument", "parent must be an origin of this server, not %q", parent)
 				}
 				at := a.S("at")
 				n, err := s.Ref(ctx, at)
@@ -45,7 +46,7 @@ func init() {
 					}
 				}
 				if err != nil {
-					return nil, Errf("not_found", "no snapshot or ref %s on %s", at, s.ID)
+					return nil, verbs.Errf("not_found", "no snapshot or ref %s on %s", at, s.ID)
 				}
 				b := make([]byte, 12)
 				if _, err := rand.Read(b); err != nil {
@@ -59,7 +60,7 @@ func init() {
 				return map[string]any{"url": e.Cfg.Scheme + "://" + pv.Label + "." + e.Cfg.Hosts.Sandbox + "/",
 					"store": pv.Store, "n": pv.N, "parent": pv.Parent, "expiresAt": pv.ExpiresAt}, nil
 			}},
-	)
+	}
 }
 
 // serverOrigin reports an origin of this server: the main host, a live

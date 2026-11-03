@@ -26,12 +26,17 @@ func (s *Server) actorEmit(storeID, topic string, data any) {
 	}
 }
 
-// viewPrincipal rebuilds the principal of a view's person.
+// viewPrincipal rebuilds the principal of a view's person (for an actor's
+// view, its event's visitor).
 func (s *Server) viewPrincipal(ctx context.Context, v *rt.View) *access.Principal {
 	if v.User == "" {
 		return nil
 	}
-	return s.personAs(ctx, v.User, "page")
+	via := "page"
+	if v.Kind == rt.KindActor {
+		via = "actor"
+	}
+	return s.personAs(ctx, v.User, via)
 }
 
 func actorFail(err error) error {

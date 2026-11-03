@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/base64"
 	"encoding/json"
+	"errors"
 	"io"
 	"net/http"
 	"net/url"
@@ -55,7 +56,7 @@ func (a *Actor) module(name string) goja.Value {
 			return a.secretsModule()
 		}
 	case "sample":
-		if a.run.Manifest.Caps.Declared["sample"] && a.m.LLM != nil && a.m.allowedAny(a, "sample") {
+		if a.run.Manifest.Caps.Declared["sample"] && a.m.Sample != nil && a.m.Sample.Available() && a.m.allowedAny(a, "sample") {
 			return a.sampleModule()
 		}
 	case "platform":
@@ -215,32 +216,106 @@ func (a *Actor) snap(d store.Doc, exists bool, path string) goja.Value {
 	return o
 }
 
+// Paths serves an actor's db paths that are not its own store's (SLOP3-009
+// step 4): its store's aliases and _stores, resolved through the same
+// rt.Space as its pages' (pkg/caps/db implements it). The actor reads them
+// as the event's visitor: what that person could read through a page of
+// this app, no more. An alarm or a reactor has no visitor and reads as
+// nobody.
+type Paths interface {
+	Space(ctx context.Context, storeID string, caps rt.Caps, stores bool) *rt.Space
+	Get(ctx context.Context, v *rt.View, path string) (rt.Doc, bool, error)
+	Query(ctx context.Context, v *rt.View, q rt.Query) ([]rt.Doc, error)
+}
+
+// dbView is the turn in progress as a view of the store by its visitor,
+// with the store's path space: built once per turn, on the first db call.
+func (a *Actor) dbView() *rt.View {
+	t := a.turn()
+	if t.view != nil {
+		return t.view
+	}
+	vis := a.Visitor()
+	level, _ := rt.ParseLevel(vis.Level)
+	var caps rt.Caps
+	if a.run.Manifest != nil {
+		caps = a.run.Manifest.Caps
+	}
+	v := &rt.View{Target: a.st.ID, App: a.run.App, User: vis.ID, Role: vis.Audience, Level: level, Caps: caps, Kind: rt.KindActor}
+	if a.m.Paths != nil {
+		v.Space = a.m.Paths.Space(t.t.Context(), a.st.ID, caps, a.m.allowed(a, "stores"))
+	}
+	t.view = v
+	return v
+}
+
+// resolve maps a db path of the actor to its target; true (hidden) for
+// another store's private documents: reads find nothing, writes are
+// refused.
+func (a *Actor) resolve(path string, doc bool) (rt.Target, bool) {
+	v := a.dbView()
+	tgt, err := v.Space.Resolve(path, doc)
+	var pe *rt.PathError
+	if errors.As(err, &pe) {
+		if pe.Code == "not_found" {
+			return rt.Target{}, true
+		}
+		a.throw(fail(pe.Code, "%s", pe.Msg))
+	}
+	if tgt.Store == "" && !tgt.Registry {
+		tgt.Store, tgt.Own = a.st.ID, true
+	}
+	return tgt, false
+}
+
+// ownPath is the path in the actor's store that a write of path writes:
+// one write writes one store, the actor's own, so a path in another store
+// (an alias, _stores) is refused.
+func (a *Actor) ownPath(path string) string {
+	tgt, hidden := a.resolve(path, true)
+	if hidden || !tgt.Own {
+		a.throw(fail("permission_denied", "%s is in another store: an actor writes only its own (call that store's action through use('stores'))", path))
+	}
+	return tgt.Path
+}
+
 func (a *Actor) dbModule() goja.Value {
 	o := a.vm.NewObject()
 	_ = o.Set("doc", func(path string) goja.Value {
 		d := a.vm.NewObject()
 		_ = d.Set("path", path)
 		_ = d.Set("get", func() goja.Value {
-			doc, err := a.turn().t.GetDoc(path)
-			if err != nil {
+			tgt, hidden := a.resolve(path, true)
+			switch {
+			case hidden:
+				return a.snap(store.Doc{}, false, path)
+			case tgt.Own:
+				doc, err := a.turn().t.GetDoc(tgt.Path)
+				if err != nil {
+					return a.snap(store.Doc{}, false, path)
+				}
+				return a.snap(doc, true, path)
+			case a.m.Paths == nil:
 				return a.snap(store.Doc{}, false, path)
 			}
-			return a.snap(doc, true, path)
+			doc, ok, err := a.m.Paths.Get(a.turn().t.Context(), a.dbView(), path)
+			a.check(err)
+			return a.snap(store.Doc{Path: path, Body: doc.Body, Version: doc.Version}, ok, path)
 		})
 		_ = d.Set("set", func(v goja.Value) goja.Value {
 			body, _ := a.fromJS(v).(map[string]any)
-			ver, err := a.turn().t.SetDoc(path, body, 0)
+			ver, err := a.turn().t.SetDoc(a.ownPath(path), body, 0)
 			a.check(err)
 			return a.vm.ToValue(ver)
 		})
 		_ = d.Set("update", func(v goja.Value) goja.Value {
 			body, _ := a.fromJS(v).(map[string]any)
-			ver, err := a.turn().t.UpdateDoc(path, body)
+			ver, err := a.turn().t.UpdateDoc(a.ownPath(path), body)
 			a.check(err)
 			return a.vm.ToValue(ver)
 		})
 		_ = d.Set("delete", func() goja.Value {
-			ok, err := a.turn().t.DeleteDoc(path)
+			ok, err := a.turn().t.DeleteDoc(a.ownPath(path))
 			a.check(err)
 			return a.vm.ToValue(ok)
 		})
@@ -248,6 +323,37 @@ func (a *Actor) dbModule() goja.Value {
 	})
 	_ = o.Set("collection", func(coll string) goja.Value { return a.query(rt.Query{Coll: coll}) })
 	return o
+}
+
+// queryDocs runs q (on a collection of the actor's space): in the turn for
+// the store's own documents, through Paths for another store's.
+func (a *Actor) queryDocs(q rt.Query) []store.Doc {
+	tgt, hidden := a.resolve(q.Coll, false)
+	switch {
+	case hidden || (!tgt.Own && a.m.Paths == nil):
+		return nil
+	case tgt.Own:
+		pageColl := q.Coll
+		q.Coll = tgt.Path
+		docs, err := a.turn().t.QueryDocs(q, store.Everything)
+		a.check(err)
+		if tgt.Via != "" { // an alias of the store itself: its page paths
+			for i := range docs {
+				docs[i].Path = pageColl + "/" + rt.IDOf(docs[i].Path)
+			}
+		}
+		return docs
+	}
+	if err := q.ValidateShape(); err != nil {
+		a.throw(fail("invalid_argument", "invalid query on %q", q.Coll))
+	}
+	ds, err := a.m.Paths.Query(a.turn().t.Context(), a.dbView(), q)
+	a.check(err)
+	docs := make([]store.Doc, len(ds))
+	for i, d := range ds {
+		docs[i] = store.Doc{Path: d.Path, Body: d.Body, Version: d.Version}
+	}
+	return docs
 }
 
 func (a *Actor) query(q rt.Query) goja.Value {
@@ -268,8 +374,7 @@ func (a *Actor) query(q rt.Query) goja.Value {
 		return a.query(n)
 	})
 	_ = o.Set("get", func() goja.Value {
-		docs, err := a.turn().t.QueryDocs(q, store.Everything)
-		a.check(err)
+		docs := a.queryDocs(q)
 		snaps := make([]any, len(docs))
 		for i, d := range docs {
 			snaps[i] = a.snap(d, true, d.Path)

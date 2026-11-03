@@ -2,6 +2,7 @@
 package client
 
 import (
+	"bufio"
 	"bytes"
 	"encoding/json"
 	"errors"
@@ -184,4 +185,86 @@ func (c *Client) Call(verb string, args map[string]any) (any, error) {
 		return nil, err
 	}
 	return out.Result, nil
+}
+
+// CallStream runs a stream verb, handing each partial result to part as it
+// arrives (SLOP3-009 step 5), and returns the result. A server that answers
+// without streaming gives the result alone.
+func (c *Client) CallStream(verb string, args map[string]any, part func(json.RawMessage)) (any, error) {
+	b, err := json.Marshal(args)
+	if err != nil {
+		return nil, err
+	}
+	req, err := http.NewRequest("POST", c.Server+"/api/v1/"+verb, bytes.NewReader(b))
+	if err != nil {
+		return nil, err
+	}
+	req.Header.Set("Content-Type", "application/json")
+	req.Header.Set("Accept", "text/event-stream, application/json")
+	req.Header.Set("X-Slop-Via", "cli")
+	if c.Token != "" {
+		req.Header.Set("Authorization", "Bearer "+c.Token)
+	}
+	resp, err := c.HTTP.Do(req)
+	if err != nil {
+		return nil, err
+	}
+	defer resp.Body.Close()
+	if !strings.HasPrefix(resp.Header.Get("Content-Type"), "text/event-stream") {
+		raw, err := io.ReadAll(resp.Body)
+		if err != nil {
+			return nil, err
+		}
+		return decodeAnswer(resp.StatusCode, raw)
+	}
+	sc := bufio.NewScanner(resp.Body)
+	sc.Buffer(make([]byte, 64<<10), 16<<20)
+	event := ""
+	for sc.Scan() {
+		line := sc.Text()
+		switch {
+		case strings.HasPrefix(line, "event: "):
+			event = strings.TrimPrefix(line, "event: ")
+		case strings.HasPrefix(line, "data: "):
+			data := []byte(strings.TrimPrefix(line, "data: "))
+			switch event {
+			case "part":
+				if part != nil {
+					part(data)
+				}
+			case "result":
+				return decodeAnswer(200, data)
+			case "error":
+				return decodeAnswer(500, data)
+			}
+		}
+	}
+	if err := sc.Err(); err != nil {
+		return nil, err
+	}
+	return nil, &APIError{Code: "unavailable", Message: "the stream ended without a result"}
+}
+
+// decodeAnswer reads {result} or {error} as Post does.
+func decodeAnswer(status int, raw []byte) (any, error) {
+	var w struct {
+		Result any       `json:"result"`
+		Error  *APIError `json:"error"`
+	}
+	dec := json.NewDecoder(bytes.NewReader(raw))
+	dec.UseNumber()
+	if err := dec.Decode(&w); err != nil {
+		return nil, &APIError{Status: status, Code: "http_" + fmt.Sprint(status), Message: strings.TrimSpace(string(raw))}
+	}
+	if w.Error != nil {
+		if status == 200 {
+			status = 500
+		}
+		w.Error.Status = status
+		return nil, w.Error
+	}
+	if status >= 400 {
+		return nil, &APIError{Status: status, Code: "http_" + fmt.Sprint(status), Message: strings.TrimSpace(string(raw))}
+	}
+	return w.Result, nil
 }

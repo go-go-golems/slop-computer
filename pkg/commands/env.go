@@ -1,11 +1,10 @@
-package verbs
+package commands
 
 import (
 	"context"
 	"encoding/json"
 	"errors"
 	"strings"
-	"sync"
 
 	"github.com/go-go-golems/slop-computer/pkg/access"
 	"github.com/go-go-golems/slop-computer/pkg/actor"
@@ -16,9 +15,13 @@ import (
 	"github.com/go-go-golems/slop-computer/pkg/rt"
 	"github.com/go-go-golems/slop-computer/pkg/store"
 	"github.com/go-go-golems/slop-computer/pkg/system"
+	"github.com/go-go-golems/slop-computer/pkg/verbs"
 )
 
-// Env is what verbs work against; every door shares one.
+// Env is what commands work against: the host builds one and installs the
+// commands into its table (Install). Views that a command's change
+// affects learn of it from the system log (the page door follows it:
+// SLOP3-009 step 3), not from callbacks.
 type Env struct {
 	Cfg *config.Config
 	Sys *system.DB
@@ -28,25 +31,20 @@ type Env struct {
 	// Billing is the Stripe service (nil without a stripe config).
 	Billing *stripe.Service
 
-	// AccessChanged is called after a verb changed who may open a store
-	// (grants, links), so the server can review its open views.
-	AccessChanged func(ctx context.Context, store string)
-	// PolicyChanged is called after an app's policy matrix changed: the
-	// views of its stores were opened with the old cells.
-	PolicyChanged func(ctx context.Context, app string)
-	// PersonChanged is called after a person's audience may have changed
-	// (role, comps), so the server can review their open views.
-	PersonChanged func(ctx context.Context, person string)
+	// Confirm is the host's confirmation book (governance changes an app
+	// asked to make for a person); nil gets a fresh one at Install.
+	Confirm *verbs.Confirmations
 
-	confirms     *Confirmations
-	confirmsOnce sync.Once
+	// Verbs is the table the commands are installed in: eval and other
+	// commands that call verbs go through it.
+	Verbs *verbs.Table
 }
 
 // open checks that p holds need on a store and opens it. A denial carries
 // the access trace; a store p may not see at all reads as not_found.
 func (e *Env) open(ctx context.Context, p *access.Principal, id string, need rt.Level, what string) (*store.Store, access.Decision, error) {
 	if id == "" {
-		return nil, access.Decision{}, Errf("invalid_argument", "which store?")
+		return nil, access.Decision{}, verbs.Errf("invalid_argument", "which store?")
 	}
 	d, _, err := e.K.Access.Can(ctx, p, id, need, what, false)
 	if err != nil {
@@ -54,13 +52,13 @@ func (e *Env) open(ctx context.Context, p *access.Principal, id string, need rt.
 	}
 	if !d.OK {
 		if d.Code == "not_found" {
-			return nil, d, &Error{Code: "not_found", Message: "no store " + id}
+			return nil, d, &verbs.Error{Code: "not_found", Message: "no store " + id}
 		}
-		return nil, d, &Error{Code: d.Code, Message: what + " on " + id + " needs " + need.String(), Trace: d.Trace}
+		return nil, d, &verbs.Error{Code: d.Code, Message: what + " on " + id + " needs " + need.String(), Trace: d.Trace}
 	}
 	s, err := e.K.Store(ctx, id)
 	if errors.Is(err, kernel.ErrNoStore) {
-		return nil, d, &Error{Code: "not_found", Message: "no store " + id}
+		return nil, d, &verbs.Error{Code: "not_found", Message: "no store " + id}
 	}
 	return s, d, err
 }
@@ -76,24 +74,24 @@ func fileErr(err error) error {
 	if err == nil || errors.Is(err, store.ErrAppCode) {
 		return storeErr(err)
 	}
-	var ve *Error
+	var ve *verbs.Error
 	if errors.As(err, &ve) {
 		return ve
 	}
-	return Errf("invalid_argument", "%s", err.Error())
+	return verbs.Errf("invalid_argument", "%s", err.Error())
 }
 
 // storeErr maps store errors to verb errors.
 func storeErr(err error) error {
 	var de *store.DocError
-	var ve *Error
+	var ve *verbs.Error
 	switch {
 	case err == nil:
 		return nil
 	case errors.As(err, &ve):
 		return ve
 	case errors.Is(err, store.ErrAppCode):
-		return &Error{Code: "permission_denied", Message: err.Error()}
+		return &verbs.Error{Code: "permission_denied", Message: err.Error()}
 	case errors.As(err, &de):
 		code := "invalid_argument"
 		if strings.HasPrefix(de.Msg, "conflict") {
@@ -101,9 +99,9 @@ func storeErr(err error) error {
 		} else if strings.HasPrefix(de.Msg, "quota_exceeded") {
 			code = "quota_exceeded"
 		}
-		return &Error{Code: code, Message: de.Msg}
+		return &verbs.Error{Code: code, Message: de.Msg}
 	case errors.Is(err, store.ErrNotFound):
-		return &Error{Code: "not_found", Message: err.Error()}
+		return &verbs.Error{Code: "not_found", Message: err.Error()}
 	}
 	return err
 }
@@ -129,7 +127,7 @@ func decodeJSON(b []byte) any {
 }
 
 // obj returns an argument as a JSON object (an object, or a string of one).
-func (a Args) obj(k string) (map[string]any, bool) {
+func argObj(a verbs.Args, k string) (map[string]any, bool) {
 	switch v := a[k].(type) {
 	case map[string]any:
 		m, _ := norm(v).(map[string]any)
@@ -143,7 +141,7 @@ func (a Args) obj(k string) (map[string]any, bool) {
 }
 
 // list returns an argument as a JSON array (an array, or a string of one).
-func (a Args) list(k string) ([]any, bool) {
+func argList(a verbs.Args, k string) ([]any, bool) {
 	switch v := a[k].(type) {
 	case []any:
 		l, _ := norm(v).([]any)

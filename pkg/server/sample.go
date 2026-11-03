@@ -9,8 +9,8 @@ import (
 	"sync"
 	"time"
 
+	capsample "github.com/go-go-golems/slop-computer/pkg/caps/sample"
 	"github.com/go-go-golems/slop-computer/pkg/httpx"
-	"github.com/go-go-golems/slop-computer/pkg/ids"
 	"github.com/go-go-golems/slop-computer/pkg/llm"
 	"github.com/go-go-golems/slop-computer/pkg/rt"
 	"github.com/go-go-golems/slop-computer/pkg/system"
@@ -79,78 +79,105 @@ func (ss *samples) takeTool(c *sampleCall, use string) chan llm.ToolResult {
 	return ch
 }
 
-// viewLLM is what the viewer may spend: the payer is the viewing person.
+// sampler is the sample capability on this server's backend (set after
+// the server is built, so read per call).
+func (s *Server) sampler() *capsample.Sampler {
+	sp := &capsample.Sampler{Sys: s.Sys}
+	if s.Env != nil && s.Env.A != nil {
+		sp.Backend = s.Env.A.LLM
+	}
+	return sp
+}
+
+// actorSampler is the sample capability for actors: the server's sampler,
+// read per call.
+type actorSampler struct{ s *Server }
+
+func (a actorSampler) Available() bool { return a.s.sampler().Available() }
+
+func (a actorSampler) Limits(ctx context.Context, payer, audience string) system.LLM {
+	return a.s.sampler().Limits(ctx, payer, audience)
+}
+
+func (a actorSampler) Check(ctx context.Context, payer, audience string) (system.LLM, error) {
+	return a.s.sampler().Check(ctx, payer, audience)
+}
+
+func (a actorSampler) Run(ctx context.Context, payer string, l system.LLM, req llm.Request, emit func(llm.Event), execute llm.ExecuteTool) (llm.Answer, error) {
+	return a.s.sampler().Run(ctx, payer, l, req, emit, execute)
+}
+
+// viewLLM is what the viewer may spend: the payer is the viewing person,
+// under the app's policy for their audience.
 func (s *Server) viewLLM(ctx context.Context, v *rt.View) system.LLM {
-	if v.User == "" || !v.Policy["sample"] {
+	if !v.Policy["sample"] {
 		return system.LLM{}
 	}
-	return s.Sys.LLMFor(ctx, v.User, v.Role)
+	return s.sampler().Limits(ctx, v.User, v.Role)
+}
+
+// sampleStatus is the HTTP status of a sample refusal.
+func sampleStatus(code string) int {
+	switch code {
+	case "unavailable":
+		return 503
+	case "quota_exceeded":
+		return 429
+	case "permission_denied", "not_granted", "not_declared":
+		return 403
+	}
+	return 400
 }
 
 // sampleView checks a view may sample now.
-func (s *Server) sampleView(w http.ResponseWriter, r *http.Request) (*rt.View, bool) {
+func (s *Server) sampleView(w http.ResponseWriter, r *http.Request) (*rt.View, system.LLM, bool) {
 	v := s.viewOf(r)
 	switch {
 	case v == nil:
 		httpx.Fail(w, 401, "session_expired", "the view is closed or expired")
-		return nil, false
-	case s.Env.A == nil || s.Env.A.LLM == nil:
+		return nil, system.LLM{}, false
+	case !s.sampler().Available():
 		httpx.Fail(w, 503, "unavailable", "this server has no model backend")
-		return nil, false
+		return nil, system.LLM{}, false
 	case !v.Caps.Declared["sample"]:
 		httpx.Fail(w, 403, "not_declared", "this app does not declare sample")
-		return nil, false
+		return nil, system.LLM{}, false
 	case grantedCaps(v)["sample"] == nil:
 		httpx.Fail(w, 403, "not_granted", "this app may not use the LLM for "+v.Role)
-		return nil, false
-	}
-	l := s.viewLLM(r.Context(), v)
-	if !l.Allowed {
+		return nil, system.LLM{}, false
+	case !v.Policy["sample"]:
 		httpx.Fail(w, 403, "permission_denied", "no LLM access")
-		return nil, false
+		return nil, system.LLM{}, false
 	}
-	if l.Remaining != nil && *l.Remaining <= 0 {
-		httpx.Fail(w, 429, "quota_exceeded", "token budget used up for this month")
-		return nil, false
+	l, err := s.sampler().Check(r.Context(), v.User, v.Role)
+	var f *llm.Failure
+	if errors.As(err, &f) {
+		if f.Code == "permission_denied" {
+			f.Message = "no LLM access"
+		}
+		httpx.Fail(w, sampleStatus(f.Code), f.Code, f.Message)
+		return nil, l, false
 	}
-	return v, true
+	return v, l, true
 }
 
 // startSample runs one call: POST /_rt/sample {input, modelTier, model?,
 // effort?, tools?, images?} → a stream of call, text, thinking, tool,
 // result or error events.
 func (s *Server) startSample(w http.ResponseWriter, r *http.Request) {
-	v, ok := s.sampleView(w, r)
+	v, l, ok := s.sampleView(w, r)
 	if !ok {
 		return
 	}
-	var in struct {
-		Input     json.RawMessage `json:"input"`
-		ModelTier string          `json:"modelTier"`
-		Model     string          `json:"model"`
-		Effort    string          `json:"effort"`
-		MaxTokens int             `json:"maxTokens"`
-		Tools     []llm.Tool      `json:"tools"`
-		Images    []llm.Image     `json:"images"`
-	}
+	var in llm.In
 	if err := httpx.Read(r, &in, int64(rt.MaxPromptBytes)+12<<20); err != nil {
 		httpx.Fail(w, 400, "invalid_argument", "send {input, modelTier, …}")
 		return
 	}
-	if in.ModelTier == "" || in.ModelTier == "inherit" {
-		in.ModelTier = "default"
-	}
-	if !v.Caps.Images {
-		in.Images = nil
-	}
-	req := llm.Request{CallID: "sc" + ids.New("", 12), Input: in.Input, Images: in.Images, Tools: in.Tools,
-		Options: llm.Options{ModelTier: in.ModelTier, Model: in.Model, Effort: in.Effort}, MaxRounds: 10, MaxOutputTokens: in.MaxTokens}
-	if err := llm.ValidateRequest(req); err != nil {
-		code := "invalid_argument"
-		if strings.Contains(err.Error(), "exceeds") {
-			code = "prompt_too_large"
-		}
-		httpx.Fail(w, 400, code, err.Error())
+	req, err := llm.NewRequest("sc", in, v.Caps.Images)
+	var f *llm.Failure
+	if errors.As(err, &f) {
+		httpx.Fail(w, 400, f.Code, f.Message)
 		return
 	}
 	flusher, ok := w.(http.Flusher)
@@ -175,19 +202,10 @@ func (s *Server) startSample(w http.ResponseWriter, r *http.Request) {
 		flusher.Flush()
 	}
 	send("call", map[string]string{"call": req.CallID})
-	// Each model round holds budget first and settles with its usage
-	// (SLOP3-007): the viewer can't spend past their limit, however many
-	// calls run at once.
-	meter := s.Sys.NewMeter(v.User, s.viewLLM(r.Context(), v).Budget, req.CallID)
-	req.Meter = meter
 	emit := func(e llm.Event) {
 		switch e.Type {
 		case "text", "thinking":
 			send(e.Type, map[string]string{"text": e.Text, "delta": e.Delta})
-		case "usage":
-			if e.Usage != nil { // never forwarded to the page
-				meter.Usage(*e.Usage)
-			}
 		case "result":
 			send("result", e.Result)
 		case "error":
@@ -209,9 +227,7 @@ func (s *Server) startSample(w http.ResponseWriter, r *http.Request) {
 			return llm.ToolResult{}, tctx.Err()
 		}
 	}
-	err := s.Env.A.LLM.Sample(ctx, req, emit, execute)
-	meter.Close() // a round that reported no usage is charged in full
-	var f *llm.Failure
+	_, err = s.sampler().Run(ctx, v.User, l, req, emit, execute)
 	switch {
 	case errors.As(err, &f) && f.Code == "quota_exceeded":
 		send("error", map[string]string{"code": f.Code, "message": f.Message})
@@ -286,11 +302,11 @@ func (s *Server) rpcSampleLimits(ctx context.Context, v *rt.View, _ json.RawMess
 	out := map[string]any{"maxPromptBytes": rt.MaxPromptBytes, "tools": map[string]int{"maxCount": 16},
 		"modelTiers": []string{"inherit", "quick", "default", "complex"}, "models": []llm.Model{},
 		"available": false, "allowed": l.Allowed, "remaining": l.Remaining}
-	if s.Env.A == nil || s.Env.A.LLM == nil || !l.Allowed {
+	if !s.sampler().Available() || !l.Allowed {
 		return out, nil
 	}
 	out["available"] = l.Remaining == nil || *l.Remaining > 0
-	out["models"] = s.Env.A.LLM.Models()
+	out["models"] = s.sampler().Models()
 	if v.Caps.Images {
 		out["images"] = map[string]any{"maxCount": 4, "maxInputBytes": 8 << 20, "mediaTypes": []string{"image/jpeg", "image/png", "image/webp", "image/gif"}}
 	}

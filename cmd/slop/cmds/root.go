@@ -6,13 +6,16 @@ import (
 	"encoding/json"
 	"fmt"
 	"os"
+	"slices"
 	"sort"
 	"strconv"
 	"strings"
+	"sync"
 
 	"github.com/spf13/cobra"
 
 	"github.com/go-go-golems/slop-computer/pkg/client"
+	"github.com/go-go-golems/slop-computer/pkg/commands"
 	"github.com/go-go-golems/slop-computer/pkg/verbs"
 )
 
@@ -21,8 +24,13 @@ var (
 	flagOutput string
 )
 
+// listOnce fills verbs.Default with the commands, unbound: the CLI only
+// lists them (names, arguments, docs) and calls the server.
+var listOnce sync.Once
+
 // Root returns the root command.
 func Root() *cobra.Command {
+	listOnce.Do(func() { commands.Install(verbs.Default, nil) })
 	root := &cobra.Command{
 		Use:           "slop",
 		Short:         "slop: host apps on stores, with a CLI for people and agents",
@@ -40,7 +48,7 @@ func Root() *cobra.Command {
 // addVerbCommands makes `slop <group> <verb>` for every verb.
 func addVerbCommands(root *cobra.Command) {
 	groups := map[string]*cobra.Command{}
-	for _, v := range verbs.All() {
+	for _, v := range verbs.Default.All() {
 		v := v
 		cmd := verbCommand(v)
 		if !strings.Contains(v.Name, ".") {
@@ -98,7 +106,24 @@ func verbCommand(v *verbs.Verb) *cobra.Command {
 			if err != nil {
 				return err
 			}
-			res, err := c.Call(v.Name, in)
+			var res any
+			if v.Effect == verbs.EffectStream {
+				// parts with a delta show on stderr as they arrive; the
+				// result is printed as usual
+				streamed := false
+				res, err = c.CallStream(v.Name, in, func(raw json.RawMessage) {
+					var p struct{ Delta string }
+					if json.Unmarshal(raw, &p) == nil && p.Delta != "" {
+						_, _ = fmt.Fprint(cmd.ErrOrStderr(), p.Delta)
+						streamed = true
+					}
+				})
+				if streamed {
+					_, _ = fmt.Fprintln(cmd.ErrOrStderr())
+				}
+			} else {
+				res, err = c.Call(v.Name, in)
+			}
 			if err != nil {
 				return err
 			}
@@ -133,17 +158,38 @@ func convert(a verbs.Arg, s string) any {
 }
 
 func verbsCmd() *cobra.Command {
-	return &cobra.Command{
+	cmd := &cobra.Command{
 		Use:   "verbs",
 		Short: "List the verbs this CLI knows",
 		RunE: func(cmd *cobra.Command, args []string) error {
 			rows := []any{}
-			for _, v := range verbs.All() {
-				rows = append(rows, map[string]any{"verb": v.Name, "scope": string(v.Scope), "doc": v.Doc})
+			for _, v := range verbs.Default.All() {
+				typed := ""
+				if v.Input != nil {
+					typed = "typed"
+				}
+				rows = append(rows, map[string]any{"verb": v.Name, "effect": string(v.Effect), "schema": typed, "doc": v.Doc})
 			}
 			return print(rows)
 		},
 	}
+	cmd.AddCommand(&cobra.Command{
+		Use:   "tools [verb...]",
+		Short: "Describe verbs as MCP tools: name, description, input and output JSON Schema",
+		RunE: func(cmd *cobra.Command, args []string) error {
+			out := []any{}
+			for _, v := range verbs.Default.All() {
+				if len(args) == 0 || slices.Contains(args, v.Name) {
+					out = append(out, v.Tool())
+				}
+			}
+			if len(out) == 0 {
+				return fail("no such verb: %s", strings.Join(args, ", "))
+			}
+			return print(out)
+		},
+	})
+	return cmd
 }
 
 func verbCmd() *cobra.Command {
