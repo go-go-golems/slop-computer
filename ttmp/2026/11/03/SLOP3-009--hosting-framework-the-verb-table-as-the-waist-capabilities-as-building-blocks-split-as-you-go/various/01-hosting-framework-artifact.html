@@ -1,0 +1,674 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>SLOP3-009 Hosting Framework</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Sans+Condensed:wght@500;600&family=IBM+Plex+Sans:ital,wght@0,400;0,600;1,400&family=IBM+Plex+Mono:wght@400;500&display=swap" rel="stylesheet">
+<style>
+/* Layout: one reading column (~68ch) with figures and tables allowed wider; a sticky contents rail on wide screens. */
+:root {
+  --bg: #f4f6f8;
+  --paper: #ffffff;
+  --ink: #18212c;
+  --muted: #586473;
+  --rule: #d5dbe3;
+  --accent: #0d6b72;      /* the proposal: the verb table, new seams */
+  --accent-soft: #e2f0f1;
+  --warn: #9a5b00;        /* duplication and knots in today's code */
+  --warn-soft: #fbf0dd;
+  --code-bg: #eef1f5;
+  --display: "IBM Plex Sans Condensed", "Arial Narrow", system-ui, sans-serif;
+  --body: "IBM Plex Sans", system-ui, -apple-system, "Segoe UI", sans-serif;
+  --mono: "IBM Plex Mono", ui-monospace, "SF Mono", Menlo, monospace;
+  color-scheme: light;
+}
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme="light"]) {
+    --bg: #11161c; --paper: #171e26; --ink: #e3e8ee; --muted: #9aa6b4; --rule: #2c3743;
+    --accent: #5cc3c9; --accent-soft: #15323a; --warn: #e0a64a; --warn-soft: #3a2c14; --code-bg: #1d2630;
+    color-scheme: dark;
+  }
+}
+:root[data-theme="dark"] {
+  --bg: #11161c; --paper: #171e26; --ink: #e3e8ee; --muted: #9aa6b4; --rule: #2c3743;
+  --accent: #5cc3c9; --accent-soft: #15323a; --warn: #e0a64a; --warn-soft: #3a2c14; --code-bg: #1d2630;
+  color-scheme: dark;
+}
+* { box-sizing: border-box; }
+html { -webkit-text-size-adjust: 100%; }
+body { margin: 0; background: var(--bg); color: var(--ink); font: 16px/1.6 var(--body); }
+.wrap { max-width: 1180px; margin: 0 auto; padding: 32px 16px 80px; display: grid; grid-template-columns: 220px minmax(0, 1fr); gap: 40px; }
+@media (max-width: 900px) { .wrap { grid-template-columns: minmax(0, 1fr); gap: 0; } nav.toc { display: none; } }
+nav.toc { position: sticky; top: 24px; align-self: start; font-size: 13.5px; }
+nav.toc p { font-family: var(--display); font-weight: 600; text-transform: uppercase; letter-spacing: .06em; color: var(--muted); margin: 0 0 8px; font-size: 12px; }
+nav.toc ol { list-style: none; margin: 0; padding: 0; display: grid; gap: 4px; }
+nav.toc a { color: var(--muted); text-decoration: none; display: block; padding: 2px 0 2px 10px; border-left: 2px solid var(--rule); }
+nav.toc a:hover, nav.toc a:focus-visible { color: var(--accent); border-left-color: var(--accent); outline: none; }
+main { min-width: 0; }
+header.doc { border-bottom: 1px solid var(--rule); padding-bottom: 20px; margin-bottom: 8px; }
+.kicker { font-family: var(--mono); font-size: 13px; color: var(--accent); margin: 0 0 6px; }
+h1 { font-family: var(--display); font-weight: 600; font-size: clamp(30px, 4.2vw, 42px); line-height: 1.1; margin: 0 0 12px; text-wrap: balance; }
+h2 { font-family: var(--display); font-weight: 600; font-size: 26px; line-height: 1.2; margin: 48px 0 12px; text-wrap: balance; scroll-margin-top: 16px; }
+h3 { font-family: var(--display); font-weight: 600; font-size: 19px; margin: 28px 0 8px; text-wrap: balance; }
+h2 .n { font-family: var(--mono); font-size: 15px; color: var(--muted); font-weight: 400; margin-right: 10px; }
+p, ul, ol.steps { max-width: 68ch; }
+p { margin: 0 0 14px; }
+ul, ol.steps { margin: 0 0 16px; padding-left: 22px; }
+li { margin: 4px 0; }
+.lede { font-size: 18px; color: var(--ink); max-width: 64ch; }
+.meta { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 14px; }
+.chip { font-family: var(--mono); font-size: 12px; padding: 3px 9px; border: 1px solid var(--rule); border-radius: 999px; color: var(--muted); background: var(--paper); }
+.chip.acc { color: var(--accent); border-color: var(--accent); }
+code { font-family: var(--mono); font-size: .88em; background: var(--code-bg); padding: 1px 5px; border-radius: 4px; }
+pre { font-family: var(--mono); font-size: 13px; line-height: 1.55; background: var(--paper); border: 1px solid var(--rule); border-left: 3px solid var(--accent); padding: 14px 16px; overflow-x: auto; margin: 0 0 18px; border-radius: 4px; max-width: 100%; }
+pre code { background: none; padding: 0; font-size: inherit; }
+pre .c { color: var(--muted); }
+figure { margin: 22px 0 26px; background: var(--paper); border: 1px solid var(--rule); border-radius: 6px; padding: 16px; }
+figure .scroll { overflow-x: auto; }
+figure svg { display: block; width: 100%; min-width: 640px; height: auto; color: var(--ink); }
+figcaption { font-size: 14px; color: var(--muted); margin-top: 10px; max-width: 72ch; }
+figcaption b { color: var(--ink); font-weight: 600; }
+.tbl { overflow-x: auto; margin: 0 0 20px; border: 1px solid var(--rule); border-radius: 6px; background: var(--paper); }
+table { border-collapse: collapse; width: 100%; font-size: 14px; }
+th, td { text-align: left; vertical-align: top; padding: 9px 12px; border-bottom: 1px solid var(--rule); }
+th { font-family: var(--display); font-weight: 600; font-size: 13px; text-transform: uppercase; letter-spacing: .04em; color: var(--muted); background: var(--bg); }
+tr:last-child td { border-bottom: none; }
+td.num { font-variant-numeric: tabular-nums; text-align: right; white-space: nowrap; }
+.pill { display: inline-block; font-family: var(--mono); font-size: 11.5px; padding: 1px 7px; border-radius: 999px; white-space: nowrap; }
+.pill.ok { background: var(--accent-soft); color: var(--accent); }
+.pill.dup { background: var(--warn-soft); color: var(--warn); }
+.pill.no { background: var(--code-bg); color: var(--muted); }
+.callout { border: 1px solid var(--rule); border-left: 3px solid var(--accent); background: var(--paper); padding: 14px 16px; border-radius: 4px; margin: 0 0 18px; max-width: 72ch; }
+.callout.warn { border-left-color: var(--warn); }
+.callout p:last-child, .callout ul:last-child { margin-bottom: 0; }
+.callout h4 { margin: 0 0 6px; font-family: var(--display); font-size: 15px; font-weight: 600; }
+.grid2 { display: grid; grid-template-columns: repeat(auto-fit, minmax(260px, 1fr)); gap: 14px; margin: 0 0 20px; }
+.card { background: var(--paper); border: 1px solid var(--rule); border-radius: 6px; padding: 14px 16px; }
+.card h4 { margin: 0 0 6px; font-family: var(--display); font-size: 16px; font-weight: 600; }
+.card .tag { font-family: var(--mono); font-size: 12px; color: var(--muted); display: block; margin-bottom: 8px; }
+.card p, .card ul { font-size: 14.5px; margin-bottom: 8px; }
+.card .verdict { font-size: 13.5px; color: var(--accent); margin: 0; }
+.card.pick { border-color: var(--accent); box-shadow: inset 0 0 0 1px var(--accent); }
+a { color: var(--accent); }
+a:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+/* diagram classes (page CSS styles the inline SVGs) */
+.dg text { font-family: var(--body); font-size: 12.5px; fill: currentColor; }
+.dg text.s { font-size: 11px; fill: var(--muted); }
+.dg text.t { font-family: var(--display); font-weight: 600; font-size: 13px; }
+.dg text.mono { font-family: var(--mono); font-size: 11.5px; }
+.dg .box { fill: var(--paper); stroke: currentColor; stroke-width: 1.2; }
+.dg .soft { fill: var(--bg); stroke: var(--rule); stroke-width: 1.2; }
+.dg .acc { fill: var(--accent-soft); stroke: var(--accent); stroke-width: 1.6; }
+.dg .dup { fill: var(--warn-soft); stroke: var(--warn); stroke-width: 1.6; }
+.dg .ln { stroke: currentColor; stroke-width: 1.2; fill: none; }
+.dg .ln.a { stroke: var(--accent); stroke-width: 1.6; }
+.dg .ln.w { stroke: var(--warn); stroke-width: 1.4; stroke-dasharray: 5 4; }
+.dg .ln.d { stroke-dasharray: 4 4; }
+.dg .ah { fill: currentColor; }
+.dg .ah.a { fill: var(--accent); }
+.dg .ah.w { fill: var(--warn); }
+.dg .ta { fill: var(--accent); }
+.dg .tw { fill: var(--warn); }
+.dg .band { fill: var(--paper); stroke: var(--rule); stroke-width: 1.2; }
+.dg .bandacc { fill: var(--accent-soft); stroke: var(--accent); stroke-width: 1.6; }
+.dg .chipbox { fill: var(--bg); stroke: var(--rule); stroke-width: 1; }
+footer { margin-top: 56px; padding-top: 16px; border-top: 1px solid var(--rule); font-size: 13.5px; color: var(--muted); }
+@media (prefers-reduced-motion: reduce) { * { scroll-behavior: auto !important; } }
+</style>
+</head>
+<body>
+<div class="wrap">
+<nav class="toc" aria-label="Contents">
+  <p>Contents</p>
+  <ol>
+    <li><a href="#today">1 · Where the code is</a></li>
+    <li><a href="#idea">2 · The idea</a></li>
+    <li><a href="#verbs">3 · Verbs at the center</a></li>
+    <li><a href="#caps">4 · Capabilities as blocks</a></li>
+    <li><a href="#sample">5 · Worked: sample</a></li>
+    <li><a href="#modularity">6 · Approaches to modularity</a></li>
+    <li><a href="#framework">7 · The framework shape</a></li>
+    <li><a href="#rewrites">8 · APIs we could change</a></li>
+    <li><a href="#map">9 · Package map and rules</a></li>
+    <li><a href="#path">10 · Getting there</a></li>
+    <li><a href="#open">11 · Open questions</a></li>
+  </ol>
+</nav>
+<main>
+<header class="doc">
+  <p class="kicker">SLOP3-009 · design brainstorm · 3 November 2026</p>
+  <h1>slop-computer as a framework for hosting artifacts</h1>
+  <p class="lede">How the code could be reorganized so that the pieces slop already has, such as the claude.ai contract runtime, a <code>sample</code> backend with budgets, documents over SQLite, sign-in and the verb table, become building blocks that other hosts can reuse. It also covers how this fits the existing verb-oriented design.</p>
+  <div class="meta">
+    <span class="chip acc">brainstorm, not a plan of record</span>
+    <span class="chip">repo: go-go-golems/slop-computer</span>
+    <span class="chip">after SLOP3-008 (PR #20)</span>
+    <span class="chip">APIs may change</span>
+  </div>
+</header>
+
+<section id="today">
+<h2><span class="n">1</span>Where the code is today</h2>
+<p>slop has one good unifying idea already: the <b>verb table</b>. A verb is one named operation with arguments, a scope (read or write), an authority floor (<code>authz.Action</code>) and a <code>Run</code> function. The CLI, the HTTP API at <code>/api/v1</code> and eval programs are all generated from it. Trusted Go modules for actors, added in SLOP3-002, are verb calls too: a <code>modFunc</code> maps a JavaScript name such as <code>people.setRole</code> to a verb, and the call runs as the visitor through every check that verb applies.</p>
+<p>Two doors do not use the table. The <b>page protocol</b> (the RPCs <code>db.get</code>, <code>db.write</code>, <code>files.list</code>, <code>sample</code> and the event stream) has its own dispatch in <code>pkg/server/views.go</code>. <b>Actor modules</b> (<code>use('db')</code>, <code>use('sample')</code>) are a third implementation, in <code>pkg/actor</code>. The result is that the same capability exists in two places, with two sets of checks.</p>
+
+<figure>
+<div class="scroll">
+<svg class="dg" viewBox="0 0 780 320" role="img" aria-label="Today: the CLI, HTTP API and trusted modules call the verb table; the page protocol and actor modules each implement db, sample and files again over the stores, and verbs reach back into the server through callbacks.">
+  <defs>
+    <marker id="m1" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path class="ah" d="M0,0 L10,5 L0,10 z"/></marker>
+    <marker id="m1w" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path class="ah w" d="M0,0 L10,5 L0,10 z"/></marker>
+  </defs>
+  <text class="s" x="20" y="18">doors</text>
+  <rect class="box" x="20" y="26" width="130" height="38" rx="4"/><text x="85" y="50" text-anchor="middle">slop CLI</text>
+  <rect class="box" x="170" y="26" width="130" height="38" rx="4"/><text x="235" y="50" text-anchor="middle">HTTP /api/v1</text>
+  <rect class="box" x="320" y="26" width="130" height="38" rx="4"/><text x="385" y="50" text-anchor="middle">trusted modules</text>
+  <rect class="box" x="470" y="26" width="130" height="38" rx="4"/><text x="535" y="50" text-anchor="middle">page protocol</text>
+  <rect class="box" x="630" y="26" width="130" height="38" rx="4"/><text x="695" y="50" text-anchor="middle">actor use()</text>
+
+  <line class="ln" x1="85" y1="64" x2="85" y2="128" marker-end="url(#m1)"/>
+  <line class="ln" x1="235" y1="64" x2="235" y2="128" marker-end="url(#m1)"/>
+  <line class="ln" x1="385" y1="64" x2="385" y2="128" marker-end="url(#m1)"/>
+  <text class="s" x="393" y="100">modFunc → verb</text>
+  <line class="ln" x1="535" y1="64" x2="535" y2="128" marker-end="url(#m1)"/>
+  <line class="ln" x1="695" y1="64" x2="695" y2="128" marker-end="url(#m1)"/>
+
+  <rect class="box" x="20" y="130" width="430" height="44" rx="4"/>
+  <text class="t" x="235" y="150" text-anchor="middle">verbs table</text>
+  <text class="s" x="235" y="166" text-anchor="middle">~83 verbs · pkg/verbs · Env holds everything</text>
+  <rect class="dup" x="470" y="130" width="130" height="44" rx="4"/>
+  <text class="t" x="535" y="150" text-anchor="middle">page RPC</text>
+  <text class="s" x="535" y="166" text-anchor="middle">db · files · sample</text>
+  <rect class="dup" x="630" y="130" width="130" height="44" rx="4"/>
+  <text class="t" x="695" y="150" text-anchor="middle">actor modules</text>
+  <text class="s" x="695" y="166" text-anchor="middle">db · sql · sample</text>
+
+  <path class="ln w" d="M440,174 L440,212 L585,212 L585,178" marker-end="url(#m1w)"/>
+  <text class="tw" x="448" y="206" style="font-size:11px">Env callbacks</text>
+  <text class="tw" x="686" y="198" text-anchor="end" style="font-size:11px">db, sample twice</text>
+
+  <line class="ln" x1="140" y1="174" x2="140" y2="246" marker-end="url(#m1)"/>
+  <line class="ln" x1="380" y1="174" x2="400" y2="246" marker-end="url(#m1)"/>
+  <line class="ln" x1="535" y1="174" x2="535" y2="246" marker-end="url(#m1)"/>
+  <line class="ln" x1="695" y1="174" x2="695" y2="246" marker-end="url(#m1)"/>
+
+  <rect class="soft" x="20" y="248" width="250" height="44" rx="4"/>
+  <text class="t" x="145" y="268" text-anchor="middle">system.db</text>
+  <text class="s" x="145" y="284" text-anchor="middle">six domains in one package</text>
+  <rect class="soft" x="300" y="248" width="460" height="44" rx="4"/>
+  <text class="t" x="530" y="268" text-anchor="middle">stores (one SQLite file each)</text>
+  <text class="s" x="530" y="284" text-anchor="middle">pkg/store: documents, files, log, SQL, alarms</text>
+</svg>
+</div>
+<figcaption><b>Today.</b> Three doors share the verb table. The page protocol and actor modules each implement <code>db</code>, <code>files</code> and <code>sample</code> again over the stores, and verbs tell the server about access changes through callbacks on <code>verbs.Env</code>.</figcaption>
+</figure>
+
+<div class="tbl">
+<table>
+<thead><tr><th>Package</th><th class="num">Lines</th><th>What it mixes</th></tr></thead>
+<tbody>
+<tr><td><code>pkg/server</code></td><td class="num">5,827</td><td>four HTTP hosts (main, live, static, sandbox); sign-in (<code>auth</code>, <code>oidc</code>, <code>device</code>); the page protocol (<code>views.go</code>, 1,259 lines); page capabilities (<code>sample</code>, <code>rtassets</code>, <code>rtfiles</code>); since #20 also the path space and registry documents; Stripe webhooks; the back office bridge</td></tr>
+<tr><td><code>pkg/verbs</code></td><td class="num">3,294</td><td>the table machinery and every domain's commands; imports <code>actor</code>, <code>kernel</code>, <code>store</code>, <code>system</code>, <code>billing/stripe</code></td></tr>
+<tr><td><code>pkg/system</code></td><td class="num">3,127</td><td>one database with six domains: identity, registry, app governance, billing, LLM access, the budget ledger</td></tr>
+<tr><td><code>pkg/actor</code></td><td class="num">2,942</td><td>the goja actor runtime and its own implementations of <code>db</code>, <code>sql</code>, <code>files</code>, <code>sample</code>, <code>storage</code></td></tr>
+<tr><td><code>web/runtime</code></td><td class="num">2,054</td><td>the contract's client side (<code>claude.js</code>): <code>db.ts</code>, <code>caps.ts</code>, <code>sample.ts</code>, <code>room.ts</code>, <code>transport.ts</code></td></tr>
+</tbody>
+</table>
+</div>
+<p>SLOP3-008 made this slightly worse, which the previous discussion predicted. Its path space (<code>rt.Space</code>) is a clean pure type, but the code that uses it went into <code>pkg/server</code> (<code>space.go</code>, <code>registry.go</code>, <code>rtfiles.go</code>), and actors' <code>use('db')</code> still sees only its own store because its <code>db</code> is the other implementation.</p>
+</section>
+
+<section id="idea">
+<h2><span class="n">2</span>The idea in one paragraph</h2>
+<p>Make the verb table the one place where an operation exists, and treat everything else as a projection of it. A <b>capability</b> (in the contract's sense: <code>db</code>, <code>sample</code>, <code>files</code>, <code>room</code>) becomes a named bundle of verbs plus the client code and grant rule that expose them to a page. A <b>door</b> (the page protocol, the CLI, the HTTP API, MCP, actor <code>use()</code>) is a transport that turns its own request shape into verb calls with a principal. A <b>domain</b> (registry, identity, billing, LLM) owns its tables and registers its verbs. A <b>host product</b> such as today's multi-tenant slop is a choice of domains, capabilities and doors, wired together in one small <code>main</code>.</p>
+
+<figure>
+<div class="scroll">
+<svg class="dg" viewBox="0 0 780 400" role="img" aria-label="Proposed layers, top to bottom: host products, doors, the verb table, capabilities, domains, core. Each layer depends only on the layers below it; the verb table is the narrow waist.">
+  <defs>
+    <marker id="m2" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path class="ah a" d="M0,0 L10,5 L0,10 z"/></marker>
+  </defs>
+  <!-- bands: x=20 w=660, h=52, gap 12 -->
+  <rect class="band" x="20" y="12" width="660" height="52" rx="4"/>
+  <text class="t" x="34" y="34">host products</text><text class="s" x="34" y="52">a main.go each</text>
+  <g><rect class="chipbox" x="170" y="24" width="112" height="28" rx="14"/><text x="226" y="42" text-anchor="middle">slop (tenants)</text>
+     <rect class="chipbox" x="290" y="24" width="112" height="28" rx="14"/><text x="346" y="42" text-anchor="middle">desktop host</text>
+     <rect class="chipbox" x="410" y="24" width="122" height="28" rx="14"/><text x="471" y="42" text-anchor="middle">MCP agent host</text>
+     <rect class="chipbox" x="540" y="24" width="128" height="28" rx="14"/><text x="604" y="42" text-anchor="middle">static exporter</text></g>
+
+  <rect class="band" x="20" y="76" width="660" height="52" rx="4"/>
+  <text class="t" x="34" y="98">doors</text><text class="s" x="34" y="116">transport → verb call</text>
+  <g><rect class="chipbox" x="170" y="88" width="100" height="28" rx="14"/><text x="220" y="106" text-anchor="middle">page protocol</text>
+     <rect class="chipbox" x="276" y="88" width="56" height="28" rx="14"/><text x="304" y="106" text-anchor="middle">CLI</text>
+     <rect class="chipbox" x="338" y="88" width="80" height="28" rx="14"/><text x="378" y="106" text-anchor="middle">HTTP API</text>
+     <rect class="chipbox" x="424" y="88" width="56" height="28" rx="14"/><text x="452" y="106" text-anchor="middle">MCP</text>
+     <rect class="chipbox" x="486" y="88" width="84" height="28" rx="14"/><text x="528" y="106" text-anchor="middle">actor use()</text>
+     <rect class="chipbox" x="576" y="88" width="94" height="28" rx="14"/><text x="623" y="106" text-anchor="middle">Go modules</text></g>
+
+  <rect class="bandacc" x="20" y="140" width="660" height="52" rx="4"/>
+  <text class="t ta" x="34" y="162">verb table</text><text class="s" x="34" y="180">the narrow waist</text>
+  <text class="mono" x="170" y="164">name · input schema · output · effect · subject · Run(ctx, in)</text>
+  <text class="s" x="170" y="181">authority, confirmation, audit and docs decided here, once, for every door</text>
+
+  <rect class="band" x="20" y="204" width="660" height="52" rx="4"/>
+  <text class="t" x="34" y="226">capabilities</text><text class="s" x="34" y="244">contract use() names</text>
+  <g><rect class="chipbox" x="170" y="216" width="42" height="28" rx="14"/><text x="191" y="234" text-anchor="middle">db</text>
+     <rect class="chipbox" x="218" y="216" width="66" height="28" rx="14"/><text x="251" y="234" text-anchor="middle">sample</text>
+     <rect class="chipbox" x="290" y="216" width="52" height="28" rx="14"/><text x="316" y="234" text-anchor="middle">files</text>
+     <rect class="chipbox" x="348" y="216" width="56" height="28" rx="14"/><text x="376" y="234" text-anchor="middle">room</text>
+     <rect class="chipbox" x="410" y="216" width="52" height="28" rx="14"/><text x="436" y="234" text-anchor="middle">user</text>
+     <rect class="chipbox" x="468" y="216" width="62" height="28" rx="14"/><text x="499" y="234" text-anchor="middle">assets</text>
+     <rect class="chipbox" x="536" y="216" width="80" height="28" rx="14"/><text x="576" y="234" text-anchor="middle">downloads</text>
+     <rect class="chipbox" x="622" y="216" width="50" height="28" rx="14"/><text x="647" y="234" text-anchor="middle">…</text></g>
+
+  <rect class="band" x="20" y="268" width="660" height="52" rx="4"/>
+  <text class="t" x="34" y="290">domains</text><text class="s" x="34" y="308">own tables + verbs</text>
+  <g><rect class="chipbox" x="170" y="280" width="78" height="28" rx="14"/><text x="209" y="298" text-anchor="middle">registry</text>
+     <rect class="chipbox" x="254" y="280" width="78" height="28" rx="14"/><text x="293" y="298" text-anchor="middle">identity</text>
+     <rect class="chipbox" x="338" y="280" width="70" height="28" rx="14"/><text x="373" y="298" text-anchor="middle">billing</text>
+     <rect class="chipbox" x="414" y="280" width="50" height="28" rx="14"/><text x="439" y="298" text-anchor="middle">llm</text>
+     <rect class="chipbox" x="470" y="280" width="64" height="28" rx="14"/><text x="502" y="298" text-anchor="middle">policy</text>
+     <rect class="chipbox" x="540" y="280" width="64" height="28" rx="14"/><text x="572" y="298" text-anchor="middle">kernel</text></g>
+
+  <rect class="band" x="20" y="332" width="660" height="52" rx="4"/>
+  <text class="t" x="34" y="354">core</text><text class="s" x="34" y="372">no I/O policy, no HTTP</text>
+  <g><rect class="chipbox" x="170" y="344" width="60" height="28" rx="14"/><text x="200" y="362" text-anchor="middle">store</text>
+     <rect class="chipbox" x="236" y="344" width="96" height="28" rx="14"/><text x="284" y="362" text-anchor="middle">rt (contract)</text>
+     <rect class="chipbox" x="338" y="344" width="66" height="28" rx="14"/><text x="371" y="362" text-anchor="middle">access</text>
+     <rect class="chipbox" x="410" y="344" width="60" height="28" rx="14"/><text x="440" y="362" text-anchor="middle">blobs</text>
+     <rect class="chipbox" x="476" y="344" width="62" height="28" rx="14"/><text x="507" y="362" text-anchor="middle">sysdb</text>
+     <rect class="chipbox" x="544" y="344" width="60" height="28" rx="14"/><text x="574" y="362" text-anchor="middle">actor</text></g>
+
+  <line class="ln a" x1="720" y1="20" x2="720" y2="380" marker-end="url(#m2)"/>
+  <text class="ta" x="732" y="200" style="font-size:12px" transform="rotate(90 732 200)" text-anchor="middle">depends on</text>
+</svg>
+</div>
+<figcaption><b>Proposed layers.</b> Every layer depends only on the ones below it. The verb table is the narrow waist: doors above it know nothing about storage, and capabilities and domains below it know nothing about HTTP, cookies or goja.</figcaption>
+</figure>
+<p>The point of the waist is that every rule which must hold for every caller lives at one level: who may call, whether the person must confirm, what the audit log records, and what the documentation says. Today those rules hold for the CLI and the API, and are re-implemented by hand in the page protocol.</p>
+</section>
+
+<section id="verbs">
+<h2><span class="n">3</span>Verbs at the center</h2>
+<h3>What a verb carries today</h3>
+<pre><code>type Verb struct {
+	Name      string        <span class="c">// group.name, e.g. "grant.set"</span>
+	Doc       string
+	Args      []Arg         <span class="c">// name, type (string|int|bool|json), position, required</span>
+	Scope     Scope         <span class="c">// read | write: what a token's scopes must include</span>
+	AdminOnly bool
+	Action    authz.Action  <span class="c">// the authority floor, checked before Run</span>
+	StoreArg  string        <span class="c">// which argument names the store the floor is about</span>
+	Run func(ctx context.Context, e *Env, p *access.Principal, a Args) (any, error)
+}</code></pre>
+<p>That is enough for request/response operations made by a person or a token. The page protocol needs three more things, which is why it grew its own dispatch: a principal that is <i>a viewer inside a view</i> (with the view's path space, granted capabilities and policy cells), results that stream (sample deltas, subscriptions), and contract error codes rather than CLI ones.</p>
+
+<h3>Verb v2: enough for every door</h3>
+<pre><code>type Verb struct {
+	Name    string            <span class="c">// "db.write", "grant.set", "sample.run" (the name stays "verb")</span>
+	Doc     string
+	In, Out *schema.Schema    <span class="c">// typed: doors derive CLI flags, MCP tool schemas, TS types, docs</span>
+	Effect  Effect            <span class="c">// Read | Write | Govern (asks the person) | Stream</span>
+	Subject Subject           <span class="c">// Platform | Store(arg) | View: what the authority check is about</span>
+	Floor   authz.Action
+	Run     func(c Call, in json.RawMessage) (any, error)
+}
+
+<span class="c">// Call is what every Run receives, whichever door it came through.</span>
+type Call interface {
+	context.Context
+	Principal() *access.Principal <span class="c">// a person, a token, a store, or a viewer in a view</span>
+	View() *rt.View               <span class="c">// nil outside a page or an actor event</span>
+	Emit(v any) error             <span class="c">// stream a partial result (Effect Stream)</span>
+	Deps() Deps                   <span class="c">// what this verb's package registered with, not a global Env</span>
+}</code></pre>
+<p>Three changes do most of the work. <code>Subject: View</code> lets <code>db.write</code> be an ordinary verb whose authority check reads the view (its level, its <code>rt.Space</code>, its rules) instead of a store argument. <code>Effect: Govern</code> moves the confirmation flow from a flag on <code>modFunc</code> into the verb itself, so a governance change asks the person no matter which door called it: CLI, page, actor or MCP. <code>Emit</code> gives <code>sample</code> and <code>subscribe</code> a way to stream through the same table.</p>
+
+<figure>
+<div class="scroll">
+<svg class="dg" viewBox="0 0 780 210" role="img" aria-label="A page write as a verb call: the runtime sends db.write, the page door builds a viewer-in-view principal, the verb table checks effect and floor, the db capability resolves the path through rt.Space and commits a store turn, and the commit reaches every door that follows the log.">
+  <defs>
+    <marker id="m3" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path class="ah" d="M0,0 L10,5 L0,10 z"/></marker>
+    <marker id="m3a" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path class="ah a" d="M0,0 L10,5 L0,10 z"/></marker>
+  </defs>
+  <rect class="box" x="10" y="40" width="118" height="56" rx="4"/>
+  <text class="t" x="69" y="62" text-anchor="middle">page</text><text class="s mono" x="69" y="80" text-anchor="middle">doc.set(...)</text>
+  <line class="ln" x1="128" y1="68" x2="158" y2="68" marker-end="url(#m3)"/>
+  <text class="s" x="143" y="58" text-anchor="middle">RPC</text>
+  <rect class="box" x="160" y="40" width="130" height="56" rx="4"/>
+  <text class="t" x="225" y="62" text-anchor="middle">page door</text><text class="s" x="225" y="80" text-anchor="middle">principal = viewer in view</text>
+  <line class="ln a" x1="290" y1="68" x2="320" y2="68" marker-end="url(#m3a)"/>
+  <text class="s" x="305" y="58" text-anchor="middle">Call</text>
+  <rect class="acc" x="322" y="40" width="140" height="56" rx="4"/>
+  <text class="t ta" x="392" y="62" text-anchor="middle">verb db.write</text><text class="s" x="392" y="80" text-anchor="middle">effect · floor · audit</text>
+  <line class="ln" x1="462" y1="68" x2="492" y2="68" marker-end="url(#m3)"/>
+  <rect class="box" x="494" y="40" width="130" height="56" rx="4"/>
+  <text class="t" x="559" y="62" text-anchor="middle">caps/db</text><text class="s" x="559" y="80" text-anchor="middle">rt.Space → store, rules</text>
+  <line class="ln" x1="624" y1="68" x2="654" y2="68" marker-end="url(#m3)"/>
+  <rect class="soft" x="656" y="40" width="114" height="56" rx="4"/>
+  <text class="t" x="713" y="62" text-anchor="middle">store turn</text><text class="s" x="713" y="80" text-anchor="middle">commit + log</text>
+  <path class="ln d" d="M713,96 L713,150 L225,150 L225,100" marker-end="url(#m3)"/>
+  <text class="s" x="470" y="166" text-anchor="middle">the log feeds the stream of every view that follows this store (no callback)</text>
+  <text class="s" x="480" y="124" text-anchor="middle">the CLI, MCP and actors call the same verb with their own principal</text>
+</svg>
+</div>
+<figcaption><b>A page write as a verb call.</b> The page door only builds the principal and translates errors. Everything that decides whether the write happens sits in the verb and the capability, so an actor's <code>use('db')</code> calling the same verb gets aliases, <code>_stores</code> and the same rules for free.</figcaption>
+</figure>
+
+<div class="callout warn">
+<h4>What it costs</h4>
+<p><code>db.query</code> and <code>db.get</code> are hot: a page issues many. Going through the table adds a map lookup, a floor check and a principal per call. The store work dominates, so this should be measurable but small. Measure it before and after on <code>TestLiveHostViews</code>-sized traffic. The second cost is conceptual: verbs today are "commands an operator runs". Page RPCs as verbs means the table also holds hundreds of calls per second from browsers. Audit and docs then need a <code>Hidden</code> or <code>Internal</code> flag, so <code>slop --help</code> does not list <code>db.subscribe</code>.</p>
+</div>
+</section>
+
+<section id="caps">
+<h2><span class="n">4</span>Capabilities as building blocks</h2>
+<p>A capability is the unit someone building a host actually wants to reuse: "give my artifacts <code>sample</code>", "give them <code>db</code> over my own storage". In the verb-centered model a capability is a Go package that contributes five things:</p>
+<pre><code>type Capability interface {
+	Name() string                          <span class="c">// the contract's use() name: "sample"</span>
+	Verbs() []*verbs.Verb                  <span class="c">// what it adds to the table (sample.run, sample.cancel, …)</span>
+	Offer(v *rt.View, m *rt.Manifest) bool <span class="c">// is it granted in this view (manifest + policy)?</span>
+	Policy() []policy.Cell                 <span class="c">// the cells an admin sets (sample: audiences, model tiers)</span>
+	Runtime() fs.FS                        <span class="c">// its piece of claude.js (sample.ts), optional</span>
+	Migrations() fs.FS                     <span class="c">// its tables in system.db or in stores, optional</span>
+}</code></pre>
+<p>The page door asks each capability whether it is offered, sends the granted list in the view's hello, and routes <code>sample.*</code> RPCs to the table. The actor door builds <code>use('sample')</code> from the same verbs, the way <code>verbModule</code> builds trusted modules today. A conformance suite per capability, run against the contract's type definitions, checks that the shapes and error codes match claude.ai.</p>
+
+<div class="tbl">
+<table>
+<thead><tr><th>Capability</th><th>Today</th><th>Depends on</th><th>Reusable outside slop?</th></tr></thead>
+<tbody>
+<tr><td><code>db</code></td><td><span class="pill dup">page + actor, twice</span></td><td>store, rt.Space, rules, access</td><td>yes, with any store backend that does turns and a log</td></tr>
+<tr><td><code>sample</code></td><td><span class="pill dup">page + actor, twice</span></td><td>llm backend, meter (ledger), policy</td><td>yes: the most generic block (section 5)</td></tr>
+<tr><td><code>files</code></td><td><span class="pill ok">page (SLOP3-008)</span></td><td>store snapshots, rt.Space</td><td>yes, over any tree</td></tr>
+<tr><td><code>room</code></td><td><span class="pill ok">page</span></td><td>an in-process broker</td><td>yes</td></tr>
+<tr><td><code>user</code></td><td><span class="pill ok">page</span></td><td>identity, access</td><td>with identity's hooks</td></tr>
+<tr><td><code>assets</code></td><td><span class="pill ok">page</span></td><td>store assets zone, blobs, policy</td><td>yes</td></tr>
+<tr><td><code>downloads</code>, <code>permissions</code></td><td><span class="pill ok">runtime + shell</span></td><td>the shell's dialogs</td><td>yes, client-side mostly</td></tr>
+<tr><td><code>storage</code> (DO-shaped)</td><td><span class="pill ok">actor (SLOP3-008)</span></td><td>db, sql, alarm</td><td>yes</td></tr>
+<tr><td><code>artifact</code>, <code>comments</code>, <code>mcp</code></td><td><span class="pill no">partial / off</span></td><td>registry, identity</td><td>later</td></tr>
+</tbody>
+</table>
+</div>
+</section>
+
+<section id="sample">
+<h2><span class="n">5</span>Worked example: <code>sample</code> as a block</h2>
+<p><code>sample</code> is the clearest case for reuse. Any host of claude.ai artifacts has to answer "what happens when the page calls <code>claude.use('sample')</code>?", and the answer needs the same five parts everywhere. There is a backend that runs a model, a meter that charges someone's budget, and a policy that says who may call it at which tier. A tool loop runs page-defined tools in the browser while the model waits. And a streaming channel carries <code>onText</code> deltas. slop has all five, split across <code>pkg/server/sample.go</code> (298 lines, page side), <code>pkg/actor/sample.go</code> (actor side) and <code>pkg/llm</code> (backends and the ledger).</p>
+
+<figure>
+<div class="scroll">
+<svg class="dg" viewBox="0 0 780 300" role="img" aria-label="The sample capability as one package: three doors call its verbs; inside are the verbs, the policy cell and the tool loop; it depends on two interfaces, Backend and Meter, which slop fills with its LLM routing and its budget ledger and another host could fill differently.">
+  <defs>
+    <marker id="m4" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path class="ah" d="M0,0 L10,5 L0,10 z"/></marker>
+    <marker id="m4a" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path class="ah a" d="M0,0 L10,5 L0,10 z"/></marker>
+  </defs>
+  <text class="s" x="20" y="22">doors</text>
+  <rect class="box" x="20" y="34" width="170" height="44" rx="4"/><text x="105" y="54" text-anchor="middle">claude.use('sample')</text><text class="s" x="105" y="70" text-anchor="middle">page door + sample.ts</text>
+  <rect class="box" x="20" y="120" width="170" height="44" rx="4"/><text x="105" y="140" text-anchor="middle">use('sample') in actors</text><text class="s" x="105" y="156" text-anchor="middle">actor door</text>
+  <rect class="box" x="20" y="206" width="170" height="44" rx="4"/><text x="105" y="226" text-anchor="middle">slop sample / MCP</text><text class="s" x="105" y="242" text-anchor="middle">CLI, MCP doors</text>
+  <line class="ln a" x1="190" y1="56" x2="268" y2="110" marker-end="url(#m4a)"/>
+  <line class="ln a" x1="190" y1="142" x2="268" y2="142" marker-end="url(#m4a)"/>
+  <line class="ln a" x1="190" y1="228" x2="268" y2="176" marker-end="url(#m4a)"/>
+
+  <rect class="acc" x="270" y="34" width="250" height="216" rx="6"/>
+  <text class="t ta" x="395" y="58" text-anchor="middle">package caps/sample</text>
+  <rect class="box" x="290" y="72" width="210" height="34" rx="4"/><text class="mono" x="395" y="93" text-anchor="middle">verbs: run · cancel · tool</text>
+  <rect class="box" x="290" y="114" width="210" height="34" rx="4"/><text x="395" y="135" text-anchor="middle">tool loop (page tools wait)</text>
+  <rect class="box" x="290" y="156" width="210" height="34" rx="4"/><text x="395" y="177" text-anchor="middle">policy cell: who, which tier</text>
+  <rect class="box" x="290" y="198" width="210" height="34" rx="4"/><text x="395" y="219" text-anchor="middle">Emit: text deltas, tool calls</text>
+
+  <line class="ln" x1="520" y1="100" x2="590" y2="80" marker-end="url(#m4)"/>
+  <line class="ln" x1="520" y1="190" x2="590" y2="210" marker-end="url(#m4)"/>
+  <rect class="box" x="592" y="52" width="170" height="56" rx="4"/>
+  <text class="t" x="677" y="74" text-anchor="middle">Backend</text><text class="s" x="677" y="92" text-anchor="middle">slop: Pi via LunaRoute</text>
+  <rect class="box" x="592" y="182" width="170" height="56" rx="4"/>
+  <text class="t" x="677" y="204" text-anchor="middle">Meter</text><text class="s" x="677" y="222" text-anchor="middle">slop: the budget ledger</text>
+  <text class="s" x="677" y="140" text-anchor="middle">interfaces: another host</text>
+  <text class="s" x="677" y="155" text-anchor="middle">plugs in its own</text>
+</svg>
+</div>
+<figcaption><b>sample as one package.</b> Three doors reach the same verbs. The capability depends on two small interfaces, so a desktop host can run it against a local model with no meter, and slop runs it against its routing and ledger.</figcaption>
+</figure>
+
+<pre><code><span class="c">// caps/sample: the interfaces a host fills</span>
+type Backend interface {
+	Run(ctx context.Context, req Request, out func(Delta) error) (Result, error) <span class="c">// tiers, tools, images</span>
+	Limits(ctx context.Context, tier string) Limits
+}
+type Meter interface {
+	Reserve(ctx context.Context, payer string, est Usage) (Hold, error) <span class="c">// refuse before running</span>
+	Settle(ctx context.Context, h Hold, used Usage) error
+}
+
+<span class="c">// slop wires it to what it has; a desktop host would pass a local model and sample.NoMeter</span>
+cap := sample.New(sample.Config{
+	Backend: llm.Router(cfg.LLM),   <span class="c">// tiers → models</span>
+	Meter:   ledger.Meter(sys),     <span class="c">// the budget ledger</span>
+	Payer:   billing.PayerOf,       <span class="c">// viewer, store or app owner</span>
+})</code></pre>
+<p>Two decisions in today's code become explicit parameters. The first is <b>who pays</b> for a page's sample (the viewer, the store, or the app's owner), which is <code>Payer</code>. The second is <b>whether page tools may run while a turn is open</b>: actors may not hold a transaction across a model call, which is why the actor side returns promises. Both are properties of the door and the host, not of <code>sample</code> itself.</p>
+</section>
+
+<section id="modularity">
+<h2><span class="n">6</span>Approaches to modularity</h2>
+<p>"Modular" can mean four different boundaries. They differ in where the seam sits and what crossing it costs.</p>
+
+<figure>
+<div class="scroll">
+<svg class="dg" viewBox="0 0 780 250" role="img" aria-label="Four places to put the boundary: A, packages inside one Go module; B, capability plugins registered into a host at build time; C, separate Go modules with their own versions; D, capability servers in separate processes reached over a protocol.">
+  <defs>
+    <marker id="m5" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="6" markerHeight="6" orient="auto-start-reverse"><path class="ah" d="M0,0 L10,5 L0,10 z"/></marker>
+  </defs>
+  <!-- A -->
+  <text class="t" x="20" y="22">A · packages</text>
+  <rect class="soft" x="20" y="34" width="170" height="170" rx="6"/>
+  <text class="s" x="105" y="52" text-anchor="middle">one go.mod</text>
+  <rect class="box" x="36" y="64" width="64" height="30" rx="3"/><text x="68" y="83" text-anchor="middle">db</text>
+  <rect class="box" x="110" y="64" width="64" height="30" rx="3"/><text x="142" y="83" text-anchor="middle">sample</text>
+  <rect class="box" x="36" y="104" width="64" height="30" rx="3"/><text x="68" y="123" text-anchor="middle">identity</text>
+  <rect class="box" x="110" y="104" width="64" height="30" rx="3"/><text x="142" y="123" text-anchor="middle">registry</text>
+  <rect class="box" x="36" y="154" width="138" height="30" rx="3"/><text x="105" y="173" text-anchor="middle">server (wiring)</text>
+  <text class="s" x="105" y="226" text-anchor="middle">seam: import rules</text>
+  <!-- B -->
+  <text class="t" x="210" y="22">B · plugins</text>
+  <rect class="soft" x="210" y="34" width="170" height="170" rx="6"/>
+  <rect class="box" x="226" y="140" width="138" height="44" rx="3"/><text x="295" y="160" text-anchor="middle">host</text><text class="s" x="295" y="176" text-anchor="middle">Register(cap)</text>
+  <rect class="acc" x="226" y="56" width="62" height="30" rx="3"/><text x="257" y="75" text-anchor="middle">db</text>
+  <rect class="acc" x="302" y="56" width="62" height="30" rx="3"/><text x="333" y="75" text-anchor="middle">sample</text>
+  <line class="ln" x1="257" y1="86" x2="270" y2="138" marker-end="url(#m5)"/>
+  <line class="ln" x1="333" y1="86" x2="320" y2="138" marker-end="url(#m5)"/>
+  <text class="s" x="295" y="50" text-anchor="middle">each: verbs, runtime, policy</text>
+  <text class="s" x="295" y="226" text-anchor="middle">seam: Capability interface</text>
+  <!-- C -->
+  <text class="t" x="400" y="22">C · Go modules</text>
+  <rect class="soft" x="400" y="34" width="80" height="60" rx="6"/><text x="440" y="60" text-anchor="middle">identity</text><text class="s mono" x="440" y="78" text-anchor="middle">v0.3.1</text>
+  <rect class="soft" x="490" y="34" width="80" height="60" rx="6"/><text x="530" y="60" text-anchor="middle">runtime</text><text class="s mono" x="530" y="78" text-anchor="middle">v1.2.0</text>
+  <rect class="soft" x="400" y="140" width="170" height="64" rx="6"/><text x="485" y="166" text-anchor="middle">slop</text><text class="s" x="485" y="184" text-anchor="middle">go.mod requires both</text>
+  <line class="ln" x1="440" y1="94" x2="460" y2="138" marker-end="url(#m5)"/>
+  <line class="ln" x1="530" y1="94" x2="510" y2="138" marker-end="url(#m5)"/>
+  <text class="s" x="485" y="226" text-anchor="middle">seam: versioned API</text>
+  <!-- D -->
+  <text class="t" x="590" y="22">D · processes</text>
+  <rect class="soft" x="590" y="34" width="170" height="70" rx="6"/><text x="675" y="62" text-anchor="middle">host</text><text class="s" x="675" y="80" text-anchor="middle">verb table, doors</text>
+  <line class="ln d" x1="590" y1="122" x2="760" y2="122"/>
+  <text class="s" x="677" y="117" text-anchor="middle">process boundary</text>
+  <rect class="box" x="600" y="140" width="72" height="44" rx="3"/><text x="636" y="166" text-anchor="middle">sample</text>
+  <rect class="box" x="682" y="140" width="72" height="44" rx="3"/><text x="718" y="166" text-anchor="middle">files</text>
+  <line class="ln" x1="610" y1="104" x2="610" y2="138" marker-end="url(#m5)"/>
+  <line class="ln" x1="744" y1="104" x2="744" y2="138" marker-end="url(#m5)"/>
+  <text class="s" x="675" y="226" text-anchor="middle">seam: JSON-RPC / MCP</text>
+</svg>
+</div>
+<figcaption><b>Four places to put the boundary.</b> Each one to the right adds a cost to crossing it: an interface to keep stable, then a version to release, then a network hop and a principal to carry across it.</figcaption>
+</figure>
+
+<div class="grid2">
+  <div class="card pick">
+    <h4>A · Packages in one module</h4>
+    <span class="tag">cost: discipline · gain: clarity</span>
+    <p>Split by domain inside <code>github.com/go-go-golems/slop-computer</code>. Cycles are avoided by explicit registration at wiring time rather than <code>init()</code> into a global table.</p>
+    <p class="verdict">Do this now, as features touch the code.</p>
+  </div>
+  <div class="card pick">
+    <h4>B · Capability plugins</h4>
+    <span class="tag">cost: one interface · gain: products</span>
+    <p>Each capability implements <code>Capability</code> and is registered into a host. Building a different product means choosing a different set. Still compiled in, still one binary.</p>
+    <p class="verdict">Falls out of A if packages are shaped this way from the start.</p>
+  </div>
+  <div class="card">
+    <h4>C · Separate Go modules</h4>
+    <span class="tag">cost: releases · gain: reuse across repos</span>
+    <p>Extract <code>identity</code>, the contract runtime (<code>claude.js</code> plus the page protocol's types) and possibly <code>store</code> into their own modules, so go-go-host or a go-go-os backend can depend on them.</p>
+    <p class="verdict">Only when a second project actually imports one.</p>
+  </div>
+  <div class="card">
+    <h4>D · Capability servers</h4>
+    <span class="tag">cost: latency, auth hop · gain: any language</span>
+    <p>A capability runs as its own process and the host's verb table proxies to it, much as MCP servers work. It suits <code>sample</code> backends, or a <code>files</code> provider over a git forge.</p>
+    <p class="verdict">Use for backends behind an interface (Backend, Meter), not for capabilities themselves.</p>
+  </div>
+</div>
+<p>A and B are the same work if a package's public surface is shaped like <code>Capability</code> or <code>Domain</code> from the first move. C and D are not alternatives to A and B. They are later steps applied to particular packages, once a second user or a second language exists.</p>
+</section>
+
+<section id="framework">
+<h2><span class="n">7</span>The framework shape</h2>
+<p>If the blocks exist, a host product is a short <code>main</code>. This is today's slop, rewritten as an assembly. The names are proposals, not existing APIs.</p>
+<pre><code>func main() {
+	cfg := config.Load()
+	p := host.New(host.Config{Data: cfg.Data})               <span class="c">// sysdb, stores, the verb table, the log</span>
+
+	p.Domain(identity.New(identity.Config{OIDC: cfg.OIDC, Admins: cfg.Admins}, identity.Hooks{
+		Claimed: registry.MoveGrants,                         <span class="c">// slop's decision, passed in</span>
+	}))
+	p.Domain(registry.New(), policy.New(), billing.Stripe(cfg.Stripe), llm.Budgets())
+
+	p.Capability(db.New(), files.New(), room.New(), assets.New(), user.New(), downloads.New(),
+		sample.New(sample.Config{Backend: llm.Router(cfg.LLM), Meter: llm.Ledger()}),
+		storage.New())                                        <span class="c">// the DO-shaped actor API</span>
+
+	p.Door(pages.New(cfg.Hosts),                              <span class="c">// main, live, static, sandbox hosts</span>
+		cli.Verbs(), api.New("/api/v1"), mcp.New("/mcp"), actors.New())
+
+	log.Fatal(http.ListenAndServe(cfg.Listen, p.Handler()))
+}</code></pre>
+
+<h3>Products from the same blocks</h3>
+<div class="tbl">
+<table>
+<thead><tr><th>Product</th><th>Domains</th><th>Capabilities</th><th>Doors</th><th>What changes</th></tr></thead>
+<tbody>
+<tr><td><b>slop</b> (today)</td><td>identity, registry, policy, billing, llm</td><td>all</td><td>pages, CLI, API, actors</td><td>nothing</td></tr>
+<tr><td><b>Desktop artifact host</b></td><td><code>identity.SingleUser("me")</code>, registry</td><td>db, files, room, sample (local model, no meter)</td><td>pages (one host), CLI</td><td>no sign-in, no billing, no sandbox subdomains (one origin per store on ports)</td></tr>
+<tr><td><b>Agent host</b></td><td>identity (tokens only), registry</td><td>db, files, storage</td><td>MCP, API</td><td>no browser at all; agents read and write stores as tools</td></tr>
+<tr><td><b>Static exporter</b></td><td>none</td><td>db (read-only, baked), files</td><td>a build step</td><td>already half-exists as the static host and <code>static.ts</code></td></tr>
+<tr><td><b>Contract test server</b></td><td>none</td><td>any one</td><td>pages</td><td>runs claude.ai's type definitions against one capability: the conformance harness</td></tr>
+</tbody>
+</table>
+</div>
+<p>The desktop host is the useful test of the design. If it can be written in about 40 lines from the blocks above, the boundaries are in the right places. If it needs a fork of <code>pkg/server</code>, they are not.</p>
+</section>
+
+<section id="rewrites">
+<h2><span class="n">8</span>APIs we could change</h2>
+<p>Since this is a brainstorm, here are the current APIs that would be rewritten rather than kept, with the reason for each.</p>
+<div class="tbl">
+<table>
+<thead><tr><th>Today</th><th>Instead</th><th>Why</th></tr></thead>
+<tbody>
+<tr><td><code>verbs.Env</code>: config, system DB, kernel, actors, billing and three callbacks</td><td>each package receives its own <code>Deps</code> at registration; <code>Call.Deps()</code> in <code>Run</code></td><td>the god object is why <code>verbs</code> imports every package, and why nothing can be built without everything</td></tr>
+<tr><td><code>AccessChanged</code>, <code>PolicyChanged</code>, <code>PersonChanged</code> callbacks</td><td>doors follow system <code>_changes</code>, as <code>system:</code> reactors already do</td><td>the log already records every one of those changes; a callback is a second, forgettable path</td></tr>
+<tr><td>page RPC switch in <code>views.go</code></td><td>verbs with <code>Subject: View</code></td><td>one place for authority, audit, errors and docs</td></tr>
+<tr><td><code>Args</code> map with <code>a.S("store")</code>, <code>a.B("assets")</code></td><td>typed input structs with a schema (<code>In</code>)</td><td>doors can generate MCP tool schemas and TypeScript types; a misspelled argument fails at build time</td></tr>
+<tr><td><code>modFunc{Confirm: true}</code> on trusted modules</td><td><code>Effect: Govern</code> on the verb</td><td>confirmation then applies to every door, page writes of registry documents included (SLOP3-008 had to add it by hand)</td></tr>
+<tr><td>policy cells listed centrally (<code>system.PolicyCaps</code>)</td><td>declared by each capability (<code>Policy()</code>)</td><td>adding a capability should not mean editing the policy package</td></tr>
+<tr><td><code>init()</code> registration into a package-global table</td><td><code>host.New()</code> owns the table; packages register into it explicitly</td><td>two hosts in one test process; no hidden ordering</td></tr>
+<tr><td>actor <code>db</code> and page <code>db</code></td><td>one <code>caps/db</code> over <code>rt.Space</code></td><td>actors get aliases and <code>_stores</code>; the duplicated rules go away</td></tr>
+</tbody>
+</table>
+</div>
+<p>Some APIs are worth keeping exactly as they are: the store's turn model, <code>rt.Space</code> and <code>rt.Query</code> (already pure), <code>access.Principal</code> and levels, the system log, and the contract itself, which is set by claude.ai.</p>
+</section>
+
+<section id="map">
+<h2><span class="n">9</span>Package map and dependency rules</h2>
+<pre><code>pkg/
+  store/ rt/ access/ blobs/ ids/       <span class="c">core: unchanged</span>
+  sysdb/                               <span class="c">system.db: open, migrations per domain, the system log</span>
+  verbs/                               <span class="c">the table: Verb, Call, schema, dispatch, errors (no domain imports)</span>
+  registry/                            <span class="c">stores, mounts, bindings, grants, links + registry documents (from server/registry.go)</span>
+  identity/                            <span class="c">people, sessions, tokens, device, OIDC, guests (no slop imports; hooks)</span>
+  billing/  llm/  policy/              <span class="c">comps + Stripe; backends + ledger; policy cells + secrets</span>
+  kernel/                              <span class="c">store lifecycle, app versions, migrations runner</span>
+  actor/                               <span class="c">the goja runtime only; modules come from the actor door</span>
+  caps/
+    db/ files/ room/ assets/ user/ downloads/ storage/
+    sample/                            <span class="c">Backend, Meter interfaces; verbs run/cancel/tool</span>
+  doors/
+    pages/                             <span class="c">hosts (main, live, static, sandbox), the view protocol, SSE</span>
+    cli/ api/ mcp/ actors/ modules/    <span class="c">projections of the verb table</span>
+  host/                                <span class="c">assembly: New, Domain, Capability, Door, Handler</span>
+cmd/slop/                              <span class="c">today's product: one main.go</span>
+web/runtime/                           <span class="c">claude.js; each capability's .ts next to its Go package later</span></code></pre>
+
+<div class="grid2">
+  <div class="card">
+    <h4>Allowed</h4>
+    <ul>
+      <li>doors → verbs, rt, access</li>
+      <li>caps → domains, core, verbs (to register)</li>
+      <li>domains → sysdb, core, verbs (to register)</li>
+      <li>host → everything (it is the wiring)</li>
+    </ul>
+  </div>
+  <div class="card">
+    <h4>Forbidden</h4>
+    <ul>
+      <li>verbs → any domain or capability</li>
+      <li>caps, domains → doors, <code>net/http</code>, goja</li>
+      <li>identity → any slop package except <code>sysdb</code></li>
+      <li>one domain → another domain's tables (go through its verbs or exported functions)</li>
+    </ul>
+  </div>
+</div>
+<p>The rules can be checked mechanically: a test in <code>host/</code> runs <code>go list -deps</code> on each package and fails on a forbidden edge. That keeps the map honest after the people who drew it have moved on.</p>
+</section>
+
+<section id="path">
+<h2><span class="n">10</span>Getting there: split as you go</h2>
+<p>The earlier decision stands: no PR only moves code, and each feature PR moves the code it touches into place. The difference now is that SLOP3-008 has left two obvious first moves, and the verb-table change can be introduced as a shim, so old and new verbs coexist.</p>
+<ol class="steps">
+  <li><b><code>pkg/registry</code> from <code>pkg/server/registry.go</code>.</b> The file needs only a principal and verb calls. The mount-template code and <code>LastChange</code> follow. The check is that <code>TestRegistryDocuments</code> passes unchanged.</li>
+  <li><b><code>caps/db</code>.</b> The page RPCs and the actor's <code>use('db')</code> resolve through <code>rt.Space</code> in one package. This is the first visible gain, since actors get aliases and <code>_stores</code>. The check is the path-space tests plus an actor test reading through an alias.</li>
+  <li><b><code>caps/sample</code></b> with <code>Backend</code> and <code>Meter</code>. Merge <code>server/sample.go</code> and <code>actor/sample.go</code>. The check is the sample tests on both sides.</li>
+  <li><b>Verb v2 as a shim.</b> Add <code>Call</code>, <code>Effect</code> and <code>Subject</code> while old verbs keep working through an adapter. Register <code>db.*</code> and <code>files.*</code> as <code>Subject: View</code> verbs, and delete the RPC switch.</li>
+  <li><b>Callbacks to log followers.</b> Replace <code>AccessChanged</code> and the other two with a follower of system <code>_changes</code> in the page door.</li>
+  <li><b>The MCP door</b>, generated from the table. It costs little once inputs are typed, and it is the first product-level payoff.</li>
+  <li><b><code>identity</code> to the reuse rules</b> (no slop imports, hooks, its own migrations) when a second project needs logins.</li>
+  <li><b><code>host.New</code> and a second product</b> (the desktop host) as the proof. Do this last, when something wants it.</li>
+</ol>
+</section>
+
+<section id="open">
+<h2><span class="n">11</span>Open questions</h2>
+<ul>
+  <li><b>Schemas: from Go types or hand-written?</b> Generating JSON Schema from input structs keeps one source of truth; hand-written schemas give better MCP and CLI docs. glazed's field definitions are a third option, already used for CLI flags elsewhere.</li>
+  <li><b>Do page RPCs belong in the same table as operator verbs?</b> The alternative is two tables over one <code>Call</code> type. That keeps <code>slop --help</code> clean but splits docs and audit again.</li>
+  <li><b>Where does each capability's TypeScript live?</b> Next to its Go package (<code>caps/sample/sample.ts</code>), with <code>claude.js</code> assembled from the granted set? Or does <code>web/runtime</code> stay one package for tooling reasons?</li>
+  <li><b>Is the contract runtime its own product?</b> <code>claude.js</code> plus the page protocol is what every artifact host needs. Published as an npm package with a Go server half, it would be the most reusable block of all.</li>
+  <li><b>One <code>system.db</code> or one per domain?</b> Shared transactions across registry and identity are used today (claims move grants). Per-domain migrations inside one file keep that.</li>
+  <li><b>What is the second product?</b> The desktop host, an agent host, or another project's need for identity. Whichever comes first decides which of steps 6 to 8 is worth doing.</li>
+</ul>
+</section>
+
+<footer>
+SLOP3-009 brainstorm, written after SLOP3-008 (go-go-golems/slop-computer PR #20). Line counts are non-test Go (and TypeScript for <code>web/runtime</code>) on <code>task/slop3-008-data-assets</code>. Proposed names such as <code>host.New</code>, <code>caps/</code>, <code>doors/</code>, <code>Call</code> and <code>Effect</code> do not exist in the code yet.
+</footer>
+</main>
+</div>
+</body>
+</html>
