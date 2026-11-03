@@ -1,7 +1,7 @@
 // The source stamp of a committed build output. A web/ package whose build
-// is committed (web/runtime → pkg/server/assets/claude.js, web/admin →
-// pkg/server/admin and apps/backoffice) writes the hash of its sources into
-// the first line of each output; pkg/server's TestBuildOutputsFresh hashes
+// is committed (web/runtime → pkg/doors/pages/assets/claude.js, web/admin →
+// pkg/doors/office/admin and apps/backoffice) writes the hash of its sources into
+// the first line of each output; pkg/host's TestBuildOutputsFresh hashes
 // the sources the same way, so a source change without a rebuild fails
 // `go test` without needing node.
 //

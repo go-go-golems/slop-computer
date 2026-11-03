@@ -13,8 +13,8 @@ import (
 	"github.com/go-go-golems/slop-computer/pkg/actor"
 	"github.com/go-go-golems/slop-computer/pkg/commands"
 	"github.com/go-go-golems/slop-computer/pkg/config"
+	"github.com/go-go-golems/slop-computer/pkg/host"
 	"github.com/go-go-golems/slop-computer/pkg/kernel"
-	"github.com/go-go-golems/slop-computer/pkg/server"
 	"github.com/go-go-golems/slop-computer/pkg/sysdb"
 )
 
@@ -84,7 +84,7 @@ func runServer(parent context.Context, cfg *config.Config) error {
 	}
 	defer k.Close()
 	env := &commands.Env{Cfg: cfg, K: k, A: actor.New(k)}
-	srv, err := server.Build(ctx, cfg, sys, env)
+	srv, err := host.Build(ctx, cfg, sys, env)
 	if err != nil {
 		return err
 	}

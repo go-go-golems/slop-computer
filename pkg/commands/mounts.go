@@ -110,7 +110,7 @@ func mountVerbs(e *Env) []*verbs.Verb {
 			}},
 		{Name: "app.ls", Doc: "List the stores that are apps (their tree's main snapshot holds app.json).", Scope: verbs.Read, Action: authz.Platform,
 			Run: func(ctx context.Context, p *access.Principal, a verbs.Args) (any, error) {
-				rows, err := VisibleStores(ctx, e, p)
+				rows, err := e.K.VisibleStores(ctx, p)
 				if p.IsAdmin() {
 					rows, err = e.K.Registry.Stores(ctx, "")
 				}

@@ -1,4 +1,4 @@
-// Builds the back office into pkg/server/admin (embedded with go:embed):
+// Builds the back office into pkg/doors/office/admin (embedded with go:embed):
 // app.js (React, bundled), styles.css (the Kiln design system, then
 // admin.css). `make admin` runs both builds; each output's first line is
 // its source stamp (../build-stamp.mjs). With --app <dir>, builds it as an
@@ -12,7 +12,7 @@ import { stamp } from '../build-stamp.mjs';
 
 const i = process.argv.indexOf('--app');
 const app = i > 0 ? process.argv[i + 1] : '';
-const out = app || '../../pkg/server/admin';
+const out = app || '../../pkg/doors/office/admin';
 const banner = stamp('slop back office, built from web/admin' + (app ? ' --app' : ''));
 const swapAPI = {
   name: 'api-app',
