@@ -325,6 +325,39 @@ func TestAliasRevokeReopens(t *testing.T) {
 	}
 }
 
+// A page that subscribed to an alias before its viewer could read the
+// target is reopened when a grant there arrives, as a revoke reopens it
+// (review of PR #20): the subscription follows the store at no level.
+func TestAliasGrantReopens(t *testing.T) {
+	h := newHarness(t)
+	admin := h.tokenFor("admin@example.com", "read", "write", "admin")
+	h.call(admin, "store.new", map[string]any{"id": "crm"})
+	h.call(admin, "docs.set", map[string]any{"store": "crm", "path": "contacts/c1", "data": map[string]any{"name": "Ada"}})
+	pageApp(h, admin, "dash", "/dash", `{}`)
+	h.call(admin, "bind.set", map[string]any{"store": "dash", "alias": "contacts", "target": "crm", "prefix": "contacts"})
+
+	s := h.site(h.cfg.Hosts.Live[0])
+	v := guestView(t, s, "/dash")
+	sbx := strings.TrimPrefix(strings.Split(v["url"].(string), "/v/")[0], "http://")
+	if docs := result(t, rpc(s, v, "db.subscribe", map[string]any{"sub": "s1", "path": "contacts", "coll": true}))["docs"].([]any); len(docs) != 0 {
+		t.Fatalf("subscribe without a grant on crm: %v", docs)
+	}
+	stream, _ := s.do("GET", sbx, "/_rt/events", nil, map[string]string{"Authorization": "Bearer " + v["secret"].(string)})
+	go func() {
+		time.Sleep(200 * time.Millisecond)
+		h.call(admin, "grant.set", map[string]any{"store": "crm", "subject": "@guest", "level": "view"})
+	}()
+	evs := events(t, stream, 2, 3*time.Second)
+	stream.Body.Close()
+	if len(evs) < 2 || evs[1]["_type"] != "access" {
+		t.Fatalf("after gaining crm: %v", evs)
+	}
+	v = guestView(t, s, "/dash")
+	if docs := result(t, rpc(s, v, "db.subscribe", map[string]any{"sub": "s1", "path": "contacts", "coll": true}))["docs"].([]any); len(docs) != 1 {
+		t.Fatalf("the reopened page does not read crm: %v", docs)
+	}
+}
+
 // pushApp pushes files into a new store and mounts it at path for guests.
 func pushApp(h *harness, admin, storeID, path string, fs map[string]string) {
 	h.t.Helper()

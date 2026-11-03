@@ -941,10 +941,19 @@ func (s *Server) rpcDBSubscribe(ctx context.Context, v *rt.View, raw json.RawMes
 	switch {
 	case r.tgt.Own:
 		head = r.st.Head()
-	case r.st != nil:
+	case r.found:
 		// Follow the other store from its head as read before the
-		// documents: what lands later arrives on the stream.
-		v.Watch(r.st.ID, r.st.Head(), r.held)
+		// documents: what lands later arrives on the stream. Follow it
+		// too when the viewer may not read it yet (held is none): a grant
+		// there then moves the level the view recorded, and recheck
+		// reopens the page, which subscribes again and reads it.
+		rst := r.st
+		if rst == nil {
+			rst, _ = s.Env.K.Store(ctx, r.tgt.Store)
+		}
+		if rst != nil {
+			v.Watch(rst.ID, rst.Head(), r.held)
+		}
 		st, _ := s.viewStore(ctx, v)
 		if st != nil {
 			head = st.Head()

@@ -48,6 +48,7 @@ type route struct {
 	level rt.Level
 	held  rt.Level // the viewer's own level on the store, before the route's ceiling
 	rules rt.Rules
+	found bool // another store that exists, whether or not the viewer may read it
 }
 
 func (r route) canRead(path, user string) bool {
@@ -106,6 +107,7 @@ func (s *Server) remoteRoute(ctx context.Context, v *rt.View, tgt rt.Target) (ro
 	if err != nil {
 		return r, err
 	}
+	r.found = true
 	d := s.Env.K.Access.Level(ctx, s.viewPrincipal(ctx, v), row)
 	r.held = d.Level
 	r.level = min(d.Level, tgt.Cap)
