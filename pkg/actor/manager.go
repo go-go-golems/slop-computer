@@ -41,18 +41,15 @@ type Manager struct {
 	files  map[string]map[string][]byte
 	logs   map[string][]LogLine
 
-	// Hooks provided by the server and later phases.
-	RoomEmit  func(store, topic string, data any)
-	RoomPeers func(store string) []rt.Peer
-	Policy    func(app, capability, audience string) bool
-	LLM       llm.Backend // the sample backend (nil: no LLM)
-	Secret    func(ctx context.Context, app, name string) (string, error)
-	Platform  func(a *Actor) goja.Value
-	Sample    Sampler                                            // the sample capability (nil: none)
-	Paths     Paths                                              // the db paths outside the store (aliases, _stores); nil: the store's own only
-	Trusted   func(ctx context.Context, app, module string) bool // app.trust
+	// Hooks provided by the host.
+	Policy  func(app, capability, audience string) bool
+	LLM     llm.Backend // the sample backend (nil: no LLM)
+	Secret  func(ctx context.Context, app, name string) (string, error)
+	Paths   Paths                                              // the db paths outside the store (aliases, _stores); nil: the store's own only
+	Trusted func(ctx context.Context, app, module string) bool // app.trust
 
-	modules map[string]Module // the registry (Register)
+	provided map[string]func(*Actor) goja.Value // the door's capability bindings (Provide)
+	modules  map[string]Module                  // the registry (Register)
 }
 
 // New makes the actor manager and hooks it into the kernel (activation,

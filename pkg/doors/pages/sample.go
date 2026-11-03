@@ -89,24 +89,6 @@ func (s *Door) sampler() *capsample.Sampler {
 	return sp
 }
 
-// actorSampler is the sample capability for actors: the server's sampler,
-// read per call.
-type actorSampler struct{ s *Door }
-
-func (a actorSampler) Available() bool { return a.s.sampler().Available() }
-
-func (a actorSampler) Limits(ctx context.Context, payer, audience string) llm.LLM {
-	return a.s.sampler().Limits(ctx, payer, audience)
-}
-
-func (a actorSampler) Check(ctx context.Context, payer, audience string) (llm.LLM, error) {
-	return a.s.sampler().Check(ctx, payer, audience)
-}
-
-func (a actorSampler) Run(ctx context.Context, payer string, l llm.LLM, req llm.Request, emit func(llm.Event), execute llm.ExecuteTool) (llm.Answer, error) {
-	return a.s.sampler().Run(ctx, payer, l, req, emit, execute)
-}
-
 // viewLLM is what the viewer may spend: the payer is the viewing person,
 // under the app's policy for their audience.
 func (s *Door) viewLLM(ctx context.Context, v *rt.View) llm.LLM {

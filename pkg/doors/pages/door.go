@@ -91,14 +91,11 @@ func New(d *Door) *Door {
 	return s
 }
 
-// InstallActors gives the actor manager what actors reach through the
-// pages: the path space of their store (db), sampling, and the rooms of
-// their open views.
+// InstallActors gives the actor manager the path space of an actor's
+// store (aliases, _stores), resolved as its pages' are. Rooms and
+// sampling reach actors through the actor door.
 func (s *Door) InstallActors(m *actor.Manager) {
 	m.Paths = s.db
-	m.Sample = actorSampler{s}
-	m.RoomEmit = s.rooms.EmitFromStore
-	m.RoomPeers = s.rooms.StorePeers
 }
 
 // Rooms is the room capability over the door's open views (the actor door
