@@ -11,7 +11,9 @@ Topics:
 DocType: reference
 Intent: long-term
 Owners: []
-RelatedFiles: []
+RelatedFiles:
+    - Path: repo://pkg/caps/db/db.go
+      Note: 'Step 4: the db capability shared by pages and actors'
 ExternalSources: []
 Summary: ""
 LastUpdated: 2026-11-03T13:31:21.022201991-05:00
@@ -246,3 +248,92 @@ Three linked changes. The registry's documents left `pkg/server` for their own p
 ### Code review instructions
 - `pkg/registry/*.go`, then `pkg/server/registry.go` (follower), then the `s.reg` call sites in `views.go` and the `Listen` wiring in `server.go`.
 - `GOWORK=off go test ./pkg/registry ./internal/archtest ./pkg/server -run 'TestLive|TestRegistry|TestDependencyRules|TestAlias|TestComps' -count=1 -v`
+
+## Step 4: pkg/caps/db, one db for pages and actors
+
+The page path space moved out of `pkg/server` into `pkg/caps/db`, and an actor's `use('db')` now uses it: actors can read through their store's aliases and `_stores`, as pages could since SLOP3-008. The refactor also exposed a race in step 3's live registry documents, which is fixed in its own commit.
+
+### Prompt Context
+**User prompt (verbatim):** see Step 2 ("let's leave #415, and now build SLOP3-009").
+**Assistant interpretation:** Design-doc §11 step 4.
+**Inferred user intent:** One `db` implementation, with actors gaining aliases and `_stores`, and the hot path benchmarked.
+**Commit (code):** 1e6220f — "registry: version documents at the log head read before their rows"; f51b06d — "SLOP3-009 step 4: pkg/caps/db, one db for pages and actors"
+
+### What I did
+- `pkg/caps/db/db.go` (new), with no HTTP and no goja:
+  - `DB{K, Host, Reg}`. `Host` is `Viewer(ctx, v)`. `Registry` (Doc, Coll, Write) serves `_stores` and `_people`;
+  - `Space`, moved from `server.spaceOf`, now takes a `stores bool` instead of the policy map;
+  - `Route`, with `CanRead`/`CanWrite`, `remote`, `LevelOn` and `PagePath`;
+  - `Get`, `Query`, `WriteRoute`, `Write` (with `Who` and `StoreFail`), `Error`;
+  - `Reader`/`ReaderFor` and `Reader.PagePaths`, for the stream.
+- `pkg/server/space.go` is now the door's side:
+  - `dbHost`, both Host and Registry. Its `Write` refuses `KindActor` views;
+  - `dbErr`, which handles both `capsdb.Error` and `registry.Error`;
+  - thin `route`, `remoteLevelsMoved`, `pageDocs` and `assetStores`.
+- `pkg/server/views.go`: `dbGet`, `readable`, `writeRoute` and `dbWrite` are wrappers. The 120-line write body went into `caps/db`, and `writeIn` became `capsdb.WriteIn`.
+- `pkg/rt/views.go`: `KindActor`. `viewPrincipal` labels an actor view's person `via: actor`.
+- `pkg/actor`:
+  - `Paths` interface (Space, Get, Query) and `Manager.Paths`, which the server sets to `s.db`;
+  - `dbView`, built once per turn: the visitor's id, audience and level, the app's caps, and the space, with `_stores` only if `allowed(a, "stores")` holds for the visitor;
+  - `resolve`, `ownPath` and `queryDocs`. Own paths, including an alias of the store itself, stay in the turn. Other stores go through `Paths`. Writes outside the store throw `permission_denied`.
+- Ratchet: a `caps` layer. Capabilities may not import the runtime, doors, `net/http` or goja; the runtime may not import capabilities.
+- Tests:
+  - `TestActorDBPathSpace`, described under "What worked";
+  - `TestBenchPageDBQuery`, which runs only with `SLOP_BENCH=1`.
+
+### Why
+- **`*rt.View` as the viewer description.** The registry's documents already take one, and pages already have one. A synthetic view of the actor's turn (target, app, user, level, caps, space; no stream) lets both callers share every function unchanged. A new `Viewer` struct would have meant rewriting `pkg/registry`'s Host as well, for no behavioural gain.
+- **An interface in `pkg/actor`.** The design says that "modules come from the actor door". A direct `actor → caps/db` import would work today, but it's the edge the package map forbids, so the ratchet now refuses it.
+- **Writes outside the store refused.** A turn commits one store. A write elsewhere would be a second commit with its own failure modes. `stores.open(alias).call` already exists for that.
+
+### What worked
+- `TestActorDBPathSpace`:
+  - the admin reads `contacts/c1` (alias to crm) and queries it, with page paths;
+  - own documents are read in the turn;
+  - an alias of the store itself (`self` → `notes`) is the store's own;
+  - mia, who holds only interact on dash, sees nothing through the alias until she is granted view on crm;
+  - `writeAlias` and `writeStores` are refused (`permission_denied`);
+  - `_stores` is closed (`invalid_argument`) until `policy.set … stores @admin on`, and then still closed to mia (a member).
+- Mutations, each caught:
+  - M1, `caps/db` importing `pkg/actor` → `forbidden import: pkg/caps/db -> pkg/actor (capabilities know nothing of HTTP, goja, the runtime or doors)`;
+  - M2, `ownPath` without `!tgt.Own` → `actor_db_test.go:77: … writeAlias …: want permission_denied, got 200 map[result:1]`. That would have written crm's path into the actor's own store;
+  - M3, `dbView` ignoring the policy → `actor_db_test.go:80: … stores …: want invalid_argument, got 200`;
+  - M4, `remote` reading as nobody → `actor_db_test.go:61: admin reads: map[c:<nil> … n:0 …]`.
+- `GOWORK=off go test ./... -count=1`: all pass. `golangci-lint run --new-from-rev=origin/main`: 0 issues, after fixing three gofmt findings and one `nonamedreturns`.
+- Benchmark: `SLOP_BENCH=1 go test ./pkg/server -run TestBenchPageDBQuery -v`. It calls the RPC handlers directly, on 100 documents per store, query limit 20, three runs each side. Before is 1e6220f, the same test file run in a temporary worktree.
+
+  | call | before (best) | after (best) | allocs before → after |
+  |---|---|---|---|
+  | query-own | 262 µs | 260 µs | 2380 → 2382 |
+  | query-alias | 330 µs | 335 µs | 2577 → 2579 |
+  | get-own | 12.9 µs | 12.2 µs | 72 → 69 |
+  | get-alias | 70.7 µs | 66.2 µs | 270 → 267 |
+
+  The before runs varied more (query-own 262–339 µs) because of machine load. The best-of numbers are equal within noise.
+
+### What didn't work
+- `TestRegistryDocumentsLive` failed 8 of 8 times after the refactor, with `live registry documents: [_stores/crm/_grants/@member _stores/crm/_grants/@member deleted _stores/crm]` (the row with no `type=contacts`). With a `t.Logf` of every event added, it passed.
+  - **Cause, in step 3's `registry.Docs`:** the row (`StoreByID`) and its version (`LastChange`) are two queries. The follower pass triggered by `grant.rm` read the row before `store.type` committed and the version after. The new version was sent with the old body, and the pass triggered by `store.type` then saw no newer version.
+  - **Fix (1e6220f):** read `LogHead` first and take `max(rev) … AND rev <= head`. A change landing mid-read then leaves the version behind, and the next pass resends. After the fix: 10 of 10 passes.
+- First test run: `dash has no actor`. `app.json` needs `"actor":"actor.js"`. Then `read declares no requires, so it needs admin`, so the read actions got `requires: 'interact'`.
+
+### What I learned
+- Moving code changed goroutine timing enough to turn a latent race into a deterministic failure. Step 3's mutation checks hadn't hit it, because those runs batched `grant.rm` and `store.type` into one follower pass.
+- Path validation was already the same on both sides. `rt.validPath` refuses reserved heads, and the store's `ValidDocPath` is the same function, so routing actor paths through `Space.Resolve` changes no error for valid own paths.
+
+### What was tricky to build
+- **An alias of the store itself.** `Space.Resolve` returns `Own` with the alias's prefix path. The actor must use that path in the turn (not the page path), and must report page paths back from queries, as `caps/db.Query` does for other stores.
+- **Shadowing.** An alias now shadows the actor's own collection of the same name, as it already did for pages. An actor that wrote to its own `contacts` before an alias named `contacts` was bound will now get `permission_denied` on writes. This is consistent with pages, but it is a behaviour change for actors.
+
+### What warrants a second pair of eyes
+- **Alarms and reactors read other stores as nobody.** There is no visitor, so `Viewer` is nil and only `@guest` grants apply. `stores.open` (reading as `store:<id>`) is still the way for a store to read another with its own grant.
+- **`dbView` runs a bindings query on each turn's first `db` call**, even for own paths, because whether a path is own depends on the aliases. It's one indexed system-DB query per turn.
+- **Not done from §11 step 4:** page `db.*` RPCs as `Subject: View` verbs, which would remove the RPC switch. The table has no `Subject` yet. The shared implementation was the visible part, so the verb form waits until a door needs it (likely the MCP door, step 6).
+
+### What should be done in the future
+- Step 5: `caps/sample`.
+- When a door needs it: `Subject: View` and page `db.*` as hidden verbs.
+
+### Code review instructions
+- `pkg/caps/db/db.go` top to bottom, then `pkg/server/space.go`, the wrappers in `views.go`, and `pkg/actor/modules.go` (`Paths`, `dbView`, `resolve`, `ownPath`, `queryDocs`).
+- `GOWORK=off go test ./pkg/server -run 'TestActorDBPathSpace|TestAlias|TestStoresSpace|TestRegistry' -count=1 -v`, then `SLOP_BENCH=1 GOWORK=off go test ./pkg/server -run TestBenchPageDBQuery -v`.
