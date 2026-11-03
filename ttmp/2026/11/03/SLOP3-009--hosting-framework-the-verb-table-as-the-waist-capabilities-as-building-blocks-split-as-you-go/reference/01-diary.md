@@ -188,3 +188,61 @@ The first code step of SLOP3-009. `verbs.Def[In, Out]` describes a verb by Go ty
 - `pkg/verbs/def.go` top to bottom, then the three conversions (`stores.go` grant.set, `docs.go` docs.query and `Cond`, `mounts.go` mount.set and `aliasTemplate`), then `callVerb` in `pkg/server/modules.go`.
 - `GOWORK=off go test ./pkg/verbs ./pkg/server -run 'TestDef|TestDecode|TestTool|TestEffects|TestTyped|TestConfirm|TestSystemModule' -count=1 -v`
 - `go run ./cmd/slop verbs tools grant.set docs.query mount.set -o json`
+
+## Step 3: pkg/registry, live registry documents, and views that follow the system log
+
+Three linked changes. The registry's documents left `pkg/server` for their own package. Open views now learn of access and policy changes by following the system log instead of through three callbacks on `verbs.Env`. Since the follower sees every registry change anyway, registry documents became live, which SLOP3-008 had deferred. A dependency ratchet now guards the package map.
+
+### Prompt Context
+**User prompt (verbatim):** see Step 2 ("let's leave #415, and now build SLOP3-009").
+**Assistant interpretation:** Design-doc §11 step 3.
+**Inferred user intent:** The first domain package, and the callback knot removed.
+**Commit (code):** 9ba426f — "SLOP3-009 step 3: pkg/registry, live registry documents, views follow the system log"
+
+### What I did
+- `pkg/registry`:
+  - `documents.go`, moved from `pkg/server/registry.go`: `Docs.Coll`, `Doc` and `Write`;
+  - `registry.go`: `Host` (Viewer, ActingApp, Reachable, WithPrincipal), `Docs`, `WriteIn`, `Error`, and `LastChange`, moved from `system.DB`;
+  - `live.go`: `Live` (Remember, Forget, Views, Update) and `Affects`.
+- `pkg/server/registry.go` (new):
+  - `regHost`, and `regErr`, which turns `registry.Error` into `rtFail`;
+  - `sysFollower` and `followSystem`: one pass per commit, serialized, from a cursor initialised at `LogHead`. It maps grant, binding, store and link changes to `reviewViews(store)` (links via `LinkByID`), person and comp changes to `reviewPerson`, and policy changes to `reviewApp`;
+  - `refreshRegistry`, which sends `doc` events, or deletions versioned at the change's revision.
+- `pkg/server/views.go`: `dbGet`, `readable` and `dbWrite` call `s.reg`. `rpcDBSubscribe` remembers registry subscriptions, with their query, in `Live`; `rpcDBUnsubscribe` and view close forget them.
+- `pkg/system/system.go`: `Listen(fn)` replaces the single `OnLog` field; `pkg/actor/sysreact.go` uses it.
+- `pkg/verbs`: `AccessChanged`, `PolicyChanged` and `PersonChanged` are removed from `Env`, along with every call site (grant.set/rm, link revoke, bind.set/rm, people.role, policy.set, sub.grant/revoke).
+- `internal/archtest/deps_test.go`: the rules of design-doc §10 over `go list -json ./pkg/...`, with six allowed violations (verbs → actor, billing/stripe, kernel, system, goja; access → system). An allowed edge that disappears fails as stale.
+- Tests: `TestRegistryDocumentsLive` (a grant made, then removed, then a store's type changed, all heard on the stream) and `TestLiveUpdate`.
+
+### Why
+- **Following the log instead of callbacks.** The callbacks were a second, forgettable path: every verb that changed access had to remember to call one. The system log already records every such change with a stable key, so one follower covers all verbs, present and future.
+- **Live documents came almost free.** The follower already sees each registry change. What was missing was a memory of what each listener had been sent.
+
+### What worked
+- `GOWORK=off go test ./... -count=1`: all pass. The access-sensitive tests, repeated with `-count=5`, also all pass, so the asynchronous follower didn't make them flaky. Lint: 0 issues after one fix.
+- Mutations:
+  - no `Remember` for collection subscriptions → `pathspace_test.go:732: live registry documents: [_stores/crm type=contacts]`;
+  - no `Listen` registration → `TestAliasRevokeReopens`, `TestAliasGrantReopens`, `TestRegistryDocumentsLive` and `TestCompsMakeSubscribers` fail;
+  - the ratchet with `access -> system` removed from the allowlist → `forbidden import: pkg/access -> pkg/system (core imports no domain, runtime, table or door)`.
+
+### What didn't work
+- Lint: `pkg/registry/live.go:89:1: named return "changed" … (nonamedreturns)`.
+- During the ratchet's mutation check, `git checkout -- internal` could not restore the untracked file, so the mutated allowlist stayed on disk until I put the entry back by hand. I'll use a backup copy for untracked files next time.
+
+### What I learned
+- Only four tests depend on the follower. The others pass on `confirm`'s per-call epoch check, which is what makes the asynchronous follower safe: a view that hasn't been told yet is still refused at its next call.
+- The background loops in `ListenAndServe` don't run under the test harness. A long-lived follower goroutine started there would have been invisible to every test, so the follower is a short pass started from each `Listen` notification.
+
+### What was tricky to build
+- **Deletions in live documents need a version** the runtime will accept. The change's system revision is at least the deleted row's last change, so it always wins the runtime's newer-version check.
+
+### What warrants a second pair of eyes
+- **Timing.** A change now reaches open views asynchronously, a moment after the verb returns, where the callbacks ran before it returned. Correctness still holds per call (`confirm`), but a page can show stale data for that moment.
+- **`refreshRegistry` cost.** It recomputes every live registry subscription on any registry change: one verb call per subscription per change. Fine for consoles, not for thousands of listeners.
+
+### What should be done in the future
+- Step 4: `caps/db`.
+
+### Code review instructions
+- `pkg/registry/*.go`, then `pkg/server/registry.go` (follower), then the `s.reg` call sites in `views.go` and the `Listen` wiring in `server.go`.
+- `GOWORK=off go test ./pkg/registry ./internal/archtest ./pkg/server -run 'TestLive|TestRegistry|TestDependencyRules|TestAlias|TestComps' -count=1 -v`
