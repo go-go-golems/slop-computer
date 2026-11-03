@@ -588,3 +588,135 @@ The doors are smaller than the guide's table, in one respect: the pages are one 
   - `doorsApart`;
   - `allowed = {}`.
 - **Line counts:** `pkg/doors/*` totals 5,974 non-test lines; the largest files are `pages/views.go` (1,177) and `pages/live.go` (723).
+
+## Step 6: lint to 0, then PR 4 (kernel.Open, narrow command deps, caps/room, the actor door binds capabilities)
+
+Two PRs finish SLOP3-010.
+- **#27** takes the whole tree to 0 lint findings and stops the linter from hiding any. Under the default caps it showed 30; there were 58, and four were real swallowed-error bugs.
+- **#28**, stacked on #27, is PR 4 in four commits: `kernel.Open`, one small dependency type per command group, `pkg/caps/room`, and the actor door binding `room`/`sample`/`platform` through a new `Manager.Provide`.
+
+PR 4 is smaller than guide Part 10 planned. There is no `caps/files`, `caps/sql` or `caps/storage`, and `db` stays in the runtime; the code showed nothing for those packages to hold (see What I learned). The last ticket task (9bc6) is checked.
+
+### Prompt Context
+**User prompt (verbatim):** "alright clean lint. Then finish SLOP3-010."
+**Assistant interpretation:** First, a lint PR that brings the whole tree to 0 so moved code stops surfacing old findings. Then PR 4 (guide Part 10), with the commands preamble discussed earlier in the session: `open` onto the kernel, and narrow dependencies per group.
+**Inferred user intent:** The reorganization done: commands untangled, capabilities served once, the runtime holding only the runtime.
+**Commits (code):**
+- #27 (`task/lint-clean`): one commit, "Lint: the whole tree at 0, with nothing hidden";
+- #28 (`task/slop3-010-pr4-caps`): 8a44ee5 (1/4 `kernel.Open`), 5362940 (2/4 narrow deps), a0ec3ce (3/4 `caps/room`), c81116d (4/4 the actor door binds capabilities).
+
+PRs: https://github.com/go-go-golems/slop-computer/pull/27 and https://github.com/go-go-golems/slop-computer/pull/28
+
+### What I did
+- **Lint (#27):**
+  - listed every finding with `golangci-lint run --max-issues-per-linter=0 --max-same-issues=0 ./...`;
+  - fixed them by kind (errcheck, exhaustive, nonamedreturns, predeclared, staticcheck, ineffassign);
+  - audited every `rows.Next()` loop for a missing `rows.Err()` with a small go/ast tool (`rowserr.go`, job tmp), and fixed the four real misses;
+  - set `issues.max-issues-per-linter: 0` and `max-same-issues: 0` in `.golangci.yml`;
+  - switched `gate.sh` to whole-tree lint.
+- **1/4 `kernel.Open`:** added `pkg/kernel/open.go`. `commands.(kernelEnv).open` maps Open's decision to `verbs.Error` as before. The pages' alias read, bound actor route and site files use it.
+- **2/4 narrow deps:**
+  - nine small types in `pkg/commands/env.go`; each group function and helper takes one;
+  - `Verbs(e)` builds the groups from `e` (zero values when `e` is nil, for the CLI's listing);
+  - `Install` sets `Confirm` and `Verbs` (and `t.Stores`) before registering;
+  - `billingEnv.Billing` is a func;
+  - `people.go`'s `e.K.People`/`e.K.Sys` became `e.People`/`e.Sys`.
+- **3/4 `caps/room`:**
+  - moved the pages' room code into `pkg/caps/room/room.go` (`Rooms` over `*rt.Registry`), along with `actorEmit`'s copy;
+  - the page RPCs parse and call it, and `roomErr` maps its `Error` to `rtFail`;
+  - `Pages.Rooms()` hands it to the host;
+  - new `room_test.go`.
+- **4/4 the actor door binds capabilities:**
+  - `actor.Manager.Provide`, and the `use()` switch consults provided names first;
+  - new runtime exports `Actor.Allowed`, `AllowedAny`, `AfterCommit`;
+  - `git mv pkg/actor/sample.go pkg/doors/actors/sample.go`, rewritten on `*capsample.Sampler`, built per call from `m.LLM`;
+  - new `doors/actors/room.go`, and `platform` provided with its gate;
+  - `actors.Door` gains `Ledger` and `Rooms`;
+  - removed `Manager.{RoomEmit, RoomPeers, Sample, Platform}`, `actor.Sampler`, the runtime's `roomModule` and the pages' `actorSampler`.
+- **Commit subjects:** renumbered "(n/n)" to "(n/4)" before pushing with `git filter-branch --msg-filter`. `git diff` between the old and new heads was empty.
+- **Docs:** guide 10.5 "as built"; task 9bc6 checked; SLOP3-004's lint task points at #27.
+
+### Why
+- **Lint first.** In PR 2 and PR 3, each file move surfaced old findings as new and cost a round. PR 4 moved code out of `pkg/actor`, which held the most findings.
+- **`kernel.Open` before anything else.** It's the gate every verb, page and capability goes through; four copies of "check, then open" became one.
+- **Same field names in the narrow types.** The diff stays in signatures, and the compiler proves each group reaches nothing else.
+- **`Provide` beside `Register`.** Trusted modules (`system`, `workshop`) need `app.trust`. Capability bindings are gated by the manifest and policy instead, inside their `load`.
+
+### What worked
+- **#27:**
+  - `golangci-lint run --max-issues-per-linter=0 --max-same-issues=0 ./...` → `0 issues.`;
+  - `gate.sh` → `GATE: ok` (with whole-tree lint from then on);
+  - the verb table and tools are byte-identical.
+- **#28:**
+  - `gate.sh` → `0 issues.` and `GATE: ok` after each commit;
+  - commit 2 compiled on the first build;
+  - `slop verbs -o json`, `verbs tools` and every verb's `--help` → `all-same` (commit 2) and `table-same` (final);
+  - `go test -race -count=1 ./pkg/actor/ ./pkg/caps/... ./pkg/doors/...` and the host's actor, sample, room and module tests (`-run 'Actor|Sample|LLM|Room|Peer|Platform|Module|System|Example|Workshop|Storage|Durable'`) → `ok`;
+  - `go test ./pkg/caps/room/` → `ok`.
+
+### What didn't work
+- **The lint count was wrong.** The 30 findings on main were the default caps talking (3 per identical message). The first uncapped run said `32` after the first round of fixes; the full count on main was 58, 29 of them `rows.Close` alone.
+- **Even uncapped, fixes surfaced more.** After the deferred `rows.Close` fixes, four bare `rows.Close()` statements in `pkg/store/export.go` and `pkg/sysdb/sysdb.go` appeared (`Error return value of rows.Close is not checked`).
+- **Renaming broke the build twice:**
+  - unnaming `reactSystem`'s returns → `pkg/actor/sysreact.go:128:3: undefined: more`, fixed with a local `more := false`;
+  - renaming `scanRows`' `max` → `pkg/store/turn.go:307:18: max (built-in) must be called`, because the body still said `max`.
+- **A typo:** a stray `sed -i … /dev/null` in one command → `sed: couldn't edit /dev/null: not a regular file`. Harmless.
+
+### What I learned
+- **The four swallowed errors.** A `rows.Next()` loop without `rows.Err()` ends early on an I/O error and looks like success:
+  - `store.Log` returned a short log (both its loops);
+  - store export produced a short bundle;
+  - `sysdb`'s migration `foreign_key_check` read an iteration error as "no violations" and committed;
+  - `llm.ExpireHolds` settled a partial list.
+- **`store.doLocked` must keep its named return.** Its deferred `recover` assigns `err`; unnamed, a panic in a turn would return `nil, nil`. It keeps the name with a `nolint` that says why.
+- **Most actor modules have no core to extract.** `files`, `sql` and `storage` are goja argument handling around `store.Turn` and `store.Store` calls. The capability core *is* `pkg/store`. Only room had logic that lived in a door and was written twice.
+- **The narrowing shows what the kernel is.** Nine groups take `K`, because the kernel is the domains' composition root. The real narrowing is at the edges: people needs no kernel; confirm and eval need one thing each; only actors and policy see the actor manager; only billing sees Stripe.
+
+### What was tricky to build
+- **Value capture versus late binding.** The groups used to read `e` at call time. Capturing values meant finding everything set after `Install`:
+  - `Confirm` and `Verbs` were set *after* `Register` → `Install`'s new order;
+  - `Billing` is set by `SetBilling` after the host is built → a func;
+  - `A.LLM` is set by `setupLLM` later → the actor door's sampler is built per call.
+
+  A grep for `Env.X =` assignments confirmed nothing else changes.
+- **`Provide` returning nil versus null.** A load that returns a nil `goja.Value` means "not for this app", and `use()` must return null. The default branch checks `v != nil` before falling through to `goja.Null()`, so a provided name never falls into trusted modules.
+
+### What warrants a second pair of eyes
+- **Room behavior parity.** `caps/room` is a move, but `Emit`'s refusal codes and messages and both event shapes should be compared against the removed `views.go` block. The unit tests pin the codes, not the messages.
+- **`Install`'s new order.** `t.Stores = e` and `e.Verbs = t` are set before `Register`. Nothing reads them during registration, but the order is now load-bearing.
+- **The sample binding builds a `capsample.Sampler` per call,** as `pages.sampler()` does. It's cheap, but it's two places that must agree on how the backend is found.
+
+### What should be done in the future
+- Close SLOP3-010 once #27 and #28 merge, and check SLOP3-004's lint task.
+- If an actor capability gains real logic outside `pkg/store` (a `files` with policy, say), give it a `caps/` package then.
+- Consider an archtest that lists the files allowed to call `K.Store` directly, so a missed `Open` shows up.
+
+### Code review instructions
+- **#27:** `pkg/store/files.go` (`Log`/`changesOf`), `pkg/store/export.go`, `pkg/sysdb/sysdb.go` (the migration check), `pkg/llm/ledger.go` (`ExpireHolds`), `pkg/store/turn.go` (the `nolint`), then `.golangci.yml`.
+- **#28, by commit:**
+  - 1: `pkg/kernel/open.go`;
+  - 2: `pkg/commands/env.go` and `commands.go`;
+  - 3: `pkg/caps/room/room.go` against the removed `views.go` block;
+  - 4: `pkg/actor/registry.go`, `modules.go`, `pkg/doors/actors/{room,sample,modules,door}.go`, `pkg/host/host.go`.
+- **Validate:** `GOWORK=off go test ./... -count=1`; `go test -race ./pkg/actor ./pkg/caps/... ./pkg/host`; `golangci-lint run ./...`; then compare `slop verbs -o json` with a build of main.
+
+### Technical details
+- **The actor's `use()` lookup after PR 4** (`pkg/actor/modules.go`):
+  ```go
+  switch name {
+  case "sql", "db", "files", "alarm", "storage", "time", "log", "stores": // the runtime's own
+  case "fetch", "secrets":                                                // policy-gated, runtime
+  default:
+      if load, ok := a.m.provided[name]; ok { // room, sample, platform (doors/actors)
+          if v := load(a); v != nil { return v }
+          return goja.Null()
+      }
+      if v := a.trustedModule(name); v != nil { return v } // system, workshop (app.trust)
+  }
+  return goja.Null()
+  ```
+- **The host's wiring:**
+  ```go
+  (&actorsdoor.Door{Web, Gov, Verbs, Confirm, Ledger: s.Ledger, Rooms: s.Pages.Rooms()}).Install(env.A)
+  ```
+- **Line counts:** `pkg/actor` is 2,896 lines (it was 3,027); `pkg/caps/room/room.go` is 210.

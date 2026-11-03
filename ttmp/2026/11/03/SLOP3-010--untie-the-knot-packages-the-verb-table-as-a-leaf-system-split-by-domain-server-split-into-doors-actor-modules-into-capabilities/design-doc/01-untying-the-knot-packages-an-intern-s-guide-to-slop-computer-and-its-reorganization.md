@@ -909,6 +909,21 @@ func (m *Manager) Provide(mods ...Module)
 
 The actor's in-turn semantics must survive the move. A module that writes the actor's own store must use `a.Turn()`, not a fresh `Store.Do` that would deadlock on the store's mutex. The existing actor tests (`pkg/server/actors_test.go`, `llm_policy_test.go`, `actor_db_test.go`, the examples) cover this; run them under `-race`.
 
+### 10.5 As built (PR #28)
+
+> **As built (PR #28, stacked on the lint PR #27).** Four commits, adapted to what the code showed:
+>
+> 1. **`kernel.Open(ctx, p, id, need, what, hidden)`** is the checked way to a store. A refusal returns the decision and no store. `commands.open` and three page sites use it; `K.Store` stays unchecked, for the kernel and for code that already holds a decided level (views, an actor's own store).
+> 2. **Each command group holds only what it uses:** `kernelEnv{K}`, `actorEnv{K, A}`, `billingEnv{K, Cfg, Billing func}`, `mountEnv`/`previewEnv{K, Cfg}`, `policyEnv{K, Cfg, A}`, `peopleEnv{People, Sys}`, `confirmEnv{Confirm}`, `evalEnv{Verbs}`. Field names are unchanged, so the bodies are too. `Install` sets `Confirm` and `Verbs` before building the groups, because they capture values; Stripe is read per call.
+> 3. **`pkg/caps/room`** holds the one room implementation (join, leave, presence, peers, emit, a store's own emit), moved out of the page door, which had a second copy of emit for actors.
+> 4. **The actor door binds outside capabilities** through `actor.Manager.Provide(name, load)`: `room` (caps/room), `sample` (caps/sample, moved from `pkg/actor`) and `platform`. The Manager lost `RoomEmit`, `RoomPeers`, `Sample`/`Sampler` and `Platform`. 10.3's `Module` interface became this `Provide` function, next to the existing `Register` for trusted modules.
+>
+> Not done, on purpose:
+>
+> - **No `caps/files`, `caps/sql` or `caps/storage`.** Those actor modules are glue over `store.Turn`/`store.Store` inside the actor's turn, and their shared core is `pkg/store`, so a capability package would only wrap it. Only `room` had real logic in a door, duplicated.
+> - **`db` stays in the runtime.** It reads the turn's own uncommitted writes and reaches aliases through `caps/db` via `Paths`. Moving it would export the turn's internals (10.4's risk). So the runtime keeps the actor's own-store modules: `sql`, `db`, `files`, `storage`, `alarm`, `time`, `log`, plus `stores`, `fetch` and `secrets`.
+> - **The content verbs stay in `pkg/commands`**, as `kernelEnv` groups over `kernel.Open`.
+
 ---
 
 ## Part 11. Working rules for move pull requests
