@@ -111,7 +111,7 @@ func single(vals []any) (map[string]any, bool) {
 // promise.
 func (s *Server) callVerb(a *actor.Actor, module string, f modFunc, args map[string]any) goja.Value {
 	name := f.Verb
-	v, ok := verbs.Get(name)
+	v, ok := s.Verbs.Get(name)
 	if !ok {
 		a.Throw("not_found", "no verb "+name)
 	}
@@ -128,7 +128,7 @@ func (s *Server) callVerb(a *actor.Actor, module string, f modFunc, args map[str
 	}
 	if confirm {
 		// Refuse what the verb would refuse before asking anyone to allow it.
-		if err := verbs.Check(p, name, args); err != nil {
+		if err := s.Verbs.Check(p, name, args); err != nil {
 			ve := verbs.AsError(err)
 			a.Throw(ve.Code, ve.Message)
 		}
@@ -136,13 +136,13 @@ func (s *Server) callVerb(a *actor.Actor, module string, f modFunc, args map[str
 		if m := a.Manifest(); m != nil && m.Title != "" {
 			title = m.Title
 		}
-		c, ok := s.Env.Confirmations().Check(p.Person.ID, a.Visitor().View, a.App(), title, name, args)
+		c, ok := s.Env.Confirm.Check(p.Person.ID, a.Visitor().View, a.App(), title, name, args)
 		if !ok {
 			a.ThrowError(&actor.Error{Code: "confirmation_required", Message: title + " asks to " + c.Summary, Confirm: c.ID})
 		}
 	}
 	return a.IO(func() (any, error) {
-		out, err := verbs.Call(withPrincipal(context.Background(), p), s.Env, p, name, args)
+		out, err := s.Verbs.Call(withPrincipal(context.Background(), p), p, name, args)
 		if err != nil {
 			ve := verbs.AsError(err)
 			return nil, &actor.Error{Code: ve.Code, Message: ve.Message}

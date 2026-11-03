@@ -22,6 +22,7 @@ var (
 	caps     = []string{"pkg/caps"}
 	runtime  = []string{"pkg/actor"}
 	table    = []string{"pkg/verbs"}
+	commands = []string{"pkg/commands"}
 	doors    = []string{"pkg/server"}
 	netHTTP  = "net/http"
 	gojaPath = "github.com/dop251/goja"
@@ -38,17 +39,16 @@ var rules = []struct {
 	{"the actor runtime is given its capabilities by a door, through interfaces", runtime, caps},
 	{"core imports no domain, capability, runtime, table or door", core, concat(domains, caps, runtime, table, doors)},
 	{"identity imports no other slop package", []string{"pkg/identity"}, concat(core, domains, caps, runtime, table, doors)},
-	{"only cmd/ imports the server", concat(core, domains, caps, runtime, table), doors},
+	{"only cmd/ imports the server", concat(core, domains, caps, runtime, table, commands), doors},
+	{"commands are installed by the host and reached through the table, not imported by doors, domains, capabilities or the runtime", concat(core, domains, caps, runtime, table, doors), commands},
 }
 
 // allowed are today's violations. Remove an entry when its import goes.
 var allowed = map[string]bool{
-	"pkg/verbs -> pkg/actor":              true,
-	"pkg/verbs -> pkg/billing/stripe":     true,
-	"pkg/verbs -> pkg/kernel":             true,
-	"pkg/verbs -> pkg/system":             true,
-	"pkg/verbs -> github.com/dop251/goja": true,
-	"pkg/access -> pkg/system":            true,
+	"pkg/access -> pkg/system": true, // SLOP3-010 PR 2: access.Directory
+	// the server assembles today (Server.Env is a *commands.Env); SLOP3-010
+	// PR 3 moves assembly to pkg/host
+	"pkg/server -> pkg/commands": true,
 }
 
 func concat(xs ...[]string) []string {

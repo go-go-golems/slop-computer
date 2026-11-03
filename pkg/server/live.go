@@ -702,7 +702,7 @@ func (s *Server) siteConfirm(w http.ResponseWriter, r *http.Request, id string) 
 		httpx.Fail(w, 404, "not_found", "no such confirmation")
 		return
 	}
-	book := s.Env.Confirmations()
+	book := s.Env.Confirm
 	switch r.Method {
 	case http.MethodGet:
 		if c, ok := book.Get(id, p.ID()); ok {

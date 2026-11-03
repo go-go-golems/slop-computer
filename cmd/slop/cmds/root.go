@@ -10,10 +10,12 @@ import (
 	"sort"
 	"strconv"
 	"strings"
+	"sync"
 
 	"github.com/spf13/cobra"
 
 	"github.com/go-go-golems/slop-computer/pkg/client"
+	"github.com/go-go-golems/slop-computer/pkg/commands"
 	"github.com/go-go-golems/slop-computer/pkg/verbs"
 )
 
@@ -22,8 +24,13 @@ var (
 	flagOutput string
 )
 
+// listOnce fills verbs.Default with the commands, unbound: the CLI only
+// lists them (names, arguments, docs) and calls the server.
+var listOnce sync.Once
+
 // Root returns the root command.
 func Root() *cobra.Command {
+	listOnce.Do(func() { commands.Install(verbs.Default, nil) })
 	root := &cobra.Command{
 		Use:           "slop",
 		Short:         "slop: host apps on stores, with a CLI for people and agents",
@@ -41,7 +48,7 @@ func Root() *cobra.Command {
 // addVerbCommands makes `slop <group> <verb>` for every verb.
 func addVerbCommands(root *cobra.Command) {
 	groups := map[string]*cobra.Command{}
-	for _, v := range verbs.All() {
+	for _, v := range verbs.Default.All() {
 		v := v
 		cmd := verbCommand(v)
 		if !strings.Contains(v.Name, ".") {
@@ -156,7 +163,7 @@ func verbsCmd() *cobra.Command {
 		Short: "List the verbs this CLI knows",
 		RunE: func(cmd *cobra.Command, args []string) error {
 			rows := []any{}
-			for _, v := range verbs.All() {
+			for _, v := range verbs.Default.All() {
 				typed := ""
 				if v.Input != nil {
 					typed = "typed"
@@ -171,7 +178,7 @@ func verbsCmd() *cobra.Command {
 		Short: "Describe verbs as MCP tools: name, description, input and output JSON Schema",
 		RunE: func(cmd *cobra.Command, args []string) error {
 			out := []any{}
-			for _, v := range verbs.All() {
+			for _, v := range verbs.Default.All() {
 				if len(args) == 0 || slices.Contains(args, v.Name) {
 					out = append(out, v.Tool())
 				}

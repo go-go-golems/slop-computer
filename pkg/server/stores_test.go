@@ -9,8 +9,8 @@ import (
 	"testing"
 	"time"
 
+	"github.com/go-go-golems/slop-computer/pkg/commands"
 	"github.com/go-go-golems/slop-computer/pkg/store"
-	"github.com/go-go-golems/slop-computer/pkg/verbs"
 )
 
 const booksCSV = "isbn,title,year\n111,Old Book,1990\n222,New Book,2004\n333,Newer Book,2019\n"
@@ -74,9 +74,9 @@ return { books: rows.length, recent: recent.map(d => d.body.title),
 	// Read-only programs cannot write.
 	h.fail(admin, "eval", map[string]any{"readOnly": true, "source": `slop.store.new({ id: 'nope' })`}, "permission_denied")
 	// Programs are interrupted.
-	old := verbs.EvalTimeout
-	verbs.EvalTimeout = 200 * time.Millisecond
-	defer func() { verbs.EvalTimeout = old }()
+	old := commands.EvalTimeout
+	commands.EvalTimeout = 200 * time.Millisecond
+	defer func() { commands.EvalTimeout = old }()
 	h.fail(admin, "eval", map[string]any{"source": `while (true) {}`}, "unavailable")
 }
 

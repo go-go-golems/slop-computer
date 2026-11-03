@@ -1,4 +1,4 @@
-package verbs
+package commands
 
 import (
 	"context"
@@ -17,42 +17,43 @@ import (
 	"github.com/go-go-golems/slop-computer/pkg/rt"
 	"github.com/go-go-golems/slop-computer/pkg/store"
 	"github.com/go-go-golems/slop-computer/pkg/system"
+	"github.com/go-go-golems/slop-computer/pkg/verbs"
 )
 
 // SQL, export and import.
 
-func init() {
-	storeArg := Arg{Name: "store", Type: "string", Pos: 1, Required: true}
-	rowsArgs := []Arg{{Name: "rows", Type: "json", Doc: "a list of objects"}, {Name: "text", Type: "string", Doc: "CSV, JSONL or a JSON array"},
+func dataVerbs(e *Env) []*verbs.Verb {
+	storeArg := verbs.Arg{Name: "store", Type: "string", Pos: 1, Required: true}
+	rowsArgs := []verbs.Arg{{Name: "rows", Type: "json", Doc: "a list of objects"}, {Name: "text", Type: "string", Doc: "CSV, JSONL or a JSON array"},
 		{Name: "format", Type: "string", Doc: "csv, jsonl or json (with text)"}}
-	Register(
-		&Verb{Name: "sql.query", Doc: "Run a read-only SQL statement on a store (admins).", Scope: Read, AdminOnly: true, Action: authz.StoreAdmin,
-			Args: []Arg{storeArg, {Name: "sql", Type: "string", Pos: 2, Required: true}, {Name: "args", Type: "json", Doc: "positional parameters"}},
-			Run: func(ctx context.Context, e *Env, p *access.Principal, a Args) (any, error) {
+	return []*verbs.Verb{
+		{Name: "sql.query", Doc: "Run a read-only SQL statement on a store (admins).", Scope: verbs.Read, AdminOnly: true, Action: authz.StoreAdmin,
+			Args: []verbs.Arg{storeArg, {Name: "sql", Type: "string", Pos: 2, Required: true}, {Name: "args", Type: "json", Doc: "positional parameters"}},
+			Run: func(ctx context.Context, p *access.Principal, a verbs.Args) (any, error) {
 				return runSQL(ctx, e, p, a, store.CallerAdminRead)
 			}},
-		&Verb{Name: "sql.exec", Doc: "Run SQL on a store's app tables (admins); --write allows writes.", Scope: Write, AdminOnly: true, Action: authz.StoreAdmin,
-			Args: []Arg{storeArg, {Name: "sql", Type: "string", Pos: 2, Required: true}, {Name: "args", Type: "json"},
+		{Name: "sql.exec", Doc: "Run SQL on a store's app tables (admins); --write allows writes.", Scope: verbs.Write, AdminOnly: true, Action: authz.StoreAdmin,
+			Args: []verbs.Arg{storeArg, {Name: "sql", Type: "string", Pos: 2, Required: true}, {Name: "args", Type: "json"},
 				{Name: "write", Type: "bool", Doc: "allow INSERT, UPDATE and DELETE on app tables"}},
-			Run: func(ctx context.Context, e *Env, p *access.Principal, a Args) (any, error) {
+			Run: func(ctx context.Context, p *access.Principal, a verbs.Args) (any, error) {
 				caller := store.CallerAdminRead
 				if a.B("write") {
 					caller = store.CallerAdminWrite
 				}
 				return runSQL(ctx, e, p, a, caller)
 			}},
-		&Verb{Name: "sql.schema", Doc: "A store's app tables, indexes, views and triggers.", Scope: Read, Action: authz.StoreAdmin,
-			Args: []Arg{storeArg},
-			Run: func(ctx context.Context, e *Env, p *access.Principal, a Args) (any, error) {
+		{Name: "sql.schema", Doc: "A store's app tables, indexes, views and triggers.", Scope: verbs.Read, Action: authz.StoreAdmin,
+			Args: []verbs.Arg{storeArg},
+			Run: func(ctx context.Context, p *access.Principal, a verbs.Args) (any, error) {
 				s, _, err := e.open(ctx, p, a.S("store"), rt.LevelAdmin, "reading the schema")
 				if err != nil {
 					return nil, err
 				}
 				return s.AppSchema(ctx)
 			}},
-		&Verb{Name: "store.export", Doc: "A store's current documents, files (with their bytes), schema and table rows.", Scope: Read, Action: authz.StoreAdmin, StoreArg: "id",
-			Args: []Arg{{Name: "id", Type: "string", Pos: 1, Required: true}},
-			Run: func(ctx context.Context, e *Env, p *access.Principal, a Args) (any, error) {
+		{Name: "store.export", Doc: "A store's current documents, files (with their bytes), schema and table rows.", Scope: verbs.Read, Action: authz.StoreAdmin, StoreArg: "id",
+			Args: []verbs.Arg{{Name: "id", Type: "string", Pos: 1, Required: true}},
+			Run: func(ctx context.Context, p *access.Principal, a verbs.Args) (any, error) {
 				s, _, err := e.open(ctx, p, a.S("id"), rt.LevelAdmin, "exporting")
 				if err != nil {
 					return nil, err
@@ -74,19 +75,19 @@ func init() {
 				}
 				return map[string]any{"id": s.ID, "bundle": b, "blobs": bl}, nil
 			}},
-		&Verb{Name: "import.folder", Doc: "Make a new store from an export bundle {bundle, blobs} (slop import folder reads the folder format).", Scope: Write, Action: authz.Program,
-			Args: []Arg{{Name: "store", Type: "string", Pos: 1, Doc: "the new store's id"}, {Name: "bundle", Type: "json", Required: true},
+		{Name: "import.folder", Doc: "Make a new store from an export bundle {bundle, blobs} (slop import folder reads the folder format).", Scope: verbs.Write, Action: authz.Program,
+			Args: []verbs.Arg{{Name: "store", Type: "string", Pos: 1, Doc: "the new store's id"}, {Name: "bundle", Type: "json", Required: true},
 				{Name: "blobs", Type: "json", Doc: "{sha256: base64}"}},
-			Run: func(ctx context.Context, e *Env, p *access.Principal, a Args) (any, error) {
+			Run: func(ctx context.Context, p *access.Principal, a verbs.Args) (any, error) {
 				if !e.K.Access.In(ctx, p, access.GroupMember) {
-					return nil, Errf("permission_denied", "only members make stores")
+					return nil, verbs.Errf("permission_denied", "only members make stores")
 				}
 				var b store.Bundle
 				raw, _ := json.Marshal(a["bundle"])
 				dec := json.NewDecoder(strings.NewReader(string(raw)))
 				dec.UseNumber()
 				if err := dec.Decode(&b); err != nil {
-					return nil, Errf("invalid_argument", "bundle: %s", err.Error())
+					return nil, verbs.Errf("invalid_argument", "bundle: %s", err.Error())
 				}
 				if err := putBlobs(e, a); err != nil {
 					return nil, err
@@ -96,14 +97,14 @@ func init() {
 					sums = append(sums, f.SHA256)
 				}
 				if missing := e.K.Blobs.Missing(sums); len(missing) > 0 {
-					return nil, &Error{Code: "missing_blobs", Message: "send these blobs", Extra: map[string]any{"missing": missing}}
+					return nil, &verbs.Error{Code: "missing_blobs", Message: "send these blobs", Extra: map[string]any{"missing": missing}}
 				}
 				row, s, err := e.K.CreateStore(ctx, p, kernel.NewStore{ID: a.S("store"), Type: b.Meta["type"], App: b.Meta["app"]})
 				if errors.Is(err, system.ErrExists) {
-					return nil, Errf("conflict", "store %s exists", a.S("store"))
+					return nil, verbs.Errf("conflict", "store %s exists", a.S("store"))
 				}
 				if err != nil {
-					return nil, Errf("invalid_argument", "%s", err.Error())
+					return nil, verbs.Errf("invalid_argument", "%s", err.Error())
 				}
 				c, err := s.Do(ctx, store.Who{ID: p.ID(), Via: p.ViaLabel(), Level: "owner", Code: authz.CodeRightOf(p)}, func(t *store.Turn) error {
 					t.Summary = "imported"
@@ -119,9 +120,9 @@ func init() {
 				if err != nil {
 					_ = e.K.DeleteStore(ctx, p, row.ID)
 					if errors.Is(err, store.ErrAppCode) {
-						return nil, Errf("permission_denied", "import refused, store removed: %s", err.Error())
+						return nil, verbs.Errf("permission_denied", "import refused, store removed: %s", err.Error())
 					}
-					return nil, Errf("invalid_argument", "import failed, store removed: %s", err.Error())
+					return nil, verbs.Errf("invalid_argument", "import failed, store removed: %s", err.Error())
 				}
 				out := map[string]any{"store": row.ID, "docs": len(b.Docs), "files": len(b.Files), "tables": len(b.Tables)}
 				if c != nil {
@@ -129,10 +130,10 @@ func init() {
 				}
 				return out, nil
 			}},
-		&Verb{Name: "import.docs", Doc: "Import records as documents in coll, one commit per 500; --id names the field used as document id. CSV numbers and booleans are typed unless --raw.", Scope: Write, Action: authz.DocWrite,
-			Args: append([]Arg{storeArg, {Name: "coll", Type: "string", Required: true}, {Name: "id", Type: "string", Doc: "field holding each document's id"},
+		{Name: "import.docs", Doc: "Import records as documents in coll, one commit per 500; --id names the field used as document id. CSV numbers and booleans are typed unless --raw.", Scope: verbs.Write, Action: authz.DocWrite,
+			Args: append([]verbs.Arg{storeArg, {Name: "coll", Type: "string", Required: true}, {Name: "id", Type: "string", Doc: "field holding each document's id"},
 				{Name: "raw", Type: "bool", Doc: "keep CSV values as strings"}}, rowsArgs...),
-			Run: func(ctx context.Context, e *Env, p *access.Principal, a Args) (any, error) {
+			Run: func(ctx context.Context, p *access.Principal, a verbs.Args) (any, error) {
 				rows, err := records(a)
 				if err != nil {
 					return nil, err
@@ -145,7 +146,7 @@ func init() {
 					}
 				}
 				if !rt.ValidCollPath(a.S("coll")) {
-					return nil, Errf("invalid_argument", "invalid collection %q", a.S("coll"))
+					return nil, verbs.Errf("invalid_argument", "invalid collection %q", a.S("coll"))
 				}
 				items := make([]docItem, 0, len(rows))
 				for i, r := range rows {
@@ -153,7 +154,7 @@ func init() {
 					if f := a.S("id"); f != "" {
 						v, ok := r[f]
 						if !ok || fmt.Sprint(v) == "" {
-							return nil, Errf("invalid_argument", "record %d has no %s", i+1, f)
+							return nil, verbs.Errf("invalid_argument", "record %d has no %s", i+1, f)
 						}
 						id = fmt.Sprint(v)
 					}
@@ -172,9 +173,9 @@ func init() {
 				}
 				return map[string]any{"imported": len(items), "revs": revs}, nil
 			}},
-		&Verb{Name: "import.table", Doc: "Insert records into an app table (it must exist, from a migration), in one commit.", Scope: Write, Action: authz.StoreAdmin,
-			Args: append([]Arg{storeArg, {Name: "table", Type: "string", Required: true}}, rowsArgs...),
-			Run: func(ctx context.Context, e *Env, p *access.Principal, a Args) (any, error) {
+		{Name: "import.table", Doc: "Insert records into an app table (it must exist, from a migration), in one commit.", Scope: verbs.Write, Action: authz.StoreAdmin,
+			Args: append([]verbs.Arg{storeArg, {Name: "table", Type: "string", Required: true}}, rowsArgs...),
+			Run: func(ctx context.Context, p *access.Principal, a verbs.Args) (any, error) {
 				s, d, err := e.open(ctx, p, a.S("store"), rt.LevelAdmin, "importing rows")
 				if err != nil {
 					return nil, err
@@ -187,7 +188,7 @@ func init() {
 					return t.InsertRows(store.CallerAdminWrite, a.S("table"), rows)
 				})
 				if err != nil {
-					return nil, Errf("invalid_argument", "%s", err.Error())
+					return nil, verbs.Errf("invalid_argument", "%s", err.Error())
 				}
 				out := map[string]any{"imported": len(rows)}
 				if c != nil {
@@ -195,16 +196,16 @@ func init() {
 				}
 				return out, nil
 			}},
-	)
+	}
 }
 
-func runSQL(ctx context.Context, e *Env, p *access.Principal, a Args, caller string) (any, error) {
+func runSQL(ctx context.Context, e *Env, p *access.Principal, a verbs.Args, caller string) (any, error) {
 	s, d, err := e.open(ctx, p, a.S("store"), rt.LevelAdmin, "running SQL")
 	if err != nil {
 		return nil, err
 	}
 	var params []any
-	if l, ok := a.list("args"); ok {
+	if l, ok := argList(a, "args"); ok {
 		for _, v := range l {
 			params = append(params, sqlArg(v))
 		}
@@ -226,7 +227,7 @@ func runSQL(ctx context.Context, e *Env, p *access.Principal, a Args, caller str
 		return err
 	})
 	if err != nil {
-		return nil, Errf("invalid_argument", "%s", err.Error())
+		return nil, verbs.Errf("invalid_argument", "%s", err.Error())
 	}
 	if isQuery {
 		return rows, nil
@@ -278,9 +279,9 @@ func inferCell(v any) any {
 }
 
 // records reads rows, or text in a format, into objects.
-func records(a Args) ([]map[string]any, error) {
+func records(a verbs.Args) ([]map[string]any, error) {
 	var list []any
-	if l, ok := a.list("rows"); ok {
+	if l, ok := argList(a, "rows"); ok {
 		list = l
 	} else if a.Has("text") {
 		text := a.S("text")
@@ -294,27 +295,27 @@ func records(a Args) ([]map[string]any, error) {
 				}
 				v := decodeJSON([]byte(line))
 				if v == nil {
-					return nil, Errf("invalid_argument", "line %d is not JSON", i+1)
+					return nil, verbs.Errf("invalid_argument", "line %d is not JSON", i+1)
 				}
 				list = append(list, v)
 			}
 		case "json", "":
 			l, ok := decodeJSON([]byte(text)).([]any)
 			if !ok {
-				return nil, Errf("invalid_argument", "text is not a JSON array")
+				return nil, verbs.Errf("invalid_argument", "text is not a JSON array")
 			}
 			list = l
 		default:
-			return nil, Errf("invalid_argument", "format must be csv, jsonl or json")
+			return nil, verbs.Errf("invalid_argument", "format must be csv, jsonl or json")
 		}
 	} else {
-		return nil, Errf("invalid_argument", "give rows, or text and format")
+		return nil, verbs.Errf("invalid_argument", "give rows, or text and format")
 	}
 	out := make([]map[string]any, 0, len(list))
 	for i, v := range list {
 		m, ok := v.(map[string]any)
 		if !ok {
-			return nil, Errf("invalid_argument", "record %d is not an object", i+1)
+			return nil, verbs.Errf("invalid_argument", "record %d is not an object", i+1)
 		}
 		out = append(out, m)
 	}
@@ -322,16 +323,16 @@ func records(a Args) ([]map[string]any, error) {
 }
 
 // putBlobs stores the base64 blobs of a call after checking their hashes.
-func putBlobs(e *Env, a Args) error {
-	given, _ := a.obj("blobs")
+func putBlobs(e *Env, a verbs.Args) error {
+	given, _ := argObj(a, "blobs")
 	for sum, v := range given {
 		str, _ := v.(string)
 		data, err := base64.StdEncoding.DecodeString(str)
 		if err != nil {
-			return Errf("invalid_argument", "blob %s is not base64", sum)
+			return verbs.Errf("invalid_argument", "blob %s is not base64", sum)
 		}
 		if blobs.Sum(data) != sum {
-			return Errf("invalid_argument", "blob %s does not match its sha256", sum)
+			return verbs.Errf("invalid_argument", "blob %s does not match its sha256", sum)
 		}
 		if _, err := e.K.Blobs.Put(data); err != nil {
 			return err

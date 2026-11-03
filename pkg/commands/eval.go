@@ -1,4 +1,4 @@
-package verbs
+package commands
 
 import (
 	"context"
@@ -12,6 +12,7 @@ import (
 
 	"github.com/go-go-golems/slop-computer/pkg/access"
 	"github.com/go-go-golems/slop-computer/pkg/authz"
+	"github.com/go-go-golems/slop-computer/pkg/verbs"
 )
 
 // EvalTimeout bounds one eval program.
@@ -19,18 +20,20 @@ var EvalTimeout = 60 * time.Second
 
 const maxEvalLogs = 1000
 
-func init() {
-	Register(&Verb{Name: "eval", Doc: "Run a JavaScript program on the server with every verb in scope as slop.<group>.<verb>(args).", Scope: Read, Action: authz.Program,
-		Args: []Arg{{Name: "source", Type: "string", Required: true, Doc: "the program body; top-level return gives the result"},
+func evalVerbs(e *Env) []*verbs.Verb {
+	return []*verbs.Verb{{Name: "eval", Doc: "Run a JavaScript program on the server with every verb in scope as slop.<group>.<verb>(args).", Scope: verbs.Read, Action: authz.Program,
+		Args: []verbs.Arg{{Name: "source", Type: "string", Required: true, Doc: "the program body; top-level return gives the result"},
 			{Name: "args", Type: "json", Doc: "passed to the program as args"},
 			{Name: "readOnly", Type: "bool", Doc: "writing verbs throw permission_denied"}},
-		Run: runEval})
+		Run: func(ctx context.Context, p *access.Principal, a verbs.Args) (any, error) {
+			return runEval(ctx, e, p, a)
+		}}}
 }
 
 // runEval runs a program in a fresh runtime. Each verb it calls is a
 // separate, synchronous call with the caller's identity (via eval), so
 // every check applies exactly as from the CLI.
-func runEval(ctx context.Context, e *Env, p *access.Principal, a Args) (any, error) {
+func runEval(ctx context.Context, e *Env, p *access.Principal, a verbs.Args) (any, error) {
 	vm := goja.New()
 	inner := *p
 	inner.Via = "eval"
@@ -59,26 +62,26 @@ func runEval(ctx context.Context, e *Env, p *access.Principal, a Args) (any, err
 
 	slop := vm.NewObject()
 	groups := map[string]*goja.Object{}
-	for _, v := range All() {
+	for _, v := range e.Verbs.All() {
 		if v.Name == "eval" {
 			continue
 		}
 		v := v
 		fn := func(call goja.FunctionCall) goja.Value {
-			args := Args{}
+			args := verbs.Args{}
 			if arg := call.Argument(0); !goja.IsUndefined(arg) && !goja.IsNull(arg) {
 				m, ok := norm(arg.Export()).(map[string]any)
 				if !ok {
-					throw(vm, Errf("invalid_argument", "%s takes one object of arguments", v.Name))
+					throw(vm, verbs.Errf("invalid_argument", "%s takes one object of arguments", v.Name))
 				}
 				args = m
 			}
-			if readOnly && v.Scope != Read {
-				throw(vm, Errf("permission_denied", "%s writes, and this program is read-only", v.Name))
+			if readOnly && v.Scope != verbs.Read {
+				throw(vm, verbs.Errf("permission_denied", "%s writes, and this program is read-only", v.Name))
 			}
-			res, err := Call(ctx, e, &inner, v.Name, args)
+			res, err := e.Verbs.Call(ctx, &inner, v.Name, args)
 			if err != nil {
-				throw(vm, AsError(err))
+				throw(vm, verbs.AsError(err))
 			}
 			return toJS(vm, res)
 		}
@@ -111,7 +114,7 @@ func runEval(ctx context.Context, e *Env, p *access.Principal, a Args) (any, err
 }
 
 // throw raises a verb error as a JS Error with .code (and .trace).
-func throw(vm *goja.Runtime, e *Error) {
+func throw(vm *goja.Runtime, e *verbs.Error) {
 	obj, err := vm.New(vm.Get("Error"), vm.ToValue(e.Message))
 	if err != nil {
 		panic(vm.NewGoError(e))
@@ -132,11 +135,11 @@ func evalError(err error, logs []string) error {
 	extra := map[string]any{"logs": logs}
 	var ie *goja.InterruptedError
 	if errors.As(err, &ie) {
-		return &Error{Code: "unavailable", Message: fmt.Sprint(ie.Value()), Extra: extra}
+		return &verbs.Error{Code: "unavailable", Message: fmt.Sprint(ie.Value()), Extra: extra}
 	}
 	var ex *goja.Exception
 	if errors.As(err, &ex) {
-		out := &Error{Code: "eval_error", Message: ex.Error(), Extra: extra}
+		out := &verbs.Error{Code: "eval_error", Message: ex.Error(), Extra: extra}
 		if obj, ok := ex.Value().(*goja.Object); ok {
 			if c := obj.Get("code"); c != nil && !goja.IsUndefined(c) {
 				out.Code = c.String()
@@ -154,7 +157,7 @@ func evalError(err error, logs []string) error {
 		}
 		return out
 	}
-	return &Error{Code: "eval_error", Message: err.Error(), Extra: extra}
+	return &verbs.Error{Code: "eval_error", Message: err.Error(), Extra: extra}
 }
 
 // toJS converts a Go value to plain JS data through JSON.

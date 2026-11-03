@@ -32,10 +32,14 @@ type Host interface {
 
 // Docs serves the registry's documents.
 type Docs struct {
-	Sys  *system.DB
-	Env  *verbs.Env
-	Host Host
-	Live *Live
+	Sys *system.DB
+	// Verbs runs the verbs that own the rows; Confirm asks the person to
+	// confirm a governance change; Access decides levels.
+	Verbs   *verbs.Table
+	Confirm *verbs.Confirmations
+	Access  *access.Checker
+	Host    Host
+	Live    *Live
 }
 
 // WriteIn is a db write of a registry document.

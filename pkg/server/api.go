@@ -18,7 +18,7 @@ const maxAPIBody = 96 << 20
 
 func (s *Server) apiRoutes(m *http.ServeMux) {
 	m.HandleFunc("GET /api/v1/verbs", func(w http.ResponseWriter, r *http.Request) {
-		httpx.JSON(w, 200, map[string]any{"verbs": verbs.All()})
+		httpx.JSON(w, 200, map[string]any{"verbs": s.Verbs.All()})
 	})
 	m.HandleFunc("POST /api/v1/{verb}", s.apiCall)
 }
@@ -61,11 +61,11 @@ func (s *Server) apiCall(w http.ResponseWriter, r *http.Request) {
 	}
 	s.Sys.TouchPerson(r.Context(), p.ID())
 	ctx := withPrincipal(r.Context(), p)
-	if v, ok := verbs.Get(name); ok && v.Effect == verbs.EffectStream && strings.Contains(r.Header.Get("Accept"), "text/event-stream") {
+	if v, ok := s.Verbs.Get(name); ok && v.Effect == verbs.EffectStream && strings.Contains(r.Header.Get("Accept"), "text/event-stream") {
 		s.apiStream(ctx, w, p, name, args)
 		return
 	}
-	res, err := verbs.Call(ctx, s.Env, p, name, args)
+	res, err := s.Verbs.Call(ctx, p, name, args)
 	if err != nil {
 		e := verbs.AsError(err)
 		httpx.JSON(w, e.Status(), map[string]any{"error": e})
@@ -104,7 +104,7 @@ func (s *Server) apiStream(ctx context.Context, w http.ResponseWriter, p *access
 		send("part", part)
 		return nil
 	})
-	res, err := verbs.Call(ctx, s.Env, p, name, args)
+	res, err := s.Verbs.Call(ctx, p, name, args)
 	mu.Lock()
 	defer mu.Unlock()
 	switch {

@@ -11,11 +11,11 @@ import (
 	"github.com/spf13/cobra"
 
 	"github.com/go-go-golems/slop-computer/pkg/actor"
+	"github.com/go-go-golems/slop-computer/pkg/commands"
 	"github.com/go-go-golems/slop-computer/pkg/config"
 	"github.com/go-go-golems/slop-computer/pkg/kernel"
 	"github.com/go-go-golems/slop-computer/pkg/server"
 	"github.com/go-go-golems/slop-computer/pkg/system"
-	"github.com/go-go-golems/slop-computer/pkg/verbs"
 )
 
 func serveCmd() *cobra.Command {
@@ -83,7 +83,7 @@ func runServer(parent context.Context, cfg *config.Config) error {
 		return err
 	}
 	defer k.Close()
-	env := &verbs.Env{Cfg: cfg, Sys: sys, K: k, A: actor.New(k)}
+	env := &commands.Env{Cfg: cfg, Sys: sys, K: k, A: actor.New(k)}
 	srv, err := server.Build(ctx, cfg, sys, env)
 	if err != nil {
 		return err
