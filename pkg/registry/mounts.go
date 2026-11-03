@@ -5,7 +5,6 @@ import (
 	"database/sql"
 	"encoding/json"
 	"errors"
-	"sort"
 	"strings"
 
 	"github.com/go-go-golems/slop-computer/pkg/sysdb"
@@ -272,14 +271,4 @@ func splitPath(p string) []string {
 		return nil
 	}
 	return strings.Split(p, "/")
-}
-
-// SortMounts orders mounts for display: by host, then path.
-func SortMounts(ms []Mount) {
-	sort.Slice(ms, func(i, j int) bool {
-		if ms[i].Host != ms[j].Host {
-			return ms[i].Host < ms[j].Host
-		}
-		return ms[i].Path < ms[j].Path
-	})
 }
