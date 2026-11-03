@@ -1,4 +1,4 @@
-package system
+package policy
 
 import (
 	"context"
@@ -9,6 +9,8 @@ import (
 	"crypto/sha256"
 	"database/sql"
 	"errors"
+
+	"github.com/go-go-golems/slop-computer/pkg/sysdb"
 )
 
 // --- the app policy matrix (guide §8) --------------------------------------------
@@ -24,7 +26,7 @@ var PolicyAudiences = []string{"guest", "member", "subscriber", "admin", "store"
 // DefaultPolicy is a cell without a row: assets for members and up, the
 // rest off (and off for stores acting on their own).
 func DefaultPolicy(capability, audience string) bool {
-	return capability == "assets" && InGroup(audience, "member")
+	return capability == "assets" && sysdb.InGroup(audience, "member")
 }
 
 // IsPolicyCap reports a capability the matrix controls.
@@ -41,8 +43,8 @@ func IsPolicyCap(c string) bool {
 // on when the cell of any of the audience's groups is on (a cell on for
 // @member reaches subscribers and admins). A group without a row has the
 // default cell.
-func (d *DB) Policy(ctx context.Context, app, capability, audience string) bool {
-	for _, g := range GroupsOf(audience) {
+func (d *Governance) Policy(ctx context.Context, app, capability, audience string) bool {
+	for _, g := range sysdb.GroupsOf(audience) {
 		if d.policyCell(ctx, app, capability, g) {
 			return true
 		}
@@ -51,7 +53,7 @@ func (d *DB) Policy(ctx context.Context, app, capability, audience string) bool 
 }
 
 // policyCell is one stored cell, or its default.
-func (d *DB) policyCell(ctx context.Context, app, capability, group string) bool {
+func (d *Governance) policyCell(ctx context.Context, app, capability, group string) bool {
 	var allowed bool
 	err := d.QueryRowContext(ctx, `SELECT allowed FROM app_policy WHERE app = ? AND capability = ? AND audience = ?`, app, capability, group).Scan(&allowed)
 	if errors.Is(err, sql.ErrNoRows) {
@@ -70,12 +72,12 @@ type PolicyCell struct {
 }
 
 // PolicyMatrix returns an app's cells for the capabilities given.
-func (d *DB) PolicyMatrix(ctx context.Context, app string, caps []string) ([]PolicyCell, error) {
+func (d *Governance) PolicyMatrix(ctx context.Context, app string, caps []string) ([]PolicyCell, error) {
 	rows, err := d.QueryContext(ctx, `SELECT capability, audience, allowed FROM app_policy WHERE app = ?`, app)
 	if err != nil {
 		return nil, err
 	}
-	defer rows.Close()
+	defer func() { _ = rows.Close() }()
 	set := map[string]bool{}
 	for rows.Next() {
 		var c, a string
@@ -102,7 +104,7 @@ func (d *DB) PolicyMatrix(ctx context.Context, app string, caps []string) ([]Pol
 		on[c.Capability+"/"+c.Audience] = c.Allowed
 	}
 	for i, c := range out {
-		for _, g := range GroupsOf(c.Audience) {
+		for _, g := range sysdb.GroupsOf(c.Audience) {
 			if on[c.Capability+"/"+g] {
 				out[i].Effective = true
 			}
@@ -112,7 +114,7 @@ func (d *DB) PolicyMatrix(ctx context.Context, app string, caps []string) ([]Pol
 }
 
 // SetPolicy turns a cell on or off.
-func (d *DB) SetPolicy(ctx context.Context, actor, via, app, capability, audience string, allowed bool) error {
+func (d *Governance) SetPolicy(ctx context.Context, actor, via, app, capability, audience string, allowed bool) error {
 	if !IsPolicyCap(capability) {
 		return errors.New("the policy controls assets, sample, user.email, fetch, secrets and platform")
 	}
@@ -131,8 +133,8 @@ func (d *DB) SetPolicy(ctx context.Context, actor, via, app, capability, audienc
 			return err
 		}
 		onoff := map[bool]string{true: "on", false: "off"}[allowed]
-		_, err := Log(ctx, tx, now, actor, via, "policy "+app+" "+capability+" @"+audience+" "+onoff,
-			Change{Kind: "policy", Key: app + " " + capability + " " + audience, Op: "set", After: onoff})
+		_, err := sysdb.Log(ctx, tx, now, actor, via, "policy "+app+" "+capability+" @"+audience+" "+onoff,
+			sysdb.Change{Kind: "policy", Key: app + " " + capability + " " + audience, Op: "set", After: onoff})
 		return err
 	})
 }
@@ -153,7 +155,7 @@ func secretAEAD(serverKey []byte) (cipher.AEAD, error) {
 
 // SetSecret stores an app's secret, sealed with AES-GCM (the app and name
 // are bound as associated data).
-func (d *DB) SetSecret(ctx context.Context, serverKey []byte, actor, via, app, name, value string) error {
+func (d *Governance) SetSecret(ctx context.Context, serverKey []byte, actor, via, app, name, value string) error {
 	aead, err := secretAEAD(serverKey)
 	if err != nil {
 		return err
@@ -170,16 +172,16 @@ func (d *DB) SetSecret(ctx context.Context, serverKey []byte, actor, via, app, n
 			app, name, sealed, actor, now); err != nil {
 			return err
 		}
-		_, err := Log(ctx, tx, now, actor, via, "secret "+name+" of "+app+" set", Change{Kind: "secret", Key: app + " " + name, Op: "set"})
+		_, err := sysdb.Log(ctx, tx, now, actor, via, "secret "+name+" of "+app+" set", sysdb.Change{Kind: "secret", Key: app + " " + name, Op: "set"})
 		return err
 	})
 }
 
 // Secret opens an app's secret.
-func (d *DB) Secret(ctx context.Context, serverKey []byte, app, name string) (string, error) {
+func (d *Governance) Secret(ctx context.Context, serverKey []byte, app, name string) (string, error) {
 	var sealed []byte
 	if err := d.QueryRowContext(ctx, `SELECT value_enc FROM secrets WHERE app = ? AND name = ?`, app, name).Scan(&sealed); errors.Is(err, sql.ErrNoRows) {
-		return "", ErrNotFound
+		return "", sysdb.ErrNotFound
 	} else if err != nil {
 		return "", err
 	}
@@ -198,12 +200,12 @@ func (d *DB) Secret(ctx context.Context, serverKey []byte, app, name string) (st
 }
 
 // SecretNames lists an app's secret names (never values).
-func (d *DB) SecretNames(ctx context.Context, app string) ([]map[string]any, error) {
+func (d *Governance) SecretNames(ctx context.Context, app string) ([]map[string]any, error) {
 	rows, err := d.QueryContext(ctx, `SELECT name, coalesce(changed_by, ''), changed_at FROM secrets WHERE app = ? ORDER BY name`, app)
 	if err != nil {
 		return nil, err
 	}
-	defer rows.Close()
+	defer func() { _ = rows.Close() }()
 	out := []map[string]any{}
 	for rows.Next() {
 		var n, by string
@@ -217,16 +219,16 @@ func (d *DB) SecretNames(ctx context.Context, app string) ([]map[string]any, err
 }
 
 // RemoveSecret deletes an app's secret.
-func (d *DB) RemoveSecret(ctx context.Context, actor, via, app, name string) error {
+func (d *Governance) RemoveSecret(ctx context.Context, actor, via, app, name string) error {
 	return d.Tx(ctx, func(tx *sql.Tx) error {
 		res, err := tx.ExecContext(ctx, `DELETE FROM secrets WHERE app = ? AND name = ?`, app, name)
 		if err != nil {
 			return err
 		}
 		if n, _ := res.RowsAffected(); n == 0 {
-			return ErrNotFound
+			return sysdb.ErrNotFound
 		}
-		_, err = Log(ctx, tx, d.NowMs(), actor, via, "secret "+name+" of "+app+" removed", Change{Kind: "secret", Key: app + " " + name, Op: "remove"})
+		_, err = sysdb.Log(ctx, tx, d.NowMs(), actor, via, "secret "+name+" of "+app+" removed", sysdb.Change{Kind: "secret", Key: app + " " + name, Op: "remove"})
 		return err
 	})
 }

@@ -1,8 +1,10 @@
-package system
+package policy
 
 import (
 	"context"
 	"database/sql"
+
+	"github.com/go-go-golems/slop-computer/pkg/sysdb"
 )
 
 // --- trusted Go modules (SLOP3-002) ------------------------------------------
@@ -16,7 +18,7 @@ type AppModule struct {
 }
 
 // TrustModule lets an app use a Go module.
-func (d *DB) TrustModule(ctx context.Context, actor, via, app, module string) error {
+func (d *Governance) TrustModule(ctx context.Context, actor, via, app, module string) error {
 	return d.Tx(ctx, func(tx *sql.Tx) error {
 		now := d.NowMs()
 		if _, err := tx.ExecContext(ctx, `INSERT INTO app_modules (app, module, granted_by, granted_at) VALUES (?, ?, ?, ?)
@@ -24,30 +26,30 @@ func (d *DB) TrustModule(ctx context.Context, actor, via, app, module string) er
 			app, module, actor, now); err != nil {
 			return err
 		}
-		_, err := Log(ctx, tx, now, actor, via, "trust "+app+" with "+module,
-			Change{Kind: "module", Key: app + " " + module, Op: "set", After: "trusted"})
+		_, err := sysdb.Log(ctx, tx, now, actor, via, "trust "+app+" with "+module,
+			sysdb.Change{Kind: "module", Key: app + " " + module, Op: "set", After: "trusted"})
 		return err
 	})
 }
 
 // UntrustModule withdraws a trust (ErrNotFound when there was none).
-func (d *DB) UntrustModule(ctx context.Context, actor, via, app, module string) error {
+func (d *Governance) UntrustModule(ctx context.Context, actor, via, app, module string) error {
 	return d.Tx(ctx, func(tx *sql.Tx) error {
 		res, err := tx.ExecContext(ctx, `DELETE FROM app_modules WHERE app = ? AND module = ?`, app, module)
 		if err != nil {
 			return err
 		}
 		if n, _ := res.RowsAffected(); n == 0 {
-			return ErrNotFound
+			return sysdb.ErrNotFound
 		}
-		_, err = Log(ctx, tx, d.NowMs(), actor, via, "untrust "+app+" with "+module,
-			Change{Kind: "module", Key: app + " " + module, Op: "remove", Before: "trusted"})
+		_, err = sysdb.Log(ctx, tx, d.NowMs(), actor, via, "untrust "+app+" with "+module,
+			sysdb.Change{Kind: "module", Key: app + " " + module, Op: "remove", Before: "trusted"})
 		return err
 	})
 }
 
 // Trusted reports whether an app may use a Go module.
-func (d *DB) Trusted(ctx context.Context, app, module string) bool {
+func (d *Governance) Trusted(ctx context.Context, app, module string) bool {
 	var one int
 	// A trust row counts only while the admin who made it is still an admin
 	// (SLOP3-007: trust has provenance, like a link and its creator).
@@ -56,7 +58,7 @@ func (d *DB) Trusted(ctx context.Context, app, module string) bool {
 }
 
 // AppModules lists trusts, of one app or (app "") of all.
-func (d *DB) AppModules(ctx context.Context, app string) ([]AppModule, error) {
+func (d *Governance) AppModules(ctx context.Context, app string) ([]AppModule, error) {
 	rows, err := d.QueryContext(ctx, `SELECT app, module, granted_by, granted_at FROM app_modules
 		WHERE ? = '' OR app = ? ORDER BY app, module`, app, app)
 	if err != nil {

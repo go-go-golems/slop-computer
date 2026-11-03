@@ -8,6 +8,8 @@ package system
 import (
 	"context"
 
+	"github.com/go-go-golems/slop-computer/pkg/policy"
+
 	"github.com/go-go-golems/slop-computer/pkg/llm"
 
 	"github.com/go-go-golems/slop-computer/pkg/registry"
@@ -20,6 +22,7 @@ import (
 // DB is system.db with every domain's queries.
 type DB struct {
 	*sysdb.DB
+	*policy.Governance
 	*llm.Ledger
 	*registry.Registry
 	*identity.Accounts
@@ -31,7 +34,7 @@ func Open(ctx context.Context, path string) (*DB, error) {
 	if err != nil {
 		return nil, err
 	}
-	return &DB{DB: d, Accounts: identity.NewAccounts(d), Registry: registry.NewRegistry(d), Ledger: llm.NewLedger(d)}, nil
+	return &DB{DB: d, Accounts: identity.NewAccounts(d), Registry: registry.NewRegistry(d), Ledger: llm.NewLedger(d), Governance: policy.NewGovernance(d)}, nil
 }
 
 type (
@@ -124,4 +127,17 @@ const (
 var (
 	ErrQuota = llm.ErrQuota
 	Period   = llm.Period
+)
+
+// forwarded from pkg/policy
+type (
+	PolicyCell = policy.PolicyCell
+	AppModule  = policy.AppModule
+)
+
+var (
+	PolicyCaps      = policy.PolicyCaps
+	PolicyAudiences = policy.PolicyAudiences
+	DefaultPolicy   = policy.DefaultPolicy
+	IsPolicyCap     = policy.IsPolicyCap
 )
