@@ -4,9 +4,11 @@ package server
 // stores, _stores/<id>/…), with their documents, changes and uploads.
 
 import (
+	"bufio"
 	"bytes"
 	"context"
 	"encoding/base64"
+	"encoding/json"
 	"io"
 	"maps"
 	"net/http"
@@ -706,29 +708,66 @@ func TestRegistryDocumentsLive(t *testing.T) {
 	}
 	sbx := strings.TrimPrefix(strings.Split(v["url"].(string), "/v/")[0], "http://")
 	stream, _ := s.do("GET", sbx, "/_rt/events", nil, map[string]string{"Authorization": "Bearer " + v["secret"].(string)})
+	defer stream.Body.Close()
+	// Each change waits for the event of the one before: the follower may
+	// coalesce changes that land in one of its passes (a grant made and
+	// removed before it looks is never shown), and a view drops what is
+	// sent before its stream is attached (hence the hello first).
+	evs := make(chan map[string]any, 16)
 	go func() {
-		time.Sleep(200 * time.Millisecond)
-		h.call(admin, "grant.set", map[string]any{"store": "crm", "subject": "@member", "level": "view"})
-		h.call(admin, "grant.rm", map[string]any{"store": "crm", "subject": "@member"})
-		h.call(admin, "store.type", map[string]any{"id": "crm", "type": "contacts"})
+		defer close(evs)
+		sc := bufio.NewScanner(stream.Body)
+		typ := ""
+		for sc.Scan() {
+			line := sc.Text()
+			if strings.HasPrefix(line, "event: ") {
+				typ = line[7:]
+			} else if d, ok := strings.CutPrefix(line, "data: "); ok {
+				var m map[string]any
+				_ = json.Unmarshal([]byte(d), &m)
+				m["_type"] = typ
+				evs <- m
+			}
+		}
 	}()
-	evs := events(t, stream, 4, 5*time.Second)
-	stream.Body.Close()
-	var got []string
-	for _, e := range evs[1:] {
-		if e["_type"] != "doc" {
-			continue
+	next := func(step string) string {
+		t.Helper()
+		for {
+			select {
+			case e, ok := <-evs:
+				if !ok {
+					t.Fatalf("%s: the stream ended", step)
+				}
+				if e["_type"] != "doc" {
+					continue
+				}
+				what := e["path"].(string)
+				if e["deleted"] == true {
+					what += " deleted"
+				} else if b, ok := e["body"].(map[string]any); ok && b["type"] != nil && b["type"] != "" {
+					what += " type=" + b["type"].(string)
+				}
+				return what
+			case <-time.After(5 * time.Second):
+				t.Fatalf("%s: no event", step)
+			}
 		}
-		what := e["path"].(string)
-		if e["deleted"] == true {
-			what += " deleted"
-		} else if b, ok := e["body"].(map[string]any); ok && b["type"] != nil && b["type"] != "" {
-			what += " type=" + b["type"].(string)
-		}
-		got = append(got, what)
 	}
-	want := []string{"_stores/crm/_grants/@member", "_stores/crm/_grants/@member deleted", "_stores/crm type=contacts"}
-	if strings.Join(got, "|") != strings.Join(want, "|") {
-		t.Fatalf("live registry documents: %v", got)
+	for e := range evs { // hello: the stream is attached
+		if e["_type"] == "hello" {
+			break
+		}
+	}
+	h.call(admin, "grant.set", map[string]any{"store": "crm", "subject": "@member", "level": "view"})
+	if got := next("grant.set"); got != "_stores/crm/_grants/@member" {
+		t.Fatalf("after grant.set: %s", got)
+	}
+	h.call(admin, "grant.rm", map[string]any{"store": "crm", "subject": "@member"})
+	if got := next("grant.rm"); got != "_stores/crm/_grants/@member deleted" {
+		t.Fatalf("after grant.rm: %s", got)
+	}
+	h.call(admin, "store.type", map[string]any{"id": "crm", "type": "contacts"})
+	if got := next("store.type"); got != "_stores/crm type=contacts" {
+		t.Fatalf("after store.type: %s", got)
 	}
 }
