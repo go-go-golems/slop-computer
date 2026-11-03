@@ -508,8 +508,7 @@ type Stores interface {
     Check(ctx context.Context, p *access.Principal, store string, need rt.Level, what string) error
 }
 
-// Table is a set of verbs. A host owns one; Default serves the doors that
-// still use the package functions.
+// Table is a set of verbs. A host owns one.
 type Table struct {
     Stores Stores
     byName map[string]*Verb
@@ -524,13 +523,12 @@ func (t *Table) Check(p *access.Principal, name string, a Args) error
 func (t *Table) Callable(p *access.Principal, v *Verb) bool
 func (t *Table) Call(ctx context.Context, p *access.Principal, name string, a Args) (any, error)
 
+// Default is the CLI's table (the commands listed, unbound). There are no
+// package-level Register, Get, All, Call or Check: a door that used them
+// would silently reach Default instead of its host's table. (The first
+// draft of PR 1 kept them as delegates; four server tests then failed with
+// "no verb people.role", from a verbs.Check left in modules.go.)
 var Default = NewTable()
-func Register(vs ...*Verb) { Default.Register(vs...) }   // kept: package functions delegate
-func Get(name string) (*Verb, bool)  { return Default.Get(name) }
-func All() []*Verb                   { return Default.All() }
-func Call(ctx context.Context, p *access.Principal, name string, a Args) (any, error) {
-    return Default.Call(ctx, p, name, a)
-}
 
 // Typed verbs: Req loses Env; the Def's Run closes over what it needs.
 type Req struct {
@@ -637,8 +635,8 @@ The typed verbs change the same way: `r.Env.Sys` becomes `e.Sys`.
 | File | Today | After PR 1 |
 |---|---|---|
 | `cmd/slop/cmds/serve.go:86` | `env := &verbs.Env{Cfg, Sys, K, A}` | `env := &commands.Env{…, Confirm: verbs.NewConfirmations()}`; `commands.Install(verbs.Default, env)` |
-| `cmd/slop/cmds/root.go` | `verbs.All()` (filled by `init()`) | `commands.Install(verbs.Default, nil)` before building the CLI, then `verbs.All()` |
-| `pkg/server/server.go` | `Env *verbs.Env`; `Build(ctx, cfg, sys, env)`, `New(cfg, sys, env)` | `Env *commands.Env` and `Verbs *verbs.Table` |
+| `cmd/slop/cmds/root.go` | `verbs.All()` (filled by `init()`) | `commands.Install(verbs.Default, nil)` once (`sync.Once`) before building the CLI, then `verbs.Default.All()` |
+| `pkg/server/server.go` | `Env *verbs.Env`; `Build(ctx, cfg, sys, env)`, `New(cfg, sys, env)` | `Env *commands.Env` and `Verbs *verbs.Table`; `New` installs the commands into a fresh table when the Env has none (never into `Default`: the CLI lists there, and `slop serve` would register every verb twice) |
 | `pkg/server/api.go:68,107`, `mcp.go:222`, `platform.go:52`, `modules.go:145` | `verbs.Call(ctx, s.Env, p, name, args)` | `s.Verbs.Call(ctx, p, name, args)` |
 | `pkg/server/modules.go:139`, `live.go:705` | `s.Env.Confirmations()` | `s.Env.Confirm` |
 | `pkg/registry/registry.go:36`, `documents.go:51,265,268` | `Env *verbs.Env`; `verbs.Call(…, d.Env, p, …)`; `d.Env.Confirmations()`; `d.Env.K.Access` | `Verbs *verbs.Table`, `Confirm *verbs.Confirmations`, `Access *access.Checker` |
@@ -918,7 +916,7 @@ The actor's in-turn semantics must survive the move. A module that writes the ac
 | `WithEmit(ctx, fn)`, `Emit(ctx, part)` | a streaming door installs an emitter; a verb emits |
 | `type Effect`: `EffectRead/Write/Govern/Stream` | govern: an app's call needs the person's confirmation; stream: partial results |
 | `type Scope`: `Read/Write/Admin` | the token scope a verb needs |
-| `type Table`, `NewTable`, `Default` | a set of verbs; `Register`, `Get`, `All`, `Check`, `Callable`, `Call` |
+| `type Table`, `NewTable`, `Default` | a set of verbs; `Register`, `Get`, `All`, `Check`, `Callable`, `Call` (methods only; `Default` is the CLI's listing table) |
 | `type Stores interface{ Check(ctx, p, store, need, what) error }` | the floor check on a verb's store |
 | `Verb.InputSchema()`, `Verb.Tool()` | JSON Schema of the arguments; the MCP tool form |
 | `type Error{Code, Message, Trace}`, `Errf`, `AsError`, `Error.Status()` | verb errors and their HTTP status |
