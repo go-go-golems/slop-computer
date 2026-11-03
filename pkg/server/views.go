@@ -858,26 +858,32 @@ func (s *Server) rpcDBSubscribe(ctx context.Context, v *rt.View, raw json.RawMes
 			head = st.Head()
 		}
 	}
+	// A registry subscription is live (step 3): the follower sends it the
+	// system log's changes. Remember it before reading, as for a store
+	// subscription: a change in between reaches it (twice at worst; the
+	// runtime keeps the higher version), where remembering after the read
+	// would record a stale snapshot the follower already passed.
+	if r.Tgt.Registry {
+		s.reg.Live.Remember(v.ID, registry.Sub{ID: a.Sub, Path: a.Path, Coll: a.Coll, Query: q}, nil)
+	}
 	if !a.Coll {
 		d, err := s.dbGet(ctx, v, a.Path)
 		if err != nil {
+			s.reg.Live.Forget(v.ID, a.Sub)
 			return nil, err
 		}
-		if r.Tgt.Registry { // live: the system log's changes to it follow (step 3)
-			var seen []rt.Doc
-			if d["exists"] == true {
-				seen = []rt.Doc{{Path: a.Path, Version: d["version"].(int64)}}
-			}
-			s.reg.Live.Remember(v.ID, registry.Sub{ID: a.Sub, Path: a.Path}, seen)
+		if r.Tgt.Registry && d["exists"] == true {
+			s.reg.Live.Saw(v.ID, a.Sub, []rt.Doc{{Path: a.Path, Version: d["version"].(int64)}})
 		}
 		return map[string]any{"rev": head, "doc": d}, nil
 	}
 	docs, err := s.readable(ctx, v, q)
 	if err != nil {
+		s.reg.Live.Forget(v.ID, a.Sub)
 		return nil, err
 	}
 	if r.Tgt.Registry {
-		s.reg.Live.Remember(v.ID, registry.Sub{ID: a.Sub, Path: a.Path, Coll: true, Query: q}, docs)
+		s.reg.Live.Saw(v.ID, a.Sub, docs)
 	}
 	return map[string]any{"rev": head, "docs": docs}, nil
 }

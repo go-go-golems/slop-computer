@@ -55,6 +55,25 @@ func (l *Live) Remember(view string, s Sub, docs []rt.Doc) {
 	subs[s.ID] = ls
 }
 
+// Saw records documents a subscription was given outside Update (its
+// snapshot), keeping the newer version of each: a subscription is
+// remembered before its snapshot is read, so the follower may have sent
+// newer ones in between, and a change landing between the read and the
+// registration is not missed.
+func (l *Live) Saw(view, sub string, docs []rt.Doc) {
+	l.mu.Lock()
+	defer l.mu.Unlock()
+	ls := l.views[view][sub]
+	if ls == nil {
+		return
+	}
+	for _, d := range docs {
+		if d.Version > ls.seen[d.Path] {
+			ls.seen[d.Path] = d.Version
+		}
+	}
+}
+
 // Forget drops a subscription, or all of a view's with sub "".
 func (l *Live) Forget(view, sub string) {
 	l.mu.Lock()
@@ -115,7 +134,7 @@ func (l *Live) Update(view, sub string, now []rt.Doc) ([]rt.Doc, []string) {
 // Affects reports whether a system change can change registry documents.
 func Affects(c system.Change) bool {
 	switch c.Kind {
-	case "store", "grant", "binding", "person", "llm", "link":
+	case "store", "grant", "binding", "person", "llm", "link", "comp", "billing":
 		return true
 	}
 	return false

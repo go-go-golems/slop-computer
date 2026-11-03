@@ -98,7 +98,8 @@ func (d *Docs) Coll(ctx context.Context, v *rt.View, tgt rt.Target, pageColl str
 		}
 		p := d.Host.Viewer(ctx, v)
 		for _, r := range rows {
-			add(r.ID, storeBody(r, min(d.Env.K.Access.Level(ctx, p, r).Level, v.Space.Stores)), "store", r.ID)
+			docs = append(docs, rt.Doc{Path: pageColl + "/" + r.ID, Body: storeBody(r, min(d.Env.K.Access.Level(ctx, p, r).Level, v.Space.Stores)),
+				Version: max(storeVersion(ctx, d.Sys, r.ID, v.User, head), 1)})
 		}
 	case tgt.Store == "" && tgt.Path == rt.PeopleRoot:
 		for _, r := range d.regRows(ctx, v, "people.ls", verbs.Args{}) {
@@ -140,7 +141,7 @@ func (d *Docs) Doc(ctx context.Context, v *rt.View, tgt rt.Target, path string) 
 		if level < rt.LevelView {
 			return nil
 		}
-		return &rt.Doc{Path: path, Body: storeBody(row, level), Version: max(lastChangeUpTo(ctx, d.Sys, "store", row.ID, head), 1)}
+		return &rt.Doc{Path: path, Body: storeBody(row, level), Version: max(storeVersion(ctx, d.Sys, row.ID, v.User, head), 1)}
 	}
 	coll, id := tgt, rt.IDOf(tgt.Path)
 	coll.Path = rt.CollOf(tgt.Path)

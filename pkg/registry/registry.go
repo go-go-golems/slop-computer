@@ -65,6 +65,24 @@ func LastChange(ctx context.Context, db *system.DB, kind, key string) int64 {
 	return n.Int64
 }
 
+// storeVersion is the version of a store's row as one viewer's document
+// (_stores/<id>): the newest change, up to head, of anything its body
+// depends on. The body shows the viewer's level there, so besides the row
+// that is the store's grants and share links, and the viewer's own person
+// (role), comp and billing rows (the subscriber audience). A grant changed
+// elsewhere then moves the document's version, and the live refresh sends
+// it (the runtime keeps only higher versions).
+func storeVersion(ctx context.Context, db *system.DB, store, viewer string, head int64) int64 {
+	var n sql.NullInt64
+	_ = db.QueryRowContext(ctx, `SELECT max(rev) FROM _changes WHERE rev <= ? AND (
+		   (kind = 'store' AND key = ?)
+		OR (kind = 'grant' AND substr(key, 1, ?) = ?)
+		OR (kind = 'link' AND key IN (SELECT id FROM links WHERE store = ?))
+		OR (kind IN ('person', 'comp', 'billing') AND key = ? AND ? <> ''))`,
+		head, store, len(store)+1, store+" ", store, viewer, viewer).Scan(&n)
+	return n.Int64
+}
+
 // lastChangeUpTo is LastChange among the revisions up to head. A document
 // is versioned at the log head read before its row: a commit that lands
 // between reading the row and reading its version would otherwise give an

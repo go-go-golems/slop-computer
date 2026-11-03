@@ -709,11 +709,25 @@ func TestRegistryDocumentsLive(t *testing.T) {
 	sbx := strings.TrimPrefix(strings.Split(v["url"].(string), "/v/")[0], "http://")
 	stream, _ := s.do("GET", sbx, "/_rt/events", nil, map[string]string{"Authorization": "Bearer " + v["secret"].(string)})
 	defer stream.Body.Close()
-	// Each change waits for the event of the one before: the follower may
-	// coalesce changes that land in one of its passes (a grant made and
-	// removed before it looks is never shown), and a view drops what is
-	// sent before its stream is attached (hence the hello first).
-	evs := make(chan map[string]any, 16)
+	// Each change waits for its event: the follower may coalesce changes
+	// that land in one of its passes (a grant made and removed before it
+	// looks is never shown).
+	await := awaitDocs(t, stream)
+	h.call(admin, "grant.set", map[string]any{"store": "crm", "subject": "@member", "level": "view"})
+	await("grant.set", "_stores/crm/_grants/@member")
+	h.call(admin, "grant.rm", map[string]any{"store": "crm", "subject": "@member"})
+	await("grant.rm", "_stores/crm/_grants/@member deleted")
+	h.call(admin, "store.type", map[string]any{"id": "crm", "type": "contacts"})
+	await("store.type", "_stores/crm type=contacts")
+}
+
+// awaitDocs reads a view's event stream (after its hello: from then on
+// nothing sent is dropped) and returns await, which waits for a doc event
+// described as want ("<path>", "<path> deleted", "<path> type=<t>", or
+// "<path> level=<l>" for a store's row), skipping the others.
+func awaitDocs(t *testing.T, stream *http.Response) func(step, want string) {
+	t.Helper()
+	evs := make(chan map[string]any, 64)
 	go func() {
 		defer close(evs)
 		sc := bufio.NewScanner(stream.Body)
@@ -730,44 +744,83 @@ func TestRegistryDocumentsLive(t *testing.T) {
 			}
 		}
 	}()
-	next := func(step string) string {
+	describe := func(e map[string]any) []string {
+		p := e["path"].(string)
+		if e["deleted"] == true {
+			return []string{p + " deleted"}
+		}
+		out := []string{p}
+		if b, ok := e["body"].(map[string]any); ok {
+			if ty, _ := b["type"].(string); ty != "" {
+				out = append(out, p+" type="+ty)
+			}
+			if l, _ := b["level"].(string); l != "" {
+				out = append(out, p+" level="+l)
+			}
+		}
+		return out
+	}
+	timeout := time.After(10 * time.Second)
+	for hello := false; !hello; {
+		select {
+		case e, ok := <-evs:
+			if !ok {
+				t.Fatal("the stream ended before hello")
+			}
+			hello = e["_type"] == "hello"
+		case <-timeout:
+			t.Fatal("no hello")
+		}
+	}
+	return func(step, want string) {
 		t.Helper()
+		var seen []string
+		timeout := time.After(5 * time.Second)
 		for {
 			select {
 			case e, ok := <-evs:
 				if !ok {
-					t.Fatalf("%s: the stream ended", step)
+					t.Fatalf("%s: the stream ended (saw %v)", step, seen)
 				}
 				if e["_type"] != "doc" {
 					continue
 				}
-				what := e["path"].(string)
-				if e["deleted"] == true {
-					what += " deleted"
-				} else if b, ok := e["body"].(map[string]any); ok && b["type"] != nil && b["type"] != "" {
-					what += " type=" + b["type"].(string)
+				for _, d := range describe(e) {
+					if d == want {
+						return
+					}
 				}
-				return what
-			case <-time.After(5 * time.Second):
-				t.Fatalf("%s: no event", step)
+				seen = append(seen, describe(e)[0])
+			case <-timeout:
+				t.Fatalf("%s: no %q (saw %v)", step, want, seen)
 			}
 		}
 	}
-	for e := range evs { // hello: the stream is attached
-		if e["_type"] == "hello" {
-			break
-		}
+}
+
+// A store's row as a document shows the viewer's level there, so its
+// version moves with the store's grants, not only with the row (Codex on
+// #22): a grant raised elsewhere reaches a live _stores/<id> listener.
+func TestRegistryStoreLevelLive(t *testing.T) {
+	h := newHarness(t)
+	admin := h.tokenFor("admin@example.com", "read", "write", "admin")
+	h.call(admin, "store.new", map[string]any{"id": "crm"})
+	h.call(admin, "grant.set", map[string]any{"store": "crm", "subject": "@guest", "level": "view"})
+	pageApp(h, admin, "console", "/console", `{"stores":"admin"}`)
+	h.call(admin, "policy.set", map[string]any{"app": "console", "capability": "stores", "audience": "@guest", "value": "on"})
+	s := h.site(h.cfg.Hosts.Live[0])
+	v := guestView(t, s, "/console")
+	d := result(t, rpc(s, v, "db.subscribe", map[string]any{"sub": "row", "path": "_stores/crm"}))["doc"].(map[string]any)
+	if d["body"].(map[string]any)["level"] != "view" {
+		t.Fatalf("_stores/crm: %v", d)
 	}
-	h.call(admin, "grant.set", map[string]any{"store": "crm", "subject": "@member", "level": "view"})
-	if got := next("grant.set"); got != "_stores/crm/_grants/@member" {
-		t.Fatalf("after grant.set: %s", got)
+	if out := rpc(s, v, "db.subscribe", map[string]any{"sub": "all", "path": "_stores", "coll": true}); out["result"] == nil {
+		t.Fatalf("subscribe _stores: %v", out)
 	}
-	h.call(admin, "grant.rm", map[string]any{"store": "crm", "subject": "@member"})
-	if got := next("grant.rm"); got != "_stores/crm/_grants/@member deleted" {
-		t.Fatalf("after grant.rm: %s", got)
-	}
-	h.call(admin, "store.type", map[string]any{"id": "crm", "type": "contacts"})
-	if got := next("store.type"); got != "_stores/crm type=contacts" {
-		t.Fatalf("after store.type: %s", got)
-	}
+	sbx := strings.TrimPrefix(strings.Split(v["url"].(string), "/v/")[0], "http://")
+	stream, _ := s.do("GET", sbx, "/_rt/events", nil, map[string]string{"Authorization": "Bearer " + v["secret"].(string)})
+	defer stream.Body.Close()
+	await := awaitDocs(t, stream)
+	h.call(admin, "grant.set", map[string]any{"store": "crm", "subject": "@guest", "level": "interact"})
+	await("grant raised", "_stores/crm level=interact")
 }
