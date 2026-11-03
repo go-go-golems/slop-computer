@@ -13,19 +13,6 @@ import (
 	"github.com/go-go-golems/slop-computer/pkg/rt"
 )
 
-// actorEmit sends an actor's room message to the store's views (after the
-// actor's turn committed).
-func (s *Door) actorEmit(storeID, topic string, data any) {
-	raw, _ := json.Marshal(data)
-	ev := rt.Out{Type: "room", Data: map[string]any{"room": "", "topic": topic, "data": json.RawMessage(raw), "peer": "actor",
-		"by": "store:" + storeID, "kind": "actor", "guest": false}}
-	for _, v := range s.rt.views.Of(storeID) {
-		if v.In("") {
-			v.Send(ev)
-		}
-	}
-}
-
 // viewPrincipal rebuilds the principal of a view's person (for an actor's
 // view, its event's visitor).
 func (s *Door) viewPrincipal(ctx context.Context, v *rt.View) *access.Principal {
@@ -85,16 +72,12 @@ func (s *Door) rpcSlopRead(ctx context.Context, v *rt.View, raw json.RawMessage)
 		return nil, rtErr("not_found", "no store is bound to %q", a.Alias)
 	}
 	p := s.viewPrincipal(ctx, v)
-	d, _, err := s.K.Access.Can(ctx, p, target, rt.LevelView, "reading", true)
+	st, d, err := s.K.Open(ctx, p, target, rt.LevelView, "reading", true)
 	if err != nil {
 		return nil, err
 	}
 	if !d.OK {
 		return nil, rtErr("not_found", "nothing to read at %q", a.Alias)
-	}
-	st, err := s.K.Store(ctx, target)
-	if err != nil {
-		return nil, err
 	}
 	rules := s.K.Rules(ctx, target)
 	switch a.Op {
@@ -235,12 +218,8 @@ func (s *Door) serveBoundAsset(w http.ResponseWriter, r *http.Request, storeID s
 		return
 	}
 	me := &access.Principal{Kind: access.KindStore, Store: storeID}
-	if d, _, err := s.K.Access.Can(ctx, me, b.Target, rt.LevelView, "reading", true); err != nil || !d.OK {
-		notFound(w)
-		return
-	}
-	st, err := s.K.Store(ctx, b.Target)
-	if err != nil {
+	st, d, err := s.K.Open(ctx, me, b.Target, rt.LevelView, "reading", true)
+	if err != nil || !d.OK {
 		notFound(w)
 		return
 	}

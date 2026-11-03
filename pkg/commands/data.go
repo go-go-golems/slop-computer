@@ -22,7 +22,7 @@ import (
 
 // SQL, export and import.
 
-func dataVerbs(e *Env) []*verbs.Verb {
+func dataVerbs(e kernelEnv) []*verbs.Verb {
 	storeArg := verbs.Arg{Name: "store", Type: "string", Pos: 1, Required: true}
 	rowsArgs := []verbs.Arg{{Name: "rows", Type: "json", Doc: "a list of objects"}, {Name: "text", Type: "string", Doc: "CSV, JSONL or a JSON array"},
 		{Name: "format", Type: "string", Doc: "csv, jsonl or json (with text)"}}
@@ -199,7 +199,7 @@ func dataVerbs(e *Env) []*verbs.Verb {
 	}
 }
 
-func runSQL(ctx context.Context, e *Env, p *access.Principal, a verbs.Args, caller string) (any, error) {
+func runSQL(ctx context.Context, e kernelEnv, p *access.Principal, a verbs.Args, caller string) (any, error) {
 	s, d, err := e.open(ctx, p, a.S("store"), rt.LevelAdmin, "running SQL")
 	if err != nil {
 		return nil, err
@@ -323,7 +323,7 @@ func records(a verbs.Args) ([]map[string]any, error) {
 }
 
 // putBlobs stores the base64 blobs of a call after checking their hashes.
-func putBlobs(e *Env, a verbs.Args) error {
+func putBlobs(e kernelEnv, a verbs.Args) error {
 	given, _ := argObj(a, "blobs")
 	for sum, v := range given {
 		str, _ := v.(string)

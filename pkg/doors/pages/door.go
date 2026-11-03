@@ -15,6 +15,7 @@ import (
 	"github.com/go-go-golems/slop-computer/pkg/actor"
 	"github.com/go-go-golems/slop-computer/pkg/billing"
 	capsdb "github.com/go-go-golems/slop-computer/pkg/caps/db"
+	caproom "github.com/go-go-golems/slop-computer/pkg/caps/room"
 	"github.com/go-go-golems/slop-computer/pkg/config"
 	"github.com/go-go-golems/slop-computer/pkg/doors/web"
 	"github.com/go-go-golems/slop-computer/pkg/identity"
@@ -59,6 +60,7 @@ type Door struct {
 	db      *capsdb.DB
 	follow  sysFollower
 	samples samples
+	rooms   *caproom.Rooms
 }
 
 // New fills in d's state, follows the system log and the kernel's commits,
@@ -66,8 +68,9 @@ type Door struct {
 func New(d *Door) *Door {
 	s := d
 	s.rt = newRT(s.Key)
+	s.rooms = caproom.New(s.rt.views)
 	s.rt.views.OnClose = func(v *rt.View, rooms []string) {
-		s.roomClosed(v, rooms)
+		s.rooms.Closed(v, rooms)
 		s.reg.Live.Forget(v.ID, "")
 	}
 	s.reg = &registry.Docs{Verbs: s.Verbs, Host: regHost{s}, Live: registry.NewLive(), Sys: s.Registry, Confirm: s.Confirm}
@@ -88,23 +91,16 @@ func New(d *Door) *Door {
 	return s
 }
 
-// InstallActors gives the actor manager what actors reach through the
-// pages: the path space of their store (db), sampling, and the rooms of
-// their open views.
+// InstallActors gives the actor manager the path space of an actor's
+// store (aliases, _stores), resolved as its pages' are. Rooms and
+// sampling reach actors through the actor door.
 func (s *Door) InstallActors(m *actor.Manager) {
 	m.Paths = s.db
-	m.Sample = actorSampler{s}
-	m.RoomEmit = s.actorEmit
-	m.RoomPeers = func(store string) []rt.Peer {
-		out := []rt.Peer{}
-		for _, v := range s.rt.views.Of(store) {
-			if p, ok := v.AsPeer(""); ok {
-				out = append(out, p)
-			}
-		}
-		return out
-	}
 }
+
+// Rooms is the room capability over the door's open views (the actor door
+// serves it to actors).
+func (s *Door) Rooms() *caproom.Rooms { return s.rooms }
 
 // MainRoutes registers what the pages serve on the main host: the sign-in
 // handoff to a live host.

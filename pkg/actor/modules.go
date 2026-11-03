@@ -32,8 +32,6 @@ func (a *Actor) module(name string) goja.Value {
 		return a.dbModule()
 	case "files":
 		return a.filesModule()
-	case "room":
-		return a.roomModule()
 	case "alarm":
 		return a.alarmModule()
 	case "storage":
@@ -55,15 +53,13 @@ func (a *Actor) module(name string) goja.Value {
 		if len(a.run.Manifest.Slop.Secrets) > 0 && a.m.allowedAny(a, "secrets") {
 			return a.secretsModule()
 		}
-	case "sample":
-		if a.run.Manifest.Caps.Declared["sample"] && a.m.Sample != nil && a.m.Sample.Available() && a.m.allowedAny(a, "sample") {
-			return a.sampleModule()
-		}
-	case "platform":
-		if len(a.run.Manifest.Slop.Platform) > 0 && a.m.Platform != nil && a.m.allowedAny(a, "platform") {
-			return a.m.Platform(a)
-		}
 	default:
+		if load, ok := a.m.provided[name]; ok {
+			if v := load(a); v != nil {
+				return v
+			}
+			return goja.Null()
+		}
 		if v := a.trustedModule(name); v != nil {
 			return v
 		}
@@ -110,6 +106,21 @@ func (a *Actor) Throw(code, msg string) { a.throw(fail(code, "%s", msg)) }
 
 // ThrowError raises an Error (with its confirmation id) in JavaScript.
 func (a *Actor) ThrowError(e *Error) { a.throw(e) }
+
+// Allowed checks a policy capability for the current turn's visitor (for
+// alarms and reactors, the store itself).
+func (a *Actor) Allowed(capability string) bool { return a.m.allowed(a, capability) }
+
+// AllowedAny reports whether the policy allows a capability for any
+// audience (what use() can know before a visitor exists).
+func (a *Actor) AllowedAny(capability string) bool { return a.m.allowedAny(a, capability) }
+
+// AfterCommit runs fn once the turn in progress commits (output such as a
+// room message must not leave a turn that rolls back).
+func (a *Actor) AfterCommit(fn func()) {
+	t := a.turn()
+	t.out = append(t.out, fn)
+}
 
 // ToJS converts Go data to JS data.
 func (a *Actor) ToJS(v any) goja.Value { return a.toJS(v) }
@@ -478,31 +489,6 @@ func (a *Actor) filesModule() goja.Value {
 		n, err := a.turn().t.Snapshot(msg, "")
 		a.check(err)
 		return a.vm.ToValue(n)
-	})
-	return o
-}
-
-// --- room ----------------------------------------------------------------
-
-func (a *Actor) roomModule() goja.Value {
-	o := a.vm.NewObject()
-	_ = o.Set("emit", func(topic string, data goja.Value) goja.Value {
-		t := a.turn()
-		payload := a.fromJS(data)
-		id := a.st.ID
-		// Output waits for the commit.
-		t.out = append(t.out, func() {
-			if a.m.RoomEmit != nil {
-				a.m.RoomEmit(id, topic, payload)
-			}
-		})
-		return goja.Undefined()
-	})
-	_ = o.Set("peers", func() goja.Value {
-		if a.m.RoomPeers == nil {
-			return a.vm.NewArray()
-		}
-		return a.toJS(a.m.RoomPeers(a.st.ID))
 	})
 	return o
 }

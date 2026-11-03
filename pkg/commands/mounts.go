@@ -13,7 +13,7 @@ import (
 	"github.com/go-go-golems/slop-computer/pkg/verbs"
 )
 
-func mountVerbs(e *Env) []*verbs.Verb {
+func mountVerbs(e mountEnv) []*verbs.Verb {
 	hostArg := verbs.Arg{Name: "host", Type: "string", Pos: 1, Required: true}
 	pathArg := verbs.Arg{Name: "path", Type: "string", Pos: 2, Required: true}
 	return []*verbs.Verb{
@@ -134,7 +134,7 @@ func mountVerbs(e *Env) []*verbs.Verb {
 }
 
 // checkMount validates a mount against the host's kind and the store.
-func checkMount(ctx context.Context, e *Env, m *registry.Mount) error {
+func checkMount(ctx context.Context, e mountEnv, m *registry.Mount) error {
 	kind := e.Cfg.HostKind(m.Host)
 	if kind != "live" && kind != "static" {
 		return verbs.Errf("invalid_argument", "%s is not a live or static host in this server's configuration", m.Host)
@@ -210,7 +210,7 @@ func splitSlash(p string) []string {
 // aliasTemplate reads mount.set's aliases: the bindings each store the mount
 // creates gets (SLOP3-008 phase 4), checked as bind.set checks them, against
 // the admin setting the mount (who must hold what they template).
-func aliasTemplate(ctx context.Context, e *Env, p *access.Principal, in []AliasIn, m registry.Mount) ([]registry.Binding, error) {
+func aliasTemplate(ctx context.Context, e mountEnv, p *access.Principal, in []AliasIn, m registry.Mount) ([]registry.Binding, error) {
 	if len(in) > 0 && m.CreateApp == "" {
 		return nil, verbs.Errf("invalid_argument", "aliases go with createApp: they bind the stores a mount creates")
 	}
@@ -222,7 +222,7 @@ func aliasTemplate(ctx context.Context, e *Env, p *access.Principal, in []AliasI
 			return nil, verbs.Errf("invalid_argument", "alias %s is listed twice", b.Alias)
 		}
 		seen[b.Alias] = true
-		if err := checkAlias(ctx, e, p, &b); err != nil {
+		if err := checkAlias(ctx, e.kernelEnv, p, &b); err != nil {
 			return nil, err
 		}
 		out = append(out, b)

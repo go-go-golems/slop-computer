@@ -20,7 +20,7 @@ var EvalTimeout = 60 * time.Second
 
 const maxEvalLogs = 1000
 
-func evalVerbs(e *Env) []*verbs.Verb {
+func evalVerbs(e evalEnv) []*verbs.Verb {
 	return []*verbs.Verb{{Name: "eval", Doc: "Run a JavaScript program on the server with every verb in scope as slop.<group>.<verb>(args).", Scope: verbs.Read, Action: authz.Program,
 		Args: []verbs.Arg{{Name: "source", Type: "string", Required: true, Doc: "the program body; top-level return gives the result"},
 			{Name: "args", Type: "json", Doc: "passed to the program as args"},
@@ -33,7 +33,7 @@ func evalVerbs(e *Env) []*verbs.Verb {
 // runEval runs a program in a fresh runtime. Each verb it calls is a
 // separate, synchronous call with the caller's identity (via eval), so
 // every check applies exactly as from the CLI.
-func runEval(ctx context.Context, e *Env, p *access.Principal, a verbs.Args) (any, error) {
+func runEval(ctx context.Context, e evalEnv, p *access.Principal, a verbs.Args) (any, error) {
 	vm := goja.New()
 	inner := *p
 	inner.Via = "eval"

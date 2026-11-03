@@ -11,7 +11,7 @@ import (
 	"github.com/go-go-golems/slop-computer/pkg/verbs"
 )
 
-func peopleVerbs(e *Env) []*verbs.Verb {
+func peopleVerbs(e peopleEnv) []*verbs.Verb {
 	return []*verbs.Verb{
 		{Name: "whoami", Doc: "Who this call acts as: person, role, audience, token and scopes.", Scope: verbs.Read, Action: authz.Account,
 			Run: func(ctx context.Context, p *access.Principal, a verbs.Args) (any, error) {
@@ -35,7 +35,7 @@ func peopleVerbs(e *Env) []*verbs.Verb {
 					}
 					who = ""
 				}
-				return e.K.People.Tokens(ctx, who)
+				return e.People.Tokens(ctx, who)
 			}},
 		{Name: "token.new", Doc: "Make an API token; its secret is shown once.", Scope: verbs.Write, Action: authz.Account,
 			Args: []verbs.Arg{{Name: "name", Type: "string", Required: true, Pos: 1}, {Name: "scopes", Type: "string", Doc: "comma-separated: read,write,admin"},
@@ -63,7 +63,7 @@ func peopleVerbs(e *Env) []*verbs.Verb {
 					}
 					return nil, err
 				}
-				secret, t, err := e.K.People.CreateToken(ctx, p.ID(), a.S("name"), scopes, int(a.I("days", 30)))
+				secret, t, err := e.People.CreateToken(ctx, p.ID(), a.S("name"), scopes, int(a.I("days", 30)))
 				if err != nil {
 					return nil, err
 				}
@@ -72,7 +72,7 @@ func peopleVerbs(e *Env) []*verbs.Verb {
 		{Name: "token.rm", Doc: "Revoke a token.", Scope: verbs.Write, Action: authz.Account,
 			Args: []verbs.Arg{{Name: "id", Type: "string", Required: true, Pos: 1}},
 			Run: func(ctx context.Context, p *access.Principal, a verbs.Args) (any, error) {
-				t, err := e.K.People.Token(ctx, a.S("id"))
+				t, err := e.People.Token(ctx, a.S("id"))
 				if errors.Is(err, sysdb.ErrNotFound) {
 					return nil, verbs.Errf("not_found", "no token %s", a.S("id"))
 				}
@@ -82,7 +82,7 @@ func peopleVerbs(e *Env) []*verbs.Verb {
 				if t.Person != p.ID() && !p.IsAdmin() {
 					return nil, verbs.Errf("permission_denied", "that token is not yours")
 				}
-				if err := e.K.People.RevokeToken(ctx, p.ID(), p.ViaLabel(), t.ID); err != nil {
+				if err := e.People.RevokeToken(ctx, p.ID(), p.ViaLabel(), t.ID); err != nil {
 					return nil, err
 				}
 				return map[string]any{"revoked": t.ID}, nil
@@ -94,7 +94,7 @@ func peopleVerbs(e *Env) []*verbs.Verb {
 				if kind == "" {
 					kind = "user"
 				}
-				return e.K.People.People(ctx, kind)
+				return e.People.People(ctx, kind)
 			}},
 		{Name: "people.role", Effect: verbs.EffectGovern, Doc: "Set a user's role: pending, member, admin or disabled.", Scope: verbs.Write, AdminOnly: true, Action: authz.PlatformAdmin,
 			Args: []verbs.Arg{{Name: "id", Type: "string", Required: true, Pos: 1}, {Name: "role", Type: "string", Required: true, Pos: 2}},
@@ -102,7 +102,7 @@ func peopleVerbs(e *Env) []*verbs.Verb {
 				if a.S("id") == p.ID() && a.S("role") != sysdb.RoleAdmin {
 					return nil, verbs.Errf("invalid_argument", "you cannot demote yourself")
 				}
-				pp, err := e.K.People.SetRole(ctx, p.ID(), p.ViaLabel(), a.S("id"), a.S("role"))
+				pp, err := e.People.SetRole(ctx, p.ID(), p.ViaLabel(), a.S("id"), a.S("role"))
 				if errors.Is(err, sysdb.ErrNotFound) {
 					return nil, verbs.Errf("not_found", "no person %s", a.S("id"))
 				}
@@ -114,7 +114,7 @@ func peopleVerbs(e *Env) []*verbs.Verb {
 		{Name: "log.system", Doc: "The platform log: sign-ups, roles, tokens, grants, mounts, policy.", Scope: verbs.Read, AdminOnly: true, Action: authz.PlatformAdmin,
 			Args: []verbs.Arg{{Name: "limit", Type: "int"}},
 			Run: func(ctx context.Context, p *access.Principal, a verbs.Args) (any, error) {
-				return e.K.Sys.Logs(ctx, int(a.I("limit", 100)))
+				return e.Sys.Logs(ctx, int(a.I("limit", 100)))
 			}},
 	}
 }

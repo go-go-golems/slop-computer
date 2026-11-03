@@ -18,7 +18,7 @@ import (
 // PreviewTTL is how long a preview origin serves.
 const PreviewTTL = time.Hour
 
-func previewVerbs(e *Env) []*verbs.Verb {
+func previewVerbs(e previewEnv) []*verbs.Verb {
 	return []*verbs.Verb{
 		{Name: "preview.url", Doc: "A private preview of a store's snapshot on its own sandbox origin, with the pick-and-pin bridge, framed only by parent (an origin of this server); it serves for an hour.", Scope: verbs.Read, Action: authz.StoreRead,
 			Args: []verbs.Arg{{Name: "store", Type: "string", Pos: 1, Required: true}, {Name: "at", Type: "string", Pos: 2, Doc: "a snapshot number or ref (default draft, else main)"},
@@ -65,7 +65,7 @@ func previewVerbs(e *Env) []*verbs.Verb {
 
 // serverOrigin reports an origin of this server: the main host, a live
 // host, or a sandbox origin.
-func (e *Env) serverOrigin(o string) bool {
+func (e previewEnv) serverOrigin(o string) bool {
 	c := e.Cfg
 	if o == c.MainURL() {
 		return true

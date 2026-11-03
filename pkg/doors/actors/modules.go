@@ -31,7 +31,14 @@ type modFunc struct {
 // in the actor manager, with trust read from governance.
 func (s *Door) Install(m *actor.Manager) {
 	m.Trusted = s.Gov.Trusted
-	m.Platform = s.platformModule
+	m.Provide("room", s.roomModule)
+	m.Provide("sample", func(a *actor.Actor) goja.Value { return s.sampleModule(m, a) })
+	m.Provide("platform", func(a *actor.Actor) goja.Value {
+		if len(a.Manifest().Slop.Platform) == 0 || !a.AllowedAny("platform") {
+			return nil
+		}
+		return s.platformModule(a)
+	})
 	m.Register(actor.Module{Name: "system", Doc: "People, grants, links, mounts, policy, LLM budgets, comps, secrets and the system log, as the visitor.",
 		Load: s.systemModule})
 	m.Register(actor.Module{Name: "workshop", Doc: "Stores, snapshots, refs and files of any store the visitor may read; push to draft, publish, run drafts.",

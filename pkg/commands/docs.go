@@ -17,7 +17,7 @@ import (
 // MaxBatch is the most documents one docs.* call writes (in one turn).
 const MaxBatch = 500
 
-func docsVerbs(e *Env) []*verbs.Verb {
+func docsVerbs(e kernelEnv) []*verbs.Verb {
 	storeArg := verbs.Arg{Name: "store", Type: "string", Pos: 1, Required: true}
 	return []*verbs.Verb{
 		{Name: "docs.get", Doc: "Read one document.", Scope: verbs.Read, Action: authz.DocRead,
@@ -93,7 +93,7 @@ func filterOf(w any) (rt.Filter, bool) {
 	return rt.Filter{}, false
 }
 
-func queryDocs(ctx context.Context, e *Env, p *access.Principal, id string, q rt.Query) ([]store.Doc, error) {
+func queryDocs(ctx context.Context, e kernelEnv, p *access.Principal, id string, q rt.Query) ([]store.Doc, error) {
 	s, d, err := e.open(ctx, p, id, rt.LevelView, "reading")
 	if err != nil {
 		return nil, err
@@ -112,7 +112,7 @@ type docItem struct {
 	IfVersion int64
 }
 
-func writeDocs(ctx context.Context, e *Env, p *access.Principal, a verbs.Args, op string) (any, error) {
+func writeDocs(ctx context.Context, e kernelEnv, p *access.Principal, a verbs.Args, op string) (any, error) {
 	var items []docItem
 	if a.Has("batch") {
 		l, ok := argList(a, "batch")
@@ -142,7 +142,7 @@ func writeDocs(ctx context.Context, e *Env, p *access.Principal, a verbs.Args, o
 }
 
 // applyDocs writes items in one turn after checking every path's rule.
-func applyDocs(ctx context.Context, e *Env, p *access.Principal, id string, items []docItem, op string) (any, error) {
+func applyDocs(ctx context.Context, e kernelEnv, p *access.Principal, id string, items []docItem, op string) (any, error) {
 	if len(items) == 0 {
 		return nil, verbs.Errf("invalid_argument", "nothing to write: give path and data, or batch")
 	}

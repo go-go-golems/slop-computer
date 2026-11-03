@@ -18,7 +18,7 @@ import (
 
 // subjectPrincipal is the principal explain.can asks about: a person by id
 // or email, store:<id>, or "anonymous" (a visitor without an id).
-func (e *Env) subjectPrincipal(ctx context.Context, subject string) (*access.Principal, error) {
+func (e kernelEnv) subjectPrincipal(ctx context.Context, subject string) (*access.Principal, error) {
 	switch {
 	case subject == "anonymous":
 		return nil, nil
@@ -38,7 +38,7 @@ func (e *Env) subjectPrincipal(ctx context.Context, subject string) (*access.Pri
 	return access.PersonPrincipal(p, ""), nil
 }
 
-func accessVerbs(e *Env) []*verbs.Verb {
+func accessVerbs(e kernelEnv) []*verbs.Verb {
 	storeArg := verbs.Arg{Name: "store", Type: "string", Pos: 1, Required: true}
 	return []*verbs.Verb{
 		{Name: "explain.can", Doc: "Explain whether someone (you, a person, store:<id> or anonymous) holds a level on a store, or may read/write a document path, with the trace.", Scope: verbs.Read, Action: authz.Account,
