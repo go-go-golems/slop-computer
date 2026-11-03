@@ -1,4 +1,4 @@
-package server
+package actors
 
 import (
 	"github.com/dop251/goja"
@@ -53,7 +53,7 @@ var systemFuncs = []modFunc{
 // systemModule is use('system'): systemFuncs, plus call(verb, args) for
 // code that names verbs (the back office's API client). call accepts only
 // the verbs above.
-func (s *Server) systemModule(a *actor.Actor) goja.Value {
+func (s *Door) systemModule(a *actor.Actor) goja.Value {
 	o := s.verbModule(a, "system", systemFuncs).(*goja.Object)
 	byVerb := map[string]modFunc{}
 	for _, f := range systemFuncs {

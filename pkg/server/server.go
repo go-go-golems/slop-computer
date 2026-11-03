@@ -12,6 +12,8 @@ import (
 	"path/filepath"
 	"time"
 
+	actorsdoor "github.com/go-go-golems/slop-computer/pkg/doors/actors"
+
 	officedoor "github.com/go-go-golems/slop-computer/pkg/doors/office"
 
 	billingdoor "github.com/go-go-golems/slop-computer/pkg/doors/billing"
@@ -173,10 +175,9 @@ func New(cfg *config.Config, sys *sysdb.DB, env *commands.Env) *Server {
 			return s.Gov.Policy(context.Background(), app, capability, audience)
 		}
 		env.A.Secret = func(ctx context.Context, app, name string) (string, error) { return s.Gov.Secret(ctx, key, app, name) }
-		env.A.Platform = s.platformModule
 		env.A.Paths = s.db
 		env.A.Sample = actorSampler{s}
-		s.registerModules()
+		(&actorsdoor.Door{Web: s.web, Gov: s.Gov, Verbs: s.Verbs, Confirm: env.Confirm}).Install(env.A)
 		env.A.RoomEmit = s.actorEmit
 		env.A.RoomPeers = func(store string) []rt.Peer {
 			out := []rt.Peer{}

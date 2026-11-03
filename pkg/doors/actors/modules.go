@@ -1,4 +1,4 @@
-package server
+package actors
 
 import (
 	"context"
@@ -27,17 +27,19 @@ type modFunc struct {
 	Confirm bool           // governance: the person confirms it in the shell (W6)
 }
 
-// registerModules puts the server's Go modules in the actor registry.
-func (s *Server) registerModules() {
-	s.Env.A.Trusted = s.Gov.Trusted
-	s.Env.A.Register(actor.Module{Name: "system", Doc: "People, grants, links, mounts, policy, LLM budgets, comps, secrets and the system log, as the visitor.",
+// Install puts the door's Go modules (system, workshop) and use('platform')
+// in the actor manager, with trust read from governance.
+func (s *Door) Install(m *actor.Manager) {
+	m.Trusted = s.Gov.Trusted
+	m.Platform = s.platformModule
+	m.Register(actor.Module{Name: "system", Doc: "People, grants, links, mounts, policy, LLM budgets, comps, secrets and the system log, as the visitor.",
 		Load: s.systemModule})
-	s.Env.A.Register(actor.Module{Name: "workshop", Doc: "Stores, snapshots, refs and files of any store the visitor may read; push to draft, publish, run drafts.",
+	m.Register(actor.Module{Name: "workshop", Doc: "Stores, snapshots, refs and files of any store the visitor may read; push to draft, publish, run drafts.",
 		Load: func(a *actor.Actor) goja.Value { return s.verbModule(a, "workshop", workshopFuncs) }})
 }
 
 // verbModule builds a module's object from its functions.
-func (s *Server) verbModule(a *actor.Actor, module string, funcs []modFunc) goja.Value {
+func (s *Door) verbModule(a *actor.Actor, module string, funcs []modFunc) goja.Value {
 	vm := a.VM()
 	o := vm.NewObject()
 	for _, f := range funcs {
@@ -110,7 +112,7 @@ func single(vals []any) (map[string]any, bool) {
 
 // callVerb runs a module function's verb as the visitor and returns its
 // promise.
-func (s *Server) callVerb(a *actor.Actor, module string, f modFunc, args map[string]any) goja.Value {
+func (s *Door) callVerb(a *actor.Actor, module string, f modFunc, args map[string]any) goja.Value {
 	name := f.Verb
 	v, ok := s.Verbs.Get(name)
 	if !ok {
@@ -137,7 +139,7 @@ func (s *Server) callVerb(a *actor.Actor, module string, f modFunc, args map[str
 		if m := a.Manifest(); m != nil && m.Title != "" {
 			title = m.Title
 		}
-		c, ok := s.Env.Confirm.Check(p.Person.ID, a.Visitor().View, a.App(), title, name, args)
+		c, ok := s.Confirm.Check(p.Person.ID, a.Visitor().View, a.App(), title, name, args)
 		if !ok {
 			a.ThrowError(&actor.Error{Code: "confirmation_required", Message: title + " asks to " + c.Summary, Confirm: c.ID})
 		}
@@ -159,7 +161,7 @@ func (s *Server) callVerb(a *actor.Actor, module string, f modFunc, args map[str
 // only read. The trust row that lets the app use the module admits the
 // store (Principal.Trusted); it counts only while the admin who made it
 // is still an admin.
-func (s *Server) actAs(a *actor.Actor, module string, write bool) *access.Principal {
+func (s *Door) actAs(a *actor.Actor, module string, write bool) *access.Principal {
 	v := a.Visitor()
 	person := v.ID
 	if id, ok := strings.CutPrefix(person, "store:"); ok {
@@ -173,7 +175,7 @@ func (s *Server) actAs(a *actor.Actor, module string, write bool) *access.Princi
 	if person == "" {
 		a.Throw("permission_denied", "no person to act as")
 	}
-	p := s.web.PersonAs(context.Background(), person, "app:"+a.App())
+	p := s.Web.PersonAs(context.Background(), person, "app:"+a.App())
 	if p == nil {
 		a.Throw("permission_denied", "no person to act as")
 	}

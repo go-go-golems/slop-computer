@@ -1,4 +1,4 @@
-package server
+package actors
 
 // workshopFuncs is the workshop module: what a review or publishing tool
 // needs, called as the visitor. push writes to the draft ref unless told

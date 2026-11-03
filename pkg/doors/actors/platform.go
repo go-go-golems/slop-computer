@@ -1,4 +1,4 @@
-package server
+package actors
 
 import (
 	"context"
@@ -21,7 +21,7 @@ var platformOps = map[string]string{"stores.create": "store.new", "mounts.set": 
 // slop.platform and the policy on for the visitor's audience, and runs as
 // the visitor (the store itself for alarms and reactors) through the verb
 // of the same meaning, so it can do only what they could.
-func (s *Server) platformModule(a *actor.Actor) goja.Value {
+func (s *Door) platformModule(a *actor.Actor) goja.Value {
 	vm := a.VM()
 	listed := a.Manifest().Slop.Platform
 	op := func(name string) func(goja.Value) goja.Value {
@@ -42,7 +42,7 @@ func (s *Server) platformModule(a *actor.Actor) goja.Value {
 				if v.Payer == "" {
 					a.Throw("permission_denied", "a visitor without an id cannot use the platform")
 				}
-				if p = s.web.PersonAs(ctx, v.Payer, "app:"+a.App()); p == nil {
+				if p = s.Web.PersonAs(ctx, v.Payer, "app:"+a.App()); p == nil {
 					a.Throw("permission_denied", "no person to act as")
 				}
 			}
