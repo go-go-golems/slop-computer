@@ -1,5 +1,7 @@
 package server
 
+// Tests from SLOP3-002 phase W1 (Go modules for actors, app trust); formerly w1_test.go.
+
 import (
 	"context"
 	"errors"

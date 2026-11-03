@@ -1,100 +1,15 @@
 package server
 
+// Tests from SLOP3-001 phase P2 (live hosts, views, site handoff); formerly p2b_test.go.
+
 import (
-	"bufio"
-	"bytes"
-	"encoding/json"
 	"io"
 	"net/http"
-	"net/http/cookiejar"
 	"net/url"
 	"strings"
 	"testing"
 	"time"
 )
-
-// site is a browser on a live host: it keeps the site cookie.
-type site struct {
-	h    *harness
-	host string
-	c    *http.Client
-}
-
-func (h *harness) site(host string) *site {
-	jar, _ := cookiejar.New(nil)
-	return &site{h: h, host: host, c: &http.Client{Jar: jar, CheckRedirect: func(*http.Request, []*http.Request) error { return http.ErrUseLastResponse }}}
-}
-
-func (s *site) do(method, host, path string, body any, hdr map[string]string) (*http.Response, map[string]any) {
-	s.h.t.Helper()
-	var rd io.Reader
-	if body != nil {
-		b, _ := json.Marshal(body)
-		rd = bytes.NewReader(b)
-	}
-	req, _ := http.NewRequest(method, s.h.ts.URL+path, rd)
-	req.Host = host
-	// The cookie jar keys on the request URL; send the host's cookies by hand.
-	u, _ := url.Parse("http://" + host + path)
-	for _, c := range s.c.Jar.Cookies(u) {
-		req.AddCookie(c)
-	}
-	if body != nil {
-		req.Header.Set("Content-Type", "application/json")
-		req.Header.Set("Origin", "http://"+host)
-	}
-	for k, v := range hdr {
-		req.Header.Set(k, v)
-	}
-	resp, err := s.c.Do(req)
-	if err != nil {
-		s.h.t.Fatal(err)
-	}
-	if cs := resp.Cookies(); len(cs) > 0 {
-		s.c.Jar.SetCookies(u, cs)
-	}
-	if strings.Contains(resp.Header.Get("Content-Type"), "event-stream") {
-		return resp, nil
-	}
-	defer resp.Body.Close()
-	out := map[string]any{}
-	_ = json.NewDecoder(resp.Body).Decode(&out)
-	return resp, out
-}
-
-// events reads SSE events from a stream until n arrive or the timeout.
-func events(t *testing.T, resp *http.Response, n int, timeout time.Duration) []map[string]any {
-	t.Helper()
-	out := []map[string]any{}
-	done := make(chan struct{})
-	go func() {
-		defer close(done)
-		sc := bufio.NewScanner(resp.Body)
-		typ := ""
-		for sc.Scan() {
-			line := sc.Text()
-			switch {
-			case strings.HasPrefix(line, "event: "):
-				typ = line[7:]
-			case strings.HasPrefix(line, "data: "):
-				var d map[string]any
-				_ = json.Unmarshal([]byte(line[6:]), &d)
-				d["_type"] = typ
-				out = append(out, d)
-				if len(out) >= n {
-					return
-				}
-			}
-		}
-	}()
-	select {
-	case <-done:
-	case <-time.After(timeout):
-	}
-	resp.Body.Close()
-	<-done
-	return out
-}
 
 // The P2 exit test, second part: a page app runs on a live host for
 // guests, and a write in one view reaches another view's stream.

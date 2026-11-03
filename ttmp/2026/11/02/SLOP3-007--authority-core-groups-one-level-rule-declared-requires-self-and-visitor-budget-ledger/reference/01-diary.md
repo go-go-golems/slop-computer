@@ -14,7 +14,7 @@ RelatedFiles:
       Note: Level, groups, deadLink
     - Path: repo://pkg/actor/actor.go
       Note: readShape requires
-    - Path: repo://pkg/server/core_test.go
+    - Path: repo://pkg/server/authority_test.go
       Note: exit tests and worked examples
     - Path: repo://pkg/server/modules.go
       Note: actAs, trusted modules

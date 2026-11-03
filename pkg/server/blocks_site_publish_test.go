@@ -1,37 +1,11 @@
 package server
 
+// Tests from SLOP3-003 phase B3 (static publishing); formerly b3_test.go.
+
 import (
-	"io"
-	"net/http"
-	"net/url"
 	"strings"
 	"testing"
 )
-
-// page is a browser request on a site that keeps the body as text (for
-// HTML answers and form posts).
-func (s *site) page(method, host, path, form string, hdr map[string]string) (*http.Response, string) {
-	s.h.t.Helper()
-	req, _ := http.NewRequest(method, s.h.ts.URL+path, strings.NewReader(form))
-	req.Host = host
-	u, _ := url.Parse("http://" + host + path)
-	for _, c := range s.c.Jar.Cookies(u) {
-		req.AddCookie(c)
-	}
-	if form != "" {
-		req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
-	}
-	for k, v := range hdr {
-		req.Header.Set(k, v)
-	}
-	resp, err := s.c.Do(req)
-	if err != nil {
-		s.h.t.Fatal(err)
-	}
-	defer resp.Body.Close()
-	b, _ := io.ReadAll(resp.Body)
-	return resp, string(b)
-}
 
 // B3 exit: static publishing. Publishing needs the app trusted with the
 // workshop module and the visitor to be an admin of the static store; a

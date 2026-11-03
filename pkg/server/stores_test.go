@@ -1,5 +1,7 @@
 package server
 
+// Tests from SLOP3-001 phase P1 (stores, the eval door, import and export); formerly p1_test.go.
+
 import (
 	"context"
 	"reflect"
@@ -10,45 +12,6 @@ import (
 	"github.com/go-go-golems/slop-computer/pkg/store"
 	"github.com/go-go-golems/slop-computer/pkg/verbs"
 )
-
-// tokenFor signs a person in (making them on first use) and mints a token.
-func (h *harness) tokenFor(email string, scopes ...string) string {
-	h.t.Helper()
-	ctx := context.Background()
-	p, _, err := h.sys.SignInUser(ctx, email, "", "sub-"+email, h.cfg.AdminEmails, true)
-	if err != nil {
-		h.t.Fatal(err)
-	}
-	if len(scopes) == 0 {
-		scopes = []string{"read", "write"}
-	}
-	secret, _, err := h.sys.CreateToken(ctx, p.ID, "test", scopes, 30)
-	if err != nil {
-		h.t.Fatal(err)
-	}
-	return secret
-}
-
-// call runs a verb and fails the test unless it succeeds.
-func (h *harness) call(token, verb string, args map[string]any) any {
-	h.t.Helper()
-	st, out := api(h.t, h, token, verb, args)
-	if st != 200 {
-		h.t.Fatalf("%s %v: %d %v", verb, args, st, out)
-	}
-	return out["result"]
-}
-
-// fail runs a verb that must fail with code.
-func (h *harness) fail(token, verb string, args map[string]any, code string) map[string]any {
-	h.t.Helper()
-	st, out := api(h.t, h, token, verb, args)
-	e, _ := out["error"].(map[string]any)
-	if st == 200 || e == nil || e["code"] != code {
-		h.t.Fatalf("%s %v: want %s, got %d %v", verb, args, code, st, out)
-	}
-	return e
-}
 
 const booksCSV = "isbn,title,year\n111,Old Book,1990\n222,New Book,2004\n333,Newer Book,2019\n"
 

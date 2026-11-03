@@ -1,5 +1,7 @@
 package server
 
+// Tests from SLOP3-003 phase B2 (the live reader); formerly b2_test.go.
+
 import (
 	"strings"
 	"testing"

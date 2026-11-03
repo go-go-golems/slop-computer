@@ -1,5 +1,7 @@
 package server
 
+// Tests from SLOP3-001 phase P4 (audiences, grants, links, guests, OIDC); formerly p4_test.go.
+
 import (
 	"context"
 	"crypto/rand"
@@ -22,51 +24,7 @@ import (
 	"github.com/go-jose/go-jose/v4"
 
 	"github.com/go-go-golems/slop-computer/pkg/config"
-	"github.com/go-go-golems/slop-computer/pkg/store"
 )
-
-// signInSite runs the live-host handoff for a site client whose browser b
-// is signed in on the main host.
-func signInSite(t *testing.T, h *harness, s *site, b *browser, host, ret string) {
-	t.Helper()
-	r, _ := s.do("GET", host, "/_site/login?return="+url.QueryEscape(ret), nil, nil)
-	loc, _ := url.Parse(r.Header.Get("Location"))
-	r = b.do("GET", loc.RequestURI(), h.cfg.Hosts.Main, nil, nil)
-	cb, _ := url.Parse(r.Header.Get("Location"))
-	if r, _ = s.do("GET", host, cb.RequestURI(), nil, nil); r.StatusCode != 303 {
-		t.Fatalf("site sign-in: %d", r.StatusCode)
-	}
-}
-
-// openView opens a view of the store mounted at path, with an optional
-// share link, and returns the status and the view.
-func openView(s *site, host, path, link string) (int, map[string]any) {
-	r, v := s.do("POST", host, "/_site/views", map[string]any{"path": path, "link": link}, nil)
-	return r.StatusCode, v
-}
-
-// rpc calls a view's RPC method.
-func rpc(s *site, v map[string]any, method string, args any) map[string]any {
-	u := strings.TrimPrefix(strings.Split(v["url"].(string), "/v/")[0], "http://")
-	_, out := s.do("POST", u, "/_rt/rpc", map[string]any{"method": method, "args": args},
-		map[string]string{"Authorization": "Bearer " + v["secret"].(string)})
-	return out
-}
-
-// privateDoc reads a document from the store itself: docs.get hides
-// data/users/<id>/ even from admins.
-func privateDoc(t *testing.T, h *harness, storeID, path string) map[string]any {
-	t.Helper()
-	st, err := h.k.Store(context.Background(), storeID)
-	if err != nil {
-		t.Fatal(err)
-	}
-	d, err := st.GetDoc(context.Background(), path, store.Everything)
-	if err != nil || d.Body == nil {
-		return nil
-	}
-	return d.Body
-}
 
 // The P4 scenario suite: every audience against every kind of grant
 // subject, read back through explain.can.

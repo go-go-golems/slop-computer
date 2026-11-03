@@ -1,5 +1,7 @@
 package server
 
+// Tests from SLOP3-002 phase W4 (the workshop module); formerly w4_test.go.
+
 import (
 	"strings"
 	"testing"

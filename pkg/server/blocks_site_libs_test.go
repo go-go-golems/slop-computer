@@ -1,5 +1,7 @@
 package server
 
+// Tests from SLOP3-003 phase B1 (the Blocks libraries in an actor); formerly b1_test.go.
+
 import (
 	"encoding/json"
 	"os"

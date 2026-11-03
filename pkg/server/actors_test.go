@@ -1,10 +1,11 @@
 package server
 
+// Tests from SLOP3-001 phase P3 (actors); formerly p3_test.go.
+
 import (
 	"fmt"
 	"strings"
 	"testing"
-	"time"
 )
 
 const trackerActor = `
@@ -51,17 +52,6 @@ defineActor({
   },
 });
 `
-
-func waitFor(t *testing.T, what string, fn func() bool) {
-	t.Helper()
-	for i := 0; i < 100; i++ {
-		if fn() {
-			return
-		}
-		time.Sleep(30 * time.Millisecond)
-	}
-	t.Fatalf("timed out waiting for %s", what)
-}
 
 // The P3 exit test: an app with an actor, migrations, setup, actions that
 // await I/O, HTTP routes, a reactor, an alarm, a read alias, and a broken

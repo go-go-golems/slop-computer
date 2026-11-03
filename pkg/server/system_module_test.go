@@ -1,5 +1,7 @@
 package server
 
+// Tests from SLOP3-002 phase W2 (the system module); formerly w2_test.go.
+
 import (
 	"strings"
 	"testing"

@@ -1,30 +1,16 @@
 package server
 
+// Tests from SLOP3-001 phase P3 (the example apps); formerly p3_examples_test.go.
+
 import (
 	"context"
 	"encoding/json"
-	"path/filepath"
 	"strings"
 	"testing"
 	"time"
 
 	"github.com/go-go-golems/slop-computer/pkg/store"
 )
-
-// exampleFiles reads apps/examples/<name> as files.push entries.
-func exampleFiles(t *testing.T, name string) []any {
-	t.Helper()
-	return appDir(t, filepath.Join("examples", name))
-}
-
-func docBody(h *harness, tok, storeID, path string) map[string]any {
-	code, res := api(h.t, h, tok, "docs.get", map[string]any{"store": storeID, "path": path})
-	if code != 200 {
-		return nil
-	}
-	b, _ := res["result"].(map[string]any)["body"].(map[string]any)
-	return b
-}
 
 // P3 exit: apps/examples/journal works — drafts per person through a view that
 // uses slop_principal(), publishing, a publish across an await, the feed

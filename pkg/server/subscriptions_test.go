@@ -1,5 +1,7 @@
 package server
 
+// Tests from SLOP3-001 phase P5 (comps, Stripe, views closing on change); formerly p5_test.go.
+
 import (
 	"bufio"
 	"bytes"

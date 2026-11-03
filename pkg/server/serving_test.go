@@ -1,34 +1,12 @@
 package server
 
+// Tests from SLOP3-001 phase P2 (static hosts, app code, read rules); formerly p2_test.go.
+
 import (
-	"io"
 	"net/http"
 	"strings"
 	"testing"
 )
-
-// get fetches a path on a host without following redirects.
-func (h *harness) get(host, path string) (*http.Response, string) {
-	h.t.Helper()
-	req, _ := http.NewRequest("GET", h.ts.URL+path, nil)
-	req.Host = host
-	c := &http.Client{CheckRedirect: func(*http.Request, []*http.Request) error { return http.ErrUseLastResponse }}
-	resp, err := c.Do(req)
-	if err != nil {
-		h.t.Fatal(err)
-	}
-	b, _ := io.ReadAll(resp.Body)
-	resp.Body.Close()
-	return resp, string(b)
-}
-
-func files(m map[string]string) []any {
-	out := []any{}
-	for p, t := range m {
-		out = append(out, map[string]any{"path": p, "text": t})
-	}
-	return out
-}
 
 // The P2 exit test, first part: a static site serves on the static host
 // with its relative CSS.
