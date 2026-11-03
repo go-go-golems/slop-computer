@@ -37,7 +37,16 @@ var errQuery = errors.New("invalid query")
 
 // Validate checks a query against the contract's bounds.
 func (q Query) Validate() error {
-	if !ValidCollPath(q.Coll) || len(q.Filters) > MaxFilters || q.Limit < 0 || q.Limit > MaxQueryLimit || strings.Contains(q.Order, ".") {
+	if !ValidCollPath(q.Coll) {
+		return errQuery
+	}
+	return q.ValidateShape()
+}
+
+// ValidateShape checks everything but the collection path: a page's
+// collection is resolved by its path space (SLOP3-008), which checks it.
+func (q Query) ValidateShape() error {
+	if len(q.Filters) > MaxFilters || q.Limit < 0 || q.Limit > MaxQueryLimit || strings.Contains(q.Order, ".") {
 		return errQuery
 	}
 	for _, f := range q.Filters {

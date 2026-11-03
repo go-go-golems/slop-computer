@@ -607,7 +607,8 @@ func (s *Server) recheck(ctx context.Context, v *rt.View, row system.StoreRow) b
 	switch {
 	case d.Level == rt.LevelNone:
 		s.rt.views.Close(v, true)
-	case d.Level != v.Level || string(d.Audience) != v.Role || !s.samePolicy(ctx, v, string(d.Audience)):
+	case d.Level != v.Level || string(d.Audience) != v.Role || !s.samePolicy(ctx, v, string(d.Audience)) ||
+		!s.spaceOf(ctx, v.Target, v.Caps, v.Policy).Equal(v.Space): // its aliases changed (SLOP3-008)
 		v.Send(rt.Out{Type: "access", Data: map[string]any{"level": d.Level.String()}})
 		s.rt.views.Close(v, false)
 	default:

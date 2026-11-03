@@ -38,9 +38,12 @@ type View struct {
 	Caps    Caps            `json:"-"`
 	Policy  map[string]bool `json:"-"`           // the app policy cells for this viewer's audience, at open
 	Perms   []string        `json:"permissions"` // approved slop permissions
-	Kind    string          `json:"kind"`        // viewer | agent
-	Expires time.Time       `json:"expiresAt"`
-	Created time.Time       `json:"-"`
+	// Space is the view's path space (SLOP3-008): its aliases and how far
+	// _stores reaches. Decided at open, like Level; a change reopens it.
+	Space   *Space    `json:"-"`
+	Kind    string    `json:"kind"` // viewer | agent
+	Expires time.Time `json:"expiresAt"`
+	Created time.Time `json:"-"`
 	// Epoch is the system epoch at which Level, Role and Policy were last
 	// confirmed; the server decides again when it has moved.
 	Epoch atomic.Int64 `json:"-"`
@@ -51,12 +54,18 @@ type View struct {
 	subs  map[string]Sub
 	rooms map[string]*Member
 	emits bucket
+	// remote is, per other store this view reads, the newest rev of it its
+	// stream has caught up to. The runtime's resume cursor counts the
+	// target's revs only; remote changes travel without a rev, and the
+	// server catches a reconnected stream up from here.
+	remote map[string]int64
 }
 
 // Out is something a view's stream sends: a target change it filters by
 // its subscriptions, or an event it sends as is.
 type Out struct {
 	Change  *Change
+	Store   string    // the store the commit is in ("" or the view's target: its own)
 	Rev     int64     // a whole commit: its rev, and the doc changes in it
 	Changes []*Change // (possibly none the view can see)
 	Type    string
@@ -177,6 +186,47 @@ func (v *View) Wants(path string) bool {
 	return false
 }
 
+// Watch starts following another store from rev (the head read before the
+// subscription's documents), unless the view already follows it.
+func (v *View) Watch(store string, rev int64) {
+	v.mu.Lock()
+	defer v.mu.Unlock()
+	if v.remote == nil {
+		v.remote = map[string]int64{}
+	}
+	if _, ok := v.remote[store]; !ok {
+		v.remote[store] = rev
+	}
+}
+
+// Watching reports whether the view follows store, and how far it got.
+func (v *View) Watching(store string) (int64, bool) {
+	v.mu.Lock()
+	defer v.mu.Unlock()
+	rev, ok := v.remote[store]
+	return rev, ok
+}
+
+// Caught records that the stream sent store's changes up to rev.
+func (v *View) Caught(store string, rev int64) {
+	v.mu.Lock()
+	defer v.mu.Unlock()
+	if v.remote != nil && rev > v.remote[store] {
+		v.remote[store] = rev
+	}
+}
+
+// Remotes lists the other stores the view follows.
+func (v *View) Remotes() map[string]int64 {
+	v.mu.Lock()
+	defer v.mu.Unlock()
+	out := make(map[string]int64, len(v.remote))
+	for k, r := range v.remote {
+		out[k] = r
+	}
+	return out
+}
+
 // Subs lists the view's subscriptions.
 func (v *View) Subs() []Sub {
 	v.mu.Lock()
@@ -278,6 +328,26 @@ func (r *Registry) Of(target string) []*View {
 	var out []*View
 	for _, v := range r.byID {
 		if v.Target == target {
+			out = append(out, v)
+		}
+	}
+	return out
+}
+
+// Reaching lists the views a commit of store concerns: its own views, and
+// views of other stores that follow it.
+func (r *Registry) Reaching(store string) []*View {
+	r.mu.Lock()
+	all := make([]*View, 0, len(r.byID))
+	for _, v := range r.byID {
+		all = append(all, v)
+	}
+	r.mu.Unlock()
+	var out []*View
+	for _, v := range all {
+		if v.Target == store {
+			out = append(out, v)
+		} else if _, ok := v.Watching(store); ok {
 			out = append(out, v)
 		}
 	}

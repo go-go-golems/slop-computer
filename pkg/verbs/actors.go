@@ -185,22 +185,52 @@ func init() {
 				}
 				return e.Sys.Bindings(ctx, a.S("store"))
 			}},
-		&Verb{Name: "bind.set", Doc: "Point a store's read alias at another store (grant store:<store> view there for actors).", Scope: Write, Action: authz.StoreAdmin,
+		&Verb{Name: "bind.set", Doc: "Point a store's read alias at another store (grant store:<store> view there for actors); with --prefix, also map it into the store's pages' db: <alias>/… reads the target's <prefix>/… as the viewer, at most at --level.", Scope: Write, Action: authz.StoreAdmin,
 			Args: []Arg{storeArg, {Name: "alias", Type: "string", Pos: 2, Required: true}, {Name: "target", Type: "string", Pos: 3, Required: true},
-				{Name: "assets", Type: "bool", Doc: "also let the store's actor read the target's uploaded files (needs admin on the target)"}},
+				{Name: "assets", Type: "bool", Doc: "also let the store's actor read the target's uploaded files, and its pages show them (needs admin on the target)"},
+				{Name: "prefix", Type: "string", Doc: "a collection path in the target: pages reach it at <alias>/… (SLOP3-008)"},
+				{Name: "level", Type: "string", Doc: "with --prefix: the most the alias gives, view, interact or admin (default view); you need it on the target"}},
 			Run: func(ctx context.Context, e *Env, p *access.Principal, a Args) (any, error) {
 				if _, _, err := e.open(ctx, p, a.S("store"), rt.LevelAdmin, "binding"); err != nil {
 					return nil, err
 				}
-				need, why := rt.LevelView, "binding to"
+				prefix, lv := a.S("prefix"), a.S("level")
+				level := rt.LevelView
+				switch {
+				case prefix == "" && lv != "":
+					return nil, Errf("invalid_argument", "--level needs --prefix: only an alias in the pages' db has a level")
+				case prefix != "":
+					if err := rt.ValidAlias(a.S("alias"), prefix); err != nil {
+						return nil, Errf("invalid_argument", "%s", err.(*rt.PathError).Msg)
+					}
+					if lv != "" {
+						l, ok := rt.ParseLevel(lv)
+						if !ok || l < rt.LevelView || l > rt.LevelAdmin {
+							return nil, Errf("invalid_argument", "--level is view, interact or admin")
+						}
+						level = l
+					}
+				}
+				// You cannot alias more than you hold: pages read the target
+				// through the alias up to its level, as their own viewers.
+				need, why := level, "binding to"
 				if a.B("assets") {
 					need, why = rt.LevelAdmin, "sharing the uploads of"
 				}
 				if _, _, err := e.open(ctx, p, a.S("target"), need, why); err != nil {
 					return nil, err
 				}
-				b := system.Binding{Store: a.S("store"), Alias: a.S("alias"), Target: a.S("target"), Assets: a.B("assets")}
-				return b, e.Sys.SetBinding(ctx, p.ID(), p.ViaLabel(), b)
+				b := system.Binding{Store: a.S("store"), Alias: a.S("alias"), Target: a.S("target"), Assets: a.B("assets"), Prefix: prefix}
+				if prefix != "" {
+					b.Level = level.String()
+				}
+				if err := e.Sys.SetBinding(ctx, p.ID(), p.ViaLabel(), b); err != nil {
+					return nil, err
+				}
+				if e.AccessChanged != nil && prefix != "" {
+					e.AccessChanged(ctx, b.Store) // open pages reopen with the new path space
+				}
+				return b, nil
 			}},
 		&Verb{Name: "bind.rm", Doc: "Remove a store's read alias.", Scope: Write, Action: authz.StoreAdmin,
 			Args: []Arg{storeArg, {Name: "alias", Type: "string", Pos: 2, Required: true}},
@@ -211,6 +241,9 @@ func init() {
 				err := e.Sys.RemoveBinding(ctx, p.ID(), p.ViaLabel(), a.S("store"), a.S("alias"))
 				if errors.Is(err, system.ErrNotFound) {
 					return nil, Errf("not_found", "no alias %s on %s", a.S("alias"), a.S("store"))
+				}
+				if err == nil && e.AccessChanged != nil {
+					e.AccessChanged(ctx, a.S("store")) // pages that mapped it reopen without it
 				}
 				return map[string]any{"removed": a.S("alias")}, err
 			}},

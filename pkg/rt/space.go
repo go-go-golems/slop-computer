@@ -116,18 +116,18 @@ func (sp *Space) Resolve(p string, doc bool) (Target, error) {
 	return Target{Store: holder, Path: p, Own: true, Cap: LevelOwner}, nil
 }
 
-// target builds a target in store at path, reached via a route with ceiling
-// cap. Another store's private documents (data/users/<id>/…) are not
+// target builds a target in store at path, reached via a route with
+// ceiling ceil. Another store's private documents (data/users/<id>/…) are not
 // reachable: only that person may read them, and only through that store's
 // own app, so an app reaching in cannot read them on their behalf.
-func (sp *Space) target(store, path string, cap Level, via string) (Target, error) {
+func (sp *Space) target(store, path string, ceil Level, via string) (Target, error) {
 	if store == sp.Holder {
-		return Target{Store: store, Path: path, Own: true, Cap: cap, Via: via}, nil
+		return Target{Store: store, Path: path, Own: true, Cap: ceil, Via: via}, nil
 	}
 	if _, private := privateOwner(path); private {
 		return Target{}, pathErr("not_found", "another store's private documents are not reachable")
 	}
-	return Target{Store: store, Path: path, Cap: cap, Via: via}, nil
+	return Target{Store: store, Path: path, Cap: ceil, Via: via}, nil
 }
 
 // PagePaths are the page paths at which a document of store at path appears

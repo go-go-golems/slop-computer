@@ -59,7 +59,9 @@ func (s *Server) uploadAsset(w http.ResponseWriter, r *http.Request) {
 		httpx.Fail(w, 413, "too_large", "an asset is at most 20 MiB (CSS and JS 16 MiB)")
 		return
 	}
-	id := ids.New("a", 8)
+	// 16 random bytes (128 bits): the id is the capability, and pages show
+	// other stores' uploads by bare id (SLOP3-008); it was 8 bytes.
+	id := ids.New("a", 16)
 	if _, err := st.Do(r.Context(), viewWho(v), func(t *store.Turn) error {
 		_, err := t.PutBlob("assets", id, sum, n, ct)
 		return err
@@ -72,19 +74,29 @@ func (s *Server) uploadAsset(w http.ResponseWriter, r *http.Request) {
 
 // serveAssetBlob serves /_blob/<id> on the sandbox origin: bytes, never a
 // page, revalidated on every use so a deleted asset is gone for good.
+//
+// An id names an upload of the origin's store or, failing that (SLOP3-008),
+// of a store one of its aliases shares uploads with (bind.set --assets), in
+// alias order: a page written for claude.ai renders "/_blob/" + id for an
+// id it read through an alias. Like the store's own uploads, the URL is the
+// capability (an <img> sends no view secret); what bounds it is that the
+// store's owner chose to share that store's uploads, as an admin there.
 func (s *Server) serveAssetBlob(w http.ResponseWriter, r *http.Request, storeID, id string) {
-	st, err := s.Env.K.Store(r.Context(), storeID)
-	if err != nil {
-		notFound(w)
+	ctx := r.Context()
+	for _, sid := range append([]string{storeID}, s.assetStores(ctx, storeID)...) {
+		st, err := s.Env.K.Store(ctx, sid)
+		if err != nil {
+			continue
+		}
+		f, err := st.File(ctx, "assets", id)
+		if err != nil {
+			continue
+		}
+		// private: revalidated on every use, so a deleted upload is gone for good
+		s.writeStoreBytes(w, r, storeBytes{st: st, f: f, vis: private, mut: moving})
 		return
 	}
-	f, err := st.File(r.Context(), "assets", id)
-	if err != nil {
-		notFound(w)
-		return
-	}
-	// private: revalidated on every use, so a deleted upload is gone for good
-	s.writeStoreBytes(w, r, storeBytes{st: st, f: f, vis: private, mut: moving})
+	notFound(w)
 }
 
 func (s *Server) rpcAssetsList(ctx context.Context, v *rt.View, _ json.RawMessage) (any, error) {

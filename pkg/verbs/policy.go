@@ -9,6 +9,7 @@ import (
 	"github.com/go-go-golems/slop-computer/pkg/access"
 	"github.com/go-go-golems/slop-computer/pkg/apps"
 	"github.com/go-go-golems/slop-computer/pkg/authz"
+	"github.com/go-go-golems/slop-computer/pkg/rt"
 	"github.com/go-go-golems/slop-computer/pkg/system"
 )
 
@@ -34,6 +35,8 @@ func (e *Env) declaredPolicyCaps(ctx context.Context, app string) ([]string, *ap
 			ok = len(m.Slop.Secrets) > 0
 		case "platform":
 			ok = len(m.Slop.Platform) > 0
+		case "stores":
+			ok = m.Caps.Stores != rt.LevelNone // capabilities.db.stores (SLOP3-008)
 		}
 		if ok {
 			out = append(out, c)
@@ -64,7 +67,7 @@ func init() {
 				cells, err := e.Sys.PolicyMatrix(ctx, a.S("app"), caps)
 				return map[string]any{"app": a.S("app"), "declared": caps, "cells": cells}, err
 			}},
-		&Verb{Name: "policy.set", Doc: "Turn a policy cell on or off: app, capability (assets, sample, user.email, fetch, secrets, platform), @audience, on|off.", Scope: Write, AdminOnly: true, Action: authz.PlatformAdmin,
+		&Verb{Name: "policy.set", Doc: "Turn a policy cell on or off: app, capability (assets, sample, user.email, fetch, secrets, platform, stores), @audience, on|off.", Scope: Write, AdminOnly: true, Action: authz.PlatformAdmin,
 			Args: []Arg{{Name: "app", Type: "string", Pos: 1, Required: true}, {Name: "capability", Type: "string", Pos: 2, Required: true},
 				{Name: "audience", Type: "string", Pos: 3, Required: true}, {Name: "value", Type: "string", Pos: 4, Required: true}},
 			Run: func(ctx context.Context, e *Env, p *access.Principal, a Args) (any, error) {
