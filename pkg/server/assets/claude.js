@@ -1,4 +1,4 @@
-/* slop page runtime (window.claude), built from web/runtime: do not edit. source sha256:676ec47f1f0614c10f6905c0012e20702f87b044df993be93d551847c5aff1c5 */
+/* slop page runtime (window.claude), built from web/runtime: do not edit. source sha256:f06c7dd2691ed1cec720897bc0c60ef67833c695ef3718a453e3e6619379a43b */
 "use strict";
 (() => {
   // src/limits.ts
@@ -70,7 +70,7 @@
   }
   var isPlain = (v) => v !== null && typeof v === "object" && !Array.isArray(v) && Object.getPrototypeOf(v) === Object.prototype;
   function freeze(v) {
-    if (v && typeof v === "object" && !Object.isFrozen(v)) {
+    if (v && typeof v === "object" && !ArrayBuffer.isView(v) && !Object.isFrozen(v)) {
       Object.freeze(v);
       for (const x of Object.values(v)) freeze(x);
     }

@@ -58,9 +58,11 @@ export function depth(v: unknown): number {
 export const isPlain = (v: unknown): v is Body =>
   v !== null && typeof v === "object" && !Array.isArray(v) && Object.getPrototypeOf(v) === Object.prototype;
 
-/** Deep-freeze a JSON value (snapshots are frozen). */
+/** Deep-freeze a JSON value (snapshots are frozen). Typed arrays (a file's
+ * bytes) are left as they are: Object.freeze throws on a view with
+ * elements. */
 export function freeze<T>(v: T): T {
-  if (v && typeof v === "object" && !Object.isFrozen(v)) {
+  if (v && typeof v === "object" && !ArrayBuffer.isView(v) && !Object.isFrozen(v)) {
     Object.freeze(v);
     for (const x of Object.values(v as object)) freeze(x);
   }
