@@ -15,3 +15,7 @@ PR 1 (#23): pkg/verbs is the table only; commands in pkg/commands; verbs.Table; 
 ## 2026-11-03
 
 PR 2 (#24): pkg/system split into sysdb, identity, registry, llm, policy, billing; access.Directory; commands stay in pkg/commands (guide updated)
+
+## 2026-11-03
+
+Ticket closed 2026-11-03: PRs #23, #24, #25 and #28 merged (the table a leaf, system.db by domain, doors and host, capabilities); lint to 0 in #27

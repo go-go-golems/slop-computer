@@ -1,7 +1,7 @@
 ---
 Title: 'Untie the knot packages: the verb table as a leaf, system split by domain, server split into doors, actor modules into capabilities'
 Ticket: SLOP3-010
-Status: active
+Status: complete
 Topics:
     - architecture
     - backend
@@ -12,7 +12,7 @@ Owners: []
 RelatedFiles: []
 ExternalSources: []
 Summary: ""
-LastUpdated: 2026-11-03T14:53:39.196173046-05:00
+LastUpdated: 2026-11-03T17:50:14.355372094-05:00
 WhatFor: ""
 WhenToUse: ""
 ---
