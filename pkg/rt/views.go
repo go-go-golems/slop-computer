@@ -4,6 +4,7 @@ import (
 	"crypto/rand"
 	"encoding/base32"
 	"encoding/json"
+	"strconv"
 	"strings"
 	"sync"
 	"sync/atomic"
@@ -55,10 +56,14 @@ type View struct {
 	rooms map[string]*Member
 	emits bucket
 	// remote is, per other store this view reads, the newest rev of it its
-	// stream has caught up to, and the viewer's level there when it started
-	// following. The runtime's resume cursor counts the target's revs only;
-	// remote changes travel without a rev, and the server catches a
-	// reconnected stream up from here. A changed level reopens the view.
+	// stream has sent, the rev it started following from, the key the
+	// stream names it by, and the viewer's level there when it started
+	// following. The runtime's resume cursor counts the target's revs; a
+	// remote change carries its store's key and rev on the side, the
+	// runtime sends back the newest it received, and a reconnected stream
+	// resumes each store from there (or from where it started following):
+	// what the server wrote is not what the browser got. A changed level
+	// reopens the view.
 	remote map[string]remoteState
 }
 
@@ -188,7 +193,9 @@ func (v *View) Wants(path string) bool {
 }
 
 type remoteState struct {
-	rev   int64
+	rev   int64 // the newest rev the stream sent
+	base  int64 // the rev the view started following from
+	key   string
 	level Level
 }
 
@@ -202,8 +209,16 @@ func (v *View) Watch(store string, rev int64, level Level) {
 		v.remote = map[string]remoteState{}
 	}
 	if _, ok := v.remote[store]; !ok {
-		v.remote[store] = remoteState{rev: rev, level: level}
+		v.remote[store] = remoteState{rev: rev, base: rev, key: strconv.Itoa(len(v.remote) + 1), level: level}
 	}
+}
+
+// RemoteKey is the key the stream names a followed store by: opaque to the
+// page, which need not learn store ids through an alias.
+func (v *View) RemoteKey(store string) string {
+	v.mu.Lock()
+	defer v.mu.Unlock()
+	return v.remote[store].key
 }
 
 // Watching reports whether the view follows store, and how far it got.
@@ -224,13 +239,17 @@ func (v *View) Caught(store string, rev int64) {
 	}
 }
 
-// Remotes lists the other stores the view follows, with their cursors.
-func (v *View) Remotes() map[string]int64 {
+// Resume lists the other stores the view follows, each with the rev a
+// reconnected stream resumes it from: the newest the runtime says it
+// received (confirmed, by store key), or the rev the view started
+// following from when it confirmed none. Never the rev the stream sent: a
+// write the connection accepted may not have reached the browser.
+func (v *View) Resume(confirmed map[string]int64) map[string]int64 {
 	v.mu.Lock()
 	defer v.mu.Unlock()
 	out := make(map[string]int64, len(v.remote))
 	for k, r := range v.remote {
-		out[k] = r.rev
+		out[k] = max(r.base, min(confirmed[r.key], r.rev))
 	}
 	return out
 }

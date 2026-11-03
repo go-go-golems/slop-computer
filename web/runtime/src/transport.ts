@@ -97,7 +97,10 @@ window.addEventListener("message", (e) => {
     secret = m.secret;
     viewId = m.view;
     waitingView.splice(0).forEach((w) => w(true));
-    if (changed) emit("newview", m.view);
+    if (changed) {
+      remoteRevs.clear(); // a new view names the stores it follows anew
+      emit("newview", m.view);
+    }
     startStream();
     return;
   }
@@ -138,6 +141,11 @@ let helloWaiters: Array<(h: Hello | null) => void> = [];
 // lastRev is the newest target rev this view has seen; -1 until the first
 // hello, so a resume from rev 0 (an empty target) still catches up.
 let lastRev = -1;
+// remoteRevs is, per other store the view follows (by the opaque key the
+// server names it by), the newest rev of it this runtime received. Sent
+// back on reconnect, so the server resumes from what arrived, not from
+// what it wrote (review of PR #20).
+const remoteRevs = new Map<string, number>();
 let connected = false;
 let streamGen = 0;
 let terminal = "";
@@ -175,7 +183,10 @@ function startStream() {
   (async function loop() {
     while (gen === streamGen && !terminal) {
       try {
-        const url = "/_rt/events" + (lastRev >= 0 ? "?after=" + lastRev : "");
+        const q: string[] = [];
+        if (lastRev >= 0) q.push("after=" + lastRev);
+        if (remoteRevs.size) q.push("remote=" + encodeURIComponent([...remoteRevs].map(([k, r]) => k + ":" + r).join(",")));
+        const url = "/_rt/events" + (q.length ? "?" + q.join("&") : "");
         const r = await fetch(url, { headers: { Authorization: "Bearer " + secret }, credentials: "omit", cache: "no-store" });
         if (r.status === 401) {
           setConnected(false);
@@ -243,6 +254,7 @@ function dispatch(type: string, ev: any) {
     case "doc":
       emit("doc", ev);
       if (ev.rev) seenRev(ev.rev);
+      if (ev.remote && ev.remoteRev > (remoteRevs.get(ev.remote) ?? 0)) remoteRevs.set(ev.remote, ev.remoteRev);
       return;
     case "revoked":
       terminal = "revoked";

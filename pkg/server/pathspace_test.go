@@ -11,6 +11,7 @@ import (
 	"maps"
 	"net/http"
 	"net/url"
+	"strconv"
 	"strings"
 	"testing"
 	"time"
@@ -189,6 +190,58 @@ func TestAliasStream(t *testing.T) {
 	}
 	if !seen["contacts/c2"] || !seen["contacts/c1 deleted"] {
 		t.Fatalf("catch-up after reconnect: %v", evs)
+	}
+}
+
+// A reconnected stream resumes another store from what the runtime says it
+// received (?remote=key:rev), not from what the server wrote: a change the
+// connection accepted but the browser never got comes again (review of
+// PR #20).
+func TestAliasResumeFromClientCursor(t *testing.T) {
+	h := newHarness(t)
+	admin := h.tokenFor("admin@example.com", "read", "write", "admin")
+	h.call(admin, "store.new", map[string]any{"id": "crm"})
+	h.call(admin, "grant.set", map[string]any{"store": "crm", "subject": "@guest", "level": "view"})
+	pageApp(h, admin, "dash", "/dash", `{}`)
+	h.call(admin, "bind.set", map[string]any{"store": "dash", "alias": "contacts", "target": "crm", "prefix": "contacts"})
+
+	s := h.site(h.cfg.Hosts.Live[0])
+	v := guestView(t, s, "/dash")
+	sbx := strings.TrimPrefix(strings.Split(v["url"].(string), "/v/")[0], "http://")
+	auth := map[string]string{"Authorization": "Bearer " + v["secret"].(string)}
+	rpc(s, v, "db.subscribe", map[string]any{"sub": "s1", "path": "contacts", "coll": true})
+	docsOf := func(evs []map[string]any) []string {
+		var out []string
+		for _, e := range evs {
+			if e["_type"] == "doc" {
+				out = append(out, e["path"].(string))
+			}
+		}
+		return out
+	}
+	// The server writes c1 to the stream; the browser is taken to have lost it.
+	stream, _ := s.do("GET", sbx, "/_rt/events", nil, auth)
+	go func() {
+		time.Sleep(200 * time.Millisecond)
+		h.call(admin, "docs.set", map[string]any{"store": "crm", "path": "contacts/c1", "data": map[string]any{"name": "Ada"}})
+	}()
+	evs := events(t, stream, 2, 3*time.Second)
+	if len(evs) < 2 || evs[1]["remote"] == nil || evs[1]["remoteRev"] == nil || evs[1]["rev"] != nil {
+		t.Fatalf("live remote change: %v", evs)
+	}
+	key, rev := evs[1]["remote"].(string), int64(evs[1]["remoteRev"].(float64))
+	time.Sleep(100 * time.Millisecond)
+	// Reconnect without having confirmed c1: it comes again.
+	stream, _ = s.do("GET", sbx, "/_rt/events?after=0", nil, auth)
+	if got := docsOf(events(t, stream, 2, time.Second)); len(got) != 1 || got[0] != "contacts/c1" {
+		t.Fatalf("resume without a remote cursor: %v", got)
+	}
+	time.Sleep(100 * time.Millisecond)
+	// Reconnect having confirmed c1: only what came after it.
+	h.call(admin, "docs.set", map[string]any{"store": "crm", "path": "contacts/c2", "data": map[string]any{"name": "Bo"}})
+	stream, _ = s.do("GET", sbx, "/_rt/events?after=0&remote="+key+":"+strconv.FormatInt(rev, 10), nil, auth)
+	if got := docsOf(events(t, stream, 3, time.Second)); len(got) != 1 || got[0] != "contacts/c2" {
+		t.Fatalf("resume from the confirmed cursor: %v", got)
 	}
 }
 

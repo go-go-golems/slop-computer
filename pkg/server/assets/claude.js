@@ -1,4 +1,4 @@
-/* slop page runtime (window.claude), built from web/runtime: do not edit. source sha256:64c9148f9b8f9573ab7d7bbbc9e22d1470c5d7c829a87e594bd463434b726adb */
+/* slop page runtime (window.claude), built from web/runtime: do not edit. source sha256:5f2045b5fc61b80ae06d3100bb08273441e929d852a890d9b1469cb84d617e42 */
 "use strict";
 (() => {
   // src/limits.ts
@@ -141,7 +141,10 @@
       secret = m.secret;
       viewId = m.view;
       waitingView.splice(0).forEach((w) => w(true));
-      if (changed) emit("newview", m.view);
+      if (changed) {
+        remoteRevs.clear();
+        emit("newview", m.view);
+      }
       startStream();
       return;
     }
@@ -174,6 +177,7 @@
   var hello = null;
   var helloWaiters = [];
   var lastRev = -1;
+  var remoteRevs = /* @__PURE__ */ new Map();
   var connected = false;
   var streamGen = 0;
   var terminal = "";
@@ -206,7 +210,10 @@
     (async function loop() {
       while (gen === streamGen && !terminal) {
         try {
-          const url = "/_rt/events" + (lastRev >= 0 ? "?after=" + lastRev : "");
+          const q = [];
+          if (lastRev >= 0) q.push("after=" + lastRev);
+          if (remoteRevs.size) q.push("remote=" + encodeURIComponent([...remoteRevs].map(([k, r2]) => k + ":" + r2).join(",")));
+          const url = "/_rt/events" + (q.length ? "?" + q.join("&") : "");
           const r = await fetch(url, { headers: { Authorization: "Bearer " + secret }, credentials: "omit", cache: "no-store" });
           if (r.status === 401) {
             setConnected(false);
@@ -272,6 +279,7 @@
       case "doc":
         emit("doc", ev);
         if (ev.rev) seenRev(ev.rev);
+        if (ev.remote && ev.remoteRev > (remoteRevs.get(ev.remote) ?? 0)) remoteRevs.set(ev.remote, ev.remoteRev);
         return;
       case "revoked":
         terminal = "revoked";

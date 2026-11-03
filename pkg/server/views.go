@@ -250,6 +250,11 @@ type docOut struct {
 	Patch   *rt.Patch       `json:"patch,omitempty"`
 	Base    int64           `json:"base,omitempty"`
 	Deleted bool            `json:"deleted,omitempty"`
+	// A change in another store the view follows: that store's key (rt.View
+	// RemoteKey) and, on a commit's last document, its rev there. The
+	// runtime keeps the newest and sends it back on reconnect (?remote=).
+	Remote    string `json:"remote,omitempty"`
+	RemoteRev int64  `json:"remoteRev,omitempty"`
 }
 
 func (s *Server) hello(ctx context.Context, v *rt.View, head int64) map[string]any {
@@ -340,9 +345,24 @@ func (s *Server) viewEvents(w http.ResponseWriter, r *http.Request) {
 		last = max(last, upTo)
 		return sendAll(docs, revs)
 	}
+	// sendRemote writes another store's documents, each with the store's
+	// key, putting each commit's rev there on its last document: the
+	// runtime's cursor for that store (rev is the view's own store's).
+	sendRemote := func(storeID string, docs []docOut, revs []int64) error {
+		key := v.RemoteKey(storeID)
+		for i, d := range docs {
+			d.Remote = key
+			if i == len(docs)-1 || revs[i+1] != revs[i] {
+				d.RemoteRev = revs[i]
+			}
+			if err := writeSSE(w, "doc", d); err != nil {
+				return err
+			}
+		}
+		return nil
+	}
 	// catchUpRemote sends what changed in another store this view follows
-	// after from. Remote documents carry no rev (the runtime's cursor
-	// counts the view's own store); the view keeps the remote cursor.
+	// after from.
 	catchUpRemote := func(storeID string, from int64) error {
 		rst, err := s.Env.K.Store(ctx, storeID)
 		if err != nil {
@@ -355,13 +375,16 @@ func (s *Server) viewEvents(w http.ResponseWriter, r *http.Request) {
 		}
 		r := s.readerFor(ctx, v, storeID)
 		reached := upTo
+		var docs []docOut
+		var revs []int64
 		for _, d := range rows {
 			for _, o := range r.pageDocs(v, d.Path, stored(d)) {
-				if err := writeSSE(w, "doc", o); err != nil {
-					return err
-				}
+				docs, revs = append(docs, o), append(revs, d.Rev)
 			}
 			reached = max(reached, d.Rev)
+		}
+		if err := sendRemote(storeID, docs, revs); err != nil {
+			return err
 		}
 		v.Caught(storeID, reached)
 		return nil
@@ -378,12 +401,15 @@ func (s *Server) viewEvents(w http.ResponseWriter, r *http.Request) {
 			return catchUpRemote(o.Store, from)
 		}
 		r := s.readerFor(ctx, v, o.Store)
+		var docs []docOut
+		var revs []int64
 		for _, c := range o.Changes {
 			for _, d := range r.pageDocs(v, c.Path, docOut{Version: c.Version, Body: c.Body, Patch: c.Patch, Base: c.Base, Deleted: c.Deleted}) {
-				if err := writeSSE(w, "doc", d); err != nil {
-					return err
-				}
+				docs, revs = append(docs, d), append(revs, o.Rev)
 			}
+		}
+		if err := sendRemote(o.Store, docs, revs); err != nil {
+			return err
 		}
 		v.Caught(o.Store, o.Rev)
 		return nil
@@ -394,8 +420,11 @@ func (s *Server) viewEvents(w http.ResponseWriter, r *http.Request) {
 	if resume && after >= 0 && after < head && catchUp(after) != nil {
 		return
 	}
-	// The other stores it follows: what changed while no stream was attached.
-	for storeID, from := range v.Remotes() {
+	// The other stores it follows: what changed since the runtime last
+	// received a change there (?remote=key:rev,…), or since the view
+	// started following it. Changes it got already come again; the runtime
+	// keeps the newer version, so a resume repeats rather than loses.
+	for storeID, from := range v.Resume(remoteCursors(r.URL.Query().Get("remote"))) {
 		if catchUpRemote(storeID, from) != nil {
 			return
 		}
@@ -450,6 +479,20 @@ func (s *Server) viewEvents(w http.ResponseWriter, r *http.Request) {
 		}
 		flusher.Flush()
 	}
+}
+
+// remoteCursors reads a reconnecting runtime's per-store cursors:
+// key:rev pairs, comma-separated. What does not parse is left out (that
+// store resumes from where the view started following it).
+func remoteCursors(q string) map[string]int64 {
+	out := map[string]int64{}
+	for _, p := range strings.Split(q, ",") {
+		k, r, ok := strings.Cut(p, ":")
+		if n, err := strconv.ParseInt(r, 10, 64); ok && err == nil && k != "" && n > 0 {
+			out[k] = n
+		}
+	}
+	return out
 }
 
 // publish sends every commit to the views of its store, with a patch
