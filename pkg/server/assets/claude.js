@@ -1,4 +1,4 @@
-/* slop page runtime (window.claude), built from web/runtime: do not edit. source sha256:df6f3e121ee80812a07ebe41cdeefb295d8fe684225260a7dccab8ac0e178011 */
+/* slop page runtime (window.claude), built from web/runtime: do not edit. source sha256:676ec47f1f0614c10f6905c0012e20702f87b044df993be93d551847c5aff1c5 */
 "use strict";
 (() => {
   // src/limits.ts
@@ -1068,6 +1068,17 @@
     }
     return known.get(path)?.body;
   }
+  async function writeRPC(args) {
+    for (let asked = 0; ; asked++) {
+      try {
+        return await rpc("db.write", args);
+      } catch (e) {
+        if (e?.code !== "confirmation_required" || !e.confirm || asked >= 4) throw e;
+        const r = await ask("confirm", { confirm: e.confirm }).catch(() => null);
+        if (!r?.approved) throw fail("confirmation_declined", "not allowed: " + e.message);
+      }
+    }
+  }
   async function write(path, op, body) {
     if (!await connect()) throw fail("not_granted", "db is not available in this view");
     const optimistic = op === "delete" ? null : op === "update" ? localBody(path) ? merge(localBody(path), body) : void 0 : body;
@@ -1093,7 +1104,7 @@
             }
           }
         }
-        return (await rpc("db.write", { path, op, body })).version;
+        return (await writeRPC({ path, op, body })).version;
       });
       if (version > 0 && op !== "update" && optimistic !== void 0) {
         remember(path, version, optimistic);

@@ -23,6 +23,14 @@ import (
 // StoresRoot is the top-level name under which other stores are reached.
 const StoresRoot = "_stores"
 
+// PeopleRoot is the top-level name of the registry's people (platform
+// admins only), under the same capability as _stores.
+const PeopleRoot = "_people"
+
+// RegistryColls are the registry's collections under _stores/<id>/: a
+// store's grants, its aliases, its own LLM budget.
+var RegistryColls = map[string]bool{"_grants": true, "_bindings": true, "_llm": true}
+
 // Reserved reports whether a path's first segment is the platform's.
 func Reserved(p string) bool { return strings.HasPrefix(p, "_") }
 
@@ -51,8 +59,9 @@ type Target struct {
 	Own   bool   // Store is the holder (Cap is then the view's own level)
 	Cap   Level  // the ceiling the route puts on the viewer's level
 	Via   string // "" (own), an alias name, or StoresRoot
-	// Registry: _stores or _stores/<id>, the registry's documents
-	// (SLOP3-008 phase 3; not served yet).
+	// Registry: the registry's documents (SLOP3-008 phase 3), with Path ""
+	// for _stores (Store "") and _stores/<id>, "_grants…", "_bindings…" or
+	// "_llm…" below it, and "_people…" (Store "").
 	Registry bool
 }
 
@@ -91,10 +100,27 @@ func (sp *Space) Resolve(p string, doc bool) (Target, error) {
 			}
 			return Target{Store: id, Via: StoresRoot, Cap: sp.Stores, Registry: true}, nil
 		}
-		if !segmentRe.MatchString(id) || !validPath(inner, doc) {
+		if !segmentRe.MatchString(id) {
+			return Target{}, pathErr("invalid_argument", p+" is not a "+kind+" path")
+		}
+		if sub, _, _ := strings.Cut(inner, "/"); RegistryColls[sub] {
+			if !registryPath(inner, doc) {
+				return Target{}, pathErr("invalid_argument", p+" is not a "+kind+" path")
+			}
+			return Target{Store: id, Path: inner, Via: StoresRoot, Cap: sp.Stores, Registry: true}, nil
+		}
+		if !validPath(inner, doc) {
 			return Target{}, pathErr("invalid_argument", p+" is not a "+kind+" path")
 		}
 		return sp.target(id, inner, sp.Stores, StoresRoot)
+	case head == PeopleRoot:
+		if sp == nil || sp.Stores == LevelNone {
+			return Target{}, pathErr("invalid_argument", "_people is not open to this app (capabilities.db.stores, allowed by an admin)")
+		}
+		if !registryPath(p, doc) {
+			return Target{}, pathErr("invalid_argument", p+" is not a "+kind+" path")
+		}
+		return Target{Path: p, Via: StoresRoot, Cap: sp.Stores, Registry: true}, nil
 	case Reserved(head):
 		return Target{}, pathErr("invalid_argument", head+" is reserved: top-level names beginning with _ are the platform's")
 	}
@@ -206,6 +232,16 @@ func (sp *Space) Equal(o *Space) bool {
 		}
 	}
 	return true
+}
+
+// registryPath checks a registry path below a root: one collection and at
+// most one document (_grants, _grants/@member), with plain segments.
+func registryPath(p string, doc bool) bool {
+	segs := strings.Split(p, "/")
+	if len(segs) > 2 || (len(segs) == 2) != doc {
+		return false
+	}
+	return len(segs) == 1 || (segmentRe.MatchString(segs[1]) && segs[1] != "." && segs[1] != "..")
 }
 
 // ValidAlias checks an alias that maps into the path space: a plain

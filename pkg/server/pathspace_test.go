@@ -221,11 +221,11 @@ func TestStoresSpace(t *testing.T) {
 	if out := rpc(s, v, "db.write", map[string]any{"path": "_stores/crm/contacts/c9", "op": "set", "body": map[string]any{}}); errCode(out) != "invalid_argument" {
 		t.Fatalf("write under a view _stores: %v", out)
 	}
-	// The registry's documents (phase 3) read as missing and empty.
-	if d := result(t, rpc(s, v, "db.get", map[string]any{"path": "_stores/crm"})); d["exists"] != false {
+	// The registry (phase 3): the guest reads crm's row, at its level there.
+	if d := result(t, rpc(s, v, "db.get", map[string]any{"path": "_stores/crm"})); d["exists"] != true || d["body"].(map[string]any)["level"] != "view" {
 		t.Fatalf("_stores/crm: %v", d)
 	}
-	if docs := result(t, rpc(s, v, "db.query", map[string]any{"coll": "_stores"}))["docs"].([]any); len(docs) != 0 {
+	if docs := result(t, rpc(s, v, "db.query", map[string]any{"coll": "_stores"}))["docs"].([]any); len(docs) != 2 { // crm and console's own
 		t.Fatalf("_stores: %v", docs)
 	}
 	// Another store's private documents: missing, even for their owner.
@@ -405,5 +405,112 @@ func TestFilesCapability(t *testing.T) {
 	r = result(t, rpc(s, v, "files.read", map[string]any{"path": "crm/docs/readme.md"}))
 	if b, _ := base64.StdEncoding.DecodeString(r["bytes"].(string)); string(b) != "# CRM" {
 		t.Fatalf("read under _stores: %v", r)
+	}
+}
+
+// adminView signs admin@example.com in on the live host and opens the page
+// mounted at path.
+func adminView(t *testing.T, h *harness, path string) (*site, map[string]any) {
+	t.Helper()
+	live := h.cfg.Hosts.Live[0]
+	b := h.browser()
+	b.signIn("admin@example.com")
+	s := h.site(live)
+	signInSite(t, h, s, b, live, path)
+	return s, guestView(t, s, path)
+}
+
+// The registry as documents (phase 3): an app allowed _stores reads stores,
+// grants, aliases and people as documents, and changes grants, aliases, a
+// store's type and a person's role by writing them, through the verbs that
+// own them, as the person, after they confirm, honouring ifVersion.
+func TestRegistryDocuments(t *testing.T) {
+	h := newHarness(t)
+	admin := h.tokenFor("admin@example.com", "read", "write", "admin")
+	h.call(admin, "store.new", map[string]any{"id": "crm"})
+	h.call(admin, "grant.set", map[string]any{"store": "crm", "subject": "@guest", "level": "view"})
+	pushApp(h, admin, "console", "/console", map[string]string{"app.json": `{"title":"c","capabilities":{"db":{"stores":"admin"}}}`, "index.html": `<!doctype html><title>c</title>`})
+	h.call(admin, "policy.set", map[string]any{"app": "console", "capability": "stores", "audience": "@admin", "value": "on"})
+	h.call(admin, "policy.set", map[string]any{"app": "console", "capability": "stores", "audience": "@guest", "value": "on"})
+
+	s, v := adminView(t, h, "/console")
+	ids := func(out map[string]any) []string {
+		var n []string
+		for _, d := range result(t, out)["docs"].([]any) {
+			n = append(n, d.(map[string]any)["path"].(string))
+		}
+		return n
+	}
+	if got := strings.Join(ids(rpc(s, v, "db.query", map[string]any{"coll": "_stores"})), " "); !strings.Contains(got, "_stores/crm") || !strings.Contains(got, "_stores/console") {
+		t.Fatalf("_stores: %s", got)
+	}
+	row := result(t, rpc(s, v, "db.get", map[string]any{"path": "_stores/crm"}))
+	if row["exists"] != true || row["body"].(map[string]any)["level"] != "admin" {
+		t.Fatalf("_stores/crm: %v", row)
+	}
+	if got := ids(rpc(s, v, "db.query", map[string]any{"coll": "_stores/crm/_grants"})); strings.Join(got, " ") != "_stores/crm/_grants/@guest" {
+		t.Fatalf("grants: %v", got)
+	}
+	g := result(t, rpc(s, v, "db.get", map[string]any{"path": "_stores/crm/_grants/@guest"}))
+	version := int64(g["version"].(float64))
+
+	// A write asks the person first, then runs grant.set as them.
+	write := map[string]any{"path": "_stores/crm/_grants/@member", "op": "set", "body": map[string]any{"level": "interact"}}
+	out := rpc(s, v, "db.write", write)
+	if errCode(out) != "confirmation_required" {
+		t.Fatalf("a registry write without confirmation: %v", out)
+	}
+	h.call(admin, "confirm.approve", map[string]any{"id": out["error"].(map[string]any)["confirm"]})
+	if out := rpc(s, v, "db.write", write); out["result"] == nil {
+		t.Fatalf("the confirmed write: %v", out)
+	}
+	grants := h.call(admin, "grant.ls", map[string]any{"store": "crm"}).([]any)
+	if len(grants) != 2 {
+		t.Fatalf("crm grants after the write: %v", grants)
+	}
+	// ifVersion: a stale version is a conflict, and nothing is asked.
+	if out := rpc(s, v, "db.write", map[string]any{"path": "_stores/crm/_grants/@guest", "op": "set", "body": map[string]any{"level": "interact"}, "ifVersion": version - 1}); errCode(out) != "conflict" {
+		t.Fatalf("stale ifVersion: %v", out)
+	}
+	// Fields a verb does not take are refused; read-only documents too.
+	if out := rpc(s, v, "db.write", map[string]any{"path": "_stores/crm", "op": "update", "body": map[string]any{"owner": "x"}}); errCode(out) != "invalid_argument" {
+		t.Fatalf("writing a store's owner: %v", out)
+	}
+	if out := rpc(s, v, "db.write", map[string]any{"path": "_stores/crm/_llm/budget", "op": "set", "body": map[string]any{}}); errCode(out) != "invalid_argument" {
+		t.Fatalf("writing the LLM budget: %v", out)
+	}
+	// People are listed for platform admins.
+	if got := ids(rpc(s, v, "db.query", map[string]any{"coll": "_people"})); len(got) == 0 || !strings.HasPrefix(got[0], "_people/usr_") {
+		t.Fatalf("_people: %v", got)
+	}
+
+	// A guest sees the stores it may open, but not their grants (grant.ls
+	// needs admin there), and cannot write the registry.
+	gs := h.site(h.cfg.Hosts.Live[0])
+	gv := guestView(t, gs, "/console")
+	if got := ids(rpc(gs, gv, "db.query", map[string]any{"coll": "_stores/crm/_grants"})); len(got) != 0 {
+		t.Fatalf("a guest reads crm's grants: %v", got)
+	}
+	if got := ids(rpc(gs, gv, "db.query", map[string]any{"coll": "_people"})); len(got) != 0 {
+		t.Fatalf("a guest lists people: %v", got)
+	}
+	if d := result(t, rpc(gs, gv, "db.get", map[string]any{"path": "_stores/crm"})); d["exists"] != true || d["body"].(map[string]any)["level"] != "view" {
+		t.Fatalf("a guest's _stores/crm: %v", d)
+	}
+}
+
+// Registry writes need capabilities.db.stores "admin".
+func TestRegistryWritesNeedAdminStores(t *testing.T) {
+	h := newHarness(t)
+	admin := h.tokenFor("admin@example.com", "read", "write", "admin")
+	h.call(admin, "store.new", map[string]any{"id": "crm"})
+	pushApp(h, admin, "viewer", "/viewer", map[string]string{"app.json": `{"title":"v","capabilities":{"db":{"stores":"view"}}}`, "index.html": `<!doctype html><title>v</title>`})
+	h.call(admin, "policy.set", map[string]any{"app": "viewer", "capability": "stores", "audience": "@admin", "value": "on"})
+	s, v := adminView(t, h, "/viewer")
+	if d := result(t, rpc(s, v, "db.get", map[string]any{"path": "_stores/crm"})); d["exists"] != true {
+		t.Fatalf("read with stores view: %v", d)
+	}
+	if out := rpc(s, v, "db.write", map[string]any{"path": "_stores/crm/_grants/@member", "op": "set", "body": map[string]any{"level": "view"}}); errCode(out) != "invalid_argument" {
+		t.Fatalf("a registry write with stores view: %v", out)
 	}
 }

@@ -51,7 +51,13 @@ func TestSpaceResolve(t *testing.T) {
 		{path: "_stores/crm", err: "invalid_argument"},
 		// the platform's names
 		{path: "_grants/x", doc: true, err: "invalid_argument"},
-		{path: "_stores/crm/_grants/x", doc: true, err: "invalid_argument"},
+		{path: "_stores/crm/_other/x", doc: true, err: "invalid_argument"},
+		// the registry's documents (phase 3)
+		{path: "_stores/crm/_grants", want: Target{Store: "crm", Path: "_grants", Via: StoresRoot, Cap: LevelView, Registry: true}},
+		{path: "_stores/crm/_grants/@member", doc: true, want: Target{Store: "crm", Path: "_grants/@member", Via: StoresRoot, Cap: LevelView, Registry: true}},
+		{path: "_stores/crm/_grants/@member/x", err: "invalid_argument"},
+		{path: "_people", want: Target{Path: "_people", Via: StoresRoot, Cap: LevelView, Registry: true}},
+		{path: "_people/usr_1", doc: true, want: Target{Path: "_people/usr_1", Via: StoresRoot, Cap: LevelView, Registry: true}},
 		// another store's private documents
 		{path: "people/users/u1", err: "not_found"},
 		{path: "people/users/u1/prefs", doc: true, err: "not_found"},

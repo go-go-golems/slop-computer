@@ -8,6 +8,7 @@ const cursor: number[] = []; // what moved the stream's resume cursor
 let answer: (res: unknown) => void = () => {};
 mock.module("../src/transport.ts", {
   namedExports: {
+    ask: async () => ({}), // the shell's confirmation (db.ts writeRPC)
     connect: async () => ({}),
     on: (type: string, h: (d: any) => void) => {
       handlers.set(type, [...(handlers.get(type) ?? []), h]);

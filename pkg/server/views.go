@@ -646,8 +646,14 @@ func (s *Server) dbGet(ctx context.Context, v *rt.View, path string) (any, error
 		return nil, err
 	}
 	missing := map[string]any{"path": path, "exists": false}
+	if r.tgt.Registry {
+		if d := s.registryDoc(ctx, v, r.tgt, path); d != nil {
+			return map[string]any{"path": path, "exists": true, "version": d.Version, "body": d.Body}, nil
+		}
+		return missing, nil
+	}
 	if r.st == nil {
-		return missing, nil // the registry's documents (phase 3), or no access
+		return missing, nil // no access
 	}
 	d, err := r.st.GetDoc(ctx, r.tgt.Path, func(p string) bool { return r.canRead(p, v.User) })
 	if errors.Is(err, store.ErrNotFound) {
@@ -665,6 +671,13 @@ func (s *Server) readable(ctx context.Context, v *rt.View, q rt.Query) ([]rt.Doc
 	r, err := s.route(ctx, v, q.Coll, false)
 	if err != nil {
 		return nil, err
+	}
+	if r.tgt.Registry {
+		docs := s.registryColl(ctx, v, r.tgt, q.Coll)
+		if docs == nil {
+			docs = []rt.Doc{}
+		}
+		return q.Apply(docs), nil
 	}
 	if r.st == nil {
 		return []rt.Doc{}, nil
@@ -743,8 +756,13 @@ func writeWho(v *rt.View, r route) store.Who {
 }
 
 // dbWrite validates and commits one write as one turn, in the store the
-// page path lives in.
+// page path lives in, or runs the registry verb a registry document's write
+// stands for.
 func (s *Server) dbWrite(ctx context.Context, v *rt.View, in writeIn) (int64, int64, error) {
+	if r, err := s.route(ctx, v, in.Path, true); err == nil && r.tgt.Registry {
+		version, err := s.registryWrite(ctx, v, r.tgt, in)
+		return version, 0, err
+	}
 	r, err := s.writeRoute(ctx, v, in.Path)
 	if err != nil {
 		return 0, 0, err
