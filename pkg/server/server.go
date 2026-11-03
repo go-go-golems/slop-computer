@@ -17,6 +17,8 @@ import (
 	capsdb "github.com/go-go-golems/slop-computer/pkg/caps/db"
 	"github.com/go-go-golems/slop-computer/pkg/commands"
 	"github.com/go-go-golems/slop-computer/pkg/config"
+	apidoor "github.com/go-go-golems/slop-computer/pkg/doors/api"
+	mcpdoor "github.com/go-go-golems/slop-computer/pkg/doors/mcp"
 	"github.com/go-go-golems/slop-computer/pkg/doors/web"
 	"github.com/go-go-golems/slop-computer/pkg/httpx"
 	"github.com/go-go-golems/slop-computer/pkg/identity"
@@ -248,8 +250,8 @@ func (s *Server) mainRoutes(m *http.ServeMux) {
 	s.authRoutes(m)
 	s.deviceRoutes(m)
 	s.billingRoutes(m)
-	s.apiRoutes(m)
-	s.mcpRoutes(m)
+	(&apidoor.Door{Web: s.web, People: s.People, Verbs: s.Verbs}).Routes(m)
+	(&mcpdoor.Door{Cfg: s.Cfg, Web: s.web, People: s.People, Verbs: s.Verbs}).Routes(m)
 	s.adminRoutes(m)
 }
 

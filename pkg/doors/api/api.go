@@ -1,4 +1,4 @@
-package server
+package api
 
 import (
 	"context"
@@ -17,7 +17,8 @@ import (
 // maxAPIBody fits a 50 MiB tree file as base64, plus its manifest.
 const maxAPIBody = 96 << 20
 
-func (s *Server) apiRoutes(m *http.ServeMux) {
+// Routes registers the door on the main host.
+func (s *Door) Routes(m *http.ServeMux) {
 	m.HandleFunc("GET /api/v1/verbs", func(w http.ResponseWriter, r *http.Request) {
 		httpx.JSON(w, 200, map[string]any{"verbs": s.Verbs.All()})
 	})
@@ -26,8 +27,8 @@ func (s *Server) apiRoutes(m *http.ServeMux) {
 
 // apiPrincipal authenticates an API call: a token, or a session with its
 // CSRF header. Nobody is an error.
-func (s *Server) apiPrincipal(w http.ResponseWriter, r *http.Request) *access.Principal {
-	p, sess, err := s.web.Principal(r)
+func (s *Door) apiPrincipal(w http.ResponseWriter, r *http.Request) *access.Principal {
+	p, sess, err := s.Web.Principal(r)
 	if err != nil || p == nil {
 		httpx.Fail(w, 401, "unauthenticated", "sign in, or send Authorization: Bearer <token>")
 		return nil
@@ -44,7 +45,7 @@ func (s *Server) apiPrincipal(w http.ResponseWriter, r *http.Request) *access.Pr
 	return p
 }
 
-func (s *Server) apiCall(w http.ResponseWriter, r *http.Request) {
+func (s *Door) apiCall(w http.ResponseWriter, r *http.Request) {
 	p := s.apiPrincipal(w, r)
 	if p == nil {
 		return
@@ -79,7 +80,7 @@ func (s *Server) apiCall(w http.ResponseWriter, r *http.Request) {
 // each part is a "part" event, then one "result" or "error" event. Until
 // the first part the answer is not yet a stream, so a refusal (arguments,
 // authority) is an ordinary JSON error with its status.
-func (s *Server) apiStream(ctx context.Context, w http.ResponseWriter, p *access.Principal, name string, args verbs.Args) {
+func (s *Door) apiStream(ctx context.Context, w http.ResponseWriter, p *access.Principal, name string, args verbs.Args) {
 	flusher, _ := w.(http.Flusher)
 	var mu sync.Mutex
 	started := false

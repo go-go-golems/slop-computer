@@ -1,4 +1,4 @@
-package server
+package mcp
 
 // The MCP door (SLOP3-009 step 6): POST /mcp on the main host speaks the
 // Model Context Protocol's streamable HTTP transport, generated from the
@@ -57,7 +57,8 @@ type mcpResponse struct {
 	Error   *mcpError       `json:"error,omitempty"`
 }
 
-func (s *Server) mcpRoutes(m *http.ServeMux) {
+// Routes registers the door on the main host.
+func (s *Door) Routes(m *http.ServeMux) {
 	m.HandleFunc("POST /mcp", s.mcpPost)
 	noStream := func(w http.ResponseWriter, _ *http.Request) {
 		w.Header().Set("Allow", "POST")
@@ -69,14 +70,14 @@ func (s *Server) mcpRoutes(m *http.ServeMux) {
 
 // mcpPrincipal authenticates an MCP request: a bearer token, from no
 // other site's page.
-func (s *Server) mcpPrincipal(w http.ResponseWriter, r *http.Request) *access.Principal {
+func (s *Door) mcpPrincipal(w http.ResponseWriter, r *http.Request) *access.Principal {
 	if o := r.Header.Get("Origin"); o != "" {
 		if u, err := url.Parse(o); err != nil || u.Host != s.Cfg.Hosts.Main {
 			httpx.Fail(w, 403, "permission_denied", "MCP requests from other sites' pages are refused")
 			return nil
 		}
 	}
-	p, _, err := s.web.Principal(r)
+	p, _, err := s.Web.Principal(r)
 	if err != nil || p == nil || p.Kind != access.KindToken {
 		w.Header().Set("WWW-Authenticate", `Bearer realm="slop"`)
 		httpx.Fail(w, 401, "unauthenticated", "send Authorization: Bearer <token> (slop token.new)")
@@ -86,12 +87,12 @@ func (s *Server) mcpPrincipal(w http.ResponseWriter, r *http.Request) *access.Pr
 	return p
 }
 
-func (s *Server) mcpPost(w http.ResponseWriter, r *http.Request) {
+func (s *Door) mcpPost(w http.ResponseWriter, r *http.Request) {
 	p := s.mcpPrincipal(w, r)
 	if p == nil {
 		return
 	}
-	raw, err := io.ReadAll(io.LimitReader(r.Body, maxAPIBody))
+	raw, err := io.ReadAll(io.LimitReader(r.Body, maxBody))
 	if err != nil {
 		httpx.Fail(w, 400, "invalid_argument", "unreadable body")
 		return
@@ -148,7 +149,7 @@ func (s *Server) mcpPost(w http.ResponseWriter, r *http.Request) {
 }
 
 // mcpVerb is the verb a tool name stands for.
-func (s *Server) mcpVerb(tool string) (*verbs.Verb, bool) {
+func (s *Door) mcpVerb(tool string) (*verbs.Verb, bool) {
 	for _, v := range s.Verbs.All() {
 		if v.Tool().Name == tool {
 			return v, true
@@ -160,7 +161,7 @@ func (s *Server) mcpVerb(tool string) (*verbs.Verb, bool) {
 // mcpCall runs tools/call: the verb as p, its result as content (and as
 // structured content when it is an object), a verb's refusal as a tool
 // error the model can read.
-func (s *Server) mcpCall(w http.ResponseWriter, r *http.Request, p *access.Principal, req mcpRequest) {
+func (s *Door) mcpCall(w http.ResponseWriter, r *http.Request, p *access.Principal, req mcpRequest) {
 	var in struct {
 		Name      string         `json:"name"`
 		Arguments map[string]any `json:"arguments"`
@@ -219,7 +220,7 @@ func (s *Server) mcpCall(w http.ResponseWriter, r *http.Request, p *access.Princ
 	mcpReply(w, req.ID, res, nil)
 }
 
-func (s *Server) callTool(ctx context.Context, p *access.Principal, verb string, args map[string]any) (any, error) {
+func (s *Door) callTool(ctx context.Context, p *access.Principal, verb string, args map[string]any) (any, error) {
 	return s.Verbs.Call(ctx, p, verb, verbs.Args(args))
 }
 
