@@ -22,41 +22,6 @@ var PolicyCaps = []string{"assets", "sample", "user.email", "fetch", "secrets", 
 // "store", a store acting on its own (alarms, reactors; SLOP3-007).
 var PolicyAudiences = []string{"guest", "member", "subscriber", "admin", "store"}
 
-// GroupsOf is the one place group nesting is decided (SLOP3-007 decision
-// 1): @admin ⊆ @subscriber ⊆ @member ⊆ @guest, so an audience's groups are
-// it and every audience below it. "store" (a store acting on its own) is a
-// group of its own, inside none of the others. Every "is this person in
-// this class?" question reads this, never a rank.
-func GroupsOf(audience string) []string {
-	switch audience {
-	case "guest":
-		return []string{"guest"}
-	case "member":
-		return []string{"guest", "member"}
-	case "subscriber":
-		return []string{"guest", "member", "subscriber"}
-	case "admin":
-		return []string{"guest", "member", "subscriber", "admin"}
-	case "store":
-		return []string{"store"}
-	}
-	return nil
-}
-
-// InGroup reports whether an audience's groups include group (with or
-// without its "@").
-func InGroup(audience, group string) bool {
-	if len(group) > 0 && group[0] == '@' {
-		group = group[1:]
-	}
-	for _, g := range GroupsOf(audience) {
-		if g == group {
-			return true
-		}
-	}
-	return false
-}
-
 // DefaultPolicy is a cell without a row: assets for members and up, the
 // rest off (and off for stores acting on their own).
 func DefaultPolicy(capability, audience string) bool {

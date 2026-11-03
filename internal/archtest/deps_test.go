@@ -17,7 +17,7 @@ const mod = "github.com/go-go-golems/slop-computer/"
 // Layers, by import path under the module (and the two outside imports the
 // rules name).
 var (
-	core     = []string{"pkg/rt", "pkg/ids", "pkg/blobs", "pkg/store", "pkg/access", "pkg/authz", "pkg/apps", "pkg/config", "pkg/httpx", "pkg/client"}
+	core     = []string{"pkg/rt", "pkg/sysdb", "pkg/ids", "pkg/blobs", "pkg/store", "pkg/access", "pkg/authz", "pkg/apps", "pkg/config", "pkg/httpx", "pkg/client"}
 	domains  = []string{"pkg/system", "pkg/registry", "pkg/identity", "pkg/billing", "pkg/llm", "pkg/kernel"}
 	caps     = []string{"pkg/caps"}
 	runtime  = []string{"pkg/actor"}

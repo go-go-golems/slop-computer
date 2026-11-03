@@ -1,7 +1,9 @@
-// Package system owns system.db: people, sessions, tokens, the stores
-// registry, grants, mounts, policy, LLM access, subscriptions and the
-// platform log. Store contents live in their own files (pkg/store).
-package system
+// Package sysdb is system.db (SLOP3-010 PR 2): opening and migrating it,
+// write transactions, the system log and its listeners, and the rows
+// several domains share (records.go). The domains (identity, registry,
+// policy, llm, billing) own their tables' queries over it. Store contents
+// live in their own files (pkg/store).
+package sysdb
 
 import (
 	"context"
@@ -160,7 +162,7 @@ func Log(ctx context.Context, x Execer, at int64, principal, via, summary string
 	}
 	for i, c := range changes {
 		if _, err := x.ExecContext(ctx, `INSERT INTO _changes (rev, seq, kind, key, op, before, after) VALUES (?, ?, ?, ?, ?, ?, ?)`,
-			rev, i, c.Kind, c.Key, c.Op, nullStr(c.Before), nullStr(c.After)); err != nil {
+			rev, i, c.Kind, c.Key, c.Op, NullStr(c.Before), NullStr(c.After)); err != nil {
 			return 0, err
 		}
 	}
@@ -269,19 +271,21 @@ func (d *DB) LogAfter(ctx context.Context, rev int64, limit int) ([]LogEntry, er
 	return out, ch.Err()
 }
 
-func nullStr(s string) any {
+// NullStr is s as a nullable SQL value ("" is NULL).
+func NullStr(s string) any {
 	if s == "" {
 		return nil
 	}
 	return s
 }
 
-func nullInt(p *int64) any {
+// NullInt is *p as a nullable SQL value (nil is NULL).
+func NullInt(p *int64) any {
 	if p == nil {
 		return nil
 	}
 	return *p
 }
 
-// splitScopes parses a space-separated scope list.
-func splitScopes(s string) []string { return strings.Fields(s) }
+// SplitScopes parses a space-separated scope list.
+func SplitScopes(s string) []string { return strings.Fields(s) }

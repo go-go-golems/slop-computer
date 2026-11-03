@@ -10,25 +10,6 @@ import (
 )
 
 // Roles of a user. Guests are people of kind guest with role "guest".
-const (
-	RolePending  = "pending"
-	RoleMember   = "member"
-	RoleAdmin    = "admin"
-	RoleDisabled = "disabled"
-	RoleGuest    = "guest"
-)
-
-// Person is a user or a guest.
-type Person struct {
-	ID         string `json:"id"`
-	Kind       string `json:"kind"`
-	Email      string `json:"email,omitempty"`
-	Name       string `json:"name"`
-	Role       string `json:"role"`
-	CreatedAt  int64  `json:"createdAt"`
-	LastSeenAt int64  `json:"lastSeenAt"`
-}
-
 const personCols = `id, kind, coalesce(email, ''), name, role, created_at, last_seen_at`
 
 func scanPerson(row interface{ Scan(...any) error }) (Person, error) {

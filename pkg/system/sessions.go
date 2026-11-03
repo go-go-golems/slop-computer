@@ -93,13 +93,6 @@ func (d *DB) DeleteSession(ctx context.Context, secret string) error {
 	return err
 }
 
-// Scopes of a token.
-const (
-	ScopeRead  = "read"
-	ScopeWrite = "write"
-	ScopeAdmin = "admin"
-)
-
 // ScopesForRole are the scopes a user with role may give a token.
 func ScopesForRole(role string) []string {
 	switch role {

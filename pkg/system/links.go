@@ -9,19 +9,6 @@ import (
 	"github.com/go-go-golems/slop-computer/pkg/ids"
 )
 
-// Link is a share link: a secret URL that gives its opener a level on a
-// store, by writing a grant whose via is the link's id.
-type Link struct {
-	ID        string `json:"id"`
-	Store     string `json:"store"`
-	Level     string `json:"level"`
-	CreatedBy string `json:"createdBy"`
-	CreatedAt int64  `json:"createdAt"`
-	ExpiresAt int64  `json:"expiresAt,omitempty"`
-	RevokedAt int64  `json:"revokedAt,omitempty"`
-	Uses      int    `json:"uses"` // grants it gave that still stand
-}
-
 // CreateLink makes a link to store and returns it with its token, which
 // is shown once and kept only as a hash.
 func (d *DB) CreateLink(ctx context.Context, actor, via, store, level string, expiresAt int64) (Link, string, error) {

@@ -7,46 +7,6 @@ import (
 	"regexp"
 )
 
-// StoreRow is a store's registry row.
-type StoreRow struct {
-	ID        string `json:"id"`
-	Type      string `json:"type,omitempty"`
-	App       string `json:"app,omitempty"` // the app store it runs; "" = itself
-	Owner     string `json:"owner"`
-	CreatedAt int64  `json:"createdAt"`
-	MadeBy    string `json:"madeBy,omitempty"`
-}
-
-// Grant gives a subject a level on a store.
-type Grant struct {
-	Store     string `json:"store"`
-	Subject   string `json:"subject"`
-	Level     string `json:"level"`
-	Via       string `json:"via"`
-	CreatedBy string `json:"createdBy,omitempty"`
-	CreatedAt int64  `json:"createdAt"`
-	// Link is the share link a grant came from (via = its id), read with
-	// the grant: a link grant counts only while the link does (SLOP3-007).
-	Link *GrantLink `json:"-"`
-	// Inactive says why a link grant no longer counts (grant.ls fills it).
-	Inactive string `json:"inactive,omitempty"`
-}
-
-// GrantLink is the state of the link behind a grant.
-type GrantLink struct {
-	Creator   string // who made the link: their level bounds it
-	Level     string // the level the link gives
-	RevokedAt int64  // 0: not revoked
-	ExpiresAt int64  // 0: never
-}
-
-// Live reports whether the link still stands at now (ms): not revoked, not
-// expired. Its creator's level is checked by the caller (access), which
-// can compute levels.
-func (l *GrantLink) Live(now int64) bool {
-	return l.RevokedAt == 0 && (l.ExpiresAt == 0 || l.ExpiresAt > now)
-}
-
 var storeID = regexp.MustCompile(`^[a-z0-9][a-z0-9-]{0,62}$`)
 
 // ValidStoreID reports a valid store id slug.
@@ -201,12 +161,6 @@ func (d *DB) RemoveStore(ctx context.Context, actor, via, id string) error {
 		return err
 	})
 }
-
-// Levels, ordered.
-var levelRank = map[string]int{"": 0, "none": 0, "view": 1, "interact": 2, "admin": 3, "owner": 4}
-
-// ValidLevel reports a grantable level.
-func ValidLevel(l string) bool { return levelRank[l] > 0 }
 
 // Grants lists a store's grants.
 func (d *DB) Grants(ctx context.Context, store string) ([]Grant, error) {
