@@ -14,6 +14,8 @@ Owners: []
 RelatedFiles:
     - Path: repo://pkg/caps/db/db.go
       Note: 'Step 4: the db capability shared by pages and actors'
+    - Path: repo://pkg/caps/sample/sample.go
+      Note: 'Step 5: the sample capability shared by pages, actors and sample.run'
 ExternalSources: []
 Summary: ""
 LastUpdated: 2026-11-03T13:31:21.022201991-05:00
@@ -337,3 +339,70 @@ The page path space moved out of `pkg/server` into `pkg/caps/db`, and an actor's
 ### Code review instructions
 - `pkg/caps/db/db.go` top to bottom, then `pkg/server/space.go`, the wrappers in `views.go`, and `pkg/actor/modules.go` (`Paths`, `dbView`, `resolve`, `ownPath`, `queryDocs`).
 - `GOWORK=off go test ./pkg/server -run 'TestActorDBPathSpace|TestAlias|TestStoresSpace|TestRegistry' -count=1 -v`, then `SLOP_BENCH=1 GOWORK=off go test ./pkg/server -run TestBenchPageDBQuery -v`.
+
+## Step 5: pkg/caps/sample, one sample for pages, actors and the CLI
+
+`sample` had two implementations: the page's streamed `/_rt/sample` and the actor's `use('sample')`. Both did the same access check, budget check, metering and failure mapping, with small differences. These now live in `pkg/caps/sample`. A third caller came with them: `sample.run`, the first verb whose result streams.
+
+### Prompt Context
+**User prompt (verbatim):** see Step 2 ("let's leave #415, and now build SLOP3-009"); mid-step the user asked "where are we right nwo?", answered with a status summary.
+**Assistant interpretation:** Design-doc §11 step 5.
+**Inferred user intent:** One sample path behind the backend and the meter, streaming through `Emit`, usable from the CLI.
+**Commit (code):** e34e457 — "SLOP3-009 step 5: pkg/caps/sample, one sample for pages, actors and the CLI"
+
+### What I did
+- `pkg/caps/sample/sample.go`: `Sampler{Backend, Sys}`:
+  - `Available` and `Models`;
+  - `Limits(payer, audience)`;
+  - `Check`, which refuses as unavailable, permission_denied or quota_exceeded, each a `*llm.Failure`;
+  - `Run(payer, limits, req, emit, execute)`: the meter, accumulated usage that is never forwarded, an `llm.Answer`, and errors mapped to `quota_exceeded` or `upstream_error`.
+- `pkg/caps/sample/verb.go`: `sample.run`, a `Def[RunIn, llm.Answer]` with Scope write and Effect stream. The payer is the principal's person, under their audience, with no app policy. Parts are `{text, delta}`.
+- `pkg/llm/request.go`: `In`, `NewRequest(prefix, in, images)` (with the `prompt_too_large` code), `InputOf` and `ParseJSON`. `llm.Answer`/`AnswerUsage` are in `backend.go`.
+- Page (`pkg/server/sample.go`): `sampleView` and `startSample` use `s.sampler()`, which is built per call because the backend is assigned after the server, and in tests after the harness. `actorSampler` adapts it for `Manager.Sample`.
+- Actor (`pkg/actor/sample.go`): `Sampler` interface, `sampleFail`. `use('sample')` requires `Sample.Available()`.
+- Streaming verbs:
+  - `verbs.WithEmit`/`Emit`/`Req.Emit`;
+  - `apiStream` in `pkg/server/api.go`;
+  - `client.CallStream` with `decodeAnswer`;
+  - the CLI's `verbCommand` prints deltas to stderr.
+- `verbs.Error.Status`: `prompt_too_large` → 400, `upstream_error` → 502.
+
+### Why
+- **What stays with the caller.** A page pays as its viewer under the app's policy, an actor as its visitor (or the store's owner), the CLI as the token's person. Tools also differ: a page round-trips them to the browser, and actors and the CLI have none. So the shared part is the money and the backend, and the rest is a callback.
+- **Request helpers in `pkg/llm`.** The ratchet forbids actor → caps, and the actor must build requests. They sit next to `ValidateRequest`, where they belong anyway.
+- **Lazy SSE in the HTTP door.** Until the first part, nothing has been written, so a refusal (arguments, authority, no LLM access) keeps its status code and JSON body. A client that asked for a stream still gets an ordinary error.
+
+### What worked
+- `TestSampleRunVerb`:
+  - the whole answer without streaming;
+  - `fixture:stream` through `client.CallStream`: three parts, then `first second third`;
+  - mia, with no LLM access, is refused 403 `permission_denied` with and without streaming;
+  - `input: 42` → `invalid_argument`;
+  - `llm.usage` shows the admin charged.
+- The existing page and actor sample tests (`TestLLMBudgets` etc.) pass unchanged.
+- Mutations, each caught:
+  - M1, `Check` without the access test → `llm_policy_test.go:86: member: map[result:…]` (actor) and `sample_verb_test.go:51: … want permission_denied, got 200` (verb). One check now guards both;
+  - M2, the HTTP door not installing the emitter → `sample_verb_test.go:47: streamed [], then map[… text:first second third …]`.
+- `GOWORK=off go test ./... -count=1`: all pass. Lint: 0 issues after one errcheck (`fmt.Fprint` in the CLI).
+
+### What didn't work
+- My first test read `u["used"]` from `llm.usage`, but the value sits at `u["llm"]["used"]`: `usage after sample.run: map[audience:admin llm:map[… used:22] …]`.
+
+### What I learned
+- The fake backend's `fixture:stream` path reports no usage and no model (`usage:{0,0}`, `model:""`). The meter still holds and settles each round in full on `Close`, so streamed calls are charged; an answer's `usage` just reads zero there.
+- `TestEffects` in `pkg/verbs` can't see `sample.run`, because `caps/sample` isn't linked into that test binary. Verbs registered outside `pkg/verbs` are only visible in binaries that import their package (the server, and `cmd/slop` through it).
+
+### What was tricky to build
+- **Two error shapes from `Run`.** A backend error event (already streamed to a page) is the answer's `Failure`. The backend's returned error is Run's error. Merging them would have made the page send its error twice.
+- **The actor's codes stayed as they were:** a backend failure is `unavailable` to an actor, `quota_exceeded` stays itself. That's why `sampleFail` maps `upstream_error` to `unavailable`.
+
+### What warrants a second pair of eyes
+- **`sample.run` has no app policy.** Any person with LLM access and a write-scoped token can spend their own budget from the CLI. That matches the design ("as yourself, no app in between"), but it is a new way to spend.
+- **I did not run the CLI live against a server.** The streaming client is tested (`CallStream`); the CLI's 15 lines (deltas to stderr, result to stdout) are not.
+
+### What should be done in the future
+- Step 6: the MCP door, from the table. `sample.run`'s parts map onto MCP progress notifications.
+
+### Code review instructions
+- `pkg/caps/sample/*.go`, `pkg/llm/request.go`, then the two callers, `pkg/server/sample.go` and `pkg/actor/sample.go`, then `apiStream` and `client.CallStream`.
+- `GOWORK=off go test ./pkg/server -run 'TestSampleRunVerb|TestLLM|Sample' -count=1 -v`
