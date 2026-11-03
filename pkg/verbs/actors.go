@@ -194,40 +194,14 @@ func init() {
 				if _, _, err := e.open(ctx, p, a.S("store"), rt.LevelAdmin, "binding"); err != nil {
 					return nil, err
 				}
-				prefix, lv := a.S("prefix"), a.S("level")
-				level := rt.LevelView
-				switch {
-				case prefix == "" && lv != "":
-					return nil, Errf("invalid_argument", "--level needs --prefix: only an alias in the pages' db has a level")
-				case prefix != "":
-					if err := rt.ValidAlias(a.S("alias"), prefix); err != nil {
-						return nil, Errf("invalid_argument", "%s", err.(*rt.PathError).Msg)
-					}
-					if lv != "" {
-						l, ok := rt.ParseLevel(lv)
-						if !ok || l < rt.LevelView || l > rt.LevelAdmin {
-							return nil, Errf("invalid_argument", "--level is view, interact or admin")
-						}
-						level = l
-					}
-				}
-				// You cannot alias more than you hold: pages read the target
-				// through the alias up to its level, as their own viewers.
-				need, why := level, "binding to"
-				if a.B("assets") {
-					need, why = rt.LevelAdmin, "sharing the uploads of"
-				}
-				if _, _, err := e.open(ctx, p, a.S("target"), need, why); err != nil {
+				b := system.Binding{Store: a.S("store"), Alias: a.S("alias"), Target: a.S("target"), Assets: a.B("assets"), Prefix: a.S("prefix"), Level: a.S("level")}
+				if err := checkAlias(ctx, e, p, &b); err != nil {
 					return nil, err
-				}
-				b := system.Binding{Store: a.S("store"), Alias: a.S("alias"), Target: a.S("target"), Assets: a.B("assets"), Prefix: prefix}
-				if prefix != "" {
-					b.Level = level.String()
 				}
 				if err := e.Sys.SetBinding(ctx, p.ID(), p.ViaLabel(), b); err != nil {
 					return nil, err
 				}
-				if e.AccessChanged != nil && prefix != "" {
+				if e.AccessChanged != nil && b.Prefix != "" {
 					e.AccessChanged(ctx, b.Store) // open pages reopen with the new path space
 				}
 				return b, nil
@@ -248,4 +222,37 @@ func init() {
 				return map[string]any{"removed": a.S("alias")}, err
 			}},
 	)
+}
+
+// checkAlias checks a binding as bind.set takes it (and a mount's alias
+// template, without its store): a valid alias and prefix, a level only with
+// a prefix (view when none is given), and p holding that level on the target,
+// admin with assets. You cannot alias more than you hold: pages read the
+// target through the alias up to its level, as their own viewers.
+func checkAlias(ctx context.Context, e *Env, p *access.Principal, b *system.Binding) error {
+	level := rt.LevelView
+	switch {
+	case b.Prefix == "" && b.Level != "":
+		return Errf("invalid_argument", "--level needs --prefix: only an alias in the pages' db has a level")
+	case b.Prefix != "":
+		if err := rt.ValidAlias(b.Alias, b.Prefix); err != nil {
+			return Errf("invalid_argument", "%s", err.(*rt.PathError).Msg)
+		}
+		if b.Level != "" {
+			l, ok := rt.ParseLevel(b.Level)
+			if !ok || l < rt.LevelView || l > rt.LevelAdmin {
+				return Errf("invalid_argument", "--level is view, interact or admin")
+			}
+			level = l
+		}
+		b.Level = level.String()
+	case b.Alias == "" || b.Target == "":
+		return Errf("invalid_argument", "an alias needs a name and a target")
+	}
+	need, why := level, "binding to"
+	if b.Assets {
+		need, why = rt.LevelAdmin, "sharing the uploads of"
+	}
+	_, _, err := e.open(ctx, p, b.Target, need, why)
+	return err
 }

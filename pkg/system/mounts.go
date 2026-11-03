@@ -18,18 +18,25 @@ type Mount struct {
 	Type           string `json:"type,omitempty"`           // with StoreParam: the type required
 	CreateApp      string `json:"createApp,omitempty"`      // live hosts: offer to create a store of this app
 	CreateAudience string `json:"createAudience,omitempty"` // who may create: member, subscriber or admin
-	ChangedBy      string `json:"changedBy,omitempty"`
-	ChangedAt      int64  `json:"changedAt"`
+	// Aliases bind each store the mount creates (with CreateApp): bindings
+	// without their store, which is the new one (SLOP3-008 phase 4).
+	Aliases   []Binding `json:"aliases,omitempty"`
+	ChangedBy string    `json:"changedBy,omitempty"`
+	ChangedAt int64     `json:"changedAt"`
 }
 
 const mountCols = `host, path, coalesce(store, ''), coalesce(store_param, ''), coalesce(type, ''), coalesce(create_app, ''),
-	coalesce(create_audience, ''), coalesce(changed_by, ''), changed_at`
+	coalesce(create_audience, ''), aliases, coalesce(changed_by, ''), changed_at`
 
 func scanMount(row interface{ Scan(...any) error }) (Mount, error) {
 	var m Mount
-	err := row.Scan(&m.Host, &m.Path, &m.Store, &m.StoreParam, &m.Type, &m.CreateApp, &m.CreateAudience, &m.ChangedBy, &m.ChangedAt)
+	var aliases string
+	err := row.Scan(&m.Host, &m.Path, &m.Store, &m.StoreParam, &m.Type, &m.CreateApp, &m.CreateAudience, &aliases, &m.ChangedBy, &m.ChangedAt)
 	if errors.Is(err, sql.ErrNoRows) {
 		return m, ErrNotFound
+	}
+	if err == nil && aliases != "" {
+		err = json.Unmarshal([]byte(aliases), &m.Aliases)
 	}
 	return m, err
 }
@@ -83,6 +90,15 @@ func ValidMountPath(p string) bool {
 	return true
 }
 
+// aliasesJSON is a mount's alias template as stored: "" for none.
+func aliasesJSON(bs []Binding) string {
+	if len(bs) == 0 {
+		return ""
+	}
+	b, _ := json.Marshal(bs)
+	return string(b)
+}
+
 func mountJSON(m *Mount) string {
 	if m == nil {
 		return ""
@@ -99,11 +115,11 @@ func (d *DB) SetMount(ctx context.Context, actor, via string, m Mount) (Mount, e
 		if old, err := scanMount(tx.QueryRowContext(ctx, `SELECT `+mountCols+` FROM mounts WHERE host = ? AND path = ?`, m.Host, m.Path)); err == nil {
 			before = &old
 		}
-		if _, err := tx.ExecContext(ctx, `INSERT INTO mounts (host, path, store, store_param, type, create_app, create_audience, changed_by, changed_at)
-			VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?) ON CONFLICT (host, path) DO UPDATE SET store = excluded.store, store_param = excluded.store_param,
-			type = excluded.type, create_app = excluded.create_app, create_audience = excluded.create_audience,
+		if _, err := tx.ExecContext(ctx, `INSERT INTO mounts (host, path, store, store_param, type, create_app, create_audience, aliases, changed_by, changed_at)
+			VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?) ON CONFLICT (host, path) DO UPDATE SET store = excluded.store, store_param = excluded.store_param,
+			type = excluded.type, create_app = excluded.create_app, create_audience = excluded.create_audience, aliases = excluded.aliases,
 			changed_by = excluded.changed_by, changed_at = excluded.changed_at`,
-			m.Host, m.Path, nullStr(m.Store), nullStr(m.StoreParam), nullStr(m.Type), nullStr(m.CreateApp), nullStr(m.CreateAudience), nullStr(actor), m.ChangedAt); err != nil {
+			m.Host, m.Path, nullStr(m.Store), nullStr(m.StoreParam), nullStr(m.Type), nullStr(m.CreateApp), nullStr(m.CreateAudience), aliasesJSON(m.Aliases), nullStr(actor), m.ChangedAt); err != nil {
 			return err
 		}
 		return d.logMount(ctx, tx, actor, via, m.Host, m.Path, before, &m)
@@ -150,9 +166,9 @@ func (d *DB) UndoMount(ctx context.Context, actor, via, host, path string) (*Mou
 				return err
 			}
 			m.ChangedBy, m.ChangedAt = actor, d.NowMs()
-			if _, err := tx.ExecContext(ctx, `INSERT INTO mounts (host, path, store, store_param, type, create_app, create_audience, changed_by, changed_at)
-				VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`, m.Host, m.Path, nullStr(m.Store), nullStr(m.StoreParam), nullStr(m.Type),
-				nullStr(m.CreateApp), nullStr(m.CreateAudience), nullStr(actor), m.ChangedAt); err != nil {
+			if _, err := tx.ExecContext(ctx, `INSERT INTO mounts (host, path, store, store_param, type, create_app, create_audience, aliases, changed_by, changed_at)
+				VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`, m.Host, m.Path, nullStr(m.Store), nullStr(m.StoreParam), nullStr(m.Type),
+				nullStr(m.CreateApp), nullStr(m.CreateAudience), aliasesJSON(m.Aliases), nullStr(actor), m.ChangedAt); err != nil {
 				return err
 			}
 			restored = &m

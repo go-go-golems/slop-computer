@@ -443,6 +443,15 @@ func (s *Server) siteCreate(w http.ResponseWriter, r *http.Request) {
 		failView(w, err)
 		return
 	}
+	// The mount's alias template binds the new store (SLOP3-008 phase 4), as
+	// the admin who set it checked; its owner can change them afterwards.
+	for _, b := range m.Mount.Aliases {
+		b.Store = row.ID
+		if err := s.Sys.SetBinding(ctx, p.ID(), "mount:"+m.Mount.Host+m.Mount.Path, b); err != nil {
+			failView(w, err)
+			return
+		}
+	}
 	httpx.JSON(w, 201, map[string]any{"store": row.ID, "path": mountPath(m.Mount.Path, m.Params, m.Mount.StoreParam, row.ID)})
 }
 

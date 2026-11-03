@@ -11,7 +11,7 @@ import (
 // Prefix (SLOP3-008): the alias also maps into the store's pages' db, as
 // <alias>/… → the target's <prefix>/…, at most at Level.
 type Binding struct {
-	Store  string `json:"store"`
+	Store  string `json:"store,omitempty"` // "" in a mount's alias template
 	Alias  string `json:"alias"`
 	Target string `json:"target"`
 	Assets bool   `json:"assets,omitempty"`

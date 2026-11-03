@@ -8,6 +8,7 @@ import (
 	"context"
 	"encoding/base64"
 	"io"
+	"maps"
 	"net/http"
 	"net/url"
 	"strings"
@@ -516,5 +517,71 @@ func TestRegistryWritesNeedAdminStores(t *testing.T) {
 	}
 	if out := rpc(s, v, "db.write", map[string]any{"path": "_stores/crm/_grants/@member", "op": "set", "body": map[string]any{"level": "view"}}); errCode(out) != "invalid_argument" {
 		t.Fatalf("a registry write with stores view: %v", out)
+	}
+}
+
+// Alias templates on mounts (phase 4): a mount that creates stores binds
+// each one it creates as its template says, so the new page reads its
+// aliases from the start; the template is checked as bind.set checks a
+// binding, and mount.undo restores it with the rest of the mount.
+func TestMountAliasTemplate(t *testing.T) {
+	h := newHarness(t)
+	admin := h.tokenFor("admin@example.com", "read", "write", "admin")
+	live := h.cfg.Hosts.Live[0]
+	h.call(admin, "store.new", map[string]any{"id": "crm"})
+	h.call(admin, "docs.set", map[string]any{"store": "crm", "path": "contacts/c1", "data": map[string]any{"name": "Ada"}})
+	h.call(admin, "store.new", map[string]any{"id": "dash"})
+	h.call(admin, "files.push", map[string]any{"store": "dash", "files": files(map[string]string{
+		"app.json":   `{"title":"d","type":"dashboard","capabilities":{"db":{}}}`,
+		"index.html": `<!doctype html><title>d</title>`,
+	})})
+	tmpl := []any{map[string]any{"alias": "contacts", "target": "crm", "prefix": "contacts", "level": "view"}}
+	mount := map[string]any{"host": live, "path": "/d/:id", "storeParam": "id", "createApp": "dash", "aliases": tmpl}
+
+	for _, bad := range map[string][]any{
+		"a level above admin": {map[string]any{"alias": "contacts", "target": "crm", "prefix": "contacts", "level": "owner"}},
+		"a reserved alias":    {map[string]any{"alias": "_stores", "target": "crm", "prefix": "contacts"}},
+		"an unknown field":    {map[string]any{"alias": "contacts", "target": "crm", "prefix": "contacts", "to": "x"}},
+		"twice":               {tmpl[0], tmpl[0]},
+	} {
+		m := maps.Clone(mount)
+		m["aliases"] = bad
+		h.fail(admin, "mount.set", m, "invalid_argument")
+	}
+	h.fail(admin, "mount.set", map[string]any{"host": live, "path": "/x", "store": "dash", "aliases": tmpl}, "invalid_argument")
+	h.fail(admin, "mount.set", map[string]any{"host": live, "path": "/d/:id", "storeParam": "id", "createApp": "dash",
+		"aliases": []any{map[string]any{"alias": "contacts", "target": "nope", "prefix": "contacts"}}}, "not_found")
+
+	h.call(admin, "mount.set", mount)
+	ms := h.call(admin, "mount.ls", map[string]any{"host": live}).([]any)
+	if got := ms[0].(map[string]any)["mount"].(map[string]any)["aliases"]; got == nil {
+		t.Fatalf("mount.ls: %v", ms)
+	}
+
+	// A signed-in member creates a dashboard at /d/…; it comes bound.
+	s, b := h.site(live), h.browser()
+	b.signIn("admin@example.com")
+	signInSite(t, h, s, b, live, "/d/new")
+	r, out := s.do("POST", live, "/_site/create", map[string]any{"path": "/d/new"}, nil)
+	if r.StatusCode != 201 {
+		t.Fatalf("create: %d %v", r.StatusCode, out)
+	}
+	id := out["store"].(string)
+	bs := h.call(admin, "bind.ls", map[string]any{"store": id}).([]any)
+	if len(bs) != 1 || bs[0].(map[string]any)["prefix"] != "contacts" || bs[0].(map[string]any)["level"] != "view" {
+		t.Fatalf("the new store's bindings: %v", bs)
+	}
+	v := guestView(t, s, out["path"].(string))
+	if d := result(t, rpc(s, v, "db.get", map[string]any{"path": "contacts/c1"})); d["exists"] != true {
+		t.Fatalf("the new page reads crm: %v", d)
+	}
+
+	// Replacing the mount drops the template; undo brings it back.
+	delete(mount, "aliases")
+	h.call(admin, "mount.set", mount)
+	h.call(admin, "mount.undo", map[string]any{"host": live, "path": "/d/:id"})
+	ms = h.call(admin, "mount.ls", map[string]any{"host": live}).([]any)
+	if got := ms[0].(map[string]any)["mount"].(map[string]any)["aliases"].([]any); len(got) != 1 {
+		t.Fatalf("after undo: %v", ms)
 	}
 }
