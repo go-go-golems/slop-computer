@@ -624,7 +624,7 @@ func (s *Server) recheck(ctx context.Context, v *rt.View, row system.StoreRow) b
 	case d.Level == rt.LevelNone:
 		s.rt.views.Close(v, true)
 	case d.Level != v.Level || string(d.Audience) != v.Role || !s.samePolicy(ctx, v, string(d.Audience)) ||
-		!s.spaceOf(ctx, v.Target, v.Caps, v.Policy).Equal(v.Space) || // its aliases changed (SLOP3-008)
+		!s.db.Space(ctx, v.Target, v.Caps, v.Policy["stores"]).Equal(v.Space) || // its aliases changed (SLOP3-008)
 		s.remoteLevelsMoved(ctx, v): // or the viewer's level on a store it reads
 		v.Send(rt.Out{Type: "access", Data: map[string]any{"level": d.Level.String()}})
 		s.rt.views.Close(v, false)

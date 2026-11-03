@@ -119,15 +119,15 @@ func (s *Server) refreshRegistry(ctx context.Context, rev int64) {
 		}
 		for _, sub := range subs {
 			r, err := s.route(ctx, v, sub.Path, !sub.Coll)
-			if err != nil || !r.tgt.Registry {
+			if err != nil || !r.Tgt.Registry {
 				continue
 			}
 			var now []rt.Doc
 			if sub.Coll {
 				q := sub.Query
 				q.Coll = sub.Path
-				now = q.Apply(s.reg.Coll(ctx, v, r.tgt, sub.Path))
-			} else if d := s.reg.Doc(ctx, v, r.tgt, sub.Path); d != nil {
+				now = q.Apply(s.reg.Coll(ctx, v, r.Tgt, sub.Path))
+			} else if d := s.reg.Doc(ctx, v, r.Tgt, sub.Path); d != nil {
 				now = []rt.Doc{*d}
 			}
 			changed, gone := s.reg.Live.Update(id, sub.ID, now)

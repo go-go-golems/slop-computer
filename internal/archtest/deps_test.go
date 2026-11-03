@@ -19,6 +19,7 @@ const mod = "github.com/go-go-golems/slop-computer/"
 var (
 	core     = []string{"pkg/rt", "pkg/ids", "pkg/blobs", "pkg/store", "pkg/access", "pkg/authz", "pkg/apps", "pkg/config", "pkg/httpx", "pkg/client"}
 	domains  = []string{"pkg/system", "pkg/registry", "pkg/identity", "pkg/billing", "pkg/llm", "pkg/kernel"}
+	caps     = []string{"pkg/caps"}
 	runtime  = []string{"pkg/actor"}
 	table    = []string{"pkg/verbs"}
 	doors    = []string{"pkg/server"}
@@ -31,11 +32,13 @@ var rules = []struct {
 	why      string
 	from, to []string
 }{
-	{"the verb table imports no domain, runtime or door", table, concat(domains, runtime, doors, []string{gojaPath})},
-	{"domains know nothing of HTTP, goja, the table's callers or doors", domains, concat(runtime, doors, []string{netHTTP, gojaPath})},
-	{"core imports no domain, runtime, table or door", core, concat(domains, runtime, table, doors)},
-	{"identity imports no other slop package", []string{"pkg/identity"}, concat(core, domains, runtime, table, doors)},
-	{"only cmd/ imports the server", concat(core, domains, runtime, table), doors},
+	{"the verb table imports no domain, capability, runtime or door", table, concat(domains, caps, runtime, doors, []string{gojaPath})},
+	{"domains know nothing of HTTP, goja, capabilities, the table's callers or doors", domains, concat(caps, runtime, doors, []string{netHTTP, gojaPath})},
+	{"capabilities know nothing of HTTP, goja, the runtime or doors", caps, concat(runtime, doors, []string{netHTTP, gojaPath})},
+	{"the actor runtime is given its capabilities by a door, through interfaces", runtime, caps},
+	{"core imports no domain, capability, runtime, table or door", core, concat(domains, caps, runtime, table, doors)},
+	{"identity imports no other slop package", []string{"pkg/identity"}, concat(core, domains, caps, runtime, table, doors)},
+	{"only cmd/ imports the server", concat(core, domains, caps, runtime, table), doors},
 }
 
 // allowed are today's violations. Remove an entry when its import goes.

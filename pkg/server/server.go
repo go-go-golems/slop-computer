@@ -15,6 +15,7 @@ import (
 	"time"
 
 	"github.com/go-go-golems/slop-computer/pkg/billing/stripe"
+	capsdb "github.com/go-go-golems/slop-computer/pkg/caps/db"
 	"github.com/go-go-golems/slop-computer/pkg/config"
 	"github.com/go-go-golems/slop-computer/pkg/httpx"
 	"github.com/go-go-golems/slop-computer/pkg/identity"
@@ -37,6 +38,7 @@ type Server struct {
 	// reg serves the registry as documents (pkg/registry); follow is the
 	// page door's place in the system log (registry.go).
 	reg    *registry.Docs
+	db     *capsdb.DB
 	follow sysFollower
 	// Extra host handlers, set by later phases (live, static, sandbox).
 	Live, Static, Sandbox http.Handler
@@ -107,6 +109,10 @@ func New(cfg *config.Config, sys *system.DB, env *verbs.Env) *Server {
 		s.reg.Live.Forget(v.ID, "")
 	}
 	s.reg = &registry.Docs{Sys: s.Sys, Env: env, Host: regHost{s}, Live: registry.NewLive()}
+	s.db = &capsdb.DB{Host: dbHost{s}, Reg: dbHost{s}}
+	if env != nil {
+		s.db.K = env.K
+	}
 	if s.Sys != nil {
 		// Views follow the system log: a change of access, a person's role
 		// or comps, or an app's policy rechecks the views it may affect,
@@ -123,6 +129,7 @@ func New(cfg *config.Config, sys *system.DB, env *verbs.Env) *Server {
 		}
 		env.A.Secret = func(ctx context.Context, app, name string) (string, error) { return sys.Secret(ctx, key, app, name) }
 		env.A.Platform = s.platformModule
+		env.A.Paths = s.db
 		s.registerModules()
 		env.A.RoomEmit = s.actorEmit
 		env.A.RoomPeers = func(store string) []rt.Peer {
