@@ -15,3 +15,7 @@ Design revised: no separate system store. One db path space per page: its own st
 ## 2026-11-02
 
 Mounts and hosts are not mapped into the path space (open question 3 decided); phase 1 is data and assets: new §5.3, /_blob/<id> resolves across the stores a view reaches, uploads stay local.
+
+## 2026-11-02
+
+Registry documents are not live for now (open question 6 decided): computed on read, onSnapshot delivers one snapshot.

@@ -188,3 +188,9 @@ rendering `"/_blob/" + id` from an aliased document would get a 404 today.
 
 §5.3's resolution order and whether a 16-character id is enough (open
 question 7).
+
+## Step 4: Registry documents are not live
+
+The user, on open question 6: "no need to keep these live for nwo".
+
+§5.4, §5.7, §7.1 and the plan now say registry documents are computed on read, and `onSnapshot` on them delivers one snapshot and no changes, as on the static host. Open question 6 is marked decided, with a note that `_changes` keys should keep naming the affected store and subject, so live updates can be added later without an API change.

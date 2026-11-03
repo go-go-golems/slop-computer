@@ -405,8 +405,13 @@ property of a store, and only platform admins change it; it stays on
 `mount.set`/`mount.ls` and the back office (decided 2026-11-02, open
 question 3).
 
-Changes already land in `system.db`'s `_changes`. Mapping a change's `key`
-to its document path gives `onSnapshot` on registry documents for free, and
+**Not live, for now** (decided 2026-11-02, open question 6). `get` and
+queries compute registry documents when called; `onSnapshot` on them
+delivers the current state once and then nothing, as `onSnapshot` does on
+the static host (`web/runtime/src/static.ts`). A console re-reads after its
+own writes or on demand. Live updates can come later: changes already land
+in `system.db`'s `_changes`, and mapping a change's `key` to its document
+path would feed `onSnapshot` without changing the API pages see.
 `system:<kind>` reactors keep working unchanged. `system.db` itself stays
 where it is: it is not a store in this design, only the source of the
 `_stores/<id>`, `_stores/<id>/_…` and `_people` documents.
@@ -461,8 +466,8 @@ then change. Without a template, a new store gets none.
 
 A listener on an aliased or `_stores` path subscribes to the target store's
 log, filtered to the target prefix, and its events are rewritten to the
-page's path before they reach it. A listener on a registry document follows
-`system.db`'s `_changes`. The view's cursor becomes a vector, one
+page's path before they reach it. A listener on a registry document gets
+one snapshot and no changes (§5.4). The view's cursor becomes a vector, one
 `epoch.rev` per store it listens to, so reconnects stay resumable. The
 channel (`room`) stays the holder's own; aliases do not reach other
 stores' channels.
@@ -531,8 +536,9 @@ to describe it as "Durable-Object-shaped", never "compatible".
    their grants unless they own them: the console adds no authority.
 6. Editing a description: `db.doc('_stores/blocks').update({description}, {ifVersion})`
    → the verb that owns app metadata (a new `app.describe`; none exists
-   yet) → a `system` log entry → every open console sees the change through
-   `onSnapshot`.
+   yet) → a `system` log entry. Registry documents are not live (§5.4):
+   the console re-reads the document after its write; other open consoles
+   see the change when they next read.
 7. Viewing source: `files.list({path: 'blocks', recursive: true})`, then
    `files.read('blocks/blocks.js')`.
 
@@ -609,8 +615,8 @@ Each phase is useful without the next.
    `project` names `_stores` or an alias. "View source" works.
 3. **Registry rows as documents.** `_stores/<id>`, `_stores/<id>/_grants`,
    `_bindings`, `_llm` and `_people` as computed documents (no mounts);
-   writes through verbs with `ifVersion`; `_changes` mapped to document
-   paths. The admin console works as a plain artifact; the back office can
+   writes through verbs with `ifVersion`; read on demand, not live
+   (§5.4). The admin console works as a plain artifact; the back office can
    drop its `system` module.
 4. **Alias templates on mounts**, so stores created from a mount come
    bound.
@@ -639,9 +645,11 @@ Each phase is useful without the next.
    spends two, so another store's documents are reachable only to depth 14.
    A page's own paths keep 16. Accept it, or raise the limit for nested
    reads?
-6. **Projection cost.** Computed documents over `stores` and `grants` are
-   cheap at today's size. At thousands of stores, `onSnapshot` on
-   `_stores` needs the change mapping to be incremental, not a re-query.
+6. **Projection cost.** *Decided (2026-11-02): registry documents are not
+   live for now* (§5.4): computed on read, one snapshot per listener. When
+   they become live, the change mapping should be incremental rather than
+   a re-query, so `_changes` keys should keep naming the affected store and
+   subject.
 7. **Assets across stores.** *Proposed in §5.3:* `/_blob/<id>` resolves
    across the reachable stores (own first, then aliases with `assets`,
    then approved `_stores`); uploads, lists and deletes stay local. Open:
