@@ -425,3 +425,53 @@ The docs now say what was built: the v3 design's documents section and the claud
 
 ### Technical details
 - N/A.
+
+## Step 9: Phase 2, the files capability
+
+The user asked for all remaining phases on the same branch. Phase 2 serves the contract's `files` capability: a page that declares `files: {project: …}` lists and reads a store's files as the viewer, with the contract's shapes and error codes. The project is `_stores` or one of the holder's aliases.
+
+### Prompt Context
+**User prompt (verbatim):** "do all phases, we don't need so many PRs" and, mid-step, "commit at appropriate intervals and keep a detailed diary as you work (using the diary format from the skill)"
+**Assistant interpretation:** Implement phases 2–6 of SLOP3-008 on `task/slop3-008-data-assets` (PR #20) rather than in new PRs, committing at milestones and keeping this diary.
+**Inferred user intent:** One reviewable PR that delivers the whole design, not a stream of small ones.
+**Commit (code):** 915a96e — "SLOP3-008 phase 2: the contract's files capability over store snapshots"
+
+### What I did
+- `pkg/rt/manifest.go`: `Caps.Files` from `capabilities.files.project` (`_stores` or a plain segment).
+- `pkg/server/views.go`: `grantedCaps` grants `files` when a project is set (for `_stores` only when the view's space reaches `_stores`); RPCs `files.list`, `files.read` (action `DocRead`).
+- `pkg/server/rtfiles.go`: `reachableStores` (owned or granted stores, every store for a platform admin, each at least view after the ceiling), `filesStore` (project path → store, inner path; viewer's level there capped by the alias's level or `db.stores`), `treeOf` (the main snapshot), `listTree` (direct children with synthesized folders, or everything below), paging by an offset cursor, `rpcFilesRead` (offset/length ≤ 25 MiB, base64 bytes, `revision` = sha256).
+- `pkg/verbs/stores.go`: `visibleStores` → `VisibleStores` (exported), callers in `stores.go` and `mounts.go`.
+- `web/runtime/src/caps.ts` `files()`, `index.ts`: `list`, `read` (bytes as `Uint8Array`), `download` (chunked read with revision check, then `ask("download")`; program extensions refused with `bad_request`), `asSampleTools` (`list_project_files`, `read_project_file` at 12 KB); errors mapped to the contract's codes.
+- `pkg/server/pathspace_test.go`: `TestFilesCapability` (alias project: not_found without a grant, top level, a folder, recursive, a ranged read, four error cases; `_stores` project: not granted before the policy cell, then the stores as folders and a read).
+
+### Why
+- The store's `main` snapshot is what `slop.read`'s `file`/`files` ops already read, and what a mount serves: "the project's files" for an app store.
+- `revision` as the content hash satisfies the contract ("differs once the file's contents change") without tracking snapshot numbers per file.
+- No consent prompt: on slop every granted capability is reported `granted` (`permissionStates`), because an admin installs and approves apps.
+
+### What worked
+- `GOWORK=off go test ./pkg/server -run TestFilesCapability -count=1`: ok. Mutation (`if false && min(held, ceil) < rt.LevelView`) → FAIL `without a grant on crm: map[result:map[entries:[…]]]`, restored.
+- `pnpm check` clean, `pnpm test` 12 pass; `make runtime`; `TestBuildOutputsFresh` ok; `go test ./...` ok; lint 0 issues after one fix.
+
+### What didn't work
+- `golangci-lint`: `pkg/server/rtfiles.go:62:1: named return "storeID" with type "string" found (nonamedreturns)`; rewrote `filesStore` with plain returns.
+- First `sed` to export `visibleStores` missed `pkg/verbs/mounts.go:109:18: undefined: visibleStores`; fixed there too.
+
+### What I learned
+- `grantedCaps` is the single gate for runtime methods: `viewRPC` refuses `<cap>.<method>` when `<cap>` is not granted, so `files` needed only a grant rule, not per-RPC checks.
+
+### What was tricky to build
+- Folder synthesis: snapshots hold files only. A non-recursive list emits each file directly in the folder plus one folder entry per first segment below it; a recursive list emits every file and every intermediate folder. A path that is a file is `bad_request` for `list`, a path with nothing under it `not_found`.
+
+### What warrants a second pair of eyes
+- `reachableStores` for a platform admin lists every store; for others it lists owned and granted stores. A store a viewer reaches only through a share link does not appear at the top level, although it can still be read by path.
+
+### What should be done in the future
+- N/A for this phase.
+
+### Code review instructions
+- `pkg/server/rtfiles.go`, then `TestFilesCapability`; `web/runtime/src/caps.ts` `files()`.
+- `GOWORK=off go test ./pkg/server -run TestFilesCapability -count=1 -v`
+
+### Technical details
+- List page: `{entries: [{path, isDirectory, size}], cursor?}`; read: `{bytes (base64 on the wire, Uint8Array in the page), size, revision}`.
