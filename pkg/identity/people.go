@@ -45,7 +45,7 @@ func (d *Accounts) People(ctx context.Context, kind string) ([]sysdb.Person, err
 	if err != nil {
 		return nil, err
 	}
-	defer rows.Close()
+	defer func() { _ = rows.Close() }()
 	out := []sysdb.Person{}
 	for rows.Next() {
 		p, err := scanPerson(rows)

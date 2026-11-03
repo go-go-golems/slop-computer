@@ -205,7 +205,7 @@ func queryDocs(ctx context.Context, db querier, q rt.Query, may func(path string
 	if err != nil {
 		return nil, err
 	}
-	defer rows.Close()
+	defer func() { _ = rows.Close() }()
 	all := map[string]Doc{}
 	rtDocs := []rt.Doc{}
 	for rows.Next() {
@@ -240,7 +240,7 @@ func (s *Store) DocsSince(ctx context.Context, rev int64, prefix string) ([]Doc,
 	if err != nil {
 		return nil, err
 	}
-	defer rows.Close()
+	defer func() { _ = rows.Close() }()
 	out := []Doc{}
 	for rows.Next() {
 		var d Doc
@@ -267,7 +267,7 @@ func (s *Store) Collections(ctx context.Context) (map[string]int, error) {
 	if err != nil {
 		return nil, err
 	}
-	defer rows.Close()
+	defer func() { _ = rows.Close() }()
 	out := map[string]int{}
 	for rows.Next() {
 		var c string

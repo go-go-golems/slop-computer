@@ -150,7 +150,8 @@ func (m *Manager) Get(ctx context.Context, id string) (*Actor, error) {
 }
 
 // get is one attempt of Get; stale reports a build overtaken by a restart.
-func (m *Manager) get(ctx context.Context, id string) (_ *Actor, stale bool, _ error) {
+// get returns the running actor, and whether a restart made the build stale.
+func (m *Manager) get(ctx context.Context, id string) (*Actor, bool, error) {
 	m.mu.Lock()
 	gen := m.gen
 	m.mu.Unlock()
@@ -419,6 +420,7 @@ func (m *Manager) activate(ctx context.Context, t *store.Turn, r kernel.Running)
 				return fmt.Errorf("%s must not await I/O", name)
 			case goja.PromiseStateRejected:
 				return fmt.Errorf("%s: %v", name, a.jsError(p.Result()).Message)
+			case goja.PromiseStateFulfilled: // settled within the turn: fine
 			}
 		}
 	}
@@ -579,7 +581,7 @@ func (m *Manager) MatchRoute(ctx context.Context, storeID, method, p string) (*A
 	bestScore := -1
 	for _, key := range a.keys("http") {
 		meth, pat, ok := strings.Cut(key, " ")
-		if !ok || (meth != method && meth != "*" && !(meth == "GET" && method == "HEAD")) {
+		if !ok || (meth != method && meth != "*" && (meth != "GET" || method != "HEAD")) {
 			continue
 		}
 		params, score, ok := matchPattern(pat, p)
@@ -943,7 +945,7 @@ func (a *Actor) alarm(cx *goja.Object, only string) (goja.Value, error) {
 		a.log("warn", "alarm "+name+" has no handler")
 		return nil, nil
 	}
-	var data goja.Value = goja.Undefined()
+	data := goja.Undefined()
 	if s, ok := row["data"].(string); ok && s != "" && s != "null" {
 		var x any
 		if json.Unmarshal([]byte(s), &x) == nil {

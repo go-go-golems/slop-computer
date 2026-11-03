@@ -77,7 +77,7 @@ func Of(a Action) (Spec, bool) {
 // the admin role or not, clears act's floor; why says what is missing.
 // The dispatchers (verbs.Call, the runtime's viewRPC) and explain.can all
 // decide with it.
-func Floor(act Action, level rt.Level, admin bool) (ok bool, why string) {
+func Floor(act Action, level rt.Level, admin bool) (bool, string) {
 	spec, known := Specs[act]
 	switch {
 	case !known:

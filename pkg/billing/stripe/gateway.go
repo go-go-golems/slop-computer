@@ -74,11 +74,11 @@ var _ Gateway = (*stripeGateway)(nil)
 // (current and previous).
 func NewStripe(secretKey string, webhookSecrets []string) (Gateway, error) {
 	if !strings.HasPrefix(secretKey, "sk_") && !strings.HasPrefix(secretKey, "rk_") {
-		return nil, errors.New("Stripe secret key must be an sk_ or rk_ key")
+		return nil, errors.New("the secret key must be a Stripe sk_ or rk_ key")
 	}
 	for _, s := range webhookSecrets {
 		if !strings.HasPrefix(s, "whsec_") {
-			return nil, errors.New("Stripe webhook secrets must be whsec_ values")
+			return nil, errors.New("webhook secrets must be Stripe whsec_ values")
 		}
 	}
 	return &stripeGateway{client: stripe.NewClient(secretKey), secrets: webhookSecrets}, nil

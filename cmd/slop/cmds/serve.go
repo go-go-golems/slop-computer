@@ -77,7 +77,7 @@ func runServer(parent context.Context, cfg *config.Config) error {
 	if err != nil {
 		return err
 	}
-	defer sys.Close()
+	defer func() { _ = sys.Close() }()
 	k, err := kernel.New(cfg, sys)
 	if err != nil {
 		return err

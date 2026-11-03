@@ -133,7 +133,7 @@ func (s *Door) serveStatic(w http.ResponseWriter, r *http.Request) {
 			w.Header().Set("X-Content-Type-Options", "nosniff")
 			w.Header().Set("Content-Type", f.Type)
 			if file, err := as.Blobs.Open(f.SHA256); err == nil {
-				defer file.Close()
+				defer func() { _ = file.Close() }()
 				w.WriteHeader(http.StatusNotFound)
 				_, _ = io.Copy(w, file)
 				return

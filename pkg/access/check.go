@@ -64,6 +64,8 @@ func ValidAudience(s string) bool {
 	switch Audience(s) {
 	case AudGuest, AudMember, AudSubscriber, AudAdmin:
 		return true
+	case AudNone, AudStore: // computed, never assigned
+		return false
 	}
 	return false
 }
@@ -128,6 +130,8 @@ func Matches(subject string, p *Principal, aud Audience) bool {
 	switch Group(subject) {
 	case GroupGuest, GroupMember, GroupSubscriber:
 		return aud.In(Group(subject))
+	case GroupAdmin, GroupStore: // not grant subjects: they come from the role and the kind
+		return false
 	}
 	return subject != "" && subject == p.ID()
 }

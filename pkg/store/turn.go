@@ -77,6 +77,7 @@ func (s *Store) Do(ctx context.Context, who Who, fn func(t *Turn) error) (*Commi
 	return c, err
 }
 
+//nolint:nonamedreturns // the deferred recover turns a panic in fn into err
 func (s *Store) doLocked(ctx context.Context, who Who, fn func(t *Turn) error) (c *Commit, err error) {
 	if _, err := s.w.ExecContext(ctx, `BEGIN IMMEDIATE`); err != nil {
 		return nil, err
@@ -290,21 +291,21 @@ func (t *Turn) Meta(key string) string {
 }
 
 // scanMaps reads rows into maps, converting []byte (a BLOB) to string.
-func scanMaps(rows *sql.Rows, max int) ([]map[string]any, error) {
-	return scanRows(rows, max, func(b []byte) any { return string(b) })
+func scanMaps(rows *sql.Rows, limit int) ([]map[string]any, error) {
+	return scanRows(rows, limit, func(b []byte) any { return string(b) })
 }
 
 // scanRows reads rows into maps; blob converts BLOB values.
-func scanRows(rows *sql.Rows, max int, blob func([]byte) any) ([]map[string]any, error) {
-	defer rows.Close()
+func scanRows(rows *sql.Rows, limit int, blob func([]byte) any) ([]map[string]any, error) {
+	defer func() { _ = rows.Close() }()
 	cols, err := rows.Columns()
 	if err != nil {
 		return nil, err
 	}
 	out := []map[string]any{}
 	for rows.Next() {
-		if len(out) >= max {
-			return nil, fmt.Errorf("more than %d rows", max)
+		if len(out) >= limit {
+			return nil, fmt.Errorf("more than %d rows", limit)
 		}
 		vals := make([]any, len(cols))
 		ptrs := make([]any, len(cols))

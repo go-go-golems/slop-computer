@@ -31,6 +31,12 @@ linters:
         - fmt.Fprintf
         - fmt.Fprintln
 
+# Report every finding: the default caps (3 per identical message, 50 per
+# linter) hid 29 unchecked rows.Close calls behind 3.
+issues:
+  max-issues-per-linter: 0
+  max-same-issues: 0
+
 # Formatters configuration
 formatters:
   enable:

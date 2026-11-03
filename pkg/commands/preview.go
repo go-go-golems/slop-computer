@@ -78,5 +78,5 @@ func (e *Env) serverOrigin(o string) bool {
 	host, ok := strings.CutPrefix(o, c.Scheme+"://")
 	label, rest, _ := strings.Cut(host, ".")
 	return ok && c.Hosts.Sandbox != "" && rest == c.Hosts.Sandbox && label != "" &&
-		!slices.ContainsFunc([]rune(label), func(r rune) bool { return !(r >= 'a' && r <= 'z' || r >= '0' && r <= '9') })
+		!slices.ContainsFunc([]rune(label), func(r rune) bool { return (r < 'a' || r > 'z') && (r < '0' || r > '9') })
 }

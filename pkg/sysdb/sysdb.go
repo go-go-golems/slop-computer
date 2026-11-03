@@ -106,7 +106,7 @@ func (d *DB) applyMigration(ctx context.Context, name, body string) error {
 	if err != nil {
 		return err
 	}
-	defer conn.Close()
+	defer func() { _ = conn.Close() }()
 	if _, err := conn.ExecContext(ctx, `PRAGMA foreign_keys = OFF`); err != nil {
 		return err
 	}
@@ -124,7 +124,11 @@ func (d *DB) applyMigration(ctx context.Context, name, body string) error {
 		return err
 	}
 	bad := rows.Next()
+	err = rows.Err()
 	_ = rows.Close()
+	if err != nil {
+		return err
+	}
 	if bad {
 		return errors.New("foreign_key_check failed")
 	}
@@ -188,7 +192,7 @@ func (d *DB) Logs(ctx context.Context, limit int) ([]LogEntry, error) {
 	if err != nil {
 		return nil, err
 	}
-	defer rows.Close()
+	defer func() { _ = rows.Close() }()
 	out := []LogEntry{}
 	for rows.Next() {
 		var e LogEntry
@@ -242,13 +246,13 @@ func (d *DB) LogAfter(ctx context.Context, rev int64, limit int) ([]LogEntry, er
 	for rows.Next() {
 		var e LogEntry
 		if err := rows.Scan(&e.Rev, &e.At, &e.Principal, &e.Via, &e.Summary); err != nil {
-			rows.Close()
+			_ = rows.Close()
 			return nil, err
 		}
 		at[e.Rev] = len(out)
 		out = append(out, e)
 	}
-	rows.Close()
+	_ = rows.Close()
 	if err := rows.Err(); err != nil || len(out) == 0 {
 		return out, err
 	}
@@ -257,7 +261,7 @@ func (d *DB) LogAfter(ctx context.Context, rev int64, limit int) ([]LogEntry, er
 	if err != nil {
 		return nil, err
 	}
-	defer ch.Close()
+	defer func() { _ = ch.Close() }()
 	for ch.Next() {
 		var r int64
 		var c Change

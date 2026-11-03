@@ -64,7 +64,7 @@ func (d *Governance) AppModules(ctx context.Context, app string) ([]AppModule, e
 	if err != nil {
 		return nil, err
 	}
-	defer rows.Close()
+	defer func() { _ = rows.Close() }()
 	out := []AppModule{}
 	for rows.Next() {
 		var m AppModule

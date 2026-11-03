@@ -91,7 +91,7 @@ func (d *Registry) Stores(ctx context.Context, owner string) ([]sysdb.StoreRow, 
 	if err != nil {
 		return nil, err
 	}
-	defer rows.Close()
+	defer func() { _ = rows.Close() }()
 	out := []sysdb.StoreRow{}
 	for rows.Next() {
 		s, err := scanStore(rows)
@@ -118,7 +118,7 @@ func (d *Registry) StoresGranted(ctx context.Context, subjects []string) ([]sysd
 	if err != nil {
 		return nil, err
 	}
-	defer rows.Close()
+	defer func() { _ = rows.Close() }()
 	out := []sysdb.StoreRow{}
 	for rows.Next() {
 		s, err := scanStore(rows)
@@ -172,7 +172,7 @@ func (d *Registry) Grants(ctx context.Context, store string) ([]sysdb.Grant, err
 	if err != nil {
 		return nil, err
 	}
-	defer rows.Close()
+	defer func() { _ = rows.Close() }()
 	out := []sysdb.Grant{}
 	for rows.Next() {
 		var g sysdb.Grant

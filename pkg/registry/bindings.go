@@ -43,7 +43,7 @@ func (d *Registry) Bindings(ctx context.Context, store string) ([]Binding, error
 	if err != nil {
 		return nil, err
 	}
-	defer rows.Close()
+	defer func() { _ = rows.Close() }()
 	out := []Binding{}
 	for rows.Next() {
 		var b Binding
@@ -112,7 +112,7 @@ func (d *Registry) DueSchedules(ctx context.Context, now int64) ([]string, error
 	if err != nil {
 		return nil, err
 	}
-	defer rows.Close()
+	defer func() { _ = rows.Close() }()
 	out := []string{}
 	for rows.Next() {
 		var s string

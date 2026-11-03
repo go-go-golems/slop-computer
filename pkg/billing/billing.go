@@ -86,7 +86,7 @@ func (d *Book) CompRows(ctx context.Context, person string) ([]CompRow, error) {
 	if err != nil {
 		return nil, err
 	}
-	defer rows.Close()
+	defer func() { _ = rows.Close() }()
 	out := []CompRow{}
 	for rows.Next() {
 		var c CompRow
@@ -160,7 +160,7 @@ func (d *Book) Subscriptions(ctx context.Context, person string) ([]Subscription
 	if err != nil {
 		return nil, err
 	}
-	defer rows.Close()
+	defer func() { _ = rows.Close() }()
 	out := []Subscription{}
 	for rows.Next() {
 		s, _, err := scanSub(rows)
@@ -293,7 +293,7 @@ func (d *Book) DueCheckouts(ctx context.Context) ([]CheckoutAttempt, error) {
 	if err != nil {
 		return nil, err
 	}
-	defer rows.Close()
+	defer func() { _ = rows.Close() }()
 	out := []CheckoutAttempt{}
 	for rows.Next() {
 		a, err := scanAttempt(rows)
@@ -415,7 +415,7 @@ func (d *Book) CustomersToReconcile(ctx context.Context) ([]string, error) {
 	if err != nil {
 		return nil, err
 	}
-	defer rows.Close()
+	defer func() { _ = rows.Close() }()
 	var out []string
 	for rows.Next() {
 		var c string
