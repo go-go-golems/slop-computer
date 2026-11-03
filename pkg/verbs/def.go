@@ -184,7 +184,9 @@ func argsOf(t reflect.Type, s *jsonschema.Schema) []Arg {
 			a.Doc = strings.TrimSpace(a.Doc + " (one of " + strings.Join(vs, ", ") + ")")
 		}
 		if a.Type == "json" {
-			a.Doc = strings.TrimSpace(a.Doc + ", as JSON: " + shapeOf(p))
+			if sh := shapeOf(p); sh != "any" { // an untyped value says nothing more
+				a.Doc = strings.TrimSpace(a.Doc + ", as JSON: " + sh)
+			}
 		}
 		for _, kv := range strings.Split(f.Tag.Get("slop"), ",") {
 			if n, ok := strings.CutPrefix(kv, "pos="); ok {

@@ -20,18 +20,16 @@ import (
 )
 
 func filesVerbs(e kernelEnv) []*verbs.Verb {
-	storeArg := verbs.Arg{Name: "store", Type: "string", Pos: 1, Required: true}
-	zoneArg := verbs.Arg{Name: "zone", Type: "string", Doc: "tree (default) or assets"}
-	atArg := verbs.Arg{Name: "at", Type: "string", Doc: "a snapshot number or ref; empty = the working tree"}
 	return []*verbs.Verb{
-		{Name: "files.ls", Doc: "List files: the working tree, a snapshot (--at 3, --at main) or the assets zone.", Scope: verbs.Read, Action: authz.StoreRead,
-			Args: []verbs.Arg{storeArg, {Name: "prefix", Type: "string", Pos: 2}, zoneArg, atArg},
-			Run: func(ctx context.Context, p *access.Principal, a verbs.Args) (any, error) {
-				s, _, err := e.open(ctx, p, a.S("store"), rt.LevelView, "reading files")
+		verbs.Def[FilesLsIn, any]{Name: "files.ls", Doc: "List files: the working tree, a snapshot (--at 3, --at main) or the assets zone.", Scope: verbs.Read, Action: authz.StoreRead,
+			Run: func(req verbs.Req, in FilesLsIn) (any, error) {
+				ctx := req.Context
+				p := req.Principal
+				s, _, err := e.open(ctx, p, in.Store, rt.LevelView, "reading files")
 				if err != nil {
 					return nil, err
 				}
-				if at := a.S("at"); at != "" {
+				if at := in.At; at != "" {
 					n, err := s.Ref(ctx, at)
 					if err != nil {
 						return nil, verbs.Errf("not_found", "no snapshot or ref %s", at)
@@ -42,34 +40,34 @@ func filesVerbs(e kernelEnv) []*verbs.Verb {
 					}
 					out := []store.File{}
 					for _, f := range fs {
-						if strings.HasPrefix(f.Path, a.S("prefix")) {
+						if strings.HasPrefix(f.Path, in.Prefix) {
 							out = append(out, f)
 						}
 					}
 					return out, nil
 				}
-				return s.Files(ctx, zoneOf(a), a.S("prefix"))
-			}},
-		{Name: "files.cat", Doc: "Read a file as text, base64, json, csv (rows) or lines.", Scope: verbs.Read, Action: authz.StoreRead,
-			Args: []verbs.Arg{storeArg, {Name: "path", Type: "string", Pos: 2, Required: true}, zoneArg, atArg,
-				{Name: "as", Type: "string", Doc: "text, base64, json, csv or lines (default: text, or base64 for binary)"}},
-			Run: func(ctx context.Context, p *access.Principal, a verbs.Args) (any, error) {
-				s, _, err := e.open(ctx, p, a.S("store"), rt.LevelView, "reading files")
+				return s.Files(ctx, zoneOf(in.Zone), in.Prefix)
+			}}.Verb(),
+		verbs.Def[FilesCatIn, any]{Name: "files.cat", Doc: "Read a file as text, base64, json, csv (rows) or lines.", Scope: verbs.Read, Action: authz.StoreRead,
+			Run: func(req verbs.Req, in FilesCatIn) (any, error) {
+				ctx := req.Context
+				p := req.Principal
+				s, _, err := e.open(ctx, p, in.Store, rt.LevelView, "reading files")
 				if err != nil {
 					return nil, err
 				}
 				var f store.File
-				if at := a.S("at"); at != "" {
+				if at := in.At; at != "" {
 					n, rerr := s.Ref(ctx, at)
 					if rerr != nil {
 						return nil, verbs.Errf("not_found", "no snapshot or ref %s", at)
 					}
-					f, err = s.SnapshotFile(ctx, n, a.S("path"))
+					f, err = s.SnapshotFile(ctx, n, in.Path)
 				} else {
-					f, err = s.File(ctx, zoneOf(a), a.S("path"))
+					f, err = s.File(ctx, zoneOf(in.Zone), in.Path)
 				}
 				if errors.Is(err, store.ErrNotFound) {
-					return nil, verbs.Errf("not_found", "no file %s", a.S("path"))
+					return nil, verbs.Errf("not_found", "no file %s", in.Path)
 				}
 				if err != nil {
 					return nil, err
@@ -78,44 +76,44 @@ func filesVerbs(e kernelEnv) []*verbs.Verb {
 				if err != nil {
 					return nil, err
 				}
-				return decodeAs(f, data, a.S("as"))
-			}},
-		{Name: "files.put", Doc: "Write one file: text, or data as base64. Tree files show after the next snapshot.", Scope: verbs.Write, Action: authz.StoreAdmin,
-			Args: []verbs.Arg{storeArg, {Name: "path", Type: "string", Pos: 2, Required: true}, {Name: "text", Type: "string"},
-				{Name: "data", Type: "string", Doc: "base64"}, {Name: "type", Type: "string"}, zoneArg},
-			Run: func(ctx context.Context, p *access.Principal, a verbs.Args) (any, error) {
-				s, d, err := e.open(ctx, p, a.S("store"), rt.LevelAdmin, "writing files")
+				return decodeAs(f, data, in.As)
+			}}.Verb(),
+		verbs.Def[FilesPutIn, any]{Name: "files.put", Doc: "Write one file: text, or data as base64. Tree files show after the next snapshot.", Scope: verbs.Write, Action: authz.StoreAdmin,
+			Run: func(req verbs.Req, in FilesPutIn) (any, error) {
+				ctx := req.Context
+				p := req.Principal
+				s, d, err := e.open(ctx, p, in.Store, rt.LevelAdmin, "writing files")
 				if err != nil {
 					return nil, err
 				}
-				data := []byte(a.S("text"))
-				if a.Has("data") {
-					if data, err = base64.StdEncoding.DecodeString(a.S("data")); err != nil {
+				data := []byte(in.Text)
+				if in.Data != nil {
+					if data, err = base64.StdEncoding.DecodeString(*in.Data); err != nil {
 						return nil, verbs.Errf("invalid_argument", "data must be base64")
 					}
 				}
 				var f store.File
 				_, err = s.Do(ctx, who(p, d), func(t *store.Turn) error {
 					var err error
-					f, err = t.PutFile(zoneOf(a), a.S("path"), data, a.S("type"))
+					f, err = t.PutFile(zoneOf(in.Zone), in.Path, data, in.Type)
 					return err
 				})
 				if err != nil {
 					return nil, fileErr(err)
 				}
 				return f, nil
-			}},
-		{Name: "files.rm", Doc: "Delete files under a path (or one file).", Scope: verbs.Write, Action: authz.StoreAdmin,
-			Args: []verbs.Arg{storeArg, {Name: "path", Type: "string", Pos: 2, Required: true}, zoneArg,
-				{Name: "recursive", Type: "bool", Doc: "everything under path/"}},
-			Run: func(ctx context.Context, p *access.Principal, a verbs.Args) (any, error) {
-				s, d, err := e.open(ctx, p, a.S("store"), rt.LevelAdmin, "deleting files")
+			}}.Verb(),
+		verbs.Def[FilesRmIn, any]{Name: "files.rm", Doc: "Delete files under a path (or one file).", Scope: verbs.Write, Action: authz.StoreAdmin,
+			Run: func(req verbs.Req, in FilesRmIn) (any, error) {
+				ctx := req.Context
+				p := req.Principal
+				s, d, err := e.open(ctx, p, in.Store, rt.LevelAdmin, "deleting files")
 				if err != nil {
 					return nil, err
 				}
-				paths := []string{a.S("path")}
-				if a.B("recursive") {
-					fs, err := s.Files(ctx, zoneOf(a), strings.TrimSuffix(a.S("path"), "/")+"/")
+				paths := []string{in.Path}
+				if in.Recursive {
+					fs, err := s.Files(ctx, zoneOf(in.Zone), strings.TrimSuffix(in.Path, "/")+"/")
 					if err != nil {
 						return nil, err
 					}
@@ -126,7 +124,7 @@ func filesVerbs(e kernelEnv) []*verbs.Verb {
 				n := 0
 				_, err = s.Do(ctx, who(p, d), func(t *store.Turn) error {
 					for _, path := range paths {
-						ok, err := t.RemoveFile(zoneOf(a), path)
+						ok, err := t.RemoveFile(zoneOf(in.Zone), path)
 						if err != nil {
 							return err
 						}
@@ -137,32 +135,33 @@ func filesVerbs(e kernelEnv) []*verbs.Verb {
 					return nil
 				})
 				return map[string]any{"removed": n}, fileErr(err)
-			}},
-		{Name: "files.push", Doc: "Replace the tree with a manifest [{path, sha256, size, type?} or {path, text|data}] and snapshot it. Send blobs {sha256: base64} the server lacks; it answers missing_blobs otherwise.", Scope: verbs.Write, Action: authz.StoreAdmin,
-			Args: []verbs.Arg{storeArg, {Name: "files", Type: "json", Required: true}, {Name: "blobs", Type: "json"},
-				{Name: "message", Type: "string"}, {Name: "ref", Type: "string", Doc: "the ref to move (default main)"},
-				{Name: "prune", Type: "bool", Doc: "delete tree files not in the manifest (default true)"},
-				{Name: "snapshot", Type: "bool", Doc: "take a snapshot (default true)"}, zoneArg},
-			Run: func(ctx context.Context, p *access.Principal, a verbs.Args) (any, error) {
-				return push(ctx, e, p, a, true)
-			}},
-		{Name: "files.blobs", Doc: "Upload blobs {sha256: base64} ahead of a push too large for one request.", Scope: verbs.Write, Action: authz.StoreAdmin,
-			Args: []verbs.Arg{storeArg, {Name: "blobs", Type: "json", Required: true}},
-			Run: func(ctx context.Context, p *access.Principal, a verbs.Args) (any, error) {
-				if _, _, err := e.open(ctx, p, a.S("store"), rt.LevelAdmin, "uploading files"); err != nil {
+			}}.Verb(),
+		verbs.Def[FilesPushIn, any]{Name: "files.push", Doc: "Replace the tree with a manifest [{path, sha256, size, type?} or {path, text|data}] and snapshot it. Send blobs {sha256: base64} the server lacks; it answers missing_blobs otherwise.", Scope: verbs.Write, Action: authz.StoreAdmin,
+			Run: func(req verbs.Req, in FilesPushIn) (any, error) {
+				ctx := req.Context
+				p := req.Principal
+				return push(ctx, e, p, pushArgs{store: in.Store, zone: in.Zone, files: in.Files, blobs: in.Blobs,
+					message: in.Message, ref: in.Ref, prune: or(in.Prune, true), snapshot: or(in.Snapshot, true)}, true)
+			}}.Verb(),
+		verbs.Def[FilesBlobsIn, any]{Name: "files.blobs", Doc: "Upload blobs {sha256: base64} ahead of a push too large for one request.", Scope: verbs.Write, Action: authz.StoreAdmin,
+			Run: func(req verbs.Req, in FilesBlobsIn) (any, error) {
+				ctx := req.Context
+				p := req.Principal
+				if _, _, err := e.open(ctx, p, in.Store, rt.LevelAdmin, "uploading files"); err != nil {
 					return nil, err
 				}
-				if err := putBlobs(e, a); err != nil {
+				if err := putBlobs(e, in.Blobs); err != nil {
 					return nil, err
 				}
-				m, _ := argObj(a, "blobs")
+				m, _ := objOf(in.Blobs)
 				return map[string]any{"stored": len(m)}, nil
-			}},
-		{Name: "import.files", Doc: "Add files to a zone without pruning or snapshotting (files.push's arguments).", Scope: verbs.Write, Action: authz.StoreAdmin,
-			Args: []verbs.Arg{storeArg, {Name: "files", Type: "json", Required: true}, {Name: "blobs", Type: "json"}, zoneArg},
-			Run: func(ctx context.Context, p *access.Principal, a verbs.Args) (any, error) {
-				return push(ctx, e, p, a, false)
-			}},
+			}}.Verb(),
+		verbs.Def[ImportFilesIn, any]{Name: "import.files", Doc: "Add files to a zone without pruning or snapshotting (files.push's arguments).", Scope: verbs.Write, Action: authz.StoreAdmin,
+			Run: func(req verbs.Req, in ImportFilesIn) (any, error) {
+				ctx := req.Context
+				p := req.Principal
+				return push(ctx, e, p, pushArgs{store: in.Store, zone: in.Zone, files: in.Files, blobs: in.Blobs}, false)
+			}}.Verb(),
 		verbs.Def[SnapNewIn, any]{Name: "snap.new", Doc: "Snapshot the working tree and move a ref (default main) to it.", Scope: verbs.Write, Action: authz.StoreAdmin,
 			Run: func(req verbs.Req, in SnapNewIn) (any, error) {
 				ctx := req.Context
@@ -219,9 +218,9 @@ func filesVerbs(e kernelEnv) []*verbs.Verb {
 	}
 }
 
-func zoneOf(a verbs.Args) string {
-	if z := a.S("zone"); z != "" {
-		return z
+func zoneOf(zone string) string {
+	if zone != "" {
+		return zone
 	}
 	return "tree"
 }
@@ -290,13 +289,21 @@ type pushFile struct {
 
 // push applies a manifest. full=true is files.push (prune and snapshot by
 // default); false is import.files (neither).
-func push(ctx context.Context, e kernelEnv, p *access.Principal, a verbs.Args, full bool) (any, error) {
-	s, d, err := e.open(ctx, p, a.S("store"), rt.LevelAdmin, "pushing files")
+// pushArgs are files.push's and import.files's arguments.
+type pushArgs struct {
+	store, zone     string
+	files, blobs    any
+	message, ref    string
+	prune, snapshot bool // files.push only (full)
+}
+
+func push(ctx context.Context, e kernelEnv, p *access.Principal, a pushArgs, full bool) (any, error) {
+	s, d, err := e.open(ctx, p, a.store, rt.LevelAdmin, "pushing files")
 	if err != nil {
 		return nil, err
 	}
-	zone := zoneOf(a)
-	raw, ok := argList(a, "files")
+	zone := zoneOf(a.zone)
+	raw, ok := listOf(a.files)
 	if !ok {
 		return nil, verbs.Errf("invalid_argument", "files is a list of {path, sha256, size}")
 	}
@@ -308,7 +315,7 @@ func push(ctx context.Context, e kernelEnv, p *access.Principal, a verbs.Args, f
 	if len(files) > store.MaxTreeFiles {
 		return nil, verbs.Errf("invalid_argument", "at most %d files", store.MaxTreeFiles)
 	}
-	if err := putBlobs(e, a); err != nil {
+	if err := putBlobs(e, a.blobs); err != nil {
 		return nil, err
 	}
 	for i, f := range files {
@@ -344,8 +351,8 @@ func push(ctx context.Context, e kernelEnv, p *access.Principal, a verbs.Args, f
 		sort.Strings(missing)
 		return nil, &verbs.Error{Code: "missing_blobs", Message: "send these blobs", Extra: map[string]any{"missing": missing}}
 	}
-	prune := full && (!a.Has("prune") || a.B("prune"))
-	snap := full && zone == "tree" && (!a.Has("snapshot") || a.B("snapshot"))
+	prune := full && a.prune
+	snap := full && zone == "tree" && a.snapshot
 	var n int64
 	removed := 0
 	c, err := s.Do(ctx, who(p, d), func(t *store.Turn) error {
@@ -370,7 +377,7 @@ func push(ctx context.Context, e kernelEnv, p *access.Principal, a verbs.Args, f
 		}
 		if snap {
 			var err error
-			n, err = t.Snapshot(a.S("message"), a.S("ref"))
+			n, err = t.Snapshot(a.message, a.ref)
 			return err
 		}
 		return nil
@@ -410,4 +417,65 @@ type RefMoveIn struct {
 	Store string `json:"store" slop:"pos=1"`
 	Ref   string `json:"ref" slop:"pos=2"`
 	N     int64  `json:"n" slop:"pos=3"`
+}
+
+// FilesLsIn is files.ls's input.
+type FilesLsIn struct {
+	Store  string `json:"store" slop:"pos=1"`
+	Prefix string `json:"prefix,omitempty" slop:"pos=2"`
+	Zone   string `json:"zone,omitempty" jsonschema_description:"tree (default) or assets"`
+	At     string `json:"at,omitempty" jsonschema_description:"a snapshot number or ref; empty = the working tree"`
+}
+
+// FilesCatIn is files.cat's input.
+type FilesCatIn struct {
+	Store string `json:"store" slop:"pos=1"`
+	Path  string `json:"path" slop:"pos=2"`
+	Zone  string `json:"zone,omitempty" jsonschema_description:"tree (default) or assets"`
+	At    string `json:"at,omitempty" jsonschema_description:"a snapshot number or ref; empty = the working tree"`
+	As    string `json:"as,omitempty" jsonschema_description:"text, base64, json, csv or lines (default: text, or base64 for binary)"`
+}
+
+// FilesPutIn is files.put's input.
+type FilesPutIn struct {
+	Store string  `json:"store" slop:"pos=1"`
+	Path  string  `json:"path" slop:"pos=2"`
+	Text  string  `json:"text,omitempty"`
+	Data  *string `json:"data,omitempty" jsonschema_description:"base64"`
+	Type  string  `json:"type,omitempty"`
+	Zone  string  `json:"zone,omitempty" jsonschema_description:"tree (default) or assets"`
+}
+
+// FilesRmIn is files.rm's input.
+type FilesRmIn struct {
+	Store     string `json:"store" slop:"pos=1"`
+	Path      string `json:"path" slop:"pos=2"`
+	Zone      string `json:"zone,omitempty" jsonschema_description:"tree (default) or assets"`
+	Recursive bool   `json:"recursive,omitempty" jsonschema_description:"everything under path/"`
+}
+
+// FilesPushIn is files.push's input.
+type FilesPushIn struct {
+	Store    string `json:"store" slop:"pos=1"`
+	Files    any    `json:"files"`
+	Blobs    any    `json:"blobs,omitempty"`
+	Message  string `json:"message,omitempty"`
+	Ref      string `json:"ref,omitempty" jsonschema_description:"the ref to move (default main)"`
+	Prune    *bool  `json:"prune,omitempty" jsonschema_description:"delete tree files not in the manifest (default true)"`
+	Snapshot *bool  `json:"snapshot,omitempty" jsonschema_description:"take a snapshot (default true)"`
+	Zone     string `json:"zone,omitempty" jsonschema_description:"tree (default) or assets"`
+}
+
+// FilesBlobsIn is files.blobs's input.
+type FilesBlobsIn struct {
+	Store string `json:"store" slop:"pos=1"`
+	Blobs any    `json:"blobs"`
+}
+
+// ImportFilesIn is import.files's input.
+type ImportFilesIn struct {
+	Store string `json:"store" slop:"pos=1"`
+	Files any    `json:"files"`
+	Blobs any    `json:"blobs,omitempty"`
+	Zone  string `json:"zone,omitempty" jsonschema_description:"tree (default) or assets"`
 }
