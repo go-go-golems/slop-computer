@@ -55,3 +55,7 @@ Admin power needs the admin scope (Principal.Role caps the role); verb scopes ar
 ### Related Files
 
 - /home/manuel/workspaces/2026-10-28/slop-computer/slop-computer/pkg/access/principal.go — Role caps the role by token scope
+
+## 2026-11-03
+
+Ticket closed 2026-11-03: every task is done or closed as obsolete

@@ -1,7 +1,7 @@
 ---
 Title: 'Blocks publishing: a content-only live reader and static publishing for Claude Blocks workspaces'
 Ticket: SLOP3-003
-Status: active
+Status: complete
 Topics:
     - architecture
     - goja
@@ -17,8 +17,8 @@ RelatedFiles:
     - Path: repo://ttmp/2026/11/01/SLOP3-003--blocks-publishing-a-content-only-live-reader-and-static-publishing-for-claude-blocks-workspaces/reference/01-diary.md
       Note: the implementation diary
 ExternalSources: []
-Summary: "Publish a Claude Blocks workspace as web pages: a blocks-site app folds the workspace server-side and serves content-only HTML (live reader), and pushes the same pages into a static store (static publishing)."
-LastUpdated: 2026-11-01T18:01:22.6946892-05:00
+Summary: 'Publish a Claude Blocks workspace as web pages: a blocks-site app folds the workspace server-side and serves content-only HTML (live reader), and pushes the same pages into a static store (static publishing).'
+LastUpdated: 2026-11-03T17:10:26.501957424-05:00
 WhatFor: ""
 WhenToUse: ""
 ---

@@ -1,7 +1,7 @@
 ---
 Title: 'Site-aware Pinup apps: a site index data source, links to any URL, filters, list repeats and rich text'
 Ticket: SLOP-006
-Status: active
+Status: complete
 Topics:
     - tools
     - frontend
@@ -13,7 +13,7 @@ Owners: []
 RelatedFiles: []
 ExternalSources: []
 Summary: ""
-LastUpdated: 2026-10-29T11:10:18.417938553-04:00
+LastUpdated: 2026-11-03T17:10:26.091017741-05:00
 WhatFor: ""
 WhenToUse: ""
 ---

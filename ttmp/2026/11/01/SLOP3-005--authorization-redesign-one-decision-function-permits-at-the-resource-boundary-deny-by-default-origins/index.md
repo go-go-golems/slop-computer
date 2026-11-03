@@ -1,7 +1,7 @@
 ---
 Title: 'Authorization redesign: one decision function, permits at the resource boundary, deny-by-default origins'
 Ticket: SLOP3-005
-Status: active
+Status: complete
 Topics:
     - access
     - auth
@@ -11,8 +11,8 @@ Intent: long-term
 Owners: []
 RelatedFiles: []
 ExternalSources: []
-Summary: "Make the PR #13 classes of access bugs impossible by construction: one decision function over current state, credentials with ceilings, permits at the resource boundary, author authority for SQL, deny-by-default trusted origins; plus rev-guarded sync and idempotent mutations."
-LastUpdated: 2026-11-01T21:26:29.971866069-05:00
+Summary: 'Make the PR #13 classes of access bugs impossible by construction: one decision function over current state, credentials with ceilings, permits at the resource boundary, author authority for SQL, deny-by-default trusted origins; plus rev-guarded sync and idempotent mutations.'
+LastUpdated: 2026-11-03T17:10:26.632385969-05:00
 WhatFor: ""
 WhenToUse: ""
 ---

@@ -9,7 +9,7 @@
 
 ## Implementation
 - [x] Phase 0 — module skeleton, go.work (ca57479)
-- [ ] Phase 0 — deploy/compose with postgres + zitadel (deferred until production config is tested)
+- [x] Phase 0 — deploy/compose with postgres + zitadel (deferred until production config is tested). Closed as obsolete: v3 has no Postgres or Zitadel (system.db on SQLite, generic OIDC); v2's code was removed in #12 (SLOP3-004 cutover, 2026-11-03).
 - [x] Phase 1 — store on database/sql (Postgres + SQLite), auth carve-out, guard, local mode, CLI auth, /device (2c6ff88)
 - [x] Phase 2 — kernel storage + API: projects, artifacts, versions, blobs, refs, routes, threads, events broker, SSE, comments wait
 - [x] Phase 3 — routing, records, rendering, site + sandbox hosts
@@ -17,4 +17,4 @@
 - [x] Phase 5 — Workshop in React + RTK Query, embedded; Vite dev proxy; safe mode /_/; push --watch
 - [x] Phase 6 — Tools: manifests, grants, CORS, ToolScreen, release board example
 - [x] Phase 7 — Hardening, Dockerfile, production doc
-- [ ] Phase 8 (optional) — MCP tools
+- [x] Phase 8 (optional) — MCP tools. Done in v3: the MCP door (SLOP3-009 step 6, pkg/doors/mcp).

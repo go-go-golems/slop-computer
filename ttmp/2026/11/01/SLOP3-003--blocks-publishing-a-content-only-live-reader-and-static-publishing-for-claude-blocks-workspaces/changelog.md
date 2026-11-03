@@ -44,3 +44,7 @@ B6: deep links inside apps. The runtime mirrors the view's fragment into the add
 
 - /home/manuel/code/wesen/2026-10-31--slop-v3/pkg/server/assets/shell.js — hash message and hashchange in the shell
 - /home/manuel/code/wesen/2026-10-31--slop-v3/web/runtime/src/url.ts — fragment sync in the runtime
+
+## 2026-11-03
+
+Ticket closed 2026-11-03: every task is done or closed as obsolete

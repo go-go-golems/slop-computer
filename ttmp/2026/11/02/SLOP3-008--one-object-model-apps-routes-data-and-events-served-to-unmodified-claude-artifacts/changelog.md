@@ -37,3 +37,7 @@ Phases 2–5 implemented on task/slop3-008-data-assets: files over store trees (
 ## 2026-11-03
 
 Addressed PR #20 review: runtime freeze skips typed arrays (files.read on non-empty files); empty files.list is []; storage keys with / are hashed; alias subscriptions follow a store before access so a grant reopens the page; remote changes carry an opaque store key and rev, and reconnects resume from the runtime's confirmed cursor (at-least-once).
+
+## 2026-11-03
+
+Ticket closed 2026-11-03: every task is done or closed as obsolete

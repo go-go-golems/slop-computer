@@ -13,5 +13,5 @@
 - [x] Browser test additions (slop/tests/app.js) <!-- t:0eec -->
 - [x] Docs: slop help pinup and agents <!-- t:nvb8 -->
 - [x] End to end: a Site map Pinup app on the local server, screenshots <!-- t:jrx8 -->
-- [ ] Per-reader filters on $site (e.g. $site?section=journal) to keep boot data small <!-- t:0r0g -->
+- [x] Per-reader filters on $site (e.g. $site?section=journal) to keep boot data small. Closed as obsolete: $site was v2's site index; v2's code was removed in #12 (SLOP3-004 cutover, 2026-11-03). <!-- t:0r0g -->
 - [x] Deploy: closed here, tracked once in SLOP-004 (pinup-push and blocks-push on the cluster). <!-- t:rnah -->

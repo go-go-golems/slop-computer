@@ -23,4 +23,4 @@
 - [x] francois admins (Manuel, Ramon) imported as slop admins; E2E test admin left out
 - [x] Real import on the cluster (108 artifacts) and the agent storefront at https://site.slop.yolo.scapegoat.dev/
 - [x] Merge PR #2, then bump the gitops image tag. Closed: PR #2 merged 2026-10-29; the cluster has had several image bumps since (latest sha-ec4c4c9).
-- [ ] Next ticket from the agent NOTES: route-by-record, per-route data projections, route conflict warnings, --output json, document /_d/ and /_v/
+- [x] Next ticket from the agent NOTES: route-by-record, per-route data projections, route conflict warnings, --output json, document /_d/ and /_v/. Closed as obsolete: the /_d/ and /_v/ routes and route-by-record were v2; v2's code was removed in #12 (SLOP3-004 cutover, 2026-11-03).

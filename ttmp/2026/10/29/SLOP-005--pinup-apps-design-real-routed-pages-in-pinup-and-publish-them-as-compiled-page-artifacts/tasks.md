@@ -13,6 +13,6 @@
 - [x] Help topic: Pinup apps section in slop help pinup <!-- t:y75o -->
 - [x] End-to-end check on the local server, screenshots <!-- t:zugi -->
 - [x] Node test of compiler and runtime matcher <!-- t:boe9 -->
-- [ ] Set main to an earlier version (Workshop/CLI), for rolling back an app <!-- t:i4de -->
+- [x] Set main to an earlier version (Workshop/CLI), for rolling back an app. Done: v3: ref.move (slop ref move; workshop module moveRef/publish). <!-- t:i4de -->
 - [ ] Self-hosted fonts, breakpoint variants, server-side screen choice for no-JS (guide §12) <!-- t:cuxl -->
 - [x] Deploy: closed here, tracked once in SLOP-004 (pinup-push and blocks-push on the cluster). <!-- t:bz67 -->

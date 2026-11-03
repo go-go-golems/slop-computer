@@ -1,7 +1,7 @@
 ---
 Title: 'One object model: apps, routes, data and events, served to unmodified Claude artifacts'
 Ticket: SLOP3-008
-Status: active
+Status: complete
 Topics:
     - architecture
     - sqlite
@@ -14,7 +14,7 @@ Owners: []
 RelatedFiles: []
 ExternalSources: []
 Summary: ""
-LastUpdated: 2026-11-02T17:36:50.760938697-05:00
+LastUpdated: 2026-11-03T17:10:26.763298969-05:00
 WhatFor: ""
 WhenToUse: ""
 ---

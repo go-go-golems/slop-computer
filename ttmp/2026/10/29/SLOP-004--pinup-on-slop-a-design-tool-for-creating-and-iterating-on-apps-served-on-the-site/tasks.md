@@ -12,9 +12,9 @@
 - [x] Phase 2: presence, send-to-agent threads, Save version (done; Open version split out) <!-- t:l5na -->
 - [x] Phase 2: player (same bundle, player mode), pinup-player page, Publish prototype, hand off (done; static publish split out) <!-- t:9f6t -->
 - [x] Phase 3: sample, assets, reviewer role, viewer. Closed as superseded: sample and assets by SLOP-009; roles by SLOP-011 phase 2. <!-- t:uppl -->
-- [ ] Open version: restore a saved version into the live documents as one revertible step <!-- t:e5c3 -->
+- [x] Open version: restore a saved version into the live documents as one revertible step. Closed as obsolete: Pinup's v2 Workshop layer; v2's code was removed in #12 (SLOP3-004 cutover, 2026-11-03). <!-- t:e5c3 -->
 - [x] Static publish (guide 6.9 C). Closed as superseded: SLOP-005 publishes Pinup apps as compiled page artifacts. <!-- t:col4 -->
-- [ ] Scripted Playwright test of tool mode against slop serve --local (slop1.js) <!-- t:dly6 -->
+- [x] Scripted Playwright test of tool mode against slop serve --local (slop1.js). Closed as obsolete: slop1.js is v2; v2's code was removed in #12 (SLOP3-004 cutover, 2026-11-03). <!-- t:dly6 -->
 - [x] Schedule PruneDocTombstones. Closed as obsolete: migration 007 dropped the docs tables; documents live in the SLOP-009 runtime store. <!-- t:n9jy -->
 - [x] Deploy Pinup and Blocks to the cluster: done 2026-10-30, blocks v1, pinup v2 and pinup-player v2 pushed with make blocks-push / pinup-push. Pinup v2's slop permissions wait for an admin's Apps > Approve in the Workshop (the endpoint refuses API tokens). <!-- t:zf91 -->
 - [x] PR #3 review: no lost revs on the docs stream, no put/delete deadlock (2fe5f5a) <!-- t:jj1v -->

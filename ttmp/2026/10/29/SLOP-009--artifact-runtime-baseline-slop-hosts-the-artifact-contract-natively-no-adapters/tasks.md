@@ -13,7 +13,7 @@
 - [ ] Decide: SVG sanitizer for assets, files mapping (guide 16.2). Roles beyond admin and the sample budget moved to SLOP-011 (guide 12.2 questions 2 and 4). <!-- t:76g1 -->
 - [x] Deploy: sample on the cluster. Closed as superseded: SLOP-010 phase 7 (Go model calls, --models pi default, no Node worker) plus a Pi credentials secret. <!-- t:5jc7 -->
 - [x] Deploy: migration 007 drops the docs table. Closed: accepted for the test deployment and shipped with sha-2ac2611 (hetzner-k3s PR #401). <!-- t:h74u -->
-- [ ] Workshop: the top bar's artifact picker shows the last artifact while /run/<target> is open (cosmetic) <!-- t:1efr -->
+- [x] Workshop: the top bar's artifact picker shows the last artifact while /run/<target> is open (cosmetic). Closed as obsolete: the v2 Workshop SPA is gone; v2's code was removed in #12 (SLOP3-004 cutover, 2026-11-03). <!-- t:1efr -->
 - [ ] Pinup: decide whether the inbox and nodes docs should declare rules (today: defaults, interact writes) <!-- t:g2kj -->
 - [ ] artifact.publish(files) (the files form with ifMatch) is not served: it rejects invalid_content <!-- t:8t4o -->
 - [ ] sample: no per-user admission queue yet (guide 6.15: two active, four queued); calls run as they come <!-- t:escv -->

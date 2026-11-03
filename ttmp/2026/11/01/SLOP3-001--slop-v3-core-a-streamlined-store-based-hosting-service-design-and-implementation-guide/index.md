@@ -1,7 +1,7 @@
 ---
 Title: 'slop v3 core: a streamlined store-based hosting service (design and implementation guide)'
 Ticket: SLOP3-001
-Status: active
+Status: complete
 Topics:
     - architecture
     - hosting
@@ -18,7 +18,7 @@ RelatedFiles:
       Note: Primary deliverable, the intern design and implementation guide
 ExternalSources: []
 Summary: ""
-LastUpdated: 2026-11-01T12:14:46.621979074-05:00
+LastUpdated: 2026-11-03T17:10:26.22592722-05:00
 WhatFor: ""
 WhenToUse: ""
 ---

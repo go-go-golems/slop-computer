@@ -1,7 +1,7 @@
 ---
 Title: 'Tools as apps: Go modules for actors, the Workshop and the back office as apps'
 Ticket: SLOP3-002
-Status: active
+Status: complete
 Topics:
     - architecture
     - goja
@@ -14,7 +14,7 @@ Owners: []
 RelatedFiles: []
 ExternalSources: []
 Summary: ""
-LastUpdated: 2026-11-01T16:20:14.235783567-05:00
+LastUpdated: 2026-11-03T17:10:26.360753143-05:00
 WhatFor: ""
 WhenToUse: ""
 ---

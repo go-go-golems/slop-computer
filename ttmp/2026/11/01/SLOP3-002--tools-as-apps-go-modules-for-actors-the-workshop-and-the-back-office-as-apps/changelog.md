@@ -75,3 +75,7 @@ W8 (69c2316): Workshop app with a CLI agent loop; actor toJS now yields native J
 ### Related Files
 
 - /home/manuel/code/wesen/2026-10-31--slop-v3/apps/workshop/actor.js — the Workshop app's actor
+
+## 2026-11-03
+
+Ticket closed 2026-11-03: every task is done or closed as obsolete
