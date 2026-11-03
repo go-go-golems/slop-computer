@@ -10,6 +10,7 @@ import (
 	"time"
 
 	capsample "github.com/go-go-golems/slop-computer/pkg/caps/sample"
+	"github.com/go-go-golems/slop-computer/pkg/doors/web"
 	"github.com/go-go-golems/slop-computer/pkg/httpx"
 	"github.com/go-go-golems/slop-computer/pkg/llm"
 	"github.com/go-go-golems/slop-computer/pkg/rt"
@@ -197,7 +198,7 @@ func (s *Server) startSample(w http.ResponseWriter, r *http.Request) {
 	send := func(typ string, data any) {
 		mu.Lock()
 		defer mu.Unlock()
-		_ = writeSSE(w, typ, data)
+		_ = web.WriteSSE(w, typ, data)
 		flusher.Flush()
 	}
 	send("call", map[string]string{"call": req.CallID})

@@ -36,7 +36,7 @@ func (s *Server) viewPrincipal(ctx context.Context, v *rt.View) *access.Principa
 	if v.Kind == rt.KindActor {
 		via = "actor"
 	}
-	return s.personAs(ctx, v.User, via)
+	return s.web.PersonAs(ctx, v.User, via)
 }
 
 func actorFail(err error) error {

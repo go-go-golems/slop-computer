@@ -89,7 +89,7 @@ func (s *Server) sitePrincipal(r *http.Request) (*access.Principal, *identity.Se
 	if err != nil {
 		return nil, nil
 	}
-	p := s.personAs(r.Context(), sess.Person, "page")
+	p := s.web.PersonAs(r.Context(), sess.Person, "page")
 	if p == nil {
 		return nil, nil
 	}
@@ -101,7 +101,7 @@ func (s *Server) sitePrincipal(r *http.Request) (*access.Principal, *identity.Se
 
 // newGuest gives this browser a guest id on this host.
 func (s *Server) newGuest(w http.ResponseWriter, r *http.Request) (*access.Principal, error) {
-	ip := s.clientIP(r)
+	ip := s.web.ClientIP(r)
 	limit := s.Cfg.GuestsPerHour
 	if limit <= 0 {
 		limit = identity.GuestsPerHour
@@ -365,7 +365,7 @@ func (s *Server) handoff(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "bad handoff", http.StatusBadRequest)
 		return
 	}
-	p, _, _ := s.principalOf(r)
+	p, _, _ := s.web.Principal(r)
 	if p == nil || p.Kind != access.KindUser {
 		http.Redirect(w, r, "/auth/login?return="+url.QueryEscape(r.URL.RequestURI()), http.StatusSeeOther)
 		return

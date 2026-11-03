@@ -8,6 +8,7 @@ import (
 
 	"github.com/go-go-golems/slop-computer/pkg/access"
 	"github.com/go-go-golems/slop-computer/pkg/actor"
+	"github.com/go-go-golems/slop-computer/pkg/doors/web"
 	"github.com/go-go-golems/slop-computer/pkg/verbs"
 )
 
@@ -142,7 +143,7 @@ func (s *Server) callVerb(a *actor.Actor, module string, f modFunc, args map[str
 		}
 	}
 	return a.IO(func() (any, error) {
-		out, err := s.Verbs.Call(withPrincipal(context.Background(), p), p, name, args)
+		out, err := s.Verbs.Call(web.WithPrincipal(context.Background(), p), p, name, args)
 		if err != nil {
 			ve := verbs.AsError(err)
 			return nil, &actor.Error{Code: ve.Code, Message: ve.Message}
@@ -172,7 +173,7 @@ func (s *Server) actAs(a *actor.Actor, module string, write bool) *access.Princi
 	if person == "" {
 		a.Throw("permission_denied", "no person to act as")
 	}
-	p := s.personAs(context.Background(), person, "app:"+a.App())
+	p := s.web.PersonAs(context.Background(), person, "app:"+a.App())
 	if p == nil {
 		a.Throw("permission_denied", "no person to act as")
 	}

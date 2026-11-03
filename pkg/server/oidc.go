@@ -5,10 +5,10 @@ import (
 	"log"
 	"net/http"
 	"net/url"
-	"os"
 	"strings"
 	"time"
 
+	"github.com/go-go-golems/slop-computer/pkg/doors/web"
 	"github.com/go-go-golems/slop-computer/pkg/identity"
 	"github.com/go-go-golems/slop-computer/pkg/ids"
 )
@@ -29,13 +29,13 @@ func (s *Server) setupOIDC() error {
 	if s.Cfg.Local || c.Issuer == "" {
 		return nil
 	}
-	id, err := readSecret(c.ClientIDFile)
+	id, err := web.ReadSecret(c.ClientIDFile)
 	if err != nil {
 		return fmt.Errorf("oidc client_id_file: %w", err)
 	}
 	secret := ""
 	if c.ClientSecretFile != "" {
-		if secret, err = readSecret(c.ClientSecretFile); err != nil {
+		if secret, err = web.ReadSecret(c.ClientSecretFile); err != nil {
 			return fmt.Errorf("oidc client_secret_file: %w", err)
 		}
 	}
@@ -47,18 +47,6 @@ func (s *Server) setupOIDC() error {
 		RedirectURL: s.Cfg.MainURL() + "/auth/callback", ExtraScopes: extra})
 	s.oidcLogin = s.oidcStart
 	return nil
-}
-
-func readSecret(path string) (string, error) {
-	b, err := os.ReadFile(path)
-	if err != nil {
-		return "", err
-	}
-	v := strings.TrimSpace(string(b))
-	if v == "" {
-		return "", fmt.Errorf("%s is empty", path)
-	}
-	return v, nil
 }
 
 // oidcStart sends the browser to the provider with S256 PKCE and a nonce.
@@ -74,7 +62,7 @@ func (s *Server) oidcStart(w http.ResponseWriter, r *http.Request, ret string) {
 		s.signInFailed(w, r, "The sign-in provider is not reachable right now.", ret)
 		return
 	}
-	s.setCookie(w, s.flowCookie(), binding, 600, http.SameSiteLaxMode)
+	s.web.SetCookie(w, s.flowCookie(), binding, 600, http.SameSiteLaxMode)
 	http.Redirect(w, r, target, http.StatusSeeOther)
 }
 
@@ -101,7 +89,7 @@ func (s *Server) oidcCallback(w http.ResponseWriter, r *http.Request) {
 		s.signInFailed(w, r, "This sign-in was started in another browser or has expired.", "/")
 		return
 	}
-	s.setCookie(w, s.flowCookie(), "", -1, http.SameSiteLaxMode)
+	s.web.SetCookie(w, s.flowCookie(), "", -1, http.SameSiteLaxMode)
 	id, idToken, err := s.oidc.Exchange(r.Context(), q.Get("code"), flow.Verifier, flow.Nonce)
 	if err != nil {
 		log.Printf("oidc exchange: %v", err)
@@ -124,5 +112,5 @@ func (s *Server) signInFailed(w http.ResponseWriter, r *http.Request, problem, r
 	w.Header().Set("Cache-Control", "no-store")
 	w.Header().Set("Content-Type", "text/html; charset=utf-8")
 	w.WriteHeader(http.StatusBadRequest)
-	_ = signInFailedTmpl.Execute(w, map[string]string{"Problem": problem, "Again": "/auth/login?return=" + url.QueryEscape(safeReturn(ret))})
+	_ = signInFailedTmpl.Execute(w, map[string]string{"Problem": problem, "Again": "/auth/login?return=" + url.QueryEscape(web.SafeReturn(ret))})
 }

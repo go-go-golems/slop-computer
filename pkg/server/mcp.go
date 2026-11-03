@@ -22,6 +22,7 @@ import (
 	"sync"
 
 	"github.com/go-go-golems/slop-computer/pkg/access"
+	"github.com/go-go-golems/slop-computer/pkg/doors/web"
 	"github.com/go-go-golems/slop-computer/pkg/httpx"
 	"github.com/go-go-golems/slop-computer/pkg/verbs"
 )
@@ -75,7 +76,7 @@ func (s *Server) mcpPrincipal(w http.ResponseWriter, r *http.Request) *access.Pr
 			return nil
 		}
 	}
-	p, _, err := s.principalOf(r)
+	p, _, err := s.web.Principal(r)
 	if err != nil || p == nil || p.Kind != access.KindToken {
 		w.Header().Set("WWW-Authenticate", `Bearer realm="slop"`)
 		httpx.Fail(w, 401, "unauthenticated", "send Authorization: Bearer <token> (slop token.new)")
@@ -176,7 +177,7 @@ func (s *Server) mcpCall(w http.ResponseWriter, r *http.Request, p *access.Princ
 		mcpReply(w, req.ID, nil, &mcpError{rpcInvalidParams, "no tool " + in.Name})
 		return
 	}
-	ctx := withPrincipal(r.Context(), p)
+	ctx := web.WithPrincipal(r.Context(), p)
 	stream := v.Effect == verbs.EffectStream && len(in.Meta.ProgressToken) > 0 &&
 		strings.Contains(r.Header.Get("Accept"), "text/event-stream")
 	var mu sync.Mutex
@@ -189,7 +190,7 @@ func (s *Server) mcpCall(w http.ResponseWriter, r *http.Request, p *access.Princ
 			w.WriteHeader(http.StatusOK)
 			started = true
 		}
-		_ = writeSSE(w, "message", msg)
+		_ = web.WriteSSE(w, "message", msg)
 		if f, ok := w.(http.Flusher); ok {
 			f.Flush()
 		}

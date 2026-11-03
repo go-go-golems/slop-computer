@@ -11,6 +11,7 @@ import (
 
 	"github.com/go-go-golems/slop-computer/pkg/access"
 	"github.com/go-go-golems/slop-computer/pkg/billing/stripe"
+	"github.com/go-go-golems/slop-computer/pkg/doors/web"
 	"github.com/go-go-golems/slop-computer/pkg/rt"
 )
 
@@ -21,13 +22,13 @@ func (s *Server) setupBilling() error {
 	if c.SecretKeyFile == "" {
 		return nil
 	}
-	key, err := readSecret(c.SecretKeyFile)
+	key, err := web.ReadSecret(c.SecretKeyFile)
 	if err != nil {
 		return err
 	}
 	var hooks []string
 	if c.WebhookSecretFile != "" {
-		h, err := readSecret(c.WebhookSecretFile)
+		h, err := web.ReadSecret(c.WebhookSecretFile)
 		if err != nil {
 			return err
 		}
@@ -97,7 +98,7 @@ button.quiet{background:#fff;color:#1a1a1a}.err{color:#e2001a}</style>
 // subscribePage is the main host's subscribe page. Coming back from
 // Checkout (?checkout=) asks for a refresh, which beats the webhook.
 func (s *Server) subscribePage(w http.ResponseWriter, r *http.Request) {
-	p, sess, _ := s.principalOf(r)
+	p, sess, _ := s.web.Principal(r)
 	if p == nil || sess == nil || p.Kind != access.KindUser {
 		http.Redirect(w, r, "/auth/login?return=/subscribe", http.StatusSeeOther)
 		return
@@ -130,7 +131,7 @@ func (s *Server) billingPerson(p *access.Principal) stripe.Person {
 
 // billingForm checks a signed-in user's form post with its CSRF token.
 func (s *Server) billingForm(w http.ResponseWriter, r *http.Request) (*access.Principal, bool) {
-	p, sess, _ := s.principalOf(r)
+	p, sess, _ := s.web.Principal(r)
 	if s.billing == nil || p == nil || sess == nil || p.Kind != access.KindUser {
 		http.Redirect(w, r, "/subscribe", http.StatusSeeOther)
 		return nil, false

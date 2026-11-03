@@ -7,11 +7,9 @@ import (
 	"context"
 	"fmt"
 	"log"
-	"net"
 	"net/http"
 	"os"
 	"path/filepath"
-	"strings"
 	"time"
 
 	"github.com/go-go-golems/slop-computer/pkg/billing"
@@ -19,6 +17,7 @@ import (
 	capsdb "github.com/go-go-golems/slop-computer/pkg/caps/db"
 	"github.com/go-go-golems/slop-computer/pkg/commands"
 	"github.com/go-go-golems/slop-computer/pkg/config"
+	"github.com/go-go-golems/slop-computer/pkg/doors/web"
 	"github.com/go-go-golems/slop-computer/pkg/httpx"
 	"github.com/go-go-golems/slop-computer/pkg/identity"
 	"github.com/go-go-golems/slop-computer/pkg/ids"
@@ -42,6 +41,8 @@ type Server struct {
 	Gov      *policy.Governance
 	Book     *billing.Book
 	Env      *commands.Env
+	// web resolves requests to principals (pkg/doors/web).
+	web *web.Sessions
 	// Verbs is the table every door calls (the commands installed with Env).
 	Verbs *verbs.Table
 	main  *http.ServeMux
@@ -114,6 +115,7 @@ func New(cfg *config.Config, sys *sysdb.DB, env *commands.Env) *Server {
 	} else if sys != nil {
 		s.People, s.Registry, s.Ledger, s.Gov, s.Book = identity.NewAccounts(sys), registry.NewRegistry(sys), llm.NewLedger(sys), policy.NewGovernance(sys), billing.NewBook(sys)
 	}
+	s.web = &web.Sessions{Cfg: cfg, People: s.People}
 	if env != nil {
 		if env.Verbs == nil {
 			commands.Install(verbs.NewTable(), env) // not verbs.Default: the CLI lists its commands there
@@ -302,18 +304,4 @@ func (s *Server) ListenAndServe(ctx context.Context) error {
 		return nil
 	}
 	return err
-}
-
-// clientIP is the caller's address (X-Forwarded-For only behind a trusted proxy).
-func (s *Server) clientIP(r *http.Request) string {
-	if s.Cfg.TrustProxy {
-		if f := r.Header.Get("X-Forwarded-For"); f != "" {
-			return strings.TrimSpace(strings.Split(f, ",")[0])
-		}
-	}
-	h, _, err := net.SplitHostPort(r.RemoteAddr)
-	if err != nil {
-		return r.RemoteAddr
-	}
-	return h
 }

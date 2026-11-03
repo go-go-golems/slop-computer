@@ -1,7 +1,6 @@
 package server
 
 import (
-	"context"
 	"errors"
 	"html/template"
 	"log"
@@ -9,70 +8,11 @@ import (
 	"net/url"
 	"strings"
 
-	"github.com/go-go-golems/slop-computer/pkg/access"
+	"github.com/go-go-golems/slop-computer/pkg/doors/web"
 	"github.com/go-go-golems/slop-computer/pkg/httpx"
 	"github.com/go-go-golems/slop-computer/pkg/identity"
 	"github.com/go-go-golems/slop-computer/pkg/sysdb"
 )
-
-type ctxKey struct{}
-
-// sessionCookie is the main host's session cookie name.
-func (s *Server) sessionCookie() string {
-	if s.Cfg.SecureCookies() {
-		return "__Host-slop_session"
-	}
-	return "slop_session"
-}
-
-func (s *Server) setCookie(w http.ResponseWriter, name, value string, maxAge int, sameSite http.SameSite) {
-	http.SetCookie(w, &http.Cookie{Name: name, Value: value, Path: "/", MaxAge: maxAge, HttpOnly: true,
-		Secure: s.Cfg.SecureCookies(), SameSite: sameSite})
-}
-
-// principalOf resolves the caller on the main host: a bearer token, or a
-// session cookie. It returns nil for nobody, and the session for CSRF checks.
-func (s *Server) principalOf(r *http.Request) (*access.Principal, *identity.Session, error) {
-	ctx := r.Context()
-	if h := r.Header.Get("Authorization"); strings.HasPrefix(h, "Bearer ") {
-		t, err := s.People.TokenBySecret(ctx, strings.TrimPrefix(h, "Bearer "))
-		if err != nil {
-			return nil, nil, err
-		}
-		p := s.personAs(ctx, t.Person, "http")
-		if p == nil {
-			return nil, nil, sysdb.ErrNotFound
-		}
-		p.Kind, p.TokenID, p.Scopes = access.KindToken, t.ID, t.Scopes
-		return p, nil, nil
-	}
-	c, err := r.Cookie(s.sessionCookie())
-	if err != nil || c.Value == "" {
-		return nil, nil, nil
-	}
-	sess, err := s.People.SessionBySecret(ctx, c.Value, r.Host)
-	if err != nil {
-		return nil, nil, nil
-	}
-	p := s.personAs(ctx, sess.Person, "http")
-	if p == nil {
-		return nil, nil, nil
-	}
-	return p, &sess, nil
-}
-
-// personAs is the principal person id acts as through via, or nil when the
-// person is gone or their account is disabled. Sessions, tokens, views,
-// previews and apps acting for their payer all turn a stored person id into
-// someone who acts here, so a disabled account is refused the same way on
-// every door.
-func (s *Server) personAs(ctx context.Context, id, via string) *access.Principal {
-	p, err := s.People.Person(ctx, id)
-	if err != nil || p.Role == sysdb.RoleDisabled {
-		return nil
-	}
-	return access.PersonPrincipal(p, via)
-}
 
 func (s *Server) authRoutes(m *http.ServeMux) {
 	m.HandleFunc("GET /auth/login", s.loginPage)
@@ -103,7 +43,7 @@ button{margin-top:16px;padding:7px 14px;border:1px solid #1a1a1a;background:#1a1
 {{if .Problem}}<p class="err">{{.Problem}}</p>{{end}}</form>`))
 
 func (s *Server) loginPage(w http.ResponseWriter, r *http.Request) {
-	ret := safeReturn(r.URL.Query().Get("return"))
+	ret := web.SafeReturn(r.URL.Query().Get("return"))
 	if !s.Cfg.Local && s.oidcLogin != nil {
 		s.oidcLogin(w, r, ret)
 		return
@@ -121,7 +61,7 @@ func (s *Server) localSignIn(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "bad form", http.StatusBadRequest)
 		return
 	}
-	ret := safeReturn(r.PostForm.Get("return"))
+	ret := web.SafeReturn(r.PostForm.Get("return"))
 	email := strings.TrimSpace(r.PostForm.Get("email"))
 	if !strings.Contains(email, "@") {
 		http.Redirect(w, r, "/auth/login?problem="+url.QueryEscape("Enter an email")+"&return="+url.QueryEscape(ret), http.StatusSeeOther)
@@ -152,7 +92,7 @@ func (s *Server) signIn(w http.ResponseWriter, r *http.Request, email, name, sub
 			return err
 		}
 	}
-	s.setCookie(w, s.sessionCookie(), secret, identity.SessionDays*24*3600, http.SameSiteLaxMode)
+	s.web.SetCookie(w, s.web.CookieName(), secret, identity.SessionDays*24*3600, http.SameSiteLaxMode)
 	return nil
 }
 
@@ -162,11 +102,11 @@ func (s *Server) signIn(w http.ResponseWriter, r *http.Request, email, name, sub
 // the next sign-in asks again (another account can sign in).
 func (s *Server) logout(w http.ResponseWriter, r *http.Request) {
 	idToken := ""
-	if c, err := r.Cookie(s.sessionCookie()); err == nil {
+	if c, err := r.Cookie(s.web.CookieName()); err == nil {
 		idToken = s.People.SessionIDToken(r.Context(), c.Value)
 		_ = s.People.DeleteSession(r.Context(), c.Value)
 	}
-	s.setCookie(w, s.sessionCookie(), "", -1, http.SameSiteLaxMode)
+	s.web.SetCookie(w, s.web.CookieName(), "", -1, http.SameSiteLaxMode)
 	next := ""
 	if s.oidc != nil && idToken != "" {
 		target, err := s.oidc.LogoutURL(r.Context(), idToken, s.Cfg.MainURL()+"/", "")
@@ -189,23 +129,10 @@ func (s *Server) logout(w http.ResponseWriter, r *http.Request) {
 
 // sessionInfo tells the back office who is signed in and its CSRF token.
 func (s *Server) sessionInfo(w http.ResponseWriter, r *http.Request) {
-	p, sess, _ := s.principalOf(r)
+	p, sess, _ := s.web.Principal(r)
 	if p == nil || sess == nil {
 		httpx.JSON(w, 200, map[string]any{"signedIn": false, "login": "/auth/login"})
 		return
 	}
 	httpx.JSON(w, 200, map[string]any{"signedIn": true, "person": p.Person, "csrf": sess.CSRF})
-}
-
-// safeReturn keeps redirects on this host.
-func safeReturn(p string) string {
-	if p == "" || !strings.HasPrefix(p, "/") || strings.HasPrefix(p, "//") || strings.Contains(p, "\\") {
-		return "/"
-	}
-	return p
-}
-
-// withPrincipal stores the principal in a context.
-func withPrincipal(ctx context.Context, p *access.Principal) context.Context {
-	return context.WithValue(ctx, ctxKey{}, p)
 }

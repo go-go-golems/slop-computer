@@ -104,7 +104,7 @@ button.go{background:#1a1a1a;color:#fff}.err{color:#e2001a}.code{font:600 20px m
 {{if .Problem}}<p class="err">{{.Problem}}</p>{{end}}</form>`))
 
 func (s *Server) devicePage(w http.ResponseWriter, r *http.Request) {
-	p, sess, _ := s.principalOf(r)
+	p, sess, _ := s.web.Principal(r)
 	if p == nil || sess == nil {
 		http.Redirect(w, r, "/auth/login?return="+url.QueryEscape(r.URL.RequestURI()), http.StatusSeeOther)
 		return
@@ -138,7 +138,7 @@ func (s *Server) devicePage(w http.ResponseWriter, r *http.Request) {
 }
 
 func (s *Server) deviceDecide(w http.ResponseWriter, r *http.Request) {
-	p, sess, _ := s.principalOf(r)
+	p, sess, _ := s.web.Principal(r)
 	if p == nil || sess == nil {
 		http.Redirect(w, r, "/auth/login?return=/device", http.StatusSeeOther)
 		return

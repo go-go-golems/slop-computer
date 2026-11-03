@@ -461,7 +461,7 @@ func TestDisabledAccountActsNowhere(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if h.srv.personAs(ctx, una.ID, "test") == nil {
+	if h.srv.web.PersonAs(ctx, una.ID, "test") == nil {
 		t.Fatal("an active member should act")
 	}
 	if _, err := h.k.People.SetRole(ctx, "", "test", una.ID, sysdb.RoleDisabled); err != nil {
@@ -477,7 +477,7 @@ func TestDisabledAccountActsNowhere(t *testing.T) {
 	if st, v2 := openView(s, live, "/club", ""); st == 200 && (v2["user"] != "" || v2["level"] == "interact") {
 		t.Fatalf("reopen as a disabled account: %d %v", st, v2)
 	}
-	if h.srv.personAs(ctx, una.ID, "test") != nil {
+	if h.srv.web.PersonAs(ctx, una.ID, "test") != nil {
 		t.Fatal("a disabled account acts")
 	}
 }

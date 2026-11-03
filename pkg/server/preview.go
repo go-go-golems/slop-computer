@@ -26,7 +26,7 @@ func (s *Server) servePreview(w http.ResponseWriter, r *http.Request, label stri
 		notFound(w)
 		return
 	}
-	who := s.personAs(ctx, pv.Person, "preview")
+	who := s.web.PersonAs(ctx, pv.Person, "preview")
 	if who == nil {
 		notFound(w)
 		return

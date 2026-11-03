@@ -22,6 +22,7 @@ import (
 	"github.com/go-go-golems/slop-computer/pkg/access"
 	"github.com/go-go-golems/slop-computer/pkg/authz"
 	capsdb "github.com/go-go-golems/slop-computer/pkg/caps/db"
+	"github.com/go-go-golems/slop-computer/pkg/doors/web"
 	"github.com/go-go-golems/slop-computer/pkg/httpx"
 	"github.com/go-go-golems/slop-computer/pkg/policy"
 	"github.com/go-go-golems/slop-computer/pkg/registry"
@@ -234,15 +235,6 @@ func (s *Server) viewOf(r *http.Request) *rt.View {
 
 // --- the stream --------------------------------------------------------
 
-func writeSSE(w http.ResponseWriter, typ string, data any) error {
-	raw, err := json.Marshal(data)
-	if err != nil {
-		return err
-	}
-	_, err = fmt.Fprintf(w, "event: %s\ndata: %s\n\n", typ, raw)
-	return err
-}
-
 // docOut is a document as the runtime receives it. Rev is set only on the
 // last document of a commit, so a resume point never splits a commit.
 type docOut struct {
@@ -318,7 +310,7 @@ func (s *Server) viewEvents(w http.ResponseWriter, r *http.Request) {
 			if i == len(docs)-1 || revs[i+1] != revs[i] {
 				d.Rev = revs[i]
 			}
-			if err := writeSSE(w, "doc", d); err != nil {
+			if err := web.WriteSSE(w, "doc", d); err != nil {
 				return err
 			}
 		}
@@ -358,7 +350,7 @@ func (s *Server) viewEvents(w http.ResponseWriter, r *http.Request) {
 			if i == len(docs)-1 || revs[i+1] != revs[i] {
 				d.RemoteRev = revs[i]
 			}
-			if err := writeSSE(w, "doc", d); err != nil {
+			if err := web.WriteSSE(w, "doc", d); err != nil {
 				return err
 			}
 		}
@@ -417,7 +409,7 @@ func (s *Server) viewEvents(w http.ResponseWriter, r *http.Request) {
 		v.Caught(o.Store, o.Rev)
 		return nil
 	}
-	if writeSSE(w, "hello", s.hello(ctx, v, head)) != nil {
+	if web.WriteSSE(w, "hello", s.hello(ctx, v, head)) != nil {
 		return
 	}
 	if resume && after >= 0 && after < head && catchUp(after) != nil {
@@ -433,7 +425,7 @@ func (s *Server) viewEvents(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 	for _, room := range s.roomsOf(v) {
-		_ = writeSSE(w, "peers", s.peersOf(v.Target, room))
+		_ = web.WriteSSE(w, "peers", s.peersOf(v.Target, room))
 	}
 	flusher.Flush()
 	ping := time.NewTicker(25 * time.Second)
@@ -470,7 +462,7 @@ func (s *Server) viewEvents(w http.ResponseWriter, r *http.Request) {
 				}
 				err = sendAll(docs, revs)
 			default:
-				err = writeSSE(w, o.Type, o.Data)
+				err = web.WriteSSE(w, o.Type, o.Data)
 				if o.Type == "revoked" {
 					flusher.Flush()
 					return

@@ -9,6 +9,7 @@ import (
 
 	"github.com/go-go-golems/slop-computer/pkg/access"
 	"github.com/go-go-golems/slop-computer/pkg/actor"
+	"github.com/go-go-golems/slop-computer/pkg/doors/web"
 	"github.com/go-go-golems/slop-computer/pkg/verbs"
 )
 
@@ -41,7 +42,7 @@ func (s *Server) platformModule(a *actor.Actor) goja.Value {
 				if v.Payer == "" {
 					a.Throw("permission_denied", "a visitor without an id cannot use the platform")
 				}
-				if p = s.personAs(ctx, v.Payer, "app:"+a.App()); p == nil {
+				if p = s.web.PersonAs(ctx, v.Payer, "app:"+a.App()); p == nil {
 					a.Throw("permission_denied", "no person to act as")
 				}
 			}
@@ -49,7 +50,7 @@ func (s *Server) platformModule(a *actor.Actor) goja.Value {
 			if args == nil {
 				args = map[string]any{}
 			}
-			out, err := s.Verbs.Call(withPrincipal(ctx, p), p, platformOps[name], args)
+			out, err := s.Verbs.Call(web.WithPrincipal(ctx, p), p, platformOps[name], args)
 			if err != nil {
 				code, msg := "actor_error", err.Error()
 				if ve, ok := err.(*verbs.Error); ok {

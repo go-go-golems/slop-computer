@@ -14,6 +14,7 @@ import (
 	"sync"
 
 	"github.com/go-go-golems/slop-computer/pkg/access"
+	"github.com/go-go-golems/slop-computer/pkg/doors/web"
 	"github.com/go-go-golems/slop-computer/pkg/registry"
 	"github.com/go-go-golems/slop-computer/pkg/rt"
 	"github.com/go-go-golems/slop-computer/pkg/sysdb"
@@ -30,7 +31,7 @@ func (h regHost) ActingApp(ctx context.Context, v *rt.View) *access.Principal {
 	if v.User == "" {
 		return nil
 	}
-	return h.s.personAs(ctx, v.User, "app:"+v.App)
+	return h.s.web.PersonAs(ctx, v.User, "app:"+v.App)
 }
 
 func (h regHost) Reachable(ctx context.Context, v *rt.View, ceil rt.Level) ([]sysdb.StoreRow, error) {
@@ -38,7 +39,7 @@ func (h regHost) Reachable(ctx context.Context, v *rt.View, ceil rt.Level) ([]sy
 }
 
 func (regHost) WithPrincipal(ctx context.Context, p *access.Principal) context.Context {
-	return withPrincipal(ctx, p)
+	return web.WithPrincipal(ctx, p)
 }
 
 // regErr is a registry refusal as the runtime's error.

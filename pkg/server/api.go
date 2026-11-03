@@ -7,6 +7,7 @@ import (
 	"sync"
 
 	"github.com/go-go-golems/slop-computer/pkg/access"
+	"github.com/go-go-golems/slop-computer/pkg/doors/web"
 	"github.com/go-go-golems/slop-computer/pkg/httpx"
 	"github.com/go-go-golems/slop-computer/pkg/verbs"
 )
@@ -26,7 +27,7 @@ func (s *Server) apiRoutes(m *http.ServeMux) {
 // apiPrincipal authenticates an API call: a token, or a session with its
 // CSRF header. Nobody is an error.
 func (s *Server) apiPrincipal(w http.ResponseWriter, r *http.Request) *access.Principal {
-	p, sess, err := s.principalOf(r)
+	p, sess, err := s.web.Principal(r)
 	if err != nil || p == nil {
 		httpx.Fail(w, 401, "unauthenticated", "sign in, or send Authorization: Bearer <token>")
 		return nil
@@ -60,7 +61,7 @@ func (s *Server) apiCall(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 	s.People.TouchPerson(r.Context(), p.ID())
-	ctx := withPrincipal(r.Context(), p)
+	ctx := web.WithPrincipal(r.Context(), p)
 	if v, ok := s.Verbs.Get(name); ok && v.Effect == verbs.EffectStream && strings.Contains(r.Header.Get("Accept"), "text/event-stream") {
 		s.apiStream(ctx, w, p, name, args)
 		return
@@ -90,7 +91,7 @@ func (s *Server) apiStream(ctx context.Context, w http.ResponseWriter, p *access
 			w.WriteHeader(http.StatusOK)
 			started = true
 		}
-		_ = writeSSE(w, typ, data)
+		_ = web.WriteSSE(w, typ, data)
 		if flusher != nil {
 			flusher.Flush()
 		}

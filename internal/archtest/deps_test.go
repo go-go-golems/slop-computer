@@ -23,7 +23,7 @@ var (
 	runtime  = []string{"pkg/actor"}
 	table    = []string{"pkg/verbs"}
 	commands = []string{"pkg/commands"}
-	doors    = []string{"pkg/server"}
+	doors    = []string{"pkg/server", "pkg/doors"}
 	netHTTP  = "net/http"
 	gojaPath = "github.com/dop251/goja"
 )
