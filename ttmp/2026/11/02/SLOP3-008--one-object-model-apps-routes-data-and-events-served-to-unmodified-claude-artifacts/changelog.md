@@ -23,3 +23,13 @@ Registry documents are not live for now (open question 6 decided): computed on r
 ## 2026-11-02
 
 Phase 1 implemented (data and assets across stores): rt.Space, aliases (bind.set --prefix --level), _stores behind db.stores and the stores policy cell, cross-store stream with per-store cursors, /_blob through --assets aliases, 16-byte asset ids, reopen on losing access to a followed store. Design doc updated with the decisions and two corrections (asset ids are 8 bytes; blob fetches cannot check the viewer's level).
+
+## 2026-11-02
+
+Phases 2–5 implemented on task/slop3-008-data-assets: files over store trees (915a96e); the registry as documents with confirmed writes and ifVersion, people read-only (6acea8e, 3d524e0); alias templates on mounts (cf8eaaa); Durable-Object-shaped ctx.storage for actors (e339f8a). Phase 6 (one owning process per store) deliberately not built while v3 is single-process. Open question 2 decided: grants, aliases and store type writable.
+
+### Related Files
+
+- /home/manuel/workspaces/2026-10-28/slop-computer/slop-computer/pkg/actor/storage.js — Durable-Object-shaped storage (phase 5)
+- /home/manuel/workspaces/2026-10-28/slop-computer/slop-computer/pkg/server/registry.go — registry documents (phase 3)
+- /home/manuel/workspaces/2026-10-28/slop-computer/slop-computer/pkg/verbs/mounts.go — alias templates (phase 4)

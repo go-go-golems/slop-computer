@@ -12,16 +12,20 @@ DocType: design-doc
 Intent: long-term
 Owners: []
 RelatedFiles:
-    - Path: repo://doc/design/slop-v3.md
-      Note: The v3 design this review measures; sections 4 (store), 8 (events), 9 (access), 10 (serving)
     - Path: repo://doc/claude-apis/README.md
       Note: What slop's runtime serves differently from the claude.ai artifact contract
+    - Path: repo://doc/design/slop-v3.md
+      Note: The v3 design this review measures; sections 4 (store), 8 (events), 9 (access), 10 (serving)
+    - Path: repo://pkg/actor/modules.go
+      Note: The actor's use() catalog, including stores.open(alias)
+    - Path: repo://pkg/actor/storage.js
+      Note: phase 5, the Durable-Object-shaped storage adapter
+    - Path: repo://pkg/server/registry.go
+      Note: phase 3, registry rows as documents
     - Path: repo://pkg/store/store.go
       Note: The per-store schema (_docs, _files, _log, _changes, _snapshots, _refs, _migrations, _cursors, _alarms)
     - Path: repo://pkg/system/migrations/001_init.sql
       Note: The registry (stores, mounts, bindings, grants) and the system log
-    - Path: repo://pkg/actor/modules.go
-      Note: The actor's use() catalog, including stores.open(alias)
     - Path: repo://web/runtime/src/index.ts
       Note: The page's use() resolver; bindings reach pages only as slop.stores.open
 ExternalSources: []
@@ -439,6 +443,27 @@ path would feed `onSnapshot` without changing the API pages see.
 where it is: it is not a store in this design, only the source of the
 `_stores/<id>`, `_stores/<id>/_…` and `_people` documents.
 
+**As implemented (phase 3, `pkg/server/registry.go`).** A narrower first
+cut of the table above:
+
+| Document | Body | A write runs |
+|---|---|---|
+| `_stores` | the stores the viewer may open (every store for a platform admin) | — |
+| `_stores/<id>` | `id`, `type`, `app`, `owner`, `createdAt`, and the viewer's `level` there | `update {type}` → `store.type` |
+| `_stores/<id>/_grants/<subject>` | the `grant.ls` row; a link's grant is `<subject>~<via>` | `set {level}` → `grant.set`, `delete` → `grant.rm`; link grants read-only |
+| `_stores/<id>/_bindings/<alias>` | the `bind.ls` row | `set {target, prefix?, level?, assets?}` → `bind.set`, `delete` → `bind.rm` |
+| `_stores/<id>/_llm/budget` | `llm.usage` for `store:<id>` | read-only |
+| `_people/<id>` | the `people.ls` row (platform admins) | read-only (open question 2) |
+
+Reads run the owning listing verb as the viewer (`app:<app>`), so a row the
+verb would not show reads as missing. Writes need `db.stores` `admin`, pass
+`verbs.Check`, then ask the person in the shell (`confirmation_required`;
+the runtime answers with `ask("confirm")` and retries), honour `ifVersion`
+when given (not required: the contract's `set` has no mandatory version),
+and refuse fields the verb does not take. Not built: `app.json`, refs,
+policy cells and modules in the store row; `app.follow`/`app.describe` and
+`llm.set` writes; creating or deleting stores through `_stores`.
+
 The admin console is then:
 
 ```json
@@ -468,7 +493,9 @@ alias, instead of a claude.ai project id:
 
 `files.read('blocks/index.html')` then reads the `blocks` app store's tree
 at its current ref, as the viewer, at the level the declaration allows.
-`revision` is the snapshot number. Writing source stays outside `files`
+`revision` is the file's content hash (as implemented in phase 2: a hash
+changes exactly when the contents do, which is all the contract promises,
+without tracking snapshot numbers per file). Writing source stays outside `files`
 (the contract has no write), on the existing paths: `slop push`, the
 workshop module, or `artifact.publish` on the app's own store.
 
@@ -484,6 +511,13 @@ template, so a parameterised mount can bind what it creates:
 
 Each store created from the mount gets those aliases, which its owner can
 then change. Without a template, a new store gets none.
+
+*As implemented (phase 4):* the template is a list of bindings in
+`bind.set`'s shape, `mount.set --aliases '[{"alias": "contacts", "target":
+"crm-team", "prefix": "contacts", "level": "view"}]'`, only with
+`createApp`. It is checked like `bind.set` against the admin setting the
+mount, stored in `mounts.aliases` (migration 010), restored by `mount.undo`,
+and written as ordinary bindings by `/_site/create`.
 
 ### 5.7 Events across stores
 
@@ -637,26 +671,34 @@ Each phase is useful without the next.
    still sees its own store only (actors keep `use('stores').open`), and
    `caps/db` is the shared `rt.Space` resolution rather than one shared
    db implementation. The dashboard works, pictures included.
-2. **`files` over store trees.** Serve the contract's `files` capability;
-   `project` names `_stores` or an alias. "View source" works.
-3. **Registry rows as documents.** `_stores/<id>`, `_stores/<id>/_grants`,
+2. **`files` over store trees.** *Implemented* (diary step 9). Serve the
+   contract's `files` capability; `project` names `_stores` or an alias.
+   "View source" works.
+3. **Registry rows as documents.** *Implemented* (diary steps 10–11; the
+   narrower first cut in §5.4). `_stores/<id>`, `_stores/<id>/_grants`,
    `_bindings`, `_llm` and `_people` as computed documents (no mounts);
-   writes through verbs with `ifVersion`; read on demand, not live
-   (§5.4). The admin console works as a plain artifact; the back office can
-   drop its `system` module.
-4. **Alias templates on mounts**, so stores created from a mount come
-   bound.
-5. **The Durable-Object adapter** for actors (`ctx.storage`), if a custom
-   app asks for it.
-6. **One owning process per store**, when v3 leaves a single process.
+   writes through verbs, confirmed by the person, with `ifVersion`; read on
+   demand, not live. The admin console works as a plain artifact; the back
+   office's `system` module is not dropped yet.
+4. **Alias templates on mounts.** *Implemented* (diary step 11), so stores
+   created from a mount come bound (§5.6).
+5. **The Durable-Object adapter.** *Implemented* (diary step 12):
+   `use('storage')` / `ctx.storage`, described in `doc/design/slop-v3.md`
+   §6.
+6. **One owning process per store.** *Not built, deliberately.* v3 runs one
+   process, so every store already has exactly one owner and the broker is
+   in-process; there is nothing to forward to and no second process to
+   test against. The rule (§5.7) is recorded for when v3 scales out: route
+   a store's views to the process chosen by its id, without a shared bus.
 
 ## 10. Open questions
 
 1. **Delegated reads.** *Decided (2026-11-02): not in phase 1.* Every
    route reads as the viewer; publishing stays an actor's job (blocks-site).
-2. **Registry writes.** Which registry documents are writable through `db`
-   at all? Grants, aliases, mounts and descriptions are natural; people,
-   sessions and tokens should stay read-only or hidden.
+2. **Registry writes.** *Decided (2026-11-02, phase 3):* grants, aliases
+   and a store's type are writable through `db`, confirmed by the person;
+   people (roles), the LLM budget, mounts, sessions and tokens are not.
+   Descriptions wait for an `app.describe` verb.
 3. **Mount keys, and mounts with no app.** *Decided (2026-11-02): mounts
    and hosts are not mapped into the path space* (§5.4). The first phases
    are about data and assets; routes stay on `mount.*` and the back office.
