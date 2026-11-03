@@ -1,7 +1,6 @@
 package commands
 
 import (
-	"context"
 	"errors"
 
 	"github.com/go-go-golems/slop-computer/pkg/access"
@@ -13,8 +12,9 @@ import (
 
 func peopleVerbs(e peopleEnv) []*verbs.Verb {
 	return []*verbs.Verb{
-		{Name: "whoami", Doc: "Who this call acts as: person, role, audience, token and scopes.", Scope: verbs.Read, Action: authz.Account,
-			Run: func(ctx context.Context, p *access.Principal, a verbs.Args) (any, error) {
+		verbs.Def[WhoamiIn, any]{Name: "whoami", Doc: "Who this call acts as: person, role, audience, token and scopes.", Scope: verbs.Read, Action: authz.Account,
+			Run: func(req verbs.Req, in WhoamiIn) (any, error) {
+				p := req.Principal
 				out := map[string]any{"kind": p.Kind, "id": p.ID(), "via": p.ViaLabel()}
 				if p.Person != nil {
 					out["person"] = p.Person
@@ -24,27 +24,28 @@ func peopleVerbs(e peopleEnv) []*verbs.Verb {
 					out["scopes"] = p.Scopes
 				}
 				return out, nil
-			}},
-		{Name: "token.ls", Doc: "List your API tokens (admins: --all for everyone's).", Scope: verbs.Read, Action: authz.Account,
-			Args: []verbs.Arg{{Name: "all", Type: "bool", Doc: "every person's tokens (admins)"}},
-			Run: func(ctx context.Context, p *access.Principal, a verbs.Args) (any, error) {
+			}}.Verb(),
+		verbs.Def[TokenLsIn, any]{Name: "token.ls", Doc: "List your API tokens (admins: --all for everyone's).", Scope: verbs.Read, Action: authz.Account,
+			Run: func(req verbs.Req, in TokenLsIn) (any, error) {
+				ctx := req.Context
+				p := req.Principal
 				who := p.ID()
-				if a.B("all") {
+				if in.All {
 					if !p.IsAdmin() {
 						return nil, verbs.Errf("permission_denied", "only admins list everyone's tokens")
 					}
 					who = ""
 				}
 				return e.People.Tokens(ctx, who)
-			}},
-		{Name: "token.new", Doc: "Make an API token; its secret is shown once.", Scope: verbs.Write, Action: authz.Account,
-			Args: []verbs.Arg{{Name: "name", Type: "string", Required: true, Pos: 1}, {Name: "scopes", Type: "string", Doc: "comma-separated: read,write,admin"},
-				{Name: "days", Type: "int", Doc: "lifetime in days; 0 = no expiry (not with admin)"}},
-			Run: func(ctx context.Context, p *access.Principal, a verbs.Args) (any, error) {
+			}}.Verb(),
+		verbs.Def[TokenNewIn, any]{Name: "token.new", Doc: "Make an API token; its secret is shown once.", Scope: verbs.Write, Action: authz.Account,
+			Run: func(req verbs.Req, in TokenNewIn) (any, error) {
+				ctx := req.Context
+				p := req.Principal
 				if p.Person == nil || p.Person.Kind != "user" {
 					return nil, verbs.Errf("permission_denied", "only signed-in people make tokens")
 				}
-				scopes := a.Strings("scopes")
+				scopes := []string(in.Scopes)
 				if len(scopes) == 0 {
 					scopes = []string{sysdb.ScopeRead, sysdb.ScopeWrite}
 				}
@@ -55,7 +56,7 @@ func peopleVerbs(e peopleEnv) []*verbs.Verb {
 						}
 					}
 				}
-				scopes, err := identity.CheckTokenGrant(p.Role(), scopes, int(a.I("days", 30)))
+				scopes, err := identity.CheckTokenGrant(p.Role(), scopes, int(or(in.Days, 30)))
 				if err != nil {
 					var ge *identity.GrantError
 					if errors.As(err, &ge) {
@@ -63,18 +64,19 @@ func peopleVerbs(e peopleEnv) []*verbs.Verb {
 					}
 					return nil, err
 				}
-				secret, t, err := e.People.CreateToken(ctx, p.ID(), a.S("name"), scopes, int(a.I("days", 30)))
+				secret, t, err := e.People.CreateToken(ctx, p.ID(), in.Name, scopes, int(or(in.Days, 30)))
 				if err != nil {
 					return nil, err
 				}
 				return map[string]any{"token": secret, "info": t}, nil
-			}},
-		{Name: "token.rm", Doc: "Revoke a token.", Scope: verbs.Write, Action: authz.Account,
-			Args: []verbs.Arg{{Name: "id", Type: "string", Required: true, Pos: 1}},
-			Run: func(ctx context.Context, p *access.Principal, a verbs.Args) (any, error) {
-				t, err := e.People.Token(ctx, a.S("id"))
+			}}.Verb(),
+		verbs.Def[TokenRmIn, any]{Name: "token.rm", Doc: "Revoke a token.", Scope: verbs.Write, Action: authz.Account,
+			Run: func(req verbs.Req, in TokenRmIn) (any, error) {
+				ctx := req.Context
+				p := req.Principal
+				t, err := e.People.Token(ctx, in.ID)
 				if errors.Is(err, sysdb.ErrNotFound) {
-					return nil, verbs.Errf("not_found", "no token %s", a.S("id"))
+					return nil, verbs.Errf("not_found", "no token %s", in.ID)
 				}
 				if err != nil {
 					return nil, err
@@ -86,35 +88,73 @@ func peopleVerbs(e peopleEnv) []*verbs.Verb {
 					return nil, err
 				}
 				return map[string]any{"revoked": t.ID}, nil
-			}},
-		{Name: "people.ls", Doc: "List people: users, or guests with --kind guest.", Scope: verbs.Read, AdminOnly: true, Action: authz.PlatformAdmin,
-			Args: []verbs.Arg{{Name: "kind", Type: "string", Doc: "user or guest (default: user)"}},
-			Run: func(ctx context.Context, p *access.Principal, a verbs.Args) (any, error) {
-				kind := a.S("kind")
+			}}.Verb(),
+		verbs.Def[PeopleLsIn, any]{Name: "people.ls", Doc: "List people: users, or guests with --kind guest.", Scope: verbs.Read, AdminOnly: true, Action: authz.PlatformAdmin,
+			Run: func(req verbs.Req, in PeopleLsIn) (any, error) {
+				ctx := req.Context
+				kind := in.Kind
 				if kind == "" {
 					kind = "user"
 				}
 				return e.People.People(ctx, kind)
-			}},
-		{Name: "people.role", Effect: verbs.EffectGovern, Doc: "Set a user's role: pending, member, admin or disabled.", Scope: verbs.Write, AdminOnly: true, Action: authz.PlatformAdmin,
-			Args: []verbs.Arg{{Name: "id", Type: "string", Required: true, Pos: 1}, {Name: "role", Type: "string", Required: true, Pos: 2}},
-			Run: func(ctx context.Context, p *access.Principal, a verbs.Args) (any, error) {
-				if a.S("id") == p.ID() && a.S("role") != sysdb.RoleAdmin {
+			}}.Verb(),
+		verbs.Def[PeopleRoleIn, any]{Name: "people.role", Effect: verbs.EffectGovern, Doc: "Set a user's role: pending, member, admin or disabled.", Scope: verbs.Write, AdminOnly: true, Action: authz.PlatformAdmin,
+			Run: func(req verbs.Req, in PeopleRoleIn) (any, error) {
+				ctx := req.Context
+				p := req.Principal
+				if in.ID == p.ID() && in.Role != sysdb.RoleAdmin {
 					return nil, verbs.Errf("invalid_argument", "you cannot demote yourself")
 				}
-				pp, err := e.People.SetRole(ctx, p.ID(), p.ViaLabel(), a.S("id"), a.S("role"))
+				pp, err := e.People.SetRole(ctx, p.ID(), p.ViaLabel(), in.ID, in.Role)
 				if errors.Is(err, sysdb.ErrNotFound) {
-					return nil, verbs.Errf("not_found", "no person %s", a.S("id"))
+					return nil, verbs.Errf("not_found", "no person %s", in.ID)
 				}
 				if err != nil {
 					return nil, verbs.Errf("invalid_argument", "%s", err.Error())
 				}
 				return pp, nil
-			}},
-		{Name: "log.system", Doc: "The platform log: sign-ups, roles, tokens, grants, mounts, policy.", Scope: verbs.Read, AdminOnly: true, Action: authz.PlatformAdmin,
-			Args: []verbs.Arg{{Name: "limit", Type: "int"}},
-			Run: func(ctx context.Context, p *access.Principal, a verbs.Args) (any, error) {
-				return e.Sys.Logs(ctx, int(a.I("limit", 100)))
-			}},
+			}}.Verb(),
+		verbs.Def[LogSystemIn, any]{Name: "log.system", Doc: "The platform log: sign-ups, roles, tokens, grants, mounts, policy.", Scope: verbs.Read, AdminOnly: true, Action: authz.PlatformAdmin,
+			Run: func(req verbs.Req, in LogSystemIn) (any, error) {
+				ctx := req.Context
+				return e.Sys.Logs(ctx, int(or(in.Limit, 100)))
+			}}.Verb(),
 	}
+}
+
+// WhoamiIn is whoami's input.
+type WhoamiIn struct {
+}
+
+// TokenLsIn is token.ls's input.
+type TokenLsIn struct {
+	All bool `json:"all,omitempty" jsonschema_description:"every person's tokens (admins)"`
+}
+
+// TokenNewIn is token.new's input.
+type TokenNewIn struct {
+	Name   string     `json:"name" slop:"pos=1"`
+	Scopes verbs.List `json:"scopes,omitempty" jsonschema_description:"comma-separated: read,write,admin"`
+	Days   *int64     `json:"days,omitempty" jsonschema_description:"lifetime in days; 0 = no expiry (not with admin)"`
+}
+
+// TokenRmIn is token.rm's input.
+type TokenRmIn struct {
+	ID string `json:"id" slop:"pos=1"`
+}
+
+// PeopleLsIn is people.ls's input.
+type PeopleLsIn struct {
+	Kind string `json:"kind,omitempty" jsonschema_description:"user or guest (default: user)"`
+}
+
+// PeopleRoleIn is people.role's input.
+type PeopleRoleIn struct {
+	ID   string `json:"id" slop:"pos=1"`
+	Role string `json:"role" slop:"pos=2"`
+}
+
+// LogSystemIn is log.system's input.
+type LogSystemIn struct {
+	Limit *int64 `json:"limit,omitempty"`
 }

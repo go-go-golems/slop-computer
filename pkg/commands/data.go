@@ -42,19 +42,21 @@ func dataVerbs(e kernelEnv) []*verbs.Verb {
 				}
 				return runSQL(ctx, e, p, a, caller)
 			}},
-		{Name: "sql.schema", Doc: "A store's app tables, indexes, views and triggers.", Scope: verbs.Read, Action: authz.StoreAdmin,
-			Args: []verbs.Arg{storeArg},
-			Run: func(ctx context.Context, p *access.Principal, a verbs.Args) (any, error) {
-				s, _, err := e.open(ctx, p, a.S("store"), rt.LevelAdmin, "reading the schema")
+		verbs.Def[SqlSchemaIn, any]{Name: "sql.schema", Doc: "A store's app tables, indexes, views and triggers.", Scope: verbs.Read, Action: authz.StoreAdmin,
+			Run: func(req verbs.Req, in SqlSchemaIn) (any, error) {
+				ctx := req.Context
+				p := req.Principal
+				s, _, err := e.open(ctx, p, in.Store, rt.LevelAdmin, "reading the schema")
 				if err != nil {
 					return nil, err
 				}
 				return s.AppSchema(ctx)
-			}},
-		{Name: "store.export", Doc: "A store's current documents, files (with their bytes), schema and table rows.", Scope: verbs.Read, Action: authz.StoreAdmin, StoreArg: "id",
-			Args: []verbs.Arg{{Name: "id", Type: "string", Pos: 1, Required: true}},
-			Run: func(ctx context.Context, p *access.Principal, a verbs.Args) (any, error) {
-				s, _, err := e.open(ctx, p, a.S("id"), rt.LevelAdmin, "exporting")
+			}}.Verb(),
+		verbs.Def[StoreExportIn, any]{Name: "store.export", Doc: "A store's current documents, files (with their bytes), schema and table rows.", Scope: verbs.Read, Action: authz.StoreAdmin, StoreArg: "id",
+			Run: func(req verbs.Req, in StoreExportIn) (any, error) {
+				ctx := req.Context
+				p := req.Principal
+				s, _, err := e.open(ctx, p, in.ID, rt.LevelAdmin, "exporting")
 				if err != nil {
 					return nil, err
 				}
@@ -74,7 +76,7 @@ func dataVerbs(e kernelEnv) []*verbs.Verb {
 					bl[f.SHA256] = base64.StdEncoding.EncodeToString(data)
 				}
 				return map[string]any{"id": s.ID, "bundle": b, "blobs": bl}, nil
-			}},
+			}}.Verb(),
 		{Name: "import.folder", Doc: "Make a new store from an export bundle {bundle, blobs} (slop import folder reads the folder format).", Scope: verbs.Write, Action: authz.Program,
 			Args: []verbs.Arg{{Name: "store", Type: "string", Pos: 1, Doc: "the new store's id"}, {Name: "bundle", Type: "json", Required: true},
 				{Name: "blobs", Type: "json", Doc: "{sha256: base64}"}},
@@ -339,4 +341,14 @@ func putBlobs(e kernelEnv, a verbs.Args) error {
 		}
 	}
 	return nil
+}
+
+// SqlSchemaIn is sql.schema's input.
+type SqlSchemaIn struct {
+	Store string `json:"store" slop:"pos=1"`
+}
+
+// StoreExportIn is store.export's input.
+type StoreExportIn struct {
+	ID string `json:"id" slop:"pos=1"`
 }

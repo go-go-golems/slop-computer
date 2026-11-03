@@ -2,6 +2,7 @@ package verbs
 
 import (
 	"context"
+	"encoding/json"
 	"reflect"
 	"strings"
 	"testing"
@@ -111,4 +112,29 @@ func mustGet(t *testing.T, tb *Table, name string) *Verb {
 		t.Fatalf("no %s", name)
 	}
 	return v
+}
+
+// A List takes a JSON array or the CLI's comma-separated string; numbers
+// in untyped fields stay exact.
+func TestListAndExactNumbers(t *testing.T) {
+	type in struct {
+		Scopes List `json:"scopes,omitempty"`
+		Data   any  `json:"data,omitempty"`
+	}
+	for _, raw := range []any{"read, write", []any{"read", "write"}} {
+		x, err := decodeArgs[in]("t", Args{"scopes": raw})
+		if err != nil || len(x.Scopes) != 2 || x.Scopes[0] != "read" || x.Scopes[1] != "write" {
+			t.Fatalf("scopes %v: %v, %v", raw, x.Scopes, err)
+		}
+	}
+	x, err := decodeArgs[in]("t", Args{"data": map[string]any{"n": json.Number("9007199254740993")}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if n := x.Data.(map[string]any)["n"]; n != json.Number("9007199254740993") {
+		t.Fatalf("data.n = %#v, want the exact number", n)
+	}
+	if s := schemaOf(reflect.TypeFor[in]()); len(argsOf(reflect.TypeFor[in](), s)) != 2 {
+		t.Fatal("List is not an argument")
+	}
 }

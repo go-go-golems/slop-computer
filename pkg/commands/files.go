@@ -163,55 +163,59 @@ func filesVerbs(e kernelEnv) []*verbs.Verb {
 			Run: func(ctx context.Context, p *access.Principal, a verbs.Args) (any, error) {
 				return push(ctx, e, p, a, false)
 			}},
-		{Name: "snap.new", Doc: "Snapshot the working tree and move a ref (default main) to it.", Scope: verbs.Write, Action: authz.StoreAdmin,
-			Args: []verbs.Arg{storeArg, {Name: "message", Type: "string", Pos: 2}, {Name: "ref", Type: "string"}},
-			Run: func(ctx context.Context, p *access.Principal, a verbs.Args) (any, error) {
-				s, d, err := e.open(ctx, p, a.S("store"), rt.LevelAdmin, "snapshotting")
+		verbs.Def[SnapNewIn, any]{Name: "snap.new", Doc: "Snapshot the working tree and move a ref (default main) to it.", Scope: verbs.Write, Action: authz.StoreAdmin,
+			Run: func(req verbs.Req, in SnapNewIn) (any, error) {
+				ctx := req.Context
+				p := req.Principal
+				s, d, err := e.open(ctx, p, in.Store, rt.LevelAdmin, "snapshotting")
 				if err != nil {
 					return nil, err
 				}
 				var n int64
 				c, err := s.Do(ctx, who(p, d), func(t *store.Turn) error {
 					var err error
-					n, err = t.Snapshot(a.S("message"), a.S("ref"))
+					n, err = t.Snapshot(in.Message, in.Ref)
 					return err
 				})
 				if err != nil {
 					return nil, fileErr(err)
 				}
 				return map[string]any{"n": n, "rev": c.Rev}, nil
-			}},
-		{Name: "snap.ls", Doc: "List a store's snapshots, newest first.", Scope: verbs.Read, Action: authz.StoreRead,
-			Args: []verbs.Arg{storeArg},
-			Run: func(ctx context.Context, p *access.Principal, a verbs.Args) (any, error) {
-				s, _, err := e.open(ctx, p, a.S("store"), rt.LevelView, "reading snapshots")
+			}}.Verb(),
+		verbs.Def[SnapLsIn, any]{Name: "snap.ls", Doc: "List a store's snapshots, newest first.", Scope: verbs.Read, Action: authz.StoreRead,
+			Run: func(req verbs.Req, in SnapLsIn) (any, error) {
+				ctx := req.Context
+				p := req.Principal
+				s, _, err := e.open(ctx, p, in.Store, rt.LevelView, "reading snapshots")
 				if err != nil {
 					return nil, err
 				}
 				return s.Snapshots(ctx)
-			}},
-		{Name: "ref.ls", Doc: "List a store's refs.", Scope: verbs.Read, Action: authz.StoreRead,
-			Args: []verbs.Arg{storeArg},
-			Run: func(ctx context.Context, p *access.Principal, a verbs.Args) (any, error) {
-				s, _, err := e.open(ctx, p, a.S("store"), rt.LevelView, "reading refs")
+			}}.Verb(),
+		verbs.Def[RefLsIn, any]{Name: "ref.ls", Doc: "List a store's refs.", Scope: verbs.Read, Action: authz.StoreRead,
+			Run: func(req verbs.Req, in RefLsIn) (any, error) {
+				ctx := req.Context
+				p := req.Principal
+				s, _, err := e.open(ctx, p, in.Store, rt.LevelView, "reading refs")
 				if err != nil {
 					return nil, err
 				}
 				return s.Refs(ctx)
-			}},
-		{Name: "ref.move", Doc: "Point a ref at a snapshot (moving main back is a rollback).", Scope: verbs.Write, Action: authz.StoreAdmin,
-			Args: []verbs.Arg{storeArg, {Name: "ref", Type: "string", Pos: 2, Required: true}, {Name: "n", Type: "int", Pos: 3, Required: true}},
-			Run: func(ctx context.Context, p *access.Principal, a verbs.Args) (any, error) {
-				s, d, err := e.open(ctx, p, a.S("store"), rt.LevelAdmin, "moving refs")
+			}}.Verb(),
+		verbs.Def[RefMoveIn, any]{Name: "ref.move", Doc: "Point a ref at a snapshot (moving main back is a rollback).", Scope: verbs.Write, Action: authz.StoreAdmin,
+			Run: func(req verbs.Req, in RefMoveIn) (any, error) {
+				ctx := req.Context
+				p := req.Principal
+				s, d, err := e.open(ctx, p, in.Store, rt.LevelAdmin, "moving refs")
 				if err != nil {
 					return nil, err
 				}
-				c, err := s.Do(ctx, who(p, d), func(t *store.Turn) error { return t.MoveRef(a.S("ref"), a.I("n", 0)) })
+				c, err := s.Do(ctx, who(p, d), func(t *store.Turn) error { return t.MoveRef(in.Ref, in.N) })
 				if err != nil {
 					return nil, fileErr(err)
 				}
-				return map[string]any{"ref": a.S("ref"), "n": a.I("n", 0), "rev": c.Rev}, nil
-			}},
+				return map[string]any{"ref": in.Ref, "n": in.N, "rev": c.Rev}, nil
+			}}.Verb(),
 	}
 }
 
@@ -382,4 +386,28 @@ func push(ctx context.Context, e kernelEnv, p *access.Principal, a verbs.Args, f
 		out["rev"] = c.Rev
 	}
 	return out, nil
+}
+
+// SnapNewIn is snap.new's input.
+type SnapNewIn struct {
+	Store   string `json:"store" slop:"pos=1"`
+	Message string `json:"message,omitempty" slop:"pos=2"`
+	Ref     string `json:"ref,omitempty"`
+}
+
+// SnapLsIn is snap.ls's input.
+type SnapLsIn struct {
+	Store string `json:"store" slop:"pos=1"`
+}
+
+// RefLsIn is ref.ls's input.
+type RefLsIn struct {
+	Store string `json:"store" slop:"pos=1"`
+}
+
+// RefMoveIn is ref.move's input.
+type RefMoveIn struct {
+	Store string `json:"store" slop:"pos=1"`
+	Ref   string `json:"ref" slop:"pos=2"`
+	N     int64  `json:"n" slop:"pos=3"`
 }

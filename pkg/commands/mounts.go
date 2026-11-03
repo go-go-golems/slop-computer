@@ -14,18 +14,16 @@ import (
 )
 
 func mountVerbs(e mountEnv) []*verbs.Verb {
-	hostArg := verbs.Arg{Name: "host", Type: "string", Pos: 1, Required: true}
-	pathArg := verbs.Arg{Name: "path", Type: "string", Pos: 2, Required: true}
 	return []*verbs.Verb{
-		{Name: "server.hosts", Doc: "This server's hosts: main, live, static and sandbox.", Scope: verbs.Read, Action: authz.Platform,
-			Run: func(ctx context.Context, p *access.Principal, a verbs.Args) (any, error) {
+		verbs.Def[ServerHostsIn, any]{Name: "server.hosts", Doc: "This server's hosts: main, live, static and sandbox.", Scope: verbs.Read, Action: authz.Platform,
+			Run: func(req verbs.Req, in ServerHostsIn) (any, error) {
 				h := e.Cfg.Hosts
 				return map[string]any{"main": h.Main, "live": h.Live, "static": h.Static, "sandbox": h.Sandbox}, nil
-			}},
-		{Name: "mount.ls", Doc: "List mounts (of one host).", Scope: verbs.Read, Action: authz.Platform,
-			Args: []verbs.Arg{{Name: "host", Type: "string", Pos: 1}},
-			Run: func(ctx context.Context, p *access.Principal, a verbs.Args) (any, error) {
-				ms, err := e.K.Registry.Mounts(ctx, a.S("host"))
+			}}.Verb(),
+		verbs.Def[MountLsIn, any]{Name: "mount.ls", Doc: "List mounts (of one host).", Scope: verbs.Read, Action: authz.Platform,
+			Run: func(req verbs.Req, in MountLsIn) (any, error) {
+				ctx := req.Context
+				ms, err := e.K.Registry.Mounts(ctx, in.Host)
 				if err != nil {
 					return nil, err
 				}
@@ -34,7 +32,7 @@ func mountVerbs(e mountEnv) []*verbs.Verb {
 					out = append(out, map[string]any{"mount": m, "kind": e.Cfg.HostKind(m.Host), "url": e.Cfg.Origin(m.Host) + m.Path})
 				}
 				return out, nil
-			}},
+			}}.Verb(),
 		verbs.Def[MountSetIn, MountSetOut]{Name: "mount.set", Doc: "Mount a store (or a :param naming stores) at host+path. A host is live or static, set in configuration.",
 			Scope: verbs.Write, AdminOnly: true, Action: authz.PlatformAdmin,
 			Run: func(r verbs.Req, in MountSetIn) (MountSetOut, error) {
@@ -64,35 +62,38 @@ func mountVerbs(e mountEnv) []*verbs.Verb {
 				}
 				return out, nil
 			}}.Verb(),
-		{Name: "mount.rm", Doc: "Remove a mount (mount undo brings it back).", Scope: verbs.Write, AdminOnly: true, Action: authz.PlatformAdmin,
-			Args: []verbs.Arg{hostArg, pathArg},
-			Run: func(ctx context.Context, p *access.Principal, a verbs.Args) (any, error) {
-				err := e.K.Registry.RemoveMount(ctx, p.ID(), p.ViaLabel(), a.S("host"), a.S("path"))
+		verbs.Def[MountRmIn, any]{Name: "mount.rm", Doc: "Remove a mount (mount undo brings it back).", Scope: verbs.Write, AdminOnly: true, Action: authz.PlatformAdmin,
+			Run: func(req verbs.Req, in MountRmIn) (any, error) {
+				ctx := req.Context
+				p := req.Principal
+				err := e.K.Registry.RemoveMount(ctx, p.ID(), p.ViaLabel(), in.Host, in.Path)
 				if errors.Is(err, sysdb.ErrNotFound) {
-					return nil, verbs.Errf("not_found", "nothing is mounted at %s%s", a.S("host"), a.S("path"))
+					return nil, verbs.Errf("not_found", "nothing is mounted at %s%s", in.Host, in.Path)
 				}
-				return map[string]any{"removed": a.S("host") + a.S("path")}, err
-			}},
-		{Name: "mount.undo", Doc: "Restore a mount to its value before its last change.", Scope: verbs.Write, AdminOnly: true, Action: authz.PlatformAdmin,
-			Args: []verbs.Arg{hostArg, pathArg},
-			Run: func(ctx context.Context, p *access.Principal, a verbs.Args) (any, error) {
-				m, err := e.K.Registry.UndoMount(ctx, p.ID(), p.ViaLabel(), a.S("host"), a.S("path"))
+				return map[string]any{"removed": in.Host + in.Path}, err
+			}}.Verb(),
+		verbs.Def[MountUndoIn, any]{Name: "mount.undo", Doc: "Restore a mount to its value before its last change.", Scope: verbs.Write, AdminOnly: true, Action: authz.PlatformAdmin,
+			Run: func(req verbs.Req, in MountUndoIn) (any, error) {
+				ctx := req.Context
+				p := req.Principal
+				m, err := e.K.Registry.UndoMount(ctx, p.ID(), p.ViaLabel(), in.Host, in.Path)
 				if errors.Is(err, sysdb.ErrNotFound) {
-					return nil, verbs.Errf("not_found", "no history for %s%s", a.S("host"), a.S("path"))
+					return nil, verbs.Errf("not_found", "no history for %s%s", in.Host, in.Path)
 				}
 				if err != nil {
 					return nil, err
 				}
 				return map[string]any{"restored": m}, nil
-			}},
-		{Name: "app.status", Doc: "The app a store runs: app store, snapshot, manifest, and why it is broken if it is.", Scope: verbs.Read, Action: authz.StoreRead,
-			Args: []verbs.Arg{{Name: "store", Type: "string", Pos: 1, Required: true}},
-			Run: func(ctx context.Context, p *access.Principal, a verbs.Args) (any, error) {
-				st, _, err := e.open(ctx, p, a.S("store"), rt.LevelView, "reading")
+			}}.Verb(),
+		verbs.Def[AppStatusIn, any]{Name: "app.status", Doc: "The app a store runs: app store, snapshot, manifest, and why it is broken if it is.", Scope: verbs.Read, Action: authz.StoreRead,
+			Run: func(req verbs.Req, in AppStatusIn) (any, error) {
+				ctx := req.Context
+				p := req.Principal
+				st, _, err := e.open(ctx, p, in.Store, rt.LevelView, "reading")
 				if err != nil {
 					return nil, err
 				}
-				r, err := e.K.Running(ctx, a.S("store"))
+				r, err := e.K.Running(ctx, in.Store)
 				if err != nil {
 					return nil, err
 				}
@@ -107,9 +108,11 @@ func mountVerbs(e mountEnv) []*verbs.Verb {
 						"capabilities": caps, "slop": m.Slop, "live": m.Live()}
 				}
 				return out, nil
-			}},
-		{Name: "app.ls", Doc: "List the stores that are apps (their tree's main snapshot holds app.json).", Scope: verbs.Read, Action: authz.Platform,
-			Run: func(ctx context.Context, p *access.Principal, a verbs.Args) (any, error) {
+			}}.Verb(),
+		verbs.Def[AppLsIn, any]{Name: "app.ls", Doc: "List the stores that are apps (their tree's main snapshot holds app.json).", Scope: verbs.Read, Action: authz.Platform,
+			Run: func(req verbs.Req, in AppLsIn) (any, error) {
+				ctx := req.Context
+				p := req.Principal
 				rows, err := e.K.VisibleStores(ctx, p)
 				if p.IsAdmin() {
 					rows, err = e.K.Registry.Stores(ctx, "")
@@ -129,7 +132,7 @@ func mountVerbs(e mountEnv) []*verbs.Verb {
 					out = append(out, map[string]any{"app": row.ID, "title": r.Manifest.Title, "type": r.Manifest.Type, "n": r.N, "live": r.Manifest.Live()})
 				}
 				return out, nil
-			}},
+			}}.Verb(),
 	}
 }
 
@@ -257,4 +260,34 @@ type MountSetOut struct {
 	Mount registry.Mount `json:"mount"`
 	URL   string         `json:"url"`
 	Note  string         `json:"note,omitempty"`
+}
+
+// ServerHostsIn is server.hosts's input.
+type ServerHostsIn struct {
+}
+
+// MountLsIn is mount.ls's input.
+type MountLsIn struct {
+	Host string `json:"host,omitempty" slop:"pos=1"`
+}
+
+// MountRmIn is mount.rm's input.
+type MountRmIn struct {
+	Host string `json:"host" slop:"pos=1"`
+	Path string `json:"path" slop:"pos=2"`
+}
+
+// MountUndoIn is mount.undo's input.
+type MountUndoIn struct {
+	Host string `json:"host" slop:"pos=1"`
+	Path string `json:"path" slop:"pos=2"`
+}
+
+// AppStatusIn is app.status's input.
+type AppStatusIn struct {
+	Store string `json:"store" slop:"pos=1"`
+}
+
+// AppLsIn is app.ls's input.
+type AppLsIn struct {
 }

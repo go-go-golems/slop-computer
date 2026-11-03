@@ -39,17 +39,13 @@ func (e kernelEnv) subjectPrincipal(ctx context.Context, subject string) (*acces
 }
 
 func accessVerbs(e kernelEnv) []*verbs.Verb {
-	storeArg := verbs.Arg{Name: "store", Type: "string", Pos: 1, Required: true}
 	return []*verbs.Verb{
-		{Name: "explain.can", Doc: "Explain whether someone (you, a person, store:<id> or anonymous) holds a level on a store, or may read/write a document path, with the trace.", Scope: verbs.Read, Action: authz.Account,
-			Args: []verbs.Arg{storeArg, {Name: "level", Type: "string", Pos: 2, Doc: "view, interact, admin or owner (default view)"},
-				{Name: "subject", Type: "string", Doc: "usr_…, vis_…, an email, store:<id> or anonymous (default: you)"},
-				{Name: "path", Type: "string", Doc: "a document path: apply the app's rules"},
-				{Name: "op", Type: "string", Doc: "read or write, with path (default read)"},
-				{Name: "action", Type: "string", Doc: "an action (doc.write, store.admin, code.push, …): does its floor hold"}},
-			Run: func(ctx context.Context, p *access.Principal, a verbs.Args) (any, error) {
+		verbs.Def[ExplainCanIn, any]{Name: "explain.can", Doc: "Explain whether someone (you, a person, store:<id> or anonymous) holds a level on a store, or may read/write a document path, with the trace.", Scope: verbs.Read, Action: authz.Account,
+			Run: func(req verbs.Req, in ExplainCanIn) (any, error) {
+				ctx := req.Context
+				p := req.Principal
 				who := p
-				if s := a.S("subject"); s != "" {
+				if s := in.Subject; s != "" {
 					if !p.IsAdmin() && s != p.ID() {
 						return nil, verbs.Errf("permission_denied", "only admins explain other people's access")
 					}
@@ -59,7 +55,7 @@ func accessVerbs(e kernelEnv) []*verbs.Verb {
 					}
 					who = q
 				}
-				lv := a.S("level")
+				lv := in.Level
 				if lv == "" {
 					lv = "view"
 				}
@@ -67,7 +63,7 @@ func accessVerbs(e kernelEnv) []*verbs.Verb {
 				if !ok {
 					return nil, verbs.Errf("invalid_argument", "unknown level %q", lv)
 				}
-				id := a.S("store")
+				id := in.Store
 				st, err := e.K.Registry.StoreByID(ctx, id)
 				if errors.Is(err, sysdb.ErrNotFound) {
 					return nil, verbs.Errf("not_found", "no store %s", id)
@@ -76,7 +72,7 @@ func accessVerbs(e kernelEnv) []*verbs.Verb {
 					return nil, err
 				}
 				d := e.K.Access.Level(ctx, who, st)
-				if act := authz.Action(a.S("action")); act != "" {
+				if act := authz.Action(in.Action); act != "" {
 					ok, why := authz.Floor(act, d.Level, who.IsAdmin())
 					if ok {
 						d.Trace = append(d.Trace, fmt.Sprintf("%s: the floor holds", act))
@@ -89,8 +85,8 @@ func accessVerbs(e kernelEnv) []*verbs.Verb {
 					}
 					return out, nil
 				}
-				if path := a.S("path"); path != "" {
-					op := a.S("op")
+				if path := in.Path; path != "" {
+					op := in.Op
 					if op == "" {
 						op = "read"
 					}
@@ -115,29 +111,28 @@ func accessVerbs(e kernelEnv) []*verbs.Verb {
 					}
 				}
 				return out, nil
-			}},
-		{Name: "link.new", Doc: "Make a share link to a store: whoever opens it gets view or interact. The token is shown once.", Scope: verbs.Write, Action: authz.StoreOwner,
-			Args: []verbs.Arg{storeArg, {Name: "level", Type: "string", Pos: 2, Doc: "view or interact (default view)"},
-				{Name: "days", Type: "int", Doc: "how long it works (0: until revoked)"},
-				{Name: "url", Type: "string", Doc: "the page's address on a live host, to build the link's URL"}},
-			Run: func(ctx context.Context, p *access.Principal, a verbs.Args) (any, error) {
-				if _, _, err := e.open(ctx, p, a.S("store"), rt.LevelOwner, "sharing"); err != nil && !p.IsAdmin() {
+			}}.Verb(),
+		verbs.Def[LinkNewIn, any]{Name: "link.new", Doc: "Make a share link to a store: whoever opens it gets view or interact. The token is shown once.", Scope: verbs.Write, Action: authz.StoreOwner,
+			Run: func(req verbs.Req, in LinkNewIn) (any, error) {
+				ctx := req.Context
+				p := req.Principal
+				if _, _, err := e.open(ctx, p, in.Store, rt.LevelOwner, "sharing"); err != nil && !p.IsAdmin() {
 					return nil, err
 				}
-				lv := a.S("level")
+				lv := in.Level
 				if lv == "" {
 					lv = "view"
 				}
 				var until int64
-				if d := a.I("days", 0); d > 0 {
+				if d := in.Days; d > 0 {
 					until = time.Now().Add(time.Duration(d) * 24 * time.Hour).UnixMilli()
 				}
-				l, token, err := e.K.Registry.CreateLink(ctx, p.ID(), p.ViaLabel(), a.S("store"), lv, until)
+				l, token, err := e.K.Registry.CreateLink(ctx, p.ID(), p.ViaLabel(), in.Store, lv, until)
 				if err != nil {
 					return nil, verbs.Errf("invalid_argument", "%s", err.Error())
 				}
 				out := map[string]any{"link": l, "token": token}
-				if u := a.S("url"); u != "" {
+				if u := in.URL; u != "" {
 					sep := "?"
 					if strings.Contains(u, "?") {
 						sep = "&"
@@ -145,21 +140,23 @@ func accessVerbs(e kernelEnv) []*verbs.Verb {
 					out["url"] = u + sep + "k=" + url.QueryEscape(token)
 				}
 				return out, nil
-			}},
-		{Name: "link.ls", Doc: "List a store's share links (uses: grants they gave that still stand).", Scope: verbs.Read, Action: authz.StoreOwner,
-			Args: []verbs.Arg{storeArg},
-			Run: func(ctx context.Context, p *access.Principal, a verbs.Args) (any, error) {
-				if _, _, err := e.open(ctx, p, a.S("store"), rt.LevelOwner, "reading links"); err != nil && !p.IsAdmin() {
+			}}.Verb(),
+		verbs.Def[LinkLsIn, any]{Name: "link.ls", Doc: "List a store's share links (uses: grants they gave that still stand).", Scope: verbs.Read, Action: authz.StoreOwner,
+			Run: func(req verbs.Req, in LinkLsIn) (any, error) {
+				ctx := req.Context
+				p := req.Principal
+				if _, _, err := e.open(ctx, p, in.Store, rt.LevelOwner, "reading links"); err != nil && !p.IsAdmin() {
 					return nil, err
 				}
-				return e.K.Registry.Links(ctx, a.S("store"))
-			}},
-		{Name: "link.rm", Doc: "Revoke a share link; the access it gave ends at once.", Scope: verbs.Write, Action: authz.StoreOwner, StoreArg: "-",
-			Args: []verbs.Arg{{Name: "id", Type: "string", Pos: 1, Required: true}},
-			Run: func(ctx context.Context, p *access.Principal, a verbs.Args) (any, error) {
-				l, err := e.K.Registry.LinkByID(ctx, a.S("id"))
+				return e.K.Registry.Links(ctx, in.Store)
+			}}.Verb(),
+		verbs.Def[LinkRmIn, any]{Name: "link.rm", Doc: "Revoke a share link; the access it gave ends at once.", Scope: verbs.Write, Action: authz.StoreOwner, StoreArg: "-",
+			Run: func(req verbs.Req, in LinkRmIn) (any, error) {
+				ctx := req.Context
+				p := req.Principal
+				l, err := e.K.Registry.LinkByID(ctx, in.ID)
 				if err != nil {
-					return nil, verbs.Errf("not_found", "no link %s", a.S("id"))
+					return nil, verbs.Errf("not_found", "no link %s", in.ID)
 				}
 				if _, _, err := e.open(ctx, p, l.Store, rt.LevelOwner, "revoking links"); err != nil && !p.IsAdmin() {
 					return nil, err
@@ -168,13 +165,46 @@ func accessVerbs(e kernelEnv) []*verbs.Verb {
 					return nil, err
 				}
 				return map[string]any{"revoked": l.ID, "store": l.Store}, nil
-			}},
-		{Name: "guest.sweep", Doc: "Delete guests unseen for 90 days (or --days), with their grants and private documents.", Scope: verbs.Write, AdminOnly: true, Action: authz.PlatformAdmin,
-			Args: []verbs.Arg{{Name: "days", Type: "int", Doc: "unseen for at least this many days (default 90)"}},
-			Run: func(ctx context.Context, p *access.Principal, a verbs.Args) (any, error) {
-				days := a.I("days", identity.GuestDays)
+			}}.Verb(),
+		verbs.Def[GuestSweepIn, any]{Name: "guest.sweep", Doc: "Delete guests unseen for 90 days (or --days), with their grants and private documents.", Scope: verbs.Write, AdminOnly: true, Action: authz.PlatformAdmin,
+			Run: func(req verbs.Req, in GuestSweepIn) (any, error) {
+				ctx := req.Context
+				days := or(in.Days, identity.GuestDays)
 				n, err := e.K.SweepGuests(ctx, time.Now().Add(-time.Duration(days)*24*time.Hour).UnixMilli())
 				return map[string]any{"deleted": n}, err
-			}},
+			}}.Verb(),
 	}
+}
+
+// ExplainCanIn is explain.can's input.
+type ExplainCanIn struct {
+	Store   string `json:"store" slop:"pos=1"`
+	Level   string `json:"level,omitempty" slop:"pos=2" jsonschema_description:"view, interact, admin or owner (default view)"`
+	Subject string `json:"subject,omitempty" jsonschema_description:"usr_…, vis_…, an email, store:<id> or anonymous (default: you)"`
+	Path    string `json:"path,omitempty" jsonschema_description:"a document path: apply the app's rules"`
+	Op      string `json:"op,omitempty" jsonschema_description:"read or write, with path (default read)"`
+	Action  string `json:"action,omitempty" jsonschema_description:"an action (doc.write, store.admin, code.push, …): does its floor hold"`
+}
+
+// LinkNewIn is link.new's input.
+type LinkNewIn struct {
+	Store string `json:"store" slop:"pos=1"`
+	Level string `json:"level,omitempty" slop:"pos=2" jsonschema_description:"view or interact (default view)"`
+	Days  int64  `json:"days,omitempty" jsonschema_description:"how long it works (0: until revoked)"`
+	URL   string `json:"url,omitempty" jsonschema_description:"the page's address on a live host, to build the link's URL"`
+}
+
+// LinkLsIn is link.ls's input.
+type LinkLsIn struct {
+	Store string `json:"store" slop:"pos=1"`
+}
+
+// LinkRmIn is link.rm's input.
+type LinkRmIn struct {
+	ID string `json:"id" slop:"pos=1"`
+}
+
+// GuestSweepIn is guest.sweep's input.
+type GuestSweepIn struct {
+	Days *int64 `json:"days,omitempty" jsonschema_description:"unseen for at least this many days (default 90)"`
 }

@@ -20,25 +20,27 @@ const MaxBatch = 500
 func docsVerbs(e kernelEnv) []*verbs.Verb {
 	storeArg := verbs.Arg{Name: "store", Type: "string", Pos: 1, Required: true}
 	return []*verbs.Verb{
-		{Name: "docs.get", Doc: "Read one document.", Scope: verbs.Read, Action: authz.DocRead,
-			Args: []verbs.Arg{storeArg, {Name: "path", Type: "string", Pos: 2, Required: true}},
-			Run: func(ctx context.Context, p *access.Principal, a verbs.Args) (any, error) {
-				s, d, err := e.open(ctx, p, a.S("store"), rt.LevelView, "reading")
+		verbs.Def[DocsGetIn, any]{Name: "docs.get", Doc: "Read one document.", Scope: verbs.Read, Action: authz.DocRead,
+			Run: func(req verbs.Req, in DocsGetIn) (any, error) {
+				ctx := req.Context
+				p := req.Principal
+				s, d, err := e.open(ctx, p, in.Store, rt.LevelView, "reading")
 				if err != nil {
 					return nil, err
 				}
-				path, rules := a.S("path"), e.K.Rules(ctx, s.ID)
+				path, rules := in.Path, e.K.Rules(ctx, s.ID)
 				doc, err := s.GetDoc(ctx, path, func(path string) bool { return rules.CanRead(path, p.ID(), d.Level) })
 				if errors.Is(err, store.ErrNotFound) {
 					return nil, verbs.Errf("not_found", "no document %s", path)
 				}
 				return doc, err
-			}},
-		{Name: "docs.ls", Doc: "List a collection's documents.", Scope: verbs.Read, Action: authz.DocRead,
-			Args: []verbs.Arg{storeArg, {Name: "coll", Type: "string", Pos: 2, Required: true}, {Name: "limit", Type: "int"}},
-			Run: func(ctx context.Context, p *access.Principal, a verbs.Args) (any, error) {
-				return queryDocs(ctx, e, p, a.S("store"), rt.Query{Coll: a.S("coll"), Limit: int(a.I("limit", 0))})
-			}},
+			}}.Verb(),
+		verbs.Def[DocsLsIn, any]{Name: "docs.ls", Doc: "List a collection's documents.", Scope: verbs.Read, Action: authz.DocRead,
+			Run: func(req verbs.Req, in DocsLsIn) (any, error) {
+				ctx := req.Context
+				p := req.Principal
+				return queryDocs(ctx, e, p, in.Store, rt.Query{Coll: in.Coll, Limit: int(in.Limit)})
+			}}.Verb(),
 		verbs.Def[DocsQueryIn, []store.Doc]{Name: "docs.query", Doc: "Query a collection: where [[field, op, value], …], orderBy, desc, limit.",
 			Scope: verbs.Read, Action: authz.DocRead,
 			Run: func(r verbs.Req, in DocsQueryIn) ([]store.Doc, error) {
@@ -60,19 +62,20 @@ func docsVerbs(e kernelEnv) []*verbs.Verb {
 			Run: func(ctx context.Context, p *access.Principal, a verbs.Args) (any, error) {
 				return writeDocs(ctx, e, p, a, "update")
 			}},
-		{Name: "docs.rm", Doc: "Delete documents: path, or paths [..] in one commit.", Scope: verbs.Write, Action: authz.DocWrite,
-			Args: []verbs.Arg{storeArg, {Name: "path", Type: "string", Pos: 2}, {Name: "paths", Type: "json"}},
-			Run: func(ctx context.Context, p *access.Principal, a verbs.Args) (any, error) {
-				paths := a.Strings("paths")
-				if a.S("path") != "" {
-					paths = append(paths, a.S("path"))
+		verbs.Def[DocsRmIn, any]{Name: "docs.rm", Doc: "Delete documents: path, or paths [..] in one commit.", Scope: verbs.Write, Action: authz.DocWrite,
+			Run: func(req verbs.Req, in DocsRmIn) (any, error) {
+				ctx := req.Context
+				p := req.Principal
+				paths := []string(in.Paths)
+				if in.Path != "" {
+					paths = append(paths, in.Path)
 				}
 				items := make([]docItem, len(paths))
 				for i, path := range paths {
 					items[i] = docItem{Path: path}
 				}
-				return applyDocs(ctx, e, p, a.S("store"), items, "rm")
-			}},
+				return applyDocs(ctx, e, p, in.Store, items, "rm")
+			}}.Verb(),
 	}
 }
 
@@ -236,4 +239,24 @@ func (Cond) JSONSchema() *jsonschema.Schema {
 		{Type: "array", MinItems: &three, MaxItems: &three, PrefixItems: []*jsonschema.Schema{{Type: "string"}, {Type: "string", Enum: ops}, {}}},
 		{Type: "object", Properties: obj, Required: []string{"field", "op", "value"}},
 	}}
+}
+
+// DocsGetIn is docs.get's input.
+type DocsGetIn struct {
+	Store string `json:"store" slop:"pos=1"`
+	Path  string `json:"path" slop:"pos=2"`
+}
+
+// DocsLsIn is docs.ls's input.
+type DocsLsIn struct {
+	Store string `json:"store" slop:"pos=1"`
+	Coll  string `json:"coll" slop:"pos=2"`
+	Limit int64  `json:"limit,omitempty"`
+}
+
+// DocsRmIn is docs.rm's input.
+type DocsRmIn struct {
+	Store string     `json:"store" slop:"pos=1"`
+	Path  string     `json:"path,omitempty" slop:"pos=2"`
+	Paths verbs.List `json:"paths,omitempty"`
 }

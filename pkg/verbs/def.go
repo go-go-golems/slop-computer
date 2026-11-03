@@ -118,6 +118,9 @@ func decodeArgs[In any](verb string, a Args) (In, error) {
 	}
 	dec := json.NewDecoder(bytes.NewReader(b))
 	dec.DisallowUnknownFields()
+	// Numbers in untyped fields (document bodies, actor arguments) stay
+	// exact, as they arrive from the HTTP door (httpx reads with UseNumber).
+	dec.UseNumber()
 	if err := dec.Decode(&x); err != nil {
 		msg := err.Error()
 		msg = strings.TrimPrefix(msg, "json: ")
@@ -210,6 +213,46 @@ func argType(p *jsonschema.Schema) string {
 }
 
 func mustJSON(v any) []byte { b, _ := json.Marshal(v); return b }
+
+// List is a list of strings an argument takes as a JSON array or, as the
+// CLI passes it, one comma-separated string ("read,write").
+type List []string
+
+// UnmarshalJSON accepts an array of strings (other values are formatted)
+// or a comma-separated string.
+func (l *List) UnmarshalJSON(b []byte) error {
+	var s string
+	if json.Unmarshal(b, &s) == nil {
+		*l = List{}
+		for _, x := range strings.Split(s, ",") {
+			if x = strings.TrimSpace(x); x != "" {
+				*l = append(*l, x)
+			}
+		}
+		return nil
+	}
+	var xs []any
+	if err := json.Unmarshal(b, &xs); err != nil {
+		return err
+	}
+	*l = make(List, 0, len(xs))
+	for _, x := range xs {
+		if str, ok := x.(string); ok {
+			*l = append(*l, str)
+		} else {
+			*l = append(*l, string(mustJSON(x)))
+		}
+	}
+	return nil
+}
+
+// JSONSchema is a list's schema: an array of strings, or one string.
+func (List) JSONSchema() *jsonschema.Schema {
+	return &jsonschema.Schema{OneOf: []*jsonschema.Schema{
+		{Type: "array", Items: &jsonschema.Schema{Type: "string"}},
+		{Type: "string", Description: "comma-separated"},
+	}}
+}
 
 // InputSchema is v's argument schema: a typed verb's own, or one made from
 // an untyped verb's Args (json arguments accept any value).
