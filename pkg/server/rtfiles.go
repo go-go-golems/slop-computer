@@ -158,6 +158,9 @@ func (s *Server) rpcFilesList(ctx context.Context, v *rt.View, raw json.RawMessa
 			return nil, err
 		}
 	}
+	if entries == nil {
+		entries = []fileEntry{} // an empty listing is [], not null
+	}
 	page := map[string]any{}
 	if from > len(entries) {
 		from = len(entries)

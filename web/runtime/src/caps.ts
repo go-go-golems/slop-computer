@@ -341,7 +341,7 @@ export function files() {
   const list = async (o?: { path?: string; recursive?: boolean; cursor?: string }) => {
     try {
       const r: any = await rpc("files.list", { path: o?.path ?? "", recursive: !!o?.recursive, cursor: o?.cursor ?? "" });
-      const entries = (r.entries as FileEntry[]).map((e) => freeze({ path: e.path, isDirectory: !!e.isDirectory, size: e.size }));
+      const entries = ((r.entries ?? []) as FileEntry[]).map((e) => freeze({ path: e.path, isDirectory: !!e.isDirectory, size: e.size }));
       return freeze(r.cursor ? { entries, cursor: String(r.cursor) } : { entries });
     } catch (e) {
       throw fileFail(e);

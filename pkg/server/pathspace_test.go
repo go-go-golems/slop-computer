@@ -409,6 +409,22 @@ func TestFilesCapability(t *testing.T) {
 	}
 }
 
+// An empty project lists as an empty array, not null: the runtime maps over
+// entries (review of PR #20).
+func TestFilesListEmpty(t *testing.T) {
+	h := newHarness(t)
+	admin := h.tokenFor("admin@example.com", "read", "write", "admin")
+	h.call(admin, "store.new", map[string]any{"id": "blank"})
+	h.call(admin, "grant.set", map[string]any{"store": "blank", "subject": "@guest", "level": "view"})
+	pushApp(h, admin, "viewer", "/viewer", map[string]string{"app.json": `{"title":"v","capabilities":{"files":{"project":"source"}}}`, "index.html": `<!doctype html><title>p</title>`})
+	h.call(admin, "bind.set", map[string]any{"store": "viewer", "alias": "source", "target": "blank"})
+	s := h.site(h.cfg.Hosts.Live[0])
+	out := rpc(s, guestView(t, s, "/viewer"), "files.list", map[string]any{})
+	if e, ok := result(t, out)["entries"].([]any); !ok || len(e) != 0 {
+		t.Fatalf("empty project: %v", out)
+	}
+}
+
 // adminView signs admin@example.com in on the live host and opens the page
 // mounted at path.
 func adminView(t *testing.T, h *harness, path string) (*site, map[string]any) {

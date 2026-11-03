@@ -1,4 +1,4 @@
-/* slop page runtime (window.claude), built from web/runtime: do not edit. source sha256:f06c7dd2691ed1cec720897bc0c60ef67833c695ef3718a453e3e6619379a43b */
+/* slop page runtime (window.claude), built from web/runtime: do not edit. source sha256:64c9148f9b8f9573ab7d7bbbc9e22d1470c5d7c829a87e594bd463434b726adb */
 "use strict";
 (() => {
   // src/limits.ts
@@ -660,7 +660,7 @@
     const list = async (o) => {
       try {
         const r = await rpc("files.list", { path: o?.path ?? "", recursive: !!o?.recursive, cursor: o?.cursor ?? "" });
-        const entries = r.entries.map((e) => freeze({ path: e.path, isDirectory: !!e.isDirectory, size: e.size }));
+        const entries = (r.entries ?? []).map((e) => freeze({ path: e.path, isDirectory: !!e.isDirectory, size: e.size }));
         return freeze(r.cursor ? { entries, cursor: String(r.cursor) } : { entries });
       } catch (e) {
         throw fileFail(e);

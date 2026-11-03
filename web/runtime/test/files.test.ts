@@ -48,4 +48,6 @@ test("read_project_file reads text through asSampleTools", async () => {
 test("an empty listing is an empty list", async () => {
   replies["files.list"] = () => ({ entries: [] });
   assert.deepEqual((await f.list()).entries, []);
+  replies["files.list"] = () => ({ entries: null }); // an older server's empty listing
+  assert.deepEqual((await f.list()).entries, []);
 });
