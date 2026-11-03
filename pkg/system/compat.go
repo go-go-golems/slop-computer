@@ -8,6 +8,8 @@ package system
 import (
 	"context"
 
+	"github.com/go-go-golems/slop-computer/pkg/llm"
+
 	"github.com/go-go-golems/slop-computer/pkg/registry"
 
 	"github.com/go-go-golems/slop-computer/pkg/identity"
@@ -18,6 +20,7 @@ import (
 // DB is system.db with every domain's queries.
 type DB struct {
 	*sysdb.DB
+	*llm.Ledger
 	*registry.Registry
 	*identity.Accounts
 }
@@ -28,7 +31,7 @@ func Open(ctx context.Context, path string) (*DB, error) {
 	if err != nil {
 		return nil, err
 	}
-	return &DB{DB: d, Accounts: identity.NewAccounts(d), Registry: registry.NewRegistry(d)}, nil
+	return &DB{DB: d, Accounts: identity.NewAccounts(d), Registry: registry.NewRegistry(d), Ledger: llm.NewLedger(d)}, nil
 }
 
 type (
@@ -104,4 +107,21 @@ var (
 	ValidMountPath = registry.ValidMountPath
 	BestMount      = registry.BestMount
 	SortMounts     = registry.SortMounts
+)
+
+// forwarded from pkg/llm
+type (
+	Hold        = llm.Hold
+	BudgetMeter = llm.BudgetMeter
+	LLMRow      = llm.LLMRow
+	LLM         = llm.LLM
+)
+
+const (
+	HoldTTL = llm.HoldTTL
+)
+
+var (
+	ErrQuota = llm.ErrQuota
+	Period   = llm.Period
 )
