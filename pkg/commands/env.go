@@ -44,17 +44,13 @@ func (e *Env) open(ctx context.Context, p *access.Principal, id string, need rt.
 	if id == "" {
 		return nil, access.Decision{}, verbs.Errf("invalid_argument", "which store?")
 	}
-	d, _, err := e.K.Access.Can(ctx, p, id, need, what, false)
-	if err != nil {
-		return nil, d, err
-	}
-	if !d.OK {
+	s, d, err := e.K.Open(ctx, p, id, need, what, false)
+	if err == nil && !d.OK {
 		if d.Code == "not_found" {
 			return nil, d, &verbs.Error{Code: "not_found", Message: "no store " + id}
 		}
 		return nil, d, &verbs.Error{Code: d.Code, Message: what + " on " + id + " needs " + need.String(), Trace: d.Trace}
 	}
-	s, err := e.K.Store(ctx, id)
 	if errors.Is(err, kernel.ErrNoStore) {
 		return nil, d, &verbs.Error{Code: "not_found", Message: "no store " + id}
 	}

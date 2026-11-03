@@ -164,13 +164,8 @@ func (s *Door) serveStoreFile(w http.ResponseWriter, r *http.Request, p *access.
 		return
 	}
 	id, at, name := parts[0], parts[1], parts[2]
-	d, _, err := s.K.Access.Can(ctx, p, id, rt.LevelView, "reading files", true)
+	st, d, err := s.K.Open(ctx, p, id, rt.LevelView, "reading files", true)
 	if err != nil || !d.OK {
-		notFound(w)
-		return
-	}
-	st, err := s.K.Store(ctx, id)
-	if err != nil {
 		notFound(w)
 		return
 	}

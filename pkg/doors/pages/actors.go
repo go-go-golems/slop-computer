@@ -85,16 +85,12 @@ func (s *Door) rpcSlopRead(ctx context.Context, v *rt.View, raw json.RawMessage)
 		return nil, rtErr("not_found", "no store is bound to %q", a.Alias)
 	}
 	p := s.viewPrincipal(ctx, v)
-	d, _, err := s.K.Access.Can(ctx, p, target, rt.LevelView, "reading", true)
+	st, d, err := s.K.Open(ctx, p, target, rt.LevelView, "reading", true)
 	if err != nil {
 		return nil, err
 	}
 	if !d.OK {
 		return nil, rtErr("not_found", "nothing to read at %q", a.Alias)
-	}
-	st, err := s.K.Store(ctx, target)
-	if err != nil {
-		return nil, err
 	}
 	rules := s.K.Rules(ctx, target)
 	switch a.Op {
@@ -235,12 +231,8 @@ func (s *Door) serveBoundAsset(w http.ResponseWriter, r *http.Request, storeID s
 		return
 	}
 	me := &access.Principal{Kind: access.KindStore, Store: storeID}
-	if d, _, err := s.K.Access.Can(ctx, me, b.Target, rt.LevelView, "reading", true); err != nil || !d.OK {
-		notFound(w)
-		return
-	}
-	st, err := s.K.Store(ctx, b.Target)
-	if err != nil {
+	st, d, err := s.K.Open(ctx, me, b.Target, rt.LevelView, "reading", true)
+	if err != nil || !d.OK {
 		notFound(w)
 		return
 	}
