@@ -6,7 +6,7 @@
 - [x] Back office: richer detail pane for a store (app, version, size, files, grants, mounts, bindings, recent log) <!-- t:zw1t -->
 - [x] Traefik: compress responses (gzip/brotli) on the slop hosts <!-- t:1nh0 -->
 - [ ] Caching: immutable caching for snapshot files on the static host where the URL names the snapshot; check entry pages <!-- t:hc66 -->
-- [ ] Generic /f/:id mount for imported apps (store type release) instead of 103 mounts <!-- t:07oh -->
+- [x] Generic /f/:id mount for imported apps (store type release) instead of 103 mounts <!-- t:07oh -->
 - [ ] Import v2 history: older versions of imported artifacts as snapshots <!-- t:2ghn -->
 - [ ] Cloudflare in front of the slop hosts (later) <!-- t:wcpm -->
 - [x] Recheck slow-loading imported apps (thought-machines, vitrine) after compression <!-- t:ilxa -->
