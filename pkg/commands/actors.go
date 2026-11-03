@@ -29,7 +29,7 @@ func actorErr(err error) error {
 	return err
 }
 
-func actorVerbs(e *Env) []*verbs.Verb {
+func actorVerbs(e actorEnv) []*verbs.Verb {
 	storeArg := verbs.Arg{Name: "store", Type: "string", Pos: 1, Required: true}
 	return []*verbs.Verb{
 		{Name: "actor.call", Doc: "Call an action of a store's actor (the action checks your level itself).", Scope: verbs.Write, Action: authz.ActorCall,
@@ -197,7 +197,7 @@ func actorVerbs(e *Env) []*verbs.Verb {
 					return nil, err
 				}
 				b := registry.Binding{Store: a.S("store"), Alias: a.S("alias"), Target: a.S("target"), Assets: a.B("assets"), Prefix: a.S("prefix"), Level: a.S("level")}
-				if err := checkAlias(ctx, e, p, &b); err != nil {
+				if err := checkAlias(ctx, e.kernelEnv, p, &b); err != nil {
 					return nil, err
 				}
 				if err := e.K.Registry.SetBinding(ctx, p.ID(), p.ViaLabel(), b); err != nil {
@@ -225,7 +225,7 @@ func actorVerbs(e *Env) []*verbs.Verb {
 // a prefix (view when none is given), and p holding that level on the target,
 // admin with assets. You cannot alias more than you hold: pages read the
 // target through the alias up to its level, as their own viewers.
-func checkAlias(ctx context.Context, e *Env, p *access.Principal, b *registry.Binding) error {
+func checkAlias(ctx context.Context, e kernelEnv, p *access.Principal, b *registry.Binding) error {
 	level := rt.LevelView
 	switch {
 	case b.Prefix == "" && b.Level != "":

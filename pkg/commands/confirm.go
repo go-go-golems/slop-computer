@@ -8,7 +8,7 @@ import (
 	"github.com/go-go-golems/slop-computer/pkg/verbs"
 )
 
-func confirmVerbs(e *Env) []*verbs.Verb {
+func confirmVerbs(e confirmEnv) []*verbs.Verb {
 	return []*verbs.Verb{
 		{Name: "confirm.approve", Doc: "Allow a change an app asked to make for you (the id from its confirmation_required error).", Scope: verbs.Write, Action: authz.Account,
 			Args: []verbs.Arg{{Name: "id", Type: "string", Pos: 1, Required: true}},

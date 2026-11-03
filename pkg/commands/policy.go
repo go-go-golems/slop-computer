@@ -17,7 +17,7 @@ import (
 
 // declaredPolicyCaps are the policy capabilities an app's current version
 // declares: matrix rows appear only for those (guide §8.2).
-func (e *Env) declaredPolicyCaps(ctx context.Context, app string) ([]string, *apps.Manifest) {
+func (e policyEnv) declaredPolicyCaps(ctx context.Context, app string) ([]string, *apps.Manifest) {
 	r, err := e.K.Running(ctx, app)
 	if err != nil || r.Manifest == nil {
 		return nil, nil
@@ -57,7 +57,7 @@ func onOff(s string) (bool, error) {
 	return false, errors.New("say on or off")
 }
 
-func policyVerbs(e *Env) []*verbs.Verb {
+func policyVerbs(e policyEnv) []*verbs.Verb {
 	return []*verbs.Verb{
 		{Name: "policy.ls", Doc: "Show an app's policy matrix: which policy capabilities each audience may use.", Scope: verbs.Read, AdminOnly: true, Action: authz.PlatformAdmin,
 			Args: []verbs.Arg{{Name: "app", Type: "string", Pos: 1, Required: true}},

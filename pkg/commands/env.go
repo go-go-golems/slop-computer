@@ -11,9 +11,11 @@ import (
 	"github.com/go-go-golems/slop-computer/pkg/authz"
 	"github.com/go-go-golems/slop-computer/pkg/billing/stripe"
 	"github.com/go-go-golems/slop-computer/pkg/config"
+	"github.com/go-go-golems/slop-computer/pkg/identity"
 	"github.com/go-go-golems/slop-computer/pkg/kernel"
 	"github.com/go-go-golems/slop-computer/pkg/rt"
 	"github.com/go-go-golems/slop-computer/pkg/store"
+	"github.com/go-go-golems/slop-computer/pkg/sysdb"
 	"github.com/go-go-golems/slop-computer/pkg/verbs"
 )
 
@@ -38,9 +40,47 @@ type Env struct {
 	Verbs *verbs.Table
 }
 
+// What each group of commands holds (SLOP3-010 PR 4): only what it uses,
+// so a group's signature says what it can reach. Most work on stores
+// through the kernel; people, confirm and eval need less, and only actors
+// and policy reach the actor manager.
+type (
+	kernelEnv struct{ K *kernel.Kernel }
+	actorEnv  struct {
+		kernelEnv
+		A *actor.Manager
+	}
+	billingEnv struct {
+		kernelEnv
+		Cfg *config.Config
+		// Billing is the Stripe service, read per call (nil without a
+		// stripe config).
+		Billing func() *stripe.Service
+	}
+	confirmEnv struct{ Confirm *verbs.Confirmations }
+	evalEnv    struct{ Verbs *verbs.Table }
+	mountEnv   struct {
+		kernelEnv
+		Cfg *config.Config
+	}
+	peopleEnv struct {
+		People *identity.Accounts
+		Sys    *sysdb.DB
+	}
+	policyEnv struct {
+		kernelEnv
+		Cfg *config.Config
+		A   *actor.Manager
+	}
+	previewEnv struct {
+		kernelEnv
+		Cfg *config.Config
+	}
+)
+
 // open checks that p holds need on a store and opens it. A denial carries
 // the access trace; a store p may not see at all reads as not_found.
-func (e *Env) open(ctx context.Context, p *access.Principal, id string, need rt.Level, what string) (*store.Store, access.Decision, error) {
+func (e kernelEnv) open(ctx context.Context, p *access.Principal, id string, need rt.Level, what string) (*store.Store, access.Decision, error) {
 	if id == "" {
 		return nil, access.Decision{}, verbs.Errf("invalid_argument", "which store?")
 	}

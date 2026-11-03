@@ -19,7 +19,7 @@ import (
 
 func bytesReader(b []byte) *bytes.Reader { return bytes.NewReader(b) }
 
-func storeVerbs(e *Env) []*verbs.Verb {
+func storeVerbs(e kernelEnv) []*verbs.Verb {
 	return []*verbs.Verb{
 		{Name: "store.ls", Doc: "List the stores you own or hold a grant on (admins: --all).", Scope: verbs.Read, Action: authz.Account,
 			Args: []verbs.Arg{{Name: "all", Type: "bool", Doc: "every store (admins)"}},

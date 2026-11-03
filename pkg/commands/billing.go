@@ -35,7 +35,7 @@ func parseUntil(s string) (int64, error) {
 }
 
 // personArg resolves a person by id or email.
-func (e *Env) personArg(ctx context.Context, s string) (sysdb.Person, error) {
+func (e kernelEnv) personArg(ctx context.Context, s string) (sysdb.Person, error) {
 	var p sysdb.Person
 	var err error
 	if strings.Contains(s, "@") {
@@ -49,7 +49,7 @@ func (e *Env) personArg(ctx context.Context, s string) (sysdb.Person, error) {
 	return p, nil
 }
 
-func billingVerbs(e *Env) []*verbs.Verb {
+func billingVerbs(e billingEnv) []*verbs.Verb {
 	return []*verbs.Verb{
 		{Name: "sub.grant", Effect: verbs.EffectGovern, Doc: "Give a person complimentary subscriber access until a date (2027-06-30) or for days (30d).", Scope: verbs.Write, AdminOnly: true, Action: authz.PlatformAdmin,
 			Args: []verbs.Arg{{Name: "person", Type: "string", Pos: 1, Required: true, Doc: "usr_… or an email"},
@@ -127,7 +127,7 @@ func billingVerbs(e *Env) []*verbs.Verb {
 		{Name: "billing.checkout", Doc: "Start a Stripe Checkout for a subscription price; returns its URL.", Scope: verbs.Write, Action: authz.Account,
 			Args: []verbs.Arg{{Name: "price", Type: "string", Pos: 1, Doc: "a price from the server's stripe.prices (default the first)"}},
 			Run: func(ctx context.Context, p *access.Principal, a verbs.Args) (any, error) {
-				if e.Billing == nil {
+				if e.Billing() == nil {
 					return nil, verbs.Errf("unavailable", "this server has no Stripe; ask an admin for a comp")
 				}
 				if p.Kind != access.KindUser && p.Kind != access.KindToken || p.Person == nil || p.Person.Kind != "user" {
@@ -140,7 +140,7 @@ func billingVerbs(e *Env) []*verbs.Verb {
 				if !e.K.Policy().AcceptedPrices[price] {
 					return nil, verbs.Errf("invalid_argument", "unknown price %q", price)
 				}
-				u, err := e.Billing.Checkout(ctx, stripe.Person{ID: p.ID(), Email: p.Person.Email, Name: p.Person.Name}, price,
+				u, err := e.Billing().Checkout(ctx, stripe.Person{ID: p.ID(), Email: p.Person.Email, Name: p.Person.Name}, price,
 					e.K.Policy().AcceptedPrices, e.Cfg.MainURL()+"/subscribe")
 				if errors.Is(err, stripe.ErrSubscriptionOpen) {
 					return nil, verbs.Errf("conflict", "you already have a subscription: use billing.portal")
@@ -152,13 +152,13 @@ func billingVerbs(e *Env) []*verbs.Verb {
 			}},
 		{Name: "billing.portal", Doc: "Open the Stripe Customer Portal for your subscription; returns its URL.", Scope: verbs.Write, Action: authz.Account,
 			Run: func(ctx context.Context, p *access.Principal, a verbs.Args) (any, error) {
-				if e.Billing == nil {
+				if e.Billing() == nil {
 					return nil, verbs.Errf("unavailable", "this server has no Stripe")
 				}
 				if p.Person == nil {
 					return nil, verbs.Errf("permission_denied", "sign in first")
 				}
-				u, err := e.Billing.Portal(ctx, stripe.Person{ID: p.ID(), Email: p.Person.Email, Name: p.Person.Name}, e.Cfg.MainURL()+"/subscribe")
+				u, err := e.Billing().Portal(ctx, stripe.Person{ID: p.ID(), Email: p.Person.Email, Name: p.Person.Name}, e.Cfg.MainURL()+"/subscribe")
 				if errors.Is(err, stripe.ErrNoCustomer) {
 					return nil, verbs.Errf("not_found", "no billing account yet")
 				}
@@ -170,7 +170,7 @@ func billingVerbs(e *Env) []*verbs.Verb {
 		{Name: "billing.refresh", Doc: "Ask Stripe for a person's current subscriptions now (yours, or anyone's for admins).", Scope: verbs.Write, Action: authz.Account,
 			Args: []verbs.Arg{{Name: "person", Type: "string", Pos: 1}},
 			Run: func(ctx context.Context, p *access.Principal, a verbs.Args) (any, error) {
-				if e.Billing == nil {
+				if e.Billing() == nil {
 					return nil, verbs.Errf("unavailable", "this server has no Stripe")
 				}
 				id := p.ID()
@@ -181,10 +181,10 @@ func billingVerbs(e *Env) []*verbs.Verb {
 					}
 					id = pp.ID
 				}
-				if err := e.Billing.ReconcilePerson(ctx, id); err != nil {
+				if err := e.Billing().ReconcilePerson(ctx, id); err != nil {
 					return nil, verbs.Errf("not_found", "no billing account for %s", id)
 				}
-				e.Billing.Drain(ctx)
+				e.Billing().Drain(ctx)
 				return e.K.Standing(ctx, id), nil
 			}},
 	}

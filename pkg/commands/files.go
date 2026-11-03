@@ -19,7 +19,7 @@ import (
 	"github.com/go-go-golems/slop-computer/pkg/verbs"
 )
 
-func filesVerbs(e *Env) []*verbs.Verb {
+func filesVerbs(e kernelEnv) []*verbs.Verb {
 	storeArg := verbs.Arg{Name: "store", Type: "string", Pos: 1, Required: true}
 	zoneArg := verbs.Arg{Name: "zone", Type: "string", Doc: "tree (default) or assets"}
 	atArg := verbs.Arg{Name: "at", Type: "string", Doc: "a snapshot number or ref; empty = the working tree"}
@@ -286,7 +286,7 @@ type pushFile struct {
 
 // push applies a manifest. full=true is files.push (prune and snapshot by
 // default); false is import.files (neither).
-func push(ctx context.Context, e *Env, p *access.Principal, a verbs.Args, full bool) (any, error) {
+func push(ctx context.Context, e kernelEnv, p *access.Principal, a verbs.Args, full bool) (any, error) {
 	s, d, err := e.open(ctx, p, a.S("store"), rt.LevelAdmin, "pushing files")
 	if err != nil {
 		return nil, err
