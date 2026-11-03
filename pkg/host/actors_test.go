@@ -108,7 +108,7 @@ func TestActors(t *testing.T) {
 		t.Fatalf("slow made %d commits: %v", len(slow), slow)
 	}
 	// A throw after an await of something resolved rolls back that turn.
-	e = h.fail(admin, "actor.call", map[string]any{"store": "tracker", "action": "boom"}, "conflict")
+	h.fail(admin, "actor.call", map[string]any{"store": "tracker", "action": "boom"}, "conflict")
 	if n := h.call(admin, "actor.call", map[string]any{"store": "tracker", "action": "count"}); n != 4.0 {
 		t.Fatalf("count after boom = %v (want 4: welcome, one, draft, published)", n)
 	}
@@ -152,7 +152,7 @@ func TestActors(t *testing.T) {
 	h.call(admin, "store.new", map[string]any{"id": "cat", "type": "catalog"})
 	h.call(admin, "docs.set", map[string]any{"store": "cat", "path": "items/a", "data": map[string]any{"name": "A"}})
 	h.call(admin, "bind.set", map[string]any{"store": "tracker", "alias": "catalog", "target": "cat"})
-	e = h.fail(admin, "actor.call", map[string]any{"store": "tracker", "action": "catalog"}, "permission_denied")
+	h.fail(admin, "actor.call", map[string]any{"store": "tracker", "action": "catalog"}, "permission_denied")
 	h.call(admin, "grant.set", map[string]any{"store": "cat", "subject": "store:tracker", "level": "view"})
 	if got := h.call(admin, "actor.call", map[string]any{"store": "tracker", "action": "catalog"}).(map[string]any); got["name"] != "A" {
 		t.Fatalf("catalog = %v", got)

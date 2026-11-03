@@ -148,7 +148,11 @@ func (d *Ledger) ExpireHolds(ctx context.Context) (int, error) {
 			ids = append(ids, id)
 		}
 	}
+	err = rows.Err()
 	_ = rows.Close()
+	if err != nil {
+		return 0, err
+	}
 	for _, id := range ids {
 		if err := d.Settle(ctx, id, -1); err != nil {
 			return 0, err

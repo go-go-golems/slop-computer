@@ -155,7 +155,7 @@ func (s *Store) AllMeta() map[string]string {
 	if err != nil {
 		return out
 	}
-	defer rows.Close()
+	defer func() { _ = rows.Close() }()
 	for rows.Next() {
 		var k, v string
 		if rows.Scan(&k, &v) == nil {

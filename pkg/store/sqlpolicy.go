@@ -169,7 +169,7 @@ func (t *Turn) checkAppForeignKeys() error {
 	if err != nil {
 		return err
 	}
-	defer rows.Close()
+	defer func() { _ = rows.Close() }()
 	for rows.Next() {
 		var table, parent string
 		if err := rows.Scan(&table, &parent); err != nil {

@@ -112,7 +112,7 @@ func (s *Door) writeStoreBytes(w http.ResponseWriter, r *http.Request, b storeBy
 		http.Error(w, "file unavailable", http.StatusServiceUnavailable)
 		return
 	}
-	defer file.Close()
+	defer func() { _ = file.Close() }()
 	h.Set("Content-Type", b.f.Type)
 	http.ServeContent(w, r, "", time.Time{}, file)
 }

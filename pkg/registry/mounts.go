@@ -52,7 +52,7 @@ func (d *Registry) Mounts(ctx context.Context, host string) ([]Mount, error) {
 	if err != nil {
 		return nil, err
 	}
-	defer rows.Close()
+	defer func() { _ = rows.Close() }()
 	out := []Mount{}
 	for rows.Next() {
 		m, err := scanMount(rows)

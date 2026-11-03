@@ -144,7 +144,7 @@ func (s *Store) Files(ctx context.Context, zone, prefix string) ([]File, error) 
 	if err != nil {
 		return nil, err
 	}
-	defer rows.Close()
+	defer func() { _ = rows.Close() }()
 	out := []File{}
 	for rows.Next() {
 		var f File
@@ -165,7 +165,7 @@ func (t *Turn) ZoneFiles(zone string) ([]File, error) {
 	if err != nil {
 		return nil, err
 	}
-	defer rows.Close()
+	defer func() { _ = rows.Close() }()
 	out := []File{}
 	for rows.Next() {
 		f := File{Zone: zone}
@@ -266,7 +266,7 @@ func (s *Store) Snapshots(ctx context.Context) ([]Snapshot, error) {
 	if err != nil {
 		return nil, err
 	}
-	defer rows.Close()
+	defer func() { _ = rows.Close() }()
 	out := []Snapshot{}
 	for rows.Next() {
 		var x Snapshot
@@ -284,7 +284,7 @@ func (s *Store) Refs(ctx context.Context) (map[string]int64, error) {
 	if err != nil {
 		return nil, err
 	}
-	defer rows.Close()
+	defer func() { _ = rows.Close() }()
 	out := map[string]int64{}
 	for rows.Next() {
 		var name string
@@ -319,7 +319,7 @@ func (s *Store) SnapshotFiles(ctx context.Context, n int64) ([]File, error) {
 	if err != nil {
 		return nil, err
 	}
-	defer rows.Close()
+	defer func() { _ = rows.Close() }()
 	out := []File{}
 	for rows.Next() {
 		f := File{Zone: "tree"}
@@ -364,33 +364,47 @@ func (s *Store) Log(ctx context.Context, after int64, limit int) ([]Commit, erro
 		return nil, err
 	}
 	out := []Commit{}
-	for rows.Next() {
-		c := Commit{Store: s.ID}
-		if err := rows.Scan(&c.Rev, &c.At, &c.Principal, &c.Via, &c.App, &c.Summary); err != nil {
-			rows.Close()
-			return nil, err
+	if err := func() error {
+		defer func() { _ = rows.Close() }()
+		for rows.Next() {
+			c := Commit{Store: s.ID}
+			if err := rows.Scan(&c.Rev, &c.At, &c.Principal, &c.Via, &c.App, &c.Summary); err != nil {
+				return err
+			}
+			out = append(out, c)
 		}
-		out = append(out, c)
+		return rows.Err()
+	}(); err != nil {
+		return nil, err
 	}
-	rows.Close()
 	epoch := s.Epoch()
 	for i := range out {
 		out[i].Epoch = epoch
-		cr, err := s.ro.QueryContext(ctx, `SELECT kind, key, op, coalesce(version, 0) FROM _changes WHERE rev = ? ORDER BY seq`, out[i].Rev)
+		changes, err := s.changesOf(ctx, out[i].Rev)
 		if err != nil {
 			return nil, err
 		}
-		for cr.Next() {
-			var ch Change
-			if err := cr.Scan(&ch.Kind, &ch.Key, &ch.Op, &ch.Version); err != nil {
-				cr.Close()
-				return nil, err
-			}
-			out[i].Changes = append(out[i].Changes, ch)
-		}
-		cr.Close()
+		out[i].Changes = changes
 	}
 	return out, nil
+}
+
+// changesOf is one commit's changes, in order.
+func (s *Store) changesOf(ctx context.Context, rev int64) ([]Change, error) {
+	cr, err := s.ro.QueryContext(ctx, `SELECT kind, key, op, coalesce(version, 0) FROM _changes WHERE rev = ? ORDER BY seq`, rev)
+	if err != nil {
+		return nil, err
+	}
+	defer func() { _ = cr.Close() }()
+	var out []Change
+	for cr.Next() {
+		var ch Change
+		if err := cr.Scan(&ch.Kind, &ch.Key, &ch.Op, &ch.Version); err != nil {
+			return nil, err
+		}
+		out = append(out, ch)
+	}
+	return out, cr.Err()
 }
 
 // RecentLog returns the newest commits, newest first.

@@ -123,7 +123,7 @@ func authStatusCmd() *cobra.Command {
 			for url, l := range creds.Servers {
 				rows = append(rows, map[string]any{"server": url, "default": url == creds.Default, "token": l.TokenID, "name": l.Name, "scopes": l.Scopes})
 			}
-			return print(rows)
+			return printOut(rows)
 		},
 	}
 }

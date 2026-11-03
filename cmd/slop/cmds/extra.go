@@ -78,7 +78,7 @@ func pushCmd() *cobra.Command {
 			if err != nil {
 				return err
 			}
-			return print(res)
+			return printOut(res)
 		},
 	}
 	cmd.Flags().StringVar(&storeID, "store", "", "the store (default: the folder's name)")
@@ -103,7 +103,7 @@ func pullCmd() *cobra.Command {
 			if err != nil {
 				return err
 			}
-			return print(map[string]any{"written": n, "dir": args[1]})
+			return printOut(map[string]any{"written": n, "dir": args[1]})
 		},
 	}
 	cmd.Flags().StringVar(&at, "at", "main", "a snapshot number or ref; empty for the working tree")
@@ -158,7 +158,7 @@ func evalCmd() *cobra.Command {
 			}
 			m, _ := res.(map[string]any)
 			printLogs(m)
-			return print(m["result"])
+			return printOut(m["result"])
 		},
 	}
 	cmd.Flags().StringVarP(&file, "file", "f", "", "the program file (- for stdin)")
@@ -191,7 +191,7 @@ func callCmd() *cobra.Command {
 			if err != nil {
 				return err
 			}
-			return print(res)
+			return printOut(res)
 		},
 	}
 }
@@ -240,7 +240,7 @@ func importDocsCmd() *cobra.Command {
 			if err != nil {
 				return err
 			}
-			return print(res)
+			return printOut(res)
 		},
 	}
 	cmd.Flags().StringVar(&storeID, "store", "", "the store")
@@ -273,7 +273,7 @@ func importTableCmd() *cobra.Command {
 			if err != nil {
 				return err
 			}
-			return print(res)
+			return printOut(res)
 		},
 	}
 	cmd.Flags().StringVar(&storeID, "store", "", "the store")
@@ -310,7 +310,7 @@ func importFilesCmd() *cobra.Command {
 			if err != nil {
 				return err
 			}
-			return print(res)
+			return printOut(res)
 		},
 	}
 	cmd.Flags().StringVar(&storeID, "store", "", "the store")
@@ -334,7 +334,7 @@ func importFolderCmd() *cobra.Command {
 			if err != nil {
 				return err
 			}
-			return print(res)
+			return printOut(res)
 		},
 	}
 	cmd.Flags().StringVar(&storeID, "store", "", "the new store's id (default: the exported id)")
@@ -357,12 +357,12 @@ func storeExportCmd() *cobra.Command {
 				if err != nil {
 					return err
 				}
-				return print(res)
+				return printOut(res)
 			}
 			if err := c.ExportFolder(args[0], folder); err != nil {
 				return err
 			}
-			return print(map[string]any{"exported": args[0], "folder": folder})
+			return printOut(map[string]any{"exported": args[0], "folder": folder})
 		},
 	}
 	cmd.Flags().StringVar(&folder, "folder", "", "write the folder format here")

@@ -127,7 +127,7 @@ func verbCommand(v *verbs.Verb) *cobra.Command {
 			if err != nil {
 				return err
 			}
-			return print(res)
+			return printOut(res)
 		},
 	}
 	for _, a := range v.Args {
@@ -170,7 +170,7 @@ func verbsCmd() *cobra.Command {
 				}
 				rows = append(rows, map[string]any{"verb": v.Name, "effect": string(v.Effect), "schema": typed, "doc": v.Doc})
 			}
-			return print(rows)
+			return printOut(rows)
 		},
 	}
 	cmd.AddCommand(&cobra.Command{
@@ -186,7 +186,7 @@ func verbsCmd() *cobra.Command {
 			if len(out) == 0 {
 				return fail("no such verb: %s", strings.Join(args, ", "))
 			}
-			return print(out)
+			return printOut(out)
 		},
 	})
 	return cmd
@@ -213,7 +213,7 @@ func verbCmd() *cobra.Command {
 			if err != nil {
 				return err
 			}
-			return print(res)
+			return printOut(res)
 		},
 	}
 	cmd.Flags().StringVar(&jsonArgs, "json", "", "arguments as a JSON object")

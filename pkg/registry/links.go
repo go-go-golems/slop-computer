@@ -37,7 +37,7 @@ func (d *Registry) Links(ctx context.Context, store string) ([]sysdb.Link, error
 	if err != nil {
 		return nil, err
 	}
-	defer rows.Close()
+	defer func() { _ = rows.Close() }()
 	out := []sysdb.Link{}
 	for rows.Next() {
 		var l sysdb.Link

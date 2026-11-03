@@ -101,8 +101,9 @@ func (m *Manager) queueSystem(a *Actor) {
 
 // reactSystem delivers the system log commits after each system: reactor's
 // cursor (200 at most per turn; more reports that some remain).
-func (a *Actor) reactSystem(cx *goja.Object) (more bool, err error) {
+func (a *Actor) reactSystem(cx *goja.Object) (bool, error) {
 	t := a.cur.t
+	more := false
 	ctx := t.Context()
 	for _, name := range a.systemKeys() {
 		f := a.fn("on", name)

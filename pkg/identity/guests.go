@@ -36,7 +36,7 @@ func (d *Accounts) StaleGuests(ctx context.Context, before int64) ([]string, err
 	if err != nil {
 		return nil, err
 	}
-	defer rows.Close()
+	defer func() { _ = rows.Close() }()
 	var out []string
 	for rows.Next() {
 		var id string
@@ -68,7 +68,7 @@ func (d *Accounts) SubjectGrants(ctx context.Context, subject string) ([]sysdb.G
 	if err != nil {
 		return nil, err
 	}
-	defer rows.Close()
+	defer func() { _ = rows.Close() }()
 	out := []sysdb.Grant{}
 	for rows.Next() {
 		var g sysdb.Grant

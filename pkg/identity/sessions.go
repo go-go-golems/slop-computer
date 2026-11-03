@@ -224,7 +224,7 @@ func (d *Accounts) Tokens(ctx context.Context, person string) ([]Token, error) {
 	if err != nil {
 		return nil, err
 	}
-	defer rows.Close()
+	defer func() { _ = rows.Close() }()
 	out := []Token{}
 	for rows.Next() {
 		t, err := scanToken(rows)

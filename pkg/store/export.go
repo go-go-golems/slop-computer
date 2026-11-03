@@ -94,18 +94,22 @@ func (s *Store) Export(ctx context.Context) (*Bundle, error) {
 		var d BundleDoc
 		var raw string
 		if err := rows.Scan(&d.Path, &raw, &d.Version); err != nil {
-			rows.Close()
+			_ = rows.Close()
 			return nil, err
 		}
 		dec := json.NewDecoder(strings.NewReader(raw))
 		dec.UseNumber()
 		if err := dec.Decode(&d.Body); err != nil {
-			rows.Close()
+			_ = rows.Close()
 			return nil, err
 		}
 		b.Docs = append(b.Docs, d)
 	}
-	rows.Close()
+	err = rows.Err()
+	_ = rows.Close()
+	if err != nil {
+		return nil, err
+	}
 	for _, zone := range []string{"tree", "assets"} {
 		fs, err := s.Files(ctx, zone, "")
 		if err != nil {

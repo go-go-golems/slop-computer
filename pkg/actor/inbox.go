@@ -51,13 +51,14 @@ func (m *Manager) push(id string, ev *event) error {
 
 // take gives a the next event of its store's queue. ok is false once a no
 // longer runs the store; ev is nil when the queue is empty.
-func (m *Manager) take(a *Actor) (ev *event, ok bool) {
+func (m *Manager) take(a *Actor) (*event, bool) {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 	if m.actors[a.st.ID] != a {
 		return nil, false
 	}
 	in := m.inboxLocked(a.st.ID)
+	var ev *event
 	if len(in.evs) > 0 {
 		ev = in.evs[0]
 		in.evs[0] = nil

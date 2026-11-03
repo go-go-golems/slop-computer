@@ -12,7 +12,7 @@ import (
 )
 
 // print writes a result in the chosen output format.
-func print(v any) error {
+func printOut(v any) error {
 	switch flagOutput {
 	case "json":
 		enc := json.NewEncoder(os.Stdout)
