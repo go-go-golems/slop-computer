@@ -117,7 +117,10 @@ func New(cfg *config.Config, sys *system.DB, env *commands.Env) *Server {
 		s.roomClosed(v, rooms)
 		s.reg.Live.Forget(v.ID, "")
 	}
-	s.reg = &registry.Docs{Sys: s.Sys, Verbs: s.Verbs, Host: regHost{s}, Live: registry.NewLive()}
+	s.reg = &registry.Docs{Verbs: s.Verbs, Host: regHost{s}, Live: registry.NewLive()}
+	if s.Sys != nil {
+		s.reg.Sys = s.Sys.Registry
+	}
 	if env != nil {
 		s.reg.Confirm = env.Confirm
 		if env.K != nil {

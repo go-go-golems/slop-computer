@@ -13,7 +13,7 @@ import (
 	"sync"
 
 	"github.com/go-go-golems/slop-computer/pkg/rt"
-	"github.com/go-go-golems/slop-computer/pkg/system"
+	"github.com/go-go-golems/slop-computer/pkg/sysdb"
 )
 
 // Sub is a view's subscription to a registry path (with its query's
@@ -132,7 +132,7 @@ func (l *Live) Update(view, sub string, now []rt.Doc) ([]rt.Doc, []string) {
 }
 
 // Affects reports whether a system change can change registry documents.
-func Affects(c system.Change) bool {
+func Affects(c sysdb.Change) bool {
 	switch c.Kind {
 	case "store", "grant", "binding", "person", "llm", "link", "comp", "billing":
 		return true

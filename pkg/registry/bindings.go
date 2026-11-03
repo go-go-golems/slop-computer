@@ -1,9 +1,11 @@
-package system
+package registry
 
 import (
 	"context"
 	"database/sql"
 	"errors"
+
+	"github.com/go-go-golems/slop-computer/pkg/sysdb"
 )
 
 // Binding maps a store's read alias to a real store. Assets: the store's
@@ -20,23 +22,23 @@ type Binding struct {
 }
 
 // Binding returns the target of a store's alias.
-func (d *DB) Binding(ctx context.Context, store, alias string) (string, error) {
+func (d *Registry) Binding(ctx context.Context, store, alias string) (string, error) {
 	b, err := d.BindingOf(ctx, store, alias)
 	return b.Target, err
 }
 
 // BindingOf returns a store's alias with its settings.
-func (d *DB) BindingOf(ctx context.Context, store, alias string) (Binding, error) {
+func (d *Registry) BindingOf(ctx context.Context, store, alias string) (Binding, error) {
 	b := Binding{Store: store, Alias: alias}
 	err := d.QueryRowContext(ctx, `SELECT target, assets, prefix, level FROM bindings WHERE store = ? AND alias = ?`, store, alias).Scan(&b.Target, &b.Assets, &b.Prefix, &b.Level)
 	if errors.Is(err, sql.ErrNoRows) {
-		return b, ErrNotFound
+		return b, sysdb.ErrNotFound
 	}
 	return b, err
 }
 
 // Bindings lists a store's aliases.
-func (d *DB) Bindings(ctx context.Context, store string) ([]Binding, error) {
+func (d *Registry) Bindings(ctx context.Context, store string) ([]Binding, error) {
 	rows, err := d.QueryContext(ctx, `SELECT store, alias, target, assets, prefix, level FROM bindings WHERE store = ? ORDER BY alias`, store)
 	if err != nil {
 		return nil, err
@@ -54,7 +56,7 @@ func (d *DB) Bindings(ctx context.Context, store string) ([]Binding, error) {
 }
 
 // SetBinding points a store's alias at a target store.
-func (d *DB) SetBinding(ctx context.Context, actor, via string, b Binding) error {
+func (d *Registry) SetBinding(ctx context.Context, actor, via string, b Binding) error {
 	if b.Level == "" {
 		b.Level = "view"
 	}
@@ -71,41 +73,41 @@ func (d *DB) SetBinding(ctx context.Context, actor, via string, b Binding) error
 		if b.Assets {
 			after += " (with uploads)"
 		}
-		_, err := Log(ctx, tx, d.NowMs(), actor, via, "bound "+b.Store+" "+b.Alias+" → "+after,
-			Change{Kind: "binding", Key: b.Store + " " + b.Alias, Op: "set", After: after})
+		_, err := sysdb.Log(ctx, tx, d.NowMs(), actor, via, "bound "+b.Store+" "+b.Alias+" → "+after,
+			sysdb.Change{Kind: "binding", Key: b.Store + " " + b.Alias, Op: "set", After: after})
 		return err
 	})
 }
 
 // RemoveBinding deletes a store's alias.
-func (d *DB) RemoveBinding(ctx context.Context, actor, via, store, alias string) error {
+func (d *Registry) RemoveBinding(ctx context.Context, actor, via, store, alias string) error {
 	return d.Tx(ctx, func(tx *sql.Tx) error {
 		res, err := tx.ExecContext(ctx, `DELETE FROM bindings WHERE store = ? AND alias = ?`, store, alias)
 		if err != nil {
 			return err
 		}
 		if n, _ := res.RowsAffected(); n == 0 {
-			return ErrNotFound
+			return sysdb.ErrNotFound
 		}
-		_, err = Log(ctx, tx, d.NowMs(), actor, via, "unbound "+store+" "+alias, Change{Kind: "binding", Key: store + " " + alias, Op: "remove"})
+		_, err = sysdb.Log(ctx, tx, d.NowMs(), actor, via, "unbound "+store+" "+alias, sysdb.Change{Kind: "binding", Key: store + " " + alias, Op: "remove"})
 		return err
 	})
 }
 
 // SetSchedule records a store's next alarm time.
-func (d *DB) SetSchedule(ctx context.Context, store string, next int64) error {
+func (d *Registry) SetSchedule(ctx context.Context, store string, next int64) error {
 	_, err := d.ExecContext(ctx, `INSERT INTO schedules (store, next_at) VALUES (?, ?) ON CONFLICT (store) DO UPDATE SET next_at = excluded.next_at`, store, next)
 	return err
 }
 
 // ClearSchedule forgets a store's alarms.
-func (d *DB) ClearSchedule(ctx context.Context, store string) error {
+func (d *Registry) ClearSchedule(ctx context.Context, store string) error {
 	_, err := d.ExecContext(ctx, `DELETE FROM schedules WHERE store = ?`, store)
 	return err
 }
 
 // DueSchedules lists the stores with an alarm due at now.
-func (d *DB) DueSchedules(ctx context.Context, now int64) ([]string, error) {
+func (d *Registry) DueSchedules(ctx context.Context, now int64) ([]string, error) {
 	rows, err := d.QueryContext(ctx, `SELECT store FROM schedules WHERE next_at <= ? ORDER BY next_at`, now)
 	if err != nil {
 		return nil, err

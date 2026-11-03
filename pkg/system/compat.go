@@ -8,6 +8,8 @@ package system
 import (
 	"context"
 
+	"github.com/go-go-golems/slop-computer/pkg/registry"
+
 	"github.com/go-go-golems/slop-computer/pkg/identity"
 
 	"github.com/go-go-golems/slop-computer/pkg/sysdb"
@@ -16,6 +18,7 @@ import (
 // DB is system.db with every domain's queries.
 type DB struct {
 	*sysdb.DB
+	*registry.Registry
 	*identity.Accounts
 }
 
@@ -25,7 +28,7 @@ func Open(ctx context.Context, path string) (*DB, error) {
 	if err != nil {
 		return nil, err
 	}
-	return &DB{DB: d, Accounts: identity.NewAccounts(d)}, nil
+	return &DB{DB: d, Accounts: identity.NewAccounts(d), Registry: registry.NewRegistry(d)}, nil
 }
 
 type (
@@ -56,7 +59,6 @@ var (
 	GroupsOf    = sysdb.GroupsOf
 	InGroup     = sysdb.InGroup
 	ValidLevel  = sysdb.ValidLevel
-	levelRank   = sysdb.LevelRank
 	nullStr     = sysdb.NullStr
 )
 
@@ -86,4 +88,20 @@ var (
 	ScopesForRole    = identity.ScopesForRole
 	CheckTokenGrant  = identity.CheckTokenGrant
 	GuestCutoff      = identity.GuestCutoff
+)
+
+// forwarded from pkg/registry
+type (
+	Binding = registry.Binding
+	Preview = registry.Preview
+	Mount   = registry.Mount
+	Match   = registry.Match
+)
+
+var (
+	ErrExists      = registry.ErrExists
+	ValidStoreID   = registry.ValidStoreID
+	ValidMountPath = registry.ValidMountPath
+	BestMount      = registry.BestMount
+	SortMounts     = registry.SortMounts
 )
