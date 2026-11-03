@@ -423,8 +423,8 @@ pkg/
     actors/                   the actor door: use() modules, trusted modules, platform        (PR 3, PR 4)
     billing/                  Stripe webhooks and checkout redirects                          (PR 3)
   verbs/                      the table only: Verb, Def, Table, Call, Check, schemas, Emit    (PR 1)
-  commands/                   every command not yet owned by a domain (shrinks to zero)       (PR 1 → 2, 4)
-  sysdb/                      system.db: open, migrations, Tx, the system log, Listen         (PR 2)
+  commands/                   the commands: they coordinate kernel and domains (PR 1; stays)
+  sysdb/                      system.db: open, migrations, Tx, the system log, shared rows   (PR 2, core)
   identity/                   people, sessions, tokens, device codes, flows, handoffs, guests (PR 2)
   registry/                   stores, grants, links, bindings, mounts, previews; documents    (PR 2)
   policy/                     app policy cells, secrets, trusted modules                     (PR 2)
@@ -764,6 +764,8 @@ type Directory interface {
 
 This is the one design change in PR 2. Review it as such. Everything else in PR 2 is moves.
 
+> **As built (PR #24).** The shared rows (`Person`, roles, scopes, `StoreRow`, `Grant`, `GrantLink`, `Link`, `GroupsOf`) live in `pkg/sysdb`, which is core, rather than as `access`-owned copies. `Principal.Person` is read everywhere, so copies would have rippled for no gain. `access.Directory` carries only the four queries the checker makes (`StoreByID`, `Grants`, `Person`, `NowMs`). The kernel implements it over `Registry` and `People`.
+
 ### 8.6 Order inside PR 2
 
 Make one commit per domain, each compiling and passing tests:
@@ -778,6 +780,8 @@ Make one commit per domain, each compiling and passing tests:
 8. delete `pkg/system`.
 
 Domain commands move with their domain (`commands/people.go` → `identity/verbs.go`). Commands that span domains, such as `store.new`, which creates a file (kernel) and a registry row, stay in `pkg/commands` or move to `kernel`.
+
+> **As built (PR #24): commands stay in `pkg/commands`.** Five of the six command files call the kernel or several domains; only `people.go` touches a single domain. The kernel imports the registry (and the other domains), so `registry` cannot import `kernel`. `pkg/commands` is therefore the layer that coordinates domains, not a staging package that empties. PR 4 may still move capability commands (`docs.*`, `files.*`, `sql.*`) to their capabilities, which may import the kernel.
 
 ---
 

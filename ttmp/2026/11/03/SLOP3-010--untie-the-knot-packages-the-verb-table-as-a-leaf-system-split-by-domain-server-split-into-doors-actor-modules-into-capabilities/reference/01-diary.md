@@ -340,3 +340,110 @@ Callers have not changed yet. `system.DB` is a temporary composite that embeds e
   }
   ```
 - **The qualifier now skips** `SelectorExpr.Sel`, `KeyValueExpr` keys, `Field` names, `FuncDecl`/`TypeSpec`/`ValueSpec` names and labels. It rewrites only idents with `Obj == nil` that are exported by the source and not declared by the target.
+
+## Step 4: PR 2, callers use the domains; pkg/system is gone
+
+The last commit of PR 2 removed the composite. Every caller now names the domain it uses, through the kernel's handles (`k.People`, `k.Registry`, `k.Ledger`, `k.Gov`, `k.Book`). `pkg/system` is deleted, and its two tests were split among `sysdb`, `policy` and `llm`. PR #24 is open, stacked on #22.
+
+Against the plan, the commands did not move into their domains. Most of them coordinate the kernel and several domains, so they can't live in a domain the kernel imports. The guide is updated.
+
+### Prompt Context
+**User prompt (verbatim):** see Step 3 ("go ahead. commit at appropriate intervals and keep a detailed diary as you work (using the diary format from the skill)").
+**Assistant interpretation:** Finish PR 2: rewire, delete `pkg/system`, validate, open the PR.
+**Inferred user intent:** The second knot untied.
+**Commit (code):** 9172a9c — "SLOP3-010 PR 2 (7/7): callers use the domains; pkg/system is gone". PR #24: https://github.com/go-go-golems/slop-computer/pull/24
+
+### What I did
+- **`rewire.py`** (job tmp, not committed):
+  - built a map of 109 domain methods to their handle field from the domain packages' source (`func (d *Accounts) X(`, …), the sysdb members from `pkg/sysdb/sysdb.go`, and the forwarded names from `compat.go`;
+  - rewrote `<holder>.Sys.M(` per package: `k.`/`….K.` → `k.<Field>`, the server's `s` → `s.<Field>`, commands' `e` → `e.K.<Field>`, tests' `h.sys` → `h.k.<Field>`, the sampler's `s` → `s.Ledger`;
+  - rewrote `system.X` → `sysdb.X` or `<domain>.X`, fixing imports. 52 files changed. The items it listed as unplaced were strings and comments ("system.db", JS names like `system.call`) and `registry.Docs`'s `d.Sys.StoreByID`, which is already right.
+- **By hand, compiler-driven:**
+  - `kernel.Kernel` fields and `kernel.New(cfg, *sysdb.DB)`, which builds the five domains; a `directory{k}` adapter for `access`;
+  - `server.Server` fields, from `env.K` or built over `sys` when there is no kernel;
+  - `commands.Env` lost `Sys` (`e.Sys.` → `e.K.Sys.`);
+  - `stripe.Service.Store` is now `*billing.Book`;
+  - `capsample.Sampler`/`Deps` carry a `Ledger`;
+  - `env.A.Policy`/`Secret` closures call `s.Gov`.
+- **Tests:**
+  - `pkg/system/groups_test.go` was split: `TestGroupsOf` → `pkg/sysdb`, `TestPolicyThroughGroups` → `pkg/policy` (with its own `openTestDB`), `TestLLMRowThroughGroups` → `pkg/llm`, next to the ledger tests;
+  - `pkg/access/level_test.go` builds identity and registry over `sysdb.Open` with a `dir` Directory.
+- **Cleanups lint asked for in moved code:** deleted `commands.(*Env).personChanged` (empty, a leftover of SLOP3-009 step 3), `gofmt` on files with rewritten imports, a stray blank import line in `pkg/verbs/confirm.go` (from PR 1), and the named returns of a test helper.
+- **Ratchet:** `pkg/system` removed from the domain layer.
+- **Docs:** the guide's Parts 6.1, 8.5 and 8.6 gained "as built" notes; task kbpu is checked; PR #24 is open.
+
+### Why
+- **Handles on the kernel.** Commands (`e.K`), actors (`a.m.K`), `caps/db` (`d.K`) and the kernel itself already reach system.db through the kernel. The server's own fields are copies for readability (`s.People.Person(…)`).
+- **No commands in domains.** See What I learned.
+
+### What worked
+- `gate.sh`: `0 issues.` and `GATE: ok`.
+- `ls pkg/system` → `No such file or directory`, and no file imports it.
+- **Verb table:** `slop verbs -o json | cmp - verbs-before.json`, then the same for `tools`: `table identical`.
+- **Ratchet mutation:** `pkg/identity` importing `pkg/registry` → `forbidden import: pkg/identity -> pkg/registry (identity imports no slop package but sysdb and ids (design §8: it can leave as its own module))`.
+- **Imports now:**
+  - `pkg/identity`: `pkg/ids`, `pkg/sysdb`, and zitadel/oauth2;
+  - `pkg/sysdb`: the standard library and sqlite3;
+  - `pkg/access`: `pkg/rt` and `pkg/sysdb`.
+
+### What didn't work
+- **My first kernel edit didn't match.** It searched for `Sys    *system.DB`, but the rewire script had already made it `*sysdb.DB`. The build said `k.People undefined (type *Kernel has no field or method People)` (and similar) until I applied it to the real text. Likewise the server struct (`AssertionError: sys field`): its field alignment differed from my pattern, and `cat -A` showed the real text.
+- **The rewire script duplicated imports:** `billing redeclared in this block` (`pkg/billing/stripe/service.go:11`), `llm redeclared` (`pkg/caps/sample/sample.go:20`). A file that already imported the target package got a second line. A dedupe pass over every import block fixed it.
+- **Test fixes:**
+  - `pkg/access/level_test.go:28:28: cannot use d (variable of type *sysdb.DB) as access.Directory value … (missing method Grants)` → a `dir` adapter that embeds `*registry.Registry`, which provides `StoreByID`, `Grants` and `NowMs`;
+  - `pkg/policy/policy_test.go:39:14: undefined: InGroup` → `sysdb.InGroup`.
+- **Lint rounds:** first `5 issues: gofmt 3, nonamedreturns 1, unused 1`, then `3 issues: gofmt 3` on different files (`site.go`, `sitelinks.go`, `views.go`). `gofmt -l pkg cmd` listed them all at once, and should have been run first.
+
+### What I learned
+- **Commands don't belong to one domain.** A count per command file:
+  - `stores.go`: 3 kernel calls, plus `Registry`;
+  - `billing.go`: 4 kernel calls, plus `Book` and `People`;
+  - `policy.go`: 1 kernel call, plus `Gov`, `Ledger` and `Registry`;
+  - `mounts.go`: 4 kernel calls, plus `Registry`;
+  - `access.go`: 2 kernel calls, plus `People` and `Registry`;
+  - only `people.go` uses one domain (`People`) and no kernel.
+
+  The kernel imports the domains, so commands sit above both. Guide Part 8.6 had this wrong.
+- **The composite made the final rewire mechanical.** Every forwarded name in `compat.go` was a line of the rewrite map.
+
+### What was tricky to build
+- **Holder rules differ per package.** `s.Sys` means the server in `pkg/server` but the sampler in `pkg/caps/sample`; `e.Sys` in commands has no domain fields of its own, so it routes through `e.K`. The script keys the rule on path plus holder, and refuses (`UNPLACED`) anything else.
+- **The ledger's `Epoch` in tests.** `pkg/llm`'s ledger test calls `d.Epoch()` on a `*Ledger`, which works because `Ledger` embeds `*sysdb.DB`. Each domain type exposes `sysdb`'s methods that way, deliberately: `NowMs`, `Tx` and `QueryRowContext` are what the queries use.
+
+### What warrants a second pair of eyes
+- **Embedded `*sysdb.DB`.** Every domain type exposes all of system.db: `Tx`, raw SQL, and each other's tables. Domain separation is a convention plus the ratchet's import rules, not encapsulation. Unexported embedding (`db *sysdb.DB`) would enforce it, at the cost of rewriting every query's receiver.
+- **`server.New` builds a second set of domain handles when `env` has no kernel.** Only tests without an Env do that. The handles are stateless over one `*sysdb.DB`, so two sets are equivalent.
+
+### What should be done in the future
+- PR 3: `pkg/server` split into doors (guide Part 9). PR 3 then removes the last allowlist entry (`pkg/server -> pkg/commands`).
+
+### Code review instructions
+- `git show 9172a9c -- pkg/kernel/kernel.go pkg/server/server.go pkg/commands/env.go pkg/access`, then skim the mechanical rest (`git show --stat 9172a9c`).
+- `GOWORK=off go test ./... -count=1`; then rebuild `cmd/slop` and compare `slop verbs -o json` with a build of #22's head.
+
+### Technical details
+- **The kernel after PR 2:**
+  ```go
+  type Kernel struct {
+      Cfg      *config.Config
+      Sys      *sysdb.DB
+      People   *identity.Accounts
+      Registry *registry.Registry
+      Ledger   *llm.Ledger
+      Gov      *policy.Governance
+      Book     *billing.Book
+      Blobs    *blobs.Blobs
+      Access   *access.Checker  // Dir: directory{k}
+      …
+  }
+  ```
+- **Holder rewrite rules** (`rewire.py`), for `<holder>.Sys.<Method>(` when `Method` belongs to a domain:
+  - `k`, `K`, or a holder ending in `.K` → `<holder>.<Field>`;
+  - `s` in `pkg/server` → `s.<Field>`;
+  - `e` in `pkg/commands` → `e.K.<Field>`;
+  - `h.sys` in tests → `h.k.<Field>`;
+  - `s`/`d` in `pkg/caps/sample` → `<holder>.Ledger`;
+  - anything else is `UNPLACED`.
+
+  sysdb members (`Tx`, `NowMs`, `Listen`, `LogHead`, `LogAfter`, `Logs`, `Epoch`, `Now`, the `sql.DB` methods) are not rewritten.
+- **PR 2's commits:** 9179752 (sysdb), e2c1476 (identity), d4622f5 (Directory), 9a4883b (registry), 0d382f8 (llm), ed9a240 (policy), 2cb14e5 (billing), 9172a9c (rewire).
