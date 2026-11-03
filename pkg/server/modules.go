@@ -122,10 +122,11 @@ func (s *Server) callVerb(a *actor.Actor, module string, f modFunc, args map[str
 		a.Throw("permission_denied", a.App()+" is no longer trusted with "+module)
 	}
 	p := s.actAs(a, module, v.Scope != verbs.Read)
-	if f.Confirm && p.Person == nil {
+	confirm := f.Confirm || v.Effect == verbs.EffectGovern // the verb says, or the module function
+	if confirm && p.Person == nil {
 		a.Throw("permission_denied", name+" asks a person to confirm, and nobody is behind this call")
 	}
-	if f.Confirm {
+	if confirm {
 		// Refuse what the verb would refuse before asking anyone to allow it.
 		if err := verbs.Check(p, name, args); err != nil {
 			ve := verbs.AsError(err)

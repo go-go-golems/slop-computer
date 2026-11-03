@@ -2,7 +2,10 @@ package verbs
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
+
+	"github.com/invopop/jsonschema"
 
 	"github.com/go-go-golems/slop-computer/pkg/access"
 	"github.com/go-go-golems/slop-computer/pkg/authz"
@@ -35,27 +38,15 @@ func init() {
 			Run: func(ctx context.Context, e *Env, p *access.Principal, a Args) (any, error) {
 				return queryDocs(ctx, e, p, a.S("store"), rt.Query{Coll: a.S("coll"), Limit: int(a.I("limit", 0))})
 			}},
-		&Verb{Name: "docs.query", Doc: "Query a collection: where [[field, op, value], …], orderBy, desc, limit.", Scope: Read, Action: authz.DocRead,
-			Args: []Arg{storeArg, {Name: "coll", Type: "string", Pos: 2, Required: true},
-				{Name: "where", Type: "json", Doc: `[["year", ">=", 2000]] or [{"field","op","value"}]`},
-				{Name: "orderBy", Type: "string"}, {Name: "desc", Type: "bool"}, {Name: "limit", Type: "int"}},
-			Run: func(ctx context.Context, e *Env, p *access.Principal, a Args) (any, error) {
-				q := rt.Query{Coll: a.S("coll"), Order: a.S("orderBy"), Desc: a.B("desc"), Limit: int(a.I("limit", 0))}
-				if a.Has("where") {
-					ws, ok := a.list("where")
-					if !ok {
-						return nil, Errf("invalid_argument", "where is a list of [field, op, value]")
-					}
-					for _, w := range ws {
-						f, ok := filterOf(w)
-						if !ok {
-							return nil, Errf("invalid_argument", "where is a list of [field, op, value]")
-						}
-						q.Filters = append(q.Filters, f)
-					}
+		Def[DocsQueryIn, []store.Doc]{Name: "docs.query", Doc: "Query a collection: where [[field, op, value], …], orderBy, desc, limit.",
+			Scope: Read, Action: authz.DocRead,
+			Run: func(r Req, in DocsQueryIn) ([]store.Doc, error) {
+				q := rt.Query{Coll: in.Coll, Order: in.OrderBy, Desc: in.Desc, Limit: in.Limit}
+				for _, c := range in.Where {
+					q.Filters = append(q.Filters, rt.Filter(c))
 				}
-				return queryDocs(ctx, e, p, a.S("store"), q)
-			}},
+				return queryDocs(r, r.Env, r.Principal, in.Store, q)
+			}}.Verb(),
 		&Verb{Name: "docs.set", Doc: "Write whole documents: path and data, or batch [{path, data, ifVersion?}] in one commit.", Scope: Write, Action: authz.DocWrite,
 			Args: []Arg{storeArg, {Name: "path", Type: "string", Pos: 2}, {Name: "data", Type: "json"},
 				{Name: "ifVersion", Type: "int", Doc: "fail unless the document is at this version"},
@@ -101,7 +92,7 @@ func filterOf(w any) (rt.Filter, bool) {
 	return rt.Filter{}, false
 }
 
-func queryDocs(ctx context.Context, e *Env, p *access.Principal, id string, q rt.Query) (any, error) {
+func queryDocs(ctx context.Context, e *Env, p *access.Principal, id string, q rt.Query) ([]store.Doc, error) {
 	s, d, err := e.open(ctx, p, id, rt.LevelView, "reading")
 	if err != nil {
 		return nil, err
@@ -203,4 +194,45 @@ func applyDocs(ctx context.Context, e *Env, p *access.Principal, id string, item
 		out["versions"] = versions
 	}
 	return out, nil
+}
+
+// DocsQueryIn is docs.query's input.
+type DocsQueryIn struct {
+	Store   string `json:"store" slop:"pos=1" jsonschema_description:"the store"`
+	Coll    string `json:"coll" slop:"pos=2" jsonschema_description:"the collection path"`
+	Where   []Cond `json:"where,omitempty" jsonschema_description:"conditions, all of which must hold"`
+	OrderBy string `json:"orderBy,omitempty" jsonschema_description:"the field to order by"`
+	Desc    bool   `json:"desc,omitempty" jsonschema_description:"order descending"`
+	Limit   int    `json:"limit,omitempty" jsonschema_description:"at most this many documents"`
+}
+
+// Cond is one where condition: [field, op, value] or {field, op, value}.
+type Cond rt.Filter
+
+// UnmarshalJSON accepts both forms.
+func (c *Cond) UnmarshalJSON(b []byte) error {
+	var v any
+	if err := json.Unmarshal(b, &v); err != nil {
+		return err
+	}
+	f, ok := filterOf(v)
+	if !ok {
+		return errors.New("a where condition is [field, op, value] or {field, op, value}")
+	}
+	*c = Cond(f)
+	return nil
+}
+
+// JSONSchema describes both forms.
+func (Cond) JSONSchema() *jsonschema.Schema {
+	three := uint64(3)
+	ops := []any{"==", "!=", "<", "<=", ">", ">=", "array-contains", "in", "not-in"}
+	obj := jsonschema.NewProperties()
+	obj.Set("field", &jsonschema.Schema{Type: "string"})
+	obj.Set("op", &jsonschema.Schema{Type: "string", Enum: ops})
+	obj.Set("value", &jsonschema.Schema{})
+	return &jsonschema.Schema{OneOf: []*jsonschema.Schema{
+		{Type: "array", MinItems: &three, MaxItems: &three, PrefixItems: []*jsonschema.Schema{{Type: "string"}, {Type: "string", Enum: ops}, {}}},
+		{Type: "object", Properties: obj, Required: []string{"field", "op", "value"}},
+	}}
 }

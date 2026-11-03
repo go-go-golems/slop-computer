@@ -56,7 +56,7 @@ func (e *Env) personChanged(ctx context.Context, id string) {
 
 func init() {
 	Register(
-		&Verb{Name: "sub.grant", Doc: "Give a person complimentary subscriber access until a date (2027-06-30) or for days (30d).", Scope: Write, AdminOnly: true, Action: authz.PlatformAdmin,
+		&Verb{Name: "sub.grant", Effect: EffectGovern, Doc: "Give a person complimentary subscriber access until a date (2027-06-30) or for days (30d).", Scope: Write, AdminOnly: true, Action: authz.PlatformAdmin,
 			Args: []Arg{{Name: "person", Type: "string", Pos: 1, Required: true, Doc: "usr_… or an email"},
 				{Name: "until", Type: "string", Required: true}, {Name: "note", Type: "string"}},
 			Run: func(ctx context.Context, e *Env, p *access.Principal, a Args) (any, error) {
@@ -78,7 +78,7 @@ func init() {
 				e.personChanged(ctx, pp.ID)
 				return c, nil
 			}},
-		&Verb{Name: "sub.revoke", Doc: "End a comp now.", Scope: Write, AdminOnly: true, Action: authz.PlatformAdmin,
+		&Verb{Name: "sub.revoke", Effect: EffectGovern, Doc: "End a comp now.", Scope: Write, AdminOnly: true, Action: authz.PlatformAdmin,
 			Args: []Arg{{Name: "id", Type: "string", Pos: 1, Required: true, Doc: "cmp_…"}},
 			Run: func(ctx context.Context, e *Env, p *access.Principal, a Args) (any, error) {
 				person, err := e.Sys.RevokeComp(ctx, p.ID(), p.ViaLabel(), a.S("id"))

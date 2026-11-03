@@ -11,6 +11,8 @@ import (
 	"strconv"
 	"strings"
 
+	"github.com/invopop/jsonschema"
+
 	"github.com/go-go-golems/slop-computer/pkg/access"
 	"github.com/go-go-golems/slop-computer/pkg/authz"
 	"github.com/go-go-golems/slop-computer/pkg/rt"
@@ -51,6 +53,13 @@ type Verb struct {
 	// arguments, and Run checks it.
 	Action   authz.Action `json:"action"`
 	StoreArg string       `json:"-"`
+	// Effect, Input and Output (SLOP3-009): what the verb does beyond its
+	// scope, and its argument and result schemas. A typed verb (Def) has
+	// both schemas; an untyped one has neither, and Register derives Effect
+	// from Scope.
+	Effect Effect             `json:"effect,omitempty"`
+	Input  *jsonschema.Schema `json:"input,omitempty"`
+	Output *jsonschema.Schema `json:"output,omitempty"`
 
 	Run func(ctx context.Context, e *Env, p *access.Principal, a Args) (any, error) `json:"-"`
 }
@@ -73,6 +82,12 @@ func Register(vs ...*Verb) {
 	for _, v := range vs {
 		if _, dup := registry[v.Name]; dup {
 			panic("duplicate verb " + v.Name)
+		}
+		if v.Effect == "" {
+			v.Effect = EffectRead
+			if v.Scope == Write {
+				v.Effect = EffectWrite
+			}
 		}
 		registry[v.Name] = v
 	}

@@ -115,30 +115,30 @@ func init() {
 				}
 				return gs, nil
 			}},
-		&Verb{Name: "grant.set", Doc: "Give a subject (usr_…, vis_…, store:<id>, @guest, @member, @subscriber) a level on a store.", Scope: Write, Action: authz.StoreAdmin,
-			Args: []Arg{{Name: "store", Type: "string", Pos: 1, Required: true}, {Name: "subject", Type: "string", Pos: 2, Required: true},
-				{Name: "level", Type: "string", Pos: 3, Required: true, Doc: "view, interact, admin or owner"}},
-			Run: func(ctx context.Context, e *Env, p *access.Principal, a Args) (any, error) {
-				_, d, err := e.open(ctx, p, a.S("store"), rt.LevelAdmin, "granting")
+		Def[GrantSetIn, system.Grant]{Name: "grant.set", Doc: "Give a subject (usr_…, vis_…, store:<id>, @guest, @member, @subscriber) a level on a store.",
+			Scope: Write, Action: authz.StoreAdmin,
+			Run: func(r Req, in GrantSetIn) (system.Grant, error) {
+				e, p := r.Env, r.Principal
+				_, d, err := e.open(r, p, in.Store, rt.LevelAdmin, "granting")
 				if err != nil {
-					return nil, err
+					return system.Grant{}, err
 				}
-				if !validSubject(a.S("subject")) {
-					return nil, Errf("invalid_argument", "a subject is usr_…, vis_…, store:<id>, @guest, @member or @subscriber")
+				if !validSubject(in.Subject) {
+					return system.Grant{}, Errf("invalid_argument", "a subject is usr_…, vis_…, store:<id>, @guest, @member or @subscriber")
 				}
-				lvl, ok := rt.ParseLevel(a.S("level"))
+				lvl, ok := rt.ParseLevel(in.Level)
 				if !ok || lvl == rt.LevelSelf {
-					return nil, Errf("invalid_argument", "level must be view, interact, admin or owner")
+					return system.Grant{}, Errf("invalid_argument", "level must be view, interact, admin or owner")
 				}
 				if lvl > d.Level {
-					return nil, &Error{Code: "permission_denied", Message: "you cannot grant more than your own level", Trace: d.Trace}
+					return system.Grant{}, &Error{Code: "permission_denied", Message: "you cannot grant more than your own level", Trace: d.Trace}
 				}
-				g, err := e.Sys.SetGrant(ctx, p.ID(), p.ViaLabel(), system.Grant{Store: a.S("store"), Subject: a.S("subject"), Level: a.S("level")})
+				g, err := e.Sys.SetGrant(r, p.ID(), p.ViaLabel(), system.Grant{Store: in.Store, Subject: in.Subject, Level: in.Level})
 				if err == nil && e.AccessChanged != nil {
-					e.AccessChanged(ctx, g.Store)
+					e.AccessChanged(r, g.Store)
 				}
 				return g, err
-			}},
+			}}.Verb(),
 		&Verb{Name: "grant.rm", Doc: "Remove a subject's grants on a store.", Scope: Write, Action: authz.StoreAdmin,
 			Args: []Arg{{Name: "store", Type: "string", Pos: 1, Required: true}, {Name: "subject", Type: "string", Pos: 2, Required: true},
 				{Name: "via", Type: "string", Doc: "only the grant made this way (direct, lnk_…)"}},
@@ -254,4 +254,11 @@ func VisibleStores(ctx context.Context, e *Env, p *access.Principal) ([]system.S
 		}
 	}
 	return out, nil
+}
+
+// GrantSetIn is grant.set's input.
+type GrantSetIn struct {
+	Store   string `json:"store" slop:"pos=1" jsonschema_description:"the store"`
+	Subject string `json:"subject" slop:"pos=2" jsonschema_description:"usr_…, vis_…, store:<id>, @guest, @member or @subscriber"`
+	Level   string `json:"level" slop:"pos=3" jsonschema:"enum=view,enum=interact,enum=admin,enum=owner" jsonschema_description:"the level to give"`
 }

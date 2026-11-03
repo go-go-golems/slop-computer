@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"os"
+	"slices"
 	"sort"
 	"strconv"
 	"strings"
@@ -133,17 +134,38 @@ func convert(a verbs.Arg, s string) any {
 }
 
 func verbsCmd() *cobra.Command {
-	return &cobra.Command{
+	cmd := &cobra.Command{
 		Use:   "verbs",
 		Short: "List the verbs this CLI knows",
 		RunE: func(cmd *cobra.Command, args []string) error {
 			rows := []any{}
 			for _, v := range verbs.All() {
-				rows = append(rows, map[string]any{"verb": v.Name, "scope": string(v.Scope), "doc": v.Doc})
+				typed := ""
+				if v.Input != nil {
+					typed = "typed"
+				}
+				rows = append(rows, map[string]any{"verb": v.Name, "effect": string(v.Effect), "schema": typed, "doc": v.Doc})
 			}
 			return print(rows)
 		},
 	}
+	cmd.AddCommand(&cobra.Command{
+		Use:   "tools [verb...]",
+		Short: "Describe verbs as MCP tools: name, description, input and output JSON Schema",
+		RunE: func(cmd *cobra.Command, args []string) error {
+			out := []any{}
+			for _, v := range verbs.All() {
+				if len(args) == 0 || slices.Contains(args, v.Name) {
+					out = append(out, v.Tool())
+				}
+			}
+			if len(out) == 0 {
+				return fail("no such verb: %s", strings.Join(args, ", "))
+			}
+			return print(out)
+		},
+	})
+	return cmd
 }
 
 func verbCmd() *cobra.Command {

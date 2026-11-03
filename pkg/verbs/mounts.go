@@ -2,7 +2,6 @@ package verbs
 
 import (
 	"context"
-	"encoding/json"
 	"errors"
 	"slices"
 
@@ -34,41 +33,35 @@ func init() {
 				}
 				return out, nil
 			}},
-		&Verb{Name: "mount.set", Doc: "Mount a store (or a :param naming stores) at host+path. A host is live or static, set in configuration.", Scope: Write, AdminOnly: true, Action: authz.PlatformAdmin,
-			Args: []Arg{hostArg, pathArg, {Name: "store", Type: "string", Pos: 3},
-				{Name: "storeParam", Type: "string", Doc: "the path parameter naming the store, e.g. store for /r/:store"},
-				{Name: "type", Type: "string", Doc: "with storeParam: the store type required"},
-				{Name: "createApp", Type: "string", Doc: "live hosts: offer to create a store of this app"},
-				{Name: "createAudience", Type: "string", Doc: "who may create: member (default), subscriber or admin"},
-				{Name: "aliases", Type: "json", Doc: `with createApp: bind each store created here, [{"alias":"contacts","target":"crm","prefix":"contacts","level":"view","assets":false}]`}},
-			Run: func(ctx context.Context, e *Env, p *access.Principal, a Args) (any, error) {
-				m := system.Mount{Host: a.S("host"), Path: a.S("path"), Store: a.S("store"), StoreParam: a.S("storeParam"),
-					Type: a.S("type"), CreateApp: a.S("createApp"), CreateAudience: a.S("createAudience")}
-				if err := checkMount(ctx, e, &m); err != nil {
-					return nil, err
+		Def[MountSetIn, MountSetOut]{Name: "mount.set", Doc: "Mount a store (or a :param naming stores) at host+path. A host is live or static, set in configuration.",
+			Scope: Write, AdminOnly: true, Action: authz.PlatformAdmin,
+			Run: func(r Req, in MountSetIn) (MountSetOut, error) {
+				e, p := r.Env, r.Principal
+				m := system.Mount{Host: in.Host, Path: in.Path, Store: in.Store, StoreParam: in.StoreParam,
+					Type: in.Type, CreateApp: in.CreateApp, CreateAudience: in.CreateAudience}
+				if err := checkMount(r, e, &m); err != nil {
+					return MountSetOut{}, err
 				}
-				if a.Has("aliases") {
-					t, err := aliasTemplate(ctx, e, p, a, m)
-					if err != nil {
-						return nil, err
-					}
-					m.Aliases = t
-				}
-				m, err := e.Sys.SetMount(ctx, p.ID(), p.ViaLabel(), m)
+				t, err := aliasTemplate(r, e, p, in.Aliases, m)
 				if err != nil {
-					return nil, err
+					return MountSetOut{}, err
 				}
-				out := map[string]any{"mount": m, "url": e.Cfg.Origin(m.Host) + m.Path}
+				m.Aliases = t
+				m, err = e.Sys.SetMount(r, p.ID(), p.ViaLabel(), m)
+				if err != nil {
+					return MountSetOut{}, err
+				}
+				out := MountSetOut{Mount: m, URL: e.Cfg.Origin(m.Host) + m.Path}
 				if m.Store != "" {
-					if d, _, _ := e.K.Access.Can(ctx, nil, m.Store, rt.LevelView, "", true); !d.OK {
-						out["note"] = "guests cannot read " + m.Store + ": signed-in visitors with a grant can; grant @guest view to make it public"
+					if d, _, _ := e.K.Access.Can(r, nil, m.Store, rt.LevelView, "", true); !d.OK {
+						out.Note = "guests cannot read " + m.Store + ": signed-in visitors with a grant can; grant @guest view to make it public"
 						if e.Cfg.HostKind(m.Host) == "static" {
-							out["note"] = "a static host serves guests only, and guests cannot read " + m.Store + ": grant @guest view to publish it"
+							out.Note = "a static host serves guests only, and guests cannot read " + m.Store + ": grant @guest view to publish it"
 						}
 					}
 				}
 				return out, nil
-			}},
+			}}.Verb(),
 		&Verb{Name: "mount.rm", Doc: "Remove a mount (mount undo brings it back).", Scope: Write, AdminOnly: true, Action: authz.PlatformAdmin,
 			Args: []Arg{hostArg, pathArg},
 			Run: func(ctx context.Context, e *Env, p *access.Principal, a Args) (any, error) {
@@ -215,28 +208,14 @@ func splitSlash(p string) []string {
 // aliasTemplate reads mount.set's aliases: the bindings each store the mount
 // creates gets (SLOP3-008 phase 4), checked as bind.set checks them, against
 // the admin setting the mount (who must hold what they template).
-func aliasTemplate(ctx context.Context, e *Env, p *access.Principal, a Args, m system.Mount) ([]system.Binding, error) {
-	raw, ok := a.list("aliases")
-	if !ok {
-		return nil, Errf("invalid_argument", "aliases is a JSON array of {alias, target, prefix?, level?, assets?}")
-	}
-	if len(raw) > 0 && m.CreateApp == "" {
+func aliasTemplate(ctx context.Context, e *Env, p *access.Principal, in []AliasIn, m system.Mount) ([]system.Binding, error) {
+	if len(in) > 0 && m.CreateApp == "" {
 		return nil, Errf("invalid_argument", "aliases go with createApp: they bind the stores a mount creates")
 	}
 	var out []system.Binding
 	seen := map[string]bool{}
-	for _, x := range raw {
-		obj, _ := x.(map[string]any)
-		for k := range obj {
-			if !slices.Contains([]string{"alias", "target", "prefix", "level", "assets"}, k) {
-				return nil, Errf("invalid_argument", "an alias takes alias, target, prefix, level and assets, not %s", k)
-			}
-		}
-		js, _ := json.Marshal(obj)
-		var b system.Binding
-		if obj == nil || json.Unmarshal(js, &b) != nil {
-			return nil, Errf("invalid_argument", "aliases is a JSON array of {alias, target, prefix?, level?, assets?}")
-		}
+	for _, x := range in {
+		b := system.Binding{Alias: x.Alias, Target: x.Target, Prefix: x.Prefix, Level: x.Level, Assets: x.Assets}
 		if seen[b.Alias] {
 			return nil, Errf("invalid_argument", "alias %s is listed twice", b.Alias)
 		}
@@ -244,8 +223,36 @@ func aliasTemplate(ctx context.Context, e *Env, p *access.Principal, a Args, m s
 		if err := checkAlias(ctx, e, p, &b); err != nil {
 			return nil, err
 		}
-		b.Store = ""
 		out = append(out, b)
 	}
 	return out, nil
+}
+
+// MountSetIn is mount.set's input.
+type MountSetIn struct {
+	Host           string    `json:"host" slop:"pos=1" jsonschema_description:"a live or static host from the configuration"`
+	Path           string    `json:"path" slop:"pos=2" jsonschema_description:"the path pattern: /guestbook, /r/:store, /docs/*"`
+	Store          string    `json:"store,omitempty" slop:"pos=3" jsonschema_description:"the store mounted (or storeParam)"`
+	StoreParam     string    `json:"storeParam,omitempty" jsonschema_description:"the path parameter naming the store, e.g. store for /r/:store"`
+	Type           string    `json:"type,omitempty" jsonschema_description:"with storeParam: the store type required"`
+	CreateApp      string    `json:"createApp,omitempty" jsonschema_description:"live hosts: offer to create a store of this app"`
+	CreateAudience string    `json:"createAudience,omitempty" jsonschema:"enum=member,enum=subscriber,enum=admin" jsonschema_description:"who may create (default member)"`
+	Aliases        []AliasIn `json:"aliases,omitempty" jsonschema_description:"with createApp: bind each store created here"`
+}
+
+// AliasIn is one entry of a mount's alias template: a binding without its
+// store, which is the store the mount creates.
+type AliasIn struct {
+	Alias  string `json:"alias" jsonschema_description:"the name in the new store's pages"`
+	Target string `json:"target" jsonschema_description:"the store it reaches"`
+	Prefix string `json:"prefix,omitempty" jsonschema_description:"a collection path in the target"`
+	Level  string `json:"level,omitempty" jsonschema:"enum=view,enum=interact,enum=admin" jsonschema_description:"with prefix: the most the alias gives (default view)"`
+	Assets bool   `json:"assets,omitempty" jsonschema_description:"also show the target's uploads"`
+}
+
+// MountSetOut is mount.set's result.
+type MountSetOut struct {
+	Mount system.Mount `json:"mount"`
+	URL   string       `json:"url"`
+	Note  string       `json:"note,omitempty"`
 }
