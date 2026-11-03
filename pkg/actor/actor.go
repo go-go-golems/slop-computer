@@ -91,10 +91,9 @@ type event struct {
 // park is an event whose handler awaits real I/O: its root promise settles
 // in a later turn.
 type park struct {
-	root  *goja.Promise
-	ev    *event
-	ctx   *goja.Object
-	alarm string // an alarm stays running until its last turn
+	root *goja.Promise
+	ev   *event
+	ctx  *goja.Object
 }
 
 // turn is the turn in progress.
