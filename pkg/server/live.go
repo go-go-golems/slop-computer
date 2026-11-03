@@ -566,11 +566,18 @@ func (s *Server) siteGrant(w http.ResponseWriter, r *http.Request) {
 // not what makes access correct (confirm does that on the view's next use);
 // it tells idle pages now rather than at their next call.
 func (s *Server) reviewViews(ctx context.Context, id string) {
-	row, err := s.Sys.StoreByID(ctx, id)
-	if err != nil {
-		return
-	}
-	for _, v := range s.rt.views.Of(id) {
+	// The store's own views, and views of other stores that read it
+	// (SLOP3-008): each is checked against its own store's row.
+	rows := map[string]system.StoreRow{}
+	for _, v := range s.rt.views.Reaching(id) {
+		row, ok := rows[v.Target]
+		if !ok {
+			r, err := s.Sys.StoreByID(ctx, v.Target)
+			if err != nil {
+				continue
+			}
+			row, rows[v.Target] = r, r
+		}
 		s.recheck(ctx, v, row)
 	}
 }
@@ -608,7 +615,8 @@ func (s *Server) recheck(ctx context.Context, v *rt.View, row system.StoreRow) b
 	case d.Level == rt.LevelNone:
 		s.rt.views.Close(v, true)
 	case d.Level != v.Level || string(d.Audience) != v.Role || !s.samePolicy(ctx, v, string(d.Audience)) ||
-		!s.spaceOf(ctx, v.Target, v.Caps, v.Policy).Equal(v.Space): // its aliases changed (SLOP3-008)
+		!s.spaceOf(ctx, v.Target, v.Caps, v.Policy).Equal(v.Space) || // its aliases changed (SLOP3-008)
+		s.remoteLevelsMoved(ctx, v): // or the viewer's level on a store it reads
 		v.Send(rt.Out{Type: "access", Data: map[string]any{"level": d.Level.String()}})
 		s.rt.views.Close(v, false)
 	default:

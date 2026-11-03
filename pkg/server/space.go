@@ -46,6 +46,7 @@ type route struct {
 	tgt   rt.Target
 	st    *store.Store
 	level rt.Level
+	held  rt.Level // the viewer's own level on the store, before the route's ceiling
 	rules rt.Rules
 }
 
@@ -106,6 +107,7 @@ func (s *Server) remoteRoute(ctx context.Context, v *rt.View, tgt rt.Target) (ro
 		return r, err
 	}
 	d := s.Env.K.Access.Level(ctx, s.viewPrincipal(ctx, v), row)
+	r.held = d.Level
 	r.level = min(d.Level, tgt.Cap)
 	if r.level == rt.LevelNone {
 		return r, nil
@@ -115,6 +117,22 @@ func (s *Server) remoteRoute(ctx context.Context, v *rt.View, tgt rt.Target) (ro
 	}
 	r.rules = s.Env.K.Rules(ctx, tgt.Store)
 	return r, nil
+}
+
+// remoteLevelsMoved reports whether the viewer's level on a store v
+// follows is no longer the one it had when v started following it: the
+// documents the page shows from there may be ones it can no longer see.
+func (s *Server) remoteLevelsMoved(ctx context.Context, v *rt.View) bool {
+	for storeID, was := range v.RemoteLevels() {
+		now := rt.LevelNone
+		if row, err := s.Sys.StoreByID(ctx, storeID); err == nil {
+			now = s.Env.K.Access.Level(ctx, s.viewPrincipal(ctx, v), row).Level
+		}
+		if now != was {
+			return true
+		}
+	}
+	return false
 }
 
 // pagePath is where a document of the route's collection shows in the

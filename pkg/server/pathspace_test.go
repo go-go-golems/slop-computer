@@ -288,3 +288,37 @@ func TestAliasAssets(t *testing.T) {
 		t.Fatalf("with --assets: %d %q", code, body)
 	}
 }
+
+// Losing access to a store a page reads through an alias reopens the page,
+// as losing access to its own store does: the documents it shows from
+// there may be ones the viewer can no longer see.
+func TestAliasRevokeReopens(t *testing.T) {
+	h := newHarness(t)
+	admin := h.tokenFor("admin@example.com", "read", "write", "admin")
+	h.call(admin, "store.new", map[string]any{"id": "crm"})
+	h.call(admin, "grant.set", map[string]any{"store": "crm", "subject": "@guest", "level": "view"})
+	h.call(admin, "docs.set", map[string]any{"store": "crm", "path": "contacts/c1", "data": map[string]any{"name": "Ada"}})
+	pageApp(h, admin, "dash", "/dash", `{}`)
+	h.call(admin, "bind.set", map[string]any{"store": "dash", "alias": "contacts", "target": "crm", "prefix": "contacts"})
+
+	s := h.site(h.cfg.Hosts.Live[0])
+	v := guestView(t, s, "/dash")
+	sbx := strings.TrimPrefix(strings.Split(v["url"].(string), "/v/")[0], "http://")
+	if docs := result(t, rpc(s, v, "db.subscribe", map[string]any{"sub": "s1", "path": "contacts", "coll": true}))["docs"].([]any); len(docs) != 1 {
+		t.Fatalf("subscribe: %v", docs)
+	}
+	stream, _ := s.do("GET", sbx, "/_rt/events", nil, map[string]string{"Authorization": "Bearer " + v["secret"].(string)})
+	go func() {
+		time.Sleep(200 * time.Millisecond)
+		h.call(admin, "grant.rm", map[string]any{"store": "crm", "subject": "@guest"})
+	}()
+	evs := events(t, stream, 2, 3*time.Second)
+	stream.Body.Close()
+	if len(evs) < 2 || evs[1]["_type"] != "access" {
+		t.Fatalf("after losing crm: %v", evs)
+	}
+	v = guestView(t, s, "/dash")
+	if d := result(t, rpc(s, v, "db.get", map[string]any{"path": "contacts/c1"})); d["exists"] != false {
+		t.Fatalf("the reopened page still reads crm: %v", d)
+	}
+}

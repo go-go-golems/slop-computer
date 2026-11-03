@@ -55,10 +55,11 @@ type View struct {
 	rooms map[string]*Member
 	emits bucket
 	// remote is, per other store this view reads, the newest rev of it its
-	// stream has caught up to. The runtime's resume cursor counts the
-	// target's revs only; remote changes travel without a rev, and the
-	// server catches a reconnected stream up from here.
-	remote map[string]int64
+	// stream has caught up to, and the viewer's level there when it started
+	// following. The runtime's resume cursor counts the target's revs only;
+	// remote changes travel without a rev, and the server catches a
+	// reconnected stream up from here. A changed level reopens the view.
+	remote map[string]remoteState
 }
 
 // Out is something a view's stream sends: a target change it filters by
@@ -186,16 +187,22 @@ func (v *View) Wants(path string) bool {
 	return false
 }
 
+type remoteState struct {
+	rev   int64
+	level Level
+}
+
 // Watch starts following another store from rev (the head read before the
-// subscription's documents), unless the view already follows it.
-func (v *View) Watch(store string, rev int64) {
+// subscription's documents), where the viewer holds level, unless the view
+// already follows it.
+func (v *View) Watch(store string, rev int64, level Level) {
 	v.mu.Lock()
 	defer v.mu.Unlock()
 	if v.remote == nil {
-		v.remote = map[string]int64{}
+		v.remote = map[string]remoteState{}
 	}
 	if _, ok := v.remote[store]; !ok {
-		v.remote[store] = rev
+		v.remote[store] = remoteState{rev: rev, level: level}
 	}
 }
 
@@ -203,26 +210,39 @@ func (v *View) Watch(store string, rev int64) {
 func (v *View) Watching(store string) (int64, bool) {
 	v.mu.Lock()
 	defer v.mu.Unlock()
-	rev, ok := v.remote[store]
-	return rev, ok
+	r, ok := v.remote[store]
+	return r.rev, ok
 }
 
 // Caught records that the stream sent store's changes up to rev.
 func (v *View) Caught(store string, rev int64) {
 	v.mu.Lock()
 	defer v.mu.Unlock()
-	if v.remote != nil && rev > v.remote[store] {
-		v.remote[store] = rev
+	if r, ok := v.remote[store]; ok && rev > r.rev {
+		r.rev = rev
+		v.remote[store] = r
 	}
 }
 
-// Remotes lists the other stores the view follows.
+// Remotes lists the other stores the view follows, with their cursors.
 func (v *View) Remotes() map[string]int64 {
 	v.mu.Lock()
 	defer v.mu.Unlock()
 	out := make(map[string]int64, len(v.remote))
 	for k, r := range v.remote {
-		out[k] = r
+		out[k] = r.rev
+	}
+	return out
+}
+
+// RemoteLevels lists the other stores the view follows, with the viewer's
+// level on each when it started following.
+func (v *View) RemoteLevels() map[string]Level {
+	v.mu.Lock()
+	defer v.mu.Unlock()
+	out := make(map[string]Level, len(v.remote))
+	for k, r := range v.remote {
+		out[k] = r.level
 	}
 	return out
 }
