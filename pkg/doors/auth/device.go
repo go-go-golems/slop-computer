@@ -1,4 +1,4 @@
-package server
+package auth
 
 import (
 	"errors"
@@ -19,14 +19,14 @@ import (
 
 const deviceDays = 30
 
-func (s *Server) deviceRoutes(m *http.ServeMux) {
+func (s *Door) deviceRoutes(m *http.ServeMux) {
 	m.HandleFunc("POST /auth/device", s.deviceStart)
 	m.HandleFunc("POST /auth/device/token", s.deviceToken)
 	m.HandleFunc("GET /device", s.devicePage)
 	m.HandleFunc("POST /device", s.deviceDecide)
 }
 
-func (s *Server) deviceStart(w http.ResponseWriter, r *http.Request) {
+func (s *Door) deviceStart(w http.ResponseWriter, r *http.Request) {
 	var in struct {
 		Name   string   `json:"name"`
 		Scopes []string `json:"scopes"`
@@ -62,7 +62,7 @@ func (s *Server) deviceStart(w http.ResponseWriter, r *http.Request) {
 	})
 }
 
-func (s *Server) deviceToken(w http.ResponseWriter, r *http.Request) {
+func (s *Door) deviceToken(w http.ResponseWriter, r *http.Request) {
 	var in struct {
 		DeviceCode string `json:"deviceCode"`
 	}
@@ -103,8 +103,8 @@ button.go{background:#1a1a1a;color:#fff}.err{color:#e2001a}.code{font:600 20px m
 <input type="hidden" name="csrf" value="{{.CSRF}}"><button class="go">Continue</button>{{end}}
 {{if .Problem}}<p class="err">{{.Problem}}</p>{{end}}</form>`))
 
-func (s *Server) devicePage(w http.ResponseWriter, r *http.Request) {
-	p, sess, _ := s.web.Principal(r)
+func (s *Door) devicePage(w http.ResponseWriter, r *http.Request) {
+	p, sess, _ := s.Web.Principal(r)
 	if p == nil || sess == nil {
 		http.Redirect(w, r, "/auth/login?return="+url.QueryEscape(r.URL.RequestURI()), http.StatusSeeOther)
 		return
@@ -137,8 +137,8 @@ func (s *Server) devicePage(w http.ResponseWriter, r *http.Request) {
 	_ = deviceTmpl.Execute(w, data)
 }
 
-func (s *Server) deviceDecide(w http.ResponseWriter, r *http.Request) {
-	p, sess, _ := s.web.Principal(r)
+func (s *Door) deviceDecide(w http.ResponseWriter, r *http.Request) {
+	p, sess, _ := s.Web.Principal(r)
 	if p == nil || sess == nil {
 		http.Redirect(w, r, "/auth/login?return=/device", http.StatusSeeOther)
 		return

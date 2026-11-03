@@ -61,7 +61,7 @@ func TestBuildOutputsFresh(t *testing.T) {
 		outs      []string
 	}{
 		{"web/runtime", "make runtime", []string{"pkg/server/assets/claude.js"}},
-		{"web/admin", "make admin", []string{"pkg/server/admin/app.js", "pkg/server/admin/styles.css",
+		{"web/admin", "make admin", []string{"pkg/doors/office/admin/app.js", "pkg/doors/office/admin/styles.css",
 			"apps/backoffice/app.js", "apps/backoffice/styles.css"}},
 	}
 	for _, o := range outputs {

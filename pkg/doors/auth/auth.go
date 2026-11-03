@@ -1,4 +1,4 @@
-package server
+package auth
 
 import (
 	"errors"
@@ -14,7 +14,10 @@ import (
 	"github.com/go-go-golems/slop-computer/pkg/sysdb"
 )
 
-func (s *Server) authRoutes(m *http.ServeMux) {
+// Routes registers sign-in, sign-out, the session probe, the OIDC callback
+// and device login.
+func (s *Door) Routes(m *http.ServeMux) {
+	s.deviceRoutes(m)
 	m.HandleFunc("GET /auth/login", s.loginPage)
 	m.HandleFunc("POST /auth/local", s.localSignIn)
 	m.HandleFunc("POST /auth/logout", s.logout)
@@ -42,7 +45,7 @@ button{margin-top:16px;padding:7px 14px;border:1px solid #1a1a1a;background:#1a1
 {{else}}<p>This server signs in with its OIDC provider.</p>{{end}}
 {{if .Problem}}<p class="err">{{.Problem}}</p>{{end}}</form>`))
 
-func (s *Server) loginPage(w http.ResponseWriter, r *http.Request) {
+func (s *Door) loginPage(w http.ResponseWriter, r *http.Request) {
 	ret := web.SafeReturn(r.URL.Query().Get("return"))
 	if !s.Cfg.Local && s.oidcLogin != nil {
 		s.oidcLogin(w, r, ret)
@@ -52,7 +55,7 @@ func (s *Server) loginPage(w http.ResponseWriter, r *http.Request) {
 	_ = loginTmpl.Execute(w, map[string]any{"Local": s.Cfg.Local, "Return": ret, "Problem": r.URL.Query().Get("problem")})
 }
 
-func (s *Server) localSignIn(w http.ResponseWriter, r *http.Request) {
+func (s *Door) localSignIn(w http.ResponseWriter, r *http.Request) {
 	if !s.Cfg.Local {
 		http.Error(w, "local sign-in is off", http.StatusNotFound)
 		return
@@ -75,7 +78,7 @@ func (s *Server) localSignIn(w http.ResponseWriter, r *http.Request) {
 }
 
 // signIn finds or creates the user and starts a main-host session.
-func (s *Server) signIn(w http.ResponseWriter, r *http.Request, email, name, subject, idToken string) error {
+func (s *Door) signIn(w http.ResponseWriter, r *http.Request, email, name, subject, idToken string) error {
 	p, _, err := s.People.SignInUser(r.Context(), email, name, subject, s.Cfg.AdminEmails, s.Cfg.SignupOpen())
 	if err != nil {
 		return err
@@ -92,7 +95,7 @@ func (s *Server) signIn(w http.ResponseWriter, r *http.Request, email, name, sub
 			return err
 		}
 	}
-	s.web.SetCookie(w, s.web.CookieName(), secret, identity.SessionDays*24*3600, http.SameSiteLaxMode)
+	s.Web.SetCookie(w, s.Web.CookieName(), secret, identity.SessionDays*24*3600, http.SameSiteLaxMode)
 	return nil
 }
 
@@ -100,13 +103,13 @@ func (s *Server) signIn(w http.ResponseWriter, r *http.Request, email, name, sub
 // provider's end_session_endpoint (RP-initiated logout), which ends the
 // provider's browser session too and comes back to the main host's /, so
 // the next sign-in asks again (another account can sign in).
-func (s *Server) logout(w http.ResponseWriter, r *http.Request) {
+func (s *Door) logout(w http.ResponseWriter, r *http.Request) {
 	idToken := ""
-	if c, err := r.Cookie(s.web.CookieName()); err == nil {
+	if c, err := r.Cookie(s.Web.CookieName()); err == nil {
 		idToken = s.People.SessionIDToken(r.Context(), c.Value)
 		_ = s.People.DeleteSession(r.Context(), c.Value)
 	}
-	s.web.SetCookie(w, s.web.CookieName(), "", -1, http.SameSiteLaxMode)
+	s.Web.SetCookie(w, s.Web.CookieName(), "", -1, http.SameSiteLaxMode)
 	next := ""
 	if s.oidc != nil && idToken != "" {
 		target, err := s.oidc.LogoutURL(r.Context(), idToken, s.Cfg.MainURL()+"/", "")
@@ -128,8 +131,8 @@ func (s *Server) logout(w http.ResponseWriter, r *http.Request) {
 }
 
 // sessionInfo tells the back office who is signed in and its CSRF token.
-func (s *Server) sessionInfo(w http.ResponseWriter, r *http.Request) {
-	p, sess, _ := s.web.Principal(r)
+func (s *Door) sessionInfo(w http.ResponseWriter, r *http.Request) {
+	p, sess, _ := s.Web.Principal(r)
 	if p == nil || sess == nil {
 		httpx.JSON(w, 200, map[string]any{"signedIn": false, "login": "/auth/login"})
 		return

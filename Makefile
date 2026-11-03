@@ -32,7 +32,7 @@ runtime:
 runtime-test:
 	cd web/runtime && pnpm test
 
-# The back office: web/admin → pkg/server/admin/{app.js,styles.css} (built
+# The back office: web/admin → pkg/doors/office/admin/{app.js,styles.css} (built
 # in, at /admin) and apps/backoffice/{app.js,styles.css} (the same UI as an
 # app, at /office).
 admin:

@@ -12,6 +12,12 @@ import (
 	"path/filepath"
 	"time"
 
+	officedoor "github.com/go-go-golems/slop-computer/pkg/doors/office"
+
+	billingdoor "github.com/go-go-golems/slop-computer/pkg/doors/billing"
+
+	authdoor "github.com/go-go-golems/slop-computer/pkg/doors/auth"
+
 	"github.com/go-go-golems/slop-computer/pkg/billing"
 	"github.com/go-go-golems/slop-computer/pkg/billing/stripe"
 	capsdb "github.com/go-go-golems/slop-computer/pkg/caps/db"
@@ -56,11 +62,12 @@ type Server struct {
 	follow sysFollower
 	// Extra host handlers, set by later phases (live, static, sandbox).
 	Live, Static, Sandbox http.Handler
-	// oidcLogin starts an OIDC sign-in (nil until OIDC is configured).
-	oidcLogin func(w http.ResponseWriter, r *http.Request, ret string)
-	oidc      *identity.Provider
-	billing   *stripe.Service
-	samples   samples
+	// auth is the sign-in door (pkg/doors/auth).
+	auth *authdoor.Door
+	// billingDoor is the subscription door (pkg/doors/billing).
+	billingDoor *billingdoor.Door
+	billing     *stripe.Service
+	samples     samples
 	// catchUpGap runs between a catch-up's head read and its document
 	// read (tests commit there; nil otherwise).
 	catchUpGap func()
@@ -69,7 +76,7 @@ type Server struct {
 // Build makes the server with everything the configuration enables.
 func Build(ctx context.Context, cfg *config.Config, sys *sysdb.DB, env *commands.Env) (*Server, error) {
 	s := New(cfg, sys, env)
-	if err := s.setupOIDC(); err != nil {
+	if err := s.auth.Setup(); err != nil {
 		return nil, err
 	}
 	if err := s.setupBilling(); err != nil {
@@ -118,6 +125,11 @@ func New(cfg *config.Config, sys *sysdb.DB, env *commands.Env) *Server {
 		s.People, s.Registry, s.Ledger, s.Gov, s.Book = identity.NewAccounts(sys), registry.NewRegistry(sys), llm.NewLedger(sys), policy.NewGovernance(sys), billing.NewBook(sys)
 	}
 	s.web = &web.Sessions{Cfg: cfg, People: s.People}
+	s.auth = &authdoor.Door{Cfg: cfg, Web: s.web, People: s.People}
+	s.billingDoor = &billingdoor.Door{Cfg: cfg, Web: s.web, Book: s.Book}
+	if env != nil {
+		s.billingDoor.K = env.K
+	}
 	if env != nil {
 		if env.Verbs == nil {
 			commands.Install(verbs.NewTable(), env) // not verbs.Default: the CLI lists its commands there
@@ -247,12 +259,11 @@ func (s *Server) mainRoutes(m *http.ServeMux) {
 	m.HandleFunc("GET /healthz", func(w http.ResponseWriter, r *http.Request) { _, _ = w.Write([]byte("ok\n")) })
 	m.HandleFunc("GET /readyz", s.ready)
 	m.HandleFunc("GET /auth/handoff", s.handoff)
-	s.authRoutes(m)
-	s.deviceRoutes(m)
-	s.billingRoutes(m)
+	s.auth.Routes(m)
+	s.billingDoor.Routes(m)
 	(&apidoor.Door{Web: s.web, People: s.People, Verbs: s.Verbs}).Routes(m)
 	(&mcpdoor.Door{Cfg: s.Cfg, Web: s.web, People: s.People, Verbs: s.Verbs}).Routes(m)
-	s.adminRoutes(m)
+	(&officedoor.Door{Cfg: s.Cfg}).Routes(m)
 }
 
 // ListenAndServe runs the server until ctx ends.

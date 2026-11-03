@@ -1,4 +1,7 @@
-package server
+// Package office serves the back office (web/admin, built into
+// pkg/doors/office/admin): a React app on the main host whose every button
+// is a call to /api/v1/<verb> (SLOP3-010 PR 3).
+package office
 
 import (
 	"crypto/sha256"
@@ -7,10 +10,9 @@ import (
 	"encoding/json"
 	"html/template"
 	"net/http"
-)
 
-// The back office (web/admin, built into pkg/server/admin): a React app on
-// the main host whose every button is a call to /api/v1/<verb>.
+	"github.com/go-go-golems/slop-computer/pkg/config"
+)
 
 //go:embed admin/app.js admin/styles.css
 var adminFS embed.FS
@@ -21,12 +23,16 @@ var adminPage = template.Must(template.New("admin").Parse(`<!doctype html>
 <script type="application/json" id="slop-admin">{{.Boot}}</script></head>
 <body><div id="root"></div><script type="module" src="/admin/app.js?v={{.V}}"></script></body></html>`))
 
-func (s *Server) adminRoutes(m *http.ServeMux) {
+// Door serves / and /admin/* on the main host.
+type Door struct{ Cfg *config.Config }
+
+// Routes registers the back office's page and its two assets.
+func (s *Door) Routes(m *http.ServeMux) {
 	m.HandleFunc("GET /{$}", s.adminIndex)
 	m.HandleFunc("GET /admin/{file}", s.adminAsset)
 }
 
-func (s *Server) adminIndex(w http.ResponseWriter, r *http.Request) {
+func (s *Door) adminIndex(w http.ResponseWriter, r *http.Request) {
 	boot, _ := json.Marshal(map[string]any{"hosts": map[string][]string{"live": s.Cfg.Hosts.Live, "static": s.Cfg.Hosts.Static}})
 	w.Header().Set("Content-Type", "text/html; charset=utf-8")
 	w.Header().Set("Cache-Control", "no-store")
@@ -47,7 +53,7 @@ var adminVersion = func() string {
 	return hex.EncodeToString(h.Sum(nil)[:6])
 }()
 
-func (s *Server) adminAsset(w http.ResponseWriter, r *http.Request) {
+func (s *Door) adminAsset(w http.ResponseWriter, r *http.Request) {
 	name := r.PathValue("file")
 	b, err := adminFS.ReadFile("admin/" + name)
 	if err != nil {
