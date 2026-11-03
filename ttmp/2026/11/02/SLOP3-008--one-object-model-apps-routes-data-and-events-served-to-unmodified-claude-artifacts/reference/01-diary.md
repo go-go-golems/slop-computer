@@ -475,3 +475,70 @@ The user asked for all remaining phases on the same branch. Phase 2 serves the c
 
 ### Technical details
 - List page: `{entries: [{path, isDirectory, size}], cursor?}`; read: `{bytes (base64 on the wire, Uint8Array in the page), size, revision}`.
+
+## Step 10: Phase 3, the registry as documents
+
+Phase 3 makes the registry rows an app may see readable through the db API: `_stores`, `_stores/<id>`, `_stores/<id>/_grants|_bindings|_llm/…` and `_people/…`. A dashboard written for claude.ai's db can therefore list stores and their grants, and change them, without a slop-specific API. Each read and write runs the verb that owns the row as the viewer, so the db path adds no authority of its own.
+
+### Prompt Context
+**User prompt (verbatim):** see Step 9 ("do all phases, we don't need so many PRs"; "commit at appropriate intervals and keep a detailed diary as you work (using the diary format from the skill)").
+**Assistant interpretation:** Phase 3 of the design, on the same branch, with an investigation entry.
+**Inferred user intent:** The registry as data under one object model, decided earlier as "no need to keep these live for now" (open question 6).
+**Commit (code):** 6acea8e — "SLOP3-008 phase 3: the registry as documents"
+
+### What I did
+- `pkg/rt/space.go`: `Resolve` returns `Target{Registry: true}` for `_stores` (when the path is the collection itself), `_stores/<id>` (a document: the row), `_stores/<id>/_grants|_bindings|_llm[/…]` and `_people[/…]`; other `_`-segments under a store stay refused. `space_test.go` gained the cases.
+- `pkg/server/registry.go` (new): `registryColl` / `registryDoc` for reads; `registryWriteOf` maps a write to `{verb, args, change kind, key}`; `registryWrite` gates and runs it.
+- `pkg/server/views.go`: `dbGet` and `readable` (query/subscribe snapshot) answer registry targets from `registry.go`; `dbWrite` resolves the route first and hands registry targets to `registryWrite`, returning `{version, rev: 0}`.
+- `pkg/system/stores.go`: `LastChange(kind, key)` = `max(rev)` in system `_changes` for a row, used as the document's version and for `ifVersion`.
+- `web/runtime/src/db.ts`: `writeRPC` answers `confirmation_required` with `ask("confirm", {confirm})` and retries once; `test/db.test.ts`'s transport mock gained `ask`. `make runtime` rebuilt `pkg/server/assets/claude.js`.
+- `pkg/server/pathspace_test.go`: `TestRegistryDocuments`, `TestRegistryWritesNeedAdminStores`, helper `adminView`; `TestStoresSpace`'s phase-1 placeholder ("registry documents read as missing") now expects the row.
+
+### Why
+- Running the owning verb as the viewer (`personAs(ctx, user, "app:"+app)`) keeps a single place for every registry rule: `grant.ls` needs admin on the store, `people.ls` needs a platform admin, and the db path inherits both. A read the verb refuses shows nothing, the way an unreadable document does.
+- Confirmation: changing grants or roles changes who may do what, so it is confirmed in the shell like module calls that change governance (`Confirmations().Check`, the same store `slop.call` uses). Refusing with `verbs.Check` first means nobody is asked to approve something that would fail anyway.
+- Versions from `_changes`: every registry verb already logs a change with a stable key (`store`=id, `grant`="<store> <subject>", `binding`="<store> <alias>", `person`=id), so `ifVersion` costs one indexed query rather than a version column on each table.
+- Writable set (closes open question 2): grants, aliases, a store's type, a person's role. Owner, app, ids and the LLM budget are read-only; a grant from a share link (`<subject>~<via>`) is changed by revoking the link.
+
+### What worked
+- `GOWORK=off go test ./pkg/server -run TestRegistry -count=1 -v`: both pass.
+- Mutations, each restored from `$CLAUDE_JOB_DIR/tmp/registry.go.bak`:
+  - confirmation skipped → `a registry write without confirmation: map[result:map[rev:0 version:11]]`
+  - ifVersion ignored → `stale ifVersion: map[error:map[code:confirmation_required …]]`
+  - `db.stores` gate removed → `TestRegistryWritesNeedAdminStores: a registry write with stores view: map[error:map[code:confirmation_required …]]`
+- `make runtime`, `pnpm test` (12 pass), `GOWORK=off go test ./... -count=1` ok (incl. `TestBuildOutputsFresh`), `golangci-lint run --new-from-rev=origin/main ./...` 0 issues.
+
+### What didn't work
+- `TestStoresSpace` failed after the change: `pathspace_test.go:226: _stores/crm: map[body:map[… id:crm level:view …] exists:true …]` — the test pinned phase 1's "missing" behavior; updated to expect the row and two stores (`crm` and the console app's own store, which the guest also holds).
+- My `sed` for that count matched the same `len(docs) != 1 {` text in `TestAliasRevokeReopens` (line 308) too, failing it with `subscribe: [map[body:map[name:Ada] …]]`; reverted that line by number.
+
+### What I learned
+- `rt.Doc.Version` is per-document; for registry rows the system revision works because system `_changes` is the registry's single ordered log, so versions are monotonic per row, as `ifVersion` needs.
+
+### What was tricky to build
+- Ordering in `dbWrite`: page writes validated the path with `validPath` before routing, which rejects `_` segments. Registry targets had to be recognised by the space first, then sent past the document-store path entirely (there is no store turn, so `rev` is 0 and no `doc` event is published).
+- The confirmation retry: the page's `db.set` promise must stay pending while the person decides in the shell. The runtime does it with `ask("confirm")` (which resolves after the shell's approve/deny) and one retry; a deny surfaces as the retry's `confirmation_required` → rejection.
+
+### What warrants a second pair of eyes
+- A guest view of `_stores/<id>` shows `owner` (a person id) for any store the guest can open. Person ids are opaque but stable; review whether `owner` should be dropped below admin.
+- Registry documents are not live: a `db.subscribe` on `_stores/…` gets one snapshot and no updates, by the earlier decision. A page polling with `get` is fine; a page waiting on `onSnapshot` will not see a grant it just wrote.
+
+### What should be done in the future
+- Live registry documents if a page needs them: publish a synthetic `doc` event from the system `_changes` hook to views whose space reaches `_stores`.
+
+### Code review instructions
+- Start at `pkg/server/registry.go` (top comment lists the paths), then the three registry branches in `pkg/server/views.go` (`dbGet`, `readable`, `dbWrite`), then `TestRegistryDocuments`.
+- `GOWORK=off go test ./pkg/server ./pkg/rt -run 'TestRegistry|TestSpace|TestStoresSpace' -count=1 -v`
+
+### Technical details
+- Write mapping:
+
+| Path | op | verb |
+|---|---|---|
+| `_stores/<id>` | update `{type}` | `store.type` |
+| `_stores/<id>/_grants/<subject>` | set `{level}` / delete | `grant.set` / `grant.rm` |
+| `_stores/<id>/_bindings/<alias>` | set `{target, prefix?, level?, assets?}` / delete | `bind.set` / `bind.rm` |
+| `_people/<id>` | update `{role}` | `people.role` |
+| `_stores/<id>/_llm/budget` | — | read-only |
+
+- Error codes: `invalid_argument` (no `db.stores` "admin", a field the verb does not take, read-only document), `permission_denied` (no signed-in person), `conflict` (stale `ifVersion`), `confirmation_required` + `confirm` id (until approved), then whatever the verb returns.
