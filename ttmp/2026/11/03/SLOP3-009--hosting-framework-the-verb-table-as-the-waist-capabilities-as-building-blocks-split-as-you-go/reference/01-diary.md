@@ -193,6 +193,26 @@ The first code step of SLOP3-009. `verbs.Def[In, Out]` describes a verb by Go ty
 - `GOWORK=off go test ./pkg/verbs ./pkg/server -run 'TestDef|TestDecode|TestTool|TestEffects|TestTyped|TestConfirm|TestSystemModule' -count=1 -v`
 - `go run ./cmd/slop verbs tools grant.set docs.query mount.set -o json`
 
+### Technical details
+- **The typed form** (`pkg/verbs/def.go`):
+  ```go
+  type Def[In, Out any] struct {
+      Name, Doc string; Scope Scope; Effect Effect; AdminOnly bool
+      Action authz.Action; StoreArg string
+      Run func(r Req, in In) (Out, error)
+  }
+  func (d Def[In, Out]) Verb() *Verb   // Args + Input/Output schemas + a Run that decodes strictly
+  ```
+- **Tags on the input struct:**
+  - `json:"name"` names the argument, and `omitempty` makes it optional;
+  - `jsonschema_description:"…"` is its doc; `jsonschema:"enum=a,enum=b"` adds schema keywords;
+  - `slop:"pos=N"` gives its CLI position.
+- **Schemas:** invopop/jsonschema with `Anonymous`, `DoNotReference` and `ExpandedStruct`; `Version` is cleared. An interface type (`any`) has no output schema.
+- **Arg types** come from the schema: string, integer → int, boolean → bool, anything else → json. Enum values are appended to the doc as "(one of …)". A json argument's doc gets ", as JSON: <shape>" (`shapeOf`), for example `[[string, string, any] | {field, op, value}, …]`.
+- **Strict decoding:** a `json.Decoder` with `DisallowUnknownFields`. "unknown field" is turned into `invalid_argument "<verb> takes no argument \"x\""`.
+- **Effects:** an unset Effect is read or write, from Scope. `callVerb` (`pkg/server/modules.go`) confirms when `f.Confirm || v.Effect == verbs.EffectGovern`.
+- **MCP tool form:** `Verb.Tool()` maps the name `.` → `_` and sets `annotations.readOnlyHint = Effect == read`. It drops the output schema unless the output type is `object`, because MCP structured results are objects.
+
 ## Step 3: pkg/registry, live registry documents, and views that follow the system log
 
 Three linked changes. The registry's documents left `pkg/server` for their own package. Open views now learn of access and policy changes by following the system log instead of through three callbacks on `verbs.Env`. Since the follower sees every registry change anyway, registry documents became live, which SLOP3-008 had deferred. A dependency ratchet now guards the package map.
@@ -250,6 +270,19 @@ Three linked changes. The registry's documents left `pkg/server` for their own p
 ### Code review instructions
 - `pkg/registry/*.go`, then `pkg/server/registry.go` (follower), then the `s.reg` call sites in `views.go` and the `Listen` wiring in `server.go`.
 - `GOWORK=off go test ./pkg/registry ./internal/archtest ./pkg/server -run 'TestLive|TestRegistry|TestDependencyRules|TestAlias|TestComps' -count=1 -v`
+
+### Technical details
+- **The follower** (`pkg/server/registry.go`):
+  - `sysFollower{mu, cursor}`. The cursor starts at `Sys.LogHead`, and `s.Sys.Listen(func(){ go s.followSystem() })` triggers each pass;
+  - one pass reads `Sys.LogAfter(cursor, 200)` in a loop, under `mu`;
+  - per change kind: grant, binding, store and link → `reviewViews(store)` (a link found via `LinkByID`); person and comp → `reviewPerson`; policy → `reviewApp`;
+  - after a batch, `refreshRegistry(ctx, rev)` runs if any change is `registry.Affects`.
+- **The live memory** (`pkg/registry/live.go`):
+  - `Live.views[view][sub] = {Sub, seen map[path]version}`;
+  - `Update(view, sub, now)` returns docs whose version is greater than `seen`, plus the paths that disappeared, and records `now`;
+  - a deletion is sent as `docOut{Path, Version: rev, Deleted: true}`: the change's system revision, which is at least the row's last change.
+- **`system.DB.Listen(fn)`:** listeners are called after each committed `Tx`, while `epoch` is incremented. The single `OnLog` field it replaces only allowed one listener; the actor's `sysreact` needs another.
+- **The ratchet:** `internal/archtest/deps_test.go` runs `go list -json ./pkg/...` with `GOWORK=off` and checks direct imports only. An allowlisted edge that no longer exists fails as stale.
 
 ## Step 4: pkg/caps/db, one db for pages and actors
 
@@ -340,6 +373,28 @@ The page path space moved out of `pkg/server` into `pkg/caps/db`, and an actor's
 - `pkg/caps/db/db.go` top to bottom, then `pkg/server/space.go`, the wrappers in `views.go`, and `pkg/actor/modules.go` (`Paths`, `dbView`, `resolve`, `ownPath`, `queryDocs`).
 - `GOWORK=off go test ./pkg/server -run 'TestActorDBPathSpace|TestAlias|TestStoresSpace|TestRegistry' -count=1 -v`, then `SLOP_BENCH=1 GOWORK=off go test ./pkg/server -run TestBenchPageDBQuery -v`.
 
+### Technical details
+- **The capability** (`pkg/caps/db/db.go`):
+  ```go
+  type DB struct { K *kernel.Kernel; Host Host; Reg Registry }
+  type Host interface { Viewer(ctx, v *rt.View) *access.Principal }
+  type Registry interface {
+      Doc(ctx, v, tgt, path) *rt.Doc
+      Coll(ctx, v, tgt, coll) []rt.Doc
+      Write(ctx, v, tgt, WriteIn) (int64, error)
+  }
+  func (d *DB) Route(ctx, v *rt.View, path string, doc bool) (Route, error)   // Route{Tgt, St, Level, Held, Rules, Found}
+  func (d *DB) Get(ctx, v, path) (rt.Doc, bool, error)
+  func (d *DB) Query(ctx, v, q rt.Query) ([]rt.Doc, error)
+  func (d *DB) Write(ctx, v, who store.Who, in WriteIn) (version, rev int64, err error)
+  ```
+- **An actor's view** (`Actor.dbView`): `&rt.View{Target: store, App, User: visitor.ID, Role: visitor.Audience, Level, Caps, Kind: rt.KindActor, Space}`, built once per turn. `Space` is `Paths.Space(ctx, store, caps, allowed(a, "stores"))`.
+- **Actor routing:**
+  - `Space.Resolve` → `Own` runs in the turn (`t.GetDoc(tgt.Path)`); otherwise it goes through `Paths.Get`/`Query`;
+  - `PathError not_found` (another store's private documents) is a missing document;
+  - writes call `ownPath`, which throws `permission_denied` unless the target is `Own`.
+- **The benchmark** (`TestBenchPageDBQuery`, `SLOP_BENCH=1`) calls `rpcDBQuery`/`rpcDBGet` directly through `testing.Benchmark`, on 100 documents per store, query limit 20.
+
 ## Step 5: pkg/caps/sample, one sample for pages, actors and the CLI
 
 `sample` had two implementations: the page's streamed `/_rt/sample` and the actor's `use('sample')`. Both did the same access check, budget check, metering and failure mapping, with small differences. These now live in `pkg/caps/sample`. A third caller came with them: `sample.run`, the first verb whose result streams.
@@ -406,6 +461,26 @@ The page path space moved out of `pkg/server` into `pkg/caps/db`, and an actor's
 ### Code review instructions
 - `pkg/caps/sample/*.go`, `pkg/llm/request.go`, then the two callers, `pkg/server/sample.go` and `pkg/actor/sample.go`, then `apiStream` and `client.CallStream`.
 - `GOWORK=off go test ./pkg/server -run 'TestSampleRunVerb|TestLLM|Sample' -count=1 -v`
+
+### Technical details
+- **The capability** (`pkg/caps/sample`):
+  ```go
+  type Sampler struct { Backend llm.Backend; Sys *system.DB }
+  func (s *Sampler) Check(ctx, payer, audience string) (system.LLM, error)   // *llm.Failure: unavailable | permission_denied | quota_exceeded
+  func (s *Sampler) Run(ctx, payer string, l system.LLM, req llm.Request,
+      emit func(llm.Event), execute llm.ExecuteTool) (llm.Answer, error)     // error: quota_exceeded | upstream_error
+  ```
+  `Answer{Text, Model, Usage{Input, Output}, Result, Failure}`. Usage events are metered and never forwarded.
+- **Request building** (`pkg/llm/request.go`):
+  - `NewRequest(prefix, In, images)` defaults the tier to "default" and drops images unless allowed;
+  - `MaxRounds` is 10;
+  - an "exceeds" validation error becomes `prompt_too_large`.
+- **Streaming verbs:**
+  - `verbs.WithEmit(ctx, fn)` and `verbs.Emit(ctx, part)` / `Req.Emit(part)`;
+  - the HTTP door streams when the verb's Effect is `stream` and the `Accept` header contains `text/event-stream`;
+  - the SSE events are `part`, then `result {result}` or `error {error}`;
+  - headers are written lazily at the first part, so an earlier refusal stays a JSON error with its status.
+- **Status codes:** `prompt_too_large` → 400, `upstream_error` → 502.
 
 ## Step 6: the MCP door, generated from the verb table
 
@@ -484,3 +559,81 @@ Agents can now use slop as MCP tools. `POST /mcp` lists every verb the caller's 
 ### Code review instructions
 - `pkg/server/mcp.go`, then `verbs.Callable` in `pkg/verbs/verb.go`.
 - `GOWORK=off go test ./pkg/server -run TestMCPDoor -count=1 -v`
+
+### Technical details
+- **Endpoint:** `POST /mcp` on the main host; `GET` and `DELETE` get 405 with `Allow: POST`. The protocol revisions offered are 2025-06-18, 2025-03-26 and 2024-11-05; the client's is echoed back when known.
+- **`initialize`** answers `{protocolVersion, capabilities: {tools: {listChanged: false}}, serverInfo: {name: "slop", title: "slop-computer", version: "3"}, instructions}`.
+- **`tools/call`:**
+  - params are `{name, arguments, _meta: {progressToken}}`;
+  - the result is `{content: [{type: "text", text: <JSON>}], structuredContent?: <object>}`, or `{isError: true, content: [{type: "text", text: "code: message"}]}`.
+- **Progress:** each part becomes `{"jsonrpc": "2.0", "method": "notifications/progress", "params": {progressToken, progress: n, message: <delta or JSON>}}`, then the response, all as SSE `event: message`.
+- **Errors:** JSON-RPC codes `-32700` (parse), `-32600` (batches), `-32601` (method), `-32602` (unknown tool or bad params).
+- **Auth:** a token principal only, with `Via = "mcp"`. A foreign `Origin` gets 403; no token gets 401 with `WWW-Authenticate: Bearer realm="slop"`.
+
+## Step 7: the Codex review of #22, two live-document bugs
+
+Codex reviewed #22 and found two places where a live registry document could stay stale indefinitely. Both were real. The first was an ordering race when subscribing. The second: a store's row document carried the viewer's level, but its version ignored the grants that level depends on. Both are fixed on #22's branch, with tests that fail without the fix.
+
+### Prompt Context
+**User prompt (verbatim):** "look at code review comments, and see if worth addressing."
+**Assistant interpretation:** Read the review comments on #22 and #23, judge each, fix what is real, reply.
+**Inferred user intent:** Merge-ready PRs, without spending effort on spurious findings.
+**Commit (code):** 196131d — "TestRegistryDocumentsLive: step through the changes, one event each" (cherry-picked from #23's c0f7926); ad2e7e1 — "registry live documents: subscribe before the snapshot; version store rows by access"
+
+### What I did
+- Read the findings with `gh api repos/go-go-golems/slop-computer/pulls/22/comments` (two P2 findings) and `…/pulls/23/comments` (none).
+- **Finding 1** (`pkg/server/views.go:871`):
+  - `rpcDBSubscribe` now calls `Live.Remember(view, sub, nil)` before reading;
+  - after the read, the new `Live.Saw(view, sub, docs)` merges the snapshot, keeping the higher version per path;
+  - a failed read calls `Live.Forget(view, sub)`.
+- **Finding 2** (`pkg/registry/live.go:102`):
+  - new `storeVersion(ctx, db, store, viewer, head)` in `pkg/registry/registry.go`, used by `Docs.Doc` for `_stores/<id>` and by `Docs.Coll` for `_stores`;
+  - `Affects` gained `comp` and `billing`.
+- Cherry-picked the flaky-test fix from #23, then extracted `awaitDocs(t, stream)` (wait for a described doc event, skip others) for both live tests.
+- Tests: `TestRegistryStoreLevelLive`, `TestLiveSaw`.
+- Rebuilt the branch as two commits (`git reset --soft 02cefc1`, the test fix alone, then the fixes), pushed, rebased #23 onto it (one conflict in `pkg/registry/documents.go`, resolved), force-pushed #23 with lease, and replied to both comments.
+
+### Why
+- **Register first** is already the rule for store subscriptions ("Register first, then read: a write in between arrives on the stream too, and the runtime keeps the higher version"). Registry subscriptions now follow the same rule, rather than gaining a revision-based catch-up, which Codex offered as an alternative.
+- **Versioning by the body's dependencies.** The runtime accepts only higher versions, so comparing bodies alone (the other way out) would still be rejected by the browser. Codex said the same.
+
+### What worked
+- `TestRegistryStoreLevelLive`: a guest's console view listens to `_stores/crm`, and `grant.set crm @guest interact` reaches it as `_stores/crm level=interact`.
+- Mutations, each caught:
+  - `storeVersion` replaced by the row-only `lastChangeUpTo` → `pathspace_test.go:825: grant raised: no "_stores/crm level=interact" (saw [])`;
+  - `Saw` overwriting instead of keeping the max → `live_test.go:42: after Saw: changed [{_stores/a map[] 7}] gone []`.
+- Both live tests passed 100 of 100 on #22's branch and 50 of 50 on #23's. Full suite and lint pass on both. #23's verb table is still byte-identical to the baseline.
+
+### What didn't work
+- After fix 2, the stepped `TestRegistryDocumentsLive` would have taken the `_stores/crm` row event (now moved by the grant change) as the answer to the next step. That's why `awaitDocs` waits for a named event instead of the next one. This was found by reasoning before running, not by a failure.
+
+### What I learned
+- A computed document's version must cover everything its body is computed from. `_stores/<id>`'s body includes `level`, which depends on rows of four other kinds.
+- The register-then-read ordering is not covered by a deterministic test. The window is a few microseconds, and forcing it would need a test hook in production code. `TestLiveSaw` covers the merge it relies on.
+
+### What was tricky to build
+- **The store's grants by key prefix.** A grant's `_changes` key is `"<store> <subject>"`. Matching with `substr(key, 1, len(store)+1) = store || ' '` avoids `LIKE` and its escaping of `_` and `%`.
+- **Links have their own key, the link id.** Their changes are matched with `key IN (SELECT id FROM links WHERE store = ?)`.
+
+### What warrants a second pair of eyes
+- **`storeVersion` runs one query per store row** in `_stores` listings, as `lastChangeUpTo` did, but with an `OR` of four clauses, which SQLite may not serve from an index. That is fine at today's `_changes` size; revisit if `_stores` listings become slow.
+- **Changes that are not logged.** A level that changes without a logged change, such as a link expiring (`expires_at` passing, with nothing written), still does not move the version.
+
+### What should be done in the future
+- If expiry matters for live documents, log expiries, or recompute and compare levels on a timer.
+
+### Code review instructions
+- `git show ad2e7e1`
+- `GOWORK=off go test ./pkg/registry ./pkg/server -run 'TestLive|TestRegistry' -count=1 -v`
+
+### Technical details
+- The version query:
+  ```sql
+  SELECT max(rev) FROM _changes WHERE rev <= :head AND (
+       (kind = 'store' AND key = :store)
+    OR (kind = 'grant' AND substr(key, 1, len(:store)+1) = :store || ' ')
+    OR (kind = 'link'  AND key IN (SELECT id FROM links WHERE store = :store))
+    OR (kind IN ('person', 'comp', 'billing') AND key = :viewer AND :viewer <> ''))
+  ```
+  `:head` is the `LogHead` read before the rows (the race fix 1e6220f).
+- `Live.Saw(view, sub, docs)`: for each doc, `seen[path] = max(seen[path], version)`. It does nothing for an unknown subscription.
