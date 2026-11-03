@@ -320,6 +320,8 @@ The package map of SLOP3-009 (design doc §10) sorts packages into layers. `inte
  core       pkg/rt, store, access, authz, apps, blobs, ids, config, httpx, client   (no domain and above)
 ```
 
+> **After PR 3 (#25):** the doors are `pkg/doors/{web,api,mcp,auth,billing,office,actors,pages}`, and assembly is a layer of its own above them, `pkg/host`, which is the one package besides `cmd/` that imports `pkg/commands`.
+
 The ratchet's rules today:
 
 | Rule | Forbidden imports |
@@ -849,6 +851,21 @@ func New(ctx context.Context, cfg *config.Config) (*Host, error) {
 
 `pkg/server`'s tests (about 40 files) are end-to-end tests over `newHarness`. They do not belong to one door. Move them to `pkg/host` with the harness. Unit tests of one door move with it later.
 
+### 9.6 As built (PR #25)
+
+> **As built (PR #25).** `pkg/server` is gone. Each door is a package whose `Door` struct holds exactly what it uses, and `pkg/host` assembles them. Where the build departs from 9.2–9.4:
+>
+> - **`sitelinks.go` and `once.go` went to pages, not auth.** Site links re-check open views (`reviewViews`), and the `once` cache is the keyed-call cache of the views' runtime methods.
+> - **`actors.go` stays in pages.** Actor routes, room emit and room peers read the open views. `doors/actors` holds the modules: `use('system')`, `use('workshop')` and `use('platform')`, installed with `Door{Web, Gov, Verbs, Confirm}.Install(*actor.Manager)`. PR 4 moves room onto a capability.
+> - **No `web.Principals` interface implemented by auth.** `doors/web.Sessions{Cfg, People}` reads sessions straight from `identity`. Auth only starts and ends them. No `pages.Rooms` interface either: the host calls `Pages.InstallActors(m)`, which gives the actor manager paths, sampling and rooms.
+> - **`SetBilling` stays in the host.** It wires the service's `OnChange` to `Pages.ReviewPerson` and sets `Env.Billing` for the commands, and no door may reach either. The billing door gets the `*stripe.Service`; `billing.Gateway(cfg)` reads the stripe block's secrets.
+> - **`commands.VisibleStores` became `kernel.VisibleStores`.** The pages needed it, and it reads only the registry and access.
+> - **The host's `New` keeps today's shape** (`Build(ctx, cfg, sys, env)` with the `commands.Env` the CLI builds) rather than 9.4's sketch, which would open the database itself. That change waits until a second assembler needs it.
+> - **Tests:** the harness and its end-to-end files are in `pkg/host`. Two pure unit tests stay with the pages. The db benchmark calls `Pages.RunMethod`, a view's runtime method in process with viewRPC's checks.
+> - **Ratchet:** the allowlist is empty, and two rules are new: a door imports no other door but `doors/web` (checked per door), and only `cmd/` imports `pkg/host`.
+>
+> The page door's exported surface (`pkg/doors/pages/door.go`): `New`, `InstallActors`, `MainRoutes` (the handoff), `ServeLive`, `ServeStatic`, `ServeSandbox`, `Tick`, `ReviewPerson`, `ReviewAll`, `RunMethod`, and the `CatchUpGap` test hook.
+
 ---
 
 ## Part 10. PR 4: actor modules into capabilities
@@ -973,6 +990,8 @@ The actor's in-turn semantics must survive the move. A module that writes the ac
 | `pkg/server/modules.go`, `modsystem.go` | trusted modules and confirmation |
 | `pkg/actor/actor.go`, `manager.go`, `modules.go` | the runtime and its modules |
 | `cmd/slop/cmds/serve.go`, `root.go` | assembly today; the generated CLI |
+
+> **After PR 3 (#25):** `pkg/server/server.go` is `pkg/host/host.go`; `views.go`, `live.go`, `sandbox.go` and `registry.go` (the follower) are in `pkg/doors/pages`; `api.go` and `mcp.go` are in `pkg/doors/api` and `pkg/doors/mcp`; `modules.go` and `modsystem.go` are in `pkg/doors/actors`. See 9.6.
 | `ttmp/2026/11/03/SLOP3-009--…/design-doc/01-…md` | the framework design this ticket implements |
 
 ---

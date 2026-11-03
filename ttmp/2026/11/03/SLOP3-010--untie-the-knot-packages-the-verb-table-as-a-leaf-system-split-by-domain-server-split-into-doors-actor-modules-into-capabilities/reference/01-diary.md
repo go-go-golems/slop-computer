@@ -447,3 +447,144 @@ Against the plan, the commands did not move into their domains. Most of them coo
 
   sysdb members (`Tx`, `NowMs`, `Listen`, `LogHead`, `LogAfter`, `Logs`, `Epoch`, `Now`, the `sql.DB` methods) are not rewritten.
 - **PR 2's commits:** 9179752 (sysdb), e2c1476 (identity), d4622f5 (Directory), 9a4883b (registry), 0d382f8 (llm), ed9a240 (policy), 2cb14e5 (billing), 9172a9c (rewire).
+
+## Step 5: PR 3, pkg/server split into doors and pkg/host
+
+PR 3 took `pkg/server` apart in six commits. Seven small doors came out first, then the pages, with assembly going to `pkg/host`. Every door is now a package whose `Door` struct holds exactly what it uses, and the ratchet's allowlist is empty. PR #25 is open against main; #22 and #24 were already merged, so nothing is stacked.
+
+The doors are smaller than the guide's table, in one respect: the pages are one cluster. `actors.go`, `sitelinks.go` and `once.go` all read the open views, so they stayed with the pages instead of going to `doors/actors` and `doors/auth`.
+
+### Prompt Context
+**User prompt (verbatim):** "go ahead."
+**Assistant interpretation:** Do SLOP3-010 PR 3 (guide Part 9): split `pkg/server` into doors plus `pkg/host`, commit per door, validate, open the PR, keep this diary.
+**Inferred user intent:** The third knot untied: each door testable and readable on its own, with no door reaching into another's state.
+**Commits (code):** d201fe7 (1/6 `doors/web`), 3701d7a (2/6 `doors/api`, `doors/mcp`), b07777d (3/6 `doors/auth`, `doors/billing`, `doors/office`), eec0f0b (4/6 `doors/actors`), c50eed4 (5/6 `doors/pages`, `pkg/host`), 0cb0acd (6/6 ratchet). PR #25: https://github.com/go-go-golems/slop-computer/pull/25
+
+### What I did
+- **`doors/web` (1/6).** `Sessions{Cfg, People}` with `Principal(r)`, `PersonAs`, `ClientIP`, `SetCookie`, `CookieName`, plus the functions `WithPrincipal`, `WriteSSE`, `SafeReturn`, `ReadSecret`. Every later door takes a `*web.Sessions`.
+- **`movedoor.py <pkg> <files>`** (job tmp): `git mv` into `pkg/doors/<pkg>/`, then `package <pkg>`, `(s *Server)` → `(s *Door)`, `s.web.` → `s.Web.`. I wrote each `door.go` by hand, and renamed the routes function to `Routes(m)`.
+- **`doors/api`, `doors/mcp` (2/6):** moved whole.
+- **`doors/auth` (3/6):** `auth.go`, `oidc.go`, `device.go`; `Door{Cfg, Web, People}` owns the OIDC provider and `oidcLogin`. `setupOIDC` is now `Setup`, and `Routes` also registers device login.
+- **`doors/billing` (3/6):** the webhook, `/subscribe`, checkout and portal; `Door{Cfg, Web, Book, K, Service}`. `Gateway(cfg)` reads the Stripe secrets. `SetBilling` stays with the host (see What was tricky). `reviewPerson` and `reviewAll` went to the pages as `ReviewPerson`/`ReviewAll`.
+- **`doors/office` (3/6):** `admin.go`, with the embedded build: `git mv pkg/server/admin pkg/doors/office/admin`. `web/admin/build.mjs`, the Makefile, README, `build-stamp.mjs` and the stamp test now point there. Ran `node build.mjs` and `node build.mjs --app ../../apps/backoffice`.
+- **`doors/actors` (4/6):** `modules.go`, `modsystem.go`, `modworkshop.go`, `platform.go`. `Door{Web, Gov, Verbs, Confirm}.Install(*actor.Manager)` replaces `registerModules` and the `Platform` assignment.
+- **`doors/pages` and `pkg/host` (5/6), via `do6.py`** (job tmp):
+  - it `git mv`'d every remaining non-test file and `assets/` to `pkg/doors/pages`, `server.go` → `pkg/host/host.go`, `billing.go` → `pkg/host/billing.go`, and every `_test.go` plus `testdata/` to `pkg/host`;
+  - it rewrote `*Server` → `*Door`, `s.Env.{K,A,Confirm}` → `s.{K,A,Confirm}`, `s.web.` → `s.Web.`, `s.catchUpGap` → `s.CatchUpGap`.
+- **By hand, in pages and host:**
+  - `pages/door.go`: the struct, `New` (rt, registry docs, caps/db, the follower, the kernel subscription), and the exported surface the host needs;
+  - `host.go`'s struct and `New`: domains, `web.Sessions`, the auth and billing doors, `commands.Install`, the key, `pages.New`, the actor wiring (`Policy`, `Secret`, `Pages.InstallActors`, the actors door), `mainRoutes`, and the three host handlers from the page door;
+  - the minute loop calls `Pages.Tick`;
+  - `cmd/slop serve` calls `host.Build`.
+- **`kernel.VisibleStores`:** moved from `commands`, because the pages needed it and a door may not import commands.
+- **Tests:**
+  - `TestEveryRPCDeclaresAnAction` and `TestOnceWaitsForTheFirstRun` were split back into `pkg/doors/pages`;
+  - the db benchmark calls `Pages.RunMethod(ctx, view, "db.query"|"db.get", …)`;
+  - the subscription tests use `Pages.CatchUpGap` and `Pages.ReviewAll`;
+  - `cache_test.go` spells out the three Cache-Control values the tests compare against.
+- **Page runtime build:** `web/runtime/build.mjs` now writes to `pkg/doors/pages/assets/claude.js`. I rebuilt it.
+- **Ratchet (5/6 and 6/6):** `doors = pkg/doors`, the allowlist is emptied (5/6), and two new rules (6/6): `doorsApart` (a door imports no other door but `doors/web`) and a `host` layer that only `cmd/` imports.
+- **Docs:** guide 9.6 "as built", plus notes after 4.1 and the file references; task 3t42 is checked.
+
+### Why
+- **One door per commit, smallest first.** The small doors needed only web plumbing, so each one was a clean, gated checkpoint. The pages were left for last, when `server.go` was thin enough to see what is assembly and what is page state.
+- **A `Door` struct per package instead of interfaces between doors.** Guide 9.3 proposed `web.Principals` (implemented by auth) and `pages.Rooms`. Neither was needed. Reading a session needs only `identity`, which `web.Sessions` holds; the actor manager needs rooms, which the host wires with `Pages.InstallActors`. No door calls another.
+
+### What worked
+- `gate.sh` after each commit printed `0 issues.` and `GATE: ok`, the last time on the final tree (0cb0acd).
+- **Byte-identical against PR 1's baseline** (`$CLAUDE_JOB_DIR/tmp/pr1`): `slop verbs -o json | cmp - verbs-before.json`, `slop verbs tools -o json | cmp - tools-before.json`, and every verb's `--help` → `verbs-same`, `tools-same`, `help-same`.
+- **Ratchet probe:** a temporary `pkg/doors/api/zz_probe.go` importing `doors/mcp` gave `forbidden import: pkg/doors/api -> pkg/doors/mcp (a door imports no other door but doors/web)`. The probe was removed.
+- **The rebuilt web outputs** (`claude.js`, `app.js`, `styles.css` in both places) differ only in the first line, the source stamp.
+- **`slop serve --local` on a scratch data dir**, by host kind:
+
+  | Host | Path | Result |
+  |---|---|---|
+  | main | `/readyz` | 200 `{"ok":true}` |
+  | main | `/` | 200, the back office |
+  | main | `/auth/login` | 200 |
+  | main | `/admin/app.js` | 200 `text/javascript` |
+  | main | `/auth/session` | 200 `{"signedIn":false}` |
+  | main | `/subscribe` | 303 to sign-in |
+  | main | `/mcp` | 401 `unauthenticated` |
+  | live, static | `/` | 404 (nothing mounted) |
+  | unknown host | `/healthz` | 200 `ok` |
+
+### What didn't work
+- **The harness has a function `api`**, which collides with an import of package `api` in `server.go`'s test package. I aliased the imports (`apidoor`, `mcpdoor`, and the same pattern for the others).
+- **The billing rewrite replaced too much.** `s.billing` → `s.Service` also hit method names: `s.ServiceCheckout undefined (type *Door has no field or method ServiceCheckout)` (and `ServicePortal`, `ServicePerson`, `ServiceForm`). A `sed` restored `s.billing{Checkout,Portal,Person,Form}`.
+- **A struct-field insertion silently missed.** `goimports` had already aligned the field as `auth    *authdoor.Door`, so my unasserted `replace` found nothing: `s.billingDoor undefined (type *Server has no field or method billingDoor)`. The other replacements in that script had asserts; this one should have too.
+- **Build stamp:** editing `web/admin/build.mjs` changed the source hash: `apps/backoffice/styles.css is stale: web/admin changed since it was built (make admin)`. Rebuilt, as above.
+- **Pages imported commands:** `pkg/doors/pages/rtfiles.go:45:45: s.Env undefined` revealed `commands.VisibleStores(ctx, s.Env, p)`, which became `kernel.VisibleStores`.
+- **Tests that reached into internals after the move:**
+  - `vet: pkg/host/authz_test.go:17:25: s.rpcTable undefined (type *Server has no field or method rpcTable)` → split back into pages;
+  - `undefined: cachePrivate` → `cache_test.go`.
+- **Lint on moved code:** `cmd/slop/cmds/serve.go:17:1: File is not properly formatted (gofmt)` and `pkg/doors/pages/live.go:64:1: named return "state" with type "string" found (nonamedreturns)`. Fixed with `goimports` and unnamed returns.
+- **The first smoke test was garbage:** every request answered `400 Bad Request: malformed Host header`. In zsh, `set -- $u` does not word-split, so the Host header carried `slop.localhost:18397 /readyz`. A second attempt hit `listen tcp 127.0.0.1:18391: bind: address already in use` from the first server's `timeout`. Running the loop under `bash -c` on a fresh port gave the table above.
+
+### What I learned
+- **The pages are one door.** Views, live, sandbox, site, site links, rooms, actor routes, the follower and the once-cache all reach the open views (`rt.views`) or `reviewViews`. Splitting them further would need a views interface first, which is PR 4's capability work (room) rather than a move.
+- **The small doors' real dependencies:**
+
+  | Door | Holds |
+  |---|---|
+  | api | `Web, People, Verbs` |
+  | mcp | `Cfg, Web, People, Verbs` |
+  | auth | `Cfg, Web, People` |
+  | billing | `Cfg, Web, Book, K, Service` |
+  | office | `Cfg` |
+  | actors | `Web, Gov, Verbs, Confirm` |
+
+  None needs another door.
+- **Embedded build outputs carry a hash of their sources, including `build.mjs`.** Moving an output path is a source change, so the output must be rebuilt. The rebuild is deterministic: only the stamp line changes.
+
+### What was tricky to build
+- **`SetBilling` straddles three layers.** The service's `OnChange` must re-check open views (pages), `Env.Billing` feeds the billing commands (commands), and the billing door serves the forms. No door may hold all three, so the host builds the service and hands it out: `billingDoor.Service`, `Env.Billing`, and `OnChange → Pages.ReviewPerson`.
+- **`Confirm` is a pointer captured at door construction.** `commands.Install` sets `env.Confirm` when it is nil, so the actors and pages doors must be built after `Install`. In `host.New` they are, as `s.reg.Confirm` already was.
+- **`New`'s order inside the page door.** `rt` must exist before the registry docs (`OnClose` calls `s.reg.Live.Forget`), and the follower's cursor is read before `Listen`. Both orders are kept from the old `server.New`.
+
+### What warrants a second pair of eyes
+- **`Pages.RunMethod` repeats viewRPC's checks** (method exists, granted, floor) instead of sharing them, so the two can drift. It is used only by the db benchmark today. Folding viewRPC onto it would remove the duplicate; I left viewRPC untouched to keep commit 5 a move.
+- **The benchmark now measures slightly more.** It used to call `rpcDBQuery` directly; `RunMethod` adds the grant and floor checks, a map lookup each.
+- **`pages.Door`'s exported fields are mutable after `New`,** and `CatchUpGap` is an exported test hook.
+- **`host.New` still builds a second set of domain handles** when `env` has no kernel (PR 2's note stands).
+- **`TestBuildOutputsFresh` lives in `pkg/host`,** although it checks repo-level outputs. It sits there because it was in the moved test package and the relative root (`../..`) is the same depth.
+
+### What should be done in the future
+- PR 4: actor modules into capabilities (guide Part 10), including room, which would let `actors.go` leave the pages.
+- Fold viewRPC onto `RunMethod`.
+- Split the end-to-end tests per door when a door gets unit tests of its own (guide question 3).
+
+### Code review instructions
+- Commits 1–4: read each `pkg/doors/*/door.go`, then `git show --stat` for the moves.
+- Commit 5: `pkg/doors/pages/door.go` (the whole exported surface), `pkg/host/host.go`'s `New`, `pkg/host/billing.go`, `pkg/kernel/visible.go`.
+- Commit 6: `internal/archtest/deps_test.go` (`doorsApart`, the host layer).
+- Validate: `GOWORK=off go test ./... -count=1`, then rebuild `cmd/slop` and compare `slop verbs -o json` with a build of main before #25.
+
+### Technical details
+- **The host's assembly** (`pkg/host/host.go`, `New`, abridged):
+  ```go
+  s.web = &web.Sessions{Cfg: cfg, People: s.People}
+  s.auth = &authdoor.Door{Cfg: cfg, Web: s.web, People: s.People}
+  s.billingDoor = &billingdoor.Door{Cfg: cfg, Web: s.web, Book: s.Book, K: env.K}
+  commands.Install(verbs.NewTable(), env)          // when env.Verbs is nil
+  p := &pages.Door{Cfg, Sys, People, Registry, Ledger, Gov, Book, Web, Verbs, Key, K, A, Confirm}
+  s.Pages = pages.New(p)
+  env.A.Policy, env.A.Secret = …                   // governance
+  s.Pages.InstallActors(env.A)                     // Paths, Sample, RoomEmit, RoomPeers
+  (&actorsdoor.Door{Web, Gov, Verbs, Confirm}).Install(env.A)
+  mainRoutes: healthz, readyz, Pages.MainRoutes, auth, billing, api, mcp, office
+  Live, Static, Sandbox = Pages.ServeLive, ServeStatic, ServeSandbox
+  ```
+- **The ratchet rules after PR 3** (`internal/archtest/deps_test.go`):
+  - the table imports no domain, capability, runtime, door or host;
+  - domains know nothing of HTTP, goja, caps, the runtime or doors;
+  - caps know nothing of HTTP, goja, the runtime or doors;
+  - the runtime imports no capability;
+  - core imports nothing above it;
+  - identity imports only `sysdb` and `ids`;
+  - only the host (and `cmd/`) builds doors;
+  - only `cmd/` imports the host;
+  - nothing but the host and `cmd/` imports commands;
+  - `doorsApart`;
+  - `allowed = {}`.
+- **Line counts:** `pkg/doors/*` totals 5,974 non-test lines; the largest files are `pages/views.go` (1,177) and `pages/live.go` (723).
