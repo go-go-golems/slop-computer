@@ -33,3 +33,7 @@ Phases 2–5 implemented on task/slop3-008-data-assets: files over store trees (
 - /home/manuel/workspaces/2026-10-28/slop-computer/slop-computer/pkg/actor/storage.js — Durable-Object-shaped storage (phase 5)
 - /home/manuel/workspaces/2026-10-28/slop-computer/slop-computer/pkg/server/registry.go — registry documents (phase 3)
 - /home/manuel/workspaces/2026-10-28/slop-computer/slop-computer/pkg/verbs/mounts.go — alias templates (phase 4)
+
+## 2026-11-03
+
+Addressed PR #20 review: runtime freeze skips typed arrays (files.read on non-empty files); empty files.list is []; storage keys with / are hashed; alias subscriptions follow a store before access so a grant reopens the page; remote changes carry an opaque store key and rev, and reconnects resume from the runtime's confirmed cursor (at-least-once).

@@ -685,3 +685,77 @@ defineActor({
   alarms: { alarm(ctx) { /* runs once, at the time set */ } },
 });
 ```
+
+## Step 13: Addressing the code review of PR #20
+
+The automated review of PR #20 raised five findings. All five were real, and all five are fixed, each with a test that fails without its fix. Three were small: the runtime's deep `freeze` threw on a file's bytes, an empty `files.list` returned `null`, and storage keys with slashes escaped `list`/`deleteAll`. Two concerned another store's stream. An alias subscription made before the viewer could read the target never followed the store, so a later grant did nothing. And a reconnect resumed another store from what the server had written, not from what the browser had received.
+
+The stream resume needed a design change. Diary step 5 kept remote documents rev-less so that the runtime's single cursor stays the view's own store's rev. That left the server-side cursor as the only record, and it moved on `writeSSE`, which is not delivery. Remote documents now carry an opaque store key (`remote`) and, on a commit's last document, that store's rev (`remoteRev`). The runtime keeps the newest per key and sends them back as `?remote=key:rev,…`. The server resumes from those values, capped by what it sent and floored at where the view started following. That makes delivery at-least-once, never lossy, and `db.ts`'s version checks make a repeat a no-op.
+
+### Prompt Context
+**User prompt (verbatim):** "Address code review for https://github.com/go-go-golems/slop-computer/pull/20 in a subagent (medium thinking)"
+**Assistant interpretation:** Fix each of the five chatgpt-codex-connector comments on PR #20 with a test and a mutation check. Commit and push to the branch. Do not post anything on GitHub.
+**Inferred user intent:** The PR merges without known data-loss or crash bugs in the new path-space, files and storage features.
+**Commits (code):** 730f216 (freeze), 1db065b (empty listing), 6fc5642 (storage keys), a05da03 (grant reopens), 0cf5ccd (remote resume)
+
+### What I did
+- **Freeze (P1, 4458467545).** `web/runtime/src/util.ts` `freeze` skips `ArrayBuffer.isView` values. New `web/runtime/test/files.test.ts` covers `files.read`, `download` and `read_project_file` on a non-empty file, and empty listings.
+- **Empty listing (4458467570).** `rpcFilesList` (`pkg/server/rtfiles.go`) turns a nil `entries` into `[]`. The runtime's `list` also reads `r.entries ?? []`. `TestFilesListEmpty` binds an alias to a store with no snapshot.
+- **Storage keys (4458467559).** `storageKeyID` (`pkg/actor/storage.go`) uses a key as its own id only when it has no `/`, as well as the existing checks. `TestDurableStorage` now puts `a/b/c` and `x/y`, expects them in `list()` and ranges, and checks `docs.ls storage/a/b` is empty after `deleteAll`. Comments in `storage.go`/`storage.js` and `doc/design/slop-v3.md` §6 now say "a single valid path segment (no `/`)".
+- **Grant reopens (4449653057).** `route` has a `found` flag, set by `remoteRoute` once the store row exists. `rpcDBSubscribe` follows a found store even when `r.st` is nil (no access), opening it for its head and calling `v.Watch(id, head, r.held)` with `held` = none. A grant then moves the level, so `remoteLevelsMoved` → `recheck` sends `access`, just as a revoke does. Test: `TestAliasGrantReopens`.
+- **Remote resume (4449653067).**
+  - `pkg/rt/views.go`: `remoteState` gains `base` (the rev it started following from) and `key` (`"1"`, `"2"`, … in Watch order). Added `RemoteKey`. `Remotes()` was replaced by `Resume(confirmed)`, which returns `max(base, min(confirmed[key], sent))`.
+  - `pkg/server/views.go`: `docOut` gains `remote`/`remoteRev`. A new `sendRemote` tags remote documents, both live (`remote`) and in catch-up (`catchUpRemote`, which now collects and then sends). The reconnect loop reads `remoteCursors(?remote=)`.
+  - `web/runtime/src/transport.ts`: `remoteRevs`, updated in `dispatch("doc")`, appended to the stream URL, and cleared on `newview`.
+  - Tests: `TestAliasResumeFromClientCursor` and `web/runtime/test/resume.test.ts`.
+
+### Why
+- **Opaque keys, not store ids.** The page shares a realm with the runtime and could read the wire. An alias should not tell the page which store it points at, so the key is per view and means nothing outside it.
+- **At-least-once rather than exact.** The server cannot know what reached the browser unless the browser says so. A tag only on a commit's last document means "everything up to this rev arrived", because the stream is in order. Commits with no visible documents never move the runtime's cursor, so a resume can repeat more than it needs to. That costs bandwidth, never correctness. In `db.ts`, `intoMirror` drops anything with `version <= seen`, deletions included, and catch-up sends full bodies, never patches, so a repeated document is a no-op.
+- **Floored at `base`, capped at what was sent.** A client value below `base` would replay history that is older than its snapshot. A value above what was sent is either a lie or belongs to another view. Neither helps.
+- **Following at no access, rather than a new mechanism.** `recheck` already reopens a view whose remote level moved (step 6, `TestAliasRevokeReopens`). Recording the dependency at none reuses that mechanism. Remote commits at none are filtered out by `pageDocs` (`level == none`), so nothing leaks before the grant.
+
+### What worked
+- Mutation checks (originals kept in `/home/manuel/.claude/jobs/7fa934c5/tmp`):
+  - `freeze` from HEAD: the three non-empty file tests fail with `code: 'unavailable'`, underlying `Error: Cannot freeze array buffer views with elements`.
+  - `rtfiles.go` from HEAD: `pathspace_test.go:424: empty project: map[result:map[entries:<nil>]]`.
+  - `storage.go` from HEAD: `all = […"a", "b", "c/d", "x/y"…], want […"a", "a/b/c", "b"…]`, the same for `range` and `left`, and `storage/a/b after deleteAll: [storage/a/b/c]`.
+  - `views.go` from HEAD (grant): `after gaining crm: [map[_type:hello …]]`, with no `access` event.
+  - `Resume` returning the sent rev: `pathspace_test.go:237: resume without a remote cursor: []`.
+  - `transport.ts` from HEAD: `actual '/_rt/events?after=3'`, expected `'/_rt/events?after=3&remote=1%3A5'`.
+- `GOWORK=off go test ./... -count=1`: all ok. `golangci-lint run --new-from-rev=origin/main ./...`: 0 issues. `pnpm test`: 17 pass. `pnpm check`: clean. `make runtime` was rebuilt and `TestBuildOutputsFresh` passes.
+
+### What didn't work
+- `gofmt` put the new `strconv` import out of order in `pkg/rt/views.go`. `gofmt -w` fixed it.
+
+### What I learned
+- `Object.freeze` on a typed array is a TypeError only when the array has elements. An empty file passes, which is why a check that only used empty fixtures would miss this bug.
+- `storage/x/y` was always hashed, because it is a collection path and `ValidDocPath` refuses it. Only keys with an even number of extra segments slipped through.
+
+### What was tricky to build
+- Tagging only the last document of each commit in both send paths. The tag has to mean "this commit arrived whole". `catchUpRemote` used to write as it scanned, so it now collects `(doc, rev)` pairs first, as `sendAll` does for the view's own store.
+- `Resume` must not move the server-side "sent" cursor backwards. Live dedupe (`o.Rev <= from`) still uses it, and `catchUpRemote` reads from the client's value up to the current head, so everything in between is re-sent once.
+
+### What warrants a second pair of eyes
+- The client's value is trusted within `[base, sent]`. A lower value only re-reads documents the viewer may read anyway, through `readerFor`. I could not find a way to get anything it may not read.
+- A view that follows a store at no access gets that store's commits on its channel, and each costs a `confirm` and a filtered read. It ends at the next reopen.
+- `known.delete` in `db.ts`'s doc handler runs even for a repeated deletion. That cache only holds patch bases, so the worst case is one refetch.
+
+### What should be done in the future
+- Possibly a cursor-only event (`remote`/`remoteRev` with no document) at the end of `catchUpRemote`, so commits with no visible documents also move the runtime's cursor and repeats get smaller.
+
+### Code review instructions
+- `git diff de702b4..0cf5ccd`. Start with `pkg/rt/views.go` (`Resume`), then `viewEvents` in `pkg/server/views.go` (`sendRemote`, `catchUpRemote`, the reconnect loop, `remoteCursors`), then `dispatch` and `startStream` in `web/runtime/src/transport.ts`.
+- `GOWORK=off go test ./pkg/server -run 'TestAlias|TestFilesList|TestDurableStorage' -count=1 -v`; `cd web/runtime && pnpm test`
+
+### Technical details
+- Wire, a remote commit of two documents:
+
+```
+event: doc
+data: {"path":"contacts/c1","version":1,"body":{…},"remote":"1"}
+event: doc
+data: {"path":"contacts/c2","version":1,"body":{…},"remote":"1","remoteRev":5}
+```
+
+- The reconnect: `GET /_rt/events?after=3&remote=1%3A5`. The server resumes store `1` from `max(base, min(5, sent))`.
