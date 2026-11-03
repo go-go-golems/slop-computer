@@ -160,3 +160,31 @@ an alias.
 
 §5.2's resolution order and the opt-in rule; §5.3's write table (which
 level each registry write needs).
+
+## Step 3: Data and assets first; mounts stay out
+
+The user, on open question 3: "yeah no need to map mounts into stores, nor
+hsots. It's really about data and assets at first."
+
+### What I did
+
+- Removed `_stores/<app>/_mounts` from §5.4 and the plan; open question 3 is
+  marked decided. Mounts stay on `mount.*` and the back office.
+- Added §5.3, assets across stores (later sections renumbered): `/_blob/<id>`
+  resolves across the stores a view reaches (own first, then aliases with
+  `assets`, then approved `_stores`), at the reader's level; uploads, lists
+  and deletes stay local; new ids get 16 characters.
+- Phase 1 is now "data and assets across stores", with `caps/db` shared by
+  page RPC and actors.
+
+### What I learned
+
+`serveAssetBlob` (`pkg/server/rtassets.go`) resolves an id only in the
+sandbox origin's own store, and ids are `a` + 8 random characters
+(`ids.New("a", 8)`): unique per store, not across stores. A contract page
+rendering `"/_blob/" + id` from an aliased document would get a 404 today.
+
+### What warrants review
+
+§5.3's resolution order and whether a 16-character id is enough (open
+question 7).
