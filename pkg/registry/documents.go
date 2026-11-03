@@ -82,8 +82,12 @@ func storeBody(r system.StoreRow, level rt.Level) map[string]any {
 // a registry target) as documents at page paths.
 func (d *Docs) Coll(ctx context.Context, v *rt.View, tgt rt.Target, pageColl string) []rt.Doc {
 	var docs []rt.Doc
+	head, err := d.Sys.LogHead(ctx) // before the rows: see lastChangeUpTo
+	if err != nil {
+		return nil
+	}
 	add := func(id string, body map[string]any, kind, key string) {
-		ver := LastChange(ctx, d.Sys, kind, key)
+		ver := lastChangeUpTo(ctx, d.Sys, kind, key, head)
 		docs = append(docs, rt.Doc{Path: pageColl + "/" + id, Body: body, Version: max(ver, 1)})
 	}
 	switch {
@@ -124,6 +128,10 @@ func (d *Docs) Coll(ctx context.Context, v *rt.View, tgt rt.Target, pageColl str
 func (d *Docs) Doc(ctx context.Context, v *rt.View, tgt rt.Target, path string) *rt.Doc {
 	if tgt.Store != "" && tgt.Path == "" {
 		// _stores/<id>: the store's row, if the viewer may open it
+		head, err := d.Sys.LogHead(ctx) // before the row: see lastChangeUpTo
+		if err != nil {
+			return nil
+		}
 		row, err := d.Sys.StoreByID(ctx, tgt.Store)
 		if err != nil {
 			return nil
@@ -132,7 +140,7 @@ func (d *Docs) Doc(ctx context.Context, v *rt.View, tgt rt.Target, path string) 
 		if level < rt.LevelView {
 			return nil
 		}
-		return &rt.Doc{Path: path, Body: storeBody(row, level), Version: max(LastChange(ctx, d.Sys, "store", row.ID), 1)}
+		return &rt.Doc{Path: path, Body: storeBody(row, level), Version: max(lastChangeUpTo(ctx, d.Sys, "store", row.ID, head), 1)}
 	}
 	coll, id := tgt, rt.IDOf(tgt.Path)
 	coll.Path = rt.CollOf(tgt.Path)

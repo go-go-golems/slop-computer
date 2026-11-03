@@ -64,3 +64,14 @@ func LastChange(ctx context.Context, db *system.DB, kind, key string) int64 {
 	_ = db.QueryRowContext(ctx, `SELECT max(rev) FROM _changes WHERE kind = ? AND key = ?`, kind, key).Scan(&n)
 	return n.Int64
 }
+
+// lastChangeUpTo is LastChange among the revisions up to head. A document
+// is versioned at the log head read before its row: a commit that lands
+// between reading the row and reading its version would otherwise give an
+// old body the new version, and the live document would never be sent the
+// new body (its version would not move again).
+func lastChangeUpTo(ctx context.Context, db *system.DB, kind, key string, head int64) int64 {
+	var n sql.NullInt64
+	_ = db.QueryRowContext(ctx, `SELECT max(rev) FROM _changes WHERE kind = ? AND key = ? AND rev <= ?`, kind, key, head).Scan(&n)
+	return n.Int64
+}
