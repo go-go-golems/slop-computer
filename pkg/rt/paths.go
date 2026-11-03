@@ -15,8 +15,8 @@ func validPath(p string, doc bool) bool {
 		return false
 	}
 	segs := strings.Split(p, "/")
-	if len(segs) > MaxPathSegments || (len(segs)%2 == 0) != doc {
-		return false
+	if len(segs) > MaxPathSegments || (len(segs)%2 == 0) != doc || Reserved(segs[0]) {
+		return false // a top-level name beginning with _ is the platform's (SLOP3-008)
 	}
 	for _, s := range segs {
 		if len(s) > MaxSegmentBytes || s == "." || s == ".." || !segmentRe.MatchString(s) {

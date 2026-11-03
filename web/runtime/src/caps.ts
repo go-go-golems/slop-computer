@@ -314,3 +314,85 @@ export function slop(h: Hello) {
     subscribeUrl: () => String(cfg.subscribeUrl ?? ""),
   });
 }
+
+// --- files (SLOP3-008) --------------------------------------------------------
+
+// files reads a store's files as the viewer: a "project" is a store's main
+// snapshot, named by files.project in the manifest (_stores, or one of the
+// store's aliases). The contract's shapes and error codes.
+
+type FileEntry = { path: string; isDirectory: boolean; size: number };
+const blockedDownload = /\.(exe|msi|com|scr|bat|cmd|ps1|sh|vbs|jar|js|mjs|cjs)$/i;
+const fileCodes = new Set(["not_found", "not_granted", "changed", "rate_limited", "too_large", "declined", "bad_request"]);
+
+function fileFail(e: any): Error {
+  const code = e?.code === "invalid_argument" ? "bad_request" : fileCodes.has(e?.code) ? e.code : "unavailable";
+  return fail(code, e?.message || "project files are unavailable");
+}
+
+function fromBase64(s: string): Uint8Array {
+  const bin = atob(s);
+  const out = new Uint8Array(bin.length);
+  for (let i = 0; i < bin.length; i++) out[i] = bin.charCodeAt(i);
+  return out;
+}
+
+export function files() {
+  const list = async (o?: { path?: string; recursive?: boolean; cursor?: string }) => {
+    try {
+      const r: any = await rpc("files.list", { path: o?.path ?? "", recursive: !!o?.recursive, cursor: o?.cursor ?? "" });
+      const entries = ((r.entries ?? []) as FileEntry[]).map((e) => freeze({ path: e.path, isDirectory: !!e.isDirectory, size: e.size }));
+      return freeze(r.cursor ? { entries, cursor: String(r.cursor) } : { entries });
+    } catch (e) {
+      throw fileFail(e);
+    }
+  };
+  const read = async (path: string, o?: { offset?: number; length?: number }) => {
+    if (typeof path !== "string" || !path) throw fail("bad_request", "read takes a file path");
+    try {
+      const r: any = await rpc("files.read", { path, offset: o?.offset ?? 0, length: o?.length });
+      return freeze({ bytes: fromBase64(r.bytes), size: r.size as number, revision: String(r.revision) });
+    } catch (e) {
+      throw fileFail(e);
+    }
+  };
+  const download = async (path: string) => {
+    if (typeof path !== "string" || !path) throw fail("bad_request", "download takes a file path");
+    if (blockedDownload.test(path)) throw fail("bad_request", "this file type cannot be saved from a page");
+    const chunks: Uint8Array[] = [];
+    let offset = 0, size = 0, rev = "";
+    do {
+      const r = await read(path, { offset });
+      if (rev && r.revision !== rev) throw fail("changed", "the file changed while it was read");
+      rev = r.revision;
+      size = r.size;
+      chunks.push(r.bytes);
+      offset += r.bytes.length;
+      if (!r.bytes.length) break;
+    } while (offset < size);
+    const name = path.split("/").pop() || "file";
+    const res = await ask("download", { filename: name, data: new Blob(chunks as BlobPart[]) }).catch(() => ({ status: "unavailable" }));
+    if (res.status === "saved") return freeze({ status: "saved" });
+    throw fail(res.status === "declined" ? "declined" : "unavailable", "the file was not saved");
+  };
+  const asSampleTools = async () =>
+    freeze([
+      freeze({
+        name: "list_project_files",
+        description: "List files and folders of the project. path: a folder (omit for the top level); recursive: everything below it.",
+        inputSchema: { type: "object", properties: { path: { type: "string" }, recursive: { type: "boolean" } } },
+        execute: async (i: { path?: string; recursive?: boolean }) => (await list(i)).entries.slice(0, 200),
+      }),
+      freeze({
+        name: "read_project_file",
+        description: "Read a text file of the project (about 12 KB per call; pass offset to continue).",
+        inputSchema: { type: "object", properties: { path: { type: "string" }, offset: { type: "number" } }, required: ["path"] },
+        execute: async (i: { path: string; offset?: number }) => {
+          const r = await read(i.path, { offset: i.offset ?? 0, length: 12 * 1024 });
+          const next = (i.offset ?? 0) + r.bytes.length;
+          return { text: new TextDecoder().decode(r.bytes), size: r.size, ...(next < r.size ? { next } : {}) };
+        },
+      }),
+    ]);
+  return Object.freeze({ list, read, download, asSampleTools });
+}

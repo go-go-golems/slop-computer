@@ -1,7 +1,7 @@
 ---
 Title: One object model for apps, routes, data and events
 Ticket: SLOP3-008
-Status: review
+Status: active
 Topics:
     - architecture
     - sqlite
@@ -12,21 +12,25 @@ DocType: design-doc
 Intent: long-term
 Owners: []
 RelatedFiles:
-    - Path: repo://doc/design/slop-v3.md
-      Note: The v3 design this review measures; sections 4 (store), 8 (events), 9 (access), 10 (serving)
     - Path: repo://doc/claude-apis/README.md
       Note: What slop's runtime serves differently from the claude.ai artifact contract
+    - Path: repo://doc/design/slop-v3.md
+      Note: The v3 design this review measures; sections 4 (store), 8 (events), 9 (access), 10 (serving)
+    - Path: repo://pkg/actor/modules.go
+      Note: The actor's use() catalog, including stores.open(alias)
+    - Path: repo://pkg/actor/storage.js
+      Note: phase 5, the Durable-Object-shaped storage adapter
+    - Path: repo://pkg/server/registry.go
+      Note: phase 3, registry rows as documents
     - Path: repo://pkg/store/store.go
       Note: The per-store schema (_docs, _files, _log, _changes, _snapshots, _refs, _migrations, _cursors, _alarms)
     - Path: repo://pkg/system/migrations/001_init.sql
       Note: The registry (stores, mounts, bindings, grants) and the system log
-    - Path: repo://pkg/actor/modules.go
-      Note: The actor's use() catalog, including stores.open(alias)
     - Path: repo://web/runtime/src/index.ts
       Note: The page's use() resolver; bindings reach pages only as slop.stores.open
 ExternalSources: []
 Summary: 'A from-scratch answer to "how would you unify apps, routes, data and events", measured against slop v3: keep the store as the one object; one db path space per page, its own store at the root and every store under _stores/<id>/ (registry rows in _-prefixed subcollections); aliases so unmodified Claude artifacts reach other stores through their own db and files APIs; Durable Objects as a shape v3 already has.'
-LastUpdated: 2026-11-02T22:00:00-05:00
+LastUpdated: 2026-11-02T23:30:00-05:00
 WhatFor: Deciding the next structural step for slop v3's data model, before building an admin console or a multi-store app as plain Claude artifacts.
 WhenToUse: Read before changing bindings, the system database, the page runtime's db or files capabilities, or before promising Durable Objects compatibility.
 ---
@@ -281,16 +285,18 @@ confused deputy). So:
 - an alias reaches only the prefix it names, and is set by the holder's
   owner;
 - the whole of `_stores` (and `_people`) is reached only by an app that
-  declares it, `"db": {"stores": "view"}` or `"admin"`, and that an admin
-  has approved for that app, as `slop app trust` approves `slop.modules`
-  today;
+  declares it, `"db": {"stores": "view"}`, `"interact"` or `"admin"`, and
+  that an admin allowed: the `stores` cell of the app policy matrix
+  (`slop policy set <app> stores @<audience> on`), off by default;
 - an unmodified Claude app gets only the aliases its binding names.
 
 Five rules make this exact:
 
-1. **Resolution order.** The longest matching alias wins; otherwise a `_`
-   name is the platform's (if declared and approved); otherwise the path
-   is the store's own.
+1. **Resolution order.** `_stores` first (if declared and allowed); any
+   other `_` name is refused as reserved; then an alias, matched on the
+   first segment (an alias is one top-level name mapped to a collection,
+   and it hides the holder's own collection of that name); otherwise the
+   path is the store's own.
 2. **Parity is preserved.** An alias maps a prefix to a prefix of the same
    parity: `contacts → _stores/crm-team/contacts` (1 → 3) is valid;
    `contacts → _stores/crm-team/crm/contacts` (1 → 4) is refused when the
@@ -308,7 +314,9 @@ Five rules make this exact:
    level and the principal's level on that store, computed with the
    SLOP3-007 rule (maximum of sources, then the ceiling).
 
-Rule 5 needs one choice, made per alias: whose level is the principal's?
+Rule 5 needs one choice: whose level is the principal's? *Phase 1
+implements `as: viewer` only* (decided 2026-11-02, open question 1):
+publishing as the store stays an actor's job, as blocks-site does it.
 
 | `as` | Principal on the target | Fits |
 |---|---|---|
@@ -320,18 +328,29 @@ up to the alias's level. Setting it therefore requires `owner` on the
 holder and `admin` on the target, and `explain.can` shows the path. The
 declared `_stores` space is always `as: viewer`.
 
-Private data follows: `data/users/<id>/` under `_stores/<x>/` is private to
-`<id>` in store `<x>`, as anywhere. A viewer's id is the same in every
-store, so a reached store's private subtree works without translation.
+**Another store's private documents are reachable by no route** (decided
+2026-11-02). `data/users/<id>/…` in a store is that person's, read
+through that store's own app. An app reaching in through an alias or
+`_stores` could otherwise read the viewer's private documents there on
+their behalf and copy them out; the viewer never chose that app for that
+data. Such paths read as missing and cannot be written. The holder's own
+private documents are its own, also at `_stores/<holder>/…`.
+
+**Losing access reopens.** A view records the viewer's level on each
+store it follows when it starts following it; when that level changes,
+the view reopens, as it does when the viewer's level on its own store
+changes, so a page never keeps showing documents its viewer may no longer
+read.
 
 ### 5.3 Assets across stores
 
 The first phase is about data and assets: what a page reads through an
 alias or `_stores` includes the uploads its documents point at.
 
-**Today.** An upload lives in its store's assets zone (`_files`, `zone =
-'assets'`) under an id of the form `a` + 8 random characters
-(`pkg/server/rtassets.go`). `/_blob/<id>` on a sandbox origin resolves the
+**Before phase 1.** An upload lives in its store's assets zone (`_files`,
+`zone = 'assets'`) under an id `a` + 8 random bytes as hex (64 bits;
+`ids.New("a", 8)` in `pkg/server/rtassets.go`; an earlier draft of this
+section said "8 random characters", which was wrong). `/_blob/<id>` on a sandbox origin resolves the
 id in that origin's store only (`serveAssetBlob`). A binding has an
 `assets` flag, used by blocks-site's actor to read a workspace's uploads
 (SLOP3-003 B5); pages have no such path.
@@ -341,24 +360,32 @@ id in that origin's store only (`serveAssetBlob`). A binding has an
 (`contacts → _stores/crm-team/contacts`), the id belongs to `crm-team`, and
 the dashboard's own origin answers 404.
 
-**The design.** The page keeps writing `"/_blob/" + id`; the server
-resolves the id against every store the view reaches for assets:
+**The design (implemented).** The page keeps writing `"/_blob/" + id`;
+the sandbox origin resolves the id in its own store first, then in each
+store an alias of the holder shares uploads with (`bind.set … --assets`,
+the binding's existing flag, which needs admin on the target), in alias
+order. The first store holding the id serves it; otherwise the answer is
+404, as for a missing asset. Resolution walks only those stores, never
+all stores.
 
-1. the view's own store first;
-2. then each store an alias names, if the alias allows assets
-   (`"assets": true`, today's binding flag moved onto the alias);
-3. then any `_stores/<id>` the app is approved for.
+A blob request carries no view credential: an `<img>` cannot send the
+view's secret, and the sandbox origin's label only names the holder store
+and app. So, as for a store's own uploads, the URL is the capability, and
+the viewer's level cannot be checked at fetch time. What bounds a shared
+store's uploads is that someone with admin on it chose to share them with
+the holder. (An earlier draft said "if the viewer's effective level …
+reaches"; that cannot be checked.)
 
-The first store that holds the id serves it, if the viewer's effective
-level on that store reaches the level to read documents there (the same
-minimum as for data, §5.2 rule 5). Otherwise the answer is 404, as for a
-missing asset. Resolution walks only the stores this view can reach, a
-handful, never all stores.
+Uploads through `_stores` (an id of any store) are **not** served in
+phase 1: with no viewer at fetch time, resolving an id in any store would
+make every store's uploads reachable through any allowed app's origin.
+A store-qualified URL (`/_blob/_stores/<id>/<asset>`) with a view-bound
+check is left for when an app needs it.
 
-Ids must not collide across stores for this to be unambiguous. Today's
-eight random characters make a collision between two reachable stores
-unlikely, not impossible: new uploads get a longer id (16 characters),
-and the walk's fixed order (own store first) keeps old ids deterministic.
+New uploads get 16 random bytes (128 bits; `ids.New("a", 16)`): 64 bits
+already made collisions between a page's few reachable stores negligible,
+and 128 bits is the right strength for an id that is the capability. The
+walk's fixed order (own store first) keeps old ids deterministic.
 
 **Writes stay local.** `assets.upload`, `assets.list` and `assets.delete`
 act on the view's own store only, as the contract's per-artifact asset
@@ -416,6 +443,27 @@ path would feed `onSnapshot` without changing the API pages see.
 where it is: it is not a store in this design, only the source of the
 `_stores/<id>`, `_stores/<id>/_…` and `_people` documents.
 
+**As implemented (phase 3, `pkg/server/registry.go`).** A narrower first
+cut of the table above:
+
+| Document | Body | A write runs |
+|---|---|---|
+| `_stores` | the stores the viewer may open (every store for a platform admin) | — |
+| `_stores/<id>` | `id`, `type`, `app`, `owner`, `createdAt`, and the viewer's `level` there | `update {type}` → `store.type` |
+| `_stores/<id>/_grants/<subject>` | the `grant.ls` row; a link's grant is `<subject>~<via>` | `set {level}` → `grant.set`, `delete` → `grant.rm`; link grants read-only |
+| `_stores/<id>/_bindings/<alias>` | the `bind.ls` row | `set {target, prefix?, level?, assets?}` → `bind.set`, `delete` → `bind.rm` |
+| `_stores/<id>/_llm/budget` | `llm.usage` for `store:<id>` | read-only |
+| `_people/<id>` | the `people.ls` row (platform admins) | read-only (open question 2) |
+
+Reads run the owning listing verb as the viewer (`app:<app>`), so a row the
+verb would not show reads as missing. Writes need `db.stores` `admin`, pass
+`verbs.Check`, then ask the person in the shell (`confirmation_required`;
+the runtime answers with `ask("confirm")` and retries), honour `ifVersion`
+when given (not required: the contract's `set` has no mandatory version),
+and refuse fields the verb does not take. Not built: `app.json`, refs,
+policy cells and modules in the store row; `app.follow`/`app.describe` and
+`llm.set` writes; creating or deleting stores through `_stores`.
+
 The admin console is then:
 
 ```json
@@ -445,7 +493,9 @@ alias, instead of a claude.ai project id:
 
 `files.read('blocks/index.html')` then reads the `blocks` app store's tree
 at its current ref, as the viewer, at the level the declaration allows.
-`revision` is the snapshot number. Writing source stays outside `files`
+`revision` is the file's content hash (as implemented in phase 2: a hash
+changes exactly when the contents do, which is all the contract promises,
+without tracking snapshot numbers per file). Writing source stays outside `files`
 (the contract has no write), on the existing paths: `slop push`, the
 workshop module, or `artifact.publish` on the app's own store.
 
@@ -461,6 +511,13 @@ template, so a parameterised mount can bind what it creates:
 
 Each store created from the mount gets those aliases, which its owner can
 then change. Without a template, a new store gets none.
+
+*As implemented (phase 4):* the template is a list of bindings in
+`bind.set`'s shape, `mount.set --aliases '[{"alias": "contacts", "target":
+"crm-team", "prefix": "contacts", "level": "view"}]'`, only with
+`createApp`. It is checked like `bind.set` against the admin setting the
+mount, stored in `mounts.aliases` (migration 010), restored by `mount.undo`,
+and written as ordinary bindings by `/_site/create`.
 
 ### 5.7 Events across stores
 
@@ -527,8 +584,8 @@ to describe it as "Durable-Object-shaped", never "compatible".
    and `_stores/*/_grants/*`. Its manifest declares `"db": {"stores":
    "admin"}` and `"files": {"project": "_stores"}` (§5.4, §5.5).
 2. `slop push ./console --store console`.
-3. A platform admin approves it to reach `_stores` (the declaration is
-   proposed in §9, phase 1; approval works as `slop app trust` does).
+3. A platform admin allows it to reach `_stores`:
+   `slop policy set console stores @admin on` (phase 1).
 4. Mount it at `/console`, grant `@admin` `view`.
 5. An admin opens it. `db.collection('_stores')` lists every store, each at
    `min(admin, the admin's level on it)`. A member who somehow opens it
@@ -588,9 +645,10 @@ a live channel: the Durable Object pattern, already expressible.
   admin has approved it; otherwise only through the aliases its binding
   names.
 - One query reads one store; one write or batch writes one store.
-- `/_blob/<id>` serves an asset only from a store the view reaches, at
-  a level that may read that store's documents; uploads write only the
-  view's own store.
+- `/_blob/<id>` serves an upload only from the origin's store or a store
+  whose uploads one of its aliases shares (shared by an admin there);
+  uploads write only the view's own store.
+- Another store's `data/users/<id>/…` is reachable by no route.
 - A write to a registry document runs the verb that owns the row, with its
   checks, and never writes a table directly.
 - Balances (the LLM ledger) are state, not authority: readable as
@@ -602,58 +660,64 @@ a live channel: the Durable Object pattern, already expressible.
 
 Each phase is useful without the next.
 
-1. **Data and assets across stores.** Reserve top-level `_` segments
-   (after checking production documents for them, open question 4).
-   Extend `bindings` into aliases (`to`, `level`, `as`, `assets`); serve
-   `_stores/<id>/…` to apps that declare `"db": {"stores": …}` and are
-   approved; resolve `db` paths once, in a `caps/db` package shared by page
-   RPC and actors (reads, queries, subscriptions, writes, leases); resolve
-   `/_blob/<id>` across the reachable stores (§5.3); vector cursors in the
-   runtime. The dashboard works, pictures included. `slop.stores.open`
-   stays as is.
-2. **`files` over store trees.** Serve the contract's `files` capability;
-   `project` names `_stores` or an alias. "View source" works.
-3. **Registry rows as documents.** `_stores/<id>`, `_stores/<id>/_grants`,
+1. **Data and assets across stores.** *Implemented* (task/slop3-008-data-assets;
+   diary steps 5–8). Top-level `_` names reserved (a scan of production
+   found none); bindings with `prefix` and `level` (`bind.set --prefix
+   --level`); `_stores/<id>/…` behind `capabilities.db.stores` and the
+   `stores` policy cell; page paths resolved once by `rt.Space`
+   (reads, queries, subscriptions, writes, leases); `/_blob/<id>` through
+   aliases with `--assets`; per-store cursors on the server-side view
+   instead of vector cursors in the runtime. Not done: actors' `use('db')`
+   still sees its own store only (actors keep `use('stores').open`), and
+   `caps/db` is the shared `rt.Space` resolution rather than one shared
+   db implementation. The dashboard works, pictures included.
+2. **`files` over store trees.** *Implemented* (diary step 9). Serve the
+   contract's `files` capability; `project` names `_stores` or an alias.
+   "View source" works.
+3. **Registry rows as documents.** *Implemented* (diary steps 10–11; the
+   narrower first cut in §5.4). `_stores/<id>`, `_stores/<id>/_grants`,
    `_bindings`, `_llm` and `_people` as computed documents (no mounts);
-   writes through verbs with `ifVersion`; read on demand, not live
-   (§5.4). The admin console works as a plain artifact; the back office can
-   drop its `system` module.
-4. **Alias templates on mounts**, so stores created from a mount come
-   bound.
-5. **The Durable-Object adapter** for actors (`ctx.storage`), if a custom
-   app asks for it.
-6. **One owning process per store**, when v3 leaves a single process.
+   writes through verbs, confirmed by the person, with `ifVersion`; read on
+   demand, not live. The admin console works as a plain artifact; the back
+   office's `system` module is not dropped yet.
+4. **Alias templates on mounts.** *Implemented* (diary step 11), so stores
+   created from a mount come bound (§5.6).
+5. **The Durable-Object adapter.** *Implemented* (diary step 12):
+   `use('storage')` / `ctx.storage`, described in `doc/design/slop-v3.md`
+   §6.
+6. **One owning process per store.** *Not built, deliberately.* v3 runs one
+   process, so every store already has exactly one owner and the broker is
+   in-process; there is nothing to forward to and no second process to
+   test against. The rule (§5.7) is recorded for when v3 scales out: route
+   a store's views to the process chosen by its id, without a shared bus.
 
 ## 10. Open questions
 
-1. **Delegated reads.** Is `as: "store"` needed beyond publishing, or should
-   publishing stay an actor's job (as blocks-site does) and pages only ever
-   read `as: "viewer"`?
-2. **Registry writes.** Which registry documents are writable through `db`
-   at all? Grants, aliases, mounts and descriptions are natural; people,
-   sessions and tokens should stay read-only or hidden.
+1. **Delegated reads.** *Decided (2026-11-02): not in phase 1.* Every
+   route reads as the viewer; publishing stays an actor's job (blocks-site).
+2. **Registry writes.** *Decided (2026-11-02, phase 3):* grants, aliases
+   and a store's type are writable through `db`, confirmed by the person;
+   people (roles), the LLM budget, mounts, sessions and tokens are not.
+   Descriptions wait for an `app.describe` verb.
 3. **Mount keys, and mounts with no app.** *Decided (2026-11-02): mounts
    and hosts are not mapped into the path space* (§5.4). The first phases
    are about data and assets; routes stay on `mount.*` and the back office.
-4. **Reserving `_`.** Document segments may start with `_` today
-   (`segmentRe` in `pkg/rt/paths.go`), so an app could already have a
-   top-level `_grants` collection. Reserving top-level `_` names is a small
-   breaking change: check production documents first. Blocks and Pinup use
-   none (`chunks`, `meta`, `snaps`, `claims`, `nodes`, `feedback`, `log`,
-   `inbox`).
-5. **Depth.** Paths have at most 16 segments. Nesting under `_stores/<id>/`
-   spends two, so another store's documents are reachable only to depth 14.
-   A page's own paths keep 16. Accept it, or raise the limit for nested
-   reads?
+4. **Reserving `_`.** *Decided (2026-11-02): reserved,* for every writer
+   (`validPath` in `pkg/rt/paths.go`). A read-only scan of all 112
+   production stores found no top-level `_` path
+   (`scripts/01-scan-reserved-paths.py`).
+5. **Depth.** *Decided (2026-11-02): 18 segments under `_stores/<id>/`*
+   (server and runtime), so a store's 16-segment documents stay reachable;
+   the path inside the store is still at most 16.
 6. **Projection cost.** *Decided (2026-11-02): registry documents are not
    live for now* (§5.4): computed on read, one snapshot per listener. When
    they become live, the change mapping should be incremental rather than
    a re-query, so `_changes` keys should keep naming the affected store and
    subject.
-7. **Assets across stores.** *Proposed in §5.3:* `/_blob/<id>` resolves
-   across the reachable stores (own first, then aliases with `assets`,
-   then approved `_stores`); uploads, lists and deletes stay local. Open:
-   is a 16-character id enough, or should new ids carry their store?
+7. **Assets across stores.** *Decided (2026-11-02), §5.3:* own store, then
+   aliases with `--assets`; not through `_stores` in phase 1; new ids are
+   16 random bytes. Open: a store-qualified, view-checked blob URL for
+   `_stores` apps, when one needs it.
 
 ## 11. References
 

@@ -218,6 +218,61 @@ func (t *Turn) Query(caller, q string, args ...any) ([]map[string]any, error) {
 	return out, err
 }
 
+// QueryTable runs app SQL as caller and returns its column names, its rows
+// in column order (BLOBs as strings, as Query returns them) and how many
+// rows it wrote (SQLite's total_changes() before and after).
+func (t *Turn) QueryTable(caller, q string, args ...any) ([]string, [][]any, int64, error) {
+	var cols []string
+	var out [][]any
+	var written int64
+	err := t.WithCaller(caller, func() error {
+		var before int64
+		if err := t.s.w.QueryRowContext(t.ctx, `SELECT total_changes()`).Scan(&before); err != nil {
+			return err
+		}
+		rows, err := t.s.w.QueryContext(t.ctx, q, args...)
+		if err != nil {
+			return err
+		}
+		defer func() { _ = rows.Close() }()
+		if cols, err = rows.Columns(); err != nil {
+			return err
+		}
+		for rows.Next() {
+			if len(out) >= 10000 {
+				return fmt.Errorf("more than %d rows", 10000)
+			}
+			r := make([]any, len(cols))
+			ptrs := make([]any, len(cols))
+			for i := range r {
+				ptrs[i] = &r[i]
+			}
+			if err := rows.Scan(ptrs...); err != nil {
+				return err
+			}
+			for i, v := range r {
+				if b, ok := v.([]byte); ok {
+					r[i] = string(b)
+				}
+			}
+			out = append(out, r)
+		}
+		if err := rows.Err(); err != nil {
+			return err
+		}
+		if err := rows.Close(); err != nil { // before total_changes() on the same connection
+			return err
+		}
+		var after int64
+		if err := t.s.w.QueryRowContext(t.ctx, `SELECT total_changes()`).Scan(&after); err != nil {
+			return err
+		}
+		written = after - before
+		return nil
+	})
+	return cols, out, written, err
+}
+
 // SetMeta writes a _meta value as part of the turn.
 func (t *Turn) SetMeta(key, value string) error {
 	if _, err := t.s.w.ExecContext(t.ctx, `INSERT INTO _meta (key, value) VALUES (?, ?) ON CONFLICT (key) DO UPDATE SET value = excluded.value`, key, value); err != nil {

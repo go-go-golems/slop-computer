@@ -9,7 +9,7 @@ import (
 
 // Manifest is the runtime part of a page version's slop.json:
 //
-//	{"capabilities": {"db": {"rules": [...]}, "user": {"scopes": ["profile"]},
+//	{"capabilities": {"db": {"rules": [...], "stores": "view"}, "user": {"scopes": ["profile"]},
 //	  "room": {"topics": {"ops": "interact"}}, "assets": {}, "downloads": true,
 //	  "comments": {"composer_only": true}, "artifact": {}, "sample": {"images": true},
 //	  "slop": {"permissions": ["versions:push"]}}}
@@ -29,6 +29,8 @@ type Caps struct {
 	Topics     map[string]Level // room topics opened below admin
 	Composer   bool             // comments: composer_only
 	Images     bool             // sample: images
+	Stores     Level            // db: stores, how far the app asks to reach _stores/<id>/… (SLOP3-008)
+	Files      string           // files: project, "_stores" or one of the store's aliases (SLOP3-008)
 	Permission []string         // slop: management API permissions
 }
 
@@ -65,15 +67,34 @@ func ParseManifest(raw []byte, slopPermissions map[string]string) (Caps, error) 
 		switch name {
 		case "db":
 			var d struct {
-				Rules []Rule `json:"rules"`
+				Rules  []Rule `json:"rules"`
+				Stores string `json:"stores"`
 			}
 			if err := unmarshalCfg(cfg, &d); err != nil {
 				return c, fmt.Errorf("capabilities.db: %v", err)
+			}
+			if d.Stores != "" {
+				l, ok := ParseLevel(d.Stores)
+				if !ok || l < LevelView || l > LevelAdmin {
+					return c, fmt.Errorf("capabilities.db.stores: %q is not view, interact or admin", d.Stores)
+				}
+				c.Stores = l
 			}
 			if c.Rules, err = CompileRules(d.Rules); err != nil {
 				return c, fmt.Errorf("capabilities.db: %v", err)
 			}
 			c.RuleList = d.Rules
+		case "files":
+			var f struct {
+				Project string `json:"project"`
+			}
+			if err := unmarshalCfg(cfg, &f); err != nil {
+				return c, fmt.Errorf("capabilities.files: %v", err)
+			}
+			if f.Project != StoresRoot && (!segmentRe.MatchString(f.Project) || Reserved(f.Project)) {
+				return c, fmt.Errorf("capabilities.files.project: %q is not _stores or an alias name", f.Project)
+			}
+			c.Files = f.Project
 		case "user":
 			var u struct {
 				Scopes []string `json:"scopes"`

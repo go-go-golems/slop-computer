@@ -125,6 +125,8 @@ type Actor struct {
 	requires   map[string]rt.Level
 	undeclared []string
 
+	storage goja.Value // use('storage'), built on first use (storage.go)
+
 	wake  chan struct{} // capacity 1: the store's inbox has something
 	stop  chan struct{}
 	cur   *turn
@@ -527,6 +529,8 @@ func (a *Actor) ctxObject(ev *event) *goja.Object {
 	_ = o.Set("store", a.toJS(map[string]any{"id": a.st.ID, "type": a.st.Meta("type")}))
 	_ = o.Set("app", a.toJS(map[string]any{"id": a.run.App, "version": a.run.N}))
 	_ = o.Set("event", a.toJS(map[string]any{"kind": ev.kind, "name": ev.name, "late": ev.late}))
+	// ctx.storage, as a Durable Object's state.storage (storage.go).
+	_ = o.DefineAccessorProperty("storage", vm.ToValue(func() goja.Value { return a.storageModule() }), nil, goja.FLAG_FALSE, goja.FLAG_TRUE)
 	_ = o.DefineAccessorProperty("now", vm.ToValue(func() int64 {
 		if a.cur != nil {
 			return a.cur.t.Now

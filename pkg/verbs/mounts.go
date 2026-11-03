@@ -2,6 +2,7 @@ package verbs
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"slices"
 
@@ -38,12 +39,20 @@ func init() {
 				{Name: "storeParam", Type: "string", Doc: "the path parameter naming the store, e.g. store for /r/:store"},
 				{Name: "type", Type: "string", Doc: "with storeParam: the store type required"},
 				{Name: "createApp", Type: "string", Doc: "live hosts: offer to create a store of this app"},
-				{Name: "createAudience", Type: "string", Doc: "who may create: member (default), subscriber or admin"}},
+				{Name: "createAudience", Type: "string", Doc: "who may create: member (default), subscriber or admin"},
+				{Name: "aliases", Type: "json", Doc: `with createApp: bind each store created here, [{"alias":"contacts","target":"crm","prefix":"contacts","level":"view","assets":false}]`}},
 			Run: func(ctx context.Context, e *Env, p *access.Principal, a Args) (any, error) {
 				m := system.Mount{Host: a.S("host"), Path: a.S("path"), Store: a.S("store"), StoreParam: a.S("storeParam"),
 					Type: a.S("type"), CreateApp: a.S("createApp"), CreateAudience: a.S("createAudience")}
 				if err := checkMount(ctx, e, &m); err != nil {
 					return nil, err
+				}
+				if a.Has("aliases") {
+					t, err := aliasTemplate(ctx, e, p, a, m)
+					if err != nil {
+						return nil, err
+					}
+					m.Aliases = t
 				}
 				m, err := e.Sys.SetMount(ctx, p.ID(), p.ViaLabel(), m)
 				if err != nil {
@@ -106,7 +115,7 @@ func init() {
 			}},
 		&Verb{Name: "app.ls", Doc: "List the stores that are apps (their tree's main snapshot holds app.json).", Scope: Read, Action: authz.Platform,
 			Run: func(ctx context.Context, e *Env, p *access.Principal, a Args) (any, error) {
-				rows, err := visibleStores(ctx, e, p)
+				rows, err := VisibleStores(ctx, e, p)
 				if p.IsAdmin() {
 					rows, err = e.Sys.Stores(ctx, "")
 				}
@@ -201,4 +210,42 @@ func splitSlash(p string) []string {
 		}
 	}
 	return out
+}
+
+// aliasTemplate reads mount.set's aliases: the bindings each store the mount
+// creates gets (SLOP3-008 phase 4), checked as bind.set checks them, against
+// the admin setting the mount (who must hold what they template).
+func aliasTemplate(ctx context.Context, e *Env, p *access.Principal, a Args, m system.Mount) ([]system.Binding, error) {
+	raw, ok := a.list("aliases")
+	if !ok {
+		return nil, Errf("invalid_argument", "aliases is a JSON array of {alias, target, prefix?, level?, assets?}")
+	}
+	if len(raw) > 0 && m.CreateApp == "" {
+		return nil, Errf("invalid_argument", "aliases go with createApp: they bind the stores a mount creates")
+	}
+	var out []system.Binding
+	seen := map[string]bool{}
+	for _, x := range raw {
+		obj, _ := x.(map[string]any)
+		for k := range obj {
+			if !slices.Contains([]string{"alias", "target", "prefix", "level", "assets"}, k) {
+				return nil, Errf("invalid_argument", "an alias takes alias, target, prefix, level and assets, not %s", k)
+			}
+		}
+		js, _ := json.Marshal(obj)
+		var b system.Binding
+		if obj == nil || json.Unmarshal(js, &b) != nil {
+			return nil, Errf("invalid_argument", "aliases is a JSON array of {alias, target, prefix?, level?, assets?}")
+		}
+		if seen[b.Alias] {
+			return nil, Errf("invalid_argument", "alias %s is listed twice", b.Alias)
+		}
+		seen[b.Alias] = true
+		if err := checkAlias(ctx, e, p, &b); err != nil {
+			return nil, err
+		}
+		b.Store = ""
+		out = append(out, b)
+	}
+	return out, nil
 }

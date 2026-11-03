@@ -1,7 +1,7 @@
 // window.claude: use(name) resolves a capability's namespace or null. The
 // table comes from the view's hello (what this view may run), not from the
 // page; nothing else is promised on window.claude.
-import { artifact, assets, comments, downloads, initPermissions, permissions, slop, user } from "./caps.ts";
+import { artifact, assets, comments, downloads, files, initPermissions, permissions, slop, user } from "./caps.ts";
 import { db } from "./db.ts";
 import { lobby } from "./room.ts";
 import { sample } from "./sample.ts";
@@ -37,6 +37,8 @@ async function resolve(name: string): Promise<unknown> {
       return assets;
     case "downloads":
       return downloads;
+    case "files":
+      return files();
     case "artifact":
       return artifact;
     case "sample":

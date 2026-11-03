@@ -16,7 +16,7 @@ import (
 
 // PolicyCaps are the capabilities the policy controls; everything else an
 // app declares is always on.
-var PolicyCaps = []string{"assets", "sample", "user.email", "fetch", "secrets", "platform"}
+var PolicyCaps = []string{"assets", "sample", "user.email", "fetch", "secrets", "platform", "stores"}
 
 // PolicyAudiences are the matrix's columns: the person groups, then
 // "store", a store acting on its own (alarms, reactors; SLOP3-007).

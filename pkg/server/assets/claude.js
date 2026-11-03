@@ -1,4 +1,4 @@
-/* slop page runtime (window.claude), built from web/runtime: do not edit. source sha256:4a5e9772f38a958dd69699953e32deede49e4871975a8b8d37a69ab234a5bdd2 */
+/* slop page runtime (window.claude), built from web/runtime: do not edit. source sha256:5f2045b5fc61b80ae06d3100bb08273441e929d852a890d9b1469cb84d617e42 */
 "use strict";
 (() => {
   // src/limits.ts
@@ -38,9 +38,12 @@
   var bytes = (s) => utf8.encode(s).length;
   function checkPath(p, doc) {
     if (typeof p !== "string" || p === "") throw new TypeError("a db path is a non-empty string");
-    if (bytes(p) > limits.MaxPathBytes) throw new TypeError(`a db path is at most ${limits.MaxPathBytes} bytes`);
+    const nested = p.startsWith("_stores/");
+    const maxBytes = limits.MaxPathBytes + (nested ? "_stores/".length + limits.MaxSegmentBytes + 1 : 0);
+    const maxSegs = limits.MaxPathSegments + (nested ? 2 : 0);
+    if (bytes(p) > maxBytes) throw new TypeError(`a db path is at most ${maxBytes} bytes`);
     const segs = p.split("/");
-    if (segs.length > limits.MaxPathSegments) throw new TypeError(`a db path has at most ${limits.MaxPathSegments} segments`);
+    if (segs.length > maxSegs) throw new TypeError(`a db path has at most ${maxSegs} segments`);
     for (const s of segs) {
       if (s === "" || s === "." || s === ".." || !segment.test(s)) throw new TypeError(`invalid path segment ${JSON.stringify(s)} in ${p}`);
       if (bytes(s) > limits.MaxSegmentBytes) throw new TypeError(`a path segment is at most ${limits.MaxSegmentBytes} bytes`);
@@ -67,7 +70,7 @@
   }
   var isPlain = (v) => v !== null && typeof v === "object" && !Array.isArray(v) && Object.getPrototypeOf(v) === Object.prototype;
   function freeze(v) {
-    if (v && typeof v === "object" && !Object.isFrozen(v)) {
+    if (v && typeof v === "object" && !ArrayBuffer.isView(v) && !Object.isFrozen(v)) {
       Object.freeze(v);
       for (const x of Object.values(v)) freeze(x);
     }
@@ -138,7 +141,10 @@
       secret = m.secret;
       viewId = m.view;
       waitingView.splice(0).forEach((w) => w(true));
-      if (changed) emit("newview", m.view);
+      if (changed) {
+        remoteRevs.clear();
+        emit("newview", m.view);
+      }
       startStream();
       return;
     }
@@ -171,6 +177,7 @@
   var hello = null;
   var helloWaiters = [];
   var lastRev = -1;
+  var remoteRevs = /* @__PURE__ */ new Map();
   var connected = false;
   var streamGen = 0;
   var terminal = "";
@@ -203,7 +210,10 @@
     (async function loop() {
       while (gen === streamGen && !terminal) {
         try {
-          const url = "/_rt/events" + (lastRev >= 0 ? "?after=" + lastRev : "");
+          const q = [];
+          if (lastRev >= 0) q.push("after=" + lastRev);
+          if (remoteRevs.size) q.push("remote=" + encodeURIComponent([...remoteRevs].map(([k, r2]) => k + ":" + r2).join(",")));
+          const url = "/_rt/events" + (q.length ? "?" + q.join("&") : "");
           const r = await fetch(url, { headers: { Authorization: "Bearer " + secret }, credentials: "omit", cache: "no-store" });
           if (r.status === 401) {
             setConnected(false);
@@ -269,6 +279,7 @@
       case "doc":
         emit("doc", ev);
         if (ev.rev) seenRev(ev.rev);
+        if (ev.remote && ev.remoteRev > (remoteRevs.get(ev.remote) ?? 0)) remoteRevs.set(ev.remote, ev.remoteRev);
         return;
       case "revoked":
         terminal = "revoked";
@@ -641,6 +652,76 @@
       subscribeUrl: () => String(cfg.subscribeUrl ?? "")
     });
   }
+  var blockedDownload = /\.(exe|msi|com|scr|bat|cmd|ps1|sh|vbs|jar|js|mjs|cjs)$/i;
+  var fileCodes = /* @__PURE__ */ new Set(["not_found", "not_granted", "changed", "rate_limited", "too_large", "declined", "bad_request"]);
+  function fileFail(e) {
+    const code = e?.code === "invalid_argument" ? "bad_request" : fileCodes.has(e?.code) ? e.code : "unavailable";
+    return fail(code, e?.message || "project files are unavailable");
+  }
+  function fromBase64(s) {
+    const bin = atob(s);
+    const out = new Uint8Array(bin.length);
+    for (let i = 0; i < bin.length; i++) out[i] = bin.charCodeAt(i);
+    return out;
+  }
+  function files() {
+    const list = async (o) => {
+      try {
+        const r = await rpc("files.list", { path: o?.path ?? "", recursive: !!o?.recursive, cursor: o?.cursor ?? "" });
+        const entries = (r.entries ?? []).map((e) => freeze({ path: e.path, isDirectory: !!e.isDirectory, size: e.size }));
+        return freeze(r.cursor ? { entries, cursor: String(r.cursor) } : { entries });
+      } catch (e) {
+        throw fileFail(e);
+      }
+    };
+    const read = async (path, o) => {
+      if (typeof path !== "string" || !path) throw fail("bad_request", "read takes a file path");
+      try {
+        const r = await rpc("files.read", { path, offset: o?.offset ?? 0, length: o?.length });
+        return freeze({ bytes: fromBase64(r.bytes), size: r.size, revision: String(r.revision) });
+      } catch (e) {
+        throw fileFail(e);
+      }
+    };
+    const download = async (path) => {
+      if (typeof path !== "string" || !path) throw fail("bad_request", "download takes a file path");
+      if (blockedDownload.test(path)) throw fail("bad_request", "this file type cannot be saved from a page");
+      const chunks = [];
+      let offset = 0, size = 0, rev = "";
+      do {
+        const r = await read(path, { offset });
+        if (rev && r.revision !== rev) throw fail("changed", "the file changed while it was read");
+        rev = r.revision;
+        size = r.size;
+        chunks.push(r.bytes);
+        offset += r.bytes.length;
+        if (!r.bytes.length) break;
+      } while (offset < size);
+      const name = path.split("/").pop() || "file";
+      const res = await ask("download", { filename: name, data: new Blob(chunks) }).catch(() => ({ status: "unavailable" }));
+      if (res.status === "saved") return freeze({ status: "saved" });
+      throw fail(res.status === "declined" ? "declined" : "unavailable", "the file was not saved");
+    };
+    const asSampleTools = async () => freeze([
+      freeze({
+        name: "list_project_files",
+        description: "List files and folders of the project. path: a folder (omit for the top level); recursive: everything below it.",
+        inputSchema: { type: "object", properties: { path: { type: "string" }, recursive: { type: "boolean" } } },
+        execute: async (i) => (await list(i)).entries.slice(0, 200)
+      }),
+      freeze({
+        name: "read_project_file",
+        description: "Read a text file of the project (about 12 KB per call; pass offset to continue).",
+        inputSchema: { type: "object", properties: { path: { type: "string" }, offset: { type: "number" } }, required: ["path"] },
+        execute: async (i) => {
+          const r = await read(i.path, { offset: i.offset ?? 0, length: 12 * 1024 });
+          const next = (i.offset ?? 0) + r.bytes.length;
+          return { text: new TextDecoder().decode(r.bytes), size: r.size, ...next < r.size ? { next } : {} };
+        }
+      })
+    ]);
+    return Object.freeze({ list, read, download, asSampleTools });
+  }
 
   // src/diff.ts
   function diff(a, b) {
@@ -995,6 +1076,17 @@
     }
     return known.get(path)?.body;
   }
+  async function writeRPC(args) {
+    for (let asked = 0; ; asked++) {
+      try {
+        return await rpc("db.write", args);
+      } catch (e) {
+        if (e?.code !== "confirmation_required" || !e.confirm || asked >= 4) throw e;
+        const r = await ask("confirm", { confirm: e.confirm }).catch(() => null);
+        if (!r?.approved) throw fail("confirmation_declined", "not allowed: " + e.message);
+      }
+    }
+  }
   async function write(path, op, body) {
     if (!await connect()) throw fail("not_granted", "db is not available in this view");
     const optimistic = op === "delete" ? null : op === "update" ? localBody(path) ? merge(localBody(path), body) : void 0 : body;
@@ -1020,7 +1112,7 @@
             }
           }
         }
-        return (await rpc("db.write", { path, op, body })).version;
+        return (await writeRPC({ path, op, body })).version;
       });
       if (version > 0 && op !== "update" && optimistic !== void 0) {
         remember(path, version, optimistic);
@@ -1620,6 +1712,8 @@
         return assets;
       case "downloads":
         return downloads;
+      case "files":
+        return files();
       case "artifact":
         return artifact;
       case "sample":

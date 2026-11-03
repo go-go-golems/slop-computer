@@ -6,7 +6,7 @@
 import { applyPatch, diff, patchSize, type Patch } from "./diff.ts";
 import { limits } from "./limits.ts";
 import { apply as applyQuery, validate, type Filter, type Query } from "./query.ts";
-import { connect, on, rpc, state } from "./transport.ts";
+import { ask, connect, on, rpc, state } from "./transport.ts";
 import { bytes, checkPath, collOf, depth, fail, freeze, idOf, isPlain, plain, randomId, type Body } from "./util.ts";
 
 type Meta = { fromCache: boolean; hasPendingWrites: boolean };
@@ -299,6 +299,22 @@ function localBody(path: string): Body | undefined {
   return known.get(path)?.body;
 }
 
+// writeRPC sends one db.write. A write that changes governance (a registry
+// document, SLOP3-008) needs the person's approval in the shell: it fails
+// with confirmation_required, the shell asks, and an allowed write is sent
+// again (the approval holds for this view and write), as for slop.call.
+async function writeRPC(args: Record<string, unknown>): Promise<{ version: number }> {
+  for (let asked = 0; ; asked++) {
+    try {
+      return await rpc<{ version: number }>("db.write", args);
+    } catch (e: any) {
+      if (e?.code !== "confirmation_required" || !e.confirm || asked >= 4) throw e;
+      const r = await ask("confirm", { confirm: e.confirm }).catch(() => null);
+      if (!r?.approved) throw fail("confirmation_declined", "not allowed: " + e.message);
+    }
+  }
+}
+
 async function write(path: string, op: "set" | "update" | "delete", body?: Body): Promise<void> {
   if (!(await connect())) throw fail("not_granted", "db is not available in this view");
   const optimistic = op === "delete" ? null : op === "update" ? (localBody(path) ? merge(localBody(path)!, body!) : undefined) : body!;
@@ -324,7 +340,7 @@ async function write(path: string, op: "set" | "update" | "delete", body?: Body)
           }
         }
       }
-      return (await rpc<{ version: number }>("db.write", { path, op, body })).version;
+      return (await writeRPC({ path, op, body })).version;
     });
     // The confirmed state goes into the mirrors now, so dropping the
     // overlay below never shows the old body until the echo arrives.

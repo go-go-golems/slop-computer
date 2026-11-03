@@ -93,6 +93,12 @@ func grantedCaps(v *rt.View) map[string]any {
 		switch name {
 		case "db", "room", "downloads":
 			out[name] = map[string]any{}
+		case "files":
+			// A project is a store's main snapshot (SLOP3-008): the stores
+			// _stores reaches, or one alias's target.
+			if v.Caps.Files != "" && (v.Caps.Files != rt.StoresRoot || v.Space.Stores != rt.LevelNone) {
+				out[name] = map[string]any{"project": v.Caps.Files}
+			}
 		case "assets":
 			// The policy decides by audience (members and up by default);
 			// a visitor without an id answers to nobody and stores nothing.
@@ -171,7 +177,8 @@ func (s *Server) openView(ctx context.Context, p *access.Principal, storeID, par
 		pol[c] = s.Sys.Policy(ctx, run.App, c, string(d.Audience))
 	}
 	v := &rt.View{Target: storeID, App: run.App, Version: int(run.N), User: p.ID(), Name: name,
-		Role: string(d.Audience), Level: d.Level, Caps: caps, Policy: pol, Kind: "viewer"}
+		Role: string(d.Audience), Level: d.Level, Caps: caps, Policy: pol, Kind: "viewer",
+		Space: s.spaceOf(ctx, storeID, caps, pol)}
 	v.Epoch.Store(epoch)
 	v = s.rt.views.Open(v)
 	u, origin, err := s.sandboxURL(ctx, v, parent)
@@ -243,6 +250,11 @@ type docOut struct {
 	Patch   *rt.Patch       `json:"patch,omitempty"`
 	Base    int64           `json:"base,omitempty"`
 	Deleted bool            `json:"deleted,omitempty"`
+	// A change in another store the view follows: that store's key (rt.View
+	// RemoteKey) and, on a commit's last document, its rev there. The
+	// runtime keeps the newest and sends it back on reconnect (?remote=).
+	Remote    string `json:"remote,omitempty"`
+	RemoteRev int64  `json:"remoteRev,omitempty"`
 }
 
 func (s *Server) hello(ctx context.Context, v *rt.View, head int64) map[string]any {
@@ -287,7 +299,16 @@ func (s *Server) viewEvents(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("X-Accel-Buffering", "no")
 	w.WriteHeader(http.StatusOK)
 	last := head
-	visible := func(path string) bool { return v.Wants(path) && v.Caps.Rules.CanRead(path, v.User, v.Level) }
+	// own reads the view's own store's commits; every document is sent at
+	// each page path that shows it (its own path, an alias, _stores/<it>).
+	own := s.readerFor(ctx, v, v.Target)
+	stored := func(d store.Doc) docOut {
+		o := docOut{Version: d.Version, Deleted: d.Body == nil}
+		if d.Body != nil {
+			o.Body, _ = json.Marshal(d.Body)
+		}
+		return o
+	}
 	// sendAll writes docs, putting each commit's rev on its last document.
 	sendAll := func(docs []docOut, revs []int64) error {
 		for i, d := range docs {
@@ -316,24 +337,97 @@ func (s *Server) viewEvents(w http.ResponseWriter, r *http.Request) {
 		var docs []docOut
 		var revs []int64
 		for _, d := range rows {
-			if !visible(d.Path) {
-				continue
+			for _, o := range own.pageDocs(v, d.Path, stored(d)) {
+				docs, revs = append(docs, o), append(revs, d.Rev)
 			}
-			o := docOut{Path: d.Path, Version: d.Version, Deleted: d.Body == nil}
-			if d.Body != nil {
-				o.Body, _ = json.Marshal(d.Body)
-			}
-			docs, revs = append(docs, o), append(revs, d.Rev)
 			last = max(last, d.Rev)
 		}
 		last = max(last, upTo)
 		return sendAll(docs, revs)
+	}
+	// sendRemote writes another store's documents, each with the store's
+	// key, putting each commit's rev there on its last document: the
+	// runtime's cursor for that store (rev is the view's own store's).
+	sendRemote := func(storeID string, docs []docOut, revs []int64) error {
+		key := v.RemoteKey(storeID)
+		for i, d := range docs {
+			d.Remote = key
+			if i == len(docs)-1 || revs[i+1] != revs[i] {
+				d.RemoteRev = revs[i]
+			}
+			if err := writeSSE(w, "doc", d); err != nil {
+				return err
+			}
+		}
+		return nil
+	}
+	// catchUpRemote sends what changed in another store this view follows
+	// after from.
+	catchUpRemote := func(storeID string, from int64) error {
+		rst, err := s.Env.K.Store(ctx, storeID)
+		if err != nil {
+			return nil // gone or unavailable: nothing to send
+		}
+		upTo := rst.Head()
+		rows, err := rst.DocsSince(ctx, from, "")
+		if err != nil {
+			return err
+		}
+		r := s.readerFor(ctx, v, storeID)
+		reached := upTo
+		var docs []docOut
+		var revs []int64
+		for _, d := range rows {
+			for _, o := range r.pageDocs(v, d.Path, stored(d)) {
+				docs, revs = append(docs, o), append(revs, d.Rev)
+			}
+			reached = max(reached, d.Rev)
+		}
+		if err := sendRemote(storeID, docs, revs); err != nil {
+			return err
+		}
+		v.Caught(storeID, reached)
+		return nil
+	}
+	// remote handles a commit of another store the view follows.
+	remote := func(o rt.Out) error {
+		from, ok := v.Watching(o.Store)
+		switch {
+		case !ok || o.Rev <= from:
+			return nil
+		case !s.confirm(ctx, v):
+			return nil // the view was closed: its access or revoked event follows
+		case o.Rev > from+1:
+			return catchUpRemote(o.Store, from)
+		}
+		r := s.readerFor(ctx, v, o.Store)
+		var docs []docOut
+		var revs []int64
+		for _, c := range o.Changes {
+			for _, d := range r.pageDocs(v, c.Path, docOut{Version: c.Version, Body: c.Body, Patch: c.Patch, Base: c.Base, Deleted: c.Deleted}) {
+				docs, revs = append(docs, d), append(revs, o.Rev)
+			}
+		}
+		if err := sendRemote(o.Store, docs, revs); err != nil {
+			return err
+		}
+		v.Caught(o.Store, o.Rev)
+		return nil
 	}
 	if writeSSE(w, "hello", s.hello(ctx, v, head)) != nil {
 		return
 	}
 	if resume && after >= 0 && after < head && catchUp(after) != nil {
 		return
+	}
+	// The other stores it follows: what changed since the runtime last
+	// received a change there (?remote=key:rev,…), or since the view
+	// started following it. Changes it got already come again; the runtime
+	// keeps the newer version, so a resume repeats rather than loses.
+	for storeID, from := range v.Resume(remoteCursors(r.URL.Query().Get("remote"))) {
+		if catchUpRemote(storeID, from) != nil {
+			return
+		}
 	}
 	for _, room := range s.roomsOf(v) {
 		_ = writeSSE(w, "peers", s.peersOf(v.Target, room))
@@ -355,6 +449,8 @@ func (s *Server) viewEvents(w http.ResponseWriter, r *http.Request) {
 			}
 			var err error
 			switch {
+			case o.Rev > 0 && o.Store != "" && o.Store != v.Target:
+				err = remote(o)
 			case o.Rev > 0 && o.Rev <= last:
 			case o.Rev > 0 && !s.confirm(ctx, v):
 				// the view was closed: its access or revoked event follows
@@ -365,9 +461,8 @@ func (s *Server) viewEvents(w http.ResponseWriter, r *http.Request) {
 				var docs []docOut
 				var revs []int64
 				for _, c := range o.Changes {
-					if visible(c.Path) {
-						docs = append(docs, docOut{Path: c.Path, Version: c.Version, Body: c.Body, Patch: c.Patch, Base: c.Base, Deleted: c.Deleted})
-						revs = append(revs, o.Rev)
+					for _, d := range own.pageDocs(v, c.Path, docOut{Version: c.Version, Body: c.Body, Patch: c.Patch, Base: c.Base, Deleted: c.Deleted}) {
+						docs, revs = append(docs, d), append(revs, o.Rev)
 					}
 				}
 				err = sendAll(docs, revs)
@@ -386,11 +481,25 @@ func (s *Server) viewEvents(w http.ResponseWriter, r *http.Request) {
 	}
 }
 
+// remoteCursors reads a reconnecting runtime's per-store cursors:
+// key:rev pairs, comma-separated. What does not parse is left out (that
+// store resumes from where the view started following it).
+func remoteCursors(q string) map[string]int64 {
+	out := map[string]int64{}
+	for _, p := range strings.Split(q, ",") {
+		k, r, ok := strings.Cut(p, ":")
+		if n, err := strconv.ParseInt(r, 10, 64); ok && err == nil && k != "" && n > 0 {
+			out[k] = n
+		}
+	}
+	return out
+}
+
 // publish sends every commit to the views of its store, with a patch
 // instead of the body when the patch is small next to it (diff sync), and
 // tells views of an app whose ref moved to reload.
 func (s *Server) publish(c *store.Commit) {
-	out := rt.Out{Rev: c.Rev}
+	out := rt.Out{Store: c.Store, Rev: c.Rev}
 	refMoved := false
 	for _, ch := range c.Changes {
 		switch ch.Kind {
@@ -409,7 +518,7 @@ func (s *Server) publish(c *store.Commit) {
 			out.Changes = append(out.Changes, rc)
 		}
 	}
-	for _, v := range s.rt.views.Of(c.Store) {
+	for _, v := range s.rt.views.Reaching(c.Store) { // its own views, and views following it
 		v.Send(out)
 	}
 	if refMoved {
@@ -469,6 +578,8 @@ func (s *Server) rpcTable() map[string]rpcMethod {
 		"artifact.publish":            {authz.CodePush, s.rpcArtifactPublish},
 		"slop.call":                   {authz.ActorCall, s.rpcSlopCall},
 		"slop.read":                   {authz.DocRead, s.rpcSlopRead},
+		"files.list":                  {authz.DocRead, s.rpcFilesList},
+		"files.read":                  {authz.DocRead, s.rpcFilesRead},
 		"permissions.state": {authz.StoreRead, func(_ context.Context, v *rt.View, _ json.RawMessage) (any, error) {
 			return permissionStates(v), nil
 		}},
@@ -570,38 +681,59 @@ func (s *Server) rpcDBGet(ctx context.Context, v *rt.View, raw json.RawMessage) 
 	return s.dbGet(ctx, v, a.Path)
 }
 
+// dbGet reads one document at a page path, wherever it lives (SLOP3-008).
+// A document the viewer may not read, in any store, is missing.
 func (s *Server) dbGet(ctx context.Context, v *rt.View, path string) (any, error) {
-	if !rt.ValidDocPath(path) {
-		return nil, rtErr("invalid_argument", "%q is not a document path", path)
-	}
-	missing := map[string]any{"path": path, "exists": false}
-	st, err := s.viewStore(ctx, v)
+	r, err := s.route(ctx, v, path, true)
 	if err != nil {
 		return nil, err
 	}
-	d, err := st.GetDoc(ctx, path, func(path string) bool { return v.Caps.Rules.CanRead(path, v.User, v.Level) })
+	missing := map[string]any{"path": path, "exists": false}
+	if r.tgt.Registry {
+		if d := s.registryDoc(ctx, v, r.tgt, path); d != nil {
+			return map[string]any{"path": path, "exists": true, "version": d.Version, "body": d.Body}, nil
+		}
+		return missing, nil
+	}
+	if r.st == nil {
+		return missing, nil // no access
+	}
+	d, err := r.st.GetDoc(ctx, r.tgt.Path, func(p string) bool { return r.canRead(p, v.User) })
 	if errors.Is(err, store.ErrNotFound) {
 		return missing, nil
 	}
 	if err != nil {
 		return nil, err
 	}
-	return docResult(d), nil
+	return map[string]any{"path": path, "exists": true, "version": d.Version, "body": d.Body}, nil
 }
 
-// readable runs q over the documents the viewer may read.
+// readable runs q (on a page collection) over the documents the viewer may
+// read in the store the collection lives in, with page paths.
 func (s *Server) readable(ctx context.Context, v *rt.View, q rt.Query) ([]rt.Doc, error) {
-	st, err := s.viewStore(ctx, v)
+	r, err := s.route(ctx, v, q.Coll, false)
 	if err != nil {
 		return nil, err
 	}
-	docs, err := st.Query(ctx, q, func(path string) bool { return v.Caps.Rules.CanRead(path, v.User, v.Level) })
+	if r.tgt.Registry {
+		docs := s.registryColl(ctx, v, r.tgt, q.Coll)
+		if docs == nil {
+			docs = []rt.Doc{}
+		}
+		return q.Apply(docs), nil
+	}
+	if r.st == nil {
+		return []rt.Doc{}, nil
+	}
+	pageColl := q.Coll
+	q.Coll = r.tgt.Path
+	docs, err := r.st.Query(ctx, q, func(p string) bool { return r.canRead(p, v.User) })
 	if err != nil {
-		return nil, rtErr("invalid_argument", "invalid query on %q", q.Coll)
+		return nil, rtErr("invalid_argument", "invalid query on %q", pageColl)
 	}
 	out := make([]rt.Doc, 0, len(docs))
 	for _, d := range docs {
-		out = append(out, rt.Doc{Path: d.Path, Body: d.Body, Version: d.Version})
+		out = append(out, rt.Doc{Path: pagePath(pageColl, d.Path), Body: d.Body, Version: d.Version})
 	}
 	return out, nil
 }
@@ -611,7 +743,7 @@ func (s *Server) rpcDBQuery(ctx context.Context, v *rt.View, raw json.RawMessage
 	if err != nil {
 		return nil, err
 	}
-	if err := q.Validate(); err != nil {
+	if err := q.ValidateShape(); err != nil {
 		return nil, rtErr("invalid_argument", "invalid query on %q", q.Coll)
 	}
 	docs, err := s.readable(ctx, v, q)
@@ -642,13 +774,41 @@ func (s *Server) rpcDBWrite(ctx context.Context, v *rt.View, raw json.RawMessage
 	return map[string]any{"version": version, "rev": rev}, nil
 }
 
-// dbWrite validates and commits one write as one turn.
-func (s *Server) dbWrite(ctx context.Context, v *rt.View, in writeIn) (int64, int64, error) {
-	if !rt.ValidDocPath(in.Path) {
-		return 0, 0, rtErr("invalid_argument", "%q is not a document path", in.Path)
+// writeRoute resolves a page path for a write: the registry's documents
+// are not writable yet, and the viewer must be allowed to write it there.
+func (s *Server) writeRoute(ctx context.Context, v *rt.View, path string) (route, error) {
+	r, err := s.route(ctx, v, path, true)
+	if err != nil {
+		return route{}, err
 	}
-	if !v.Caps.Rules.CanWrite(in.Path, v.User, v.Level) {
-		return 0, 0, rtErr("invalid_argument", "this viewer cannot write %q", in.Path)
+	if r.tgt.Registry {
+		return route{}, rtErr("invalid_argument", "the registry's documents are not writable (yet)")
+	}
+	if r.st == nil || !r.canWrite(r.tgt.Path, v.User) {
+		return route{}, rtErr("invalid_argument", "this viewer cannot write %q", path)
+	}
+	return r, nil
+}
+
+// writeWho is who a write through r commits as: the viewer, at their level
+// on the store written, from this page's app.
+func writeWho(v *rt.View, r route) store.Who {
+	w := viewWho(v)
+	w.Level = r.level.String()
+	return w
+}
+
+// dbWrite validates and commits one write as one turn, in the store the
+// page path lives in, or runs the registry verb a registry document's write
+// stands for.
+func (s *Server) dbWrite(ctx context.Context, v *rt.View, in writeIn) (int64, int64, error) {
+	if r, err := s.route(ctx, v, in.Path, true); err == nil && r.tgt.Registry {
+		version, err := s.registryWrite(ctx, v, r.tgt, in)
+		return version, 0, err
+	}
+	r, err := s.writeRoute(ctx, v, in.Path)
+	if err != nil {
+		return 0, 0, err
 	}
 	var body map[string]any
 	switch in.Op {
@@ -666,13 +826,10 @@ func (s *Server) dbWrite(ctx context.Context, v *rt.View, in writeIn) (int64, in
 	default:
 		return 0, 0, rtErr("invalid_argument", "unknown write %q", in.Op)
 	}
-	st, err := s.viewStore(ctx, v)
-	if err != nil {
-		return 0, 0, err
-	}
+	path := r.tgt.Path
 	var version int64
-	c, err := st.Do(ctx, viewWho(v), func(t *store.Turn) error {
-		cur, err := t.GetDoc(in.Path)
+	c, err := r.st.Do(ctx, writeWho(v, r), func(t *store.Turn) error {
+		cur, err := t.GetDoc(path)
 		exists := err == nil
 		if err != nil && !errors.Is(err, store.ErrNotFound) {
 			return err
@@ -688,12 +845,12 @@ func (s *Server) dbWrite(ctx context.Context, v *rt.View, in writeIn) (int64, in
 		}
 		switch in.Op {
 		case "set":
-			version, err = t.SetDoc(in.Path, body, 0)
+			version, err = t.SetDoc(path, body, 0)
 		case "update":
 			if !exists {
 				return rtErr("invalid_argument", "update needs an existing document at %q", in.Path)
 			}
-			version, err = t.UpdateDoc(in.Path, body)
+			version, err = t.UpdateDoc(path, body)
 		case "patch":
 			if !exists || cur.Version != in.Base {
 				return rtErr("conflict_base", "the document moved past version %d", in.Base)
@@ -706,9 +863,9 @@ func (s *Server) dbWrite(ctx context.Context, v *rt.View, in writeIn) (int64, in
 			if perr != nil || !ok {
 				return rtErr("conflict_base", "the patch does not apply")
 			}
-			version, err = t.SetDoc(in.Path, m, 0)
+			version, err = t.SetDoc(path, m, 0)
 		case "delete":
-			_, err = t.DeleteDoc(in.Path)
+			_, err = t.DeleteDoc(path)
 		}
 		return err
 	})
@@ -742,11 +899,12 @@ func (s *Server) rpcDBAcquire(ctx context.Context, v *rt.View, raw json.RawMessa
 	if err != nil {
 		return nil, err
 	}
-	if !rt.ValidDocPath(a.Path) || a.Holder == "" || len(a.Holder) > 200 {
+	if a.Holder == "" || len(a.Holder) > 200 {
 		return nil, rtErr("invalid_argument", "acquire needs a document path and a holder")
 	}
-	if !v.Caps.Rules.CanWrite(a.Path, v.User, v.Level) {
-		return nil, rtErr("invalid_argument", "this viewer cannot write %q", a.Path)
+	r, err := s.writeRoute(ctx, v, a.Path)
+	if err != nil {
+		return nil, err
 	}
 	ttl := a.TTLMs
 	if ttl == 0 {
@@ -754,7 +912,7 @@ func (s *Server) rpcDBAcquire(ctx context.Context, v *rt.View, raw json.RawMessa
 	}
 	ttl = min(max(ttl, rt.MinLeaseMs), rt.MaxLeaseMs)
 	now := time.Now()
-	key := v.Target + "\x00" + a.Path
+	key := r.tgt.Store + "\x00" + r.tgt.Path // the document's, whichever page path names it
 	s.rt.leaseMu.Lock()
 	l, held := s.rt.leases[key]
 	if held && l.holder != a.Holder && l.until.After(now) {
@@ -775,12 +933,8 @@ func (s *Server) rpcDBAcquire(ctx context.Context, v *rt.View, raw json.RawMessa
 		if err != nil {
 			return nil, rtErr("invalid_argument", "%v", err)
 		}
-		st, err := s.viewStore(ctx, v)
-		if err != nil {
-			return nil, err
-		}
-		if _, err := st.Do(ctx, viewWho(v), func(t *store.Turn) error {
-			version, err = t.UpdateDoc(a.Path, data)
+		if _, err := r.st.Do(ctx, writeWho(v, r), func(t *store.Turn) error {
+			version, err = t.UpdateDoc(r.tgt.Path, data)
 			return err
 		}); err != nil {
 			return nil, err
@@ -794,7 +948,8 @@ func (s *Server) rpcDBAcquire(ctx context.Context, v *rt.View, raw json.RawMessa
 }
 
 // rpcDBSubscribe registers a subscription and returns its current
-// documents (without the limit: the runtime windows its mirror).
+// documents (without the limit: the runtime windows its mirror). A
+// subscription in another store makes the view follow that store's log.
 func (s *Server) rpcDBSubscribe(ctx context.Context, v *rt.View, raw json.RawMessage) (any, error) {
 	a, err := args[struct {
 		Sub   string    `json:"sub"`
@@ -805,15 +960,19 @@ func (s *Server) rpcDBSubscribe(ctx context.Context, v *rt.View, raw json.RawMes
 	if err != nil {
 		return nil, err
 	}
-	if a.Sub == "" || len(a.Sub) > 64 || (a.Coll && !rt.ValidCollPath(a.Path)) || (!a.Coll && !rt.ValidDocPath(a.Path)) {
+	if a.Sub == "" || len(a.Sub) > 64 {
 		return nil, rtErr("invalid_argument", "invalid subscription")
+	}
+	r, err := s.route(ctx, v, a.Path, !a.Coll)
+	if err != nil {
+		return nil, err
 	}
 	q := rt.Query{Coll: a.Path}
 	if a.Query != nil {
 		q = *a.Query
 		q.Coll, q.Limit = a.Path, 0
 	}
-	if a.Coll && q.Validate() != nil {
+	if a.Coll && q.ValidateShape() != nil {
 		return nil, rtErr("invalid_argument", "invalid query on %q", a.Path)
 	}
 	// Register first, then read: a write in between arrives on the stream
@@ -821,11 +980,28 @@ func (s *Server) rpcDBSubscribe(ctx context.Context, v *rt.View, raw json.RawMes
 	if !v.Subscribe(rt.Sub{ID: a.Sub, Path: a.Path, Coll: a.Coll}) {
 		return nil, rtErr("resource_exhausted", "at most %d subscriptions per view", rt.MaxSubscriptions)
 	}
-	st, err := s.viewStore(ctx, v)
-	if err != nil {
-		return nil, err
+	var head int64
+	switch {
+	case r.tgt.Own:
+		head = r.st.Head()
+	case r.found:
+		// Follow the other store from its head as read before the
+		// documents: what lands later arrives on the stream. Follow it
+		// too when the viewer may not read it yet (held is none): a grant
+		// there then moves the level the view recorded, and recheck
+		// reopens the page, which subscribes again and reads it.
+		rst := r.st
+		if rst == nil {
+			rst, _ = s.Env.K.Store(ctx, r.tgt.Store)
+		}
+		if rst != nil {
+			v.Watch(rst.ID, rst.Head(), r.held)
+		}
+		st, _ := s.viewStore(ctx, v)
+		if st != nil {
+			head = st.Head()
+		}
 	}
-	head := st.Head()
 	if !a.Coll {
 		d, err := s.dbGet(ctx, v, a.Path)
 		if err != nil {

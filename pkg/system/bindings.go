@@ -7,12 +7,16 @@ import (
 )
 
 // Binding maps a store's read alias to a real store. Assets: the store's
-// actor may also read the target's uploaded files.
+// actor may also read the target's uploaded files, and its pages show them.
+// Prefix (SLOP3-008): the alias also maps into the store's pages' db, as
+// <alias>/… → the target's <prefix>/…, at most at Level.
 type Binding struct {
-	Store  string `json:"store"`
+	Store  string `json:"store,omitempty"` // "" in a mount's alias template
 	Alias  string `json:"alias"`
 	Target string `json:"target"`
 	Assets bool   `json:"assets,omitempty"`
+	Prefix string `json:"prefix,omitempty"`
+	Level  string `json:"level,omitempty"`
 }
 
 // Binding returns the target of a store's alias.
@@ -24,7 +28,7 @@ func (d *DB) Binding(ctx context.Context, store, alias string) (string, error) {
 // BindingOf returns a store's alias with its settings.
 func (d *DB) BindingOf(ctx context.Context, store, alias string) (Binding, error) {
 	b := Binding{Store: store, Alias: alias}
-	err := d.QueryRowContext(ctx, `SELECT target, assets FROM bindings WHERE store = ? AND alias = ?`, store, alias).Scan(&b.Target, &b.Assets)
+	err := d.QueryRowContext(ctx, `SELECT target, assets, prefix, level FROM bindings WHERE store = ? AND alias = ?`, store, alias).Scan(&b.Target, &b.Assets, &b.Prefix, &b.Level)
 	if errors.Is(err, sql.ErrNoRows) {
 		return b, ErrNotFound
 	}
@@ -33,7 +37,7 @@ func (d *DB) BindingOf(ctx context.Context, store, alias string) (Binding, error
 
 // Bindings lists a store's aliases.
 func (d *DB) Bindings(ctx context.Context, store string) ([]Binding, error) {
-	rows, err := d.QueryContext(ctx, `SELECT store, alias, target, assets FROM bindings WHERE store = ? ORDER BY alias`, store)
+	rows, err := d.QueryContext(ctx, `SELECT store, alias, target, assets, prefix, level FROM bindings WHERE store = ? ORDER BY alias`, store)
 	if err != nil {
 		return nil, err
 	}
@@ -41,7 +45,7 @@ func (d *DB) Bindings(ctx context.Context, store string) ([]Binding, error) {
 	out := []Binding{}
 	for rows.Next() {
 		var b Binding
-		if err := rows.Scan(&b.Store, &b.Alias, &b.Target, &b.Assets); err != nil {
+		if err := rows.Scan(&b.Store, &b.Alias, &b.Target, &b.Assets, &b.Prefix, &b.Level); err != nil {
 			return nil, err
 		}
 		out = append(out, b)
@@ -51,12 +55,19 @@ func (d *DB) Bindings(ctx context.Context, store string) ([]Binding, error) {
 
 // SetBinding points a store's alias at a target store.
 func (d *DB) SetBinding(ctx context.Context, actor, via string, b Binding) error {
+	if b.Level == "" {
+		b.Level = "view"
+	}
 	return d.Tx(ctx, func(tx *sql.Tx) error {
-		if _, err := tx.ExecContext(ctx, `INSERT INTO bindings (store, alias, target, assets) VALUES (?, ?, ?, ?)
-			ON CONFLICT (store, alias) DO UPDATE SET target = excluded.target, assets = excluded.assets`, b.Store, b.Alias, b.Target, b.Assets); err != nil {
+		if _, err := tx.ExecContext(ctx, `INSERT INTO bindings (store, alias, target, assets, prefix, level) VALUES (?, ?, ?, ?, ?, ?)
+			ON CONFLICT (store, alias) DO UPDATE SET target = excluded.target, assets = excluded.assets,
+			prefix = excluded.prefix, level = excluded.level`, b.Store, b.Alias, b.Target, b.Assets, b.Prefix, b.Level); err != nil {
 			return err
 		}
 		after := b.Target
+		if b.Prefix != "" {
+			after += ":" + b.Prefix + " (in pages at " + b.Alias + ", " + b.Level + ")"
+		}
 		if b.Assets {
 			after += " (with uploads)"
 		}
