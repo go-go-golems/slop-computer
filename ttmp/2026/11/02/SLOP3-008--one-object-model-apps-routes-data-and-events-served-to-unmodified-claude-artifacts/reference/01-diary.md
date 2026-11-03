@@ -491,7 +491,7 @@ Phase 3 makes the registry rows an app may see readable through the db API: `_st
 - `pkg/server/registry.go` (new): `registryColl` / `registryDoc` for reads; `registryWriteOf` maps a write to `{verb, args, change kind, key}`; `registryWrite` gates and runs it.
 - `pkg/server/views.go`: `dbGet` and `readable` (query/subscribe snapshot) answer registry targets from `registry.go`; `dbWrite` resolves the route first and hands registry targets to `registryWrite`, returning `{version, rev: 0}`.
 - `pkg/system/stores.go`: `LastChange(kind, key)` = `max(rev)` in system `_changes` for a row, used as the document's version and for `ifVersion`.
-- `web/runtime/src/db.ts`: `writeRPC` answers `confirmation_required` with `ask("confirm", {confirm})` and retries once; `test/db.test.ts`'s transport mock gained `ask`. `make runtime` rebuilt `pkg/server/assets/claude.js`.
+- `web/runtime/src/db.ts`: `writeRPC` answers `confirmation_required` with `ask("confirm", {confirm})` and retries (a deny rejects `confirmation_declined`); `test/db.test.ts`'s transport mock gained `ask`. `make runtime` rebuilt `pkg/server/assets/claude.js`.
 - `pkg/server/pathspace_test.go`: `TestRegistryDocuments`, `TestRegistryWritesNeedAdminStores`, helper `adminView`; `TestStoresSpace`'s phase-1 placeholder ("registry documents read as missing") now expects the row.
 
 ### Why
@@ -517,7 +517,7 @@ Phase 3 makes the registry rows an app may see readable through the db API: `_st
 
 ### What was tricky to build
 - Ordering in `dbWrite`: page writes validated the path with `validPath` before routing, which rejects `_` segments. Registry targets had to be recognised by the space first, then sent past the document-store path entirely (there is no store turn, so `rev` is 0 and no `doc` event is published).
-- The confirmation retry: the page's `db.set` promise must stay pending while the person decides in the shell. The runtime does it with `ask("confirm")` (which resolves after the shell's approve/deny) and one retry; a deny surfaces as the retry's `confirmation_required` → rejection.
+- The confirmation retry: the page's `db.set` promise must stay pending while the person decides in the shell. The runtime does it with `ask("confirm")` (which resolves after the shell's approve/deny) and a retry, at most four rounds, the same loop `caps.ts` uses for `slop.call`; a deny rejects with `confirmation_declined`.
 
 ### What warrants a second pair of eyes
 - A guest view of `_stores/<id>` shows `owner` (a person id) for any store the guest can open. Person ids are opaque but stable; review whether `owner` should be dropped below admin.
