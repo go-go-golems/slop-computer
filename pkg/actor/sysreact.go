@@ -8,7 +8,7 @@ import (
 	"github.com/dop251/goja"
 
 	"github.com/go-go-golems/slop-computer/pkg/store"
-	"github.com/go-go-golems/slop-computer/pkg/system"
+	"github.com/go-go-golems/slop-computer/pkg/sysdb"
 )
 
 // --- system: reactors (SLOP3-002) -----------------------------------------
@@ -149,7 +149,7 @@ func (a *Actor) reactSystem(cx *goja.Object) (more bool, err error) {
 
 // systemSelects reports whether a system log commit has a change of kind
 // (any change for "*").
-func systemSelects(kind string, e system.LogEntry) bool {
+func systemSelects(kind string, e sysdb.LogEntry) bool {
 	if kind == "*" {
 		return true
 	}

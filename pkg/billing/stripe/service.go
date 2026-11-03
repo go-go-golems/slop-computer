@@ -8,7 +8,7 @@ import (
 	"time"
 
 	"github.com/go-go-golems/slop-computer/pkg/billing"
-	"github.com/go-go-golems/slop-computer/pkg/system"
+	"github.com/go-go-golems/slop-computer/pkg/sysdb"
 )
 
 var (
@@ -33,14 +33,14 @@ type Person struct{ ID, Email, Name string }
 
 type Service struct {
 	Gateway Gateway
-	Store   *system.DB
+	Store   *billing.Book
 	Config  Config
 	wake    chan struct{}
 	// OnChange is called after a person's projection changed.
 	OnChange func(person string)
 }
 
-func NewService(g Gateway, s *system.DB, cfg Config) *Service {
+func NewService(g Gateway, s *billing.Book, cfg Config) *Service {
 	return &Service{Gateway: g, Store: s, Config: cfg, wake: make(chan struct{}, 1)}
 }
 
@@ -59,7 +59,7 @@ func (s *Service) ensureCustomer(ctx context.Context, u Person) (string, error) 
 	if err == nil {
 		return id, nil
 	}
-	if !errors.Is(err, system.ErrNotFound) {
+	if !errors.Is(err, sysdb.ErrNotFound) {
 		return "", err
 	}
 	id, err = s.Gateway.CreateCustomer(ctx, u.ID, s.Config.Deployment, u.Email, u.Name, s.Config.Deployment+"-customer-"+u.ID)
@@ -127,7 +127,7 @@ func (s *Service) Checkout(ctx context.Context, u Person, price string, accepted
 	if err != nil {
 		return "", fmt.Errorf("create Checkout session: %w", err)
 	}
-	if err = s.Store.OpenCheckout(ctx, attempt.ID, cs.ID, cs.URL, cs.ExpiresAt); errors.Is(err, system.ErrNotFound) {
+	if err = s.Store.OpenCheckout(ctx, attempt.ID, cs.ID, cs.URL, cs.ExpiresAt); errors.Is(err, sysdb.ErrNotFound) {
 		// Another price retired this attempt while the Session was being
 		// created; its URL must not reach the browser.
 		if xerr := s.Gateway.ExpireCheckout(ctx, cs.ID); xerr != nil {
@@ -143,7 +143,7 @@ func (s *Service) Checkout(ctx context.Context, u Person, price string, accepted
 
 // supersede retires an admitted attempt for another price. An open Session
 // is expired at Stripe; a completed one means a subscription is on its way.
-func (s *Service) supersede(ctx context.Context, a system.CheckoutAttempt) error {
+func (s *Service) supersede(ctx context.Context, a billing.CheckoutAttempt) error {
 	if a.SessionID != nil {
 		cs, err := s.Gateway.RetrieveCheckout(ctx, *a.SessionID)
 		if err != nil {
@@ -169,7 +169,7 @@ func (s *Service) supersede(ctx context.Context, a system.CheckoutAttempt) error
 // Portal creates a Customer Portal session for the person's own Customer.
 func (s *Service) Portal(ctx context.Context, u Person, back string) (string, error) {
 	customer, err := s.Store.CustomerFor(ctx, u.ID)
-	if errors.Is(err, system.ErrNotFound) {
+	if errors.Is(err, sysdb.ErrNotFound) {
 		return "", ErrNoCustomer
 	}
 	if err != nil {
@@ -188,7 +188,7 @@ func (s *Service) Refresh(ctx context.Context, u Person, sessionID string) error
 		}
 	}
 	customer, err := s.Store.CustomerFor(ctx, u.ID)
-	if errors.Is(err, system.ErrNotFound) {
+	if errors.Is(err, sysdb.ErrNotFound) {
 		return ErrNoCustomer
 	}
 	if err != nil {
@@ -210,7 +210,7 @@ func (s *Service) Ingest(ctx context.Context, payload []byte, signature string) 
 	if e.Livemode != s.Config.Livemode {
 		return e, errors.New("event mode does not match deployment")
 	}
-	rec := system.StripeEvent{EventID: e.ID, Type: e.Type, CustomerID: e.CustomerID, SubscriptionID: e.SubscriptionID, SessionID: e.SessionID,
+	rec := billing.StripeEvent{EventID: e.ID, Type: e.Type, CustomerID: e.CustomerID, SubscriptionID: e.SubscriptionID, SessionID: e.SessionID,
 		Livemode: e.Livemode, StripeCreated: &e.Created}
 	if !e.Supported {
 		rec.State = "ignored"
@@ -258,7 +258,7 @@ func (s *Service) Drain(ctx context.Context) {
 
 func (s *Service) processOne(ctx context.Context) (bool, error) {
 	e, err := s.Store.ClaimEvent(ctx, 2*time.Minute)
-	if errors.Is(err, system.ErrNotFound) {
+	if errors.Is(err, sysdb.ErrNotFound) {
 		return false, nil
 	}
 	if err != nil {
@@ -278,7 +278,7 @@ func (s *Service) processOne(ctx context.Context) (bool, error) {
 		return true, s.Store.CompleteEvent(ctx, e, "", nil, "ignored")
 	}
 	person, err := s.Store.PersonForCustomer(ctx, customer)
-	if errors.Is(err, system.ErrNotFound) {
+	if errors.Is(err, sysdb.ErrNotFound) {
 		// A Stripe account can be shared with other applications; their
 		// Customers are not ours to retry.
 		dep, derr := s.Gateway.CustomerDeployment(call, customer)

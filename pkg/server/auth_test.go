@@ -114,23 +114,23 @@ func TestDeviceLoginWhoamiRevoke(t *testing.T) {
 func TestSignupRoles(t *testing.T) {
 	h := newHarness(t)
 	ctx := context.Background()
-	a, _, _ := h.sys.SignInUser(ctx, "Admin@Example.com", "", "", h.cfg.AdminEmails, true)
-	m, _, _ := h.sys.SignInUser(ctx, "kim@example.com", "", "", h.cfg.AdminEmails, true)
-	p, _, _ := h.sys.SignInUser(ctx, "pat@example.com", "", "", h.cfg.AdminEmails, false)
+	a, _, _ := h.k.People.SignInUser(ctx, "Admin@Example.com", "", "", h.cfg.AdminEmails, true)
+	m, _, _ := h.k.People.SignInUser(ctx, "kim@example.com", "", "", h.cfg.AdminEmails, true)
+	p, _, _ := h.k.People.SignInUser(ctx, "pat@example.com", "", "", h.cfg.AdminEmails, false)
 	if a.Role != "admin" || m.Role != "member" || p.Role != "pending" {
 		t.Fatalf("roles: %s %s %s", a.Role, m.Role, p.Role)
 	}
 	// Signing in again keeps the same person.
-	m2, created, _ := h.sys.SignInUser(ctx, "kim@example.com", "", "", h.cfg.AdminEmails, true)
+	m2, created, _ := h.k.People.SignInUser(ctx, "kim@example.com", "", "", h.cfg.AdminEmails, true)
 	if created || m2.ID != m.ID {
 		t.Fatalf("second sign-in made a new person")
 	}
 	// Disabling revokes tokens.
-	_, tk, _ := h.sys.CreateToken(ctx, m.ID, "x", []string{"read"}, 1)
-	if _, err := h.sys.SetRole(ctx, a.ID, "test", m.ID, "disabled"); err != nil {
+	_, tk, _ := h.k.People.CreateToken(ctx, m.ID, "x", []string{"read"}, 1)
+	if _, err := h.k.People.SetRole(ctx, a.ID, "test", m.ID, "disabled"); err != nil {
 		t.Fatal(err)
 	}
-	got, _ := h.sys.Token(ctx, tk.ID)
+	got, _ := h.k.People.Token(ctx, tk.ID)
 	if got.RevokedAt == nil {
 		t.Fatalf("disabling did not revoke the token")
 	}

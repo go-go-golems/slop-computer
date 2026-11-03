@@ -11,7 +11,6 @@ import (
 
 	"github.com/go-go-golems/slop-computer/pkg/identity"
 	"github.com/go-go-golems/slop-computer/pkg/ids"
-	"github.com/go-go-golems/slop-computer/pkg/system"
 )
 
 // flowCookie binds an OIDC flow to the browser that started it.
@@ -65,7 +64,7 @@ func readSecret(path string) (string, error) {
 // oidcStart sends the browser to the provider with S256 PKCE and a nonce.
 func (s *Server) oidcStart(w http.ResponseWriter, r *http.Request, ret string) {
 	state, nonce, verifier, binding := ids.New("", 32), ids.New("", 24), ids.New("", 43), ids.New("", 32)
-	if err := s.Sys.SaveLoginFlow(r.Context(), state, system.LoginFlow{BindingHash: ids.Hash(binding), Nonce: nonce, Verifier: verifier, ReturnPath: ret}, 10*time.Minute); err != nil {
+	if err := s.People.SaveLoginFlow(r.Context(), state, identity.LoginFlow{BindingHash: ids.Hash(binding), Nonce: nonce, Verifier: verifier, ReturnPath: ret}, 10*time.Minute); err != nil {
 		http.Error(w, "could not start sign-in", http.StatusServiceUnavailable)
 		return
 	}
@@ -89,15 +88,15 @@ func (s *Server) oidcCallback(w http.ResponseWriter, r *http.Request) {
 	q := r.URL.Query()
 	state := q.Get("state")
 	if q.Get("error") != "" {
-		s.signInFailed(w, r, "Sign-in was cancelled or refused.", s.Sys.LoginFlowReturn(r.Context(), state))
+		s.signInFailed(w, r, "Sign-in was cancelled or refused.", s.People.LoginFlowReturn(r.Context(), state))
 		return
 	}
 	c, err := r.Cookie(s.flowCookie())
 	if err != nil || c.Value == "" || state == "" || q.Get("code") == "" {
-		s.signInFailed(w, r, "This sign-in was started in another browser or has expired.", s.Sys.LoginFlowReturn(r.Context(), state))
+		s.signInFailed(w, r, "This sign-in was started in another browser or has expired.", s.People.LoginFlowReturn(r.Context(), state))
 		return
 	}
-	flow, err := s.Sys.ConsumeLoginFlow(r.Context(), state, ids.Hash(c.Value))
+	flow, err := s.People.ConsumeLoginFlow(r.Context(), state, ids.Hash(c.Value))
 	if err != nil {
 		s.signInFailed(w, r, "This sign-in was started in another browser or has expired.", "/")
 		return

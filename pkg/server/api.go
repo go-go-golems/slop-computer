@@ -59,7 +59,7 @@ func (s *Server) apiCall(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 	}
-	s.Sys.TouchPerson(r.Context(), p.ID())
+	s.People.TouchPerson(r.Context(), p.ID())
 	ctx := withPrincipal(r.Context(), p)
 	if v, ok := s.Verbs.Get(name); ok && v.Effect == verbs.EffectStream && strings.Contains(r.Header.Get("Accept"), "text/event-stream") {
 		s.apiStream(ctx, w, p, name, args)

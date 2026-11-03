@@ -9,9 +9,10 @@ import (
 	"github.com/go-go-golems/slop-computer/pkg/actor"
 	"github.com/go-go-golems/slop-computer/pkg/apps"
 	"github.com/go-go-golems/slop-computer/pkg/authz"
+	"github.com/go-go-golems/slop-computer/pkg/registry"
 	"github.com/go-go-golems/slop-computer/pkg/rt"
 	"github.com/go-go-golems/slop-computer/pkg/store"
-	"github.com/go-go-golems/slop-computer/pkg/system"
+	"github.com/go-go-golems/slop-computer/pkg/sysdb"
 	"github.com/go-go-golems/slop-computer/pkg/verbs"
 )
 
@@ -86,7 +87,7 @@ func actorVerbs(e *Env) []*verbs.Verb {
 				if !slices.Contains(r.Manifest.Slop.Modules, mod) {
 					return nil, verbs.Errf("invalid_argument", "%s does not declare %s in app.json slop.modules", app, mod)
 				}
-				if err := e.Sys.TrustModule(ctx, p.ID(), p.ViaLabel(), app, mod); err != nil {
+				if err := e.K.Gov.TrustModule(ctx, p.ID(), p.ViaLabel(), app, mod); err != nil {
 					return nil, err
 				}
 				e.A.RestartApp(app) // use() is evaluated at start
@@ -96,8 +97,8 @@ func actorVerbs(e *Env) []*verbs.Verb {
 			Args: []verbs.Arg{{Name: "app", Type: "string", Pos: 1, Required: true}, {Name: "module", Type: "string", Pos: 2, Required: true}},
 			Run: func(ctx context.Context, p *access.Principal, a verbs.Args) (any, error) {
 				app, mod := a.S("app"), a.S("module")
-				err := e.Sys.UntrustModule(ctx, p.ID(), p.ViaLabel(), app, mod)
-				if errors.Is(err, system.ErrNotFound) {
+				err := e.K.Gov.UntrustModule(ctx, p.ID(), p.ViaLabel(), app, mod)
+				if errors.Is(err, sysdb.ErrNotFound) {
 					return nil, verbs.Errf("not_found", "%s is not trusted with %s", app, mod)
 				}
 				if err != nil {
@@ -144,7 +145,7 @@ func actorVerbs(e *Env) []*verbs.Verb {
 				for _, m := range e.A.Modules() {
 					reg = append(reg, map[string]any{"name": m.Name, "doc": m.Doc})
 				}
-				trust, err := e.Sys.AppModules(ctx, a.S("app"))
+				trust, err := e.K.Gov.AppModules(ctx, a.S("app"))
 				if err != nil {
 					return nil, err
 				}
@@ -184,7 +185,7 @@ func actorVerbs(e *Env) []*verbs.Verb {
 				if _, _, err := e.open(ctx, p, a.S("store"), rt.LevelView, "reading"); err != nil {
 					return nil, err
 				}
-				return e.Sys.Bindings(ctx, a.S("store"))
+				return e.K.Registry.Bindings(ctx, a.S("store"))
 			}},
 		{Name: "bind.set", Doc: "Point a store's read alias at another store (grant store:<store> view there for actors); with --prefix, also map it into the store's pages' db: <alias>/… reads the target's <prefix>/… as the viewer, at most at --level.", Scope: verbs.Write, Action: authz.StoreAdmin,
 			Args: []verbs.Arg{storeArg, {Name: "alias", Type: "string", Pos: 2, Required: true}, {Name: "target", Type: "string", Pos: 3, Required: true},
@@ -195,11 +196,11 @@ func actorVerbs(e *Env) []*verbs.Verb {
 				if _, _, err := e.open(ctx, p, a.S("store"), rt.LevelAdmin, "binding"); err != nil {
 					return nil, err
 				}
-				b := system.Binding{Store: a.S("store"), Alias: a.S("alias"), Target: a.S("target"), Assets: a.B("assets"), Prefix: a.S("prefix"), Level: a.S("level")}
+				b := registry.Binding{Store: a.S("store"), Alias: a.S("alias"), Target: a.S("target"), Assets: a.B("assets"), Prefix: a.S("prefix"), Level: a.S("level")}
 				if err := checkAlias(ctx, e, p, &b); err != nil {
 					return nil, err
 				}
-				if err := e.Sys.SetBinding(ctx, p.ID(), p.ViaLabel(), b); err != nil {
+				if err := e.K.Registry.SetBinding(ctx, p.ID(), p.ViaLabel(), b); err != nil {
 					return nil, err
 				}
 				return b, nil
@@ -210,8 +211,8 @@ func actorVerbs(e *Env) []*verbs.Verb {
 				if _, _, err := e.open(ctx, p, a.S("store"), rt.LevelAdmin, "unbinding"); err != nil {
 					return nil, err
 				}
-				err := e.Sys.RemoveBinding(ctx, p.ID(), p.ViaLabel(), a.S("store"), a.S("alias"))
-				if errors.Is(err, system.ErrNotFound) {
+				err := e.K.Registry.RemoveBinding(ctx, p.ID(), p.ViaLabel(), a.S("store"), a.S("alias"))
+				if errors.Is(err, sysdb.ErrNotFound) {
 					return nil, verbs.Errf("not_found", "no alias %s on %s", a.S("alias"), a.S("store"))
 				}
 				return map[string]any{"removed": a.S("alias")}, err
@@ -224,7 +225,7 @@ func actorVerbs(e *Env) []*verbs.Verb {
 // a prefix (view when none is given), and p holding that level on the target,
 // admin with assets. You cannot alias more than you hold: pages read the
 // target through the alias up to its level, as their own viewers.
-func checkAlias(ctx context.Context, e *Env, p *access.Principal, b *system.Binding) error {
+func checkAlias(ctx context.Context, e *Env, p *access.Principal, b *registry.Binding) error {
 	level := rt.LevelView
 	switch {
 	case b.Prefix == "" && b.Level != "":

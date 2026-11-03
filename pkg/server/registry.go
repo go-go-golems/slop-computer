@@ -16,7 +16,7 @@ import (
 	"github.com/go-go-golems/slop-computer/pkg/access"
 	"github.com/go-go-golems/slop-computer/pkg/registry"
 	"github.com/go-go-golems/slop-computer/pkg/rt"
-	"github.com/go-go-golems/slop-computer/pkg/system"
+	"github.com/go-go-golems/slop-computer/pkg/sysdb"
 )
 
 // regHost is the server as the registry documents' Host.
@@ -33,7 +33,7 @@ func (h regHost) ActingApp(ctx context.Context, v *rt.View) *access.Principal {
 	return h.s.personAs(ctx, v.User, "app:"+v.App)
 }
 
-func (h regHost) Reachable(ctx context.Context, v *rt.View, ceil rt.Level) ([]system.StoreRow, error) {
+func (h regHost) Reachable(ctx context.Context, v *rt.View, ceil rt.Level) ([]sysdb.StoreRow, error) {
 	return h.s.reachableStores(ctx, v, ceil)
 }
 
@@ -77,7 +77,7 @@ func (s *Server) followSystem() {
 				case "store":
 					stores[c.Key] = true
 				case "link":
-					if l, err := s.Sys.LinkByID(ctx, c.Key); err == nil {
+					if l, err := s.Registry.LinkByID(ctx, c.Key); err == nil {
 						stores[l.Store] = true
 					}
 				case "person", "comp":

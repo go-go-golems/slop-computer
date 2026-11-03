@@ -23,10 +23,11 @@ import (
 	"github.com/go-go-golems/slop-computer/pkg/authz"
 	capsdb "github.com/go-go-golems/slop-computer/pkg/caps/db"
 	"github.com/go-go-golems/slop-computer/pkg/httpx"
+	"github.com/go-go-golems/slop-computer/pkg/policy"
 	"github.com/go-go-golems/slop-computer/pkg/registry"
 	"github.com/go-go-golems/slop-computer/pkg/rt"
 	"github.com/go-go-golems/slop-computer/pkg/store"
-	"github.com/go-go-golems/slop-computer/pkg/system"
+	"github.com/go-go-golems/slop-computer/pkg/sysdb"
 )
 
 // The page protocol (ported from slop-computer's rt.go, same wire format so
@@ -79,7 +80,7 @@ func (s *Server) sandboxURL(ctx context.Context, v *rt.View, parent string) (str
 		return "", "", rtErr("unavailable", "this server has no sandbox host")
 	}
 	l := s.label(v.Target, v.App)
-	if err := s.Sys.SetOrigin(ctx, l, v.Target, v.App); err != nil {
+	if err := s.People.SetOrigin(ctx, l, v.Target, v.App); err != nil {
 		return "", "", err
 	}
 	origin := s.Cfg.Scheme + "://" + l + "." + s.Cfg.Hosts.Sandbox
@@ -175,8 +176,8 @@ func (s *Server) openView(ctx context.Context, p *access.Principal, storeID, par
 		name = p.Person.Name
 	}
 	pol := map[string]bool{}
-	for _, c := range system.PolicyCaps {
-		pol[c] = s.Sys.Policy(ctx, run.App, c, string(d.Audience))
+	for _, c := range policy.PolicyCaps {
+		pol[c] = s.Gov.Policy(ctx, run.App, c, string(d.Audience))
 	}
 	v := &rt.View{Target: storeID, App: run.App, Version: int(run.N), User: p.ID(), Name: name,
 		Role: string(d.Audience), Level: d.Level, Caps: caps, Policy: pol, Kind: "viewer",
@@ -917,7 +918,7 @@ func hue(id string) string {
 	return fmt.Sprintf("hsl(%d 55%% 45%%)", h)
 }
 
-func profileOf(v *rt.View, p system.Person) profile {
+func profileOf(v *rt.View, p sysdb.Person) profile {
 	out := profile{ID: p.ID, Color: hue(p.ID)}
 	if p.Kind == "guest" {
 		out.Name, out.Guest = "Guest", true
@@ -954,7 +955,7 @@ func (s *Server) userInfo(ctx context.Context, v *rt.View) map[string]any {
 	if v.Caps.Declared["user"] {
 		out["id"] = v.User
 		out["guest"] = strings.HasPrefix(v.User, "vis_") || v.User == ""
-		if p, err := s.Sys.Person(ctx, v.User); err == nil {
+		if p, err := s.People.Person(ctx, v.User); err == nil {
 			out["profile"] = profileOf(v, p)
 		}
 	}
@@ -971,7 +972,7 @@ func (s *Server) rpcUserProfiles(ctx context.Context, v *rt.View, raw json.RawMe
 	}
 	out := map[string]profile{}
 	for _, id := range a.IDs {
-		if p, err := s.Sys.Person(ctx, id); err == nil {
+		if p, err := s.People.Person(ctx, id); err == nil {
 			out[id] = profileOf(v, p)
 		}
 	}
@@ -988,10 +989,10 @@ func (s *Server) rpcUserSearch(ctx context.Context, v *rt.View, raw json.RawMess
 		return []profile{}, nil
 	}
 	ids := []string{}
-	if row, err := s.Sys.StoreByID(ctx, v.Target); err == nil {
+	if row, err := s.Registry.StoreByID(ctx, v.Target); err == nil {
 		ids = append(ids, row.Owner)
 	}
-	if gs, err := s.Sys.Grants(ctx, v.Target); err == nil {
+	if gs, err := s.Registry.Grants(ctx, v.Target); err == nil {
 		for _, g := range gs {
 			if strings.HasPrefix(g.Subject, "usr_") && !slices.Contains(ids, g.Subject) {
 				ids = append(ids, g.Subject)
@@ -1001,7 +1002,7 @@ func (s *Server) rpcUserSearch(ctx context.Context, v *rt.View, raw json.RawMess
 	q := strings.ToLower(strings.TrimSpace(a.Q))
 	out := []profile{}
 	for _, id := range ids {
-		p, err := s.Sys.Person(ctx, id)
+		p, err := s.People.Person(ctx, id)
 		if err != nil {
 			continue
 		}

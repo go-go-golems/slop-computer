@@ -10,8 +10,8 @@ import (
 
 	"github.com/go-go-golems/slop-computer/pkg/access"
 	"github.com/go-go-golems/slop-computer/pkg/httpx"
+	"github.com/go-go-golems/slop-computer/pkg/identity"
 	"github.com/go-go-golems/slop-computer/pkg/store"
-	"github.com/go-go-golems/slop-computer/pkg/system"
 )
 
 // claimDocsAtMost bounds the private documents one claim copies.
@@ -37,7 +37,7 @@ func (s *Server) siteLinks(w http.ResponseWriter, r *http.Request) {
 	if in.Days > 0 {
 		until = time.Now().Add(time.Duration(in.Days) * 24 * time.Hour).UnixMilli()
 	}
-	l, token, err := s.Sys.CreateLink(r.Context(), p.ID(), "site", id, in.Level, until)
+	l, token, err := s.Registry.CreateLink(r.Context(), p.ID(), "site", id, in.Level, until)
 	if err != nil {
 		httpx.Fail(w, 400, "invalid_argument", err.Error())
 		return
@@ -55,12 +55,12 @@ func (s *Server) siteRevokeLink(w http.ResponseWriter, r *http.Request, linkID s
 	if !ok {
 		return
 	}
-	l, err := s.Sys.LinkByID(r.Context(), linkID)
+	l, err := s.Registry.LinkByID(r.Context(), linkID)
 	if err != nil || l.Store != id {
 		httpx.Fail(w, 404, "not_found", "no such link here")
 		return
 	}
-	if _, err := s.Sys.RevokeLink(r.Context(), p.ID(), "site", linkID); err != nil {
+	if _, err := s.Registry.RevokeLink(r.Context(), p.ID(), "site", linkID); err != nil {
 		failView(w, err)
 		return
 	}
@@ -71,30 +71,30 @@ func (s *Server) siteRevokeLink(w http.ResponseWriter, r *http.Request, linkID s
 // redeemLink gives p the level of a share link on a store. A link never
 // lowers a level; an expired or revoked one is link_invalid.
 func (s *Server) redeemLink(ctx context.Context, storeID, token string, p *access.Principal) error {
-	row, err := s.Sys.StoreByID(ctx, storeID)
+	row, err := s.Registry.StoreByID(ctx, storeID)
 	if err != nil {
 		return err
 	}
 	have := s.Env.K.Access.Level(ctx, p, row).LevelName()
-	_, _, err = s.Sys.RedeemLink(ctx, storeID, token, p.ID(), have)
+	_, _, err = s.Registry.RedeemLink(ctx, storeID, token, p.ID(), have)
 	return err
 }
 
 // claimable is what the guest a person signed in over left behind. With
 // nothing left, the offer is settled at once.
-func (s *Server) claimable(r *http.Request, p *access.Principal, sess *system.Session) map[string]int {
+func (s *Server) claimable(r *http.Request, p *access.Principal, sess *identity.Session) map[string]int {
 	if p == nil || p.Kind != access.KindUser || sess == nil || sess.FromGuest == "" {
 		return nil
 	}
 	ctx := r.Context()
 	docs := s.Env.K.PrivateDocs(ctx, sess.FromGuest)
-	grants, err := s.Sys.SubjectGrants(ctx, sess.FromGuest)
+	grants, err := s.People.SubjectGrants(ctx, sess.FromGuest)
 	if err != nil {
 		return nil
 	}
 	if len(docs) == 0 && len(grants) == 0 {
 		if c, err := r.Cookie(s.siteCookie()); err == nil {
-			_ = s.Sys.SettleClaim(ctx, c.Value)
+			_ = s.People.SettleClaim(ctx, c.Value)
 		}
 		return nil
 	}
@@ -160,7 +160,7 @@ func (s *Server) siteClaim(w http.ResponseWriter, r *http.Request) {
 				return
 			}
 		}
-		stores, err := s.Sys.MoveGrants(ctx, guest, user)
+		stores, err := s.People.MoveGrants(ctx, guest, user)
 		if err != nil {
 			failView(w, err)
 			return
@@ -171,7 +171,7 @@ func (s *Server) siteClaim(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 	if c, err := r.Cookie(s.siteCookie()); err == nil {
-		_ = s.Sys.SettleClaim(ctx, c.Value)
+		_ = s.People.SettleClaim(ctx, c.Value)
 	}
 	httpx.JSON(w, 200, map[string]any{"kept": in.Keep, "docs": kept, "grants": moved})
 }

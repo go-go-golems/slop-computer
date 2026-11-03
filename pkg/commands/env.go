@@ -14,7 +14,6 @@ import (
 	"github.com/go-go-golems/slop-computer/pkg/kernel"
 	"github.com/go-go-golems/slop-computer/pkg/rt"
 	"github.com/go-go-golems/slop-computer/pkg/store"
-	"github.com/go-go-golems/slop-computer/pkg/system"
 	"github.com/go-go-golems/slop-computer/pkg/verbs"
 )
 
@@ -24,7 +23,6 @@ import (
 // SLOP3-009 step 3), not from callbacks.
 type Env struct {
 	Cfg *config.Config
-	Sys *system.DB
 	K   *kernel.Kernel
 	A   *actor.Manager
 

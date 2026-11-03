@@ -248,8 +248,8 @@ func TestSecretsAndPlatformPolicy(t *testing.T) {
 	if got["id"] != "mias-notes" {
 		t.Fatalf("platform.stores.create = %v", got)
 	}
-	row, err := h.sys.StoreByID(context.Background(), "mias-notes")
-	mp, _ := h.sys.PersonByEmail(context.Background(), "mia@example.com")
+	row, err := h.k.Registry.StoreByID(context.Background(), "mias-notes")
+	mp, _ := h.k.People.PersonByEmail(context.Background(), "mia@example.com")
 	if err != nil || row.Owner != mp.ID {
 		t.Fatalf("created store = %+v %v (want owner %s)", row, err, mp.ID)
 	}

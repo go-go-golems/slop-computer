@@ -18,7 +18,7 @@ const mod = "github.com/go-go-golems/slop-computer/"
 // rules name).
 var (
 	core     = []string{"pkg/rt", "pkg/sysdb", "pkg/ids", "pkg/blobs", "pkg/store", "pkg/access", "pkg/authz", "pkg/apps", "pkg/config", "pkg/httpx", "pkg/client"}
-	domains  = []string{"pkg/system", "pkg/registry", "pkg/identity", "pkg/policy", "pkg/billing", "pkg/llm", "pkg/kernel"}
+	domains  = []string{"pkg/registry", "pkg/identity", "pkg/policy", "pkg/billing", "pkg/llm", "pkg/kernel"}
 	caps     = []string{"pkg/caps"}
 	runtime  = []string{"pkg/actor"}
 	table    = []string{"pkg/verbs"}

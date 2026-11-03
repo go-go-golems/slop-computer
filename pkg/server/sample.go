@@ -13,7 +13,6 @@ import (
 	"github.com/go-go-golems/slop-computer/pkg/httpx"
 	"github.com/go-go-golems/slop-computer/pkg/llm"
 	"github.com/go-go-golems/slop-computer/pkg/rt"
-	"github.com/go-go-golems/slop-computer/pkg/system"
 )
 
 // The sample capability in pages, ported from slop-computer's rt_sample.go:
@@ -82,7 +81,7 @@ func (ss *samples) takeTool(c *sampleCall, use string) chan llm.ToolResult {
 // sampler is the sample capability on this server's backend (set after
 // the server is built, so read per call).
 func (s *Server) sampler() *capsample.Sampler {
-	sp := &capsample.Sampler{Sys: s.Sys}
+	sp := &capsample.Sampler{Ledger: s.Ledger}
 	if s.Env != nil && s.Env.A != nil {
 		sp.Backend = s.Env.A.LLM
 	}
@@ -95,23 +94,23 @@ type actorSampler struct{ s *Server }
 
 func (a actorSampler) Available() bool { return a.s.sampler().Available() }
 
-func (a actorSampler) Limits(ctx context.Context, payer, audience string) system.LLM {
+func (a actorSampler) Limits(ctx context.Context, payer, audience string) llm.LLM {
 	return a.s.sampler().Limits(ctx, payer, audience)
 }
 
-func (a actorSampler) Check(ctx context.Context, payer, audience string) (system.LLM, error) {
+func (a actorSampler) Check(ctx context.Context, payer, audience string) (llm.LLM, error) {
 	return a.s.sampler().Check(ctx, payer, audience)
 }
 
-func (a actorSampler) Run(ctx context.Context, payer string, l system.LLM, req llm.Request, emit func(llm.Event), execute llm.ExecuteTool) (llm.Answer, error) {
+func (a actorSampler) Run(ctx context.Context, payer string, l llm.LLM, req llm.Request, emit func(llm.Event), execute llm.ExecuteTool) (llm.Answer, error) {
 	return a.s.sampler().Run(ctx, payer, l, req, emit, execute)
 }
 
 // viewLLM is what the viewer may spend: the payer is the viewing person,
 // under the app's policy for their audience.
-func (s *Server) viewLLM(ctx context.Context, v *rt.View) system.LLM {
+func (s *Server) viewLLM(ctx context.Context, v *rt.View) llm.LLM {
 	if !v.Policy["sample"] {
-		return system.LLM{}
+		return llm.LLM{}
 	}
 	return s.sampler().Limits(ctx, v.User, v.Role)
 }
@@ -130,24 +129,24 @@ func sampleStatus(code string) int {
 }
 
 // sampleView checks a view may sample now.
-func (s *Server) sampleView(w http.ResponseWriter, r *http.Request) (*rt.View, system.LLM, bool) {
+func (s *Server) sampleView(w http.ResponseWriter, r *http.Request) (*rt.View, llm.LLM, bool) {
 	v := s.viewOf(r)
 	switch {
 	case v == nil:
 		httpx.Fail(w, 401, "session_expired", "the view is closed or expired")
-		return nil, system.LLM{}, false
+		return nil, llm.LLM{}, false
 	case !s.sampler().Available():
 		httpx.Fail(w, 503, "unavailable", "this server has no model backend")
-		return nil, system.LLM{}, false
+		return nil, llm.LLM{}, false
 	case !v.Caps.Declared["sample"]:
 		httpx.Fail(w, 403, "not_declared", "this app does not declare sample")
-		return nil, system.LLM{}, false
+		return nil, llm.LLM{}, false
 	case grantedCaps(v)["sample"] == nil:
 		httpx.Fail(w, 403, "not_granted", "this app may not use the LLM for "+v.Role)
-		return nil, system.LLM{}, false
+		return nil, llm.LLM{}, false
 	case !v.Policy["sample"]:
 		httpx.Fail(w, 403, "permission_denied", "no LLM access")
-		return nil, system.LLM{}, false
+		return nil, llm.LLM{}, false
 	}
 	l, err := s.sampler().Check(r.Context(), v.User, v.Role)
 	var f *llm.Failure

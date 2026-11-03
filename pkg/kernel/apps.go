@@ -10,7 +10,7 @@ import (
 	"github.com/go-go-golems/slop-computer/pkg/apps"
 	"github.com/go-go-golems/slop-computer/pkg/rt"
 	"github.com/go-go-golems/slop-computer/pkg/store"
-	"github.com/go-go-golems/slop-computer/pkg/system"
+	"github.com/go-go-golems/slop-computer/pkg/sysdb"
 )
 
 // Running is the app a store runs now: the version it serves (N,
@@ -201,8 +201,8 @@ func (k *Kernel) activate(ctx context.Context, s *store.Store, r Running) error 
 		return err
 	}
 	_ = k.Sys.Tx(ctx, func(tx systemTx) error {
-		_, err := system.Log(ctx, tx, k.Sys.NowMs(), "system", "activate", "store "+s.ID+" runs "+r.App+"@"+n,
-			system.Change{Kind: "store", Key: s.ID, Op: "activate", Before: from, After: r.App + "@" + n})
+		_, err := sysdb.Log(ctx, tx, k.Sys.NowMs(), "system", "activate", "store "+s.ID+" runs "+r.App+"@"+n,
+			sysdb.Change{Kind: "store", Key: s.ID, Op: "activate", Before: from, After: r.App + "@" + n})
 		return err
 	})
 	return nil

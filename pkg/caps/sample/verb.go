@@ -4,7 +4,6 @@ import (
 	"github.com/go-go-golems/slop-computer/pkg/access"
 	"github.com/go-go-golems/slop-computer/pkg/authz"
 	"github.com/go-go-golems/slop-computer/pkg/llm"
-	"github.com/go-go-golems/slop-computer/pkg/system"
 	"github.com/go-go-golems/slop-computer/pkg/verbs"
 )
 
@@ -26,7 +25,7 @@ type Part struct {
 
 // Deps is what sample.run needs.
 type Deps struct {
-	Sys     *system.DB
+	Ledger  *llm.Ledger
 	Backend func() llm.Backend // read per call: a host sets its backend after building
 	Access  *access.Checker
 }
@@ -40,7 +39,7 @@ func Verbs(d Deps) []*verbs.Verb {
 			"The answer streams to callers that accept it (the CLI shows it on stderr).",
 		Scope: verbs.Write, Effect: verbs.EffectStream, Action: authz.Account,
 		Run: func(r verbs.Req, in RunIn) (llm.Answer, error) {
-			sp := &Sampler{Sys: d.Sys}
+			sp := &Sampler{Ledger: d.Ledger}
 			if d.Backend != nil {
 				sp.Backend = d.Backend()
 			}

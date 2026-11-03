@@ -15,10 +15,13 @@ import (
 
 	"github.com/go-go-golems/slop-computer/pkg/access"
 	"github.com/go-go-golems/slop-computer/pkg/httpx"
+	"github.com/go-go-golems/slop-computer/pkg/identity"
 	"github.com/go-go-golems/slop-computer/pkg/ids"
 	"github.com/go-go-golems/slop-computer/pkg/kernel"
+	"github.com/go-go-golems/slop-computer/pkg/policy"
+	"github.com/go-go-golems/slop-computer/pkg/registry"
 	"github.com/go-go-golems/slop-computer/pkg/rt"
-	"github.com/go-go-golems/slop-computer/pkg/system"
+	"github.com/go-go-golems/slop-computer/pkg/sysdb"
 )
 
 // Live hosts (SLOP-011 carried over): the shell at mount paths, a site
@@ -74,7 +77,7 @@ func (s *Server) parseState(v string) (state, guest string, ok bool) {
 // requests from this host's own pages: an unsafe request from another
 // origin acts as nobody (an app's sandbox origin is same-site, so SameSite
 // cookies alone would let its pages post as the person).
-func (s *Server) sitePrincipal(r *http.Request) (*access.Principal, *system.Session) {
+func (s *Server) sitePrincipal(r *http.Request) (*access.Principal, *identity.Session) {
 	if r.Method != http.MethodGet && r.Method != http.MethodHead && s.crossOrigin(r) {
 		return nil, nil
 	}
@@ -82,7 +85,7 @@ func (s *Server) sitePrincipal(r *http.Request) (*access.Principal, *system.Sess
 	if err != nil || c.Value == "" {
 		return nil, nil
 	}
-	sess, err := s.Sys.SessionBySecret(r.Context(), c.Value, r.Host)
+	sess, err := s.People.SessionBySecret(r.Context(), c.Value, r.Host)
 	if err != nil {
 		return nil, nil
 	}
@@ -91,7 +94,7 @@ func (s *Server) sitePrincipal(r *http.Request) (*access.Principal, *system.Sess
 		return nil, nil
 	}
 	if p.Kind == access.KindGuest {
-		s.Sys.SeeGuest(r.Context(), c.Value, sess)
+		s.People.SeeGuest(r.Context(), c.Value, sess)
 	}
 	return p, &sess
 }
@@ -101,16 +104,16 @@ func (s *Server) newGuest(w http.ResponseWriter, r *http.Request) (*access.Princ
 	ip := s.clientIP(r)
 	limit := s.Cfg.GuestsPerHour
 	if limit <= 0 {
-		limit = system.GuestsPerHour
+		limit = identity.GuestsPerHour
 	}
-	if s.Sys.GuestsFrom(r.Context(), ip, time.Now().Add(-time.Hour).UnixMilli()) >= limit {
-		return nil, system.ErrTooManyGuests
+	if s.People.GuestsFrom(r.Context(), ip, time.Now().Add(-time.Hour).UnixMilli()) >= limit {
+		return nil, identity.ErrTooManyGuests
 	}
-	g, err := s.Sys.CreateGuest(r.Context(), ip)
+	g, err := s.People.CreateGuest(r.Context(), ip)
 	if err != nil {
 		return nil, err
 	}
-	secret, _, err := s.Sys.CreateSessionFor(r.Context(), g.ID, r.Host, "", system.GuestDays)
+	secret, _, err := s.People.CreateSessionFor(r.Context(), g.ID, r.Host, "", identity.GuestDays)
 	if err != nil {
 		return nil, err
 	}
@@ -228,7 +231,7 @@ func (s *Server) siteMe(w http.ResponseWriter, r *http.Request) {
 	httpx.JSON(w, 200, out)
 }
 
-func displayName(p *system.Person) string {
+func displayName(p *sysdb.Person) string {
 	if p == nil {
 		return ""
 	}
@@ -277,7 +280,7 @@ func (s *Server) siteOpenView(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 		if p, err = s.newGuest(w, r); err != nil {
-			if errors.Is(err, system.ErrTooManyGuests) {
+			if errors.Is(err, identity.ErrTooManyGuests) {
 				httpx.Fail(w, 429, "rate_limited", err.Error())
 				return
 			}
@@ -316,7 +319,7 @@ func (s *Server) siteViewCall(w http.ResponseWriter, r *http.Request, rest strin
 	switch {
 	case op == "renew" && r.Method == http.MethodPost:
 		// a view whose access changed is not renewed: the shell opens a new one
-		if row, err := s.Sys.StoreByID(r.Context(), v.Target); err != nil || s.recheck(r.Context(), v, row) {
+		if row, err := s.Registry.StoreByID(r.Context(), v.Target); err != nil || s.recheck(r.Context(), v, row) {
 			httpx.Fail(w, 404, "not_found", "no such view")
 			return
 		}
@@ -367,7 +370,7 @@ func (s *Server) handoff(w http.ResponseWriter, r *http.Request) {
 		http.Redirect(w, r, "/auth/login?return="+url.QueryEscape(r.URL.RequestURI()), http.StatusSeeOther)
 		return
 	}
-	code, err := s.Sys.CreateHandoff(r.Context(), system.Handoff{Person: p.ID(), Host: host, Return: ret, State: state})
+	code, err := s.People.CreateHandoff(r.Context(), identity.Handoff{Person: p.ID(), Host: host, Return: ret, State: state})
 	if err != nil {
 		http.Error(w, "handoff failed", http.StatusInternalServerError)
 		return
@@ -379,7 +382,7 @@ func (s *Server) handoff(w http.ResponseWriter, r *http.Request) {
 // cookie, and sets the site session.
 func (s *Server) siteCallback(w http.ResponseWriter, r *http.Request) {
 	ctx := r.Context()
-	h, err := s.Sys.TakeHandoff(ctx, r.URL.Query().Get("code"), r.Host)
+	h, err := s.People.TakeHandoff(ctx, r.URL.Query().Get("code"), r.Host)
 	c, cerr := r.Cookie(s.siteStateCookie())
 	var state, fromGuest string
 	ok := false
@@ -391,7 +394,7 @@ func (s *Server) siteCallback(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	s.setSiteCookie(w, s.siteStateCookie(), "", -1)
-	secret, _, err := s.Sys.CreateSession(ctx, h.Person, r.Host, fromGuest)
+	secret, _, err := s.People.CreateSession(ctx, h.Person, r.Host, fromGuest)
 	if err != nil {
 		http.Error(w, "sign-in failed", http.StatusInternalServerError)
 		return
@@ -402,7 +405,7 @@ func (s *Server) siteCallback(w http.ResponseWriter, r *http.Request) {
 
 func (s *Server) siteLogout(w http.ResponseWriter, r *http.Request) {
 	if c, err := r.Cookie(s.siteCookie()); err == nil {
-		_ = s.Sys.DeleteSession(r.Context(), c.Value)
+		_ = s.People.DeleteSession(r.Context(), c.Value)
 	}
 	s.setSiteCookie(w, s.siteCookie(), "", -1)
 	httpx.JSON(w, 200, map[string]any{"ok": true})
@@ -424,12 +427,12 @@ func (s *Server) siteCreate(w http.ResponseWriter, r *http.Request) {
 		httpx.Fail(w, 401, "unauthenticated", "sign in to create one")
 		return
 	}
-	mounts, err := s.Sys.Mounts(ctx, r.Host)
+	mounts, err := s.Registry.Mounts(ctx, r.Host)
 	if err != nil {
 		failView(w, err)
 		return
 	}
-	m, ok := system.BestMount(mounts, in.Path)
+	m, ok := registry.BestMount(mounts, in.Path)
 	if !ok || m.Mount.CreateApp == "" || m.Mount.StoreParam == "" {
 		httpx.Fail(w, 404, "not_found", "nothing can be created here")
 		return
@@ -447,7 +450,7 @@ func (s *Server) siteCreate(w http.ResponseWriter, r *http.Request) {
 	// the admin who set it checked; its owner can change them afterwards.
 	for _, b := range m.Mount.Aliases {
 		b.Store = row.ID
-		if err := s.Sys.SetBinding(ctx, p.ID(), "mount:"+m.Mount.Host+m.Mount.Path, b); err != nil {
+		if err := s.Registry.SetBinding(ctx, p.ID(), "mount:"+m.Mount.Host+m.Mount.Path, b); err != nil {
 			failView(w, err)
 			return
 		}
@@ -499,29 +502,29 @@ func (s *Server) siteAccess(w http.ResponseWriter, r *http.Request) {
 	if !ok {
 		return
 	}
-	gs, err := s.Sys.Grants(r.Context(), id)
+	gs, err := s.Registry.Grants(r.Context(), id)
 	if err != nil {
 		failView(w, err)
 		return
 	}
 	type grantOut struct {
-		system.Grant
+		sysdb.Grant
 		Name string `json:"name,omitempty"`
 	}
 	out := []grantOut{}
 	for _, g := range gs {
 		o := grantOut{Grant: g}
-		if pp, err := s.Sys.Person(r.Context(), g.Subject); err == nil {
+		if pp, err := s.People.Person(r.Context(), g.Subject); err == nil {
 			o.Name = displayName(&pp)
 		}
 		out = append(out, o)
 	}
-	links, err := s.Sys.Links(r.Context(), id)
+	links, err := s.Registry.Links(r.Context(), id)
 	if err != nil {
 		failView(w, err)
 		return
 	}
-	live := []system.Link{}
+	live := []sysdb.Link{}
 	for _, l := range links {
 		if l.RevokedAt == 0 && (l.ExpiresAt == 0 || l.ExpiresAt > time.Now().UnixMilli()) {
 			live = append(live, l)
@@ -547,7 +550,7 @@ func (s *Server) siteGrant(w http.ResponseWriter, r *http.Request) {
 	}
 	ctx := r.Context()
 	if in.Level == "" {
-		_, err := s.Sys.RemoveGrant(ctx, p.ID(), "site", id, in.Subject, "")
+		_, err := s.Registry.RemoveGrant(ctx, p.ID(), "site", id, in.Subject, "")
 		if err != nil {
 			failView(w, err)
 			return
@@ -560,7 +563,7 @@ func (s *Server) siteGrant(w http.ResponseWriter, r *http.Request) {
 		httpx.Fail(w, 400, "invalid_argument", "owners give view or interact here")
 		return
 	}
-	if _, err := s.Sys.SetGrant(ctx, p.ID(), "site", system.Grant{Store: id, Subject: in.Subject, Level: in.Level}); err != nil {
+	if _, err := s.Registry.SetGrant(ctx, p.ID(), "site", sysdb.Grant{Store: id, Subject: in.Subject, Level: in.Level}); err != nil {
 		failView(w, err)
 		return
 	}
@@ -577,11 +580,11 @@ func (s *Server) siteGrant(w http.ResponseWriter, r *http.Request) {
 func (s *Server) reviewViews(ctx context.Context, id string) {
 	// The store's own views, and views of other stores that read it
 	// (SLOP3-008): each is checked against its own store's row.
-	rows := map[string]system.StoreRow{}
+	rows := map[string]sysdb.StoreRow{}
 	for _, v := range s.rt.views.Reaching(id) {
 		row, ok := rows[v.Target]
 		if !ok {
-			r, err := s.Sys.StoreByID(ctx, v.Target)
+			r, err := s.Registry.StoreByID(ctx, v.Target)
 			if err != nil {
 				continue
 			}
@@ -601,8 +604,8 @@ func (s *Server) confirm(ctx context.Context, v *rt.View) bool {
 	if v.Epoch.Load() == e {
 		return true
 	}
-	row, err := s.Sys.StoreByID(ctx, v.Target)
-	if errors.Is(err, system.ErrNotFound) {
+	row, err := s.Registry.StoreByID(ctx, v.Target)
+	if errors.Is(err, sysdb.ErrNotFound) {
 		s.rt.views.Close(v, true)
 		return false
 	}
@@ -618,7 +621,7 @@ func (s *Server) confirm(ctx context.Context, v *rt.View) bool {
 
 // recheck closes v when its viewer's access to row is no longer the one v
 // was opened with, and reports whether it did.
-func (s *Server) recheck(ctx context.Context, v *rt.View, row system.StoreRow) bool {
+func (s *Server) recheck(ctx context.Context, v *rt.View, row sysdb.StoreRow) bool {
 	d := s.Env.K.Access.Level(ctx, s.viewPrincipal(ctx, v), row)
 	switch {
 	case d.Level == rt.LevelNone:
@@ -637,8 +640,8 @@ func (s *Server) recheck(ctx context.Context, v *rt.View, row system.StoreRow) b
 // samePolicy reports whether the app's policy cells for aud are still the
 // ones v was opened with (they authorize uploads, email, sample).
 func (s *Server) samePolicy(ctx context.Context, v *rt.View, aud string) bool {
-	for _, c := range system.PolicyCaps {
-		if s.Sys.Policy(ctx, v.App, c, aud) != v.Policy[c] {
+	for _, c := range policy.PolicyCaps {
+		if s.Gov.Policy(ctx, v.App, c, aud) != v.Policy[c] {
 			return false
 		}
 	}

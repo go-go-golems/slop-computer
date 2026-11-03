@@ -7,8 +7,9 @@ import (
 
 	"github.com/go-go-golems/slop-computer/pkg/access"
 	"github.com/go-go-golems/slop-computer/pkg/authz"
+	"github.com/go-go-golems/slop-computer/pkg/registry"
 	"github.com/go-go-golems/slop-computer/pkg/rt"
-	"github.com/go-go-golems/slop-computer/pkg/system"
+	"github.com/go-go-golems/slop-computer/pkg/sysdb"
 	"github.com/go-go-golems/slop-computer/pkg/verbs"
 )
 
@@ -24,7 +25,7 @@ func mountVerbs(e *Env) []*verbs.Verb {
 		{Name: "mount.ls", Doc: "List mounts (of one host).", Scope: verbs.Read, Action: authz.Platform,
 			Args: []verbs.Arg{{Name: "host", Type: "string", Pos: 1}},
 			Run: func(ctx context.Context, p *access.Principal, a verbs.Args) (any, error) {
-				ms, err := e.Sys.Mounts(ctx, a.S("host"))
+				ms, err := e.K.Registry.Mounts(ctx, a.S("host"))
 				if err != nil {
 					return nil, err
 				}
@@ -38,7 +39,7 @@ func mountVerbs(e *Env) []*verbs.Verb {
 			Scope: verbs.Write, AdminOnly: true, Action: authz.PlatformAdmin,
 			Run: func(r verbs.Req, in MountSetIn) (MountSetOut, error) {
 				e, p := e, r.Principal
-				m := system.Mount{Host: in.Host, Path: in.Path, Store: in.Store, StoreParam: in.StoreParam,
+				m := registry.Mount{Host: in.Host, Path: in.Path, Store: in.Store, StoreParam: in.StoreParam,
 					Type: in.Type, CreateApp: in.CreateApp, CreateAudience: in.CreateAudience}
 				if err := checkMount(r, e, &m); err != nil {
 					return MountSetOut{}, err
@@ -48,7 +49,7 @@ func mountVerbs(e *Env) []*verbs.Verb {
 					return MountSetOut{}, err
 				}
 				m.Aliases = t
-				m, err = e.Sys.SetMount(r, p.ID(), p.ViaLabel(), m)
+				m, err = e.K.Registry.SetMount(r, p.ID(), p.ViaLabel(), m)
 				if err != nil {
 					return MountSetOut{}, err
 				}
@@ -66,8 +67,8 @@ func mountVerbs(e *Env) []*verbs.Verb {
 		{Name: "mount.rm", Doc: "Remove a mount (mount undo brings it back).", Scope: verbs.Write, AdminOnly: true, Action: authz.PlatformAdmin,
 			Args: []verbs.Arg{hostArg, pathArg},
 			Run: func(ctx context.Context, p *access.Principal, a verbs.Args) (any, error) {
-				err := e.Sys.RemoveMount(ctx, p.ID(), p.ViaLabel(), a.S("host"), a.S("path"))
-				if errors.Is(err, system.ErrNotFound) {
+				err := e.K.Registry.RemoveMount(ctx, p.ID(), p.ViaLabel(), a.S("host"), a.S("path"))
+				if errors.Is(err, sysdb.ErrNotFound) {
 					return nil, verbs.Errf("not_found", "nothing is mounted at %s%s", a.S("host"), a.S("path"))
 				}
 				return map[string]any{"removed": a.S("host") + a.S("path")}, err
@@ -75,8 +76,8 @@ func mountVerbs(e *Env) []*verbs.Verb {
 		{Name: "mount.undo", Doc: "Restore a mount to its value before its last change.", Scope: verbs.Write, AdminOnly: true, Action: authz.PlatformAdmin,
 			Args: []verbs.Arg{hostArg, pathArg},
 			Run: func(ctx context.Context, p *access.Principal, a verbs.Args) (any, error) {
-				m, err := e.Sys.UndoMount(ctx, p.ID(), p.ViaLabel(), a.S("host"), a.S("path"))
-				if errors.Is(err, system.ErrNotFound) {
+				m, err := e.K.Registry.UndoMount(ctx, p.ID(), p.ViaLabel(), a.S("host"), a.S("path"))
+				if errors.Is(err, sysdb.ErrNotFound) {
 					return nil, verbs.Errf("not_found", "no history for %s%s", a.S("host"), a.S("path"))
 				}
 				if err != nil {
@@ -111,7 +112,7 @@ func mountVerbs(e *Env) []*verbs.Verb {
 			Run: func(ctx context.Context, p *access.Principal, a verbs.Args) (any, error) {
 				rows, err := VisibleStores(ctx, e, p)
 				if p.IsAdmin() {
-					rows, err = e.Sys.Stores(ctx, "")
+					rows, err = e.K.Registry.Stores(ctx, "")
 				}
 				if err != nil {
 					return nil, err
@@ -133,12 +134,12 @@ func mountVerbs(e *Env) []*verbs.Verb {
 }
 
 // checkMount validates a mount against the host's kind and the store.
-func checkMount(ctx context.Context, e *Env, m *system.Mount) error {
+func checkMount(ctx context.Context, e *Env, m *registry.Mount) error {
 	kind := e.Cfg.HostKind(m.Host)
 	if kind != "live" && kind != "static" {
 		return verbs.Errf("invalid_argument", "%s is not a live or static host in this server's configuration", m.Host)
 	}
-	if !system.ValidMountPath(m.Path) {
+	if !registry.ValidMountPath(m.Path) {
 		return verbs.Errf("invalid_argument", "a mount path is /, /name, /name/:param or /name/*")
 	}
 	if (m.Store == "") == (m.StoreParam == "") {
@@ -209,14 +210,14 @@ func splitSlash(p string) []string {
 // aliasTemplate reads mount.set's aliases: the bindings each store the mount
 // creates gets (SLOP3-008 phase 4), checked as bind.set checks them, against
 // the admin setting the mount (who must hold what they template).
-func aliasTemplate(ctx context.Context, e *Env, p *access.Principal, in []AliasIn, m system.Mount) ([]system.Binding, error) {
+func aliasTemplate(ctx context.Context, e *Env, p *access.Principal, in []AliasIn, m registry.Mount) ([]registry.Binding, error) {
 	if len(in) > 0 && m.CreateApp == "" {
 		return nil, verbs.Errf("invalid_argument", "aliases go with createApp: they bind the stores a mount creates")
 	}
-	var out []system.Binding
+	var out []registry.Binding
 	seen := map[string]bool{}
 	for _, x := range in {
-		b := system.Binding{Alias: x.Alias, Target: x.Target, Prefix: x.Prefix, Level: x.Level, Assets: x.Assets}
+		b := registry.Binding{Alias: x.Alias, Target: x.Target, Prefix: x.Prefix, Level: x.Level, Assets: x.Assets}
 		if seen[b.Alias] {
 			return nil, verbs.Errf("invalid_argument", "alias %s is listed twice", b.Alias)
 		}
@@ -253,7 +254,7 @@ type AliasIn struct {
 
 // MountSetOut is mount.set's result.
 type MountSetOut struct {
-	Mount system.Mount `json:"mount"`
-	URL   string       `json:"url"`
-	Note  string       `json:"note,omitempty"`
+	Mount registry.Mount `json:"mount"`
+	URL   string         `json:"url"`
+	Note  string         `json:"note,omitempty"`
 }

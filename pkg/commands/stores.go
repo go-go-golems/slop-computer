@@ -10,9 +10,10 @@ import (
 	"github.com/go-go-golems/slop-computer/pkg/access"
 	"github.com/go-go-golems/slop-computer/pkg/authz"
 	"github.com/go-go-golems/slop-computer/pkg/kernel"
+	"github.com/go-go-golems/slop-computer/pkg/registry"
 	"github.com/go-go-golems/slop-computer/pkg/rt"
 	"github.com/go-go-golems/slop-computer/pkg/store"
-	"github.com/go-go-golems/slop-computer/pkg/system"
+	"github.com/go-go-golems/slop-computer/pkg/sysdb"
 	"github.com/go-go-golems/slop-computer/pkg/verbs"
 )
 
@@ -23,13 +24,13 @@ func storeVerbs(e *Env) []*verbs.Verb {
 		{Name: "store.ls", Doc: "List the stores you own or hold a grant on (admins: --all).", Scope: verbs.Read, Action: authz.Account,
 			Args: []verbs.Arg{{Name: "all", Type: "bool", Doc: "every store (admins)"}},
 			Run: func(ctx context.Context, p *access.Principal, a verbs.Args) (any, error) {
-				var rows []system.StoreRow
+				var rows []sysdb.StoreRow
 				var err error
 				if a.B("all") {
 					if !p.IsAdmin() {
 						return nil, verbs.Errf("permission_denied", "only admins list every store")
 					}
-					rows, err = e.Sys.Stores(ctx, "")
+					rows, err = e.K.Registry.Stores(ctx, "")
 				} else {
 					rows, err = VisibleStores(ctx, e, p)
 				}
@@ -52,7 +53,7 @@ func storeVerbs(e *Env) []*verbs.Verb {
 					return nil, verbs.Errf("permission_denied", "only members make stores")
 				}
 				row, _, err := e.K.CreateStore(ctx, p, kernel.NewStore{ID: a.S("id"), Type: a.S("type"), App: a.S("app")})
-				if errors.Is(err, system.ErrExists) {
+				if errors.Is(err, registry.ErrExists) {
 					return nil, verbs.Errf("conflict", "store %s exists", a.S("id"))
 				}
 				if err != nil {
@@ -79,7 +80,7 @@ func storeVerbs(e *Env) []*verbs.Verb {
 			Args: []verbs.Arg{{Name: "id", Type: "string", Pos: 1, Required: true}, {Name: "type", Type: "string", Pos: 2, Doc: "the new type; empty clears it"}},
 			Run: func(ctx context.Context, p *access.Principal, a verbs.Args) (any, error) {
 				row, err := e.K.SetStoreType(ctx, p, a.S("id"), a.S("type"))
-				if errors.Is(err, system.ErrNotFound) {
+				if errors.Is(err, sysdb.ErrNotFound) {
 					return nil, verbs.Errf("not_found", "no store %s", a.S("id"))
 				}
 				return row, err
@@ -91,7 +92,7 @@ func storeVerbs(e *Env) []*verbs.Verb {
 				if err != nil {
 					return nil, err
 				}
-				row, _ := e.Sys.StoreByID(ctx, s.ID)
+				row, _ := e.K.Registry.StoreByID(ctx, s.ID)
 				colls, _ := s.Collections(ctx)
 				refs, _ := s.Refs(ctx)
 				return map[string]any{"store": row, "meta": s.AllMeta(), "head": s.Head(), "docs": s.CountDocs(ctx),
@@ -103,11 +104,11 @@ func storeVerbs(e *Env) []*verbs.Verb {
 				if _, _, err := e.open(ctx, p, a.S("store"), rt.LevelAdmin, "listing grants"); err != nil {
 					return nil, err
 				}
-				gs, err := e.Sys.Grants(ctx, a.S("store"))
+				gs, err := e.K.Registry.Grants(ctx, a.S("store"))
 				if err != nil {
 					return nil, err
 				}
-				st, err := e.Sys.StoreByID(ctx, a.S("store"))
+				st, err := e.K.Registry.StoreByID(ctx, a.S("store"))
 				if err != nil {
 					return nil, err
 				}
@@ -116,25 +117,25 @@ func storeVerbs(e *Env) []*verbs.Verb {
 				}
 				return gs, nil
 			}},
-		verbs.Def[GrantSetIn, system.Grant]{Name: "grant.set", Doc: "Give a subject (usr_…, vis_…, store:<id>, @guest, @member, @subscriber) a level on a store.",
+		verbs.Def[GrantSetIn, sysdb.Grant]{Name: "grant.set", Doc: "Give a subject (usr_…, vis_…, store:<id>, @guest, @member, @subscriber) a level on a store.",
 			Scope: verbs.Write, Action: authz.StoreAdmin,
-			Run: func(r verbs.Req, in GrantSetIn) (system.Grant, error) {
+			Run: func(r verbs.Req, in GrantSetIn) (sysdb.Grant, error) {
 				e, p := e, r.Principal
 				_, d, err := e.open(r, p, in.Store, rt.LevelAdmin, "granting")
 				if err != nil {
-					return system.Grant{}, err
+					return sysdb.Grant{}, err
 				}
 				if !validSubject(in.Subject) {
-					return system.Grant{}, verbs.Errf("invalid_argument", "a subject is usr_…, vis_…, store:<id>, @guest, @member or @subscriber")
+					return sysdb.Grant{}, verbs.Errf("invalid_argument", "a subject is usr_…, vis_…, store:<id>, @guest, @member or @subscriber")
 				}
 				lvl, ok := rt.ParseLevel(in.Level)
 				if !ok || lvl == rt.LevelSelf {
-					return system.Grant{}, verbs.Errf("invalid_argument", "level must be view, interact, admin or owner")
+					return sysdb.Grant{}, verbs.Errf("invalid_argument", "level must be view, interact, admin or owner")
 				}
 				if lvl > d.Level {
-					return system.Grant{}, &verbs.Error{Code: "permission_denied", Message: "you cannot grant more than your own level", Trace: d.Trace}
+					return sysdb.Grant{}, &verbs.Error{Code: "permission_denied", Message: "you cannot grant more than your own level", Trace: d.Trace}
 				}
-				g, err := e.Sys.SetGrant(r, p.ID(), p.ViaLabel(), system.Grant{Store: in.Store, Subject: in.Subject, Level: in.Level})
+				g, err := e.K.Registry.SetGrant(r, p.ID(), p.ViaLabel(), sysdb.Grant{Store: in.Store, Subject: in.Subject, Level: in.Level})
 				return g, err
 			}}.Verb(),
 		{Name: "grant.rm", Doc: "Remove a subject's grants on a store.", Scope: verbs.Write, Action: authz.StoreAdmin,
@@ -144,7 +145,7 @@ func storeVerbs(e *Env) []*verbs.Verb {
 				if _, _, err := e.open(ctx, p, a.S("store"), rt.LevelAdmin, "revoking"); err != nil {
 					return nil, err
 				}
-				n, err := e.Sys.RemoveGrant(ctx, p.ID(), p.ViaLabel(), a.S("store"), a.S("subject"), a.S("via"))
+				n, err := e.K.Registry.RemoveGrant(ctx, p.ID(), p.ViaLabel(), a.S("store"), a.S("subject"), a.S("via"))
 				return map[string]any{"removed": n}, err
 			}},
 		{Name: "log.show", Doc: "A store's commits after a rev (oldest first), or the newest ones.", Scope: verbs.Read, Action: authz.StoreRead,
@@ -210,13 +211,13 @@ func validSubject(s string) bool {
 	case strings.HasPrefix(s, "usr_"), strings.HasPrefix(s, "vis_"):
 		return len(s) > 4
 	case strings.HasPrefix(s, "store:"):
-		return system.ValidStoreID(s[6:])
+		return registry.ValidStoreID(s[6:])
 	}
 	return false
 }
 
 // VisibleStores lists what p owns or holds a grant on.
-func VisibleStores(ctx context.Context, e *Env, p *access.Principal) ([]system.StoreRow, error) {
+func VisibleStores(ctx context.Context, e *Env, p *access.Principal) ([]sysdb.StoreRow, error) {
 	aud := e.K.Access.AudienceOf(ctx, p)
 	subjects := []string{}
 	if id := p.ID(); id != "" {
@@ -228,9 +229,9 @@ func VisibleStores(ctx context.Context, e *Env, p *access.Principal) ([]system.S
 		}
 	}
 	seen := map[string]bool{}
-	out := []system.StoreRow{}
+	out := []sysdb.StoreRow{}
 	if p.ID() != "" {
-		owned, err := e.Sys.Stores(ctx, p.ID())
+		owned, err := e.K.Registry.Stores(ctx, p.ID())
 		if err != nil {
 			return nil, err
 		}
@@ -239,7 +240,7 @@ func VisibleStores(ctx context.Context, e *Env, p *access.Principal) ([]system.S
 			out = append(out, r)
 		}
 	}
-	granted, err := e.Sys.StoresGranted(ctx, subjects)
+	granted, err := e.K.Registry.StoresGranted(ctx, subjects)
 	if err != nil {
 		return nil, err
 	}

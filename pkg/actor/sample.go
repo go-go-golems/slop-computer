@@ -9,7 +9,6 @@ import (
 	"github.com/dop251/goja"
 
 	"github.com/go-go-golems/slop-computer/pkg/llm"
-	"github.com/go-go-golems/slop-computer/pkg/system"
 )
 
 // SampleTimeout bounds one LLM call from an actor.
@@ -20,9 +19,9 @@ const SampleTimeout = 3 * time.Minute
 // backend call as a page's and the sample.run verb's.
 type Sampler interface {
 	Available() bool
-	Limits(ctx context.Context, payer, audience string) system.LLM
-	Check(ctx context.Context, payer, audience string) (system.LLM, error)
-	Run(ctx context.Context, payer string, l system.LLM, req llm.Request, emit func(llm.Event), execute llm.ExecuteTool) (llm.Answer, error)
+	Limits(ctx context.Context, payer, audience string) llm.LLM
+	Check(ctx context.Context, payer, audience string) (llm.LLM, error)
+	Run(ctx context.Context, payer string, l llm.LLM, req llm.Request, emit func(llm.Event), execute llm.ExecuteTool) (llm.Answer, error)
 }
 
 // sampleFail is a capability refusal as an actor error; a backend failure
@@ -41,7 +40,7 @@ func sampleFail(err error) *Error {
 // sampleCheck applies guide §9.3 for the current turn: the policy for the
 // visitor's audience, then the payer's access and monthly budget. It
 // returns the payer.
-func (a *Actor) sampleCheck() (string, system.LLM) {
+func (a *Actor) sampleCheck() (string, llm.LLM) {
 	a.need("sample")
 	v := a.Visitor()
 	l, err := a.m.Sample.Check(a.turn().t.Context(), v.Payer, v.Audience)
@@ -107,10 +106,10 @@ func (a *Actor) sampleModule() goja.Value {
 	_ = fn.Set("json", func(c goja.FunctionCall) goja.Value { return call(c.Argument(0), c.Argument(1), true) })
 	// limits is what this turn's visitor may spend (nothing when the
 	// policy does not allow sample for them).
-	limits := func() system.LLM {
+	limits := func() llm.LLM {
 		v := a.Visitor()
 		if !a.m.allowed(a, "sample") {
-			return system.LLM{}
+			return llm.LLM{}
 		}
 		return a.m.Sample.Limits(a.turn().t.Context(), v.Payer, v.Audience)
 	}

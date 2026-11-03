@@ -43,7 +43,7 @@ func (s *Server) setupBilling() error {
 
 // SetBilling installs a billing gateway (the fake one in tests).
 func (s *Server) SetBilling(g stripe.Gateway, livemode bool) *stripe.Service {
-	svc := stripe.NewService(g, s.Sys, stripe.Config{Livemode: livemode, Deployment: s.Cfg.Hosts.Main})
+	svc := stripe.NewService(g, s.Book, stripe.Config{Livemode: livemode, Deployment: s.Cfg.Hosts.Main})
 	svc.OnChange = func(person string) { s.reviewPerson(context.Background(), person) }
 	s.billing = svc
 	s.Env.Billing = svc
@@ -116,7 +116,7 @@ func (s *Server) subscribePage(w http.ResponseWriter, r *http.Request) {
 	if d.Until != nil {
 		data["Until"] = d.Until.Format("2 January 2006")
 	}
-	if _, err := s.Sys.CustomerFor(ctx, p.ID()); err == nil {
+	if _, err := s.Book.CustomerFor(ctx, p.ID()); err == nil {
 		data["Customer"] = true
 	}
 	w.Header().Set("Content-Type", "text/html; charset=utf-8")

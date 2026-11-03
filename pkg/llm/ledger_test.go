@@ -1,15 +1,18 @@
-package system
+package llm
 
 import (
 	"context"
 	"errors"
 	"fmt"
+	"path/filepath"
 	"sync"
 	"testing"
 	"time"
+
+	"github.com/go-go-golems/slop-computer/pkg/sysdb"
 )
 
-func usage(t *testing.T, d *DB, account string) (used, reserved int64) {
+func usage(t *testing.T, d *Ledger, account string) (int64, int64) { // used, reserved
 	t.Helper()
 	p := Period(d.Now())
 	return d.LLMUsed(context.Background(), account, p), d.LLMReserved(context.Background(), account, p)
@@ -133,5 +136,53 @@ func TestConcurrentReservationsStayWithinLimit(t *testing.T) {
 	}
 	if used, reserved := usage(t, d, "usr_a"); used > limit || reserved != 0 {
 		t.Fatalf("used %d reserved %d", used, reserved)
+	}
+}
+
+func openTestDB(t *testing.T) *Ledger {
+	t.Helper()
+	d, err := sysdb.Open(context.Background(), filepath.Join(t.TempDir(), "system.db"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = d.Close() })
+	return NewLedger(d)
+}
+
+// A person's own row wins, even when off; otherwise the most generous row
+// that is on among their groups: no budget beats any budget, a bigger
+// budget beats a smaller one, a row that is off adds nothing.
+func TestLLMRowThroughGroups(t *testing.T) {
+	d := openTestDB(t)
+	ctx := context.Background()
+	n := func(v int64) *int64 { return &v }
+	set := func(subject string, on bool, budget *int64) {
+		t.Helper()
+		if err := d.SetLLM(ctx, "admin", "test", subject, on, budget); err != nil {
+			t.Fatal(err)
+		}
+	}
+	set("@member", true, n(500))
+	set("@subscriber", true, n(5000))
+	if got := d.LLMFor(ctx, "usr_sam", "subscriber"); !got.Allowed || *got.Budget != 5000 || got.Source != "@subscriber" {
+		t.Fatalf("subscriber: %+v", got)
+	}
+	if got := d.LLMFor(ctx, "usr_mia", "member"); !got.Allowed || *got.Budget != 500 {
+		t.Fatalf("member: %+v", got)
+	}
+	set("@subscriber", false, nil)
+	if got := d.LLMFor(ctx, "usr_sam", "subscriber"); !got.Allowed || *got.Budget != 500 || got.Source != "@member" {
+		t.Fatalf("an @subscriber row that is off adds nothing: %+v", got)
+	}
+	set("@admin", true, nil)
+	if got := d.LLMFor(ctx, "usr_ana", "admin"); !got.Allowed || got.Budget != nil {
+		t.Fatalf("no budget beats any budget: %+v", got)
+	}
+	set("usr_ana", false, nil)
+	if got := d.LLMFor(ctx, "usr_ana", "admin"); got.Allowed {
+		t.Fatalf("a person's own row wins, even off: %+v", got)
+	}
+	if got := d.LLMFor(ctx, "usr_g", "guest"); got.Allowed {
+		t.Fatalf("no row for guests: %+v", got)
 	}
 }

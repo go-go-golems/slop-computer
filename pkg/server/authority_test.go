@@ -21,7 +21,7 @@ import (
 // personID is the id of the person with this email.
 func personID(t *testing.T, h *harness, email string) string {
 	t.Helper()
-	p, err := h.sys.PersonByEmail(context.Background(), email)
+	p, err := h.k.People.PersonByEmail(context.Background(), email)
 	if err != nil {
 		t.Fatal(err)
 	}

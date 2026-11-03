@@ -80,7 +80,7 @@ func (s *Server) rpcSlopRead(ctx context.Context, v *rt.View, raw json.RawMessag
 	if err != nil {
 		return nil, err
 	}
-	target, err := s.Sys.Binding(ctx, v.Target, a.Alias)
+	target, err := s.Registry.Binding(ctx, v.Target, a.Alias)
 	if err != nil {
 		return nil, rtErr("not_found", "no store is bound to %q", a.Alias)
 	}
@@ -229,7 +229,7 @@ func (s *Server) serveActorRoute(w http.ResponseWriter, r *http.Request, res *re
 // sandboxing CSP), and anything but media is a download.
 func (s *Server) serveBoundAsset(w http.ResponseWriter, r *http.Request, storeID string, ref *actor.AssetRef, cache string) {
 	ctx := r.Context()
-	b, err := s.Sys.BindingOf(ctx, storeID, ref.From)
+	b, err := s.Registry.BindingOf(ctx, storeID, ref.From)
 	if err != nil || !b.Assets {
 		notFound(w)
 		return

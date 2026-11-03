@@ -11,7 +11,8 @@ import (
 
 	"github.com/go-go-golems/slop-computer/pkg/access"
 	"github.com/go-go-golems/slop-computer/pkg/httpx"
-	"github.com/go-go-golems/slop-computer/pkg/system"
+	"github.com/go-go-golems/slop-computer/pkg/identity"
+	"github.com/go-go-golems/slop-computer/pkg/sysdb"
 )
 
 type ctxKey struct{}
@@ -31,16 +32,16 @@ func (s *Server) setCookie(w http.ResponseWriter, name, value string, maxAge int
 
 // principalOf resolves the caller on the main host: a bearer token, or a
 // session cookie. It returns nil for nobody, and the session for CSRF checks.
-func (s *Server) principalOf(r *http.Request) (*access.Principal, *system.Session, error) {
+func (s *Server) principalOf(r *http.Request) (*access.Principal, *identity.Session, error) {
 	ctx := r.Context()
 	if h := r.Header.Get("Authorization"); strings.HasPrefix(h, "Bearer ") {
-		t, err := s.Sys.TokenBySecret(ctx, strings.TrimPrefix(h, "Bearer "))
+		t, err := s.People.TokenBySecret(ctx, strings.TrimPrefix(h, "Bearer "))
 		if err != nil {
 			return nil, nil, err
 		}
 		p := s.personAs(ctx, t.Person, "http")
 		if p == nil {
-			return nil, nil, system.ErrNotFound
+			return nil, nil, sysdb.ErrNotFound
 		}
 		p.Kind, p.TokenID, p.Scopes = access.KindToken, t.ID, t.Scopes
 		return p, nil, nil
@@ -49,7 +50,7 @@ func (s *Server) principalOf(r *http.Request) (*access.Principal, *system.Sessio
 	if err != nil || c.Value == "" {
 		return nil, nil, nil
 	}
-	sess, err := s.Sys.SessionBySecret(ctx, c.Value, r.Host)
+	sess, err := s.People.SessionBySecret(ctx, c.Value, r.Host)
 	if err != nil {
 		return nil, nil, nil
 	}
@@ -66,8 +67,8 @@ func (s *Server) principalOf(r *http.Request) (*access.Principal, *system.Sessio
 // someone who acts here, so a disabled account is refused the same way on
 // every door.
 func (s *Server) personAs(ctx context.Context, id, via string) *access.Principal {
-	p, err := s.Sys.Person(ctx, id)
-	if err != nil || p.Role == system.RoleDisabled {
+	p, err := s.People.Person(ctx, id)
+	if err != nil || p.Role == sysdb.RoleDisabled {
 		return nil
 	}
 	return access.PersonPrincipal(p, via)
@@ -135,23 +136,23 @@ func (s *Server) localSignIn(w http.ResponseWriter, r *http.Request) {
 
 // signIn finds or creates the user and starts a main-host session.
 func (s *Server) signIn(w http.ResponseWriter, r *http.Request, email, name, subject, idToken string) error {
-	p, _, err := s.Sys.SignInUser(r.Context(), email, name, subject, s.Cfg.AdminEmails, s.Cfg.SignupOpen())
+	p, _, err := s.People.SignInUser(r.Context(), email, name, subject, s.Cfg.AdminEmails, s.Cfg.SignupOpen())
 	if err != nil {
 		return err
 	}
-	if p.Role == system.RoleDisabled {
+	if p.Role == sysdb.RoleDisabled {
 		return errors.New("this account is disabled")
 	}
-	secret, _, err := s.Sys.CreateSession(r.Context(), p.ID, r.Host, "")
+	secret, _, err := s.People.CreateSession(r.Context(), p.ID, r.Host, "")
 	if err != nil {
 		return err
 	}
 	if idToken != "" {
-		if err := s.Sys.SetSessionIDToken(r.Context(), secret, idToken); err != nil {
+		if err := s.People.SetSessionIDToken(r.Context(), secret, idToken); err != nil {
 			return err
 		}
 	}
-	s.setCookie(w, s.sessionCookie(), secret, system.SessionDays*24*3600, http.SameSiteLaxMode)
+	s.setCookie(w, s.sessionCookie(), secret, identity.SessionDays*24*3600, http.SameSiteLaxMode)
 	return nil
 }
 
@@ -162,8 +163,8 @@ func (s *Server) signIn(w http.ResponseWriter, r *http.Request, email, name, sub
 func (s *Server) logout(w http.ResponseWriter, r *http.Request) {
 	idToken := ""
 	if c, err := r.Cookie(s.sessionCookie()); err == nil {
-		idToken = s.Sys.SessionIDToken(r.Context(), c.Value)
-		_ = s.Sys.DeleteSession(r.Context(), c.Value)
+		idToken = s.People.SessionIDToken(r.Context(), c.Value)
+		_ = s.People.DeleteSession(r.Context(), c.Value)
 	}
 	s.setCookie(w, s.sessionCookie(), "", -1, http.SameSiteLaxMode)
 	next := ""

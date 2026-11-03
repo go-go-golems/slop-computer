@@ -333,7 +333,7 @@ func callable(p *access.Principal, v *Verb) error {
 	// the role half of the floor; Call checks the level on the store
 	ok, _ := authz.Floor(v.Action, rt.LevelOwner, p.IsAdmin())
 	if !ok || (v.AdminOnly && !p.IsAdmin()) {
-		if p.Kind == access.KindToken && p.Person != nil && p.Person.Role == "admin" { // system.RoleAdmin
+		if p.Kind == access.KindToken && p.Person != nil && p.Person.Role == "admin" { // sysdb.RoleAdmin
 			return Errf("permission_denied", "%s needs a token with the admin scope", v.Name)
 		}
 		return Errf("permission_denied", "%s is for admins", v.Name)

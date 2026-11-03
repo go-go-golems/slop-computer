@@ -10,8 +10,8 @@ import (
 
 	"github.com/go-go-golems/slop-computer/pkg/access"
 	"github.com/go-go-golems/slop-computer/pkg/authz"
+	"github.com/go-go-golems/slop-computer/pkg/registry"
 	"github.com/go-go-golems/slop-computer/pkg/rt"
-	"github.com/go-go-golems/slop-computer/pkg/system"
 	"github.com/go-go-golems/slop-computer/pkg/verbs"
 )
 
@@ -52,9 +52,9 @@ func previewVerbs(e *Env) []*verbs.Verb {
 				if _, err := rand.Read(b); err != nil {
 					return nil, err
 				}
-				pv := system.Preview{Label: "p" + hex.EncodeToString(b), Store: s.ID, N: n, Person: p.Person.ID, Parent: parent,
-					ExpiresAt: e.Sys.NowMs() + PreviewTTL.Milliseconds()}
-				if err := e.Sys.CreatePreview(ctx, pv); err != nil {
+				pv := registry.Preview{Label: "p" + hex.EncodeToString(b), Store: s.ID, N: n, Person: p.Person.ID, Parent: parent,
+					ExpiresAt: e.K.Sys.NowMs() + PreviewTTL.Milliseconds()}
+				if err := e.K.Registry.CreatePreview(ctx, pv); err != nil {
 					return nil, err
 				}
 				return map[string]any{"url": e.Cfg.Scheme + "://" + pv.Label + "." + e.Cfg.Hosts.Sandbox + "/",

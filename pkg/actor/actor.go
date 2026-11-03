@@ -21,9 +21,10 @@ import (
 	"github.com/dop251/goja"
 
 	"github.com/go-go-golems/slop-computer/pkg/kernel"
+	"github.com/go-go-golems/slop-computer/pkg/llm"
 	"github.com/go-go-golems/slop-computer/pkg/rt"
 	"github.com/go-go-golems/slop-computer/pkg/store"
-	"github.com/go-go-golems/slop-computer/pkg/system"
+	"github.com/go-go-golems/slop-computer/pkg/sysdb"
 )
 
 // Limits of one actor.
@@ -35,13 +36,13 @@ var (
 
 // Visitor is who an event acts for, as ctx.visitor shows them.
 type Visitor struct {
-	ID         string      `json:"id"`
-	Name       string      `json:"name"`
-	Audience   string      `json:"audience"`
-	Level      string      `json:"level"`
-	Guest      bool        `json:"guest"`
-	Subscribed bool        `json:"subscribed"`
-	LLM        *system.LLM `json:"llm,omitempty"`
+	ID         string   `json:"id"`
+	Name       string   `json:"name"`
+	Audience   string   `json:"audience"`
+	Level      string   `json:"level"`
+	Guest      bool     `json:"guest"`
+	Subscribed bool     `json:"subscribed"`
+	LLM        *llm.LLM `json:"llm,omitempty"`
 	// Payer is who an LLM call is charged to: the visitor when they are a
 	// person, the store's owner for alarms and reactors (guide §9.2).
 	Payer string `json:"-"`
@@ -556,7 +557,7 @@ func (a *Actor) ctxObject(ev *event) *goja.Object {
 		return goja.Undefined()
 	})
 	_ = o.Set("needAudience", func(aud string) goja.Value {
-		if !system.InGroup(ev.visitor.Audience, aud) {
+		if !sysdb.InGroup(ev.visitor.Audience, aud) {
 			a.throw(fail("audience_required", "this is for %ss", aud))
 		}
 		return goja.Undefined()

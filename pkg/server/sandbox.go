@@ -77,7 +77,7 @@ func (s *Server) serveSandbox(w http.ResponseWriter, r *http.Request) {
 		s.servePreview(w, r, label)
 		return
 	}
-	storeID, app, err := s.Sys.Origin(ctx, label)
+	storeID, app, err := s.People.Origin(ctx, label)
 	if err != nil {
 		notFound(w)
 		return

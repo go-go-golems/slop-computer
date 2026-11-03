@@ -46,7 +46,7 @@ type Config struct {
 	AdminEmails []string `yaml:"admin_emails"`
 	Signup      string   `yaml:"signup"` // open (default) or approval
 	// GuestsPerHour caps the new guests one address may create in an hour
-	// (0: system.GuestsPerHour, 30).
+	// (0: identity.GuestsPerHour, 30).
 	GuestsPerHour int    `yaml:"guests_per_hour"`
 	Local         bool   `yaml:"local"` // local sign-in form instead of OIDC (development)
 	Test          bool   `yaml:"test"`  // loopback only: X-Slop-As, fake LLM, virtual clock

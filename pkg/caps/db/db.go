@@ -22,7 +22,7 @@ import (
 	"github.com/go-go-golems/slop-computer/pkg/kernel"
 	"github.com/go-go-golems/slop-computer/pkg/rt"
 	"github.com/go-go-golems/slop-computer/pkg/store"
-	"github.com/go-go-golems/slop-computer/pkg/system"
+	"github.com/go-go-golems/slop-computer/pkg/sysdb"
 )
 
 // Host is what the capability needs from the door that serves it.
@@ -74,7 +74,7 @@ func (d *DB) Space(ctx context.Context, storeID string, caps rt.Caps, stores boo
 	if caps.Stores != rt.LevelNone && stores {
 		sp.Stores = caps.Stores
 	}
-	bs, err := d.K.Sys.Bindings(ctx, storeID)
+	bs, err := d.K.Registry.Bindings(ctx, storeID)
 	if err != nil {
 		return sp
 	}
@@ -146,8 +146,8 @@ func (d *DB) Route(ctx context.Context, v *rt.View, path string, doc bool) (Rout
 // the store is gone.
 func (d *DB) remote(ctx context.Context, v *rt.View, tgt rt.Target) (Route, error) {
 	r := Route{Tgt: tgt}
-	row, err := d.K.Sys.StoreByID(ctx, tgt.Store)
-	if errors.Is(err, system.ErrNotFound) {
+	row, err := d.K.Registry.StoreByID(ctx, tgt.Store)
+	if errors.Is(err, sysdb.ErrNotFound) {
 		return r, nil
 	}
 	if err != nil {
@@ -169,7 +169,7 @@ func (d *DB) remote(ctx context.Context, v *rt.View, tgt rt.Target) (Route, erro
 // LevelOn is the viewer's own level on another store (LevelNone when it is
 // gone).
 func (d *DB) LevelOn(ctx context.Context, v *rt.View, storeID string) rt.Level {
-	row, err := d.K.Sys.StoreByID(ctx, storeID)
+	row, err := d.K.Registry.StoreByID(ctx, storeID)
 	if err != nil {
 		return rt.LevelNone
 	}

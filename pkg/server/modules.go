@@ -28,7 +28,7 @@ type modFunc struct {
 
 // registerModules puts the server's Go modules in the actor registry.
 func (s *Server) registerModules() {
-	s.Env.A.Trusted = s.Sys.Trusted
+	s.Env.A.Trusted = s.Gov.Trusted
 	s.Env.A.Register(actor.Module{Name: "system", Doc: "People, grants, links, mounts, policy, LLM budgets, comps, secrets and the system log, as the visitor.",
 		Load: s.systemModule})
 	s.Env.A.Register(actor.Module{Name: "workshop", Doc: "Stores, snapshots, refs and files of any store the visitor may read; push to draft, publish, run drafts.",
@@ -118,7 +118,7 @@ func (s *Server) callVerb(a *actor.Actor, module string, f modFunc, args map[str
 	// The trust that let the app use() this module is checked again on every
 	// call: it ends when it is withdrawn, or when the admin who made it is
 	// no longer an admin (SLOP3-007), without waiting for a restart.
-	if module != "" && !s.Sys.Trusted(context.Background(), a.App(), module) {
+	if module != "" && !s.Gov.Trusted(context.Background(), a.App(), module) {
 		a.Throw("permission_denied", a.App()+" is no longer trusted with "+module)
 	}
 	p := s.actAs(a, module, v.Scope != verbs.Read)
@@ -166,7 +166,7 @@ func (s *Server) actAs(a *actor.Actor, module string, write bool) *access.Princi
 			a.Throw("permission_denied", "a module write needs a person; reactors, alarms and other stores may only read")
 		}
 		p := &access.Principal{Kind: access.KindStore, Store: id, Via: "app:" + a.App()}
-		p.Trusted = module != "" && s.Sys.Trusted(context.Background(), a.App(), module)
+		p.Trusted = module != "" && s.Gov.Trusted(context.Background(), a.App(), module)
 		return p
 	}
 	if person == "" {
