@@ -8,6 +8,8 @@ package system
 import (
 	"context"
 
+	"github.com/go-go-golems/slop-computer/pkg/billing"
+
 	"github.com/go-go-golems/slop-computer/pkg/policy"
 
 	"github.com/go-go-golems/slop-computer/pkg/llm"
@@ -22,6 +24,7 @@ import (
 // DB is system.db with every domain's queries.
 type DB struct {
 	*sysdb.DB
+	*billing.Book
 	*policy.Governance
 	*llm.Ledger
 	*registry.Registry
@@ -34,7 +37,7 @@ func Open(ctx context.Context, path string) (*DB, error) {
 	if err != nil {
 		return nil, err
 	}
-	return &DB{DB: d, Accounts: identity.NewAccounts(d), Registry: registry.NewRegistry(d), Ledger: llm.NewLedger(d), Governance: policy.NewGovernance(d)}, nil
+	return &DB{DB: d, Accounts: identity.NewAccounts(d), Registry: registry.NewRegistry(d), Ledger: llm.NewLedger(d), Governance: policy.NewGovernance(d), Book: billing.NewBook(d)}, nil
 }
 
 type (
@@ -65,7 +68,6 @@ var (
 	GroupsOf    = sysdb.GroupsOf
 	InGroup     = sysdb.InGroup
 	ValidLevel  = sysdb.ValidLevel
-	nullStr     = sysdb.NullStr
 )
 
 // forwarded from pkg/identity
@@ -140,4 +142,15 @@ var (
 	PolicyAudiences = policy.PolicyAudiences
 	DefaultPolicy   = policy.DefaultPolicy
 	IsPolicyCap     = policy.IsPolicyCap
+)
+
+// forwarded from pkg/billing
+type (
+	CompRow         = billing.CompRow
+	CheckoutAttempt = billing.CheckoutAttempt
+	StripeEvent     = billing.StripeEvent
+)
+
+var (
+	ErrConflict = billing.ErrConflict
 )

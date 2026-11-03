@@ -1,4 +1,4 @@
-package system
+package billing
 
 import (
 	"context"
@@ -6,8 +6,8 @@ import (
 	"errors"
 	"time"
 
-	"github.com/go-go-golems/slop-computer/pkg/billing"
 	"github.com/go-go-golems/slop-computer/pkg/ids"
+	"github.com/go-go-golems/slop-computer/pkg/sysdb"
 )
 
 // Billing storage: comps and the Stripe projection, ported from
@@ -46,26 +46,26 @@ type CompRow struct {
 }
 
 // GrantComp gives person standing access until until (ms).
-func (d *DB) GrantComp(ctx context.Context, actor, via, person string, until int64, note string) (CompRow, error) {
+func (d *Book) GrantComp(ctx context.Context, actor, via, person string, until int64, note string) (CompRow, error) {
 	c := CompRow{ID: ids.New("cmp_", 10), Person: person, Until: until, Note: note, CreatedBy: actor, CreatedAt: d.NowMs()}
 	err := d.Tx(ctx, func(tx *sql.Tx) error {
 		if _, err := tx.ExecContext(ctx, `INSERT INTO comps (id, person, until, note, created_by, created_at) VALUES (?, ?, ?, ?, ?, ?)`,
-			c.ID, person, until, nullStr(note), actor, c.CreatedAt); err != nil {
+			c.ID, person, until, sysdb.NullStr(note), actor, c.CreatedAt); err != nil {
 			return err
 		}
-		_, err := Log(ctx, tx, c.CreatedAt, actor, via, "comp for "+person+" until "+time.UnixMilli(until).UTC().Format("2006-01-02"),
-			Change{Kind: "comp", Key: person, Op: "grant", After: c.ID})
+		_, err := sysdb.Log(ctx, tx, c.CreatedAt, actor, via, "comp for "+person+" until "+time.UnixMilli(until).UTC().Format("2006-01-02"),
+			sysdb.Change{Kind: "comp", Key: person, Op: "grant", After: c.ID})
 		return err
 	})
 	return c, err
 }
 
 // RevokeComp ends a comp now. It returns the person.
-func (d *DB) RevokeComp(ctx context.Context, actor, via, id string) (string, error) {
+func (d *Book) RevokeComp(ctx context.Context, actor, via, id string) (string, error) {
 	var person string
 	err := d.Tx(ctx, func(tx *sql.Tx) error {
 		if err := tx.QueryRowContext(ctx, `SELECT person FROM comps WHERE id = ?`, id).Scan(&person); errors.Is(err, sql.ErrNoRows) {
-			return ErrNotFound
+			return sysdb.ErrNotFound
 		} else if err != nil {
 			return err
 		}
@@ -73,14 +73,14 @@ func (d *DB) RevokeComp(ctx context.Context, actor, via, id string) (string, err
 		if _, err := tx.ExecContext(ctx, `UPDATE comps SET revoked_at = ? WHERE id = ? AND revoked_at IS NULL`, now, id); err != nil {
 			return err
 		}
-		_, err := Log(ctx, tx, now, actor, via, "revoked comp "+id+" of "+person, Change{Kind: "comp", Key: person, Op: "revoke", Before: id})
+		_, err := sysdb.Log(ctx, tx, now, actor, via, "revoked comp "+id+" of "+person, sysdb.Change{Kind: "comp", Key: person, Op: "revoke", Before: id})
 		return err
 	})
 	return person, err
 }
 
 // CompRows lists comps, of one person or of everyone (person "").
-func (d *DB) CompRows(ctx context.Context, person string) ([]CompRow, error) {
+func (d *Book) CompRows(ctx context.Context, person string) ([]CompRow, error) {
 	rows, err := d.QueryContext(ctx, `SELECT id, person, until, coalesce(revoked_at, 0), coalesce(note, ''), created_by, created_at
 		FROM comps WHERE ? = '' OR person = ? ORDER BY created_at DESC`, person, person)
 	if err != nil {
@@ -99,32 +99,32 @@ func (d *DB) CompRows(ctx context.Context, person string) ([]CompRow, error) {
 }
 
 // Comps returns a person's comps for the policy.
-func (d *DB) Comps(ctx context.Context, person string) ([]billing.Comp, error) {
+func (d *Book) Comps(ctx context.Context, person string) ([]Comp, error) {
 	rows, err := d.CompRows(ctx, person)
 	if err != nil {
 		return nil, err
 	}
-	out := make([]billing.Comp, 0, len(rows))
+	out := make([]Comp, 0, len(rows))
 	for _, c := range rows {
-		out = append(out, billing.Comp{Until: time.UnixMilli(c.Until).UTC(), Revoked: c.RevokedAt != 0})
+		out = append(out, Comp{Until: time.UnixMilli(c.Until).UTC(), Revoked: c.RevokedAt != 0})
 	}
 	return out, nil
 }
 
 // --- customers and subscriptions ---------------------------------------------
 
-func (d *DB) CustomerFor(ctx context.Context, person string) (string, error) {
+func (d *Book) CustomerFor(ctx context.Context, person string) (string, error) {
 	var id string
 	err := d.QueryRowContext(ctx, `SELECT customer_id FROM stripe_customers WHERE person = ?`, person).Scan(&id)
 	if errors.Is(err, sql.ErrNoRows) {
-		return "", ErrNotFound
+		return "", sysdb.ErrNotFound
 	}
 	return id, err
 }
 
 // SaveCustomer keeps the first mapping and returns the stored Customer, so
 // a retried creation adopts the same one.
-func (d *DB) SaveCustomer(ctx context.Context, person, customer string) (string, error) {
+func (d *Book) SaveCustomer(ctx context.Context, person, customer string) (string, error) {
 	if _, err := d.ExecContext(ctx, `INSERT INTO stripe_customers (person, customer_id, created_at) VALUES (?, ?, ?) ON CONFLICT DO NOTHING`,
 		person, customer, d.NowMs()); err != nil {
 		return "", err
@@ -132,19 +132,19 @@ func (d *DB) SaveCustomer(ctx context.Context, person, customer string) (string,
 	return d.CustomerFor(ctx, person)
 }
 
-func (d *DB) PersonForCustomer(ctx context.Context, customer string) (string, error) {
+func (d *Book) PersonForCustomer(ctx context.Context, customer string) (string, error) {
 	var id string
 	err := d.QueryRowContext(ctx, `SELECT person FROM stripe_customers WHERE customer_id = ?`, customer).Scan(&id)
 	if errors.Is(err, sql.ErrNoRows) {
-		return "", ErrNotFound
+		return "", sysdb.ErrNotFound
 	}
 	return id, err
 }
 
 const subColumns = `subscription_id, customer_id, price_id, status, quantity, item_count, access_until, trial_until, cancel_at_period_end, canceled_at, refreshed_at`
 
-func scanSub(r interface{ Scan(...any) error }) (billing.Subscription, string, error) {
-	var s billing.Subscription
+func scanSub(r interface{ Scan(...any) error }) (Subscription, string, error) {
+	var s Subscription
 	var person string
 	var access, trial, canceled sql.NullInt64
 	var refreshed int64
@@ -155,13 +155,13 @@ func scanSub(r interface{ Scan(...any) error }) (billing.Subscription, string, e
 }
 
 // Subscriptions returns a person's projected subscriptions.
-func (d *DB) Subscriptions(ctx context.Context, person string) ([]billing.Subscription, error) {
+func (d *Book) Subscriptions(ctx context.Context, person string) ([]Subscription, error) {
 	rows, err := d.QueryContext(ctx, `SELECT `+subColumns+`, person FROM stripe_subscriptions WHERE person = ? ORDER BY refreshed_at DESC`, person)
 	if err != nil {
 		return nil, err
 	}
 	defer rows.Close()
-	out := []billing.Subscription{}
+	out := []Subscription{}
 	for rows.Next() {
 		s, _, err := scanSub(rows)
 		if err != nil {
@@ -173,15 +173,15 @@ func (d *DB) Subscriptions(ctx context.Context, person string) ([]billing.Subscr
 }
 
 // SubscriptionPerson returns a subscription's customer and person.
-func (d *DB) SubscriptionPerson(ctx context.Context, id string) (billing.Subscription, string, error) {
+func (d *Book) SubscriptionPerson(ctx context.Context, id string) (Subscription, string, error) {
 	s, p, err := scanSub(d.QueryRowContext(ctx, `SELECT `+subColumns+`, person FROM stripe_subscriptions WHERE subscription_id = ?`, id))
 	if errors.Is(err, sql.ErrNoRows) {
-		return s, p, ErrNotFound
+		return s, p, sysdb.ErrNotFound
 	}
 	return s, p, err
 }
 
-func upsertSubscriptions(ctx context.Context, tx *sql.Tx, now int64, person string, subs []billing.Subscription, live bool) error {
+func upsertSubscriptions(ctx context.Context, tx *sql.Tx, now int64, person string, subs []Subscription, live bool) error {
 	for _, s := range subs {
 		if _, err := tx.ExecContext(ctx, `INSERT INTO stripe_subscriptions (subscription_id, person, customer_id, price_id, status, quantity, item_count,
 			access_until, trial_until, cancel_at_period_end, canceled_at, livemode, refreshed_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
@@ -222,7 +222,7 @@ func scanAttempt(r interface{ Scan(...any) error }) (CheckoutAttempt, error) {
 	var created, updated int64
 	err := r.Scan(&a.ID, &a.Person, &a.Price, &a.State, &sid, &surl, &exp, &code, &created, &updated)
 	if errors.Is(err, sql.ErrNoRows) {
-		return a, ErrNotFound
+		return a, sysdb.ErrNotFound
 	}
 	if sid.Valid {
 		a.SessionID = &sid.String
@@ -241,7 +241,7 @@ func scanAttempt(r interface{ Scan(...any) error }) (CheckoutAttempt, error) {
 // AdmitCheckout returns the person's admitted attempt, creating a pending
 // one for price when none is open. An existing attempt may be for another
 // price.
-func (d *DB) AdmitCheckout(ctx context.Context, person, price string) (CheckoutAttempt, bool, error) {
+func (d *Book) AdmitCheckout(ctx context.Context, person, price string) (CheckoutAttempt, bool, error) {
 	var a CheckoutAttempt
 	created := false
 	err := d.Tx(ctx, func(tx *sql.Tx) error {
@@ -264,30 +264,30 @@ func (d *DB) AdmitCheckout(ctx context.Context, person, price string) (CheckoutA
 
 // OpenCheckout records the Session of an admitted attempt. ErrNotFound: the
 // attempt was retired meanwhile.
-func (d *DB) OpenCheckout(ctx context.Context, id, session, url string, expires time.Time) error {
+func (d *Book) OpenCheckout(ctx context.Context, id, session, url string, expires time.Time) error {
 	res, err := d.ExecContext(ctx, `UPDATE checkout_attempts SET state = 'open', session_id = ?, session_url = ?, expires_at = ?, updated_at = ? WHERE id = ? AND state IN ('pending', 'open')`,
 		session, url, expires.UnixMilli(), d.NowMs(), id)
 	if err != nil {
 		return err
 	}
 	if n, _ := res.RowsAffected(); n == 0 {
-		return ErrNotFound
+		return sysdb.ErrNotFound
 	}
 	return nil
 }
 
-func (d *DB) FinishCheckout(ctx context.Context, id, state, code string) error {
+func (d *Book) FinishCheckout(ctx context.Context, id, state, code string) error {
 	_, err := d.ExecContext(ctx, `UPDATE checkout_attempts SET state = ?, error_code = nullif(?, ''), updated_at = ? WHERE id = ? AND state IN ('pending', 'open')`,
 		state, code, d.NowMs(), id)
 	return err
 }
 
-func (d *DB) CheckoutBySession(ctx context.Context, session string) (CheckoutAttempt, error) {
+func (d *Book) CheckoutBySession(ctx context.Context, session string) (CheckoutAttempt, error) {
 	return scanAttempt(d.QueryRowContext(ctx, `SELECT `+attemptColumns+` FROM checkout_attempts WHERE session_id = ?`, session))
 }
 
 // DueCheckouts lists pending or open attempts untouched for two minutes.
-func (d *DB) DueCheckouts(ctx context.Context) ([]CheckoutAttempt, error) {
+func (d *Book) DueCheckouts(ctx context.Context) ([]CheckoutAttempt, error) {
 	rows, err := d.QueryContext(ctx, `SELECT `+attemptColumns+` FROM checkout_attempts WHERE state IN ('pending', 'open') AND updated_at < ? ORDER BY updated_at, id LIMIT 50`,
 		d.NowMs()-2*60*1000)
 	if err != nil {
@@ -318,7 +318,7 @@ type StripeEvent struct {
 }
 
 // InsertEvent records an event once; duplicates are accepted.
-func (d *DB) InsertEvent(ctx context.Context, e StripeEvent) (bool, error) {
+func (d *Book) InsertEvent(ctx context.Context, e StripeEvent) (bool, error) {
 	state := "pending"
 	if e.State == "ignored" {
 		state = "ignored"
@@ -340,7 +340,7 @@ func (d *DB) InsertEvent(ctx context.Context, e StripeEvent) (bool, error) {
 
 // EnqueueRefresh adds a synthetic refresh request for a Customer, so
 // reconciliation and operators share the webhook path.
-func (d *DB) EnqueueRefresh(ctx context.Context, customer, reason string) error {
+func (d *Book) EnqueueRefresh(ctx context.Context, customer, reason string) error {
 	now := d.NowMs()
 	_, err := d.ExecContext(ctx, `INSERT INTO stripe_events (event_id, type, customer_id, next_attempt_at, received_at) VALUES (?, ?, ?, ?, ?)`,
 		ids.New("refresh_", 10), "slop.refresh."+reason, customer, now, now)
@@ -348,7 +348,7 @@ func (d *DB) EnqueueRefresh(ctx context.Context, customer, reason string) error 
 }
 
 // ClaimEvent leases one due pending event.
-func (d *DB) ClaimEvent(ctx context.Context, lease time.Duration) (StripeEvent, error) {
+func (d *Book) ClaimEvent(ctx context.Context, lease time.Duration) (StripeEvent, error) {
 	var e StripeEvent
 	token := ids.New("", 16)
 	err := d.Tx(ctx, func(tx *sql.Tx) error {
@@ -357,7 +357,7 @@ func (d *DB) ClaimEvent(ctx context.Context, lease time.Duration) (StripeEvent, 
 			WHERE state = 'pending' AND next_attempt_at <= ? AND (lease_until IS NULL OR lease_until < ?) ORDER BY next_attempt_at LIMIT 1`, now, now).
 			Scan(&e.EventID, &e.Type, &e.CustomerID, &e.SubscriptionID, &e.SessionID, &e.Livemode, &e.State, &e.Attempts)
 		if errors.Is(err, sql.ErrNoRows) {
-			return ErrNotFound
+			return sysdb.ErrNotFound
 		}
 		if err != nil {
 			return err
@@ -372,7 +372,7 @@ func (d *DB) ClaimEvent(ctx context.Context, lease time.Duration) (StripeEvent, 
 
 // CompleteEvent writes a person's current subscriptions and marks the event
 // done, in one transaction, if the lease is still owned.
-func (d *DB) CompleteEvent(ctx context.Context, e StripeEvent, person string, subs []billing.Subscription, state string) error {
+func (d *Book) CompleteEvent(ctx context.Context, e StripeEvent, person string, subs []Subscription, state string) error {
 	return d.Tx(ctx, func(tx *sql.Tx) error {
 		var n int
 		if err := tx.QueryRowContext(ctx, `SELECT count(*) FROM stripe_events WHERE event_id = ? AND lease_token = ?`, e.EventID, e.LeaseToken).Scan(&n); err != nil {
@@ -386,7 +386,7 @@ func (d *DB) CompleteEvent(ctx context.Context, e StripeEvent, person string, su
 			if err := upsertSubscriptions(ctx, tx, now, person, subs, e.Livemode); err != nil {
 				return err
 			}
-			if _, err := Log(ctx, tx, now, "system", "stripe", "billing refreshed for "+person, Change{Kind: "billing", Key: person, Op: "refresh"}); err != nil {
+			if _, err := sysdb.Log(ctx, tx, now, "system", "stripe", "billing refreshed for "+person, sysdb.Change{Kind: "billing", Key: person, Op: "refresh"}); err != nil {
 				return err
 			}
 		}
@@ -397,7 +397,7 @@ func (d *DB) CompleteEvent(ctx context.Context, e StripeEvent, person string, su
 }
 
 // FailEvent schedules a retry with backoff, or gives up (terminal).
-func (d *DB) FailEvent(ctx context.Context, e StripeEvent, code string, backoff time.Duration, terminal bool) error {
+func (d *Book) FailEvent(ctx context.Context, e StripeEvent, code string, backoff time.Duration, terminal bool) error {
 	state := "pending"
 	if terminal {
 		state = "error"
@@ -409,7 +409,7 @@ func (d *DB) FailEvent(ctx context.Context, e StripeEvent, code string, backoff 
 
 // CustomersToReconcile are Customers with live subscriptions not refreshed
 // for six hours.
-func (d *DB) CustomersToReconcile(ctx context.Context) ([]string, error) {
+func (d *Book) CustomersToReconcile(ctx context.Context) ([]string, error) {
 	rows, err := d.QueryContext(ctx, `SELECT customer_id FROM stripe_subscriptions WHERE status NOT IN ('canceled', 'incomplete_expired') AND refreshed_at < ?
 		GROUP BY customer_id ORDER BY min(refreshed_at) LIMIT 50`, d.NowMs()-6*3600*1000)
 	if err != nil {
@@ -430,7 +430,7 @@ func (d *DB) CustomersToReconcile(ctx context.Context) ([]string, error) {
 // NextAccessChange is the earliest future moment at which someone's
 // standing access may lapse: a comp's until or a subscription's
 // access_until. Zero when none is scheduled.
-func (d *DB) NextAccessChange(ctx context.Context, now int64) int64 {
+func (d *Book) NextAccessChange(ctx context.Context, now int64) int64 {
 	var next sql.NullInt64
 	_ = d.QueryRowContext(ctx, `SELECT min(t) FROM (
 		SELECT until AS t FROM comps WHERE revoked_at IS NULL AND until > ?
