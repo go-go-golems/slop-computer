@@ -153,6 +153,7 @@ Documents keep the claude.ai contract's semantics exactly, because hosted pages 
 - **Operations** are `set`, `update` (deep merge for objects, arrays replaced), `delete`, `acquire` (lease) and queries with up to ten `where` filters, `orderBy` and `limit`.
 - **Versions:** `version` counts changes to one document; `rev` is the store revision that last wrote it. A delete leaves a tombstone for seven days, so a view that reconnects learns of it.
 - **Queries are SQL** over `_docs` with `json_extract`. A manifest can ask for expression indexes on a collection's fields (section 6.1); the kernel creates them as `_idx_<coll>_<field>`.
+- **One path space per page** (SLOP3-008). A page's `db` sees its own store at the root, unchanged. A top-level segment beginning with `_` is the platform's, in every store. Other stores are reached two ways, always as the viewer: an **alias** (`bind.set <store> <alias> <target> --prefix <collection> --level view|interact|admin`) maps `<alias>/…` to a collection of another store, for pages written for claude.ai; `_stores/<id>/<path>` reaches any store, for an app that declares `capabilities.db.stores` and that an admin allowed (the `stores` policy cell), up to 18 segments. The effective level is the lower of the route's and the viewer's level on that store, under that store's rules. Another store's `data/users/<id>/…` is reachable by no route. A view follows the stores it subscribed into, and reopens when the viewer's level on one of them changes.
 
 ### 4.4 Files and blobs
 

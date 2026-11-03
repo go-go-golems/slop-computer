@@ -19,3 +19,7 @@ Mounts and hosts are not mapped into the path space (open question 3 decided); p
 ## 2026-11-02
 
 Registry documents are not live for now (open question 6 decided): computed on read, onSnapshot delivers one snapshot.
+
+## 2026-11-02
+
+Phase 1 implemented (data and assets across stores): rt.Space, aliases (bind.set --prefix --level), _stores behind db.stores and the stores policy cell, cross-store stream with per-store cursors, /_blob through --assets aliases, 16-byte asset ids, reopen on losing access to a followed store. Design doc updated with the decisions and two corrections (asset ids are 8 bytes; blob fetches cannot check the viewer's level).

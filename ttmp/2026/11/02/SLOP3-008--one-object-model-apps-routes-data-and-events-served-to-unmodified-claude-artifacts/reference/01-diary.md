@@ -323,3 +323,105 @@ This step wires `rt.Space` into the server: bindings become aliases (a prefix an
 ### Technical details
 - Effective level on a route: own store `min(v.Level, Cap)` (Cap is `owner` for plain own paths); another store `min(Access.Level(viewer, store), Cap)`. Rules are those of the app the target store runs (`Kernel.Rules`).
 - `bind.set dash contacts crm --prefix contacts --level interact` logs `bound dash contacts → crm:contacts (in pages at contacts, interact)`.
+
+## Step 7: The runtime's depth, the browser check, and reopening on revocation
+
+The runtime got the 18-segment limit for `_stores/<id>/` paths, and then the whole case ran in a browser: an unmodified, claude.ai-style page (`claude.use('db')`, `onSnapshot`, `"/_blob/" + id`) on a local server, reading a CRM store through an alias. Reading, pictures, live changes and the page's own writes all worked. The check found one real gap: after the viewer lost access to the CRM store, the open page kept showing its contacts. Fixed and tested; the browser then showed the page reopening to "0 contacts".
+
+### Prompt Context
+**User prompt (verbatim):** see Step 5.
+**Assistant interpretation:** Finish phase 1 in the runtime and validate it end to end in a real browser.
+**Inferred user intent:** Evidence that a page made in claude.ai works unchanged across stores, not only that unit tests pass.
+**Commit (code):** 0d0776d — "SLOP3-008 runtime: _stores/<id>/ paths keep a store's full depth (18 segments)"; da5ea10 — "SLOP3-008: losing access to a store a page reads reopens the page"
+
+### What I did
+- `web/runtime/src/util.ts` `checkPath`: for paths starting `_stores/`, 2 more segments and `"_stores/".length + MaxSegmentBytes + 1` more bytes. `web/runtime/test/paths.test.ts` (3 tests). `make runtime` rebuilt `pkg/server/assets/claude.js` with a new source stamp.
+- `ttmp/…/scripts/02-dashboard/` (`app.json`, `index.html`): the dashboard as claude.ai would write it. `ttmp/…/scripts/02-local-alias-dashboard.sh <slop>`: creates `crm` (a contact with a 32×32 PNG upload at a 16-byte id, via `files.put --zone assets`), pushes `dash`, mounts it at `/dash`, grants guests, `bind.set dash contacts crm --prefix contacts --assets`.
+- Local server: `slop serve --local --listen 127.0.0.1:18320 --data $CLAUDE_JOB_DIR/tmp/e2e/data --admin-email admin@example.com`; CLI login by device code approved in the browser, with `SLOP_CREDENTIALS` pointing at a separate file (the production credentials untouched).
+- Browser (Playwright tools), as a guest at `http://apps.localhost:18320/dash`: list, picture, a live `docs.set crm contacts/c2`, a note added through the page; then `grant.rm crm @guest`.
+- The revocation fix: `rt.View` remote state now holds `{rev, level}` (`Watch(store, rev, level)`, `RemoteLevels`); `route.held` (the viewer's level before the ceiling); `remoteLevelsMoved` in `recheck`; `reviewViews(id)` walks `Registry.Reaching(id)`, rechecking each view against its own store's row. `TestAliasRevokeReopens`.
+- Screenshots: `various/01-dashboard-alias.png`, `various/02-dashboard-after-revoke.png`.
+
+### Why
+- The browser check was the point of the phase: the server tests drive the RPC protocol, but only the real runtime shows that an unmodified page's `onSnapshot`, `orderBy` and `<img>` work through an alias.
+- Reopening (rather than pushing deletions for what the viewer lost) reuses the existing mechanism for the view's own store: the shell reopens the frame and the page subscribes again under the new levels.
+
+### What worked
+- `node --test … test/paths.test.ts`: 3 pass; `pnpm test`: 12 pass; `pnpm check`: clean; `TestBuildOutputsFresh` ok after `make runtime`.
+- Browser, first load: "Ada Lovelace" with her picture; `img.complete: true, naturalWidth: 32, src: "/_blob/a0123456789abcdef0123456789abcdef"`; "1 contact".
+- Live: after `docs.set crm contacts/c2` the page showed Grace Hopper and "2 contacts" without a reload.
+- Own write: the note "call Grace about COBOL" appeared; `docs.ls` found `notes/r7TrhYAqi3JyvW4RF0gY` in `dash` and nothing in `crm`.
+- After the fix, `grant.rm crm @guest` with the page open: within 3 s the page showed "0 contacts", its note still there.
+- `TestAliasRevokeReopens` passes; mutations (no level comparison in `recheck`; `reviewViews` back on `Of(id)`) each make it fail with `after losing crm: [map[_type:hello …]]`.
+
+### What didn't work
+- The gap itself: after `grant.rm crm @guest`, a new contact (Katherine Johnson) was correctly not delivered, but Ada and Grace stayed on screen until a reload.
+- `slop serve` on 18300: `LISTEN … 127.0.0.1:18300 … users:(("slop",pid=1390210…))`, an older server; used `--listen 127.0.0.1:18320`, which re-derives the `*.localhost` hosts.
+- `--test`'s documented `X-Slop-As` header is not implemented anywhere (`git grep -i "slop-as"` finds only the flag's help text and a config comment), so the CLI logged in by device code instead.
+- The Playwright tools' schemas had changed (`browser_type`: `Invalid input: expected string, received undefined → at target`); loaded the current schemas with ToolSearch and used `target`.
+- `browser_wait_for text: "2 contacts"` timed out after 5000 ms: it searches the top frame, and the page is in the shell's iframe; the snapshot showed the text was there.
+- After the reopen, the console showed `404 … /_site/views/vjatpsgdui4sy6ipl`: the shell's `DELETE` of the view the server had already closed (`shell.js:129`). Existing behaviour for any access-driven reopen; harmless.
+
+### What I learned
+- `/_blob` resolution needed nothing from the runtime: the page composes `"/_blob/" + id` relative to its own sandbox origin, and the server's fallback does the rest.
+- `reviewViews` is the "tell idle pages now" path; `confirm` alone would only have caught the change at the page's next RPC or the next commit of either store.
+
+### What was tricky to build
+- Which level to record. The ceiling-capped level would hide changes above the cap (a guest's crm level going from interact to view under a view alias); the raw level the viewer holds on the store (`route.held`) is what the documents shown depend on, so that is recorded and compared.
+
+### What warrants a second pair of eyes
+- `reviewViews` now rechecks views of other stores on every grant change of a followed store: one `StoreByID` per distinct holder, then `recheck` per view.
+- Reopening on any level change (up or down) is coarser than needed for an increase; it matches the own-store behaviour.
+
+### What should be done in the future
+- Implement or remove the documented `X-Slop-As` test header (out of scope here).
+
+### Code review instructions
+- `web/runtime/src/util.ts` `checkPath`; `pkg/rt/views.go` (`remoteState`, `Watch`, `RemoteLevels`); `pkg/server/space.go` (`remoteLevelsMoved`); `pkg/server/live.go` (`recheck`, `reviewViews`).
+- `GOWORK=off go test ./pkg/server -run 'TestAlias|TestStoresSpace' -count=1 -v`; `cd web/runtime && pnpm test`.
+- Browser: run a `--local` server, log the CLI in, run `scripts/02-local-alias-dashboard.sh <slop>`, open `http://apps.localhost:<port>/dash`.
+
+### Technical details
+- The PNG is generated in the script (32×32, colour 217,119,87) and uploaded with `files.put --json '{"store":"crm","path":"a0123…","data":"<base64>","type":"image/png","zone":"assets"}'`.
+
+## Step 8: Documentation and the design doc brought in line
+
+The docs now say what was built: the v3 design's documents section and the claude.ai comparison describe the path space, and SLOP3-008's design records the phase-1 decisions and two corrections from implementation.
+
+### Prompt Context
+**User prompt (verbatim):** see Step 5.
+**Assistant interpretation:** Keep the design and reference docs truthful about the implemented behaviour.
+**Inferred user intent:** The next phase (files, registry documents) starts from an accurate design.
+**Commit (code):** see the commit after this entry — "SLOP3-008: docs for phase 1 …"
+
+### What I did
+- `doc/design/slop-v3.md` §4.3: a "One path space per page" item (aliases, `_stores`, reserved `_`, levels, private documents, reopening).
+- `doc/claude-apis/README.md`: the `db` and `assets` rows mention the path space and bare-id uploads through `--assets` aliases.
+- SLOP3-008 design doc: §5.2 (resolution order as built; `stores` policy cell instead of "as `slop app trust`"; `as: viewer` only; private documents rule; reopening), §5.3 rewritten as implemented (capability model for blobs; no `_stores` uploads in phase 1; 8 bytes → 16 bytes), §7.1 step 3, §8 invariants, §9 phase 1 marked implemented with what is not done, §10 questions 1, 4, 5, 7 decided. Tasks and changelog updated.
+
+### Why
+- Two statements in the design were wrong once the code was read closely: asset ids were 8 random bytes, not 8 characters; and a blob fetch cannot be checked against the viewer's level, because it carries no view credential.
+
+### What worked
+- `docmgr doctor --ticket SLOP3-008`: all checks passed.
+
+### What didn't work
+- No failures observed.
+
+### What I learned
+- N/A beyond the corrections above.
+
+### What was tricky to build
+- Saying honestly what phase 1 did not do: actors' `use('db')` is unchanged, and `caps/db` became a shared resolver (`rt.Space`) rather than one shared db implementation.
+
+### What warrants a second pair of eyes
+- §5.3's decision to leave `_stores` uploads unserved in phase 1.
+
+### What should be done in the future
+- Open question 2 (writable registry documents) before phase 3.
+
+### Code review instructions
+- Read §5.2, §5.3, §9 and §10 of the design doc against `pkg/rt/space.go` and `pkg/server/space.go`.
+
+### Technical details
+- N/A.
