@@ -22,6 +22,7 @@ import (
 	"github.com/go-go-golems/slop-computer/pkg/access"
 	"github.com/go-go-golems/slop-computer/pkg/authz"
 	"github.com/go-go-golems/slop-computer/pkg/httpx"
+	"github.com/go-go-golems/slop-computer/pkg/registry"
 	"github.com/go-go-golems/slop-computer/pkg/rt"
 	"github.com/go-go-golems/slop-computer/pkg/store"
 	"github.com/go-go-golems/slop-computer/pkg/system"
@@ -690,7 +691,7 @@ func (s *Server) dbGet(ctx context.Context, v *rt.View, path string) (any, error
 	}
 	missing := map[string]any{"path": path, "exists": false}
 	if r.tgt.Registry {
-		if d := s.registryDoc(ctx, v, r.tgt, path); d != nil {
+		if d := s.reg.Doc(ctx, v, r.tgt, path); d != nil {
 			return map[string]any{"path": path, "exists": true, "version": d.Version, "body": d.Body}, nil
 		}
 		return missing, nil
@@ -716,7 +717,7 @@ func (s *Server) readable(ctx context.Context, v *rt.View, q rt.Query) ([]rt.Doc
 		return nil, err
 	}
 	if r.tgt.Registry {
-		docs := s.registryColl(ctx, v, r.tgt, q.Coll)
+		docs := s.reg.Coll(ctx, v, r.tgt, q.Coll)
 		if docs == nil {
 			docs = []rt.Doc{}
 		}
@@ -803,8 +804,8 @@ func writeWho(v *rt.View, r route) store.Who {
 // stands for.
 func (s *Server) dbWrite(ctx context.Context, v *rt.View, in writeIn) (int64, int64, error) {
 	if r, err := s.route(ctx, v, in.Path, true); err == nil && r.tgt.Registry {
-		version, err := s.registryWrite(ctx, v, r.tgt, in)
-		return version, 0, err
+		version, err := s.reg.Write(ctx, v, r.tgt, registry.WriteIn{Op: in.Op, Body: in.Body, IfVersion: in.IfVersion})
+		return version, 0, regErr(err)
 	}
 	r, err := s.writeRoute(ctx, v, in.Path)
 	if err != nil {
@@ -1007,11 +1008,21 @@ func (s *Server) rpcDBSubscribe(ctx context.Context, v *rt.View, raw json.RawMes
 		if err != nil {
 			return nil, err
 		}
+		if r.tgt.Registry { // live: the system log's changes to it follow (step 3)
+			var seen []rt.Doc
+			if m, _ := d.(map[string]any); m["exists"] == true {
+				seen = []rt.Doc{{Path: a.Path, Version: m["version"].(int64)}}
+			}
+			s.reg.Live.Remember(v.ID, registry.Sub{ID: a.Sub, Path: a.Path}, seen)
+		}
 		return map[string]any{"rev": head, "doc": d}, nil
 	}
 	docs, err := s.readable(ctx, v, q)
 	if err != nil {
 		return nil, err
+	}
+	if r.tgt.Registry {
+		s.reg.Live.Remember(v.ID, registry.Sub{ID: a.Sub, Path: a.Path, Coll: true, Query: q}, docs)
 	}
 	return map[string]any{"rev": head, "docs": docs}, nil
 }
@@ -1022,6 +1033,7 @@ func (s *Server) rpcDBUnsubscribe(_ context.Context, v *rt.View, raw json.RawMes
 		return nil, err
 	}
 	v.Unsubscribe(a.Sub)
+	s.reg.Live.Forget(v.ID, a.Sub)
 	return map[string]bool{"ok": true}, nil
 }
 

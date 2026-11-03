@@ -49,9 +49,6 @@ func (e *Env) personArg(ctx context.Context, s string) (system.Person, error) {
 }
 
 func (e *Env) personChanged(ctx context.Context, id string) {
-	if e.PersonChanged != nil {
-		e.PersonChanged(ctx, id)
-	}
 }
 
 func init() {
@@ -75,7 +72,6 @@ func init() {
 				if err != nil {
 					return nil, err
 				}
-				e.personChanged(ctx, pp.ID)
 				return c, nil
 			}},
 		&Verb{Name: "sub.revoke", Effect: EffectGovern, Doc: "End a comp now.", Scope: Write, AdminOnly: true, Action: authz.PlatformAdmin,
@@ -88,7 +84,6 @@ func init() {
 				if err != nil {
 					return nil, err
 				}
-				e.personChanged(ctx, person)
 				return map[string]any{"revoked": a.S("id"), "person": person}, nil
 			}},
 		&Verb{Name: "sub.ls", Doc: "List comps (of one person, or everyone's).", Scope: Read, AdminOnly: true, Action: authz.PlatformAdmin,

@@ -201,9 +201,6 @@ func init() {
 				if err := e.Sys.SetBinding(ctx, p.ID(), p.ViaLabel(), b); err != nil {
 					return nil, err
 				}
-				if e.AccessChanged != nil && b.Prefix != "" {
-					e.AccessChanged(ctx, b.Store) // open pages reopen with the new path space
-				}
 				return b, nil
 			}},
 		&Verb{Name: "bind.rm", Doc: "Remove a store's read alias.", Scope: Write, Action: authz.StoreAdmin,
@@ -215,9 +212,6 @@ func init() {
 				err := e.Sys.RemoveBinding(ctx, p.ID(), p.ViaLabel(), a.S("store"), a.S("alias"))
 				if errors.Is(err, system.ErrNotFound) {
 					return nil, Errf("not_found", "no alias %s on %s", a.S("alias"), a.S("store"))
-				}
-				if err == nil && e.AccessChanged != nil {
-					e.AccessChanged(ctx, a.S("store")) // pages that mapped it reopen without it
 				}
 				return map[string]any{"removed": a.S("alias")}, err
 			}},

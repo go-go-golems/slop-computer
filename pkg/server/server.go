@@ -21,6 +21,7 @@ import (
 	"github.com/go-go-golems/slop-computer/pkg/ids"
 	"github.com/go-go-golems/slop-computer/pkg/llm"
 	"github.com/go-go-golems/slop-computer/pkg/llm/gepp"
+	"github.com/go-go-golems/slop-computer/pkg/registry"
 	"github.com/go-go-golems/slop-computer/pkg/rt"
 	"github.com/go-go-golems/slop-computer/pkg/system"
 	"github.com/go-go-golems/slop-computer/pkg/verbs"
@@ -33,6 +34,10 @@ type Server struct {
 	Env  *verbs.Env
 	main *http.ServeMux
 	rt   *rtState
+	// reg serves the registry as documents (pkg/registry); follow is the
+	// page door's place in the system log (registry.go).
+	reg    *registry.Docs
+	follow sysFollower
 	// Extra host handlers, set by later phases (live, static, sandbox).
 	Live, Static, Sandbox http.Handler
 	// oidcLogin starts an OIDC sign-in (nil until OIDC is configured).
@@ -97,11 +102,17 @@ func New(cfg *config.Config, sys *system.DB, env *verbs.Env) *Server {
 		key = []byte(ids.Secret("key_"))
 	}
 	s.rt = newRT(key)
-	s.rt.views.OnClose = s.roomClosed
-	if env != nil {
-		env.AccessChanged = s.reviewViews
-		env.PersonChanged = s.reviewPerson
-		env.PolicyChanged = s.reviewApp
+	s.rt.views.OnClose = func(v *rt.View, rooms []string) {
+		s.roomClosed(v, rooms)
+		s.reg.Live.Forget(v.ID, "")
+	}
+	s.reg = &registry.Docs{Sys: s.Sys, Env: env, Host: regHost{s}, Live: registry.NewLive()}
+	if s.Sys != nil {
+		// Views follow the system log: a change of access, a person's role
+		// or comps, or an app's policy rechecks the views it may affect,
+		// and live registry documents hear what moved (SLOP3-009 step 3).
+		s.follow.cursor, _ = s.Sys.LogHead(context.Background())
+		s.Sys.Listen(func() { go s.followSystem() })
 	}
 	if env != nil && env.K != nil {
 		env.K.Subscribe(s.publish)

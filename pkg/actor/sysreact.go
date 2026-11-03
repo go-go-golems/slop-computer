@@ -25,12 +25,12 @@ func (m *Manager) followSystem() {
 		return
 	}
 	wake := make(chan struct{}, 1)
-	m.K.Sys.OnLog = func() {
+	m.K.Sys.Listen(func() {
 		select {
 		case wake <- struct{}{}:
 		default:
 		}
-	}
+	})
 	go func() {
 		var seen int64
 		for range wake {

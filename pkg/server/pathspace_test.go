@@ -687,3 +687,48 @@ func TestMountAliasTemplate(t *testing.T) {
 		t.Fatalf("after undo: %v", ms)
 	}
 }
+
+// Registry documents are live (SLOP3-009 step 3): a listener on a store's
+// grants hears a grant made and removed elsewhere, as a document and then
+// its deletion, and a listener on the store's row hears its type change.
+func TestRegistryDocumentsLive(t *testing.T) {
+	h := newHarness(t)
+	admin := h.tokenFor("admin@example.com", "read", "write", "admin")
+	h.call(admin, "store.new", map[string]any{"id": "crm"})
+	pushApp(h, admin, "console", "/console", map[string]string{"app.json": `{"title":"c","capabilities":{"db":{"stores":"admin"}}}`, "index.html": `<!doctype html><title>c</title>`})
+	h.call(admin, "policy.set", map[string]any{"app": "console", "capability": "stores", "audience": "@admin", "value": "on"})
+	s, v := adminView(t, h, "/console")
+	if out := rpc(s, v, "db.subscribe", map[string]any{"sub": "g", "path": "_stores/crm/_grants", "coll": true}); out["result"] == nil {
+		t.Fatalf("subscribe grants: %v", out)
+	}
+	if out := rpc(s, v, "db.subscribe", map[string]any{"sub": "row", "path": "_stores/crm"}); out["result"] == nil {
+		t.Fatalf("subscribe row: %v", out)
+	}
+	sbx := strings.TrimPrefix(strings.Split(v["url"].(string), "/v/")[0], "http://")
+	stream, _ := s.do("GET", sbx, "/_rt/events", nil, map[string]string{"Authorization": "Bearer " + v["secret"].(string)})
+	go func() {
+		time.Sleep(200 * time.Millisecond)
+		h.call(admin, "grant.set", map[string]any{"store": "crm", "subject": "@member", "level": "view"})
+		h.call(admin, "grant.rm", map[string]any{"store": "crm", "subject": "@member"})
+		h.call(admin, "store.type", map[string]any{"id": "crm", "type": "contacts"})
+	}()
+	evs := events(t, stream, 4, 5*time.Second)
+	stream.Body.Close()
+	var got []string
+	for _, e := range evs[1:] {
+		if e["_type"] != "doc" {
+			continue
+		}
+		what := e["path"].(string)
+		if e["deleted"] == true {
+			what += " deleted"
+		} else if b, ok := e["body"].(map[string]any); ok && b["type"] != nil && b["type"] != "" {
+			what += " type=" + b["type"].(string)
+		}
+		got = append(got, what)
+	}
+	want := []string{"_stores/crm/_grants/@member", "_stores/crm/_grants/@member deleted", "_stores/crm type=contacts"}
+	if strings.Join(got, "|") != strings.Join(want, "|") {
+		t.Fatalf("live registry documents: %v", got)
+	}
+}

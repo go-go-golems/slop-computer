@@ -94,9 +94,6 @@ func init() {
 				if e.A != nil {
 					e.A.RestartApp(a.S("app")) // actors evaluate use() at start
 				}
-				if e.PolicyChanged != nil {
-					e.PolicyChanged(ctx, a.S("app"))
-				}
 				return map[string]any{"app": a.S("app"), "capability": c, "audience": aud, "allowed": on}, nil
 			}},
 		&Verb{Name: "llm.ls", Doc: "List LLM access rows (people and audience defaults) with their monthly budgets.", Scope: Read, AdminOnly: true, Action: authz.PlatformAdmin,

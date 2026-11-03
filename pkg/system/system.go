@@ -12,6 +12,7 @@ import (
 	"io/fs"
 	"sort"
 	"strings"
+	"sync"
 	"sync/atomic"
 	"time"
 
@@ -24,12 +25,20 @@ var migrations embed.FS
 // DB is system.db.
 type DB struct {
 	*sql.DB
-	Now func() time.Time
-	// OnLog is called after every committed transaction (the log may have
-	// grown); the actor manager wakes system: reactors with it.
-	OnLog func()
+	Now       func() time.Time
+	epoch     atomic.Int64
+	listenMu  sync.Mutex
+	listeners []func()
+}
 
-	epoch atomic.Int64
+// Listen adds fn to the functions called after every committed write
+// transaction (the log may have grown): the actor manager wakes system:
+// reactors with one, the page door rechecks views and refreshes live
+// registry documents with another (SLOP3-009). fn must not block.
+func (d *DB) Listen(fn func()) {
+	d.listenMu.Lock()
+	defer d.listenMu.Unlock()
+	d.listeners = append(d.listeners, fn)
 }
 
 // Epoch counts committed write transactions. A decision made from
@@ -203,8 +212,11 @@ func (d *DB) Tx(ctx context.Context, fn func(tx *sql.Tx) error) error {
 		return err
 	}
 	d.epoch.Add(1)
-	if d.OnLog != nil {
-		d.OnLog()
+	d.listenMu.Lock()
+	ls := d.listeners
+	d.listenMu.Unlock()
+	for _, fn := range ls {
+		fn()
 	}
 	return nil
 }

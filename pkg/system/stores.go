@@ -279,13 +279,3 @@ func (d *DB) RemoveGrant(ctx context.Context, actor, via, store, subject, grantV
 	})
 	return n, err
 }
-
-// LastChange is the newest system revision that changed the row kind/key
-// (a store id, "<store> <subject>" for a grant, "<store> <alias>" for a
-// binding, a person id): the version of that row as a registry document
-// (SLOP3-008). 0 when it never changed.
-func (d *DB) LastChange(ctx context.Context, kind, key string) int64 {
-	var n sql.NullInt64
-	_ = d.QueryRowContext(ctx, `SELECT max(rev) FROM _changes WHERE kind = ? AND key = ?`, kind, key).Scan(&n)
-	return n.Int64
-}

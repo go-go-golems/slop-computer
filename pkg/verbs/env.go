@@ -28,15 +28,8 @@ type Env struct {
 	// Billing is the Stripe service (nil without a stripe config).
 	Billing *stripe.Service
 
-	// AccessChanged is called after a verb changed who may open a store
-	// (grants, links), so the server can review its open views.
-	AccessChanged func(ctx context.Context, store string)
-	// PolicyChanged is called after an app's policy matrix changed: the
-	// views of its stores were opened with the old cells.
-	PolicyChanged func(ctx context.Context, app string)
-	// PersonChanged is called after a person's audience may have changed
-	// (role, comps), so the server can review their open views.
-	PersonChanged func(ctx context.Context, person string)
+	// Views that a verb's change affects learn of it from the system log
+	// (the page door follows it: SLOP3-009 step 3), not from callbacks.
 
 	confirms     *Confirmations
 	confirmsOnce sync.Once

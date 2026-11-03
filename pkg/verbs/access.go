@@ -165,9 +165,6 @@ func init() {
 				if _, err := e.Sys.RevokeLink(ctx, p.ID(), p.ViaLabel(), l.ID); err != nil {
 					return nil, err
 				}
-				if e.AccessChanged != nil {
-					e.AccessChanged(ctx, l.Store)
-				}
 				return map[string]any{"revoked": l.ID, "store": l.Store}, nil
 			}},
 		&Verb{Name: "guest.sweep", Doc: "Delete guests unseen for 90 days (or --days), with their grants and private documents.", Scope: Write, AdminOnly: true, Action: authz.PlatformAdmin,

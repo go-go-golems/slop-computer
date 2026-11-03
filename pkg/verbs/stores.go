@@ -134,9 +134,6 @@ func init() {
 					return system.Grant{}, &Error{Code: "permission_denied", Message: "you cannot grant more than your own level", Trace: d.Trace}
 				}
 				g, err := e.Sys.SetGrant(r, p.ID(), p.ViaLabel(), system.Grant{Store: in.Store, Subject: in.Subject, Level: in.Level})
-				if err == nil && e.AccessChanged != nil {
-					e.AccessChanged(r, g.Store)
-				}
 				return g, err
 			}}.Verb(),
 		&Verb{Name: "grant.rm", Doc: "Remove a subject's grants on a store.", Scope: Write, Action: authz.StoreAdmin,
@@ -147,9 +144,6 @@ func init() {
 					return nil, err
 				}
 				n, err := e.Sys.RemoveGrant(ctx, p.ID(), p.ViaLabel(), a.S("store"), a.S("subject"), a.S("via"))
-				if err == nil && n > 0 && e.AccessChanged != nil {
-					e.AccessChanged(ctx, a.S("store"))
-				}
 				return map[string]any{"removed": n}, err
 			}},
 		&Verb{Name: "log.show", Doc: "A store's commits after a rev (oldest first), or the newest ones.", Scope: Read, Action: authz.StoreRead,
