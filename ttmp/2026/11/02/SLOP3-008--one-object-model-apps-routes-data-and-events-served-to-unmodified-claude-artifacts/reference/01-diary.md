@@ -542,3 +542,58 @@ Phase 3 makes the registry rows an app may see readable through the db API: `_st
 | `_stores/<id>/_llm/budget` | — | read-only |
 
 - Error codes: `invalid_argument` (no `db.stores` "admin", a field the verb does not take, read-only document), `permission_denied` (no signed-in person), `conflict` (stale `ifVersion`), `confirmation_required` + `confirm` id (until approved), then whatever the verb returns.
+
+## Step 11: People read-only, and phase 4, alias templates on mounts
+
+Two commits. First, a correction to step 10: `_people/<id>` had been writable (`update {role}` → `people.role`). The design's open question 2 says people stay read-only through `db`, so I removed that write. Second, phase 4: a parameterised mount that creates stores now binds each new store from a template, so a dashboard created at `/d/:id` reads `contacts/…` from `crm` from its first view.
+
+### Prompt Context
+**User prompt (verbatim):** see Step 9.
+**Assistant interpretation:** Phase 4 of the design, plus aligning phase 3 with the design's stated answer to open question 2.
+**Inferred user intent:** Stores created from a URL come wired to the data they are meant to show, without an admin binding each one.
+**Commit (code):** 3d524e0 — "SLOP3-008 phase 3: people stay read-only through db"; cf8eaaa — "SLOP3-008 phase 4: alias templates on mounts"
+
+### What I did
+- `pkg/server/registry.go`: dropped the `_people` write case (it falls through to "read-only"); `TestRegistryDocuments` now asserts the refusal.
+- `pkg/system/migrations/010_mount_aliases.sql`: `mounts.aliases TEXT NOT NULL DEFAULT ''` (a JSON array of bindings without their store).
+- `pkg/system/mounts.go`: `Mount.Aliases []Binding`; scanned and written by `SetMount` and by `UndoMount`'s re-insert (`aliasesJSON`).
+- `pkg/system/bindings.go`: `Binding.Store` is `omitempty`, so template entries don't carry `"store": ""`.
+- `pkg/verbs/actors.go`: bind.set's validation moved into `checkAlias(ctx, e, p, *Binding)`, which checks the alias and prefix, takes a level only with a prefix, and requires the caller to hold that level on the target (admin if assets are shared). bind.set itself is unchanged.
+- `pkg/verbs/mounts.go`: `mount.set --aliases` (json), parsed by `aliasTemplate`. Only the fields alias, target, prefix, level and assets are allowed; an alias may not appear twice; each entry goes through `checkAlias` against the admin. Aliases require `createApp`.
+- `pkg/server/live.go`: `/_site/create` writes the template's bindings on the new store with via `mount:<host><path>`.
+- `TestMountAliasTemplate`: four invalid templates, aliases without createApp, and a missing target (`not_found`). mount.ls shows the template. A signed-in admin creates at `/d/new` and the store comes bound, so the new page reads `contacts/c1` from crm. Replacing the mount drops the template and `mount.undo` brings it back.
+- Docs: `doc/claude-apis/README.md` was missing phases 2–4. The `files` row still said "Not served"; it now describes the project mapping, and the `db` row gains the registry documents and templates. `doc/design/slop-v3.md` §4.3 is updated to match.
+
+### Why
+- The template is checked when the admin sets the mount, not when a member creates a store: the creator usually holds nothing on `crm`. Holding nothing doesn't matter, because aliases never grant access. Every read through one is as the viewer, capped by the alias's level. So the check only has to stop an admin from templating a level they don't hold themselves, which is the same rule bind.set applies.
+- The bindings are written as ordinary bindings, so the new store's owner can change or remove them with bind.set and bind.rm, and they show up in `_stores/<id>/_bindings`.
+
+### What worked
+- `GOWORK=off go test ./pkg/server -run TestMountAliasTemplate -count=1`: ok.
+- Mutations, each restored from `$CLAUDE_JOB_DIR/tmp/*.bak`:
+  - `range m.Mount.Aliases[:0]` → `pathspace_test.go:572: the new store's bindings: []`
+  - `checkAlias` removed from `aliasTemplate` → `mount.set … alias:_stores …: want invalid_argument, got 200`
+- `GOWORK=off go test ./... -count=1` ok; `golangci-lint run --new-from-rev=origin/main ./...` 0 issues. (A plain `golangci-lint run ./pkg/server/` reports 3 issues in older code, ineffassign ×2 and nonamedreturns ×1. None is on this branch.)
+
+### What didn't work
+- My first pass at `system.SetMount` missed `UndoMount`, which re-inserts the previous mount with its own column list; undo would have silently dropped a template. I caught it reading the file before testing, and the undo assertion in the test now covers it.
+
+### What I learned
+- `mount_log` stores whole mounts as JSON (`mountJSON`), so a new field on `Mount` round-trips through undo for free. Only the SQL column lists need updating.
+
+### What was tricky to build
+- Keeping bind.set's error messages unchanged when its checks moved into `checkAlias`. The messages still say `--level`/`--prefix`, which reads a little oddly for a JSON template but is still accurate.
+
+### What warrants a second pair of eyes
+- If writing a template binding fails after `CreateStore`, `/_site/create` returns the error, but the store has already been created without its bindings. That's recoverable (the owner binds it), but not atomic.
+- A template's target can be removed after the mount is set. The bindings are then written at creation against a store that is gone, and the alias resolves to `not_found` (empty) until it is rebound.
+
+### What should be done in the future
+- N/A for this phase.
+
+### Code review instructions
+- `pkg/verbs/mounts.go` `aliasTemplate`, `pkg/verbs/actors.go` `checkAlias`, `pkg/server/live.go` `siteCreate`, then `TestMountAliasTemplate`.
+- `GOWORK=off go test ./pkg/server -run 'TestMountAliasTemplate|TestRegistry' -count=1 -v`
+
+### Technical details
+- CLI: `slop mount set apps.example /d/:id --storeParam id --createApp dash --aliases '[{"alias":"contacts","target":"crm","prefix":"contacts","level":"view"}]'`.
