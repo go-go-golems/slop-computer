@@ -652,7 +652,7 @@ Phase 5 gives actors `use('storage')`, also available as `ctx.storage`, with the
 - The first run of the key-hash mutation printed nothing: removing `strings.HasPrefix` left `strings` unused, so the package didn't compile. I reran it as `HasPrefix(key, "~~~")`.
 
 ### What I learned
-- `total_changes()` is per connection and cumulative, so the difference before and after one statement on the turn's writer connection is exactly what that statement wrote, including `INSERT … RETURNING`, which also returns rows.
+- `total_changes()` is per connection and cumulative, so the difference before and after one statement on the turn's writer connection is exactly what that statement wrote, which should include `INSERT … RETURNING` (not tested here).
 
 ### What was tricky to build
 - The order of prefix and reverse in `base.list`. The server query filters `key >= prefix`, so ascending, the first key past the prefix ends the scan. Descending, keys past the prefix come first and are skipped, not treated as the end.
@@ -673,7 +673,7 @@ Phase 5 gives actors `use('storage')`, also available as `ctx.storage`, with the
 - Example:
 
 ```js
-export default defineActor({
+defineActor({
   actions: {
     async incr(ctx) {
       const n = ((await ctx.storage.get('n')) || 0) + 1;
