@@ -25,8 +25,8 @@ RelatedFiles:
     - Path: repo://web/runtime/src/index.ts
       Note: The page's use() resolver; bindings reach pages only as slop.stores.open
 ExternalSources: []
-Summary: 'A from-scratch answer to "how would you unify apps, routes, data and events", measured against slop v3: keep the store as the one object, make the registry a store, give bindings a namespace that unmodified Claude artifacts see through their own db and files APIs, and treat Durable Objects as a shape v3 already has.'
-LastUpdated: 2026-11-02T18:00:00-05:00
+Summary: 'A from-scratch answer to "how would you unify apps, routes, data and events", measured against slop v3: keep the store as the one object; one db path space per page, its own store at the root and every store under _stores/<id>/ (registry rows in _-prefixed subcollections); aliases so unmodified Claude artifacts reach other stores through their own db and files APIs; Durable Objects as a shape v3 already has.'
+LastUpdated: 2026-11-02T20:30:00-05:00
 WhatFor: Deciding the next structural step for slop v3's data model, before building an admin console or a multi-store app as plain Claude artifacts.
 WhenToUse: Read before changing bindings, the system database, the page runtime's db or files capabilities, or before promising Durable Objects compatibility.
 ---
@@ -49,14 +49,16 @@ The answer has four parts.
    exactly this (`pkg/store/store.go`), and it is the right foundation. A
    from-scratch design arrives at the same place.
 2. **Three relations on top of it.** A *grant* says who holds which level on
-   a store. A *binding* gives code a *namespace*: which paths of which stores
-   its `db` and `files` calls reach, and at what level. A *route* (a mount)
-   maps a URL to code plus a namespace. An "instance" is not an object; it is
-   the tuple (code, namespace, principal) worked out for each request.
-3. **The registry is a store too.** Apps, stores, mounts, grants and
-   policies are documents in a `system` store, written through validators.
-   An admin console then is an ordinary app that a namespace gives the
-   `system` store, and it can be a plain Claude artifact.
+   a store. A *binding* gives code aliases into one path space: the page's
+   own store at the root, every other store under `_stores/<id>/`. A
+   *route* (a mount) maps a URL to code plus a binding. An "instance" is not
+   an object; it is the tuple (code, binding, principal) worked out for each
+   request.
+3. **The registry reads as documents of the stores it describes.** A
+   store's row is `_stores/<id>`, its grants `_stores/<id>/_grants/*`, its
+   aliases `_stores/<id>/_bindings/*`; writes go through the verbs that own
+   the rows. An admin console is then an ordinary app approved to reach
+   `_stores`, and it can be a plain Claude artifact.
 4. **Durable Objects are a shape v3 already has.** A store with an actor is
    a Durable Object with JS as the only language. Matching the API *shape*
    is a small adapter. Matching it *one-to-one* means hosting the Workers
@@ -67,8 +69,8 @@ primitive is not used uniformly:
 
 | Seam | Today | Proposed |
 |---|---|---|
-| The registry | `system.db` is store-shaped (it has `_log` and `_changes`) but is not a store; apps reach it through verbs or a trusted `system` module | a `system` store whose registry rows read as documents |
-| Bindings | `alias → target`, reachable only through slop's own API (`slop.stores.open` in pages, read-only; `stores.open` in actors) | a namespace: path prefixes mapped to stores, served through the page's own `db` and `files` |
+| The registry | `system.db` is store-shaped (it has `_log` and `_changes`) but apps reach it only through verbs or a trusted `system` module | registry rows read as documents under `_stores/<id>/`, written through their verbs |
+| Bindings | `alias → target`, reachable only through slop's own API (`slop.stores.open` in pages, read-only; `stores.open` in actors) | aliases into one path space (`_stores/…`), served through the page's own `db` and `files` |
 | App source | the actor's `files` module and `slop.read` | Claude's `files` capability, served over a bound store's tree |
 
 ## 2. The test cases
@@ -159,7 +161,7 @@ registry and the bindings sit outside it.
 
 ## 4. The seams
 
-### 4.1 The registry is not a store
+### 4.1 The registry is out of reach
 
 `system.db` has a store's log tables, but its registry rows (`stores`,
 `mounts`, `bindings`, `grants`, `app_policy`, `llm_access`, …) are reachable
@@ -198,14 +200,15 @@ slop does not serve it (`use('files')` is `null`). The admin console's
 ```text
 store      one SQLite file: docs, tree + snapshots, assets, tables, log, alarms
 grant      (store, principal) → level            who may do what
-binding    (holder store, namespace)             what code running for the holder can reach
-route      (host, path) → (code, data, namespace template)
+binding    (holder store, aliases)               what code running for the holder can reach
+route      (host, path) → (code, data, alias template)
 ```
 
 A request resolves to three things, never stored as a row:
 
 - **code**: an app store at a ref (`blocks@live`);
-- **namespace**: the binding of the store the request is for;
+- **binding**: the aliases of the store the request is for, plus `_stores`
+  if the code is approved for it;
 - **principal**: the visitor, or the store itself for alarms and reactors.
 
 That tuple is the "instance". Because it is computed, there is nothing to
@@ -213,16 +216,45 @@ keep in sync when an app is upgraded, a binding changes or a grant is
 revoked; the next request sees the new tuple. The SLOP3-007 epoch already
 invalidates cached decisions when authority changes.
 
-### 5.2 Namespaces: several stores behind one `db`
+### 5.2 One path space: the page's store at the root, every store under `_stores`
 
-A namespace maps path prefixes of the page's `db` (and `files`) to stores:
+A page's `db` sees one path space. Its own store sits at the root, exactly
+as the contract has it. The platform's names sit beside it, under top-level
+segments that begin with `_`:
+
+```text
+chunks/c41                         this store's own documents, unchanged
+data/users/u1/prefs                its private documents, unchanged
+_stores                            every store this page may reach
+_stores/ws-team                    a store's registry row (§5.3)
+_stores/ws-team/chunks/c41         another store's documents
+_stores/ws-team/_grants/@member    its grants (§5.3)
+_people/<id>                       profiles and roles (§5.3)
+```
+
+**One reservation rule.** A top-level segment that begins with `_` belongs
+to the platform: at the page's root, and at every store's root. Since
+`_stores/<id>/` is a store's root, the rule holds at any depth of nesting,
+and app data never collides with platform names. Pages written for
+claude.ai never see a `_` name unless they are given one.
+
+**Nesting keeps parity.** In the contract, a path with an odd number of
+segments is a collection and an even number is a document. `_stores/<id>`
+has two segments, so a store's paths keep their meaning when nested:
+`chunks/c41` (a document, 2 segments) is `_stores/ws-team/chunks/c41`
+(4 segments, still a document). A store's top-level collections become
+subcollections of its registry document, and `_stores/<self>/chunks` and
+`chunks` are the same documents, with the same versions and events.
+
+**Aliases for unmodified apps.** Claude's code says `contacts`, not
+`_stores/crm-team/contacts`. A binding gives it aliases: prefix rewrites
+inside the one path space.
 
 ```json
 { "bindings": {
     "dash-team": {
-      "":         { "store": "dash-team" },
-      "contacts": { "store": "crm-team",  "prefix": "contacts", "level": "view" },
-      "pages":    { "store": "ws-team",   "prefix": "chunks",   "level": "view" }
+      "contacts": { "to": "_stores/crm-team/contacts", "level": "view" },
+      "pages":    { "to": "_stores/ws-team/chunks",    "level": "view" }
 } } }
 ```
 
@@ -230,37 +262,53 @@ The dashboard's code stays as Claude wrote it:
 
 ```js
 const db = await claude.use('db');
-db.collection('contacts').where('stage', '==', 'lead').onSnapshot(render);   // → crm-team: contacts
-await db.collection('notes').add({ text, at: Date.now() });                  // → dash-team: notes
+db.collection('contacts').where('stage', '==', 'lead').onSnapshot(render);   // → _stores/crm-team/contacts
+await db.collection('notes').add({ text, at: Date.now() });                  // → its own notes
 ```
 
 **The code's paths are the contract.** The page never learns that
-`contacts` lives elsewhere. Whoever binds the app decides where each prefix
-lives. A runtime that records which collections a page touches can suggest
-the mapping when someone binds an app for the first time.
+`contacts` lives elsewhere; whoever binds the app decides. A runtime that
+records which collections a page touches can suggest the aliases when
+someone binds an app for the first time. Apps written for slop can skip
+aliases and name `_stores/crm-team/contacts` directly, if they may reach
+`_stores` (below).
+
+**`_stores` is opt-in.** If every page could read `_stores`, any app a
+visitor opens could read every store that visitor can see: the app would
+act with the visitor's authority on data the visitor never gave it (a
+confused deputy). So:
+
+- an alias reaches only the prefix it names, and is set by the holder's
+  owner;
+- the whole of `_stores` (and `_people`) is reached only by an app that
+  declares it, `"db": {"stores": "view"}` or `"admin"`, and that an admin
+  has approved for that app, as `slop app trust` approves `slop.modules`
+  today;
+- an unmodified Claude app gets only the aliases its binding names.
 
 Five rules make this exact:
 
-1. **Longest prefix wins.** `""` is the holder's own store and is always
-   present.
-2. **Parity is preserved.** In the contract, a path with an odd number of
-   segments is a collection and an even number is a document. A mount's
-   source prefix and target prefix must have the same parity, or the code's
-   paths would change meaning. `contacts → contacts` (1 → 1) is valid;
-   `contacts → crm/contacts` (1 → 2) is refused when the binding is set.
+1. **Resolution order.** The longest matching alias wins; otherwise a `_`
+   name is the platform's (if declared and approved); otherwise the path
+   is the store's own.
+2. **Parity is preserved.** An alias maps a prefix to a prefix of the same
+   parity: `contacts → _stores/crm-team/contacts` (1 → 3) is valid;
+   `contacts → _stores/crm-team/crm/contacts` (1 → 4) is refused when the
+   alias is set.
 3. **One query, one store.** The contract has no cross-collection queries,
    so every `get`, `query` and `onSnapshot` falls in exactly one store.
-   A namespace never merges results.
-4. **One write, one store.** A batch or a lease spanning two mounts is
+   The path space never merges results. Listing `_stores` itself is a
+   query over the registry (§5.3).
+4. **One write, one store.** A batch or a lease spanning two stores is
    refused with `invalid_argument`. There are no cross-store transactions
    (design §8.5); this keeps it that way.
-5. **Rules and levels compose by minimum.** On a mounted store, that store's
-   own rules apply (the rules of the app *it* runs), and the effective level
-   is the minimum of the binding's `level` and the principal's level on that
-   store, computed with the SLOP3-007 rule (maximum of sources, then the
-   ceiling).
+5. **Rules and levels compose by minimum.** Under `_stores/<id>/`, that
+   store's own rules apply (the rules of the app *it* runs), and the
+   effective level is the minimum of the alias's or the declaration's
+   level and the principal's level on that store, computed with the
+   SLOP3-007 rule (maximum of sources, then the ceiling).
 
-Rule 5 needs one choice, made per mount: whose level is the principal's?
+Rule 5 needs one choice, made per alias: whose level is the principal's?
 
 | `as` | Principal on the target | Fits |
 |---|---|---|
@@ -268,38 +316,42 @@ Rule 5 needs one choice, made per mount: whose level is the principal's?
 | `store` | the holder store's grant on the target (`store:<id>`, as for alarms) | publishing: a site's readers have no grant on the workspace; the site does (blocks-site today) |
 
 `as: "store"` is delegation: anyone who can open the holder reads the target
-up to the binding's level. Setting it therefore requires `owner` on the
-holder and `admin` on the target, and `explain.can` shows the path.
+up to the alias's level. Setting it therefore requires `owner` on the
+holder and `admin` on the target, and `explain.can` shows the path. The
+declared `_stores` space is always `as: viewer`.
 
-Private data follows: `data/users/<id>/` on a mounted store is private to
-`<id>` there, as anywhere. A viewer's id is the same in every store, so a
-mounted store's private subtree works without translation.
+Private data follows: `data/users/<id>/` under `_stores/<x>/` is private to
+`<id>` in store `<x>`, as anywhere. A viewer's id is the same in every
+store, so a reached store's private subtree works without translation.
 
-### 5.3 The registry as documents of the `system` store
+### 5.3 Registry rows under the store they belong to
 
 The registry tables stay tables: they need constraints, indexes and
 transactions across rows that documents do not give. What changes is how
-code reads and writes them. The `system` store presents them as documents:
+code reads and writes them: each row reads as a document under the store it
+belongs to, in `_`-prefixed subcollections next to the store's own data.
 
-| Document | From |
-|---|---|
-| `apps/<id>` | the app's `app.json`, its type, current version and refs, its policy cells, its modules |
-| `stores/<id>` | type, app, owner, created; and `stores/<id>/bindings/<alias>` |
-| `stores/<id>/grants/<subject>` | one grant, with `via` and whether its link still stands |
-| `mounts/<key>` | one mount; `<key>` encodes `host` and `path` (`apps.example~b~:id`) |
-| `people/<id>` | a person's profile, role, audience (admins only) |
-| `llm/<subject>` | an LLM access row and this month's usage, read-only for balances |
+| Document | From | A write runs | Level to write |
+|---|---|---|---|
+| `_stores/<id>` | type, app, owner, created; for an app store also its `app.json`, current version, refs, policy cells and modules | `store.type`, `app.follow`, a new `app.describe` | admin on the store |
+| `_stores/<id>/_grants/<subject>` | one grant, with `via` and whether its link still stands | `grant.set`, `grant.rm` | owner |
+| `_stores/<id>/_bindings/<alias>` | one alias (§5.2) | `bind.set`, `bind.rm` | owner |
+| `_stores/<app>/_mounts/<key>` | a mount that runs or creates this app; `<key>` encodes host and path | `mount.set`, `mount.rm` | platform admin |
+| `_stores/<id>/_llm` | the store's own LLM access, budget and this month's usage | `llm.set` (the balance is read-only) | platform admin |
+| `_people/<id>` | a person's profile, role and audience | `people.role` | platform admin |
 
 Three properties make this safe:
 
 - **Reads are computed, not copied.** A document is the current row, read
   through the caller's level. A row the caller may not see reads as missing,
-  as the contract requires of hidden documents.
+  as the contract requires of hidden documents. `db.collection('_stores')`
+  lists the stores the caller holds a level on.
 - **Writes go through the verb that owns the row.** A `set` on
-  `stores/ws-team/grants/@member` runs `grant.set`, with its checks, its
+  `_stores/ws-team/_grants/@member` runs `grant.set`, with its checks, its
   confirmation rules and its log entry. A write the verb refuses fails with
   the verb's error code. Fields the verb does not accept are refused, not
-  ignored.
+  ignored. Creating a store is `add` on `_stores` (→ `store.new`); a
+  delete on `_stores/<id>` is `store.rm`.
 - **Writes require `ifVersion`.** A document's version is the registry
   revision that last changed its row. An admin console overwriting a grant
   someone else just changed fails with `conflict`, instead of silently
@@ -307,60 +359,65 @@ Three properties make this safe:
 
 Changes already land in `system.db`'s `_changes`. Mapping a change's `key`
 to its document path gives `onSnapshot` on registry documents for free, and
-`system:<kind>` reactors keep working unchanged.
+`system:<kind>` reactors keep working unchanged. `system.db` itself stays
+where it is: it is not a store in this design, only the source of the
+`_stores/<id>`, `_stores/<id>/_…` and `_people` documents.
 
 The admin console is then:
 
 ```json
 { "title": "Console", "type": "console",
-  "capabilities": { "db": {}, "files": {}, "user": { "scopes": ["profile"] } } }
+  "capabilities": { "db": { "stores": "admin" }, "files": {}, "user": { "scopes": ["profile"] } } }
 ```
 
-bound with `{ "": {store: "console"}, "apps": {store: "system", prefix: "apps", level: "admin"}, "stores": {store: "system", prefix: "stores", level: "admin"} }`,
-and its code is plain contract code: `db.collection('apps').onSnapshot(...)`,
-`db.doc('stores/ws-team/grants/@member').set({level: 'interact'}, {ifVersion})`.
-It can still be built in claude.ai against a seeded database and pushed
-unchanged.
+approved once by a platform admin, with no aliases. Its code is contract
+code over `_` paths: `db.collection('_stores').onSnapshot(...)`,
+`db.doc('_stores/ws-team/_grants/@member').set({level: 'interact'}, {ifVersion})`.
+It can still be built in claude.ai against seeded documents at those paths
+and pushed unchanged.
 
 ### 5.4 Source through the `files` capability
 
 `files` in the contract reads a project's tree: `list({path, recursive,
 cursor})`, `read(path, {offset, length}) → {bytes, size, revision}`,
-`download(path)`. On slop, a *project* is a store and the manifest's
-`files: {project: "…"}` names a namespace entry instead of a claude.ai
-project id:
+`download(path)`. A file tree does not follow the document parity rule
+(`a/b/c.js` would land on a collection), so source is not mapped into
+`_stores` as documents. Instead, a *project* is a store: the manifest's
+`files: {project: "…"}` names `_stores` (any store the app may reach) or one
+alias, instead of a claude.ai project id:
 
 ```json
-"capabilities": { "files": { "project": "apps" } }
+"capabilities": { "files": { "project": "_stores" } }
 ```
 
 `files.read('blocks/index.html')` then reads the `blocks` app store's tree
-at its current ref, as the viewer, at the binding's level. `revision` is the
-snapshot number. Writing source stays outside `files` (the contract has no
-write), on the existing paths: `slop push`, the workshop module, or
-`artifact.publish` on the app's own store.
+at its current ref, as the viewer, at the level the declaration allows.
+`revision` is the snapshot number. Writing source stays outside `files`
+(the contract has no write), on the existing paths: `slop push`, the
+workshop module, or `artifact.publish` on the app's own store.
 
 ### 5.5 Routes stay mounts
 
-Mounts already carry the right information. One field is added: a
-namespace template, so a parameterised mount can bind what it creates:
+Mounts already carry the right information. One field is added: an alias
+template, so a parameterised mount can bind what it creates:
 
 ```text
 /d/:id  type dashboard  createApp dashboard
-        namespace { "contacts": {store: "crm-team", prefix: "contacts", level: "view"} }
+        aliases { "contacts": {to: "_stores/crm-team/contacts", level: "view"} }
 ```
 
-Each store created from the mount gets that namespace as its binding, which
-its owner can then change. Without a template, a new store gets only `""`.
+Each store created from the mount gets those aliases, which its owner can
+then change. Without a template, a new store gets none.
 
-### 5.6 Events across a namespace
+### 5.6 Events across stores
 
-A listener on a mounted path subscribes to the target store's log, filtered
-to the target prefix, and its events are rewritten to the source prefix
-before they reach the page. The view's cursor becomes a vector, one
+A listener on an aliased or `_stores` path subscribes to the target store's
+log, filtered to the target prefix, and its events are rewritten to the
+page's path before they reach it. A listener on a registry document follows
+`system.db`'s `_changes`. The view's cursor becomes a vector, one
 `epoch.rev` per store it listens to, so reconnects stay resumable. The
-channel (`room`) stays the holder's own; a namespace does not mount
-channels.
+channel (`room`) stays the holder's own; aliases do not reach other
+stores' channels.
 
 Across processes, the rule is the one Durable Objects use: **each store has
 one owning process**, chosen by its id. Views and subscriptions for a store
@@ -413,27 +470,29 @@ to describe it as "Durable-Object-shaped", never "compatible".
 
 ### 7.1 The admin console, end to end
 
-1. Build `console` in claude.ai against seeded documents shaped like
-   `apps/*` and `stores/*`.
+1. Build `console` in claude.ai against seeded documents at `_stores/*`
+   and `_stores/*/_grants/*`. Its manifest declares `"db": {"stores":
+   "admin"}` and `"files": {"project": "_stores"}` (§5.3, §5.4).
 2. `slop push ./console --store console`.
-3. `slop bind set console apps system --prefix apps --level admin` and the
-   same for `stores`, `mounts` (`--prefix` and `--level` are proposed in §9, phase 1).
+3. A platform admin approves it to reach `_stores` (the declaration is
+   proposed in §9, phase 1; approval works as `slop app trust` does).
 4. Mount it at `/console`, grant `@admin` `view`.
-5. An admin opens it. `db.collection('apps')` reads the `system` store's
-   `apps/*` at `min(admin, the admin's level on system)`. A member who
-   somehow opens it reads nothing: their level on `system` is `none`, so
-   the documents read as missing.
-6. Editing a description: `db.doc('apps/blocks').update({description}, {ifVersion})`
+5. An admin opens it. `db.collection('_stores')` lists every store, each at
+   `min(admin, the admin's level on it)`. A member who somehow opens it
+   lists only the stores they hold a level on, and can change none of
+   their grants unless they own them: the console adds no authority.
+6. Editing a description: `db.doc('_stores/blocks').update({description}, {ifVersion})`
    → the verb that owns app metadata (a new `app.describe`; none exists
-   yet) → a `system` log entry → every open console
-   sees the change through `onSnapshot`.
+   yet) → a `system` log entry → every open console sees the change through
+   `onSnapshot`.
 7. Viewing source: `files.list({path: 'blocks', recursive: true})`, then
    `files.read('blocks/blocks.js')`.
 
 ### 7.2 The dashboard
 
-The binding from §5.2. A viewer with `view` on `crm-team` and on `ws-team`
-sees both. A viewer without a CRM grant sees an empty `contacts`
+The aliases from §5.2; no approval needed, since the app never sees
+`_stores` itself. A viewer with `view` on `crm-team` and on `ws-team` sees
+both. A viewer without a CRM grant sees an empty `contacts`
 collection; the dashboard must already handle an empty collection, as
 every contract page does.
 
@@ -466,32 +525,41 @@ a live channel: the Durable Object pattern, already expressible.
 - A store has exactly one writer at a time, and one owning process.
 - A commit and its log entry land in the same transaction.
 - A snapshot never changes; a blob hash always identifies its bytes.
-- A binding never gives more than the minimum of its level and the
+- An alias never gives more than the minimum of its level and the
   principal's level on the target (`as: viewer`), or the holder store's
   level (`as: store`).
+- A top-level segment beginning with `_` belongs to the platform, at the
+  page's root and at every store's root.
+- Code reaches `_stores` as a whole only when its app declares it and an
+  admin has approved it; otherwise only through the aliases its binding
+  names.
 - One query reads one store; one write or batch writes one store.
 - A write to a registry document runs the verb that owns the row, with its
   checks, and never writes a table directly.
 - Balances (the LLM ledger) are state, not authority: readable as
   documents, never written through them, and never moving the epoch.
-- A page sees only the contract's API: nothing about namespaces, mounts or
-  the registry appears in it.
+- A page sees only the contract's API: the platform appears to it only as
+  documents at `_` paths, and only if it was given them.
 
 ## 9. Plan
 
 Each phase is useful without the next.
 
-1. **Namespaces for pages.** Extend `bindings` with `prefix`, `level`,
-   `as`; resolve `db` paths through the namespace in `pkg/server/views.go`
-   (reads, queries, subscriptions, writes, leases); vector cursors in the
-   runtime. The dashboard works. `slop.stores.open` stays as is.
-2. **`files` over bound trees.** Serve the contract's `files` capability;
-   `project` names a namespace entry. "View source" works.
-3. **The `system` store.** Registry rows as computed documents, writes
-   through verbs with `ifVersion`, `_changes` mapped to document paths.
-   The admin console works as a plain artifact; the back office can drop
-   its `system` module.
-4. **Namespace templates on mounts**, so stores created from a mount come
+1. **One path space for pages.** Reserve top-level `_` segments (after
+   checking production documents for them, open question 4). Extend
+   `bindings` into aliases (`to`, `level`, `as`); serve `_stores/<id>/…`
+   to apps that declare `"db": {"stores": …}` and are approved; resolve
+   `db` paths in `pkg/server/views.go` (reads, queries, subscriptions,
+   writes, leases); vector cursors in the runtime. The dashboard works.
+   `slop.stores.open` stays as is.
+2. **`files` over store trees.** Serve the contract's `files` capability;
+   `project` names `_stores` or an alias. "View source" works.
+3. **Registry rows as documents.** `_stores/<id>`, `_stores/<id>/_grants`,
+   `_bindings`, `_mounts`, `_llm` and `_people` as computed documents;
+   writes through verbs with `ifVersion`; `_changes` mapped to document
+   paths. The admin console works as a plain artifact; the back office can
+   drop its `system` module.
+4. **Alias templates on mounts**, so stores created from a mount come
    bound.
 5. **The Durable-Object adapter** for actors (`ctx.storage`), if a custom
    app asks for it.
@@ -503,16 +571,29 @@ Each phase is useful without the next.
    publishing stay an actor's job (as blocks-site does) and pages only ever
    read `as: "viewer"`?
 2. **Registry writes.** Which registry documents are writable through `db`
-   at all? Grants, mounts and descriptions are natural; people, sessions and
-   tokens should stay read-only or hidden.
-3. **Mount keys.** How to encode `host` + `path` into one path segment so
-   it round-trips and stays readable.
-4. **Projection cost.** Computed documents over `stores` and `grants` are
+   at all? Grants, aliases, mounts and descriptions are natural; people,
+   sessions and tokens should stay read-only or hidden.
+3. **Mount keys, and mounts with no app.** How to encode `host` + `path`
+   into one path segment so it round-trips and stays readable. A mount that
+   creates no app (the static host's `/s/:id --type site`) has no app store
+   to file it under: a `_hosts/<host>/_mounts/<key>` root, or under the
+   stores of that type?
+4. **Reserving `_`.** Document segments may start with `_` today
+   (`segmentRe` in `pkg/rt/paths.go`), so an app could already have a
+   top-level `_grants` collection. Reserving top-level `_` names is a small
+   breaking change: check production documents first. Blocks and Pinup use
+   none (`chunks`, `meta`, `snaps`, `claims`, `nodes`, `feedback`, `log`,
+   `inbox`).
+5. **Depth.** Paths have at most 16 segments. Nesting under `_stores/<id>/`
+   spends two, so another store's documents are reachable only to depth 14.
+   A page's own paths keep 16. Accept it, or raise the limit for nested
+   reads?
+6. **Projection cost.** Computed documents over `stores` and `grants` are
    cheap at today's size. At thousands of stores, `onSnapshot` on
-   `stores` needs the change mapping to be incremental, not a re-query.
-5. **Assets across mounts.** Should `assets.list` on a namespace list the
-   holder's assets only (proposed), and `/_blob/<id>` resolve any bound
-   store's asset the viewer may read?
+   `_stores` needs the change mapping to be incremental, not a re-query.
+7. **Assets across stores.** Should `assets.list` list the holder's assets
+   only (proposed), and `/_blob/<id>` resolve any reached store's asset the
+   viewer may read?
 
 ## 11. References
 

@@ -114,3 +114,49 @@ v3.0 non-goal and migrations are `sql/NNN_name.sql` files. Fixed to
 ### What should be done in the future
 
 Decide the open questions in §10, then phase 1 (namespaces for pages).
+
+## Step 2: One path space instead of a system store
+
+The user proposed mapping the registry as `stores/XXX/...` under the usual
+document conventions instead of a separate `system` store ("we could actually
+just map them as stores/XXX/... and then the usual convention?"), and then
+keeping the page's own store at the root with the platform under `_stores`
+("it's still possible to have the defafult store collections at the top
+level, maybe it should be _stores or so to make it easier to separate?").
+Then: "ok, update."
+
+### What I did
+
+Rewrote design §5.2–§5.4 and the parts that depended on them (summary,
+seams, §5.1, §5.5, §5.6, §7.1, §7.2, invariants, plan, open questions):
+
+- a page's `db` is one path space: its own store at the root, unchanged;
+  every store at `_stores/<id>/…`; registry rows in `_`-prefixed
+  subcollections (`_grants`, `_bindings`, `_mounts`, `_llm`) and `_people`;
+- bindings become aliases (`contacts → _stores/crm-team/contacts`);
+- `_stores` as a whole is opt-in: declared by the app and approved by an
+  admin, or the app would act as a confused deputy with the visitor's
+  authority over every store they can see.
+
+### What I learned
+
+- `_stores/<id>` has two segments, so nesting keeps every store path's
+  document/collection parity: the convention needs no translation.
+- Document segments may start with `_` today (`segmentRe` in
+  `pkg/rt/paths.go`), so reserving top-level `_` names is a small breaking
+  change (open question 4).
+- Verbs exist for every writable row except app metadata: `grant.set/rm`,
+  `bind.set/rm`, `mount.set/rm`, `llm.set`, `people.role`, `store.new/rm`,
+  `store.type`, `app.follow`; `store.meta` is read-only, so `app.describe`
+  would be new.
+
+### What was tricky
+
+Files do not fit the parity rule (`a/b/c.js` lands on a collection), so
+source stays on the `files` capability, with `project` naming `_stores` or
+an alias.
+
+### What warrants review
+
+§5.2's resolution order and the opt-in rule; §5.3's write table (which
+level each registry write needs).
