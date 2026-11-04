@@ -14,6 +14,7 @@ import (
 	"time"
 
 	"github.com/go-go-golems/slop-computer/pkg/access"
+	"github.com/go-go-golems/slop-computer/pkg/doors/web"
 	"github.com/go-go-golems/slop-computer/pkg/httpx"
 	"github.com/go-go-golems/slop-computer/pkg/identity"
 	"github.com/go-go-golems/slop-computer/pkg/ids"
@@ -175,6 +176,11 @@ func (s *Door) serveLive(w http.ResponseWriter, r *http.Request) {
 			if s.serveActorRoute(w, r, res, pr) {
 				return
 			}
+		}
+		// slop's icon, unless an app's actor route answered it above.
+		if web.IsFavicon(p) && (r.Method == http.MethodGet || r.Method == http.MethodHead) {
+			web.Favicon(w, r)
+			return
 		}
 		if r.Method != http.MethodGet && r.Method != http.MethodHead {
 			http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
@@ -663,7 +669,7 @@ func (s *Door) reviewApp(ctx context.Context, app string) {
 
 var shellPage = template.Must(template.New("shell").Parse(`<!doctype html>
 <html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
-<title>{{.Title}}</title><link rel="stylesheet" href="{{.CSS}}">
+<title>{{.Title}}</title><link rel="icon" href="/favicon.svg" type="image/svg+xml"><link rel="stylesheet" href="{{.CSS}}">
 <script type="application/json" id="slop-shell">{{.Boot}}</script></head>
 <body><header class="shell-bar"><span class="shell-title">{{.Title}}</span><span class="shell-sp"></span>
 <button type="button" class="shell-btn" id="share" hidden>Share</button><span class="shell-me" id="me"></span></header>

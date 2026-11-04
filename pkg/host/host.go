@@ -218,6 +218,8 @@ func (s *Server) mainRoutes(m *http.ServeMux) {
 	m.HandleFunc("GET /healthz", func(w http.ResponseWriter, r *http.Request) { _, _ = w.Write([]byte("ok\n")) })
 	m.HandleFunc("GET /readyz", s.ready)
 	s.Pages.MainRoutes(m)
+	m.HandleFunc("GET /favicon.ico", web.Favicon)
+	m.HandleFunc("GET /favicon.svg", web.Favicon)
 	s.auth.Routes(m)
 	s.billingDoor.Routes(m)
 	(&apidoor.Door{Web: s.web, People: s.People, Verbs: s.Verbs}).Routes(m)

@@ -19,7 +19,7 @@ var adminFS embed.FS
 
 var adminPage = template.Must(template.New("admin").Parse(`<!doctype html>
 <html lang="en" data-theme="light"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
-<title>slop · back office</title><link rel="stylesheet" href="/admin/styles.css?v={{.V}}">
+<title>slop · back office</title><link rel="icon" href="/favicon.svg" type="image/svg+xml"><link rel="stylesheet" href="/admin/styles.css?v={{.V}}">
 <script type="application/json" id="slop-admin">{{.Boot}}</script></head>
 <body><div id="root"></div><script type="module" src="/admin/app.js?v={{.V}}"></script></body></html>`))
 
