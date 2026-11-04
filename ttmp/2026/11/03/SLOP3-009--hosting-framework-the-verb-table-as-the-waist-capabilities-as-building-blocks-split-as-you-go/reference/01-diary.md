@@ -793,3 +793,9 @@ Step 9 left one console error: `/favicon.ico` returned 404. PR #30 added an S, d
 - **Terraform has no such role.** `~/code/wesen/terraform` has only slop's ZITADEL clients. The role lives in the gitops repo's `vault/`, and `bootstrap-vault-kubernetes-auth.sh` only writes roles. So after #421 merges and Argo prunes, the user runs `vault delete auth/kubernetes/role/slop-test-db-bootstrap` and `vault policy delete slop-test-db-bootstrap`. Writing to Vault is the user's step, since the classifier refuses it.
 - **Left:** v2's database `slop` and role `slop_app` on the shared Postgres. Dropping them can't be undone, so that's the user's call.
 - **#421 merged (f5694d5):** Argo `slop` synced f5694d5, Synced/Healthy. Every bootstrap resource was pruned: no Job, ConfigMap, ServiceAccount, VaultAuth, VaultStaticSecret or Secret matching `bootstrap` or `postgres-admin` remains in namespace `slop`. What's left is `slop-runtime`, `slop-pi` and `slop-tls`. The pod was not restarted (51m, 0 restarts), and `/healthz` returns 200. The Vault role and policy delete is still the user's to run.
+- **Vault cleanup, done.** The user deleted role and policy `slop-test-db-bootstrap`, which I confirmed by reading both back. The question "aren't the roles in terraform?" turned into a cleanup across both repos:
+  - Kubernetes-auth roles stay in the k3s repo (`vault/roles/kubernetes`), by its playbook.
+  - `auth/github-actions` is terraform's. The k3s repo's stale copies are retired (k3s #424, merged 31a9907).
+  - terraform #40 adopted the 17 roles that existed only in k3s; #41 lets GitOps PR roles accept `push` and `workflow_dispatch` on main, and adopted two hand-made roles. I applied both with the user's operator login; a re-plan shows no changes.
+  - The unused `dmeta-npm-publish` role was deleted by the user.
+  - Live Vault now has 66 GitHub Actions roles, the same as terraform, and #424's validator passes against live Vault.
