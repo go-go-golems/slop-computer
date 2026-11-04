@@ -752,3 +752,23 @@ The conversion was mostly mechanical, done by two rewriters, and checked against
   {"oneOf": [{"type": "array", "items": {"type": "string"}}, {"type": "null"}]}
   ```
 - **The tools** (job tmp, not committed): `inv`, `typer`, `outer`, `cmp.py`, `audit.py`, and `TestDumpVerbs` (copied in and removed after each dump).
+
+## Step 9: deployed (sha-99e203c), verified, apps pushed
+
+Production moved from sha-35a4347 (#20) to sha-99e203c (#29). That takes in everything since: SLOP3-010's four PRs, the dead-code and lint PRs, and typed verbs. Then I pushed the shipped apps. The `/f/:id` migration needed nothing; it was applied on 2026-11-03.
+
+**User prompt (verbatim):** "alright, do the deploy and then verify and deploy the apps and migrate"
+**Commit / deploy:** gitops #420 (merged 8844468); #417–#419 closed as superseded. Argo CD `slop`: Synced, Healthy.
+
+- **No backup was taken.** Slop has no backup job on the cluster, and a backup written inside the pod was refused by the permission classifier. The user chose to deploy without one. There are no schema changes: the migration files only moved (`pkg/system` → `pkg/sysdb`, R100), and `_schema` names them `migrations/<file>` relative to the embedding package, as before.
+- **Rollout:** `deployment "slop" successfully rolled out`, one pod, 0 restarts. The log shows `Pi models ready (Geppetto): 14` and the four hosts.
+- **Hosts:** `/healthz` and `/readyz` 200; `/auth/login` 303 (to ZITADEL); `/admin/app.js`, `/guestbook`, `/f/shop`, `/f/lattice-arcade`, `/examples/static-site/`, `/office`, `/workshop` and `/journal` all 200.
+- **Data parity**, before and after (`mount ls`, `store ls --all true`, `app ls`): 11 mounts, 112 stores, 111 apps, identical; no broken apps.
+- **MCP:** `initialize` 2025-06-18; `tools/list` returns 86 tools, 54 with an output schema (the object-valued ones); `tools/call whoami` returns structured content; an unknown argument is refused (`grant.ls takes no argument "bogus"`).
+- **Browser, as a guest:**
+  - `/guestbook` opened a view, its event stream and two runtime calls; `db.query` returned the two entries and the profiles lookup resolved both authors;
+  - `/f/shop` opened at `interact`;
+  - the only console error is `/favicon.ico` 404.
+- **`make deploy-apps SLOP=<cli built at f000d9b>`:** workshop n=2, backoffice n=3, blocks-site n=2, blocks n=1, pinup n=1, guestbook n=2, journal n=2, static-site n=1, all `broken=''`.
+- **Migration:** `01-generic-f-mount.py` (dry run): `0 exact /f/<id> mounts on apps.slop.yolo.scapegoat.dev; 0 stores to type 'release'`.
+- **Noted:** every CLI flag is a string flag (`store ls --all true`), as before this work.

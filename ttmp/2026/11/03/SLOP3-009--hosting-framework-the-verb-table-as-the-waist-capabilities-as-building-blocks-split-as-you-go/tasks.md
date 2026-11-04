@@ -1,7 +1,7 @@
 # Tasks
 
 ## TODO
-- [ ] Step 0 (ops, outside this ticket): #20 is deployed (sha-35a4347, 2026-11-03); remaining: make deploy-apps; SLOP3-006 /f/:id migration --apply (dry run 2026-11-03: 103 mounts) <!-- t:n9h7 -->
+- [x] Step 0 (ops): done 2026-11-04. sha-99e203c deployed (gitops #420); make deploy-apps pushed the eight shipped apps; the /f/:id migration was applied 2026-11-03 (SLOP3-006) and its dry run now finds nothing to do <!-- t:n9h7 -->
 - [x] Step 1: write SLOP3-009 (this design doc) <!-- t:vfcn -->
 - [x] Step 2: spike verbs.Def[In,Out] + Call/Effect/Subject + schema from Go types + compat layer, on grant.set, docs.query, sample.run; check generated CLI help and MCP listing <!-- t:2ufd -->
 - [x] Step 3: pkg/registry from server/registry.go (+ LastChange, mount templates); page door follows system _changes (live registry docs, AccessChanged removed); dependency ratchet test <!-- t:8drp -->
