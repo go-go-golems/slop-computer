@@ -772,3 +772,23 @@ Production moved from sha-35a4347 (#20) to sha-99e203c (#29). That takes in ever
 - **`make deploy-apps SLOP=<cli built at f000d9b>`:** workshop n=2, backoffice n=3, blocks-site n=2, blocks n=1, pinup n=1, guestbook n=2, journal n=2, static-site n=1, all `broken=''`.
 - **Migration:** `01-generic-f-mount.py` (dry run): `0 exact /f/<id> mounts on apps.slop.yolo.scapegoat.dev; 0 stores to type 'release'`.
 - **Noted:** every CLI flag is a string flag (`store ls --all true`), as before this work.
+
+## Step 10: favicon deployed (sha-a3da880); v2's Postgres bootstrap removal opened (gitops #421)
+
+Step 9 left one console error: `/favicon.ico` returned 404. PR #30 added an S, drawn in the style of francois's F, embedded in `pkg/doors/web`. The main and live hosts serve it, and the shell and admin pages link to it. I deployed it the same way as #420. Separately, the user asked what v2's Postgres bootstrap still does. On every Argo sync, it runs a Job holding the cluster's Postgres admin credentials to recreate a database that v3 never opens. Gitops #421 removes the bootstrap, and the Vault role and policy have to be deleted by hand.
+
+**User prompts (verbatim):** "what;s the v2 postgres bootstrap thing about? And add the favicon.ico from francois (the S )"; "it's merged"; "open gitops PR, tell me what to write to vault"; "and yes update terraform to remove hte role"
+**Commit / deploy:** slop-computer #30 (a3da880); gitops #422 (deploy, merged), #421 (bootstrap removal, open, 2aa6768).
+
+- **Rollout:** Argo `slop` Synced/Healthy on sha-a3da880; one pod, 0 restarts.
+- **Favicons:** `/favicon.ico` (200 `image/x-icon`, 321 bytes) and `/favicon.svg` (200 `image/svg+xml`, 378 bytes) on slop.yolo and apps.slop.yolo. Their sha256 matches the embedded files. `/f/shop` has `<link rel="icon" href="/favicon.svg" type="image/svg+xml">`. site.slop.yolo still returns 404, by design: static hosts serve the published site's own bytes.
+- **The bootstrap (gitops #421):**
+  - It removes:
+    - the Sync-hook Job `slop-db-bootstrap` (`HookSucceeded`, so no Job is left in the cluster);
+    - its script ConfigMap, ServiceAccount and VaultAuth;
+    - the VaultStaticSecret `slop-postgres-admin` (from `kv/infra/postgres/cluster`);
+    - `vault/roles/kubernetes/slop-test-db-bootstrap.json` and `vault/policies/kubernetes/slop-test-db-bootstrap.hcl`.
+  - `scripts/bootstrap-slop-secrets.sh` now seeds only `oidc-client-id` and `oidc-org-id`. It drops `database`, `username`, `password` and `database-url`.
+  - Validation: `validate_gitops.sh` reported 56 packages and 0 violations; `kubectl kustomize` renders.
+- **Terraform has no such role.** `~/code/wesen/terraform` has only slop's ZITADEL clients. The role lives in the gitops repo's `vault/`, and `bootstrap-vault-kubernetes-auth.sh` only writes roles. So after #421 merges and Argo prunes, the user runs `vault delete auth/kubernetes/role/slop-test-db-bootstrap` and `vault policy delete slop-test-db-bootstrap`. Writing to Vault is the user's step, since the classifier refuses it.
+- **Left:** v2's database `slop` and role `slop_app` on the shared Postgres. Dropping them can't be undone, so that's the user's call.
