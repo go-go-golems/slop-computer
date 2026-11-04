@@ -18,27 +18,28 @@ import (
 const MaxBatch = 500
 
 func docsVerbs(e kernelEnv) []*verbs.Verb {
-	storeArg := verbs.Arg{Name: "store", Type: "string", Pos: 1, Required: true}
 	return []*verbs.Verb{
-		{Name: "docs.get", Doc: "Read one document.", Scope: verbs.Read, Action: authz.DocRead,
-			Args: []verbs.Arg{storeArg, {Name: "path", Type: "string", Pos: 2, Required: true}},
-			Run: func(ctx context.Context, p *access.Principal, a verbs.Args) (any, error) {
-				s, d, err := e.open(ctx, p, a.S("store"), rt.LevelView, "reading")
+		verbs.Def[DocsGetIn, store.Doc]{Name: "docs.get", Doc: "Read one document.", Scope: verbs.Read, Action: authz.DocRead,
+			Run: func(req verbs.Req, in DocsGetIn) (store.Doc, error) {
+				ctx := req.Context
+				p := req.Principal
+				s, d, err := e.open(ctx, p, in.Store, rt.LevelView, "reading")
 				if err != nil {
-					return nil, err
+					return store.Doc{}, err
 				}
-				path, rules := a.S("path"), e.K.Rules(ctx, s.ID)
+				path, rules := in.Path, e.K.Rules(ctx, s.ID)
 				doc, err := s.GetDoc(ctx, path, func(path string) bool { return rules.CanRead(path, p.ID(), d.Level) })
 				if errors.Is(err, store.ErrNotFound) {
-					return nil, verbs.Errf("not_found", "no document %s", path)
+					return store.Doc{}, verbs.Errf("not_found", "no document %s", path)
 				}
 				return doc, err
-			}},
-		{Name: "docs.ls", Doc: "List a collection's documents.", Scope: verbs.Read, Action: authz.DocRead,
-			Args: []verbs.Arg{storeArg, {Name: "coll", Type: "string", Pos: 2, Required: true}, {Name: "limit", Type: "int"}},
-			Run: func(ctx context.Context, p *access.Principal, a verbs.Args) (any, error) {
-				return queryDocs(ctx, e, p, a.S("store"), rt.Query{Coll: a.S("coll"), Limit: int(a.I("limit", 0))})
-			}},
+			}}.Verb(),
+		verbs.Def[DocsLsIn, []store.Doc]{Name: "docs.ls", Doc: "List a collection's documents.", Scope: verbs.Read, Action: authz.DocRead,
+			Run: func(req verbs.Req, in DocsLsIn) ([]store.Doc, error) {
+				ctx := req.Context
+				p := req.Principal
+				return queryDocs(ctx, e, p, in.Store, rt.Query{Coll: in.Coll, Limit: int(in.Limit)})
+			}}.Verb(),
 		verbs.Def[DocsQueryIn, []store.Doc]{Name: "docs.query", Doc: "Query a collection: where [[field, op, value], …], orderBy, desc, limit.",
 			Scope: verbs.Read, Action: authz.DocRead,
 			Run: func(r verbs.Req, in DocsQueryIn) ([]store.Doc, error) {
@@ -48,31 +49,32 @@ func docsVerbs(e kernelEnv) []*verbs.Verb {
 				}
 				return queryDocs(r, e, r.Principal, in.Store, q)
 			}}.Verb(),
-		{Name: "docs.set", Doc: "Write whole documents: path and data, or batch [{path, data, ifVersion?}] in one commit.", Scope: verbs.Write, Action: authz.DocWrite,
-			Args: []verbs.Arg{storeArg, {Name: "path", Type: "string", Pos: 2}, {Name: "data", Type: "json"},
-				{Name: "ifVersion", Type: "int", Doc: "fail unless the document is at this version"},
-				{Name: "batch", Type: "json", Doc: "[{path, data, ifVersion?}]"}},
-			Run: func(ctx context.Context, p *access.Principal, a verbs.Args) (any, error) {
-				return writeDocs(ctx, e, p, a, "set")
-			}},
-		{Name: "docs.update", Doc: "Deep-merge data into documents (creating them): path and data, or batch [{path, data}].", Scope: verbs.Write, Action: authz.DocWrite,
-			Args: []verbs.Arg{storeArg, {Name: "path", Type: "string", Pos: 2}, {Name: "data", Type: "json"}, {Name: "batch", Type: "json"}},
-			Run: func(ctx context.Context, p *access.Principal, a verbs.Args) (any, error) {
-				return writeDocs(ctx, e, p, a, "update")
-			}},
-		{Name: "docs.rm", Doc: "Delete documents: path, or paths [..] in one commit.", Scope: verbs.Write, Action: authz.DocWrite,
-			Args: []verbs.Arg{storeArg, {Name: "path", Type: "string", Pos: 2}, {Name: "paths", Type: "json"}},
-			Run: func(ctx context.Context, p *access.Principal, a verbs.Args) (any, error) {
-				paths := a.Strings("paths")
-				if a.S("path") != "" {
-					paths = append(paths, a.S("path"))
+		verbs.Def[DocsSetIn, any]{Name: "docs.set", Doc: "Write whole documents: path and data, or batch [{path, data, ifVersion?}] in one commit.", Scope: verbs.Write, Action: authz.DocWrite,
+			Run: func(req verbs.Req, in DocsSetIn) (any, error) {
+				ctx := req.Context
+				p := req.Principal
+				return writeDocs(ctx, e, p, in.Store, in.Path, in.Data, in.Batch, in.IfVersion, "set")
+			}}.Verb(),
+		verbs.Def[DocsUpdateIn, any]{Name: "docs.update", Doc: "Deep-merge data into documents (creating them): path and data, or batch [{path, data}].", Scope: verbs.Write, Action: authz.DocWrite,
+			Run: func(req verbs.Req, in DocsUpdateIn) (any, error) {
+				ctx := req.Context
+				p := req.Principal
+				return writeDocs(ctx, e, p, in.Store, in.Path, in.Data, in.Batch, 0, "update")
+			}}.Verb(),
+		verbs.Def[DocsRmIn, any]{Name: "docs.rm", Doc: "Delete documents: path, or paths [..] in one commit.", Scope: verbs.Write, Action: authz.DocWrite,
+			Run: func(req verbs.Req, in DocsRmIn) (any, error) {
+				ctx := req.Context
+				p := req.Principal
+				paths := []string(in.Paths)
+				if in.Path != "" {
+					paths = append(paths, in.Path)
 				}
 				items := make([]docItem, len(paths))
 				for i, path := range paths {
 					items[i] = docItem{Path: path}
 				}
-				return applyDocs(ctx, e, p, a.S("store"), items, "rm")
-			}},
+				return applyDocs(ctx, e, p, in.Store, items, "rm")
+			}}.Verb(),
 	}
 }
 
@@ -112,10 +114,10 @@ type docItem struct {
 	IfVersion int64
 }
 
-func writeDocs(ctx context.Context, e kernelEnv, p *access.Principal, a verbs.Args, op string) (any, error) {
+func writeDocs(ctx context.Context, e kernelEnv, p *access.Principal, storeID, path string, data, batch any, ifVersion int64, op string) (any, error) {
 	var items []docItem
-	if a.Has("batch") {
-		l, ok := argList(a, "batch")
+	if batch != nil {
+		l, ok := listOf(batch)
 		if !ok {
 			return nil, verbs.Errf("invalid_argument", "batch is a list of {path, data}")
 		}
@@ -125,20 +127,20 @@ func writeDocs(ctx context.Context, e kernelEnv, p *access.Principal, a verbs.Ar
 				return nil, verbs.Errf("invalid_argument", "batch is a list of {path, data}")
 			}
 			it := docItem{Path: verbs.Args(m).S("path"), IfVersion: verbs.Args(m).I("ifVersion", 0)}
-			if it.Data, ok = argObj(verbs.Args(m), "data"); !ok {
+			if it.Data, ok = objOf(m["data"]); !ok {
 				return nil, verbs.Errf("invalid_argument", "%s: data must be an object", it.Path)
 			}
 			items = append(items, it)
 		}
 	}
-	if a.S("path") != "" {
-		data, ok := argObj(a, "data")
+	if path != "" {
+		obj, ok := objOf(data)
 		if !ok {
 			return nil, verbs.Errf("invalid_argument", "data must be a JSON object")
 		}
-		items = append(items, docItem{Path: a.S("path"), Data: data, IfVersion: a.I("ifVersion", 0)})
+		items = append(items, docItem{Path: path, Data: obj, IfVersion: ifVersion})
 	}
-	return applyDocs(ctx, e, p, a.S("store"), items, op)
+	return applyDocs(ctx, e, p, storeID, items, op)
 }
 
 // applyDocs writes items in one turn after checking every path's rule.
@@ -236,4 +238,41 @@ func (Cond) JSONSchema() *jsonschema.Schema {
 		{Type: "array", MinItems: &three, MaxItems: &three, PrefixItems: []*jsonschema.Schema{{Type: "string"}, {Type: "string", Enum: ops}, {}}},
 		{Type: "object", Properties: obj, Required: []string{"field", "op", "value"}},
 	}}
+}
+
+// DocsGetIn is docs.get's input.
+type DocsGetIn struct {
+	Store string `json:"store" slop:"pos=1"`
+	Path  string `json:"path" slop:"pos=2"`
+}
+
+// DocsLsIn is docs.ls's input.
+type DocsLsIn struct {
+	Store string `json:"store" slop:"pos=1"`
+	Coll  string `json:"coll" slop:"pos=2"`
+	Limit int64  `json:"limit,omitempty"`
+}
+
+// DocsRmIn is docs.rm's input.
+type DocsRmIn struct {
+	Store string     `json:"store" slop:"pos=1"`
+	Path  string     `json:"path,omitempty" slop:"pos=2"`
+	Paths verbs.List `json:"paths,omitempty"`
+}
+
+// DocsSetIn is docs.set's input.
+type DocsSetIn struct {
+	Store     string `json:"store" slop:"pos=1"`
+	Path      string `json:"path,omitempty" slop:"pos=2"`
+	Data      any    `json:"data,omitempty"`
+	IfVersion int64  `json:"ifVersion,omitempty" jsonschema_description:"fail unless the document is at this version"`
+	Batch     any    `json:"batch,omitempty" jsonschema_description:"[{path, data, ifVersion?}]"`
+}
+
+// DocsUpdateIn is docs.update's input.
+type DocsUpdateIn struct {
+	Store string `json:"store" slop:"pos=1"`
+	Path  string `json:"path,omitempty" slop:"pos=2"`
+	Data  any    `json:"data,omitempty"`
+	Batch any    `json:"batch,omitempty"`
 }

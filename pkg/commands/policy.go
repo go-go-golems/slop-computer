@@ -9,6 +9,7 @@ import (
 	"github.com/go-go-golems/slop-computer/pkg/access"
 	"github.com/go-go-golems/slop-computer/pkg/apps"
 	"github.com/go-go-golems/slop-computer/pkg/authz"
+	"github.com/go-go-golems/slop-computer/pkg/llm"
 	"github.com/go-go-golems/slop-computer/pkg/policy"
 	"github.com/go-go-golems/slop-computer/pkg/rt"
 	"github.com/go-go-golems/slop-computer/pkg/sysdb"
@@ -59,153 +60,266 @@ func onOff(s string) (bool, error) {
 
 func policyVerbs(e policyEnv) []*verbs.Verb {
 	return []*verbs.Verb{
-		{Name: "policy.ls", Doc: "Show an app's policy matrix: which policy capabilities each audience may use.", Scope: verbs.Read, AdminOnly: true, Action: authz.PlatformAdmin,
-			Args: []verbs.Arg{{Name: "app", Type: "string", Pos: 1, Required: true}},
-			Run: func(ctx context.Context, p *access.Principal, a verbs.Args) (any, error) {
-				caps, m := e.declaredPolicyCaps(ctx, a.S("app"))
+		verbs.Def[PolicyLsIn, PolicyLsOut]{Name: "policy.ls", Doc: "Show an app's policy matrix: which policy capabilities each audience may use.", Scope: verbs.Read, AdminOnly: true, Action: authz.PlatformAdmin,
+			Run: func(req verbs.Req, in PolicyLsIn) (PolicyLsOut, error) {
+				ctx := req.Context
+				caps, m := e.declaredPolicyCaps(ctx, in.App)
 				if m == nil {
-					return nil, verbs.Errf("not_found", "%s is not an app (no app.json)", a.S("app"))
+					return PolicyLsOut{}, verbs.Errf("not_found", "%s is not an app (no app.json)", in.App)
 				}
-				cells, err := e.K.Gov.PolicyMatrix(ctx, a.S("app"), caps)
-				return map[string]any{"app": a.S("app"), "declared": caps, "cells": cells}, err
-			}},
-		{Name: "policy.set", Effect: verbs.EffectGovern, Doc: "Turn a policy cell on or off: app, capability (assets, sample, user.email, fetch, secrets, platform, stores), @audience, on|off.", Scope: verbs.Write, AdminOnly: true, Action: authz.PlatformAdmin,
-			Args: []verbs.Arg{{Name: "app", Type: "string", Pos: 1, Required: true}, {Name: "capability", Type: "string", Pos: 2, Required: true},
-				{Name: "audience", Type: "string", Pos: 3, Required: true}, {Name: "value", Type: "string", Pos: 4, Required: true}},
-			Run: func(ctx context.Context, p *access.Principal, a verbs.Args) (any, error) {
-				caps, m := e.declaredPolicyCaps(ctx, a.S("app"))
+				cells, err := e.K.Gov.PolicyMatrix(ctx, in.App, caps)
+				return PolicyLsOut{App: in.App, Declared: caps, Cells: cells}, err
+			}}.Verb(),
+		verbs.Def[PolicySetIn, PolicySetOut]{Name: "policy.set", Effect: verbs.EffectGovern, Doc: "Turn a policy cell on or off: app, capability (assets, sample, user.email, fetch, secrets, platform, stores), @audience, on|off.", Scope: verbs.Write, AdminOnly: true, Action: authz.PlatformAdmin,
+			Run: func(req verbs.Req, in PolicySetIn) (PolicySetOut, error) {
+				ctx := req.Context
+				p := req.Principal
+				caps, m := e.declaredPolicyCaps(ctx, in.App)
 				if m == nil {
-					return nil, verbs.Errf("not_found", "%s is not an app (no app.json)", a.S("app"))
+					return PolicySetOut{}, verbs.Errf("not_found", "%s is not an app (no app.json)", in.App)
 				}
-				c := a.S("capability")
+				c := in.Capability
 				found := false
 				for _, x := range caps {
 					found = found || x == c
 				}
 				if !found {
-					return nil, verbs.Errf("invalid_argument", "%s does not declare %s, so it cannot be turned on", a.S("app"), c)
+					return PolicySetOut{}, verbs.Errf("invalid_argument", "%s does not declare %s, so it cannot be turned on", in.App, c)
 				}
-				on, err := onOff(a.S("value"))
+				on, err := onOff(in.Value)
 				if err != nil {
-					return nil, verbs.Errf("invalid_argument", "%s", err.Error())
+					return PolicySetOut{}, verbs.Errf("invalid_argument", "%s", err.Error())
 				}
-				aud := strings.TrimPrefix(a.S("audience"), "@")
-				if err := e.K.Gov.SetPolicy(ctx, p.ID(), p.ViaLabel(), a.S("app"), c, aud, on); err != nil {
-					return nil, verbs.Errf("invalid_argument", "%s", err.Error())
+				aud := strings.TrimPrefix(in.Audience, "@")
+				if err := e.K.Gov.SetPolicy(ctx, p.ID(), p.ViaLabel(), in.App, c, aud, on); err != nil {
+					return PolicySetOut{}, verbs.Errf("invalid_argument", "%s", err.Error())
 				}
 				if e.A != nil {
-					e.A.RestartApp(a.S("app")) // actors evaluate use() at start
+					e.A.RestartApp(in.App) // actors evaluate use() at start
 				}
-				return map[string]any{"app": a.S("app"), "capability": c, "audience": aud, "allowed": on}, nil
-			}},
-		{Name: "llm.ls", Doc: "List LLM access rows (people and audience defaults) with their monthly budgets.", Scope: verbs.Read, AdminOnly: true, Action: authz.PlatformAdmin,
-			Run: func(ctx context.Context, p *access.Principal, a verbs.Args) (any, error) {
+				return PolicySetOut{App: in.App, Capability: c, Audience: aud, Allowed: on}, nil
+			}}.Verb(),
+		verbs.Def[LlmLsIn, []llm.LLMRow]{Name: "llm.ls", Doc: "List LLM access rows (people and audience defaults) with their monthly budgets.", Scope: verbs.Read, AdminOnly: true, Action: authz.PlatformAdmin,
+			Run: func(req verbs.Req, in LlmLsIn) ([]llm.LLMRow, error) {
+				ctx := req.Context
 				return e.K.Ledger.LLMRows(ctx)
-			}},
-		{Name: "llm.set", Effect: verbs.EffectGovern, Doc: "Give a person (usr_…, vis_…, an email), an audience (@guest, @member, @subscriber, @admin), @store (stores acting on their own) or one store (store:<id>) LLM access on or off, with a monthly token budget.", Scope: verbs.Write, AdminOnly: true, Action: authz.PlatformAdmin,
-			Args: []verbs.Arg{{Name: "subject", Type: "string", Pos: 1, Required: true}, {Name: "value", Type: "string", Pos: 2, Required: true},
-				{Name: "budget", Type: "int", Doc: "tokens per calendar month (omit: no limit)"}},
-			Run: func(ctx context.Context, p *access.Principal, a verbs.Args) (any, error) {
-				sub := a.S("subject")
+			}}.Verb(),
+		verbs.Def[LlmSetIn, LlmSetOut]{Name: "llm.set", Effect: verbs.EffectGovern, Doc: "Give a person (usr_…, vis_…, an email), an audience (@guest, @member, @subscriber, @admin), @store (stores acting on their own) or one store (store:<id>) LLM access on or off, with a monthly token budget.", Scope: verbs.Write, AdminOnly: true, Action: authz.PlatformAdmin,
+			Run: func(req verbs.Req, in LlmSetIn) (LlmSetOut, error) {
+				ctx := req.Context
+				p := req.Principal
+				sub := in.Subject
 				switch {
 				case sub == string(access.GroupStore):
 					// every store acting on its own (alarms, reactors)
 				case strings.HasPrefix(sub, "@"):
 					if !access.ValidAudience(strings.TrimPrefix(sub, "@")) || sub == "@none" {
-						return nil, verbs.Errf("invalid_argument", "audience is @guest, @member, @subscriber, @admin or @store")
+						return LlmSetOut{}, verbs.Errf("invalid_argument", "audience is @guest, @member, @subscriber, @admin or @store")
 					}
 				case strings.HasPrefix(sub, "store:"):
 					// one store's own budget, for its alarms and reactors
 					if _, err := e.K.Registry.StoreByID(ctx, sub[len("store:"):]); err != nil {
-						return nil, verbs.Errf("not_found", "no store %s", sub[len("store:"):])
+						return LlmSetOut{}, verbs.Errf("not_found", "no store %s", sub[len("store:"):])
 					}
 				default:
 					pp, err := e.personArg(ctx, sub)
 					if err != nil {
-						return nil, err
+						return LlmSetOut{}, err
 					}
 					sub = pp.ID
 				}
-				on, err := onOff(a.S("value"))
+				on, err := onOff(in.Value)
 				if err != nil {
-					return nil, verbs.Errf("invalid_argument", "%s", err.Error())
+					return LlmSetOut{}, verbs.Errf("invalid_argument", "%s", err.Error())
 				}
 				var budget *int64
-				if a.Has("budget") {
-					b := a.I("budget", 0)
+				if in.Budget != nil {
+					b := or(in.Budget, 0)
 					if b < 0 {
-						return nil, verbs.Errf("invalid_argument", "a budget is zero or more tokens")
+						return LlmSetOut{}, verbs.Errf("invalid_argument", "a budget is zero or more tokens")
 					}
 					budget = &b
 				}
 				if err := e.K.Ledger.SetLLM(ctx, p.ID(), p.ViaLabel(), sub, on, budget); err != nil {
-					return nil, err
+					return LlmSetOut{}, err
 				}
-				return map[string]any{"subject": sub, "allowed": on, "budget": budget}, nil
-			}},
-		{Name: "llm.rm", Effect: verbs.EffectGovern, Doc: "Remove a person's own LLM row (they fall back to their audience's).", Scope: verbs.Write, AdminOnly: true, Action: authz.PlatformAdmin,
-			Args: []verbs.Arg{{Name: "subject", Type: "string", Pos: 1, Required: true}},
-			Run: func(ctx context.Context, p *access.Principal, a verbs.Args) (any, error) {
-				return map[string]any{"removed": a.S("subject")}, e.K.Ledger.RemoveLLM(ctx, p.ID(), p.ViaLabel(), a.S("subject"))
-			}},
-		{Name: "llm.usage", Doc: "A person's LLM access and usage this month (yours by default).", Scope: verbs.Read, Action: authz.Account,
-			Args: []verbs.Arg{{Name: "person", Type: "string", Pos: 1}},
-			Run: func(ctx context.Context, p *access.Principal, a verbs.Args) (any, error) {
+				return LlmSetOut{Subject: sub, Allowed: on, Budget: budget}, nil
+			}}.Verb(),
+		verbs.Def[LlmRmIn, LlmRmOut]{Name: "llm.rm", Effect: verbs.EffectGovern, Doc: "Remove a person's own LLM row (they fall back to their audience's).", Scope: verbs.Write, AdminOnly: true, Action: authz.PlatformAdmin,
+			Run: func(req verbs.Req, in LlmRmIn) (LlmRmOut, error) {
+				ctx := req.Context
+				p := req.Principal
+				return LlmRmOut{Removed: in.Subject}, e.K.Ledger.RemoveLLM(ctx, p.ID(), p.ViaLabel(), in.Subject)
+			}}.Verb(),
+		verbs.Def[LlmUsageIn, LlmUsageOut]{Name: "llm.usage", Doc: "A person's LLM access and usage this month (yours by default).", Scope: verbs.Read, Action: authz.Account,
+			Run: func(req verbs.Req, in LlmUsageIn) (LlmUsageOut, error) {
+				ctx := req.Context
+				p := req.Principal
 				q := p
-				if id, ok := strings.CutPrefix(a.S("person"), "store:"); ok {
+				if id, ok := strings.CutPrefix(in.Person, "store:"); ok {
 					// a store's own budget (alarms, reactors): admins only
 					if !p.IsAdmin() {
-						return nil, verbs.Errf("permission_denied", "only admins look at a store's usage")
+						return LlmUsageOut{}, verbs.Errf("permission_denied", "only admins look at a store's usage")
 					}
 					q = &access.Principal{Kind: access.KindStore, Store: id}
-				} else if s := a.S("person"); s != "" {
+				} else if s := in.Person; s != "" {
 					pp, err := e.personArg(ctx, s)
 					if err != nil {
-						return nil, err
+						return LlmUsageOut{}, err
 					}
 					if pp.ID != p.ID() && !p.IsAdmin() {
-						return nil, verbs.Errf("permission_denied", "only admins look at other people's usage")
+						return LlmUsageOut{}, verbs.Errf("permission_denied", "only admins look at other people's usage")
 					}
 					q = access.PersonPrincipal(pp, "")
 				}
 				aud := e.K.Access.AudienceOf(ctx, q)
-				return map[string]any{"person": q.ID(), "audience": aud, "llm": e.K.Ledger.LLMFor(ctx, q.ID(), string(aud))}, nil
-			}},
-		{Name: "llm.reset", Effect: verbs.EffectGovern, Doc: "Set a person's usage this month to zero.", Scope: verbs.Write, AdminOnly: true, Action: authz.PlatformAdmin,
-			Args: []verbs.Arg{{Name: "person", Type: "string", Pos: 1, Required: true}},
-			Run: func(ctx context.Context, p *access.Principal, a verbs.Args) (any, error) {
-				pp, err := e.personArg(ctx, a.S("person"))
+				return LlmUsageOut{Person: q.ID(), Audience: aud, Llm: e.K.Ledger.LLMFor(ctx, q.ID(), string(aud))}, nil
+			}}.Verb(),
+		verbs.Def[LlmResetIn, LlmResetOut]{Name: "llm.reset", Effect: verbs.EffectGovern, Doc: "Set a person's usage this month to zero.", Scope: verbs.Write, AdminOnly: true, Action: authz.PlatformAdmin,
+			Run: func(req verbs.Req, in LlmResetIn) (LlmResetOut, error) {
+				ctx := req.Context
+				p := req.Principal
+				pp, err := e.personArg(ctx, in.Person)
 				if err != nil {
-					return nil, err
+					return LlmResetOut{}, err
 				}
-				return map[string]any{"reset": pp.ID}, e.K.Ledger.ResetLLMUsage(ctx, p.ID(), p.ViaLabel(), pp.ID)
-			}},
-		{Name: "secret.ls", Doc: "List an app's secret names (never values).", Scope: verbs.Read, AdminOnly: true, Action: authz.PlatformAdmin,
-			Args: []verbs.Arg{{Name: "app", Type: "string", Pos: 1, Required: true}},
-			Run: func(ctx context.Context, p *access.Principal, a verbs.Args) (any, error) {
-				return e.K.Gov.SecretNames(ctx, a.S("app"))
-			}},
-		{Name: "secret.set", Effect: verbs.EffectGovern, Doc: "Set an app's secret (encrypted at rest); the actor reads it if app.json slop.secrets lists it and the policy allows.", Scope: verbs.Write, AdminOnly: true, Action: authz.PlatformAdmin,
-			Args: []verbs.Arg{{Name: "app", Type: "string", Pos: 1, Required: true}, {Name: "name", Type: "string", Pos: 2, Required: true},
-				{Name: "value", Type: "string", Pos: 3, Required: true}},
-			Run: func(ctx context.Context, p *access.Principal, a verbs.Args) (any, error) {
+				return LlmResetOut{Reset: pp.ID}, e.K.Ledger.ResetLLMUsage(ctx, p.ID(), p.ViaLabel(), pp.ID)
+			}}.Verb(),
+		verbs.Def[SecretLsIn, []map[string]any]{Name: "secret.ls", Doc: "List an app's secret names (never values).", Scope: verbs.Read, AdminOnly: true, Action: authz.PlatformAdmin,
+			Run: func(req verbs.Req, in SecretLsIn) ([]map[string]any, error) {
+				ctx := req.Context
+				return e.K.Gov.SecretNames(ctx, in.App)
+			}}.Verb(),
+		verbs.Def[SecretSetIn, SecretSetOut]{Name: "secret.set", Effect: verbs.EffectGovern, Doc: "Set an app's secret (encrypted at rest); the actor reads it if app.json slop.secrets lists it and the policy allows.", Scope: verbs.Write, AdminOnly: true, Action: authz.PlatformAdmin,
+			Run: func(req verbs.Req, in SecretSetIn) (SecretSetOut, error) {
+				ctx := req.Context
+				p := req.Principal
 				key, err := e.Cfg.Key()
 				if err != nil {
-					return nil, err
+					return SecretSetOut{}, err
 				}
-				if err := e.K.Gov.SetSecret(ctx, key, p.ID(), p.ViaLabel(), a.S("app"), a.S("name"), a.S("value")); err != nil {
-					return nil, err
+				if err := e.K.Gov.SetSecret(ctx, key, p.ID(), p.ViaLabel(), in.App, in.Name, in.Value); err != nil {
+					return SecretSetOut{}, err
 				}
-				return map[string]any{"app": a.S("app"), "name": a.S("name"), "length": strconv.Itoa(len(a.S("value")))}, nil
-			}},
-		{Name: "secret.rm", Effect: verbs.EffectGovern, Doc: "Remove an app's secret.", Scope: verbs.Write, AdminOnly: true, Action: authz.PlatformAdmin,
-			Args: []verbs.Arg{{Name: "app", Type: "string", Pos: 1, Required: true}, {Name: "name", Type: "string", Pos: 2, Required: true}},
-			Run: func(ctx context.Context, p *access.Principal, a verbs.Args) (any, error) {
-				err := e.K.Gov.RemoveSecret(ctx, p.ID(), p.ViaLabel(), a.S("app"), a.S("name"))
+				return SecretSetOut{App: in.App, Name: in.Name, Length: strconv.Itoa(len(in.Value))}, nil
+			}}.Verb(),
+		verbs.Def[SecretRmIn, SecretRmOut]{Name: "secret.rm", Effect: verbs.EffectGovern, Doc: "Remove an app's secret.", Scope: verbs.Write, AdminOnly: true, Action: authz.PlatformAdmin,
+			Run: func(req verbs.Req, in SecretRmIn) (SecretRmOut, error) {
+				ctx := req.Context
+				p := req.Principal
+				err := e.K.Gov.RemoveSecret(ctx, p.ID(), p.ViaLabel(), in.App, in.Name)
 				if errors.Is(err, sysdb.ErrNotFound) {
-					return nil, verbs.Errf("not_found", "no secret %s on %s", a.S("name"), a.S("app"))
+					return SecretRmOut{}, verbs.Errf("not_found", "no secret %s on %s", in.Name, in.App)
 				}
-				return map[string]any{"removed": a.S("name")}, err
-			}},
+				return SecretRmOut{Removed: in.Name}, err
+			}}.Verb(),
 	}
+}
+
+// PolicyLsIn is policy.ls's input.
+type PolicyLsIn struct {
+	App string `json:"app" slop:"pos=1"`
+}
+
+// PolicySetIn is policy.set's input.
+type PolicySetIn struct {
+	App        string `json:"app" slop:"pos=1"`
+	Capability string `json:"capability" slop:"pos=2"`
+	Audience   string `json:"audience" slop:"pos=3"`
+	Value      string `json:"value" slop:"pos=4"`
+}
+
+// LlmLsIn is llm.ls's input.
+type LlmLsIn struct {
+}
+
+// LlmSetIn is llm.set's input.
+type LlmSetIn struct {
+	Subject string `json:"subject" slop:"pos=1"`
+	Value   string `json:"value" slop:"pos=2"`
+	Budget  *int64 `json:"budget,omitempty" jsonschema_description:"tokens per calendar month (omit: no limit)"`
+}
+
+// LlmRmIn is llm.rm's input.
+type LlmRmIn struct {
+	Subject string `json:"subject" slop:"pos=1"`
+}
+
+// LlmUsageIn is llm.usage's input.
+type LlmUsageIn struct {
+	Person string `json:"person,omitempty" slop:"pos=1"`
+}
+
+// LlmResetIn is llm.reset's input.
+type LlmResetIn struct {
+	Person string `json:"person" slop:"pos=1"`
+}
+
+// SecretLsIn is secret.ls's input.
+type SecretLsIn struct {
+	App string `json:"app" slop:"pos=1"`
+}
+
+// SecretSetIn is secret.set's input.
+type SecretSetIn struct {
+	App   string `json:"app" slop:"pos=1"`
+	Name  string `json:"name" slop:"pos=2"`
+	Value string `json:"value" slop:"pos=3"`
+}
+
+// SecretRmIn is secret.rm's input.
+type SecretRmIn struct {
+	App  string `json:"app" slop:"pos=1"`
+	Name string `json:"name" slop:"pos=2"`
+}
+
+// PolicyLsOut is policy.ls's result.
+type PolicyLsOut struct {
+	App      string              `json:"app"`
+	Cells    []policy.PolicyCell `json:"cells"`
+	Declared []string            `json:"declared"`
+}
+
+// PolicySetOut is policy.set's result.
+type PolicySetOut struct {
+	Allowed    bool   `json:"allowed"`
+	App        string `json:"app"`
+	Audience   string `json:"audience"`
+	Capability string `json:"capability"`
+}
+
+// LlmSetOut is llm.set's result.
+type LlmSetOut struct {
+	Allowed bool   `json:"allowed"`
+	Budget  *int64 `json:"budget"`
+	Subject string `json:"subject"`
+}
+
+// LlmRmOut is llm.rm's result.
+type LlmRmOut struct {
+	Removed string `json:"removed"`
+}
+
+// LlmUsageOut is llm.usage's result.
+type LlmUsageOut struct {
+	Audience access.Audience `json:"audience"`
+	Llm      llm.LLM         `json:"llm"`
+	Person   string          `json:"person"`
+}
+
+// LlmResetOut is llm.reset's result.
+type LlmResetOut struct {
+	Reset string `json:"reset"`
+}
+
+// SecretSetOut is secret.set's result.
+type SecretSetOut struct {
+	App    string `json:"app"`
+	Length string `json:"length"`
+	Name   string `json:"name"`
+}
+
+// SecretRmOut is secret.rm's result.
+type SecretRmOut struct {
+	Removed string `json:"removed"`
 }

@@ -1,23 +1,25 @@
 package commands
 
 import (
-	"context"
-
-	"github.com/go-go-golems/slop-computer/pkg/access"
 	"github.com/go-go-golems/slop-computer/pkg/authz"
 	"github.com/go-go-golems/slop-computer/pkg/verbs"
 )
 
 func confirmVerbs(e confirmEnv) []*verbs.Verb {
 	return []*verbs.Verb{
-		{Name: "confirm.approve", Doc: "Allow a change an app asked to make for you (the id from its confirmation_required error).", Scope: verbs.Write, Action: authz.Account,
-			Args: []verbs.Arg{{Name: "id", Type: "string", Pos: 1, Required: true}},
-			Run: func(ctx context.Context, p *access.Principal, a verbs.Args) (any, error) {
-				x, ok := e.Confirm.Approve(a.S("id"), p.ID())
+		verbs.Def[ConfirmApproveIn, *verbs.Confirmation]{Name: "confirm.approve", Doc: "Allow a change an app asked to make for you (the id from its confirmation_required error).", Scope: verbs.Write, Action: authz.Account,
+			Run: func(req verbs.Req, in ConfirmApproveIn) (*verbs.Confirmation, error) {
+				p := req.Principal
+				x, ok := e.Confirm.Approve(in.ID, p.ID())
 				if !ok {
-					return nil, verbs.Errf("not_found", "no confirmation %s waits for you", a.S("id"))
+					return nil, verbs.Errf("not_found", "no confirmation %s waits for you", in.ID)
 				}
 				return x, nil
-			}},
+			}}.Verb(),
 	}
+}
+
+// ConfirmApproveIn is confirm.approve's input.
+type ConfirmApproveIn struct {
+	ID string `json:"id" slop:"pos=1"`
 }

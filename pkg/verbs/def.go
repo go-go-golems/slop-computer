@@ -89,7 +89,7 @@ type Def[In, Out any] struct {
 func (d Def[In, Out]) Verb() *Verb {
 	in := schemaOf(reflect.TypeFor[In]())
 	v := &Verb{Name: d.Name, Doc: d.Doc, Scope: d.Scope, Effect: d.Effect, AdminOnly: d.AdminOnly,
-		Action: d.Action, StoreArg: d.StoreArg, Input: in, Output: schemaOf(reflect.TypeFor[Out]()),
+		Action: d.Action, StoreArg: d.StoreArg, Input: in, Output: outputSchema(reflect.TypeFor[Out]()),
 		Args: argsOf(reflect.TypeFor[In](), in)}
 	if v.Effect == "" {
 		v.Effect = EffectRead
@@ -118,6 +118,9 @@ func decodeArgs[In any](verb string, a Args) (In, error) {
 	}
 	dec := json.NewDecoder(bytes.NewReader(b))
 	dec.DisallowUnknownFields()
+	// Numbers in untyped fields (document bodies, actor arguments) stay
+	// exact, as they arrive from the HTTP door (httpx reads with UseNumber).
+	dec.UseNumber()
 	if err := dec.Decode(&x); err != nil {
 		msg := err.Error()
 		msg = strings.TrimPrefix(msg, "json: ")
@@ -143,6 +146,81 @@ func schemaOf(t reflect.Type) *jsonschema.Schema {
 	s := reflector.ReflectFromType(t)
 	s.Version = ""
 	return s
+}
+
+// outputSchema is t's schema as a result's: wherever Go can encode null (a
+// nil pointer, slice or map), the schema allows it, so a client checking
+// structured results against it (MCP) accepts what the verb returns.
+func outputSchema(t reflect.Type) *jsonschema.Schema {
+	s := schemaOf(t)
+	if s != nil {
+		nullable(t, s, map[reflect.Type]int{})
+	}
+	return s
+}
+
+// nullable walks t and its schema s together, letting null through for
+// every nilable value.
+func nullable(t reflect.Type, s *jsonschema.Schema, depth map[reflect.Type]int) {
+	if s == nil || depth[t] > 2 { // recursive types: their schema is finite
+		return
+	}
+	depth[t]++
+	defer func() { depth[t]-- }()
+	orNull := false
+	for t.Kind() == reflect.Pointer {
+		orNull, t = true, t.Elem()
+	}
+	if k := t.Kind(); k == reflect.Slice && t.Elem().Kind() != reflect.Uint8 { // []byte is a string
+		orNull = true
+		nullable(t.Elem(), s.Items, depth)
+	} else if k == reflect.Map {
+		orNull = true
+		if s.AdditionalProperties != nil && s.AdditionalProperties != jsonschema.TrueSchema && s.AdditionalProperties != jsonschema.FalseSchema {
+			nullable(t.Elem(), s.AdditionalProperties, depth)
+		}
+	} else if k == reflect.Struct && s.Properties != nil {
+		structFields(t, func(name string, ft reflect.Type) {
+			if ps, ok := s.Properties.Get(name); ok {
+				nullable(ft, ps, depth)
+			}
+		})
+	}
+	if orNull && s.Type != "" && s.Type != "null" {
+		inner := *s
+		inner.Description = ""
+		*s = jsonschema.Schema{Description: s.Description, OneOf: []*jsonschema.Schema{&inner, {Type: "null"}}}
+	}
+}
+
+// structFields calls fn with the JSON name and type of each field of t
+// that encodes, embedded structs flattened as encoding/json does.
+func structFields(t reflect.Type, fn func(name string, ft reflect.Type)) {
+	for i := 0; i < t.NumField(); i++ {
+		f := t.Field(i)
+		tag := f.Tag.Get("json")
+		name, _, _ := strings.Cut(tag, ",")
+		if name == "-" {
+			continue
+		}
+		if f.Anonymous && name == "" {
+			ft := f.Type
+			for ft.Kind() == reflect.Pointer {
+				ft = ft.Elem()
+			}
+			if ft.Kind() == reflect.Struct {
+				structFields(ft, fn)
+				continue
+			}
+		}
+		if !f.IsExported() {
+			continue
+		}
+		if name == "" {
+			name = f.Name
+		}
+		fn(name, f.Type)
+	}
 }
 
 // argsOf lists a struct type's fields as verb arguments, for the doors that
@@ -181,7 +259,9 @@ func argsOf(t reflect.Type, s *jsonschema.Schema) []Arg {
 			a.Doc = strings.TrimSpace(a.Doc + " (one of " + strings.Join(vs, ", ") + ")")
 		}
 		if a.Type == "json" {
-			a.Doc = strings.TrimSpace(a.Doc + ", as JSON: " + shapeOf(p))
+			if sh := shapeOf(p); sh != "any" { // an untyped value says nothing more
+				a.Doc = strings.TrimSpace(a.Doc + ", as JSON: " + sh)
+			}
 		}
 		for _, kv := range strings.Split(f.Tag.Get("slop"), ",") {
 			if n, ok := strings.CutPrefix(kv, "pos="); ok {
@@ -210,6 +290,46 @@ func argType(p *jsonschema.Schema) string {
 }
 
 func mustJSON(v any) []byte { b, _ := json.Marshal(v); return b }
+
+// List is a list of strings an argument takes as a JSON array or, as the
+// CLI passes it, one comma-separated string ("read,write").
+type List []string
+
+// UnmarshalJSON accepts an array of strings (other values are formatted)
+// or a comma-separated string.
+func (l *List) UnmarshalJSON(b []byte) error {
+	var s string
+	if json.Unmarshal(b, &s) == nil {
+		*l = List{}
+		for _, x := range strings.Split(s, ",") {
+			if x = strings.TrimSpace(x); x != "" {
+				*l = append(*l, x)
+			}
+		}
+		return nil
+	}
+	var xs []any
+	if err := json.Unmarshal(b, &xs); err != nil {
+		return err
+	}
+	*l = make(List, 0, len(xs))
+	for _, x := range xs {
+		if str, ok := x.(string); ok {
+			*l = append(*l, str)
+		} else {
+			*l = append(*l, string(mustJSON(x)))
+		}
+	}
+	return nil
+}
+
+// JSONSchema is a list's schema: an array of strings, or one string.
+func (List) JSONSchema() *jsonschema.Schema {
+	return &jsonschema.Schema{OneOf: []*jsonschema.Schema{
+		{Type: "array", Items: &jsonschema.Schema{Type: "string"}},
+		{Type: "string", Description: "comma-separated"},
+	}}
+}
 
 // InputSchema is v's argument schema: a typed verb's own, or one made from
 // an untyped verb's Args (json arguments accept any value).

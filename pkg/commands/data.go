@@ -23,44 +23,44 @@ import (
 // SQL, export and import.
 
 func dataVerbs(e kernelEnv) []*verbs.Verb {
-	storeArg := verbs.Arg{Name: "store", Type: "string", Pos: 1, Required: true}
-	rowsArgs := []verbs.Arg{{Name: "rows", Type: "json", Doc: "a list of objects"}, {Name: "text", Type: "string", Doc: "CSV, JSONL or a JSON array"},
-		{Name: "format", Type: "string", Doc: "csv, jsonl or json (with text)"}}
 	return []*verbs.Verb{
-		{Name: "sql.query", Doc: "Run a read-only SQL statement on a store (admins).", Scope: verbs.Read, AdminOnly: true, Action: authz.StoreAdmin,
-			Args: []verbs.Arg{storeArg, {Name: "sql", Type: "string", Pos: 2, Required: true}, {Name: "args", Type: "json", Doc: "positional parameters"}},
-			Run: func(ctx context.Context, p *access.Principal, a verbs.Args) (any, error) {
-				return runSQL(ctx, e, p, a, store.CallerAdminRead)
-			}},
-		{Name: "sql.exec", Doc: "Run SQL on a store's app tables (admins); --write allows writes.", Scope: verbs.Write, AdminOnly: true, Action: authz.StoreAdmin,
-			Args: []verbs.Arg{storeArg, {Name: "sql", Type: "string", Pos: 2, Required: true}, {Name: "args", Type: "json"},
-				{Name: "write", Type: "bool", Doc: "allow INSERT, UPDATE and DELETE on app tables"}},
-			Run: func(ctx context.Context, p *access.Principal, a verbs.Args) (any, error) {
+		verbs.Def[SqlQueryIn, any]{Name: "sql.query", Doc: "Run a read-only SQL statement on a store (admins).", Scope: verbs.Read, AdminOnly: true, Action: authz.StoreAdmin,
+			Run: func(req verbs.Req, in SqlQueryIn) (any, error) {
+				ctx := req.Context
+				p := req.Principal
+				return runSQL(ctx, e, p, in.Store, in.Sql, in.Args, store.CallerAdminRead)
+			}}.Verb(),
+		verbs.Def[SqlExecIn, any]{Name: "sql.exec", Doc: "Run SQL on a store's app tables (admins); --write allows writes.", Scope: verbs.Write, AdminOnly: true, Action: authz.StoreAdmin,
+			Run: func(req verbs.Req, in SqlExecIn) (any, error) {
+				ctx := req.Context
+				p := req.Principal
 				caller := store.CallerAdminRead
-				if a.B("write") {
+				if in.Write {
 					caller = store.CallerAdminWrite
 				}
-				return runSQL(ctx, e, p, a, caller)
-			}},
-		{Name: "sql.schema", Doc: "A store's app tables, indexes, views and triggers.", Scope: verbs.Read, Action: authz.StoreAdmin,
-			Args: []verbs.Arg{storeArg},
-			Run: func(ctx context.Context, p *access.Principal, a verbs.Args) (any, error) {
-				s, _, err := e.open(ctx, p, a.S("store"), rt.LevelAdmin, "reading the schema")
+				return runSQL(ctx, e, p, in.Store, in.Sql, in.Args, caller)
+			}}.Verb(),
+		verbs.Def[SqlSchemaIn, []store.SchemaObject]{Name: "sql.schema", Doc: "A store's app tables, indexes, views and triggers.", Scope: verbs.Read, Action: authz.StoreAdmin,
+			Run: func(req verbs.Req, in SqlSchemaIn) ([]store.SchemaObject, error) {
+				ctx := req.Context
+				p := req.Principal
+				s, _, err := e.open(ctx, p, in.Store, rt.LevelAdmin, "reading the schema")
 				if err != nil {
 					return nil, err
 				}
 				return s.AppSchema(ctx)
-			}},
-		{Name: "store.export", Doc: "A store's current documents, files (with their bytes), schema and table rows.", Scope: verbs.Read, Action: authz.StoreAdmin, StoreArg: "id",
-			Args: []verbs.Arg{{Name: "id", Type: "string", Pos: 1, Required: true}},
-			Run: func(ctx context.Context, p *access.Principal, a verbs.Args) (any, error) {
-				s, _, err := e.open(ctx, p, a.S("id"), rt.LevelAdmin, "exporting")
+			}}.Verb(),
+		verbs.Def[StoreExportIn, StoreExportOut]{Name: "store.export", Doc: "A store's current documents, files (with their bytes), schema and table rows.", Scope: verbs.Read, Action: authz.StoreAdmin, StoreArg: "id",
+			Run: func(req verbs.Req, in StoreExportIn) (StoreExportOut, error) {
+				ctx := req.Context
+				p := req.Principal
+				s, _, err := e.open(ctx, p, in.ID, rt.LevelAdmin, "exporting")
 				if err != nil {
-					return nil, err
+					return StoreExportOut{}, err
 				}
 				b, err := s.Export(ctx)
 				if err != nil {
-					return nil, err
+					return StoreExportOut{}, err
 				}
 				bl := map[string]string{}
 				for _, f := range b.Files {
@@ -69,42 +69,42 @@ func dataVerbs(e kernelEnv) []*verbs.Verb {
 					}
 					data, err := s.Blobs.Read(f.SHA256)
 					if err != nil {
-						return nil, err
+						return StoreExportOut{}, err
 					}
 					bl[f.SHA256] = base64.StdEncoding.EncodeToString(data)
 				}
-				return map[string]any{"id": s.ID, "bundle": b, "blobs": bl}, nil
-			}},
-		{Name: "import.folder", Doc: "Make a new store from an export bundle {bundle, blobs} (slop import folder reads the folder format).", Scope: verbs.Write, Action: authz.Program,
-			Args: []verbs.Arg{{Name: "store", Type: "string", Pos: 1, Doc: "the new store's id"}, {Name: "bundle", Type: "json", Required: true},
-				{Name: "blobs", Type: "json", Doc: "{sha256: base64}"}},
-			Run: func(ctx context.Context, p *access.Principal, a verbs.Args) (any, error) {
+				return StoreExportOut{ID: s.ID, Bundle: b, Blobs: bl}, nil
+			}}.Verb(),
+		verbs.Def[ImportFolderIn, ImportFolderOut]{Name: "import.folder", Doc: "Make a new store from an export bundle {bundle, blobs} (slop import folder reads the folder format).", Scope: verbs.Write, Action: authz.Program,
+			Run: func(req verbs.Req, in ImportFolderIn) (ImportFolderOut, error) {
+				ctx := req.Context
+				p := req.Principal
 				if !e.K.Access.In(ctx, p, access.GroupMember) {
-					return nil, verbs.Errf("permission_denied", "only members make stores")
+					return ImportFolderOut{}, verbs.Errf("permission_denied", "only members make stores")
 				}
 				var b store.Bundle
-				raw, _ := json.Marshal(a["bundle"])
+				raw, _ := json.Marshal(in.Bundle)
 				dec := json.NewDecoder(strings.NewReader(string(raw)))
 				dec.UseNumber()
 				if err := dec.Decode(&b); err != nil {
-					return nil, verbs.Errf("invalid_argument", "bundle: %s", err.Error())
+					return ImportFolderOut{}, verbs.Errf("invalid_argument", "bundle: %s", err.Error())
 				}
-				if err := putBlobs(e, a); err != nil {
-					return nil, err
+				if err := putBlobs(e, in.Blobs); err != nil {
+					return ImportFolderOut{}, err
 				}
 				sums := []string{}
 				for _, f := range b.Files {
 					sums = append(sums, f.SHA256)
 				}
 				if missing := e.K.Blobs.Missing(sums); len(missing) > 0 {
-					return nil, &verbs.Error{Code: "missing_blobs", Message: "send these blobs", Extra: map[string]any{"missing": missing}}
+					return ImportFolderOut{}, &verbs.Error{Code: "missing_blobs", Message: "send these blobs", Extra: map[string]any{"missing": missing}}
 				}
-				row, s, err := e.K.CreateStore(ctx, p, kernel.NewStore{ID: a.S("store"), Type: b.Meta["type"], App: b.Meta["app"]})
+				row, s, err := e.K.CreateStore(ctx, p, kernel.NewStore{ID: in.Store, Type: b.Meta["type"], App: b.Meta["app"]})
 				if errors.Is(err, registry.ErrExists) {
-					return nil, verbs.Errf("conflict", "store %s exists", a.S("store"))
+					return ImportFolderOut{}, verbs.Errf("conflict", "store %s exists", in.Store)
 				}
 				if err != nil {
-					return nil, verbs.Errf("invalid_argument", "%s", err.Error())
+					return ImportFolderOut{}, verbs.Errf("invalid_argument", "%s", err.Error())
 				}
 				c, err := s.Do(ctx, store.Who{ID: p.ID(), Via: p.ViaLabel(), Level: "owner", Code: authz.CodeRightOf(p)}, func(t *store.Turn) error {
 					t.Summary = "imported"
@@ -120,99 +120,100 @@ func dataVerbs(e kernelEnv) []*verbs.Verb {
 				if err != nil {
 					_ = e.K.DeleteStore(ctx, p, row.ID)
 					if errors.Is(err, store.ErrAppCode) {
-						return nil, verbs.Errf("permission_denied", "import refused, store removed: %s", err.Error())
+						return ImportFolderOut{}, verbs.Errf("permission_denied", "import refused, store removed: %s", err.Error())
 					}
-					return nil, verbs.Errf("invalid_argument", "import failed, store removed: %s", err.Error())
+					return ImportFolderOut{}, verbs.Errf("invalid_argument", "import failed, store removed: %s", err.Error())
 				}
-				out := map[string]any{"store": row.ID, "docs": len(b.Docs), "files": len(b.Files), "tables": len(b.Tables)}
+				out := ImportFolderOut{Store: row.ID, Docs: len(b.Docs), Files: len(b.Files), Tables: len(b.Tables)}
 				if c != nil {
-					out["rev"] = c.Rev
+					out.Rev = ptr[int64](c.Rev)
 				}
 				return out, nil
-			}},
-		{Name: "import.docs", Doc: "Import records as documents in coll, one commit per 500; --id names the field used as document id. CSV numbers and booleans are typed unless --raw.", Scope: verbs.Write, Action: authz.DocWrite,
-			Args: append([]verbs.Arg{storeArg, {Name: "coll", Type: "string", Required: true}, {Name: "id", Type: "string", Doc: "field holding each document's id"},
-				{Name: "raw", Type: "bool", Doc: "keep CSV values as strings"}}, rowsArgs...),
-			Run: func(ctx context.Context, p *access.Principal, a verbs.Args) (any, error) {
-				rows, err := records(a)
+			}}.Verb(),
+		verbs.Def[ImportDocsIn, ImportDocsOut]{Name: "import.docs", Doc: "Import records as documents in coll, one commit per 500; --id names the field used as document id. CSV numbers and booleans are typed unless --raw.", Scope: verbs.Write, Action: authz.DocWrite,
+			Run: func(req verbs.Req, in ImportDocsIn) (ImportDocsOut, error) {
+				ctx := req.Context
+				p := req.Principal
+				rows, err := records(in.Rows, or(in.Text, ""), in.Text != nil, in.Format)
 				if err != nil {
-					return nil, err
+					return ImportDocsOut{}, err
 				}
-				if a.S("format") == "csv" && !a.B("raw") {
+				if in.Format == "csv" && !in.Raw {
 					for _, r := range rows {
 						for k, v := range r {
 							r[k] = inferCell(v)
 						}
 					}
 				}
-				if !rt.ValidCollPath(a.S("coll")) {
-					return nil, verbs.Errf("invalid_argument", "invalid collection %q", a.S("coll"))
+				if !rt.ValidCollPath(in.Coll) {
+					return ImportDocsOut{}, verbs.Errf("invalid_argument", "invalid collection %q", in.Coll)
 				}
 				items := make([]docItem, 0, len(rows))
 				for i, r := range rows {
 					id := ids.Slug("d", 11)
-					if f := a.S("id"); f != "" {
+					if f := in.ID; f != "" {
 						v, ok := r[f]
 						if !ok || fmt.Sprint(v) == "" {
-							return nil, verbs.Errf("invalid_argument", "record %d has no %s", i+1, f)
+							return ImportDocsOut{}, verbs.Errf("invalid_argument", "record %d has no %s", i+1, f)
 						}
 						id = fmt.Sprint(v)
 					}
-					items = append(items, docItem{Path: a.S("coll") + "/" + id, Data: r})
+					items = append(items, docItem{Path: in.Coll + "/" + id, Data: r})
 				}
 				revs := []int64{}
 				for start := 0; start < len(items); start += MaxBatch {
 					end := min(start+MaxBatch, len(items))
-					res, err := applyDocs(ctx, e, p, a.S("store"), items[start:end], "set")
+					res, err := applyDocs(ctx, e, p, in.Store, items[start:end], "set")
 					if err != nil {
-						return map[string]any{"imported": start, "revs": revs}, err
+						return ImportDocsOut{Imported: start, Revs: revs}, err
 					}
 					if rev, ok := res.(map[string]any)["rev"].(int64); ok {
 						revs = append(revs, rev)
 					}
 				}
-				return map[string]any{"imported": len(items), "revs": revs}, nil
-			}},
-		{Name: "import.table", Doc: "Insert records into an app table (it must exist, from a migration), in one commit.", Scope: verbs.Write, Action: authz.StoreAdmin,
-			Args: append([]verbs.Arg{storeArg, {Name: "table", Type: "string", Required: true}}, rowsArgs...),
-			Run: func(ctx context.Context, p *access.Principal, a verbs.Args) (any, error) {
-				s, d, err := e.open(ctx, p, a.S("store"), rt.LevelAdmin, "importing rows")
+				return ImportDocsOut{Imported: len(items), Revs: revs}, nil
+			}}.Verb(),
+		verbs.Def[ImportTableIn, ImportTableOut]{Name: "import.table", Doc: "Insert records into an app table (it must exist, from a migration), in one commit.", Scope: verbs.Write, Action: authz.StoreAdmin,
+			Run: func(req verbs.Req, in ImportTableIn) (ImportTableOut, error) {
+				ctx := req.Context
+				p := req.Principal
+				s, d, err := e.open(ctx, p, in.Store, rt.LevelAdmin, "importing rows")
 				if err != nil {
-					return nil, err
+					return ImportTableOut{}, err
 				}
-				rows, err := records(a)
+				rows, err := records(in.Rows, or(in.Text, ""), in.Text != nil, in.Format)
 				if err != nil {
-					return nil, err
+					return ImportTableOut{}, err
 				}
 				c, err := s.Do(ctx, who(p, d), func(t *store.Turn) error {
-					return t.InsertRows(store.CallerAdminWrite, a.S("table"), rows)
+					return t.InsertRows(store.CallerAdminWrite, in.Table, rows)
 				})
 				if err != nil {
-					return nil, verbs.Errf("invalid_argument", "%s", err.Error())
+					return ImportTableOut{}, verbs.Errf("invalid_argument", "%s", err.Error())
 				}
-				out := map[string]any{"imported": len(rows)}
+				out := ImportTableOut{Imported: len(rows)}
 				if c != nil {
-					out["rev"] = c.Rev
+					out.Rev = ptr[int64](c.Rev)
 				}
 				return out, nil
-			}},
+			}}.Verb(),
 	}
 }
 
-func runSQL(ctx context.Context, e kernelEnv, p *access.Principal, a verbs.Args, caller string) (any, error) {
-	s, d, err := e.open(ctx, p, a.S("store"), rt.LevelAdmin, "running SQL")
+func runSQL(ctx context.Context, e kernelEnv, p *access.Principal, storeID, sql string, args any, caller string) (any, error) {
+	s, d, err := e.open(ctx, p, storeID, rt.LevelAdmin, "running SQL")
 	if err != nil {
 		return nil, err
 	}
 	var params []any
-	if l, ok := argList(a, "args"); ok {
+	if l, ok := listOf(args); ok {
 		for _, v := range l {
 			params = append(params, sqlArg(v))
 		}
 	}
 	var rows []map[string]any
 	var affected int64
-	q := strings.TrimSpace(a.S("sql"))
+	q := strings.TrimSpace(sql)
 	isQuery := returnsRows(q)
 	c, err := s.Do(ctx, who(p, d), func(t *store.Turn) error {
 		if isQuery {
@@ -279,13 +280,12 @@ func inferCell(v any) any {
 }
 
 // records reads rows, or text in a format, into objects.
-func records(a verbs.Args) ([]map[string]any, error) {
+func records(rowsArg any, text string, hasText bool, format string) ([]map[string]any, error) {
 	var list []any
-	if l, ok := argList(a, "rows"); ok {
+	if l, ok := listOf(rowsArg); ok {
 		list = l
-	} else if a.Has("text") {
-		text := a.S("text")
-		switch a.S("format") {
+	} else if hasText {
+		switch format {
 		case "csv":
 			return parseCSV([]byte(text))
 		case "jsonl":
@@ -323,8 +323,8 @@ func records(a verbs.Args) ([]map[string]any, error) {
 }
 
 // putBlobs stores the base64 blobs of a call after checking their hashes.
-func putBlobs(e kernelEnv, a verbs.Args) error {
-	given, _ := argObj(a, "blobs")
+func putBlobs(e kernelEnv, blobsArg any) error {
+	given, _ := objOf(blobsArg)
 	for sum, v := range given {
 		str, _ := v.(string)
 		data, err := base64.StdEncoding.DecodeString(str)
@@ -339,4 +339,84 @@ func putBlobs(e kernelEnv, a verbs.Args) error {
 		}
 	}
 	return nil
+}
+
+// SqlSchemaIn is sql.schema's input.
+type SqlSchemaIn struct {
+	Store string `json:"store" slop:"pos=1"`
+}
+
+// StoreExportIn is store.export's input.
+type StoreExportIn struct {
+	ID string `json:"id" slop:"pos=1"`
+}
+
+// SqlQueryIn is sql.query's input.
+type SqlQueryIn struct {
+	Store string `json:"store" slop:"pos=1"`
+	Sql   string `json:"sql" slop:"pos=2"`
+	Args  any    `json:"args,omitempty" jsonschema_description:"positional parameters"`
+}
+
+// SqlExecIn is sql.exec's input.
+type SqlExecIn struct {
+	Store string `json:"store" slop:"pos=1"`
+	Sql   string `json:"sql" slop:"pos=2"`
+	Args  any    `json:"args,omitempty"`
+	Write bool   `json:"write,omitempty" jsonschema_description:"allow INSERT, UPDATE and DELETE on app tables"`
+}
+
+// ImportFolderIn is import.folder's input.
+type ImportFolderIn struct {
+	Store  string `json:"store,omitempty" slop:"pos=1" jsonschema_description:"the new store's id"`
+	Bundle any    `json:"bundle"`
+	Blobs  any    `json:"blobs,omitempty" jsonschema_description:"{sha256: base64}"`
+}
+
+// ImportDocsIn is import.docs's input.
+type ImportDocsIn struct {
+	Store  string  `json:"store" slop:"pos=1"`
+	Coll   string  `json:"coll"`
+	ID     string  `json:"id,omitempty" jsonschema_description:"field holding each document's id"`
+	Raw    bool    `json:"raw,omitempty" jsonschema_description:"keep CSV values as strings"`
+	Rows   any     `json:"rows,omitempty" jsonschema_description:"a list of objects"`
+	Text   *string `json:"text,omitempty" jsonschema_description:"CSV, JSONL or a JSON array"`
+	Format string  `json:"format,omitempty" jsonschema_description:"csv, jsonl or json (with text)"`
+}
+
+// ImportTableIn is import.table's input.
+type ImportTableIn struct {
+	Store  string  `json:"store" slop:"pos=1"`
+	Table  string  `json:"table"`
+	Rows   any     `json:"rows,omitempty" jsonschema_description:"a list of objects"`
+	Text   *string `json:"text,omitempty" jsonschema_description:"CSV, JSONL or a JSON array"`
+	Format string  `json:"format,omitempty" jsonschema_description:"csv, jsonl or json (with text)"`
+}
+
+// StoreExportOut is store.export's result.
+type StoreExportOut struct {
+	Blobs  map[string]string `json:"blobs"`
+	Bundle *store.Bundle     `json:"bundle"`
+	ID     string            `json:"id"`
+}
+
+// ImportFolderOut is import.folder's result.
+type ImportFolderOut struct {
+	Docs   int    `json:"docs"`
+	Files  int    `json:"files"`
+	Rev    *int64 `json:"rev,omitempty"`
+	Store  string `json:"store"`
+	Tables int    `json:"tables"`
+}
+
+// ImportDocsOut is import.docs's result.
+type ImportDocsOut struct {
+	Imported int     `json:"imported"`
+	Revs     []int64 `json:"revs"`
+}
+
+// ImportTableOut is import.table's result.
+type ImportTableOut struct {
+	Imported int    `json:"imported"`
+	Rev      *int64 `json:"rev,omitempty"`
 }

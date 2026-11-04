@@ -149,8 +149,12 @@ func convert(a verbs.Arg, s string) any {
 	case "bool":
 		return s == "" || s == "true" || s == "1" || s == "yes" || s == "on"
 	case "json":
+		// UseNumber: a number keeps every digit on its way to the server
+		// (9007199254740993 would become …992 as a float64).
+		dec := json.NewDecoder(strings.NewReader(s))
+		dec.UseNumber()
 		var v any
-		if json.Unmarshal([]byte(s), &v) == nil {
+		if dec.Decode(&v) == nil && !dec.More() {
 			return v
 		}
 	}

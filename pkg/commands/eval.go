@@ -21,23 +21,21 @@ var EvalTimeout = 60 * time.Second
 const maxEvalLogs = 1000
 
 func evalVerbs(e evalEnv) []*verbs.Verb {
-	return []*verbs.Verb{{Name: "eval", Doc: "Run a JavaScript program on the server with every verb in scope as slop.<group>.<verb>(args).", Scope: verbs.Read, Action: authz.Program,
-		Args: []verbs.Arg{{Name: "source", Type: "string", Required: true, Doc: "the program body; top-level return gives the result"},
-			{Name: "args", Type: "json", Doc: "passed to the program as args"},
-			{Name: "readOnly", Type: "bool", Doc: "writing verbs throw permission_denied"}},
-		Run: func(ctx context.Context, p *access.Principal, a verbs.Args) (any, error) {
-			return runEval(ctx, e, p, a)
-		}}}
+	return []*verbs.Verb{verbs.Def[EvalIn, any]{Name: "eval", Doc: "Run a JavaScript program on the server with every verb in scope as slop.<group>.<verb>(args).", Scope: verbs.Read, Action: authz.Program,
+		Run: func(req verbs.Req, in EvalIn) (any, error) {
+			ctx := req.Context
+			p := req.Principal
+			return runEval(ctx, e, p, in.Source, in.Args, in.ReadOnly)
+		}}.Verb()}
 }
 
 // runEval runs a program in a fresh runtime. Each verb it calls is a
 // separate, synchronous call with the caller's identity (via eval), so
 // every check applies exactly as from the CLI.
-func runEval(ctx context.Context, e evalEnv, p *access.Principal, a verbs.Args) (any, error) {
+func runEval(ctx context.Context, e evalEnv, p *access.Principal, source string, args any, readOnly bool) (any, error) {
 	vm := goja.New()
 	inner := *p
 	inner.Via = "eval"
-	readOnly := a.B("readOnly")
 	logs := []string{}
 
 	console := vm.NewObject()
@@ -98,7 +96,7 @@ func runEval(ctx context.Context, e evalEnv, p *access.Principal, a verbs.Args) 
 		_ = g.Set(v.Short(), fn)
 	}
 	_ = vm.Set("slop", slop)
-	_ = vm.Set("args", toJS(vm, a["args"]))
+	_ = vm.Set("args", toJS(vm, args))
 
 	timer := time.AfterFunc(EvalTimeout, func() { vm.Interrupt("eval timed out") })
 	defer timer.Stop()
@@ -106,7 +104,7 @@ func runEval(ctx context.Context, e evalEnv, p *access.Principal, a verbs.Args) 
 	defer stop()
 
 	// Same first line as the source, so error positions match it.
-	val, err := vm.RunScript("eval.js", "(function(){"+a.S("source")+"\n})()")
+	val, err := vm.RunScript("eval.js", "(function(){"+source+"\n})()")
 	if err != nil {
 		return nil, evalError(err, logs)
 	}
@@ -213,4 +211,11 @@ func logString(vm *goja.Runtime, v goja.Value) string {
 func isError(v goja.Value) bool {
 	obj, ok := v.(*goja.Object)
 	return ok && obj.ClassName() == "Error"
+}
+
+// EvalIn is eval's input.
+type EvalIn struct {
+	Source   string `json:"source" jsonschema_description:"the program body; top-level return gives the result"`
+	Args     any    `json:"args,omitempty" jsonschema_description:"passed to the program as args"`
+	ReadOnly bool   `json:"readOnly,omitempty" jsonschema_description:"writing verbs throw permission_denied"`
 }

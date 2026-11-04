@@ -9,6 +9,7 @@ import (
 
 	"github.com/go-go-golems/slop-computer/pkg/access"
 	"github.com/go-go-golems/slop-computer/pkg/authz"
+	"github.com/go-go-golems/slop-computer/pkg/billing"
 	"github.com/go-go-golems/slop-computer/pkg/billing/stripe"
 	"github.com/go-go-golems/slop-computer/pkg/sysdb"
 	"github.com/go-go-golems/slop-computer/pkg/verbs"
@@ -51,141 +52,207 @@ func (e kernelEnv) personArg(ctx context.Context, s string) (sysdb.Person, error
 
 func billingVerbs(e billingEnv) []*verbs.Verb {
 	return []*verbs.Verb{
-		{Name: "sub.grant", Effect: verbs.EffectGovern, Doc: "Give a person complimentary subscriber access until a date (2027-06-30) or for days (30d).", Scope: verbs.Write, AdminOnly: true, Action: authz.PlatformAdmin,
-			Args: []verbs.Arg{{Name: "person", Type: "string", Pos: 1, Required: true, Doc: "usr_… or an email"},
-				{Name: "until", Type: "string", Required: true}, {Name: "note", Type: "string"}},
-			Run: func(ctx context.Context, p *access.Principal, a verbs.Args) (any, error) {
-				pp, err := e.personArg(ctx, a.S("person"))
+		verbs.Def[SubGrantIn, billing.CompRow]{Name: "sub.grant", Effect: verbs.EffectGovern, Doc: "Give a person complimentary subscriber access until a date (2027-06-30) or for days (30d).", Scope: verbs.Write, AdminOnly: true, Action: authz.PlatformAdmin,
+			Run: func(req verbs.Req, in SubGrantIn) (billing.CompRow, error) {
+				ctx := req.Context
+				p := req.Principal
+				pp, err := e.personArg(ctx, in.Person)
 				if err != nil {
-					return nil, err
+					return billing.CompRow{}, err
 				}
 				if pp.Kind != "user" {
-					return nil, verbs.Errf("invalid_argument", "comps are for signed-in people, not guests")
+					return billing.CompRow{}, verbs.Errf("invalid_argument", "comps are for signed-in people, not guests")
 				}
-				until, err := parseUntil(a.S("until"))
+				until, err := parseUntil(in.Until)
 				if err != nil {
-					return nil, verbs.Errf("invalid_argument", "%s", err.Error())
+					return billing.CompRow{}, verbs.Errf("invalid_argument", "%s", err.Error())
 				}
-				c, err := e.K.Book.GrantComp(ctx, p.ID(), p.ViaLabel(), pp.ID, until, a.S("note"))
+				c, err := e.K.Book.GrantComp(ctx, p.ID(), p.ViaLabel(), pp.ID, until, in.Note)
 				if err != nil {
-					return nil, err
+					return billing.CompRow{}, err
 				}
 				return c, nil
-			}},
-		{Name: "sub.revoke", Effect: verbs.EffectGovern, Doc: "End a comp now.", Scope: verbs.Write, AdminOnly: true, Action: authz.PlatformAdmin,
-			Args: []verbs.Arg{{Name: "id", Type: "string", Pos: 1, Required: true, Doc: "cmp_…"}},
-			Run: func(ctx context.Context, p *access.Principal, a verbs.Args) (any, error) {
-				person, err := e.K.Book.RevokeComp(ctx, p.ID(), p.ViaLabel(), a.S("id"))
+			}}.Verb(),
+		verbs.Def[SubRevokeIn, SubRevokeOut]{Name: "sub.revoke", Effect: verbs.EffectGovern, Doc: "End a comp now.", Scope: verbs.Write, AdminOnly: true, Action: authz.PlatformAdmin,
+			Run: func(req verbs.Req, in SubRevokeIn) (SubRevokeOut, error) {
+				ctx := req.Context
+				p := req.Principal
+				person, err := e.K.Book.RevokeComp(ctx, p.ID(), p.ViaLabel(), in.ID)
 				if errors.Is(err, sysdb.ErrNotFound) {
-					return nil, verbs.Errf("not_found", "no comp %s", a.S("id"))
+					return SubRevokeOut{}, verbs.Errf("not_found", "no comp %s", in.ID)
 				}
 				if err != nil {
-					return nil, err
+					return SubRevokeOut{}, err
 				}
-				return map[string]any{"revoked": a.S("id"), "person": person}, nil
-			}},
-		{Name: "sub.ls", Doc: "List comps (of one person, or everyone's).", Scope: verbs.Read, AdminOnly: true, Action: authz.PlatformAdmin,
-			Args: []verbs.Arg{{Name: "person", Type: "string", Pos: 1}},
-			Run: func(ctx context.Context, p *access.Principal, a verbs.Args) (any, error) {
+				return SubRevokeOut{Revoked: in.ID, Person: person}, nil
+			}}.Verb(),
+		verbs.Def[SubLsIn, []billing.CompRow]{Name: "sub.ls", Doc: "List comps (of one person, or everyone's).", Scope: verbs.Read, AdminOnly: true, Action: authz.PlatformAdmin,
+			Run: func(req verbs.Req, in SubLsIn) ([]billing.CompRow, error) {
+				ctx := req.Context
 				id := ""
-				if a.S("person") != "" {
-					pp, err := e.personArg(ctx, a.S("person"))
+				if in.Person != "" {
+					pp, err := e.personArg(ctx, in.Person)
 					if err != nil {
 						return nil, err
 					}
 					id = pp.ID
 				}
 				return e.K.Book.CompRows(ctx, id)
-			}},
-		{Name: "sub.show", Doc: "Show a person's standing access (yours by default): the decision, comps and subscriptions.", Scope: verbs.Read, Action: authz.Account,
-			Args: []verbs.Arg{{Name: "person", Type: "string", Pos: 1}},
-			Run: func(ctx context.Context, p *access.Principal, a verbs.Args) (any, error) {
+			}}.Verb(),
+		verbs.Def[SubShowIn, SubShowOut]{Name: "sub.show", Doc: "Show a person's standing access (yours by default): the decision, comps and subscriptions.", Scope: verbs.Read, Action: authz.Account,
+			Run: func(req verbs.Req, in SubShowIn) (SubShowOut, error) {
+				ctx := req.Context
+				p := req.Principal
 				id := p.ID()
-				if s := a.S("person"); s != "" {
+				if s := in.Person; s != "" {
 					pp, err := e.personArg(ctx, s)
 					if err != nil {
-						return nil, err
+						return SubShowOut{}, err
 					}
 					if pp.ID != p.ID() && !p.IsAdmin() {
-						return nil, verbs.Errf("permission_denied", "only admins look at other people's access")
+						return SubShowOut{}, verbs.Errf("permission_denied", "only admins look at other people's access")
 					}
 					id = pp.ID
 				}
 				comps, err := e.K.Book.CompRows(ctx, id)
 				if err != nil {
-					return nil, err
+					return SubShowOut{}, err
 				}
 				subs, err := e.K.Book.Subscriptions(ctx, id)
 				if err != nil {
-					return nil, err
+					return SubShowOut{}, err
 				}
 				pp, _ := e.K.People.Person(ctx, id)
 				q := access.PersonPrincipal(pp, "")
-				return map[string]any{"person": id, "audience": e.K.Access.AudienceOf(ctx, q), "decision": e.K.Standing(ctx, id),
-					"comps": comps, "subscriptions": subs}, nil
-			}},
-		{Name: "billing.checkout", Doc: "Start a Stripe Checkout for a subscription price; returns its URL.", Scope: verbs.Write, Action: authz.Account,
-			Args: []verbs.Arg{{Name: "price", Type: "string", Pos: 1, Doc: "a price from the server's stripe.prices (default the first)"}},
-			Run: func(ctx context.Context, p *access.Principal, a verbs.Args) (any, error) {
+				return SubShowOut{Person: id, Audience: e.K.Access.AudienceOf(ctx, q), Decision: e.K.Standing(ctx, id), Comps: comps, Subscriptions: subs}, nil
+			}}.Verb(),
+		verbs.Def[BillingCheckoutIn, BillingCheckoutOut]{Name: "billing.checkout", Doc: "Start a Stripe Checkout for a subscription price; returns its URL.", Scope: verbs.Write, Action: authz.Account,
+			Run: func(req verbs.Req, in BillingCheckoutIn) (BillingCheckoutOut, error) {
+				ctx := req.Context
+				p := req.Principal
 				if e.Billing() == nil {
-					return nil, verbs.Errf("unavailable", "this server has no Stripe; ask an admin for a comp")
+					return BillingCheckoutOut{}, verbs.Errf("unavailable", "this server has no Stripe; ask an admin for a comp")
 				}
 				if p.Kind != access.KindUser && p.Kind != access.KindToken || p.Person == nil || p.Person.Kind != "user" {
-					return nil, verbs.Errf("permission_denied", "sign in to subscribe")
+					return BillingCheckoutOut{}, verbs.Errf("permission_denied", "sign in to subscribe")
 				}
-				price := a.S("price")
+				price := in.Price
 				if price == "" && len(e.Cfg.Stripe.Prices) > 0 {
 					price = e.Cfg.Stripe.Prices[0]
 				}
 				if !e.K.Policy().AcceptedPrices[price] {
-					return nil, verbs.Errf("invalid_argument", "unknown price %q", price)
+					return BillingCheckoutOut{}, verbs.Errf("invalid_argument", "unknown price %q", price)
 				}
 				u, err := e.Billing().Checkout(ctx, stripe.Person{ID: p.ID(), Email: p.Person.Email, Name: p.Person.Name}, price,
 					e.K.Policy().AcceptedPrices, e.Cfg.MainURL()+"/subscribe")
 				if errors.Is(err, stripe.ErrSubscriptionOpen) {
-					return nil, verbs.Errf("conflict", "you already have a subscription: use billing.portal")
+					return BillingCheckoutOut{}, verbs.Errf("conflict", "you already have a subscription: use billing.portal")
 				}
 				if err != nil {
-					return nil, err
+					return BillingCheckoutOut{}, err
 				}
-				return map[string]any{"url": u}, nil
-			}},
-		{Name: "billing.portal", Doc: "Open the Stripe Customer Portal for your subscription; returns its URL.", Scope: verbs.Write, Action: authz.Account,
-			Run: func(ctx context.Context, p *access.Principal, a verbs.Args) (any, error) {
+				return BillingCheckoutOut{URL: u}, nil
+			}}.Verb(),
+		verbs.Def[BillingPortalIn, BillingPortalOut]{Name: "billing.portal", Doc: "Open the Stripe Customer Portal for your subscription; returns its URL.", Scope: verbs.Write, Action: authz.Account,
+			Run: func(req verbs.Req, in BillingPortalIn) (BillingPortalOut, error) {
+				ctx := req.Context
+				p := req.Principal
 				if e.Billing() == nil {
-					return nil, verbs.Errf("unavailable", "this server has no Stripe")
+					return BillingPortalOut{}, verbs.Errf("unavailable", "this server has no Stripe")
 				}
 				if p.Person == nil {
-					return nil, verbs.Errf("permission_denied", "sign in first")
+					return BillingPortalOut{}, verbs.Errf("permission_denied", "sign in first")
 				}
 				u, err := e.Billing().Portal(ctx, stripe.Person{ID: p.ID(), Email: p.Person.Email, Name: p.Person.Name}, e.Cfg.MainURL()+"/subscribe")
 				if errors.Is(err, stripe.ErrNoCustomer) {
-					return nil, verbs.Errf("not_found", "no billing account yet")
+					return BillingPortalOut{}, verbs.Errf("not_found", "no billing account yet")
 				}
 				if err != nil {
-					return nil, err
+					return BillingPortalOut{}, err
 				}
-				return map[string]any{"url": u}, nil
-			}},
-		{Name: "billing.refresh", Doc: "Ask Stripe for a person's current subscriptions now (yours, or anyone's for admins).", Scope: verbs.Write, Action: authz.Account,
-			Args: []verbs.Arg{{Name: "person", Type: "string", Pos: 1}},
-			Run: func(ctx context.Context, p *access.Principal, a verbs.Args) (any, error) {
+				return BillingPortalOut{URL: u}, nil
+			}}.Verb(),
+		verbs.Def[BillingRefreshIn, billing.Decision]{Name: "billing.refresh", Doc: "Ask Stripe for a person's current subscriptions now (yours, or anyone's for admins).", Scope: verbs.Write, Action: authz.Account,
+			Run: func(req verbs.Req, in BillingRefreshIn) (billing.Decision, error) {
+				ctx := req.Context
+				p := req.Principal
 				if e.Billing() == nil {
-					return nil, verbs.Errf("unavailable", "this server has no Stripe")
+					return billing.Decision{}, verbs.Errf("unavailable", "this server has no Stripe")
 				}
 				id := p.ID()
-				if s := a.S("person"); s != "" && p.IsAdmin() {
+				if s := in.Person; s != "" && p.IsAdmin() {
 					pp, err := e.personArg(ctx, s)
 					if err != nil {
-						return nil, err
+						return billing.Decision{}, err
 					}
 					id = pp.ID
 				}
 				if err := e.Billing().ReconcilePerson(ctx, id); err != nil {
-					return nil, verbs.Errf("not_found", "no billing account for %s", id)
+					return billing.Decision{}, verbs.Errf("not_found", "no billing account for %s", id)
 				}
 				e.Billing().Drain(ctx)
 				return e.K.Standing(ctx, id), nil
-			}},
+			}}.Verb(),
 	}
+}
+
+// SubGrantIn is sub.grant's input.
+type SubGrantIn struct {
+	Person string `json:"person" slop:"pos=1" jsonschema_description:"usr_… or an email"`
+	Until  string `json:"until"`
+	Note   string `json:"note,omitempty"`
+}
+
+// SubRevokeIn is sub.revoke's input.
+type SubRevokeIn struct {
+	ID string `json:"id" slop:"pos=1" jsonschema_description:"cmp_…"`
+}
+
+// SubLsIn is sub.ls's input.
+type SubLsIn struct {
+	Person string `json:"person,omitempty" slop:"pos=1"`
+}
+
+// SubShowIn is sub.show's input.
+type SubShowIn struct {
+	Person string `json:"person,omitempty" slop:"pos=1"`
+}
+
+// BillingCheckoutIn is billing.checkout's input.
+type BillingCheckoutIn struct {
+	Price string `json:"price,omitempty" slop:"pos=1" jsonschema_description:"a price from the server's stripe.prices (default the first)"`
+}
+
+// BillingPortalIn is billing.portal's input.
+type BillingPortalIn struct {
+}
+
+// BillingRefreshIn is billing.refresh's input.
+type BillingRefreshIn struct {
+	Person string `json:"person,omitempty" slop:"pos=1"`
+}
+
+// SubRevokeOut is sub.revoke's result.
+type SubRevokeOut struct {
+	Person  string `json:"person"`
+	Revoked string `json:"revoked"`
+}
+
+// SubShowOut is sub.show's result.
+type SubShowOut struct {
+	Audience      access.Audience        `json:"audience"`
+	Comps         []billing.CompRow      `json:"comps"`
+	Decision      billing.Decision       `json:"decision"`
+	Person        string                 `json:"person"`
+	Subscriptions []billing.Subscription `json:"subscriptions"`
+}
+
+// BillingCheckoutOut is billing.checkout's result.
+type BillingCheckoutOut struct {
+	URL string `json:"url"`
+}
+
+// BillingPortalOut is billing.portal's result.
+type BillingPortalOut struct {
+	URL string `json:"url"`
 }

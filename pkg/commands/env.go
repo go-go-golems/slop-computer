@@ -160,9 +160,9 @@ func decodeJSON(b []byte) any {
 	return out
 }
 
-// obj returns an argument as a JSON object (an object, or a string of one).
-func argObj(a verbs.Args, k string) (map[string]any, bool) {
-	switch v := a[k].(type) {
+// objOf is an argument as a JSON object (an object, or a string of one).
+func objOf(v any) (map[string]any, bool) {
+	switch v := v.(type) {
 	case map[string]any:
 		m, _ := norm(v).(map[string]any)
 		return m, true
@@ -174,9 +174,9 @@ func argObj(a verbs.Args, k string) (map[string]any, bool) {
 	return nil, false
 }
 
-// list returns an argument as a JSON array (an array, or a string of one).
-func argList(a verbs.Args, k string) ([]any, bool) {
-	switch v := a[k].(type) {
+// listOf is an argument as a JSON array (an array, or a string of one).
+func listOf(v any) ([]any, bool) {
+	switch v := v.(type) {
 	case []any:
 		l, _ := norm(v).([]any)
 		return l, true
