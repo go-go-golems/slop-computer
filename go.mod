@@ -3,7 +3,7 @@ module github.com/go-go-golems/slop-computer
 go 1.26.6
 
 require (
-	github.com/dop251/goja v0.0.0-20251103141225-af2ceb9156d7
+	github.com/dop251/goja v0.0.0-20261103151521-97b96e1e55f5
 	github.com/go-go-golems/geppetto v0.13.13
 	github.com/go-jose/go-jose/v4 v4.1.4
 	github.com/invopop/jsonschema v0.14.0
@@ -31,7 +31,7 @@ require (
 	github.com/bahlo/generic-list-go v0.2.0 // indirect
 	github.com/buger/jsonparser v1.2.0 // indirect
 	github.com/cespare/xxhash/v2 v2.3.0 // indirect
-	github.com/dlclark/regexp2 v1.11.5 // indirect
+	github.com/dlclark/regexp2/v2 v2.11.0 // indirect
 	github.com/felixge/httpsnoop v1.0.4 // indirect
 	github.com/go-go-golems/glazed v1.4.3 // indirect
 	github.com/go-go-golems/logcopter v0.1.1 // indirect
