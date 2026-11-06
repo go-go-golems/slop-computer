@@ -295,3 +295,100 @@ app.post('/items').allow('interact').handle((ctx, res) => {
 });
 // merged as def.http['POST /items'] = { level: 'interact', run }
 ```
+
+## Step 5: Phase 3 — the mount's API policy
+
+Phase 3 puts the HTTP policy on the mount: an optional `api` block with an allowlist of route keys, level floors, request and response rules, and the middleware configurations phase 4 will run. It is persisted, validated in `mount.set`, enforced in the actor (dispatch, and a load-time check over every serving mount) and in the pages door, and listable with a new verb `mount.routes`. Two things in the guide were wrong or incomplete, and testing found them: an unmatched path under an API prefix fell through to the page shell, and `app.status` could not show a route-policy failure. Both are fixed. A mutation check also showed that one assertion first passed for the wrong reason.
+
+### Prompt Context
+**User prompt (verbatim):** see Step 3
+**Assistant interpretation:** Phase 3 of the guide's plan.
+**Inferred user intent:** Admins decide which endpoints an app exposes on which subpath, and how.
+**Commit (code):** `cb48952` — "SLOP3-012 phase 3: a mount's API policy (allowlist, floors, request and response rules)"
+
+### What I did
+- `pkg/registry/api.go` (new):
+  - `MountAPI`, `Floor`, `Middleware`, and `RateLimitConfig`/`CORSConfig`/`APITokenConfig`, each with `Validate`;
+  - `decodeStrict` (unknown fields and trailing data refused), `ValidateAPI` (the guide's nine rules, plus "a floor sets min or audience", "an audience is not `store`", "a middleware slot only once"), `WithDefaults`;
+  - `UnderPrefix`, `AllowsKey`, `FloorOf`, `patternScore`, `LevelRank`, `MaxLevel`, `Covers`, `MatchPattern` (moved from `pkg/actor/manager.go`).
+- `pkg/registry/api_test.go` (new): `TestValidRouteKey`, `TestCovers` (20 cases), `TestMatchPattern`, `TestFloorOf`, `TestValidateAPI` (23 failure cases, each asserting its message).
+- `pkg/sysdb/migrations/011_mount_api.sql`. `pkg/registry/mounts.go`: `Mount.API`, `api` in `mountCols`/`scanMount`, the `SetMount` upsert and the `UndoMount` re-insert, `apiJSON`.
+- `pkg/actor`:
+  - `MatchRoute(…, api)` skips uncovered keys before scoring;
+  - `build(ctx, …, checkPolicy)` calls `checkRoutePolicies` after `readShape`, in both build sites (on demand in `get`, and at activation);
+  - `routes.go` (new): `servingMounts`, `checkRoutePolicies`, `Routes` (rebuilds once without the check when the actor is broken).
+- `pkg/commands`:
+  - `mountEnv` gains `A`;
+  - `MountSetIn.API`;
+  - `checkMount` accepts `api` on live hosts only and validates it;
+  - `mountAt`, `servedStores`, `restartServed` (restart and rebuild) after `mount.set`/`mount.rm`/`mount.undo`;
+  - `app.status` also reports `A.Broken(id)`;
+  - new verb `mount.routes` with `MountRoutesIn`/`MountRoute`.
+- `pkg/doors/pages/actors.go`:
+  - `serveActorRoute` applies the prefix, a JSON 404 under the prefix, floors and audiences, the body limit with 413, forwarded headers, and the response filters (type, header allowlist, size, HTML sandbox);
+  - `responseTypeAllowed`;
+  - `serveBoundAsset` takes an `allow` check for the asset's type.
+- `pkg/host/mount_api_test.go` (new): `TestMountAPIPolicy`.
+
+### Why
+- Restarts happen when the mount's policy is involved before or after the change, or when a served store is broken. The second case lets a new mount without a policy fix a store broken by a narrow one. Restarting on every mount change would kill parked handlers of every store a type-less `:param` mount serves, for changes that cannot matter to them.
+- `restartServed` rebuilds each actor right after restarting it. A route-policy failure or its fix shows in `app.status` at once, not at the next request. Without this, the test's "narrow mount breaks the actor" step saw no failure until something requested a route.
+- The activation build checks the policy too. A new app version that adds a route outside its mount's allowlist then fails to activate, and the store keeps its old version. This is the same behaviour as a failing migration.
+- `WithDefaults` is applied when a request is served, not when the policy is stored. `mount.ls` shows exactly what the admin wrote, and changing a default later applies to existing policies.
+
+### What worked
+- `GOWORK=off go test ./pkg/registry/` passed.
+- `TestMountAPIPolicy` passed, with an assertion for each of these:
+  - an uncovered key gives JSON 404 on the API mount and 200 on the plain mount;
+  - a path outside the prefix does not reach the actor;
+  - `feed.json` stays public through a public floor;
+  - a `public` app route is raised to `view` by the default floor (404 for nobody on `/japi`, 200 on `/j`);
+  - the floor's audience gives `audience_required`;
+  - HTML gives 500 `response_type_not_allowed` by default;
+  - `Set-Cookie`, `X-Custom` and the actor's CSP are dropped and `ETag` is kept, while the plain mount still passes `X-Custom`;
+  - forwarded headers are exactly the policy's `accept`/`x-trace` (no `user-agent`, no cookie);
+  - an 11-byte JSON body against a 10-byte limit gives 413, and a 4-byte one gives 201;
+  - a body over 1 MiB on the plain mount gives 413;
+  - `mount.routes` reports `allowed`, `declaredLevel`/`effectiveLevel` and `audiences`;
+  - allowing `text/html` serves it with `Content-Security-Policy: sandbox; default-src 'none'`, and `mount.undo` restores the previous policy (checked in `mount.ls`);
+  - a store served only by a narrow API mount is broken, with `GET /api/admin is in no API allowlist`, and widening the mount fixes it without `app.restart`;
+  - `mount.set` refuses a `Cookie` forward header, empty routes, a `*` CORS origin and an unknown field.
+- Mutation check: with the `AllowsKey` filter in `MatchRoute` disabled, the test failed with `admin on the API mount: 200 map[admin:true]`. I restored the file.
+- Full suite passed; `golangci-lint run`: `0 issues.`
+
+### What didn't work
+- My batch edit of `pkg/commands/mounts.go` failed its own assertion, `AssertionError: ('pkg/commands/mounts.go', '\t\t\t\t\tm := registry.Mount{…')`, because my pattern had five tabs where the file has four. The appended helpers had already been written by the `cat >>` in the same command, so the build failed with `undefined: MountRoutesIn`. I redid those edits with the Edit tool.
+- The first test run failed with `admin on the API mount: 200`. The policy had filtered the key, `MatchRoute` returned no match, and the live host's page shell answered with `index.html`. **Fix:** under an API prefix, an unmatched route is a JSON 404 (`not_found`). The guide assumed 404 but did not say where it comes from.
+- The first mutation check (dispatch filter disabled) did not make the test fail. With the default floor at `view`, the anonymous request was already refused by the level check, so the assertion proved nothing about the allowlist. I changed it to run as bob (view), and the mutation then failed as it should.
+
+### What I learned
+- `app.status` reads `kernel.Running.Broken()`, which reports activation failures only. A build failure after activation lives in the actor manager's `broken` map, and `app.status` did not show it until now.
+- Under an API prefix, falling through to the page would also leak the app's page on paths the admin meant to be API-only. The JSON 404 closes that as well.
+
+### What was tricky to build
+- **Two places enforce the allowlist, for different reasons.**
+  - The load-time check runs over the union of serving mounts (fixed mounts naming the store, plus `:param` mounts of its type). A store also mounted somewhere without a policy therefore passes.
+  - Only the dispatch filter keeps a route off a particular API mount.
+- **Restarts have to clear two failure records:** the manager's `broken` cache, and the kernel's failed activation. `Restart` does both (`delete(m.broken, id)`, `m.K.ClearFailure(id)`); `RestartApp` does neither.
+
+### What warrants a second pair of eyes
+- `restartServed` for a `:param` mount with no type restarts and rebuilds every store when the policy changes. That is correct but potentially many actors at once.
+- `responseTypeAllowed` checks the actor's `Content-Type` header if set, else the type implied by its result. An actor that returns `{text}` but sets `Content-Type: text/html` is treated as HTML, and is refused or sandboxed accordingly. That is the intended reading.
+- The size limit applies to bodies the actor returns. `{asset}` results are streamed from blobs and only type-checked.
+
+### What should be done in the future
+- Phase 4: the host middleware chain before `MatchRoute`.
+
+### Code review instructions
+- Start at `pkg/registry/api.go` (`ValidateAPI`, `Covers`, `FloorOf`), then `serveActorRoute` in `pkg/doors/pages/actors.go`, then `pkg/actor/routes.go` and `restartServed` in `pkg/commands/mounts.go`.
+- Validate: `GOWORK=off go test ./pkg/registry/ ./pkg/host/ -run 'Test(ValidRouteKey|Covers|MatchPattern|FloorOf|ValidateAPI|MountAPIPolicy)$' -count=1 -v`.
+
+### Technical details
+```json
+{"host": "apps.example", "path": "/japi", "store": "jr",
+ "api": {"prefix": "/api",
+         "routes": ["GET /api/feed.json", "GET /api/members", "POST /api/items"],
+         "floors": [{"route": "GET /api/feed.json", "min": "public"},
+                    {"route": "GET /api/members", "audience": "subscriber"}],
+         "maxBodyBytes": 10, "forwardHeaders": ["Accept", "X-Trace"]}}
+```
