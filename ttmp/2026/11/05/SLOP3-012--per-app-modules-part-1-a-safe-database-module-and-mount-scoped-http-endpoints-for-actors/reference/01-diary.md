@@ -473,3 +473,101 @@ Phase 4 runs the mount's host middlewares in the pages door, after the prefix ch
 ```
 - Pull request: https://github.com/go-go-golems/slop-computer/pull/31 (branch `task/slop3-012-modules`, phases 1–4 and diary steps 3–6).
 - Answers: 429 `rate_limited` (+ `Retry-After`), 403 `origin_not_allowed`, 405 `method_not_allowed` (+ `Allow`), 413 `payload_too_large`, 401 `unauthenticated` (+ `WWW-Authenticate: Bearer`), 403 `insufficient_scope`.
+
+## Step 7: Part 2, phase 5a — the module catalog and grants with a configuration
+
+Part 2 starts with the catalog the guide proposed in §20. Every Go module an actor can `use()` or `require()` by name now has a class (`data`, `own`, `scoped`, `trusted`), an optional Go config struct, TypeScript declarations and a `Load(Setup)`. `database` and `express` moved out of the `use()` switch into the catalog as `own` modules; `system` and `workshop` are `trusted`. An admin's grant (`app.trust`) now carries a configuration that is decoded strictly, validated, stored in a new column and applied when the module loads. An interceptor wraps each catalog module's functions to count calls and, for modules that need a grant, re-check it on every call. Two findings changed the code along the way: Go's JSON decoder accepts `readonly` for `readOnly`, and a grant that restricts a default module must not lapse when its admin steps down.
+
+### Prompt Context
+**User prompt (verbatim):** "then do part 2. commit at appropriate intervals and keep a detailed diary as you work (using the diary format from the skill)"
+**Assistant interpretation:** Implement the guide's phase 5 (§19–20) on a branch stacked on PR #31, in sub-phases: 5a catalog and grants, 5b an in-memory `fs` and `path`, 5c `fetch` redirect checks; one diary step per sub-phase.
+**Inferred user intent:** Admins choose and configure, per app, which modules a sandboxed script gets, with slop's own safe versions (no real filesystem, no handles to other databases).
+**Commit (code):** `abea016` — "SLOP3-012 phase 5a: module catalog and grants with a configuration" (branch `task/slop3-012-part2`, from `cf99f05`)
+
+### What I did
+- `pkg/actor/catalog.go` (new):
+  - `Class` with `Default()` (true for `data` and `own`), `Module{Name, Class, Doc, Config, TypeScript, Load}`, `Setup{Actor, Config}`, `Grant{Config, Current}`;
+  - `Module.DecodeConfig` (strict decode into a fresh copy of `Config`, exact key names via `exactKeys`, then `Validate()` if the struct has it) and `CanonicalConfig` (what is stored);
+  - `Register` (moved from `registry.go`; default class `trusted`), `Modules`, `Module`, `grant`, `trusted`;
+  - `catalogModule`: the resolution rule, cached per actor in `Actor.loaded`;
+  - `intercept`: wraps the functions of the module object and of plain objects under it;
+  - `meters`, `meter`, `ModuleCalls`: per app and module, in memory.
+- `pkg/actor/builtins.go` (new): `registerBuiltins` (called from `New`), `DatabaseConfig.Validate` (`maxRows` 0–10000), `databaseTS`, `expressTS`.
+- `pkg/actor/modules.go`: the `database`/`express` cases are gone; the `default` branch tries provided names, then the catalog. `registry.go` keeps only `Provide`.
+- `pkg/actor/manager.go`: `Trusted` hook replaced by `Grant func(ctx, app, module) (Grant, bool)`; field `calls meters`. `sysreact.go` uses `a.m.trusted`.
+- `pkg/actor/database.go`: under `readOnly`, an authorizer refusal (`not authorized`) is thrown as `permission_denied` naming the grant.
+- `pkg/sysdb/migrations/012_app_module_config.sql`: `ALTER TABLE app_modules ADD COLUMN config TEXT NOT NULL DEFAULT '{}'`.
+- `pkg/policy/modules.go`: `AppModule` gains `Config` and `Current`; `TrustModule(..., config)` logs the old and new config as `Before`/`After`; `ModuleGrant` returns a grant whether current or not; `Trusted` is `ModuleGrant(...).Current`; `AppModules` selects both.
+- `pkg/doors/actors/modules.go`: `Install` sets `m.Grant` from `Gov.ModuleGrant`; `system` and `workshop` register as `ClassTrusted` with the new `Load` signature.
+- `pkg/commands/actors.go`:
+  - `app.trust` looks the module up in the catalog (`e.A.Module`), requires `slop.modules` only for `trusted` modules, and takes `config` (`map[string]any`), stored as `CanonicalConfig`;
+  - `app.modules` rows carry `class`, `default`, `config` (JSON Schema) and `typescript`; for one app it adds `calls`;
+  - `apps` import dropped (`apps.Modules` is now only the manifest's list of declarable names).
+- `pkg/verbs/def.go`: exported `SchemaFor(v any)` over the existing reflector.
+- Tests, in `pkg/host/module_catalog_test.go` (new):
+  - `TestModuleCatalog`: catalog rows, strict and validated configs, a read-only grant that survives its admin's demotion, `maxRows`, untrust, a stale stored config;
+  - `TestModuleInterceptor`: a test-registered `scoped` module `probe`.
+
+### Why
+- **A default module's grant is a restriction, so it applies whether or not it is current.** `Current` (the granter is still an admin, SLOP3-007) exists so a privilege lapses with its admin. If the same rule applied to `database {readOnly: true}`, demoting the admin who set it would silently make the app read-write. `catalogModule` therefore checks `Current` only for `scoped` and `trusted` modules.
+- **A stored config that no longer decodes fails closed.** If a later module version drops a field, falling back to the zero config would lift the restriction. Instead, `use()` throws `unavailable … an admin must grant it again`, and the actor fails to build (`actor_error` at the call).
+- **The interceptor re-checks per call** so that withdrawing a grant or demoting its admin takes effect without a restart. `system`/`workshop` already did this inside `callVerb`; the interceptor makes it true of every non-default module, including future `scoped` ones that do not go through verbs.
+- **`trusted` alone needs `slop.modules`.** Those modules act as the visitor across the platform, so the app has to ask for them in its manifest. A `scoped` module's grant is the admin's decision alone, and a default module needs no request at all.
+
+### What worked
+- `GOWORK=off go test ./... -count=1`: every package `ok`. `golangci-lint run ./...`: `0 issues.`
+- `TestModuleCatalog` asserts, among other things:
+  - the `database` config schema has `readOnly`, `maxRows` and `additionalProperties: false`;
+  - every `trusted` catalog module is in `apps.Modules`, and no other module is;
+  - `{"readonly": true}` and `{"maxRows": 20000}` are `invalid_argument`, as are config on `express` and an unknown module;
+  - after ada's `readOnly`/`maxRows 1` grant and her demotion to member, `add` is `permission_denied`, `count` works, the grant row shows `current: false`, and `calls.database >= 2`;
+  - untrust brings the default back (2 rows readable again);
+  - a stored `{"gone":true}` makes the next call `actor_error` with "grant it again".
+- `TestModuleInterceptor`: `use('probe')` is null before the grant; after ada's grant `p.ping() + p.inner.deep()` is `pong7`, with 2 calls counted; after her demotion, with no restart, the next call is `permission_denied … no longer trusted with probe`.
+- Mutation checks, each restored from a backup and confirmed with `cmp`:
+  - M1, `exactKeys` disabled: `TestModuleCatalog` failed at line 80 (`readonly` accepted, 200);
+  - M2, a lapsed grant's config dropped: failed at line 99 (`add` returned 1 instead of `permission_denied`);
+  - M3, per-call re-check disabled: `TestModuleInterceptor` failed at line 172 (`pong7` after demotion).
+
+### What didn't work
+- First full run: `TestTrustEndsWithItsAdmin` failed with `permission_denied` and message `tool is no longer granted system`, against an expected "no longer trusted". The interceptor now refuses before `callVerb` does, with its own wording; I changed the wording to `… is no longer trusted with …`.
+- `TestModuleCatalog` failed at the strict-config check: `app.trust {"config":{"readonly":true}}` returned 200 with `config: {readOnly: true}`. `encoding/json` matches field names case-insensitively even with `DisallowUnknownFields`. Fix: `exactKeys` compares every key, recursively, with the struct's exact JSON names.
+- The read-only refusal first surfaced as `500 actor_error "Error: not authorized at …intercept.func1 (native)"`. It is now `permission_denied` with the reason (see above).
+- The stale-config assertion first used an empty expected code; the actual code is `actor_error` (the actor fails to build), and the test now says so.
+
+### What I learned
+- The same case-insensitive matching applies to `verbs.decodeArgs` (`pkg/verbs/def.go`): a verb argument `Store` is accepted for `store`. That is not a security issue for verbs (the name maps to the right field), but it is the same "a near-miss is silently accepted" class. I left it alone here.
+
+### What was tricky to build
+- **Rethrowing from the interceptor.** The wrapper calls the original with `f(call.This, call.Arguments...)` and, on error, panics with the returned `*goja.Exception` so JavaScript sees the original exception (with its `.code`). Interrupts arrive the same way and keep working.
+- **Function properties.** `intercept` copies the own keys of a wrapped function onto its wrapper, so a module function that carries properties keeps them. It recurses only into plain `Object`s, so arrays, promises and class instances are left alone.
+
+### What warrants a second pair of eyes
+- Call counts are per process and in memory, like the rate-limit buckets. They reset on restart, and `app.modules` says "since the process started".
+- `intercept` mutates the module's object once, when the actor first loads it. A module that adds functions later (after `Load` returns) would not have them counted.
+- The read-only mapping matches the string `not authorized` from SQLite's authorizer.
+
+### What should be done in the future
+- 5b: an `own` in-memory `fs` with go-go-goja's names, and a `data` `path`.
+- 5c: `fetch` re-checks `slop.fetch` on every redirect.
+- A follow-up: exact key matching in `verbs.decodeArgs`.
+
+### Code review instructions
+- Start at `catalogModule` and `intercept` in `pkg/actor/catalog.go`, then `DecodeConfig`/`exactKeys`, then `app.trust` in `pkg/commands/actors.go` and `ModuleGrant` in `pkg/policy/modules.go`.
+- Validate: `GOWORK=off go test ./pkg/host -run 'TestModuleCatalog|TestModuleInterceptor|TestTrust|TestModule' -count=1 -v`.
+
+### Technical details
+```text
+use(name):
+  built-in switch (sql, db, files, alarm, storage, time, log, stores, fetch, secrets)
+  provided (room, sample, platform)
+  catalog:
+    data/own     → on; grant (if any) configures, current or not
+    scoped       → needs a current grant
+    trusted      → needs slop.modules and a current grant
+    config       → strict decode + exact keys + Validate; undecodable → throw (fail closed)
+    object       → intercepted (count; re-check grant for scoped/trusted), cached per actor
+```
+```text
+slop app trust cat database --config '{"readOnly":true,"maxRows":100}'
+```
