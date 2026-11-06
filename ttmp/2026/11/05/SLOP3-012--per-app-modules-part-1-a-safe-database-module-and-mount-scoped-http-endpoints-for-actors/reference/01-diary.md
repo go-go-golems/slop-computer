@@ -122,3 +122,89 @@ The writer agent that had just written the SLOP3-011 vault report, and so had re
 ### Technical details
 - Guide: `ttmp/2026/11/05/SLOP3-012-…/design-doc/01-intern-guide-per-app-modules-the-database-module-and-mount-scoped-http-endpoints.md`.
 - reMarkable: `/ai/2026/11/05/SLOP3-012/SLOP3-012 Intern Guide - Per-App Modules, Database and HTTP Endpoints`.
+
+## Step 3: Phase 1 — the `database` module
+
+The user asked for the guide to be implemented. I am doing phases 1–4 (part 1) on one branch, `task/slop3-012-modules` from `origin/main` (`ecb5df9`), committing at the end of each phase with its tests passing. Phase 5 (module catalog and admin grants) is part 2 and out of scope. The guide's decisions are applied as written, since the user asked to implement it without changing any of them. Phase 1 adds `use('database')` and `require('database')`: go-go-goja's API run in the turn as the actor, with savepoint-backed `begin()` handles that never outlive their turn. All tests and lint pass.
+
+### Prompt Context
+**User prompt (verbatim):** "Nowimplement it, commit at appropriate intervals and keep a detailed diary as you work (using the diary format from the skill) (Diary format according to skill: MANDATORY)"; then, mid-turn: "subagents in case you use them should also keep their own separate diary"
+**Assistant interpretation:** Implement the guide's part 1 (phases 1–4) with tests, committing per phase, and keep this diary in the investigation format. Any subagent writes its own diary file in this ticket.
+**Inferred user intent:** Working, reviewable code that follows the design, with a record a reviewer can retrace.
+**Commit (code):** `106e72e` — "SLOP3-012 phase 1: use('database'), go-go-goja's database API over the actor's own store"
+
+### What I did
+- Worktree `…/scratchpad/slop012` on `task/slop3-012-modules` from `origin/main`. Baseline: `GOWORK=off go test ./...` passed in 20 s.
+- `pkg/store/sqlpolicy.go`: `CallerActorRead = "actor-read"`. `SQLITE_SAVEPOINT` is allowed for `actor` and `actor-read`. Writes need no change, because the INSERT/UPDATE/DELETE branch already lists only `actor`, `migration` and `admin-write`.
+- `pkg/actor/database.go` (new):
+  - `DatabaseConfig{ReadOnly, MaxRows}`;
+  - `databaseModule` (built once per actor, cached in `a.database`), `begin`, `endSavepoint`, `popSavepointsFrom`, `closeSavepoints`, `dropSavepoints`, `noOpenTransaction`, `flatParams`;
+  - `reservedModules = {"database"}`.
+- `pkg/actor/actor.go`:
+  - fields `database`, `savepoints`, `seq`;
+  - in `handle`'s turn closure, `dropSavepoints()` when `ev.run` fails, `closeSavepoints()` when it succeeds;
+  - `requirer` resolves reserved names before tree files.
+- `pkg/actor/manager.go`: in the activation hooks, `defer a.dropSavepoints()`, and `a.closeSavepoints()` after `setup`/`smoke`.
+- `pkg/actor/modules.go`:
+  - `case "database"` in `module()`;
+  - `noOpenTransaction("documents")` in `ownPath`, which every document writer (and so `storage`) goes through;
+  - `noOpenTransaction("files")` in `files.write`.
+- Tests:
+  - `pkg/store/store_test.go`, in `TestAppSQLAuthorizer`: `actor-read` may `SELECT`, `PRAGMA data_version` and `SAVEPOINT`/`ROLLBACK TO`/`RELEASE`; it may not `INSERT`, `UPDATE`, `DELETE`, `INSERT … RETURNING`, `CREATE TABLE` or `ATTACH`;
+  - `pkg/host/database_module_test.go` (new): `TestDatabaseModule`.
+
+### Why
+- Savepoint names use a per-actor counter (`dbsp<seq>`), not the guide's `len(a.savepoints)+1`. After an inner handle is popped, the length-based name could be reused while an outer savepoint of the same name is still open. A counter never repeats.
+- The guard sits in `ownPath`, so `db.doc().set/update/delete` and `storage`'s writes, which go through `db`, are all covered by one check. `files.write` gets its own. The guide named only `db` and `storage`, but `PutFile` also records changes in the turn as it runs, so it has the same exposure.
+- The module object is cached, so `require('database') === use('database')`. `use('sql')` builds a new object on every call, which is harmless there but would make the equality test meaningless.
+
+### What worked
+- `GOWORK=off go test ./pkg/store/` passed. `TestDatabaseModule` passed. Each of these cases is an assertion:
+  - `query` returns `[]` for no rows;
+  - `exec` returns `{success, rowsAffected: 1, lastInsertId: 1}`;
+  - `[1, 2], true` binds as 1, 2, 1;
+  - `configure` gives `permission_denied`;
+  - `DELETE FROM _docs` and `ATTACH` give `actor_error`;
+  - commit keeps, rollback discards, and a handle left open is rolled back;
+  - a handle used after `await time.sleep(1)` gives `conflict`, and its pre-await insert is gone;
+  - `db.doc().set()` with a handle open gives `conflict`;
+  - the outer handle's rollback ends the inner one (`inner.commit()` gives `conflict`);
+  - a turn that throws with a handle open rolls back, and the next `begin` works;
+  - `require('database') === use('database')`;
+  - `require('./database.js')` loads the tree file;
+  - the `table:items` reactor counts at least three commits.
+- Mutation check: with the `closeSavepoints()` call in `handle` commented out, the test failed with `after commit, rollback, leaveOpen: [one kept left-open], want [one kept]`. I restored the file from a copy.
+- Full suite `GOWORK=off go test ./...`: all packages `ok`. `golangci-lint run`: `0 issues.`
+
+### What didn't work
+- My first store test used `PRAGMA table_info(items)` and failed with `actor-read reads: not authorized`. `readPragmas` allows a read pragma only without an argument (`a2 == ""`, `sqlpolicy.go:123`), so `table_info(x)` is denied for every app caller, `actor` included. I switched the test to `PRAGMA data_version`. The authorizer is unchanged.
+- The editor's language server reports `go: go.work requires go >= 1.26.6 (running go 1.25.5)`. It runs an older Go than the build (`go version go1.26.6`), so this does not affect `go build` or `go test`.
+
+### What I learned
+- Actors already read kernel tables (`SELECT count(*) FROM _docs` is allowed for `actor`, `store_test.go:166`), so `database.query` can too. Only writes are restricted.
+- A rolled-back write to an app table still sets `t.tables[name]` in the authorizer, which runs at prepare time. The commit then reports a `table` change for a write that was undone, and table reactors fire once with nothing new. This is harmless (reactors re-read), and `sql.transaction` behaves the same way.
+
+### What was tricky to build
+- Handle lifetime across `await`. The turn closure returns as soon as the handler awaits real I/O. The rest of the handler runs in a later turn with a different `store.Turn`. `closeSavepoints` runs at the end of every successful closure, so an open handle is rolled back before the first turn commits. `live()` compares the handle's turn with `a.cur.t`, so a later use throws `conflict` instead of running against a savepoint that no longer exists.
+- The order on failure. When `ev.run` errors, the store rolls back the whole turn, so the savepoints are gone in SQLite. `dropSavepoints` only clears the Go side. Running `ROLLBACK TO` there would fail on a transaction that is already being rolled back.
+
+### What warrants a second pair of eyes
+- `noOpenTransaction` throws `conflict` for any document or file write while a handle is open, including writes the app might expect to be independent of the SQL transaction.
+- `sql.transaction` (`modules.go:195`) still allows document writes under its savepoint and has the exposure described above. This is out of scope here and noted in the guide's risks.
+
+### What should be done in the future
+- Part 2: pass a real `DatabaseConfig` from the admin's grant, and test `readOnly` and `maxRows` end to end. Today only the store-level caller is tested.
+
+### Code review instructions
+- Start at `pkg/actor/database.go`, then the `handle` closure in `pkg/actor/actor.go` (search `closeSavepoints`), `ownPath` in `pkg/actor/modules.go`, and `pkg/host/database_module_test.go`.
+- Validate: `GOWORK=off go test ./pkg/store/ ./pkg/host/ -run 'TestAppSQLAuthorizer|TestDatabaseModule' -count=1 -v`.
+
+### Technical details
+```js
+const db = require('database');
+const tx = db.begin();                 // SAVEPOINT dbsp<n>
+tx.exec('INSERT INTO items (name) VALUES (?)', 'kept');
+tx.commit();                           // RELEASE dbsp<n>
+db.query('SELECT ? AS a, ? AS b', [1, 2]);   // [{a: 1, b: 2}]
+db.configure('sqlite3', '/x');         // throws permission_denied
+```
