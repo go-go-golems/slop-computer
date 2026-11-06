@@ -191,3 +191,78 @@ python3 -I scripts/02-rehearsal-fixtures.py various/inventory-2026-11-06.json ap
 python3 -I scripts/03-import.py various/inventory-2026-11-06.json --only weft,polis,… [--apply --log-out local-apply.jsonl]
 python3 -I scripts/04-verify.py various/inventory-2026-11-06.json http://apps.localhost:18413 --only weft,polis,…
 ```
+
+## Step 3: A crash, the production run, and verification
+
+The session crashed while the production dry run was running, and the machine's `/tmp` went with it: the scratch worktree, the blob cache, the local rehearsal server and the half-finished dry run. Everything that mattered was already on `origin/main` (`6fa32c2`, `46d440c`). Production had not been written to; the dry run only reads. I recreated the worktree, reran the dry run, validated the manifests, and applied the import: `polis` first, then the rest. One transient `kubectl exec` failure stopped the first full run after 38 stores. After a fix, the rerun resumed exactly where it had stopped. All 103 stores now verify, and a fresh dry run plans nothing.
+
+### Prompt Context
+**User prompt (verbatim):** "continue" and "we crashed" (after the crash); the task itself: see Step 1.
+**Assistant interpretation:** Recover the lost local state and finish the production import.
+**Inferred user intent:** slop.yolo carries francois's real catalog, with nothing lost to the crash.
+**Commit (code):** this entry's commit (`03-import.py` retry fix, evidence in `various/`).
+
+### What I did
+- **Recovery.**
+  - `git worktree prune`, then `git worktree add -B task/slop3-013-francois-import <new scratchpad>/slop013 origin/main` (at `46d440c`).
+  - Recreated `_validate/main.go` (scratch, not committed).
+- **Production dry run.** `03-import.py various/inventory-2026-11-06.json --plan-out … --emit-apps …` → `plan: 103 pushes ({'app.json': 103, 'provenance': 103, 'html': 8}), 8 grant changes, 0 history snapshots, 11 skipped`. This is exactly the guide's §13 prediction. No attachment changes. Saved as `various/plan-2026-11-06-dryrun.{json,txt}`.
+- **Manifests.** `go run ./_validate prod-apps` → `103 app.json files, 0 rejected`.
+- **Canary.** `--only polis --apply` gave `polis main 1.0.0 → snapshot 2 (html, app.json, provenance; uploaded 245,339 B)` and grants `{'@guest': 'interact'} → {'@subscriber': 'interact'}`. Then `04-verify.py --only polis,weft` passed for polis (paid, 401). weft failed only its tree check, because it had not been applied yet.
+- **Full apply, run 1** (`various/apply-2026-11-06-run1.txt`): 38 stores pushed, then it stopped in `living-comic-studio` (see below).
+- **Full apply, run 2** (`run2.txt`): `plan: 64 pushes ({'html': 4, …}), 3 grant changes`.
+  - `living-comic-studio` uploaded 7,909,758 B, `mimeo` 997,162 B, `no-dom-the-interface-is-a-projection` 90,105 B and `octavo-lab` 1,063,955 B.
+  - `applied`, exit 0.
+  - The apply log (`various/apply-2026-11-06.jsonl`) has 103 `push` records across the canary and both runs.
+- **Verification** (`various/verify-2026-11-06.{txt,json}`): `103 stores, 0 failing; anonymous view status: {('free', 200): 95, ('paid', 401): 8}`.
+- **Idempotence** (`various/plan-2026-11-06-after.txt`): `plan: 0 pushes ({}), 0 grant changes, 0 history snapshots, 11 skipped`.
+- **Browser** (Playwright, not signed in):
+  - `/f/hypercore-studio/` stops at "Opening…", with console `401 … /_site/views`, as expected for a paid app viewed anonymously.
+  - `/f/craftkit-workbench/` (capabilities fixed: `sample.images`) runs for a guest. Screenshot: `various/screenshots/s3-craftkit-workbench.png`.
+  - The tab was closed afterwards. I also deleted the Playwright MCP output folder `.playwright-mcp/` that the check created in the slop-computer checkout.
+- **SLOP3-006 task `2ghn`** checked, with a pointer here. The history mechanism exists, but no older release may be imported safely today.
+
+### Why
+- **Canary first:** `polis` exercises the riskiest path. It is paid, the grants must close before the bytes arrive, and its HTML blob was absent from slop.
+- **Resume by rerunning rather than patching state by hand:** the plan is computed from current state, so a rerun skips the 39 finished stores.
+
+### What worked
+- Every step of the resume behaved as designed: run 2 planned only the 64 stores left.
+- The failure happened at the safest point. `living-comic-studio` had already moved to `@subscriber` (log lines at `22:42:45Z`) and still served its placeholder, so no paid HTML was exposed at any time.
+
+### What didn't work
+- **Run 1 stopped** with `subprocess.CalledProcessError: Command '['kubectl', 'exec', '-n', 'francois', 'deploy/francois', '--', 'sh', '-c', 'tail -c +4194305 "$0" | head -c 3715454', '/var/lib/francois/releases/blobs/a7/a7562f22…f6fd']' returned non-zero exit status 1.` This was the second 4 MiB piece of `living-comic-studio-0.1.0.html` (7,909,758 B). The step-2 retry covered short reads but used `check=True`, so a failed exec raised immediately.
+  - Fix in `Blobs.fetch`: drop `check=True`, and treat a non-zero exit like a short read. That means up to 6 tries with a back-off of 2, 4, 6… seconds, and a final error that includes the exec's stderr.
+  - Run 2 then fetched the same blob without trouble.
+- **The crash itself:** the background dry run (task `bk46yadus`) never finished, and its output file was empty. Python block-buffers stdout when it is redirected, which is why nothing had been written. Later runs use `python3 -u`.
+
+### What I learned
+- `kubectl exec` over the Tailscale API endpoint has two failure modes: a silent short read (step 2) and an outright exit status 1. Both are transient, and both need the retry loop.
+- Scratch state in `/tmp` does not survive a crash. Anything worth keeping goes into a commit at each checkpoint; that is why the recovery took minutes.
+
+### What was tricky to build
+- Making sure a stop in the middle of a store is safe. The order "close the grants, then push" means that a paid store which stops between the two steps is closed but still holds its placeholder. The opposite order would have left real paid HTML public until the rerun.
+
+### What warrants a second pair of eyes
+- **Paid apps are admin- or subscriber-only now.** If nobody on slop.yolo has a subscription, they are admin-only (guide §14). I could not open them signed in from this browser, because sign-in needs your ZITADEL login. Please open https://apps.slop.yolo.scapegoat.dev/f/polis/ as an admin to confirm.
+- **The sandbox `/v/<n>/` exposure** (guide §14) is unchanged. A subscriber who shares the sandbox URL shares the paid HTML.
+
+### What should be done in the future
+- A platform ticket for viewer checks on sandbox snapshot URLs.
+- Rerun `01-inventory.sh` and `03-import.py --apply` after francois publishes new releases.
+- A separate ticket if subscribers' instance data (99 instances) is to move.
+
+### Code review instructions
+- `scripts/03-import.py` `Blobs.fetch` (the retry loop).
+- Evidence: `various/plan-2026-11-06-dryrun.txt`, `apply-2026-11-06-run{1,2}.txt`, `apply-2026-11-06.jsonl`, `verify-2026-11-06.txt`, `plan-2026-11-06-after.txt`.
+- To reproduce the check: `python3 -I scripts/04-verify.py various/inventory-2026-11-06.json https://apps.slop.yolo.scapegoat.dev`.
+
+### Technical details
+```
+canary   polis main 1.0.0 → snapshot 2; grants @guest → @subscriber
+run 1    38 stores, stopped in living-comic-studio (grants already closed)
+run 2    64 pushes (html 4), 3 grant changes; applied
+verify   103 stores, 0 failing; free 200 ×95, paid 401 ×8
+rerun    0 pushes, 0 grant changes, 11 skipped (8 paid history, 3 withdrawn)
+rollback ref.move <store> main <before.n from apply-2026-11-06.jsonl>
+```

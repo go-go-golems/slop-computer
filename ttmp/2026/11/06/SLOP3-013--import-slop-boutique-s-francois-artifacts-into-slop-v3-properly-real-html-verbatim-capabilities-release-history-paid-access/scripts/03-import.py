@@ -226,21 +226,25 @@ class Blobs:
     def fetch(key, size):
         """Read a blob from the francois pod in 4 MiB pieces: one `kubectl exec
         cat` of a large file can end early (12,848,209 bytes arrived as
-        10,780,672), so each piece's length is checked and retried."""
+        10,780,672), and an exec can fail outright, so each piece's exit status
+        and length are checked and retried."""
         if not KEY.match(key or ""):
             raise SystemExit(f"refusing storage key {key!r}")
         path = "/var/lib/francois/releases/" + key
         out = bytearray()
         while len(out) < size:
             n = min(CHUNK, size - len(out))
-            for _ in range(4):
-                piece = subprocess.run(["kubectl", "exec", "-n", "francois", "deploy/francois", "--", "sh", "-c",
-                                        f'tail -c +{len(out) + 1} "$0" | head -c {n}', path],
-                                       check=True, capture_output=True).stdout
-                if len(piece) == n:
+            for attempt in range(6):
+                r = subprocess.run(["kubectl", "exec", "-n", "francois", "deploy/francois", "--", "sh", "-c",
+                                    f'tail -c +{len(out) + 1} "$0" | head -c {n}', path], capture_output=True)
+                piece = r.stdout
+                if r.returncode == 0 and len(piece) == n:
                     break
+                # an exec can also fail outright (exit 1 mid-run on 2026-11-06); wait and retry
+                time.sleep(2 * (attempt + 1))
             else:
-                raise SystemExit(f"{key}: short read at {len(out)} ({len(piece)} of {n} bytes, 4 tries)")
+                raise SystemExit(f"{key}: read at {len(out)} failed (exit {r.returncode}, {len(piece)} of {n} bytes, "
+                                 f"6 tries): {r.stderr.decode(errors='replace')[-300:]}")
             out += piece
         return bytes(out)
 

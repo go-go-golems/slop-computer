@@ -1,0 +1,2 @@
+103 stores, 0 failing; anonymous view status: {('free', 200): 95, ('paid', 401): 8}
+exit 0

@@ -1,0 +1,2543 @@
+{
+ "server": "https://slop.yolo.scapegoat.dev",
+ "inventory": "2026-11-06T22:14:20Z",
+ "skipped": [
+  {
+   "store": "aasd",
+   "what": "artifact",
+   "reason": "no published release"
+  },
+  {
+   "store": "lattice-deck",
+   "what": "rel_08a7a6168371c71f285397d6 0.1.0",
+   "reason": "paid release in a public store"
+  },
+  {
+   "store": "lattice-deck",
+   "what": "rel_7eb142a73b88a690d042c952 0.1.1",
+   "reason": "paid release in a public store"
+  },
+  {
+   "store": "lattice-phantasmagoria",
+   "what": "rel_7666279d21ac37718f31e4e7 0.1.0",
+   "reason": "paid release in a public store"
+  },
+  {
+   "store": "lattice-rift",
+   "what": "rel_cdc4426a42fefb2c512d77f6 0.1.0",
+   "reason": "paid release in a public store"
+  },
+  {
+   "store": "lattice-rift",
+   "what": "rel_1e376f5c236cec83a1ee6f53 0.1.1",
+   "reason": "paid release in a public store"
+  },
+  {
+   "store": "rag-workbench",
+   "what": "rel_48bc7b49c104ed89526e6249 0.1.0",
+   "reason": "withdrawn"
+  },
+  {
+   "store": "rag-workbench",
+   "what": "rel_87f08be07833f2a4c43ac4e1 0.1.1",
+   "reason": "withdrawn"
+  },
+  {
+   "store": "rag-workbench",
+   "what": "rel_fefc379a622251ad5c4cbbe0 0.1.2",
+   "reason": "withdrawn"
+  },
+  {
+   "store": "tabula-workbench",
+   "what": "rel_a9d88eeef8c8cc334341e117 0.1.0",
+   "reason": "paid release in a public store"
+  },
+  {
+   "store": "tabula-workbench",
+   "what": "rel_d8227318d8645a1409d1a73c 0.1.1",
+   "reason": "paid release in a public store"
+  }
+ ],
+ "stores": [
+  {
+   "store": "agent-gym-works",
+   "release": "rel_2e1cffb666c07c5c0648fc4f",
+   "version": "0.1.0",
+   "paid": false,
+   "push": true,
+   "changes": [
+    "app.json",
+    "francois.json"
+   ],
+   "grants": {
+    "have": {
+     "@guest": "interact"
+    },
+    "want": {
+     "@guest": "interact"
+    },
+    "change": false
+   },
+   "history": [],
+   "before": {
+    "n": 1
+   }
+  },
+  {
+   "store": "bench-twin",
+   "release": "rel_027d3d996d3c0e75f4ea32ba",
+   "version": "0.1.0",
+   "paid": false,
+   "push": true,
+   "changes": [
+    "app.json",
+    "francois.json"
+   ],
+   "grants": {
+    "have": {
+     "@guest": "interact"
+    },
+    "want": {
+     "@guest": "interact"
+    },
+    "change": false
+   },
+   "history": [],
+   "before": {
+    "n": 1
+   }
+  },
+  {
+   "store": "beton-brut-studio",
+   "release": "rel_9a38bc92570e4a688f3c75d6",
+   "version": "1.0.0",
+   "paid": false,
+   "push": true,
+   "changes": [
+    "app.json",
+    "francois.json"
+   ],
+   "grants": {
+    "have": {
+     "@guest": "interact"
+    },
+    "want": {
+     "@guest": "interact"
+    },
+    "change": false
+   },
+   "history": [],
+   "before": {
+    "n": 1
+   }
+  },
+  {
+   "store": "blockout-studio",
+   "release": "rel_4c92c0a490d68a08c372c69b",
+   "version": "1.0.0",
+   "paid": true,
+   "push": true,
+   "changes": [
+    "app.json",
+    "francois.json",
+    "index.html"
+   ],
+   "grants": {
+    "have": {
+     "@guest": "interact"
+    },
+    "want": {
+     "@subscriber": "interact"
+    },
+    "change": true
+   },
+   "history": [],
+   "before": {
+    "n": 1
+   }
+  },
+  {
+   "store": "blueprint-house",
+   "release": "rel_1778537d88c5d1eb4ea2848f",
+   "version": "1.0.0",
+   "paid": false,
+   "push": true,
+   "changes": [
+    "app.json",
+    "francois.json"
+   ],
+   "grants": {
+    "have": {
+     "@guest": "interact"
+    },
+    "want": {
+     "@guest": "interact"
+    },
+    "change": false
+   },
+   "history": [],
+   "before": {
+    "n": 1
+   }
+  },
+  {
+   "store": "blueprint-mech",
+   "release": "rel_5122ca3a2370fd855be40db1",
+   "version": "1.0.0",
+   "paid": false,
+   "push": true,
+   "changes": [
+    "app.json",
+    "francois.json"
+   ],
+   "grants": {
+    "have": {
+     "@guest": "interact"
+    },
+    "want": {
+     "@guest": "interact"
+    },
+    "change": false
+   },
+   "history": [],
+   "before": {
+    "n": 1
+   }
+  },
+  {
+   "store": "blueprint-physics-kit",
+   "release": "rel_104b2a172fdaf41d5c3dfc96",
+   "version": "1.0.0",
+   "paid": false,
+   "push": true,
+   "changes": [
+    "app.json",
+    "francois.json"
+   ],
+   "grants": {
+    "have": {
+     "@guest": "interact"
+    },
+    "want": {
+     "@guest": "interact"
+    },
+    "change": false
+   },
+   "history": [],
+   "before": {
+    "n": 1
+   }
+  },
+  {
+   "store": "brand-crystal",
+   "release": "rel_d1214e2ef0462bc275ae3dc0",
+   "version": "1.0.0",
+   "paid": false,
+   "push": true,
+   "changes": [
+    "app.json",
+    "francois.json"
+   ],
+   "grants": {
+    "have": {
+     "@guest": "interact"
+    },
+    "want": {
+     "@guest": "interact"
+    },
+    "change": false
+   },
+   "history": [],
+   "before": {
+    "n": 1
+   }
+  },
+  {
+   "store": "brickwork",
+   "release": "rel_7c3f15b090b5e4998c4d7470",
+   "version": "0.1.0",
+   "paid": false,
+   "push": true,
+   "changes": [
+    "app.json",
+    "francois.json"
+   ],
+   "grants": {
+    "have": {
+     "@guest": "interact"
+    },
+    "want": {
+     "@guest": "interact"
+    },
+    "change": false
+   },
+   "history": [],
+   "before": {
+    "n": 1
+   }
+  },
+  {
+   "store": "claude-computer",
+   "release": "rel_e2a6df71b4aae80866df2d67",
+   "version": "1.0.0",
+   "paid": false,
+   "push": true,
+   "changes": [
+    "app.json",
+    "francois.json"
+   ],
+   "grants": {
+    "have": {
+     "@guest": "interact"
+    },
+    "want": {
+     "@guest": "interact"
+    },
+    "change": false
+   },
+   "history": [],
+   "before": {
+    "n": 1
+   }
+  },
+  {
+   "store": "craftkit-studio",
+   "release": "rel_81803014a03644c5bc09cd58",
+   "version": "0.1.0",
+   "paid": false,
+   "push": true,
+   "changes": [
+    "app.json",
+    "francois.json"
+   ],
+   "grants": {
+    "have": {
+     "@guest": "interact"
+    },
+    "want": {
+     "@guest": "interact"
+    },
+    "change": false
+   },
+   "history": [],
+   "before": {
+    "n": 1
+   }
+  },
+  {
+   "store": "craftkit-workbench",
+   "release": "rel_c4969ac1bc5e47a3f5b17627",
+   "version": "0.1.0",
+   "paid": false,
+   "push": true,
+   "changes": [
+    "app.json",
+    "francois.json"
+   ],
+   "grants": {
+    "have": {
+     "@guest": "interact"
+    },
+    "want": {
+     "@guest": "interact"
+    },
+    "change": false
+   },
+   "history": [],
+   "before": {
+    "n": 1
+   }
+  },
+  {
+   "store": "derived-not-fixed",
+   "release": "rel_7a9f78c3c64355340216d24a",
+   "version": "1.0.0",
+   "paid": false,
+   "push": true,
+   "changes": [
+    "app.json",
+    "francois.json"
+   ],
+   "grants": {
+    "have": {
+     "@guest": "interact"
+    },
+    "want": {
+     "@guest": "interact"
+    },
+    "change": false
+   },
+   "history": [],
+   "before": {
+    "n": 1
+   }
+  },
+  {
+   "store": "diary-workbench",
+   "release": "rel_a63d6adf99de2b03463adf67",
+   "version": "0.1.0",
+   "paid": false,
+   "push": true,
+   "changes": [
+    "app.json",
+    "francois.json"
+   ],
+   "grants": {
+    "have": {
+     "@guest": "interact"
+    },
+    "want": {
+     "@guest": "interact"
+    },
+    "change": false
+   },
+   "history": [],
+   "before": {
+    "n": 1
+   }
+  },
+  {
+   "store": "dockermetrics-ide",
+   "release": "rel_f60c7c134c028ce8517bff40",
+   "version": "0.1.0",
+   "paid": false,
+   "push": true,
+   "changes": [
+    "app.json",
+    "francois.json"
+   ],
+   "grants": {
+    "have": {
+     "@guest": "interact"
+    },
+    "want": {
+     "@guest": "interact"
+    },
+    "change": false
+   },
+   "history": [],
+   "before": {
+    "n": 1
+   }
+  },
+  {
+   "store": "ds-shader-sketchbook",
+   "release": "rel_410e1a625da1e4e93a5ab0a2",
+   "version": "0.1.0",
+   "paid": false,
+   "push": true,
+   "changes": [
+    "app.json",
+    "francois.json"
+   ],
+   "grants": {
+    "have": {
+     "@guest": "interact"
+    },
+    "want": {
+     "@guest": "interact"
+    },
+    "change": false
+   },
+   "history": [],
+   "before": {
+    "n": 1
+   }
+  },
+  {
+   "store": "exposure-studio",
+   "release": "rel_e1059abe45adc5b777ebb673",
+   "version": "1.0.0",
+   "paid": false,
+   "push": true,
+   "changes": [
+    "app.json",
+    "francois.json"
+   ],
+   "grants": {
+    "have": {
+     "@guest": "interact"
+    },
+    "want": {
+     "@guest": "interact"
+    },
+    "change": false
+   },
+   "history": [],
+   "before": {
+    "n": 1
+   }
+  },
+  {
+   "store": "fluchtlinie",
+   "release": "rel_e8fc27ffbfa10b5fcb937994",
+   "version": "1.0.0",
+   "paid": false,
+   "push": true,
+   "changes": [
+    "app.json",
+    "francois.json"
+   ],
+   "grants": {
+    "have": {
+     "@guest": "interact"
+    },
+    "want": {
+     "@guest": "interact"
+    },
+    "change": false
+   },
+   "history": [],
+   "before": {
+    "n": 1
+   }
+  },
+  {
+   "store": "form-skate-workbench",
+   "release": "rel_487cdc36fb6a9fdd7ae04d2b",
+   "version": "0.1.0",
+   "paid": false,
+   "push": true,
+   "changes": [
+    "app.json",
+    "francois.json"
+   ],
+   "grants": {
+    "have": {
+     "@guest": "interact"
+    },
+    "want": {
+     "@guest": "interact"
+    },
+    "change": false
+   },
+   "history": [],
+   "before": {
+    "n": 1
+   }
+  },
+  {
+   "store": "fringe-studio",
+   "release": "rel_b8d754bd6ceb76389dbf4c55",
+   "version": "1.0.0",
+   "paid": false,
+   "push": true,
+   "changes": [
+    "app.json",
+    "francois.json"
+   ],
+   "grants": {
+    "have": {
+     "@guest": "interact"
+    },
+    "want": {
+     "@guest": "interact"
+    },
+    "change": false
+   },
+   "history": [],
+   "before": {
+    "n": 1
+   }
+  },
+  {
+   "store": "graveler-lab",
+   "release": "rel_b11d532220dfb68d36641e98",
+   "version": "0.1.0",
+   "paid": false,
+   "push": true,
+   "changes": [
+    "app.json",
+    "francois.json"
+   ],
+   "grants": {
+    "have": {
+     "@guest": "interact"
+    },
+    "want": {
+     "@guest": "interact"
+    },
+    "change": false
+   },
+   "history": [],
+   "before": {
+    "n": 1
+   }
+  },
+  {
+   "store": "halo-field",
+   "release": "rel_c4a818cc109a08cf93e34dbd",
+   "version": "0.1.0",
+   "paid": false,
+   "push": true,
+   "changes": [
+    "app.json",
+    "francois.json"
+   ],
+   "grants": {
+    "have": {
+     "@guest": "interact"
+    },
+    "want": {
+     "@guest": "interact"
+    },
+    "change": false
+   },
+   "history": [],
+   "before": {
+    "n": 1
+   }
+  },
+  {
+   "store": "hypercore-studio",
+   "release": "rel_1f2e4d75e0e486e413d0f284",
+   "version": "0.1.0",
+   "paid": true,
+   "push": true,
+   "changes": [
+    "app.json",
+    "francois.json",
+    "index.html"
+   ],
+   "grants": {
+    "have": {
+     "@guest": "interact"
+    },
+    "want": {
+     "@subscriber": "interact"
+    },
+    "change": true
+   },
+   "history": [],
+   "before": {
+    "n": 1
+   }
+  },
+  {
+   "store": "kiln-studio",
+   "release": "rel_493274a59eb354de0b598b7f",
+   "version": "0.1.0",
+   "paid": false,
+   "push": true,
+   "changes": [
+    "app.json",
+    "francois.json"
+   ],
+   "grants": {
+    "have": {
+     "@guest": "interact"
+    },
+    "want": {
+     "@guest": "interact"
+    },
+    "change": false
+   },
+   "history": [],
+   "before": {
+    "n": 1
+   }
+  },
+  {
+   "store": "kiln-workbench",
+   "release": "rel_bd2b5762b836129a84397656",
+   "version": "0.1.0",
+   "paid": true,
+   "push": true,
+   "changes": [
+    "app.json",
+    "francois.json",
+    "index.html"
+   ],
+   "grants": {
+    "have": {
+     "@guest": "interact"
+    },
+    "want": {
+     "@subscriber": "interact"
+    },
+    "change": true
+   },
+   "history": [],
+   "before": {
+    "n": 1
+   }
+  },
+  {
+   "store": "kinescope",
+   "release": "rel_4f3a6c766f2c1f837753cfeb",
+   "version": "1.0.0",
+   "paid": false,
+   "push": true,
+   "changes": [
+    "app.json",
+    "francois.json"
+   ],
+   "grants": {
+    "have": {
+     "@guest": "interact"
+    },
+    "want": {
+     "@guest": "interact"
+    },
+    "change": false
+   },
+   "history": [],
+   "before": {
+    "n": 1
+   }
+  },
+  {
+   "store": "kustenlinie",
+   "release": "rel_4110b65d047c137183297fdd",
+   "version": "1.0.0",
+   "paid": false,
+   "push": true,
+   "changes": [
+    "app.json",
+    "francois.json"
+   ],
+   "grants": {
+    "have": {
+     "@guest": "interact"
+    },
+    "want": {
+     "@guest": "interact"
+    },
+    "change": false
+   },
+   "history": [],
+   "before": {
+    "n": 1
+   }
+  },
+  {
+   "store": "lab-104-factory-twin",
+   "release": "rel_7e2eac27df0b1c87678970d7",
+   "version": "0.1.0",
+   "paid": false,
+   "push": true,
+   "changes": [
+    "app.json",
+    "francois.json"
+   ],
+   "grants": {
+    "have": {
+     "@guest": "interact"
+    },
+    "want": {
+     "@guest": "interact"
+    },
+    "change": false
+   },
+   "history": [],
+   "before": {
+    "n": 1
+   }
+  },
+  {
+   "store": "lantern-slide-studio",
+   "release": "rel_9ac150382206cc56f30f236e",
+   "version": "0.1.0",
+   "paid": false,
+   "push": true,
+   "changes": [
+    "app.json",
+    "francois.json"
+   ],
+   "grants": {
+    "have": {
+     "@guest": "interact"
+    },
+    "want": {
+     "@guest": "interact"
+    },
+    "change": false
+   },
+   "history": [],
+   "before": {
+    "n": 1
+   }
+  },
+  {
+   "store": "lastwork-foundry",
+   "release": "rel_504057f24e03b972cf150367",
+   "version": "1.0.0",
+   "paid": false,
+   "push": true,
+   "changes": [
+    "app.json",
+    "francois.json"
+   ],
+   "grants": {
+    "have": {
+     "@guest": "interact"
+    },
+    "want": {
+     "@guest": "interact"
+    },
+    "change": false
+   },
+   "history": [],
+   "before": {
+    "n": 1
+   }
+  },
+  {
+   "store": "lattice-arcade",
+   "release": "rel_3ff91dab103ee3325c38ae3d",
+   "version": "0.1.0",
+   "paid": false,
+   "push": true,
+   "changes": [
+    "app.json",
+    "francois.json"
+   ],
+   "grants": {
+    "have": {
+     "@guest": "interact"
+    },
+    "want": {
+     "@guest": "interact"
+    },
+    "change": false
+   },
+   "history": [],
+   "before": {
+    "n": 1
+   }
+  },
+  {
+   "store": "lattice-arena",
+   "release": "rel_23e7979fb51072550c83f80b",
+   "version": "0.1.0",
+   "paid": false,
+   "push": true,
+   "changes": [
+    "app.json",
+    "francois.json"
+   ],
+   "grants": {
+    "have": {
+     "@guest": "interact"
+    },
+    "want": {
+     "@guest": "interact"
+    },
+    "change": false
+   },
+   "history": [],
+   "before": {
+    "n": 1
+   }
+  },
+  {
+   "store": "lattice-arena-ds",
+   "release": "rel_64ced3cb6a145213e9021f16",
+   "version": "0.1.0",
+   "paid": false,
+   "push": true,
+   "changes": [
+    "app.json",
+    "francois.json"
+   ],
+   "grants": {
+    "have": {
+     "@guest": "interact"
+    },
+    "want": {
+     "@guest": "interact"
+    },
+    "change": false
+   },
+   "history": [],
+   "before": {
+    "n": 1
+   }
+  },
+  {
+   "store": "lattice-deck",
+   "release": "rel_b60d73cb6e23dae43cacf683",
+   "version": "0.1.2",
+   "paid": false,
+   "push": true,
+   "changes": [
+    "app.json",
+    "francois.json"
+   ],
+   "grants": {
+    "have": {
+     "@guest": "interact"
+    },
+    "want": {
+     "@guest": "interact"
+    },
+    "change": false
+   },
+   "history": [],
+   "before": {
+    "n": 1
+   }
+  },
+  {
+   "store": "lattice-phantasmagoria",
+   "release": "rel_6d251311c237610e2efdaff8",
+   "version": "0.1.2",
+   "paid": false,
+   "push": true,
+   "changes": [
+    "app.json",
+    "francois.json"
+   ],
+   "grants": {
+    "have": {
+     "@guest": "interact"
+    },
+    "want": {
+     "@guest": "interact"
+    },
+    "change": false
+   },
+   "history": [],
+   "before": {
+    "n": 1
+   }
+  },
+  {
+   "store": "lattice-rift",
+   "release": "rel_c73f4e37a2013bf7f93ae5cc",
+   "version": "0.1.2",
+   "paid": false,
+   "push": true,
+   "changes": [
+    "app.json",
+    "francois.json"
+   ],
+   "grants": {
+    "have": {
+     "@guest": "interact"
+    },
+    "want": {
+     "@guest": "interact"
+    },
+    "change": false
+   },
+   "history": [],
+   "before": {
+    "n": 1
+   }
+  },
+  {
+   "store": "lie-group-ik-playground",
+   "release": "rel_617bf599fa0171bc79b40f9f",
+   "version": "0.1.0",
+   "paid": false,
+   "push": true,
+   "changes": [
+    "app.json",
+    "francois.json"
+   ],
+   "grants": {
+    "have": {
+     "@guest": "interact"
+    },
+    "want": {
+     "@guest": "interact"
+    },
+    "change": false
+   },
+   "history": [],
+   "before": {
+    "n": 1
+   }
+  },
+  {
+   "store": "live-embedding-viewer",
+   "release": "rel_c3e5d99bef0f58c34aa902ee",
+   "version": "0.1.0",
+   "paid": false,
+   "push": true,
+   "changes": [
+    "app.json",
+    "francois.json"
+   ],
+   "grants": {
+    "have": {
+     "@guest": "interact"
+    },
+    "want": {
+     "@guest": "interact"
+    },
+    "change": false
+   },
+   "history": [],
+   "before": {
+    "n": 1
+   }
+  },
+  {
+   "store": "living-comic-studio",
+   "release": "rel_b6e3d9292fe723edda6a4374",
+   "version": "0.1.0",
+   "paid": true,
+   "push": true,
+   "changes": [
+    "app.json",
+    "francois.json",
+    "index.html"
+   ],
+   "grants": {
+    "have": {
+     "@guest": "interact"
+    },
+    "want": {
+     "@subscriber": "interact"
+    },
+    "change": true
+   },
+   "history": [],
+   "before": {
+    "n": 1
+   }
+  },
+  {
+   "store": "loom-brawl",
+   "release": "rel_c556d53dc1fbd90732be18b5",
+   "version": "1.0.0",
+   "paid": false,
+   "push": true,
+   "changes": [
+    "app.json",
+    "francois.json"
+   ],
+   "grants": {
+    "have": {
+     "@guest": "interact"
+    },
+    "want": {
+     "@guest": "interact"
+    },
+    "change": false
+   },
+   "history": [],
+   "before": {
+    "n": 1
+   }
+  },
+  {
+   "store": "loom-city",
+   "release": "rel_3ae9bd6ae1dd0e3d15d54afd",
+   "version": "1.0.0",
+   "paid": false,
+   "push": true,
+   "changes": [
+    "app.json",
+    "francois.json"
+   ],
+   "grants": {
+    "have": {
+     "@guest": "interact"
+    },
+    "want": {
+     "@guest": "interact"
+    },
+    "change": false
+   },
+   "history": [],
+   "before": {
+    "n": 1
+   }
+  },
+  {
+   "store": "loom-hours",
+   "release": "rel_cae689e71eaecc5d85aa25b9",
+   "version": "1.0.0",
+   "paid": false,
+   "push": true,
+   "changes": [
+    "app.json",
+    "francois.json"
+   ],
+   "grants": {
+    "have": {
+     "@guest": "interact"
+    },
+    "want": {
+     "@guest": "interact"
+    },
+    "change": false
+   },
+   "history": [],
+   "before": {
+    "n": 1
+   }
+  },
+  {
+   "store": "loom-humanoids-in-the-factory",
+   "release": "rel_683473279009ec0f2e6c6abb",
+   "version": "1.0.0",
+   "paid": false,
+   "push": true,
+   "changes": [
+    "app.json",
+    "francois.json"
+   ],
+   "grants": {
+    "have": {
+     "@guest": "interact"
+    },
+    "want": {
+     "@guest": "interact"
+    },
+    "change": false
+   },
+   "history": [],
+   "before": {
+    "n": 1
+   }
+  },
+  {
+   "store": "loom-pitch",
+   "release": "rel_dccdd99050df06b9f369f3ec",
+   "version": "1.0.0",
+   "paid": false,
+   "push": true,
+   "changes": [
+    "app.json",
+    "francois.json"
+   ],
+   "grants": {
+    "have": {
+     "@guest": "interact"
+    },
+    "want": {
+     "@guest": "interact"
+    },
+    "change": false
+   },
+   "history": [],
+   "before": {
+    "n": 1
+   }
+  },
+  {
+   "store": "loom-playtime",
+   "release": "rel_d675998257c7201b9070e340",
+   "version": "1.0.0",
+   "paid": false,
+   "push": true,
+   "changes": [
+    "app.json",
+    "francois.json"
+   ],
+   "grants": {
+    "have": {
+     "@guest": "interact"
+    },
+    "want": {
+     "@guest": "interact"
+    },
+    "change": false
+   },
+   "history": [],
+   "before": {
+    "n": 1
+   }
+  },
+  {
+   "store": "loom-wilds",
+   "release": "rel_22c428e337550a137471c21c",
+   "version": "1.0.0",
+   "paid": false,
+   "push": true,
+   "changes": [
+    "app.json",
+    "francois.json"
+   ],
+   "grants": {
+    "have": {
+     "@guest": "interact"
+    },
+    "want": {
+     "@guest": "interact"
+    },
+    "change": false
+   },
+   "history": [],
+   "before": {
+    "n": 1
+   }
+  },
+  {
+   "store": "loom-worlds",
+   "release": "rel_4c2cbcf2eb1e549eb3ca84b6",
+   "version": "1.0.0",
+   "paid": false,
+   "push": true,
+   "changes": [
+    "app.json",
+    "francois.json"
+   ],
+   "grants": {
+    "have": {
+     "@guest": "interact"
+    },
+    "want": {
+     "@guest": "interact"
+    },
+    "change": false
+   },
+   "history": [],
+   "before": {
+    "n": 1
+   }
+  },
+  {
+   "store": "lowpoly-fx",
+   "release": "rel_e24d1b0b6fa84a2c40a23212",
+   "version": "0.1.0",
+   "paid": false,
+   "push": true,
+   "changes": [
+    "app.json",
+    "francois.json"
+   ],
+   "grants": {
+    "have": {
+     "@guest": "interact"
+    },
+    "want": {
+     "@guest": "interact"
+    },
+    "change": false
+   },
+   "history": [],
+   "before": {
+    "n": 1
+   }
+  },
+  {
+   "store": "lumen-studio",
+   "release": "rel_8a1131bcc4035636fa3ec662",
+   "version": "1.0.0",
+   "paid": false,
+   "push": true,
+   "changes": [
+    "app.json",
+    "francois.json"
+   ],
+   "grants": {
+    "have": {
+     "@guest": "interact"
+    },
+    "want": {
+     "@guest": "interact"
+    },
+    "change": false
+   },
+   "history": [],
+   "before": {
+    "n": 1
+   }
+  },
+  {
+   "store": "machine-zone",
+   "release": "rel_47d68f75ffe227a9e1dee80a",
+   "version": "1.0.0",
+   "paid": false,
+   "push": true,
+   "changes": [
+    "app.json",
+    "francois.json"
+   ],
+   "grants": {
+    "have": {
+     "@guest": "interact"
+    },
+    "want": {
+     "@guest": "interact"
+    },
+    "change": false
+   },
+   "history": [],
+   "before": {
+    "n": 1
+   }
+  },
+  {
+   "store": "metropolis",
+   "release": "rel_f0db76b66a13b8c0835389ea",
+   "version": "1.0.0",
+   "paid": false,
+   "push": true,
+   "changes": [
+    "app.json",
+    "francois.json"
+   ],
+   "grants": {
+    "have": {
+     "@guest": "interact"
+    },
+    "want": {
+     "@guest": "interact"
+    },
+    "change": false
+   },
+   "history": [],
+   "before": {
+    "n": 1
+   }
+  },
+  {
+   "store": "millwright",
+   "release": "rel_20b2eaac3b283ddc59a1903a",
+   "version": "0.1.0",
+   "paid": false,
+   "push": true,
+   "changes": [
+    "app.json",
+    "francois.json"
+   ],
+   "grants": {
+    "have": {
+     "@guest": "interact"
+    },
+    "want": {
+     "@guest": "interact"
+    },
+    "change": false
+   },
+   "history": [],
+   "before": {
+    "n": 1
+   }
+  },
+  {
+   "store": "mimeo",
+   "release": "rel_7b40c46761e9f06bf7ae0ce1",
+   "version": "0.1.0",
+   "paid": true,
+   "push": true,
+   "changes": [
+    "app.json",
+    "francois.json",
+    "index.html"
+   ],
+   "grants": {
+    "have": {
+     "@guest": "interact"
+    },
+    "want": {
+     "@subscriber": "interact"
+    },
+    "change": true
+   },
+   "history": [],
+   "before": {
+    "n": 1
+   }
+  },
+  {
+   "store": "mimeo-studio",
+   "release": "rel_9ae82add6f5e8906c3a0885e",
+   "version": "0.1.0",
+   "paid": false,
+   "push": true,
+   "changes": [
+    "app.json",
+    "francois.json"
+   ],
+   "grants": {
+    "have": {
+     "@guest": "interact"
+    },
+    "want": {
+     "@guest": "interact"
+    },
+    "change": false
+   },
+   "history": [],
+   "before": {
+    "n": 1
+   }
+  },
+  {
+   "store": "mossbloom",
+   "release": "rel_826df421cfc0b8c812d5aced",
+   "version": "1.0.0",
+   "paid": false,
+   "push": true,
+   "changes": [
+    "app.json",
+    "francois.json"
+   ],
+   "grants": {
+    "have": {
+     "@guest": "interact"
+    },
+    "want": {
+     "@guest": "interact"
+    },
+    "change": false
+   },
+   "history": [],
+   "before": {
+    "n": 1
+   }
+  },
+  {
+   "store": "mossbrook",
+   "release": "rel_b043bf409e3e35b64f709fba",
+   "version": "1.0.0",
+   "paid": false,
+   "push": true,
+   "changes": [
+    "app.json",
+    "francois.json"
+   ],
+   "grants": {
+    "have": {
+     "@guest": "interact"
+    },
+    "want": {
+     "@guest": "interact"
+    },
+    "change": false
+   },
+   "history": [],
+   "before": {
+    "n": 1
+   }
+  },
+  {
+   "store": "nerve-workbench",
+   "release": "rel_5f9c5526e0599179fc06264e",
+   "version": "0.1.0",
+   "paid": false,
+   "push": true,
+   "changes": [
+    "app.json",
+    "francois.json"
+   ],
+   "grants": {
+    "have": {
+     "@guest": "interact"
+    },
+    "want": {
+     "@guest": "interact"
+    },
+    "change": false
+   },
+   "history": [],
+   "before": {
+    "n": 1
+   }
+  },
+  {
+   "store": "no-dom-the-interface-is-a-projection",
+   "release": "rel_8331685da353cd110da599b3",
+   "version": "1.0.0",
+   "paid": true,
+   "push": true,
+   "changes": [
+    "app.json",
+    "francois.json",
+    "index.html"
+   ],
+   "grants": {
+    "have": {
+     "@guest": "interact"
+    },
+    "want": {
+     "@subscriber": "interact"
+    },
+    "change": true
+   },
+   "history": [],
+   "before": {
+    "n": 1
+   }
+  },
+  {
+   "store": "no-shade",
+   "release": "rel_16b19780a42550c34f96590b",
+   "version": "1.0.0",
+   "paid": false,
+   "push": true,
+   "changes": [
+    "app.json",
+    "francois.json"
+   ],
+   "grants": {
+    "have": {
+     "@guest": "interact"
+    },
+    "want": {
+     "@guest": "interact"
+    },
+    "change": false
+   },
+   "history": [],
+   "before": {
+    "n": 1
+   }
+  },
+  {
+   "store": "note-g",
+   "release": "rel_1eea709f8c87bf8e42e3d18c",
+   "version": "1.0.0",
+   "paid": false,
+   "push": true,
+   "changes": [
+    "app.json",
+    "francois.json"
+   ],
+   "grants": {
+    "have": {
+     "@guest": "interact"
+    },
+    "want": {
+     "@guest": "interact"
+    },
+    "change": false
+   },
+   "history": [],
+   "before": {
+    "n": 1
+   }
+  },
+  {
+   "store": "octavo-ide",
+   "release": "rel_79b44c0e0a361cdf124b5307",
+   "version": "0.1.0",
+   "paid": false,
+   "push": true,
+   "changes": [
+    "app.json",
+    "francois.json"
+   ],
+   "grants": {
+    "have": {
+     "@guest": "interact"
+    },
+    "want": {
+     "@guest": "interact"
+    },
+    "change": false
+   },
+   "history": [],
+   "before": {
+    "n": 1
+   }
+  },
+  {
+   "store": "octavo-lab",
+   "release": "rel_e3ce43f1df2ee4b59c72707b",
+   "version": "0.1.0",
+   "paid": true,
+   "push": true,
+   "changes": [
+    "app.json",
+    "francois.json",
+    "index.html"
+   ],
+   "grants": {
+    "have": {
+     "@guest": "interact"
+    },
+    "want": {
+     "@subscriber": "interact"
+    },
+    "change": true
+   },
+   "history": [],
+   "before": {
+    "n": 1
+   }
+  },
+  {
+   "store": "on-twos",
+   "release": "rel_5e08c922091201459827f616",
+   "version": "1.0.0",
+   "paid": false,
+   "push": true,
+   "changes": [
+    "app.json",
+    "francois.json"
+   ],
+   "grants": {
+    "have": {
+     "@guest": "interact"
+    },
+    "want": {
+     "@guest": "interact"
+    },
+    "change": false
+   },
+   "history": [],
+   "before": {
+    "n": 1
+   }
+  },
+  {
+   "store": "overshoot",
+   "release": "rel_3b279f5637cf1b0432debc37",
+   "version": "1.0.0",
+   "paid": false,
+   "push": true,
+   "changes": [
+    "app.json",
+    "francois.json"
+   ],
+   "grants": {
+    "have": {
+     "@guest": "interact"
+    },
+    "want": {
+     "@guest": "interact"
+    },
+    "change": false
+   },
+   "history": [],
+   "before": {
+    "n": 1
+   }
+  },
+  {
+   "store": "patent-drawer",
+   "release": "rel_0b96266d7762979dea2e3e19",
+   "version": "1.0.0",
+   "paid": false,
+   "push": true,
+   "changes": [
+    "app.json",
+    "francois.json"
+   ],
+   "grants": {
+    "have": {
+     "@guest": "interact"
+    },
+    "want": {
+     "@guest": "interact"
+    },
+    "change": false
+   },
+   "history": [],
+   "before": {
+    "n": 1
+   }
+  },
+  {
+   "store": "plads",
+   "release": "rel_63e49ed9db5d4246c51acea2",
+   "version": "1.0.0",
+   "paid": false,
+   "push": true,
+   "changes": [
+    "app.json",
+    "francois.json"
+   ],
+   "grants": {
+    "have": {
+     "@guest": "interact"
+    },
+    "want": {
+     "@guest": "interact"
+    },
+    "change": false
+   },
+   "history": [],
+   "before": {
+    "n": 1
+   }
+  },
+  {
+   "store": "plenum-studio",
+   "release": "rel_fd0a9ec26ca98083d8b92ee2",
+   "version": "1.0.0",
+   "paid": false,
+   "push": true,
+   "changes": [
+    "app.json",
+    "francois.json"
+   ],
+   "grants": {
+    "have": {
+     "@guest": "interact"
+    },
+    "want": {
+     "@guest": "interact"
+    },
+    "change": false
+   },
+   "history": [],
+   "before": {
+    "n": 1
+   }
+  },
+  {
+   "store": "pointfield-cad",
+   "release": "rel_7ad8d410ed198eb2e3f056db",
+   "version": "1.0.0",
+   "paid": false,
+   "push": true,
+   "changes": [
+    "app.json",
+    "francois.json"
+   ],
+   "grants": {
+    "have": {
+     "@guest": "interact"
+    },
+    "want": {
+     "@guest": "interact"
+    },
+    "change": false
+   },
+   "history": [],
+   "before": {
+    "n": 1
+   }
+  },
+  {
+   "store": "polis",
+   "release": "rel_02fefc881efb42bfc6a002cb",
+   "version": "1.0.0",
+   "paid": true,
+   "push": true,
+   "changes": [
+    "app.json",
+    "francois.json",
+    "index.html"
+   ],
+   "grants": {
+    "have": {
+     "@guest": "interact"
+    },
+    "want": {
+     "@subscriber": "interact"
+    },
+    "change": true
+   },
+   "history": [],
+   "before": {
+    "n": 1
+   }
+  },
+  {
+   "store": "porous-forge",
+   "release": "rel_bb2d196a98cc58f548467ee3",
+   "version": "1.0.0",
+   "paid": false,
+   "push": true,
+   "changes": [
+    "app.json",
+    "francois.json"
+   ],
+   "grants": {
+    "have": {
+     "@guest": "interact"
+    },
+    "want": {
+     "@guest": "interact"
+    },
+    "change": false
+   },
+   "history": [],
+   "before": {
+    "n": 1
+   }
+  },
+  {
+   "store": "port-wright",
+   "release": "rel_8fd519e889e30e9cc4d77c16",
+   "version": "1.0.0",
+   "paid": false,
+   "push": true,
+   "changes": [
+    "app.json",
+    "francois.json"
+   ],
+   "grants": {
+    "have": {
+     "@guest": "interact"
+    },
+    "want": {
+     "@guest": "interact"
+    },
+    "change": false
+   },
+   "history": [],
+   "before": {
+    "n": 1
+   }
+  },
+  {
+   "store": "possie-toybox",
+   "release": "rel_cf4b2079cd02c0f5899ca436",
+   "version": "1.0.0",
+   "paid": false,
+   "push": true,
+   "changes": [
+    "app.json",
+    "francois.json"
+   ],
+   "grants": {
+    "have": {
+     "@guest": "interact"
+    },
+    "want": {
+     "@guest": "interact"
+    },
+    "change": false
+   },
+   "history": [],
+   "before": {
+    "n": 1
+   }
+  },
+  {
+   "store": "pre-textile-atelier",
+   "release": "rel_c73af80658c772e918d5bcff",
+   "version": "1.0.0",
+   "paid": false,
+   "push": true,
+   "changes": [
+    "app.json",
+    "francois.json"
+   ],
+   "grants": {
+    "have": {
+     "@guest": "interact"
+    },
+    "want": {
+     "@guest": "interact"
+    },
+    "change": false
+   },
+   "history": [],
+   "before": {
+    "n": 1
+   }
+  },
+  {
+   "store": "rag-workbench",
+   "release": "rel_836959d5043dddc652d61397",
+   "version": "0.1.3",
+   "paid": false,
+   "push": true,
+   "changes": [
+    "app.json",
+    "francois.json"
+   ],
+   "grants": {
+    "have": {
+     "@guest": "interact"
+    },
+    "want": {
+     "@guest": "interact"
+    },
+    "change": false
+   },
+   "history": [],
+   "before": {
+    "n": 1
+   }
+  },
+  {
+   "store": "roomba-rooms",
+   "release": "rel_e382646512bd1d1f9c81420c",
+   "version": "1.0.0",
+   "paid": false,
+   "push": true,
+   "changes": [
+    "app.json",
+    "francois.json"
+   ],
+   "grants": {
+    "have": {
+     "@guest": "interact"
+    },
+    "want": {
+     "@guest": "interact"
+    },
+    "change": false
+   },
+   "history": [],
+   "before": {
+    "n": 1
+   }
+  },
+  {
+   "store": "shop",
+   "release": "rel_616fcb3e2f7256b761ad884e",
+   "version": "0.0.1",
+   "paid": false,
+   "push": true,
+   "changes": [
+    "app.json",
+    "francois.json"
+   ],
+   "grants": {
+    "have": {
+     "@guest": "interact"
+    },
+    "want": {
+     "@guest": "interact"
+    },
+    "change": false
+   },
+   "history": [],
+   "before": {
+    "n": 1
+   }
+  },
+  {
+   "store": "shop-next",
+   "release": "rel_f5df7c1d082a266d9994af32",
+   "version": "1.0.0",
+   "paid": false,
+   "push": true,
+   "changes": [
+    "app.json",
+    "francois.json"
+   ],
+   "grants": {
+    "have": {
+     "@guest": "interact"
+    },
+    "want": {
+     "@guest": "interact"
+    },
+    "change": false
+   },
+   "history": [],
+   "before": {
+    "n": 1
+   }
+  },
+  {
+   "store": "shop-strata",
+   "release": "rel_42a65a1f0921e50030c49228",
+   "version": "1.0.0",
+   "paid": false,
+   "push": true,
+   "changes": [
+    "app.json",
+    "francois.json"
+   ],
+   "grants": {
+    "have": {
+     "@guest": "interact"
+    },
+    "want": {
+     "@guest": "interact"
+    },
+    "change": false
+   },
+   "history": [],
+   "before": {
+    "n": 1
+   }
+  },
+  {
+   "store": "slopster",
+   "release": "rel_d8968a7de2482cd2df297238",
+   "version": "1.0.0",
+   "paid": false,
+   "push": true,
+   "changes": [
+    "app.json",
+    "francois.json"
+   ],
+   "grants": {
+    "have": {
+     "@guest": "interact"
+    },
+    "want": {
+     "@guest": "interact"
+    },
+    "change": false
+   },
+   "history": [],
+   "before": {
+    "n": 1
+   }
+  },
+  {
+   "store": "so3-playground",
+   "release": "rel_d230ba00f6d0221d303553e9",
+   "version": "0.1.0",
+   "paid": false,
+   "push": true,
+   "changes": [
+    "app.json",
+    "francois.json"
+   ],
+   "grants": {
+    "have": {
+     "@guest": "interact"
+    },
+    "want": {
+     "@guest": "interact"
+    },
+    "change": false
+   },
+   "history": [],
+   "before": {
+    "n": 1
+   }
+  },
+  {
+   "store": "sonnet-new-roman-modular",
+   "release": "rel_5ebf0d1baa5e77cb9a9c655a",
+   "version": "0.1.0",
+   "paid": false,
+   "push": true,
+   "changes": [
+    "app.json",
+    "francois.json"
+   ],
+   "grants": {
+    "have": {
+     "@guest": "interact"
+    },
+    "want": {
+     "@guest": "interact"
+    },
+    "change": false
+   },
+   "history": [],
+   "before": {
+    "n": 1
+   }
+  },
+  {
+   "store": "splice-console",
+   "release": "rel_43932ea70ea3e38133fde757",
+   "version": "1.0.0",
+   "paid": false,
+   "push": true,
+   "changes": [
+    "app.json",
+    "francois.json"
+   ],
+   "grants": {
+    "have": {
+     "@guest": "interact"
+    },
+    "want": {
+     "@guest": "interact"
+    },
+    "change": false
+   },
+   "history": [],
+   "before": {
+    "n": 1
+   }
+  },
+  {
+   "store": "stackchan-pet-studio",
+   "release": "rel_0adadc8a3928e13af2252e14",
+   "version": "0.1.0",
+   "paid": false,
+   "push": true,
+   "changes": [
+    "app.json",
+    "francois.json"
+   ],
+   "grants": {
+    "have": {
+     "@guest": "interact"
+    },
+    "want": {
+     "@guest": "interact"
+    },
+    "change": false
+   },
+   "history": [],
+   "before": {
+    "n": 1
+   }
+  },
+  {
+   "store": "stamen-studio",
+   "release": "rel_91e41d96b2f93df63d42ed5d",
+   "version": "0.1.0",
+   "paid": false,
+   "push": true,
+   "changes": [
+    "app.json",
+    "francois.json"
+   ],
+   "grants": {
+    "have": {
+     "@guest": "interact"
+    },
+    "want": {
+     "@guest": "interact"
+    },
+    "change": false
+   },
+   "history": [],
+   "before": {
+    "n": 1
+   }
+  },
+  {
+   "store": "station-point",
+   "release": "rel_08e6e22e4cbbe2feb4fe04c3",
+   "version": "1.0.0",
+   "paid": false,
+   "push": true,
+   "changes": [
+    "app.json",
+    "francois.json"
+   ],
+   "grants": {
+    "have": {
+     "@guest": "interact"
+    },
+    "want": {
+     "@guest": "interact"
+    },
+    "change": false
+   },
+   "history": [],
+   "before": {
+    "n": 1
+   }
+  },
+  {
+   "store": "tabula-workbench",
+   "release": "rel_708cecd90e56907ea987a987",
+   "version": "0.1.2",
+   "paid": false,
+   "push": true,
+   "changes": [
+    "app.json",
+    "francois.json"
+   ],
+   "grants": {
+    "have": {
+     "@guest": "interact"
+    },
+    "want": {
+     "@guest": "interact"
+    },
+    "change": false
+   },
+   "history": [],
+   "before": {
+    "n": 1
+   }
+  },
+  {
+   "store": "takt",
+   "release": "rel_0b324783a7420d07338415cd",
+   "version": "1.0.0",
+   "paid": false,
+   "push": true,
+   "changes": [
+    "app.json",
+    "francois.json"
+   ],
+   "grants": {
+    "have": {
+     "@guest": "interact"
+    },
+    "want": {
+     "@guest": "interact"
+    },
+    "change": false
+   },
+   "history": [],
+   "before": {
+    "n": 1
+   }
+  },
+  {
+   "store": "takt-workbench",
+   "release": "rel_1fbd642ef14430977edea1dc",
+   "version": "0.1.0",
+   "paid": false,
+   "push": true,
+   "changes": [
+    "app.json",
+    "francois.json"
+   ],
+   "grants": {
+    "have": {
+     "@guest": "interact"
+    },
+    "want": {
+     "@guest": "interact"
+    },
+    "change": false
+   },
+   "history": [],
+   "before": {
+    "n": 1
+   }
+  },
+  {
+   "store": "thought-machines",
+   "release": "rel_f18ae976b17a257c3378a60a",
+   "version": "1.0.0",
+   "paid": false,
+   "push": true,
+   "changes": [
+    "app.json",
+    "francois.json"
+   ],
+   "grants": {
+    "have": {
+     "@guest": "interact"
+    },
+    "want": {
+     "@guest": "interact"
+    },
+    "change": false
+   },
+   "history": [],
+   "before": {
+    "n": 1
+   }
+  },
+  {
+   "store": "tilth-garden",
+   "release": "rel_c3bb9ec8b5df1109dd0851c5",
+   "version": "0.1.0",
+   "paid": false,
+   "push": true,
+   "changes": [
+    "app.json",
+    "francois.json"
+   ],
+   "grants": {
+    "have": {
+     "@guest": "interact"
+    },
+    "want": {
+     "@guest": "interact"
+    },
+    "change": false
+   },
+   "history": [],
+   "before": {
+    "n": 1
+   }
+  },
+  {
+   "store": "tinker",
+   "release": "rel_45bdd94648ea92d392658e49",
+   "version": "1.0.0",
+   "paid": false,
+   "push": true,
+   "changes": [
+    "app.json",
+    "francois.json"
+   ],
+   "grants": {
+    "have": {
+     "@guest": "interact"
+    },
+    "want": {
+     "@guest": "interact"
+    },
+    "change": false
+   },
+   "history": [],
+   "before": {
+    "n": 1
+   }
+  },
+  {
+   "store": "transcript-hub",
+   "release": "rel_062c8cee9c90ece312806850",
+   "version": "0.1.0",
+   "paid": false,
+   "push": true,
+   "changes": [
+    "app.json",
+    "francois.json"
+   ],
+   "grants": {
+    "have": {
+     "@guest": "interact"
+    },
+    "want": {
+     "@guest": "interact"
+    },
+    "change": false
+   },
+   "history": [],
+   "before": {
+    "n": 1
+   }
+  },
+  {
+   "store": "twin-motion-ide",
+   "release": "rel_ee484e2da3c49c4a9bdad47b",
+   "version": "0.1.0",
+   "paid": false,
+   "push": true,
+   "changes": [
+    "app.json",
+    "francois.json"
+   ],
+   "grants": {
+    "have": {
+     "@guest": "interact"
+    },
+    "want": {
+     "@guest": "interact"
+    },
+    "change": false
+   },
+   "history": [],
+   "before": {
+    "n": 1
+   }
+  },
+  {
+   "store": "twin-render-playground",
+   "release": "rel_5f72c401966c399667eec4b4",
+   "version": "0.1.0",
+   "paid": false,
+   "push": true,
+   "changes": [
+    "app.json",
+    "francois.json"
+   ],
+   "grants": {
+    "have": {
+     "@guest": "interact"
+    },
+    "want": {
+     "@guest": "interact"
+    },
+    "change": false
+   },
+   "history": [],
+   "before": {
+    "n": 1
+   }
+  },
+  {
+   "store": "type-studio",
+   "release": "rel_50060adbeea2c11b662350b7",
+   "version": "1.0.0",
+   "paid": false,
+   "push": true,
+   "changes": [
+    "app.json",
+    "francois.json"
+   ],
+   "grants": {
+    "have": {
+     "@guest": "interact"
+    },
+    "want": {
+     "@guest": "interact"
+    },
+    "change": false
+   },
+   "history": [],
+   "before": {
+    "n": 1
+   }
+  },
+  {
+   "store": "uncommon-math",
+   "release": "rel_a987dc374f722feccad1502c",
+   "version": "0.1.0",
+   "paid": false,
+   "push": true,
+   "changes": [
+    "app.json",
+    "francois.json"
+   ],
+   "grants": {
+    "have": {
+     "@guest": "interact"
+    },
+    "want": {
+     "@guest": "interact"
+    },
+    "change": false
+   },
+   "history": [],
+   "before": {
+    "n": 1
+   }
+  },
+  {
+   "store": "vigil",
+   "release": "rel_33531694e7509bab72f0d2fa",
+   "version": "1.0.0",
+   "paid": false,
+   "push": true,
+   "changes": [
+    "app.json",
+    "francois.json"
+   ],
+   "grants": {
+    "have": {
+     "@guest": "interact"
+    },
+    "want": {
+     "@guest": "interact"
+    },
+    "change": false
+   },
+   "history": [],
+   "before": {
+    "n": 1
+   }
+  },
+  {
+   "store": "visiting-hours",
+   "release": "rel_315d42269b146dbb47ddc31b",
+   "version": "1.0.0",
+   "paid": false,
+   "push": true,
+   "changes": [
+    "app.json",
+    "francois.json"
+   ],
+   "grants": {
+    "have": {
+     "@guest": "interact"
+    },
+    "want": {
+     "@guest": "interact"
+    },
+    "change": false
+   },
+   "history": [],
+   "before": {
+    "n": 1
+   }
+  },
+  {
+   "store": "vitrine",
+   "release": "rel_fed9e33471f6dbfac3842dd7",
+   "version": "1.0.0",
+   "paid": false,
+   "push": true,
+   "changes": [
+    "app.json",
+    "francois.json"
+   ],
+   "grants": {
+    "have": {
+     "@guest": "interact"
+    },
+    "want": {
+     "@guest": "interact"
+    },
+    "change": false
+   },
+   "history": [],
+   "before": {
+    "n": 1
+   }
+  },
+  {
+   "store": "weft",
+   "release": "rel_75b2d615420432fd88a7365c",
+   "version": "1.0.0",
+   "paid": false,
+   "push": true,
+   "changes": [
+    "app.json",
+    "francois.json"
+   ],
+   "grants": {
+    "have": {
+     "@guest": "interact"
+    },
+    "want": {
+     "@guest": "interact"
+    },
+    "change": false
+   },
+   "history": [],
+   "before": {
+    "n": 1
+   }
+  },
+  {
+   "store": "wend",
+   "release": "rel_bd5d635bd2fe077f44148fab",
+   "version": "1.0.0",
+   "paid": false,
+   "push": true,
+   "changes": [
+    "app.json",
+    "francois.json"
+   ],
+   "grants": {
+    "have": {
+     "@guest": "interact"
+    },
+    "want": {
+     "@guest": "interact"
+    },
+    "change": false
+   },
+   "history": [],
+   "before": {
+    "n": 1
+   }
+  },
+  {
+   "store": "wildforge",
+   "release": "rel_f4ed566cd4c46a24c2140996",
+   "version": "1.0.0",
+   "paid": false,
+   "push": true,
+   "changes": [
+    "app.json",
+    "francois.json"
+   ],
+   "grants": {
+    "have": {
+     "@guest": "interact"
+    },
+    "want": {
+     "@guest": "interact"
+    },
+    "change": false
+   },
+   "history": [],
+   "before": {
+    "n": 1
+   }
+  },
+  {
+   "store": "xenoform-studio",
+   "release": "rel_6f418cb14353e0bacced6941",
+   "version": "0.1.0",
+   "paid": false,
+   "push": true,
+   "changes": [
+    "app.json",
+    "francois.json"
+   ],
+   "grants": {
+    "have": {
+     "@guest": "interact"
+    },
+    "want": {
+     "@guest": "interact"
+    },
+    "change": false
+   },
+   "history": [],
+   "before": {
+    "n": 1
+   }
+  }
+ ]
+}

@@ -1,0 +1,146 @@
+server https://slop.yolo.scapegoat.dev; inventory 2026-11-06T22:14:20Z; 103 stores
+  living-comic-studio                      paid 0.1.0    html,app.json,provenance
+  loom-brawl                               free 1.0.0    app.json,provenance
+  loom-city                                free 1.0.0    app.json,provenance
+  loom-hours                               free 1.0.0    app.json,provenance
+  loom-humanoids-in-the-factory            free 1.0.0    app.json,provenance
+  loom-pitch                               free 1.0.0    app.json,provenance
+  loom-playtime                            free 1.0.0    app.json,provenance
+  loom-wilds                               free 1.0.0    app.json,provenance
+  loom-worlds                              free 1.0.0    app.json,provenance
+  lowpoly-fx                               free 0.1.0    app.json,provenance
+  lumen-studio                             free 1.0.0    app.json,provenance
+  machine-zone                             free 1.0.0    app.json,provenance
+  metropolis                               free 1.0.0    app.json,provenance
+  millwright                               free 0.1.0    app.json,provenance
+  mimeo                                    paid 0.1.0    html,app.json,provenance grants→@subscriber
+  mimeo-studio                             free 0.1.0    app.json,provenance
+  mossbloom                                free 1.0.0    app.json,provenance
+  mossbrook                                free 1.0.0    app.json,provenance
+  nerve-workbench                          free 0.1.0    app.json,provenance
+  no-dom-the-interface-is-a-projection     paid 1.0.0    html,app.json,provenance grants→@subscriber
+  no-shade                                 free 1.0.0    app.json,provenance
+  note-g                                   free 1.0.0    app.json,provenance
+  octavo-ide                               free 0.1.0    app.json,provenance
+  octavo-lab                               paid 0.1.0    html,app.json,provenance grants→@subscriber
+  on-twos                                  free 1.0.0    app.json,provenance
+  overshoot                                free 1.0.0    app.json,provenance
+  patent-drawer                            free 1.0.0    app.json,provenance
+  plads                                    free 1.0.0    app.json,provenance
+  plenum-studio                            free 1.0.0    app.json,provenance
+  pointfield-cad                           free 1.0.0    app.json,provenance
+  porous-forge                             free 1.0.0    app.json,provenance
+  port-wright                              free 1.0.0    app.json,provenance
+  possie-toybox                            free 1.0.0    app.json,provenance
+  pre-textile-atelier                      free 1.0.0    app.json,provenance
+  rag-workbench                            free 0.1.3    app.json,provenance
+  roomba-rooms                             free 1.0.0    app.json,provenance
+  shop                                     free 0.0.1    app.json,provenance
+  shop-next                                free 1.0.0    app.json,provenance
+  shop-strata                              free 1.0.0    app.json,provenance
+  slopster                                 free 1.0.0    app.json,provenance
+  so3-playground                           free 0.1.0    app.json,provenance
+  sonnet-new-roman-modular                 free 0.1.0    app.json,provenance
+  splice-console                           free 1.0.0    app.json,provenance
+  stackchan-pet-studio                     free 0.1.0    app.json,provenance
+  stamen-studio                            free 0.1.0    app.json,provenance
+  station-point                            free 1.0.0    app.json,provenance
+  tabula-workbench                         free 0.1.2    app.json,provenance
+  takt                                     free 1.0.0    app.json,provenance
+  takt-workbench                           free 0.1.0    app.json,provenance
+  thought-machines                         free 1.0.0    app.json,provenance
+  tilth-garden                             free 0.1.0    app.json,provenance
+  tinker                                   free 1.0.0    app.json,provenance
+  transcript-hub                           free 0.1.0    app.json,provenance
+  twin-motion-ide                          free 0.1.0    app.json,provenance
+  twin-render-playground                   free 0.1.0    app.json,provenance
+  type-studio                              free 1.0.0    app.json,provenance
+  uncommon-math                            free 0.1.0    app.json,provenance
+  vigil                                    free 1.0.0    app.json,provenance
+  visiting-hours                           free 1.0.0    app.json,provenance
+  vitrine                                  free 1.0.0    app.json,provenance
+  weft                                     free 1.0.0    app.json,provenance
+  wend                                     free 1.0.0    app.json,provenance
+  wildforge                                free 1.0.0    app.json,provenance
+  xenoform-studio                          free 0.1.0    app.json,provenance
+  skip aasd                                artifact                               no published release
+  skip lattice-deck                        rel_08a7a6168371c71f285397d6 0.1.0     paid release in a public store
+  skip lattice-deck                        rel_7eb142a73b88a690d042c952 0.1.1     paid release in a public store
+  skip lattice-phantasmagoria              rel_7666279d21ac37718f31e4e7 0.1.0     paid release in a public store
+  skip lattice-rift                        rel_cdc4426a42fefb2c512d77f6 0.1.0     paid release in a public store
+  skip lattice-rift                        rel_1e376f5c236cec83a1ee6f53 0.1.1     paid release in a public store
+  skip rag-workbench                       rel_48bc7b49c104ed89526e6249 0.1.0     withdrawn
+  skip rag-workbench                       rel_87f08be07833f2a4c43ac4e1 0.1.1     withdrawn
+  skip rag-workbench                       rel_fefc379a622251ad5c4cbbe0 0.1.2     withdrawn
+  skip tabula-workbench                    rel_a9d88eeef8c8cc334341e117 0.1.0     paid release in a public store
+  skip tabula-workbench                    rel_d8227318d8645a1409d1a73c 0.1.1     paid release in a public store
+plan: 64 pushes ({'html': 4, 'app.json': 64, 'provenance': 64}), 3 grant changes, 0 history snapshots, 11 skipped
+living-comic-studio                      main 0.1.0 → snapshot 2 (html, app.json, provenance; uploaded 7,909,758 B)
+loom-brawl                               main 1.0.0 → snapshot 2 (app.json, provenance; uploaded 0 B)
+loom-city                                main 1.0.0 → snapshot 2 (app.json, provenance; uploaded 0 B)
+loom-hours                               main 1.0.0 → snapshot 2 (app.json, provenance; uploaded 0 B)
+loom-humanoids-in-the-factory            main 1.0.0 → snapshot 2 (app.json, provenance; uploaded 0 B)
+loom-pitch                               main 1.0.0 → snapshot 2 (app.json, provenance; uploaded 0 B)
+loom-playtime                            main 1.0.0 → snapshot 2 (app.json, provenance; uploaded 0 B)
+loom-wilds                               main 1.0.0 → snapshot 2 (app.json, provenance; uploaded 0 B)
+loom-worlds                              main 1.0.0 → snapshot 2 (app.json, provenance; uploaded 0 B)
+lowpoly-fx                               main 0.1.0 → snapshot 2 (app.json, provenance; uploaded 0 B)
+lumen-studio                             main 1.0.0 → snapshot 2 (app.json, provenance; uploaded 0 B)
+machine-zone                             main 1.0.0 → snapshot 2 (app.json, provenance; uploaded 0 B)
+metropolis                               main 1.0.0 → snapshot 2 (app.json, provenance; uploaded 0 B)
+millwright                               main 0.1.0 → snapshot 2 (app.json, provenance; uploaded 0 B)
+mimeo                                    main 0.1.0 → snapshot 2 (html, app.json, provenance; uploaded 997,162 B)
+mimeo                                    grants {'@guest': 'interact'} → {'@subscriber': 'interact'}
+mimeo-studio                             main 0.1.0 → snapshot 2 (app.json, provenance; uploaded 0 B)
+mossbloom                                main 1.0.0 → snapshot 2 (app.json, provenance; uploaded 0 B)
+mossbrook                                main 1.0.0 → snapshot 2 (app.json, provenance; uploaded 0 B)
+nerve-workbench                          main 0.1.0 → snapshot 2 (app.json, provenance; uploaded 0 B)
+no-dom-the-interface-is-a-projection     main 1.0.0 → snapshot 2 (html, app.json, provenance; uploaded 90,105 B)
+no-dom-the-interface-is-a-projection     grants {'@guest': 'interact'} → {'@subscriber': 'interact'}
+no-shade                                 main 1.0.0 → snapshot 2 (app.json, provenance; uploaded 0 B)
+note-g                                   main 1.0.0 → snapshot 2 (app.json, provenance; uploaded 0 B)
+octavo-ide                               main 0.1.0 → snapshot 2 (app.json, provenance; uploaded 0 B)
+octavo-lab                               main 0.1.0 → snapshot 2 (html, app.json, provenance; uploaded 1,063,955 B)
+octavo-lab                               grants {'@guest': 'interact'} → {'@subscriber': 'interact'}
+on-twos                                  main 1.0.0 → snapshot 2 (app.json, provenance; uploaded 0 B)
+overshoot                                main 1.0.0 → snapshot 2 (app.json, provenance; uploaded 0 B)
+patent-drawer                            main 1.0.0 → snapshot 2 (app.json, provenance; uploaded 0 B)
+plads                                    main 1.0.0 → snapshot 2 (app.json, provenance; uploaded 0 B)
+plenum-studio                            main 1.0.0 → snapshot 2 (app.json, provenance; uploaded 0 B)
+pointfield-cad                           main 1.0.0 → snapshot 2 (app.json, provenance; uploaded 0 B)
+porous-forge                             main 1.0.0 → snapshot 2 (app.json, provenance; uploaded 0 B)
+port-wright                              main 1.0.0 → snapshot 2 (app.json, provenance; uploaded 0 B)
+possie-toybox                            main 1.0.0 → snapshot 2 (app.json, provenance; uploaded 0 B)
+pre-textile-atelier                      main 1.0.0 → snapshot 2 (app.json, provenance; uploaded 0 B)
+rag-workbench                            main 0.1.3 → snapshot 2 (app.json, provenance; uploaded 0 B)
+roomba-rooms                             main 1.0.0 → snapshot 2 (app.json, provenance; uploaded 0 B)
+shop                                     main 0.0.1 → snapshot 2 (app.json, provenance; uploaded 0 B)
+shop-next                                main 1.0.0 → snapshot 2 (app.json, provenance; uploaded 0 B)
+shop-strata                              main 1.0.0 → snapshot 2 (app.json, provenance; uploaded 0 B)
+slopster                                 main 1.0.0 → snapshot 2 (app.json, provenance; uploaded 0 B)
+so3-playground                           main 0.1.0 → snapshot 2 (app.json, provenance; uploaded 0 B)
+sonnet-new-roman-modular                 main 0.1.0 → snapshot 2 (app.json, provenance; uploaded 0 B)
+splice-console                           main 1.0.0 → snapshot 2 (app.json, provenance; uploaded 0 B)
+stackchan-pet-studio                     main 0.1.0 → snapshot 2 (app.json, provenance; uploaded 0 B)
+stamen-studio                            main 0.1.0 → snapshot 2 (app.json, provenance; uploaded 0 B)
+station-point                            main 1.0.0 → snapshot 2 (app.json, provenance; uploaded 0 B)
+tabula-workbench                         main 0.1.2 → snapshot 2 (app.json, provenance; uploaded 0 B)
+takt                                     main 1.0.0 → snapshot 2 (app.json, provenance; uploaded 0 B)
+takt-workbench                           main 0.1.0 → snapshot 2 (app.json, provenance; uploaded 0 B)
+thought-machines                         main 1.0.0 → snapshot 2 (app.json, provenance; uploaded 0 B)
+tilth-garden                             main 0.1.0 → snapshot 2 (app.json, provenance; uploaded 0 B)
+tinker                                   main 1.0.0 → snapshot 2 (app.json, provenance; uploaded 0 B)
+transcript-hub                           main 0.1.0 → snapshot 2 (app.json, provenance; uploaded 0 B)
+twin-motion-ide                          main 0.1.0 → snapshot 2 (app.json, provenance; uploaded 0 B)
+twin-render-playground                   main 0.1.0 → snapshot 2 (app.json, provenance; uploaded 0 B)
+type-studio                              main 1.0.0 → snapshot 2 (app.json, provenance; uploaded 0 B)
+uncommon-math                            main 0.1.0 → snapshot 2 (app.json, provenance; uploaded 0 B)
+vigil                                    main 1.0.0 → snapshot 2 (app.json, provenance; uploaded 0 B)
+visiting-hours                           main 1.0.0 → snapshot 2 (app.json, provenance; uploaded 0 B)
+vitrine                                  main 1.0.0 → snapshot 2 (app.json, provenance; uploaded 0 B)
+weft                                     main 1.0.0 → snapshot 2 (app.json, provenance; uploaded 0 B)
+wend                                     main 1.0.0 → snapshot 2 (app.json, provenance; uploaded 0 B)
+wildforge                                main 1.0.0 → snapshot 2 (app.json, provenance; uploaded 0 B)
+xenoform-studio                          main 0.1.0 → snapshot 2 (app.json, provenance; uploaded 0 B)
+applied
+exit 0

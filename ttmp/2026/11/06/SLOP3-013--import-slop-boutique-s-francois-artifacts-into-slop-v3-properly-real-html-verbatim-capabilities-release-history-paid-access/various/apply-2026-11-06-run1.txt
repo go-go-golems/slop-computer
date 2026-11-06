@@ -1,0 +1,176 @@
+server https://slop.yolo.scapegoat.dev; inventory 2026-11-06T22:14:20Z; 103 stores
+  agent-gym-works                          free 0.1.0    app.json,provenance
+  bench-twin                               free 0.1.0    app.json,provenance
+  beton-brut-studio                        free 1.0.0    app.json,provenance
+  blockout-studio                          paid 1.0.0    html,app.json,provenance grants→@subscriber
+  blueprint-house                          free 1.0.0    app.json,provenance
+  blueprint-mech                           free 1.0.0    app.json,provenance
+  blueprint-physics-kit                    free 1.0.0    app.json,provenance
+  brand-crystal                            free 1.0.0    app.json,provenance
+  brickwork                                free 0.1.0    app.json,provenance
+  claude-computer                          free 1.0.0    app.json,provenance
+  craftkit-studio                          free 0.1.0    app.json,provenance
+  craftkit-workbench                       free 0.1.0    app.json,provenance
+  derived-not-fixed                        free 1.0.0    app.json,provenance
+  diary-workbench                          free 0.1.0    app.json,provenance
+  dockermetrics-ide                        free 0.1.0    app.json,provenance
+  ds-shader-sketchbook                     free 0.1.0    app.json,provenance
+  exposure-studio                          free 1.0.0    app.json,provenance
+  fluchtlinie                              free 1.0.0    app.json,provenance
+  form-skate-workbench                     free 0.1.0    app.json,provenance
+  fringe-studio                            free 1.0.0    app.json,provenance
+  graveler-lab                             free 0.1.0    app.json,provenance
+  halo-field                               free 0.1.0    app.json,provenance
+  hypercore-studio                         paid 0.1.0    html,app.json,provenance grants→@subscriber
+  kiln-studio                              free 0.1.0    app.json,provenance
+  kiln-workbench                           paid 0.1.0    html,app.json,provenance grants→@subscriber
+  kinescope                                free 1.0.0    app.json,provenance
+  kustenlinie                              free 1.0.0    app.json,provenance
+  lab-104-factory-twin                     free 0.1.0    app.json,provenance
+  lantern-slide-studio                     free 0.1.0    app.json,provenance
+  lastwork-foundry                         free 1.0.0    app.json,provenance
+  lattice-arcade                           free 0.1.0    app.json,provenance
+  lattice-arena                            free 0.1.0    app.json,provenance
+  lattice-arena-ds                         free 0.1.0    app.json,provenance
+  lattice-deck                             free 0.1.2    app.json,provenance
+  lattice-phantasmagoria                   free 0.1.2    app.json,provenance
+  lattice-rift                             free 0.1.2    app.json,provenance
+  lie-group-ik-playground                  free 0.1.0    app.json,provenance
+  live-embedding-viewer                    free 0.1.0    app.json,provenance
+  living-comic-studio                      paid 0.1.0    html,app.json,provenance grants→@subscriber
+  loom-brawl                               free 1.0.0    app.json,provenance
+  loom-city                                free 1.0.0    app.json,provenance
+  loom-hours                               free 1.0.0    app.json,provenance
+  loom-humanoids-in-the-factory            free 1.0.0    app.json,provenance
+  loom-pitch                               free 1.0.0    app.json,provenance
+  loom-playtime                            free 1.0.0    app.json,provenance
+  loom-wilds                               free 1.0.0    app.json,provenance
+  loom-worlds                              free 1.0.0    app.json,provenance
+  lowpoly-fx                               free 0.1.0    app.json,provenance
+  lumen-studio                             free 1.0.0    app.json,provenance
+  machine-zone                             free 1.0.0    app.json,provenance
+  metropolis                               free 1.0.0    app.json,provenance
+  millwright                               free 0.1.0    app.json,provenance
+  mimeo                                    paid 0.1.0    html,app.json,provenance grants→@subscriber
+  mimeo-studio                             free 0.1.0    app.json,provenance
+  mossbloom                                free 1.0.0    app.json,provenance
+  mossbrook                                free 1.0.0    app.json,provenance
+  nerve-workbench                          free 0.1.0    app.json,provenance
+  no-dom-the-interface-is-a-projection     paid 1.0.0    html,app.json,provenance grants→@subscriber
+  no-shade                                 free 1.0.0    app.json,provenance
+  note-g                                   free 1.0.0    app.json,provenance
+  octavo-ide                               free 0.1.0    app.json,provenance
+  octavo-lab                               paid 0.1.0    html,app.json,provenance grants→@subscriber
+  on-twos                                  free 1.0.0    app.json,provenance
+  overshoot                                free 1.0.0    app.json,provenance
+  patent-drawer                            free 1.0.0    app.json,provenance
+  plads                                    free 1.0.0    app.json,provenance
+  plenum-studio                            free 1.0.0    app.json,provenance
+  pointfield-cad                           free 1.0.0    app.json,provenance
+  porous-forge                             free 1.0.0    app.json,provenance
+  port-wright                              free 1.0.0    app.json,provenance
+  possie-toybox                            free 1.0.0    app.json,provenance
+  pre-textile-atelier                      free 1.0.0    app.json,provenance
+  rag-workbench                            free 0.1.3    app.json,provenance
+  roomba-rooms                             free 1.0.0    app.json,provenance
+  shop                                     free 0.0.1    app.json,provenance
+  shop-next                                free 1.0.0    app.json,provenance
+  shop-strata                              free 1.0.0    app.json,provenance
+  slopster                                 free 1.0.0    app.json,provenance
+  so3-playground                           free 0.1.0    app.json,provenance
+  sonnet-new-roman-modular                 free 0.1.0    app.json,provenance
+  splice-console                           free 1.0.0    app.json,provenance
+  stackchan-pet-studio                     free 0.1.0    app.json,provenance
+  stamen-studio                            free 0.1.0    app.json,provenance
+  station-point                            free 1.0.0    app.json,provenance
+  tabula-workbench                         free 0.1.2    app.json,provenance
+  takt                                     free 1.0.0    app.json,provenance
+  takt-workbench                           free 0.1.0    app.json,provenance
+  thought-machines                         free 1.0.0    app.json,provenance
+  tilth-garden                             free 0.1.0    app.json,provenance
+  tinker                                   free 1.0.0    app.json,provenance
+  transcript-hub                           free 0.1.0    app.json,provenance
+  twin-motion-ide                          free 0.1.0    app.json,provenance
+  twin-render-playground                   free 0.1.0    app.json,provenance
+  type-studio                              free 1.0.0    app.json,provenance
+  uncommon-math                            free 0.1.0    app.json,provenance
+  vigil                                    free 1.0.0    app.json,provenance
+  visiting-hours                           free 1.0.0    app.json,provenance
+  vitrine                                  free 1.0.0    app.json,provenance
+  weft                                     free 1.0.0    app.json,provenance
+  wend                                     free 1.0.0    app.json,provenance
+  wildforge                                free 1.0.0    app.json,provenance
+  xenoform-studio                          free 0.1.0    app.json,provenance
+  skip aasd                                artifact                               no published release
+  skip lattice-deck                        rel_08a7a6168371c71f285397d6 0.1.0     paid release in a public store
+  skip lattice-deck                        rel_7eb142a73b88a690d042c952 0.1.1     paid release in a public store
+  skip lattice-phantasmagoria              rel_7666279d21ac37718f31e4e7 0.1.0     paid release in a public store
+  skip lattice-rift                        rel_cdc4426a42fefb2c512d77f6 0.1.0     paid release in a public store
+  skip lattice-rift                        rel_1e376f5c236cec83a1ee6f53 0.1.1     paid release in a public store
+  skip rag-workbench                       rel_48bc7b49c104ed89526e6249 0.1.0     withdrawn
+  skip rag-workbench                       rel_87f08be07833f2a4c43ac4e1 0.1.1     withdrawn
+  skip rag-workbench                       rel_fefc379a622251ad5c4cbbe0 0.1.2     withdrawn
+  skip tabula-workbench                    rel_a9d88eeef8c8cc334341e117 0.1.0     paid release in a public store
+  skip tabula-workbench                    rel_d8227318d8645a1409d1a73c 0.1.1     paid release in a public store
+plan: 102 pushes ({'app.json': 102, 'provenance': 102, 'html': 7}), 7 grant changes, 0 history snapshots, 11 skipped
+agent-gym-works                          main 0.1.0 → snapshot 2 (app.json, provenance; uploaded 0 B)
+bench-twin                               main 0.1.0 → snapshot 2 (app.json, provenance; uploaded 0 B)
+beton-brut-studio                        main 1.0.0 → snapshot 2 (app.json, provenance; uploaded 0 B)
+blockout-studio                          main 1.0.0 → snapshot 2 (html, app.json, provenance; uploaded 569,358 B)
+blockout-studio                          grants {'@guest': 'interact'} → {'@subscriber': 'interact'}
+blueprint-house                          main 1.0.0 → snapshot 2 (app.json, provenance; uploaded 0 B)
+blueprint-mech                           main 1.0.0 → snapshot 2 (app.json, provenance; uploaded 0 B)
+blueprint-physics-kit                    main 1.0.0 → snapshot 2 (app.json, provenance; uploaded 0 B)
+brand-crystal                            main 1.0.0 → snapshot 2 (app.json, provenance; uploaded 0 B)
+brickwork                                main 0.1.0 → snapshot 2 (app.json, provenance; uploaded 0 B)
+claude-computer                          main 1.0.0 → snapshot 2 (app.json, provenance; uploaded 0 B)
+craftkit-studio                          main 0.1.0 → snapshot 2 (app.json, provenance; uploaded 0 B)
+craftkit-workbench                       main 0.1.0 → snapshot 2 (app.json, provenance; uploaded 0 B)
+derived-not-fixed                        main 1.0.0 → snapshot 2 (app.json, provenance; uploaded 0 B)
+diary-workbench                          main 0.1.0 → snapshot 2 (app.json, provenance; uploaded 0 B)
+dockermetrics-ide                        main 0.1.0 → snapshot 2 (app.json, provenance; uploaded 0 B)
+ds-shader-sketchbook                     main 0.1.0 → snapshot 2 (app.json, provenance; uploaded 0 B)
+exposure-studio                          main 1.0.0 → snapshot 2 (app.json, provenance; uploaded 0 B)
+fluchtlinie                              main 1.0.0 → snapshot 2 (app.json, provenance; uploaded 0 B)
+form-skate-workbench                     main 0.1.0 → snapshot 2 (app.json, provenance; uploaded 0 B)
+fringe-studio                            main 1.0.0 → snapshot 2 (app.json, provenance; uploaded 0 B)
+graveler-lab                             main 0.1.0 → snapshot 2 (app.json, provenance; uploaded 0 B)
+halo-field                               main 0.1.0 → snapshot 2 (app.json, provenance; uploaded 0 B)
+hypercore-studio                         main 0.1.0 → snapshot 2 (html, app.json, provenance; uploaded 8,179,289 B)
+hypercore-studio                         grants {'@guest': 'interact'} → {'@subscriber': 'interact'}
+kiln-studio                              main 0.1.0 → snapshot 2 (app.json, provenance; uploaded 0 B)
+kiln-workbench                           main 0.1.0 → snapshot 2 (html, app.json, provenance; uploaded 743,173 B)
+kiln-workbench                           grants {'@guest': 'interact'} → {'@subscriber': 'interact'}
+kinescope                                main 1.0.0 → snapshot 2 (app.json, provenance; uploaded 0 B)
+kustenlinie                              main 1.0.0 → snapshot 2 (app.json, provenance; uploaded 0 B)
+lab-104-factory-twin                     main 0.1.0 → snapshot 2 (app.json, provenance; uploaded 0 B)
+lantern-slide-studio                     main 0.1.0 → snapshot 2 (app.json, provenance; uploaded 0 B)
+lastwork-foundry                         main 1.0.0 → snapshot 2 (app.json, provenance; uploaded 0 B)
+lattice-arcade                           main 0.1.0 → snapshot 2 (app.json, provenance; uploaded 0 B)
+lattice-arena                            main 0.1.0 → snapshot 2 (app.json, provenance; uploaded 0 B)
+lattice-arena-ds                         main 0.1.0 → snapshot 2 (app.json, provenance; uploaded 0 B)
+lattice-deck                             main 0.1.2 → snapshot 2 (app.json, provenance; uploaded 0 B)
+lattice-phantasmagoria                   main 0.1.2 → snapshot 2 (app.json, provenance; uploaded 0 B)
+lattice-rift                             main 0.1.2 → snapshot 2 (app.json, provenance; uploaded 0 B)
+lie-group-ik-playground                  main 0.1.0 → snapshot 2 (app.json, provenance; uploaded 0 B)
+live-embedding-viewer                    main 0.1.0 → snapshot 2 (app.json, provenance; uploaded 0 B)
+Traceback (most recent call last):
+  File "/tmp/claude-1000/-home-manuel-workspaces-2026-10-28-slop-computer-slop-computer/7fa934c5-45f7-43c5-9ffb-d734dcfbe139/scratchpad/slop013/ttmp/2026/11/06/SLOP3-013--import-slop-boutique-s-francois-artifacts-into-slop-v3-properly-real-html-verbatim-capabilities-release-history-paid-access/scripts/03-import.py", line 383, in <module>
+    main()
+  File "/tmp/claude-1000/-home-manuel-workspaces-2026-10-28-slop-computer-slop-computer/7fa934c5-45f7-43c5-9ffb-d734dcfbe139/scratchpad/slop013/ttmp/2026/11/06/SLOP3-013--import-slop-boutique-s-francois-artifacts-into-slop-v3-properly-real-html-verbatim-capabilities-release-history-paid-access/scripts/03-import.py", line 377, in main
+    apply(slop, plans, Blobs(a.blob_cache, a.blobs_from), logf)
+  File "/tmp/claude-1000/-home-manuel-workspaces-2026-10-28-slop-computer-slop-computer/7fa934c5-45f7-43c5-9ffb-d734dcfbe139/scratchpad/slop013/ttmp/2026/11/06/SLOP3-013--import-slop-boutique-s-francois-artifacts-into-slop-v3-properly-real-html-verbatim-capabilities-release-history-paid-access/scripts/03-import.py", line 319, in apply
+    res, sent = push(slop, blobs, sid, p["_tree"], f"francois {p['release']} {p['version']}")
+                ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/tmp/claude-1000/-home-manuel-workspaces-2026-10-28-slop-computer-slop-computer/7fa934c5-45f7-43c5-9ffb-d734dcfbe139/scratchpad/slop013/ttmp/2026/11/06/SLOP3-013--import-slop-boutique-s-francois-artifacts-into-slop-v3-properly-real-html-verbatim-capabilities-release-history-paid-access/scripts/03-import.py", line 278, in push
+    data = blobs.get(d, *keys[d])
+           ^^^^^^^^^^^^^^^^^^^^^^
+  File "/tmp/claude-1000/-home-manuel-workspaces-2026-10-28-slop-computer-slop-computer/7fa934c5-45f7-43c5-9ffb-d734dcfbe139/scratchpad/slop013/ttmp/2026/11/06/SLOP3-013--import-slop-boutique-s-francois-artifacts-into-slop-v3-properly-real-html-verbatim-capabilities-release-history-paid-access/scripts/03-import.py", line 254, in get
+    data = self.fetch(key, size)
+           ^^^^^^^^^^^^^^^^^^^^^
+  File "/tmp/claude-1000/-home-manuel-workspaces-2026-10-28-slop-computer-slop-computer/7fa934c5-45f7-43c5-9ffb-d734dcfbe139/scratchpad/slop013/ttmp/2026/11/06/SLOP3-013--import-slop-boutique-s-francois-artifacts-into-slop-v3-properly-real-html-verbatim-capabilities-release-history-paid-access/scripts/03-import.py", line 237, in fetch
+    piece = subprocess.run(["kubectl", "exec", "-n", "francois", "deploy/francois", "--", "sh", "-c",
+            ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/home/manuel/.pyenv/versions/3.11.3/lib/python3.11/subprocess.py", line 571, in run
+    raise CalledProcessError(retcode, process.args,
+subprocess.CalledProcessError: Command '['kubectl', 'exec', '-n', 'francois', 'deploy/francois', '--', 'sh', '-c', 'tail -c +4194305 "$0" | head -c 3715454', '/var/lib/francois/releases/blobs/a7/a7562f22498fa7097a97b378e018610b1c238179f1ba04df88faf076f1c7f6fd']' returned non-zero exit status 1.
