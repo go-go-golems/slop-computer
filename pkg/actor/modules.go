@@ -30,6 +30,8 @@ func (a *Actor) module(name string) goja.Value {
 		return a.sqlModule()
 	case "database":
 		return a.databaseModule(DatabaseConfig{})
+	case "express":
+		return a.expressModule()
 	case "db":
 		return a.dbModule()
 	case "files":

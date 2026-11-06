@@ -128,6 +128,12 @@ type Actor struct {
 
 	storage  goja.Value // use('storage'), built on first use (storage.go)
 	database goja.Value // use('database'), built on first use (database.go)
+	express  goja.Value // use('express'), built on first use (express.go)
+	// loading is true while actor.js (and what it requires) runs: the only
+	// time express routes may register; pending holds them until build
+	// merges them into def.http.
+	loading bool
+	pending []pendingRoute
 	// savepoints are the open database.begin() handles of the current
 	// turn, outermost first; seq names them.
 	savepoints []*savepoint
@@ -198,7 +204,9 @@ func build(m *Manager, st *store.Store, run kernel.Running, files map[string][]b
 		return nil, err
 	}
 	timer := time.AfterFunc(TurnLimit, func() { a.vm.Interrupt("actor.js took too long to load") })
+	a.loading = true
 	_, err := a.vm.RunScript(entry, string(src))
+	a.loading = false
 	timer.Stop()
 	a.vm.ClearInterrupt()
 	if err != nil {
@@ -206,6 +214,9 @@ func build(m *Manager, st *store.Store, run kernel.Running, files map[string][]b
 	}
 	if a.def == nil {
 		return nil, fail("actor_error", "%s did not call defineActor", entry)
+	}
+	if err := a.mergeRoutes(); err != nil {
+		return nil, fail("actor_error", "%s: %v", entry, err)
 	}
 	if err := a.readShape(); err != nil {
 		return nil, fail("actor_error", "%s: %v", entry, err)
