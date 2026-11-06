@@ -62,6 +62,7 @@ type (
 	mountEnv   struct {
 		kernelEnv
 		Cfg *config.Config
+		A   *actor.Manager // restarts actors when a mount's API policy changes (nil in tests without actors)
 	}
 	peopleEnv struct {
 		People *identity.Accounts

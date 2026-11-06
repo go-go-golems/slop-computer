@@ -21,23 +21,30 @@ type Mount struct {
 	CreateAudience string `json:"createAudience,omitempty"` // who may create: member, subscriber or admin
 	// Aliases bind each store the mount creates (with CreateApp): bindings
 	// without their store, which is the new one (SLOP3-008 phase 4).
-	Aliases   []Binding `json:"aliases,omitempty"`
+	Aliases []Binding `json:"aliases,omitempty"`
+	// API is the mount's API policy (SLOP3-012): nil serves every actor
+	// route of the store, as before.
+	API       *MountAPI `json:"api,omitempty"`
 	ChangedBy string    `json:"changedBy,omitempty"`
 	ChangedAt int64     `json:"changedAt"`
 }
 
 const mountCols = `host, path, coalesce(store, ''), coalesce(store_param, ''), coalesce(type, ''), coalesce(create_app, ''),
-	coalesce(create_audience, ''), aliases, coalesce(changed_by, ''), changed_at`
+	coalesce(create_audience, ''), aliases, api, coalesce(changed_by, ''), changed_at`
 
 func scanMount(row interface{ Scan(...any) error }) (Mount, error) {
 	var m Mount
-	var aliases string
-	err := row.Scan(&m.Host, &m.Path, &m.Store, &m.StoreParam, &m.Type, &m.CreateApp, &m.CreateAudience, &aliases, &m.ChangedBy, &m.ChangedAt)
+	var aliases, api string
+	err := row.Scan(&m.Host, &m.Path, &m.Store, &m.StoreParam, &m.Type, &m.CreateApp, &m.CreateAudience, &aliases, &api, &m.ChangedBy, &m.ChangedAt)
 	if errors.Is(err, sql.ErrNoRows) {
 		return m, sysdb.ErrNotFound
 	}
 	if err == nil && aliases != "" {
 		err = json.Unmarshal([]byte(aliases), &m.Aliases)
+	}
+	if err == nil && api != "" {
+		m.API = &MountAPI{}
+		err = json.Unmarshal([]byte(api), m.API)
 	}
 	return m, err
 }
@@ -100,6 +107,15 @@ func aliasesJSON(bs []Binding) string {
 	return string(b)
 }
 
+// apiJSON is a mount's API policy as stored: "" for none.
+func apiJSON(a *MountAPI) string {
+	if a == nil {
+		return ""
+	}
+	b, _ := json.Marshal(a)
+	return string(b)
+}
+
 func mountJSON(m *Mount) string {
 	if m == nil {
 		return ""
@@ -116,11 +132,11 @@ func (d *Registry) SetMount(ctx context.Context, actor, via string, m Mount) (Mo
 		if old, err := scanMount(tx.QueryRowContext(ctx, `SELECT `+mountCols+` FROM mounts WHERE host = ? AND path = ?`, m.Host, m.Path)); err == nil {
 			before = &old
 		}
-		if _, err := tx.ExecContext(ctx, `INSERT INTO mounts (host, path, store, store_param, type, create_app, create_audience, aliases, changed_by, changed_at)
-			VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?) ON CONFLICT (host, path) DO UPDATE SET store = excluded.store, store_param = excluded.store_param,
+		if _, err := tx.ExecContext(ctx, `INSERT INTO mounts (host, path, store, store_param, type, create_app, create_audience, aliases, api, changed_by, changed_at)
+			VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?) ON CONFLICT (host, path) DO UPDATE SET store = excluded.store, store_param = excluded.store_param,
 			type = excluded.type, create_app = excluded.create_app, create_audience = excluded.create_audience, aliases = excluded.aliases,
-			changed_by = excluded.changed_by, changed_at = excluded.changed_at`,
-			m.Host, m.Path, sysdb.NullStr(m.Store), sysdb.NullStr(m.StoreParam), sysdb.NullStr(m.Type), sysdb.NullStr(m.CreateApp), sysdb.NullStr(m.CreateAudience), aliasesJSON(m.Aliases), sysdb.NullStr(actor), m.ChangedAt); err != nil {
+			api = excluded.api, changed_by = excluded.changed_by, changed_at = excluded.changed_at`,
+			m.Host, m.Path, sysdb.NullStr(m.Store), sysdb.NullStr(m.StoreParam), sysdb.NullStr(m.Type), sysdb.NullStr(m.CreateApp), sysdb.NullStr(m.CreateAudience), aliasesJSON(m.Aliases), apiJSON(m.API), sysdb.NullStr(actor), m.ChangedAt); err != nil {
 			return err
 		}
 		return d.logMount(ctx, tx, actor, via, m.Host, m.Path, before, &m)
@@ -167,9 +183,9 @@ func (d *Registry) UndoMount(ctx context.Context, actor, via, host, path string)
 				return err
 			}
 			m.ChangedBy, m.ChangedAt = actor, d.NowMs()
-			if _, err := tx.ExecContext(ctx, `INSERT INTO mounts (host, path, store, store_param, type, create_app, create_audience, aliases, changed_by, changed_at)
-				VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`, m.Host, m.Path, sysdb.NullStr(m.Store), sysdb.NullStr(m.StoreParam), sysdb.NullStr(m.Type),
-				sysdb.NullStr(m.CreateApp), sysdb.NullStr(m.CreateAudience), aliasesJSON(m.Aliases), sysdb.NullStr(actor), m.ChangedAt); err != nil {
+			if _, err := tx.ExecContext(ctx, `INSERT INTO mounts (host, path, store, store_param, type, create_app, create_audience, aliases, api, changed_by, changed_at)
+				VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`, m.Host, m.Path, sysdb.NullStr(m.Store), sysdb.NullStr(m.StoreParam), sysdb.NullStr(m.Type),
+				sysdb.NullStr(m.CreateApp), sysdb.NullStr(m.CreateAudience), aliasesJSON(m.Aliases), apiJSON(m.API), sysdb.NullStr(actor), m.ChangedAt); err != nil {
 				return err
 			}
 			restored = &m

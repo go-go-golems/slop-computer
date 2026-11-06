@@ -165,7 +165,7 @@ func (a *Actor) log(level, text string) {
 
 // build makes the runtime: it runs the app's actor.js, which must call
 // defineActor once.
-func build(m *Manager, st *store.Store, run kernel.Running, files map[string][]byte) (*Actor, error) {
+func build(ctx context.Context, m *Manager, st *store.Store, run kernel.Running, files map[string][]byte, checkPolicy bool) (*Actor, error) {
 	a := &Actor{m: m, st: st, run: run, key: run.App + "@" + strconv.FormatInt(run.N, 10),
 		vm: goja.New(), wake: make(chan struct{}, 1), stop: make(chan struct{})}
 	a.vm.SetFieldNameMapper(goja.TagFieldNameMapper("json", true))
@@ -220,6 +220,11 @@ func build(m *Manager, st *store.Store, run kernel.Running, files map[string][]b
 	}
 	if err := a.readShape(); err != nil {
 		return nil, fail("actor_error", "%s: %v", entry, err)
+	}
+	if checkPolicy {
+		if err := a.checkRoutePolicies(ctx); err != nil {
+			return nil, fail("actor_error", "%v", err)
+		}
 	}
 	return a, nil
 }

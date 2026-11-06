@@ -21,6 +21,7 @@ import (
 	"github.com/go-go-golems/slop-computer/pkg/kernel"
 	"github.com/go-go-golems/slop-computer/pkg/llm"
 	"github.com/go-go-golems/slop-computer/pkg/policy"
+	"github.com/go-go-golems/slop-computer/pkg/registry"
 	"github.com/go-go-golems/slop-computer/pkg/rt"
 	"github.com/go-go-golems/slop-computer/pkg/store"
 )
@@ -182,7 +183,7 @@ func (m *Manager) get(ctx context.Context, id string) (*Actor, bool, error) {
 	if err != nil {
 		return nil, false, err
 	}
-	a, err := build(m, st, r, files)
+	a, err := build(ctx, m, st, r, files, true)
 	m.mu.Lock()
 	if m.gen != gen {
 		m.mu.Unlock()
@@ -388,7 +389,7 @@ func (m *Manager) activate(ctx context.Context, t *store.Turn, r kernel.Running)
 	if err != nil {
 		return err
 	}
-	a, err := build(m, st, r, files)
+	a, err := build(ctx, m, st, r, files, true)
 	if err != nil {
 		return err
 	}
@@ -571,7 +572,9 @@ type Route struct {
 
 // MatchRoute finds the actor route for a method and path (below the
 // mount). ok is false when the store has no actor or no route matches.
-func (m *Manager) MatchRoute(ctx context.Context, storeID, method, p string) (*Actor, Route, bool) {
+// With a mount's API policy, only the route keys its allowlist covers are
+// candidates (SLOP3-012): a request can never reach any other key.
+func (m *Manager) MatchRoute(ctx context.Context, storeID, method, p string, api *registry.MountAPI) (*Actor, Route, bool) {
 	a, err := m.Get(ctx, storeID)
 	if err != nil || a == nil {
 		return nil, Route{}, false
@@ -583,7 +586,10 @@ func (m *Manager) MatchRoute(ctx context.Context, storeID, method, p string) (*A
 		if !ok || (meth != method && meth != "*" && (meth != "GET" || method != "HEAD")) {
 			continue
 		}
-		params, score, ok := matchPattern(pat, p)
+		if api != nil && !api.AllowsKey(key) {
+			continue
+		}
+		params, score, ok := registry.MatchPattern(pat, p)
 		if !ok || score <= bestScore {
 			continue
 		}
@@ -592,42 +598,6 @@ func (m *Manager) MatchRoute(ctx context.Context, storeID, method, p string) (*A
 		best, bestScore = r, score
 	}
 	return a, best, bestScore >= 0
-}
-
-// matchPattern matches /a/:b/* against a path; literal segments score more.
-func matchPattern(pat, p string) (map[string]string, int, bool) {
-	ps := strings.Split(strings.Trim(pat, "/"), "/")
-	xs := strings.Split(strings.Trim(p, "/"), "/")
-	if strings.Trim(pat, "/") == "" {
-		ps = nil
-	}
-	if strings.Trim(p, "/") == "" {
-		xs = nil
-	}
-	params := map[string]string{}
-	score := 0
-	for i, s := range ps {
-		if s == "*" {
-			params["*"] = strings.Join(xs[i:], "/")
-			return params, score, true
-		}
-		if i >= len(xs) {
-			return nil, 0, false
-		}
-		switch {
-		case strings.HasPrefix(s, ":"):
-			params[s[1:]] = xs[i]
-			score++
-		case s == xs[i]:
-			score += 2
-		default:
-			return nil, 0, false
-		}
-	}
-	if len(xs) != len(ps) {
-		return nil, 0, false
-	}
-	return params, score, true
 }
 
 // Serve runs a matched route as an event and returns its response.

@@ -46,7 +46,7 @@ func Verbs(e *Env) []*verbs.Verb {
 	groups := [][]*verbs.Verb{
 		accessVerbs(k), actorVerbs(actorEnv{k, a}), billingVerbs(billingEnv{k, cfg, service}),
 		confirmVerbs(confirmEnv{confirm}), dataVerbs(k), docsVerbs(k), evalVerbs(evalEnv{table}),
-		filesVerbs(k), mountVerbs(mountEnv{k, cfg}), peopleVerbs(people),
+		filesVerbs(k), mountVerbs(mountEnv{k, cfg, a}), peopleVerbs(people),
 		policyVerbs(policyEnv{k, cfg, a}), previewVerbs(previewEnv{k, cfg}), storeVerbs(k),
 	}
 	var vs []*verbs.Verb
