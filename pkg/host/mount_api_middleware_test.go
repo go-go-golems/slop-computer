@@ -42,6 +42,7 @@ func TestMountAPIMiddleware(t *testing.T) {
 	admin := h.tokenFor("admin@example.com", "read", "write", "admin")
 	bobToken := h.tokenFor("bob@example.com")
 	annToken := h.tokenFor("ann@example.com")
+	readToken := h.tokenFor("rita@example.com", "read")
 	live := h.cfg.Hosts.Live[0]
 	h.call(admin, "store.new", map[string]any{"id": "mw"})
 	h.call(admin, "files.push", map[string]any{"store": "mw", "files": files(map[string]string{
@@ -123,6 +124,10 @@ func TestMountAPIMiddleware(t *testing.T) {
 	r, body = h.raw("POST", live, "/mw2/api/items", strings.NewReader(`{}`), map[string]string{"Authorization": "Bearer " + bobToken, "Origin": "https://client.example", "Content-Type": "application/json"})
 	if r.StatusCode != 201 || r.Header.Get("Access-Control-Allow-Origin") != "https://client.example" {
 		t.Fatalf("POST with a token from an allowed origin: %d %v %q", r.StatusCode, r.Header, body)
+	}
+	// A read token makes safe requests only.
+	if r, body := h.raw("POST", live, "/mw2/api/items", strings.NewReader(`{}`), map[string]string{"Authorization": "Bearer " + readToken, "Content-Type": "application/json"}); r.StatusCode != 403 || !strings.Contains(body, "insufficient_scope") {
+		t.Fatalf("POST with a read token: %d %q", r.StatusCode, body)
 	}
 	// rateLimit per visitor (limit 1): bob is out, ann is not.
 	if r, _ := h.raw("GET", live, "/mw2/api/hit", nil, map[string]string{"Authorization": "Bearer " + bobToken}); r.StatusCode != 429 {

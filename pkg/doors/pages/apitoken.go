@@ -11,6 +11,7 @@ import (
 	"strings"
 
 	"github.com/go-go-golems/slop-computer/pkg/access"
+	"github.com/go-go-golems/slop-computer/pkg/sysdb"
 )
 
 func (s *Door) apiTokenStep(c *apiCall) bool {
@@ -38,8 +39,22 @@ func (s *Door) apiTokenStep(c *apiCall) bool {
 		return false
 	}
 	p.Kind, p.TokenID, p.Scopes = access.KindToken, t.ID, t.Scopes
+	// A token's scopes do not cap its person's level on a store; they cap
+	// what it may do: a read token makes safe requests only.
+	if !safeMethod(c.r.Method) && !p.HasScope(sysdb.ScopeWrite) {
+		writeJSONError(c.w, 403, "insufficient_scope", c.r.Method+" needs a token with the write scope")
+		return false
+	}
+	if !p.HasScope(sysdb.ScopeRead) {
+		writeJSONError(c.w, 403, "insufficient_scope", "the token has no scope")
+		return false
+	}
 	c.p = p
 	return true
+}
+
+func safeMethod(m string) bool {
+	return m == http.MethodGet || m == http.MethodHead || m == http.MethodOptions
 }
 
 func unauthorized(w http.ResponseWriter, msg string) {
