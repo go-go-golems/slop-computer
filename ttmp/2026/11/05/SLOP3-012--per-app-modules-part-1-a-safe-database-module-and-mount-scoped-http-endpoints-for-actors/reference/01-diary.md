@@ -471,4 +471,5 @@ Phase 4 runs the mount's host middlewares in the pages door, after the prefix ch
   {"name": "rateLimit", "config": {"per": "visitor", "limit": 10, "window": "1m", "burst": 5}}
 ]
 ```
+- Pull request: https://github.com/go-go-golems/slop-computer/pull/31 (branch `task/slop3-012-modules`, phases 1–4 and diary steps 3–6).
 - Answers: 429 `rate_limited` (+ `Retry-After`), 403 `origin_not_allowed`, 405 `method_not_allowed` (+ `Allow`), 413 `payload_too_large`, 401 `unauthenticated` (+ `WWW-Authenticate: Bearer`), 403 `insufficient_scope`.
