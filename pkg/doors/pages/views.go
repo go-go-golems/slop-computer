@@ -936,7 +936,7 @@ func (s *Door) userInfo(ctx context.Context, v *rt.View) map[string]any {
 		}}
 	if s.A != nil {
 		vis := s.A.VisitorOf(ctx, s.viewPrincipal(ctx, v), v.Target)
-		out["visitor"] = vis
+		out["visitor"] = vis.Seen(v.Caps, true)
 		out["subscribed"] = vis.Subscribed
 	}
 	l := s.viewLLM(ctx, v) // §9.5: user.me().llm
@@ -996,7 +996,9 @@ func (s *Door) rpcUserSearch(ctx context.Context, v *rt.View, raw json.RawMessag
 			continue
 		}
 		pr := profileOf(v, p)
-		if q == "" || strings.Contains(strings.ToLower(pr.Name), q) || (v.Caps.Scopes["email"] && strings.Contains(strings.ToLower(p.Email), q)) {
+		// The address is matched only when the app may see it (profileOf's
+		// rule): otherwise a query would test what the page cannot read.
+		if q == "" || strings.Contains(strings.ToLower(pr.Name), q) || (pr.Email != "" && strings.Contains(strings.ToLower(pr.Email), q)) {
 			out = append(out, pr)
 		}
 		if len(out) == 20 {

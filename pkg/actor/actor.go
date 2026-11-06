@@ -36,7 +36,7 @@ var (
 
 // Visitor is who an event acts for, as ctx.visitor shows them.
 type Visitor struct {
-	ID         string   `json:"id"`
+	ID         string   `json:"id,omitempty"`
 	Name       string   `json:"name"`
 	Audience   string   `json:"audience"`
 	Level      string   `json:"level"`
@@ -520,11 +520,30 @@ func (a *Actor) crashed() {
 	}
 }
 
+// Seen is the visitor as an app with these capabilities may see them
+// (SLOP3-014): the person's name only with the user capability's profile
+// scope, and, for a page, their id only when it declares user (the
+// claude.ai contract). An actor always gets the id: it is the app's own
+// server half, and apps key their data on it. The store acting as itself
+// (alarms, reactors, setup) is not a person and is shown as it is.
+func (v Visitor) Seen(caps rt.Caps, page bool) Visitor {
+	if strings.HasPrefix(v.ID, "store:") {
+		return v
+	}
+	if !caps.Scopes["profile"] {
+		v.Name = ""
+	}
+	if page && !caps.Declared["user"] {
+		v.ID = ""
+	}
+	return v
+}
+
 // ctxObject is the ctx a handler receives.
 func (a *Actor) ctxObject(ev *event) *goja.Object {
 	vm := a.vm
 	o := vm.NewObject()
-	vis := a.toJS(ev.visitor)
+	vis := a.toJS(ev.visitor.Seen(a.run.Manifest.Caps, false))
 	_ = o.Set("visitor", vis)
 	_ = o.Set("principal", vis) // the lab's name for it
 	_ = o.Set("store", a.toJS(map[string]any{"id": a.st.ID, "type": a.st.Meta("type")}))
