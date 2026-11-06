@@ -538,3 +538,60 @@ The user refined the HTTP requirement: an express-style module that cannot serve
   "middleware": [{"name":"rateLimit","per":"visitor","rate":"60/m"}, {"name":"cors","origins":["https://…"]}],
   "responseTypes": ["application/json", "text/plain"] }
 ```
+
+## Step 9: The vault report, and corrections to this diary
+
+A writer agent wrote the deep-dive report from this diary, checking every code claim against the source (slop origin/main `0f1991b`, go-go-goja v0.10.7, go-go-host `4fa1bf0`, goja-bleve `d7cfc30`), and pushed it to the go-go-parc vault. Its verification found seven mistakes or imprecisions in Steps 1–7, listed below as corrections; the earlier steps are left as written. It also confirmed the absence claims flagged in Steps 3–4 with whole-repository searches and found new problems that are in the report.
+
+### Prompt Context
+**User prompt (verbatim):** see Step 5 (the report request)
+**Assistant interpretation:** Deliver the textbook-style deep dive to the vault, committed and pushed.
+**Inferred user intent:** A durable long-form write-up of the research.
+**Commit (vault):** `d24cc2a` — "Project report: slop v3 per-app modules — safe database and HTTP endpoints (SLOP3-011)", pushed `6ef7dc7..d24cc2a main -> main`
+
+### What I did
+- Briefed a general-purpose agent (skills `textbook-authoring`, `obsidian-vault-writing`) with this diary, the four repositories and the chapter plan, then sent it the Step 8 refinement for chapter 8.
+
+### Why
+- The report needed code reading across four repositories; a separate agent kept that out of this session's context.
+
+### What worked
+- The note, `Projects/2026/11/05/PROJECT REPORT - slop v3 - Per-App Modules - Safe Database and HTTP Endpoints for Sandboxed Actors - A Technical Deep Dive.md`, has 12,338 words (about 10,500 without code), nine chapters, and five mermaid diagrams, all rendered without errors by `mmdc`. Only that file was committed.
+- Absence claims confirmed by whole-repository greps: nothing in go-go-goja outside `ttmp` reads `.ConfigSchema` (five struct literals set it); no non-test code in go-go-host reads `CapabilitySet.Database`; in go-go-goja v0.10.7, `VM.Interrupt` is called only in `Runtime.Close`, as in v0.8.3.
+
+### What didn't work
+- The worktree path in my brief, `/home/manuel/.claude/jobs/7fa934c5/tmp/slop011`, did not exist. In this resumed session `$CLAUDE_JOB_DIR` is empty, so `$CLAUDE_JOB_DIR/tmp/slop011` resolved to `/tmp/slop011` when the worktree was created (`git worktree list`: `/tmp/slop011 … [ticket/slop3-011]`). The agent found it there. From here on I use `/tmp/slop011` explicitly.
+
+### What I learned
+- **Corrections to Steps 1–7:**
+  1. Step 1: `/_site/*` is not the only path reserved before actor routes on live hosts; `/_slop/` and `/_s/` are too (`pkg/doors/pages/live.go:157-171`).
+  2. Step 6: the `TurnLimit` interrupt at `pkg/actor/manager.go:407` covers only the activation hooks `setup` and `smoke`, not "other events".
+  3. Step 3, Q6: go-go-goja's core provider list (`providers/core/core.go:20`) is path, yaml, crypto, time, timer and events (plus `node:` aliases), without uidsl; the engine's data-only list (`module_specs.go:164`) also leaves out yaml.
+  4. Step 7: go-go-goja express's `.allow(action)` takes an action name and follows `.auth(spec)` (`modules/express/auth_builders.go:293-325`); it does not take a level or an audience. The handler's first argument is a context envelope, not the request (`pkg/gojahttp/planned_dispatch.go:197-214`).
+  5. Step 7: go-go-goja's `listen` already returns an error (`express.go:229-231`). Under Step 8, slop's builder leaves it out.
+  6. Steps 1 and 7: the "1 MiB body limit" silently truncates through `io.LimitReader` (`pkg/doors/pages/actors.go:157`); it does not reject.
+  7. Line references: the private-cache rule is at `pkg/doors/pages/actors.go:196-201`, not `manager.go:650-690`. The `app.trust` actor restart is at `pkg/commands/actors.go:97`; line 79 is the verb definition.
+- **New findings (in the report):**
+  - go-go-goja `fetch.New()` defaults to allowing credentials from any environment variable or any file.
+  - xgoja's `decodeConfig` is plain `json.Unmarshal`, so a misspelled `allowedOrigins` means any origin.
+  - slop's `fetch` follows redirects without checking `slop.fetch` again.
+  - `serveActorRoute` copies the actor's response headers without a filter.
+  - go-go-goja's default `database` is one shared instance, whose connection `configure()` changes for every runtime using it. This was read from the code, not run.
+  - go-go-goja flattens array arguments, while slop's `sql` turns them into JSON strings.
+  - `MatchRoute` builds the actor before it can match a route, so host middleware has to run before it.
+  - A store served by several mounts makes the load-time allowlist check a union of those mounts' allowlists.
+
+### What was tricky to build
+- N/A.
+
+### What warrants a second pair of eyes
+- The `fetch` redirect finding and the unfiltered response headers are worth fixing independently of this ticket.
+
+### What should be done in the future
+- Fix: re-check `slop.fetch` on every redirect; filter actor response headers (at least `Set-Cookie`, CSP and framing headers).
+
+### Code review instructions
+- Read the report's chapters 7–9 against SLOP3-012's guide.
+
+### Technical details
+- Vault: `/home/manuel/code/wesen/go-go-golems/go-go-parc`, commit `d24cc2a`.
