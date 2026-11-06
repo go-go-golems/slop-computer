@@ -571,3 +571,97 @@ use(name):
 ```text
 slop app trust cat database --config '{"readOnly":true,"maxRows":100}'
 ```
+
+## Step 8: Phases 5b and 5c — an in-memory `fs`, `path`, `fetch` redirects; docs; the report writer's corrections
+
+Phase 5b adds the two modules the user named as examples of slop's own safe versions: `fs`, go-go-goja's fs API over an in-memory tree the actor owns, and `path`, its pure string API. `fs` is an `own` module with a configuration (`maxBytes`, `maxFiles`), and its writes follow the turn: a turn that rolls back takes them with it, as it does the store's writes. Phase 5c closes the `fetch` redirect hole recorded in step 6. Before it, an allowed origin could redirect a fetch to any other origin, and the test shows the actor reading that origin's answer. The design document now describes the catalog, and the tasks record the follow-ups. This step also records the corrections and review findings of the report writer, whose vault report on PR #31 is now pushed.
+
+### Prompt Context
+**User prompt (verbatim):** see Step 7
+**Assistant interpretation:** The rest of phase 5: 5b (`fs`, `path`), 5c (`fetch` redirects), then the docs and bookkeeping.
+**Inferred user intent:** "no fs for example except against a virtual in memory fs" (the user's earlier message, Step 1 of SLOP3-011's context): modules that cannot reach the host.
+**Commit (code):** `f19557d` — "SLOP3-012 phase 5b: an in-memory fs and path in the catalog"; `ed82735` — "SLOP3-012 phase 5c: fetch checks slop.fetch on every redirect"
+
+### What I did
+- `pkg/actor/memfs.go` (new):
+  - `FSConfig{MaxBytes, MaxFiles}` with `Validate` (caps of 64 MiB and 10000), defaults of 8 MiB and 1000;
+  - `memFS`: absolute clean paths to `*memFile` (`"/"` always exists), a byte count, and `snap` (taken by `touch()` at a turn's first change, restored by `end(false)`); `missing` gives `ENOTDIR` for a path through a file, else `ENOENT`;
+  - operations `read`, `write` (append too), `mkdir` (recursive), `readdir`, `remove` (recursive, force), `rename` (whole subtrees), with Node's error codes;
+  - `fsModule`: the 11 operations, each as `xSync` and as a promise form that settles at once (`catch` turns a throw into a rejection), plus `isReadOnly()`;
+  - encodings: `utf8`, `base64`, `hex`; without one, `readFile` returns a `Uint8Array`; writes take strings, `ArrayBuffer` and typed arrays.
+- `pkg/actor/pathmod.go` (new): `join`, `resolve` (against `/`), `normalize`, `dirname`, `basename`, `extname`, `isAbsolute`, `relative` (`relPath`), `sep`, `separator`, `delimiter`.
+- `pkg/actor/builtins.go`: `fs` (`ClassOwn`, `FSConfig`) and `path` (`ClassData`) registered, with `fsTS` and `pathTS`. `database.go`: `reservedModules` gains `fs` and `path`.
+- Turn hooks: `actor.go` calls `a.fs.end(err == nil)` after `a.st.Do` returns, so a commit that fails also restores; `manager.go`'s setup/smoke path ends it with `true` on success, with a deferred `end(false)` (a no-op after `end(true)`). `end` on a nil tree does nothing.
+- `pkg/actor/modules.go`: `fetchRedirect` is the client's `CheckRedirect`: each hop's origin must be in `slop.fetch`, and it stops after 10 hops; `fetch` returns that `*Error` as is instead of wrapping it as `unavailable`.
+- Tests: `pkg/host/fs_module_test.go` (`TestFSModule`, plus a `jsonString` helper) and `pkg/host/fetch_redirect_test.go` (`TestFetchRedirects`, two `httptest` servers). The second is the first test of actor `fetch` in the repository.
+- `doc/design/slop-v3.md`: a paragraph on the catalog after the `database`/`express` paragraph (§6.2); in §7.1, rows for `fs` and `path`, the `database` row says a grant configures it, and the `fetch` row says redirects are checked; §6.5 lists `fs` and `path` among the bare names.
+- `tasks.md`:
+  - phase 5 is checked, and the fetch half of `b4cu` is marked done;
+  - new tasks for the `decodeArgs` case-insensitivity, the two report-writer findings, and go-go-goja imports.
+- On the part 1 branch: committed and pushed the report writer's diary (`75e85e1`, `reference/02-diary-report-writer.md`).
+
+### Why
+- **The tree follows the turn because the store does.** An actor that writes a file and a row and then throws would otherwise keep the file and lose the row, so a retried event would see half of its own earlier attempt. The snapshot is a shallow `maps.Clone` taken only on a turn's first change. Entries are never changed in place (a write stores a new `memFile`), so the clone is a consistent copy.
+- **Writes during load are not snapshotted.** `actor.js` runs outside any turn. If the build fails, the actor and its tree are discarded together.
+- **The tree is not persisted.** It is memory the actor owns, which is what makes it an `own` module. Durable files are `use('files')` or `use('db')`. A restart, including the one `app.trust` causes, empties it, and the test asserts that.
+- **The redirect check is the first request's check, not a looser one.** `slop.fetch` is a list of origins, so a redirect to a path on the same origin is allowed, and anything else is refused before the request is sent.
+
+### What worked
+- `TestFSModule` asserts each of these as exact JSON:
+  - round trip: `["hello world",11,104,"aGVsbG8gd29ybGQ=",["a.txt","boot.txt"],true,11,false,"loaded"]` (the last value was written while `actor.js` loaded);
+  - errors: `ENOENT`, `ENOENT`, `EEXIST`, `ENOTEMPTY`, `EISDIR`, `ENOTDIR`, `ENOENT` for `/../../etc/passwd` (it is `/etc/passwd` in the tree), and `existsSync('/etc/passwd') === false`;
+  - moves: rename of a subtree, `copyFile` of bytes `[1,2,3]`, recursive `rm`;
+  - path: `["a/c/d.txt","/y/z","/x","/a/b","b",".gz","",false,"../../d","a/b/c/","/"]`;
+  - promises: `["async","ENOENT"]`;
+  - a failing turn's write is gone and an earlier committed one stays; 9 MiB is `ENOSPC` by default;
+  - after `app.trust fs {"maxBytes":100,"maxFiles":5}`, the tree is empty, 95 bytes is `ENOSPC` and 94 fits (the reload wrote `boot.txt`'s 6 bytes again), the second extra file is `ENOSPC`, and `maxBytes: 1<<30` is refused naming 64 MiB.
+- `TestFetchRedirects`: a same-origin redirect works; a redirect to the second server is `permission_denied`, names its origin, and the second server counts 0 hits; a redirect loop is `unavailable … 10 redirects`.
+- Mutation checks, each restored and confirmed with `cmp`:
+  - fs M1, `end(true)` regardless of the error: failed at line 90 (`a failed turn's write stayed`);
+  - fs M2, byte limit disabled: failed at line 96 (`big default: got "ok"`);
+  - fetch, `CheckRedirect` removed: failed at line 52 with `got 200 map[result:map[secret:true]]`. That is the hole: the actor read an undeclared origin's answer.
+- `GOWORK=off go test ./... -count=1`: every package `ok`. `golangci-lint run ./...`: `0 issues.`
+
+### What didn't work
+- `go build`: `cleanPath redeclared in this block` (`pkg/actor/actor.go:336` already has one for the tree). I renamed mine to `fsPath`.
+- `TestFSModule` errors: `got […,"ENOENT",…] want […,"ENOTDIR",…]` for `readFileSync('/data/a.txt/x')`. A path through a file is `ENOTDIR` on a real filesystem; `missing` now walks the ancestors.
+- `TestFSModule` limits: `big ok: got "ENOSPC" want "ok"`. That was my arithmetic: the restart reran `actor.js`, which wrote `boot.txt` again. The test now says why 94 fits.
+- Lint: `nonamedreturns` on `catch`, and `SA5011` (possible nil dereference) after `throwFS` in `stat`, because staticcheck does not know that `throwFS` panics. `catch` no longer uses named results: a recovered panic makes the inner function return `false`, its zero value. `stat` now has an unreachable `return` after `throwFS`.
+
+### What I learned
+- The report writer checked my diary against the code and found three mistakes, which I record here rather than editing steps 3 and 5:
+  - Step 5 says an "11-byte JSON body against a 10-byte limit gives 413". The harness JSON-encodes the string `"0123456789abc"`, so the body is 15 bytes.
+  - Step 3 places the `a2 == ""` pragma check at `pkg/store/sqlpolicy.go:123`. It is at line 124; line 123 is `case sqlite3.SQLITE_PRAGMA:`.
+  - Step 5 does not say that, since phase 4, the API mount's 413 in `TestMountAPIPolicy` comes from `maxBodyStep` (the request has a `Content-Length`), not from the body read in `serveActorRoute`. No test now sends an over-limit body without a `Content-Length` to an API mount.
+- The writer also found two behaviours worth a review, now tasks `f8pw` and `4nwl`:
+  - Floors do not combine. The most specific floor wins alone, and an audience-only floor takes `DefaultMin` for the level, so adding an audience requirement under a broader `admin` floor lowers the level to `view`.
+  - `ctx.body` is parsed only when the request's `content-type` is forwarded, so a `forwardHeaders` without it turns parsing off.
+
+### What was tricky to build
+- **Where the turn ends.** The fs tree has to be kept or restored once the store's commit is known, not when the handler returns, so `end` runs after `a.st.Do`. The setup path is different: it runs inside the kernel's activation turn, so it ends the tree itself, with a deferred `end(false)` covering the failure returns.
+- **Throwing Node-shaped errors.** go-go-goja's fs errors are Go errors with `code`, `syscall` and `path`. `throwFS` builds one with `vm.NewGoError` and those properties and panics with it, which goja throws as that value. The promise forms recover it into a rejection.
+
+### What warrants a second pair of eyes
+- `fs` counts `"/"` against `maxFiles`. The limit is on entries, including directories.
+- `readFile` without an encoding returns a `Uint8Array`, not a Node `Buffer`, because slop has no `Buffer`. Code that calls `buf.toString()` on it gets the typed array's comma-joined bytes.
+- The redirect check allows `http` and `https` only, matching the first request. An allowed `https` origin that redirects to its own `http` origin is refused unless both origins are listed.
+
+### What should be done in the future
+- Open the stacked PR (base `task/slop3-012-modules`).
+- Follow-ups in `tasks.md`: exact names in `decodeArgs`; the floors and `ctx.body` review points; response-header filtering on non-API mounts; go-go-goja imports.
+
+### Code review instructions
+- `fs`: start at `memFS.write`, `touch`/`end`, and the two `end` call sites (`actor.go` after `a.st.Do`, `manager.go` in setup), then `fsModule`.
+- `fetch`: `fetchRedirect` in `pkg/actor/modules.go` and the `errors.As` after `c.Do`.
+- Validate: `GOWORK=off go test ./pkg/host -run 'TestFSModule|TestFetchRedirects|TestModuleCatalog|TestModuleInterceptor' -count=1 -v`.
+
+### Technical details
+```js
+const fs = require('fs'), path = require('path');
+fs.mkdirSync('/cache', { recursive: true });
+fs.writeFileSync(path.join('/cache', 'feed.json'), JSON.stringify(items));
+const items2 = JSON.parse(fs.readFileSync('/cache/feed.json', 'utf8'));
+```
+```text
+slop app trust journal fs --config '{"maxBytes":1048576,"maxFiles":200}'
+```
