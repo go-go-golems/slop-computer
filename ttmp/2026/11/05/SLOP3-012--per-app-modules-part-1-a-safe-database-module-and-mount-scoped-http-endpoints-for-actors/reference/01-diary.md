@@ -392,3 +392,83 @@ Phase 3 puts the HTTP policy on the mount: an optional `api` block with an allow
                     {"route": "GET /api/members", "audience": "subscriber"}],
          "maxBodyBytes": 10, "forwardHeaders": ["Accept", "X-Trace"]}}
 ```
+
+## Step 6: Phase 4 — host middlewares before the actor, a token-scope fix, docs
+
+Phase 4 runs the mount's host middlewares in the pages door, after the prefix check and before `MatchRoute`, which is what builds the actor. A refused request therefore costs no build, no inbox slot and no turn, and the test asserts that directly. The order is fixed: `rateLimit` per ip, `cors`, methods, the body limit, `apiToken`, `rateLimit` per visitor. A self-review afterwards found that a `read`-scoped token could reach `interact` routes with POST, because token scopes do not cap a person's level (SLOP3-005). I fixed that in `apiToken`. The design document now covers both modules and the mount policy.
+
+### Prompt Context
+**User prompt (verbatim):** see Step 3
+**Assistant interpretation:** Phase 4 of the guide's plan, and the documentation the effort level asks for.
+**Inferred user intent:** Slop, not the app, controls rate, origin, method, size and identity on API endpoints.
+**Commit (code):** `a5f66cc` — "SLOP3-012 phase 4: host middlewares on API mounts, before the actor is built; docs"; `1b4cdcc` — "SLOP3-012 phase 4: a read token makes safe requests only on API mounts"
+
+### What I did
+- `pkg/doors/pages/apichain.go` (new): `apiCall`, `runAPIChain`, `limitStep`, `methodsStep`/`allowedMethods`, `maxBodyStep`.
+- `pkg/doors/pages/ratelimit.go` (new): `rateLimiter` (`take`, `sweep`, `size`), `capacity`; token buckets keyed `mount|per|key`. The door's `Tick` sweeps them.
+- `pkg/doors/pages/cors.go` (new): `corsStep`.
+- `pkg/doors/pages/apitoken.go` (new): `apiTokenStep`, `safeMethod`, `unauthorized`.
+- `pkg/doors/pages/actors.go`: the chain runs before `MatchRoute`, and the principal it settles (site cookie, or token) is the one used afterwards. `door.go`: field `limiter`, swept in `Tick`.
+- Tests:
+  - `pkg/doors/pages/ratelimit_test.go`: `TestRateLimiter`;
+  - `pkg/host/mount_api_middleware_test.go`: `TestMountAPIMiddleware`, plus a `harness.raw` helper.
+- `doc/design/slop-v3.md`: §6.2 (a paragraph on `database` and `express`), §6.5 (`require` resolution), §7.1 (two catalog rows), §10.2 (the API policy and the chain).
+
+### Why
+- **The chain is code in a fixed order, not a configurable list.** CORS preflights carry no `Authorization`; the per-visitor limit needs the principal `apiToken` settles; the body limit must come before anything reads the body. The policy only switches steps on.
+- **`maxBodyStep` refuses on `Content-Length`,** before the actor exists. `serveActorRoute` still refuses based on what it actually reads, because `Content-Length` can be absent (chunked bodies) or wrong.
+- **An invalid bearer token is a 401,** never a fallback to the cookie. A client that sent a token meant to be that token. Quietly acting as the cookie's person, or as nobody, would hide a client bug.
+- **The read-scope fix:** `Access.Level` deliberately ignores scopes (SLOP3-005 step 10), and `VisitorOf` only copies them for modules. Without a check in `apiToken`, a token minted read-only could run an `interact` handler's writes. The rule matches verbs: unsafe methods need `write`.
+
+### What worked
+- `TestRateLimiter` passed: two takes then a refusal with exactly `30s` retry (limit 2 per minute); a token back after 30 s; per-key buckets; a changed rule starts full; burst 1 caps; `sweep` after 3 minutes empties it.
+- `TestMountAPIMiddleware` passed, with an assertion for each of these:
+  - the third request from one ip gives 429 with `Retry-After`, and the table shows 2 hits, so the third never ran;
+  - after `h.a.Restart("mw")`, these requests are answered with `h.a.Running("mw") == nil` afterwards (no build):
+    - the preflight from an allowed origin gives 204, with `Access-Control-Allow-Origin` and the methods, and no `Allow-Credentials`;
+    - another origin gives 403;
+    - `DELETE` gives 405 with `Allow: … POST`;
+    - a 40-byte body against 16 gives 413;
+    - `Bearer nope` gives 401 with `WWW-Authenticate: Bearer`;
+  - bob's token, from the allowed origin, posts (201) and gets `Access-Control-Allow-Origin`;
+  - a read token's POST gives 403 `insufficient_scope`;
+  - per-visitor limit 1: bob's second request gives 429, while ann gets 200 with `level: view` and her `usr_` id;
+  - on a mount without `apiToken`, a token means nothing (404);
+  - `required: true` without a token gives 401, and with one gives 200.
+- Mutation check: with `if !s.runAPIChain(c)` disabled, the test failed with `third hit: 200 … {"level":"","who":null}`. I restored the file.
+- Uncached full suite `GOWORK=off go test ./... -count=1`: every package `ok`. `golangci-lint run`: `0 issues.`
+
+### What didn't work
+- My first `ratelimit.go` declared `func (rl registry.RateLimitConfig) capacity()`, a method on a type from another package, which Go does not allow. I rewrote it as a plain function before the first build. No other failures.
+
+### What I learned
+- The live host already treats an unsafe cross-origin request as nobody (`sitePrincipal`). CORS with credentials would therefore not even work, so "never allow credentials" costs nothing, and token auth is the only cross-origin identity.
+
+### What was tricky to build
+- **Where the principal changes.** `serveActorRoute` receives the site principal from its caller. The chain may replace it with the token's, and everything after the chain (the visitor, level, audiences, the per-visitor limit) has to use the replaced one. The chain writes `c.p` and `serveActorRoute` reads it back before `MatchRoute`.
+- **Response headers set by the chain survive the response filter.** CORS headers and `Retry-After` are set on `w.Header()` before the actor answers. The phase 3 filter only skips the actor's own headers that are outside the allowlist, so `Access-Control-Allow-Origin` reaches the client while an actor-set `Access-Control-*` header does not.
+
+### What warrants a second pair of eyes
+- Rate-limit buckets live in memory, per server process. A restart resets them, and several replicas would not share them. That is fine for slop's single pod today.
+- `cors` with `"* …"` routes advertises a fixed method list (`GET, HEAD, POST, PUT, PATCH, DELETE`).
+- `ClientIP` decides the per-ip key. It is as trustworthy as the server's proxy configuration (`web.Sessions.ClientIP`).
+
+### What should be done in the future
+- Part 2 (phase 5): the module catalog and admin grants with configuration.
+- Confirm the guide's decisions with the user. In particular, `database`/`express` are on by default, and every actor route now gets 413 for over-limit bodies.
+- Separate tickets: the shared live-host origin; `fetch` re-checking `slop.fetch` on redirects; filtering response headers on non-API mounts.
+
+### Code review instructions
+- Start at `runAPIChain` in `pkg/doors/pages/apichain.go`, then `apitoken.go`, `cors.go`, `ratelimit.go`, then the call site in `serveActorRoute`.
+- Validate: `GOWORK=off go test ./pkg/doors/pages/ ./pkg/host/ -run 'TestRateLimiter|TestMountAPIMiddleware' -count=1 -v`.
+
+### Technical details
+```json
+"middleware": [
+  {"name": "rateLimit", "config": {"per": "ip", "limit": 120, "window": "1m"}},
+  {"name": "cors", "config": {"origins": ["https://client.example"], "maxAgeSeconds": 600}},
+  {"name": "apiToken", "config": {"required": false}},
+  {"name": "rateLimit", "config": {"per": "visitor", "limit": 10, "window": "1m", "burst": 5}}
+]
+```
+- Answers: 429 `rate_limited` (+ `Retry-After`), 403 `origin_not_allowed`, 405 `method_not_allowed` (+ `Allow`), 413 `payload_too_large`, 401 `unauthenticated` (+ `WWW-Authenticate: Bearer`), 403 `insufficient_scope`.
