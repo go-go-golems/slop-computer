@@ -27,6 +27,12 @@ func (m *Manager) registerBuiltins() {
 	m.Register(Module{Name: "express", Class: ClassOwn, TypeScript: expressTS,
 		Doc:  "go-go-goja's express route builder, compiled into the actor's route table while actor.js loads; no static, listen or mount.",
 		Load: func(s Setup) goja.Value { return s.Actor.expressModule() }})
+	m.Register(Module{Name: "fs", Class: ClassOwn, Config: FSConfig{}, TypeScript: fsTS,
+		Doc:  "go-go-goja's fs API over an in-memory tree the actor owns (never the host's disk); it follows the turn and empties on restart. Config: maxBytes, maxFiles.",
+		Load: func(s Setup) goja.Value { return s.Actor.fsModule(*s.Config.(*FSConfig)) }})
+	m.Register(Module{Name: "path", Class: ClassData, TypeScript: pathTS,
+		Doc:  "go-go-goja's path API (POSIX): join, resolve, normalize, dirname, basename, extname, isAbsolute, relative.",
+		Load: func(s Setup) goja.Value { return s.Actor.pathModule() }})
 }
 
 const databaseTS = `declare module "database" {
@@ -70,4 +76,52 @@ const expressTS = `declare module "express" {
   }
   /** The actor's one app; routes register while actor.js loads. */
   export function app(): App;
+}`
+
+const fsTS = `declare module "fs" {
+  type Data = string | ArrayBuffer | Uint8Array;
+  type Encoding = "utf8" | "utf-8" | "base64" | "hex";
+  type Enc = Encoding | { encoding?: Encoding };
+  interface Stats { size: number; mtimeMs: number; isFile(): boolean; isDirectory(): boolean }
+  /** Errors carry .code: ENOENT, EEXIST, ENOTDIR, EISDIR, ENOTEMPTY, ENOSPC, EINVAL. */
+  export function readFileSync(path: string): Uint8Array;
+  export function readFileSync(path: string, enc: Enc): string;
+  export function writeFileSync(path: string, data: Data, enc?: Enc): void;
+  export function appendFileSync(path: string, data: Data, enc?: Enc): void;
+  export function existsSync(path: string): boolean;
+  export function mkdirSync(path: string, opts?: { recursive?: boolean }): void;
+  export function readdirSync(path: string): string[];
+  export function statSync(path: string): Stats;
+  export function unlinkSync(path: string): void;
+  export function rmSync(path: string, opts?: { recursive?: boolean; force?: boolean }): void;
+  export function renameSync(from: string, to: string): void;
+  export function copyFileSync(from: string, to: string): void;
+  export function readFile(path: string): Promise<Uint8Array>;
+  export function readFile(path: string, enc: Enc): Promise<string>;
+  export function writeFile(path: string, data: Data, enc?: Enc): Promise<void>;
+  export function appendFile(path: string, data: Data, enc?: Enc): Promise<void>;
+  export function exists(path: string): Promise<boolean>;
+  export function mkdir(path: string, opts?: { recursive?: boolean }): Promise<void>;
+  export function readdir(path: string): Promise<string[]>;
+  export function stat(path: string): Promise<Stats>;
+  export function unlink(path: string): Promise<void>;
+  export function rm(path: string, opts?: { recursive?: boolean; force?: boolean }): Promise<void>;
+  export function rename(from: string, to: string): Promise<void>;
+  export function copyFile(from: string, to: string): Promise<void>;
+  export function isReadOnly(): false;
+}`
+
+const pathTS = `declare module "path" {
+  export function join(...parts: string[]): string;
+  /** Resolves against "/", the fs module's root. */
+  export function resolve(...parts: string[]): string;
+  export function normalize(p: string): string;
+  export function dirname(p: string): string;
+  export function basename(p: string, ext?: string): string;
+  export function extname(p: string): string;
+  export function isAbsolute(p: string): boolean;
+  export function relative(from: string, to: string): string;
+  export const sep: "/";
+  export const separator: "/";
+  export const delimiter: ":";
 }`

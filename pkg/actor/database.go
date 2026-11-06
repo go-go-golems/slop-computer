@@ -36,7 +36,7 @@ type jsFunc = func(goja.FunctionCall) goja.Value
 
 // reservedModules are the use() names require() resolves before the app's
 // own files (SLOP3-012): scripts written for go-go-goja require them.
-var reservedModules = map[string]bool{"database": true, "express": true}
+var reservedModules = map[string]bool{"database": true, "express": true, "fs": true, "path": true}
 
 // databaseModule builds the module once per actor (use() and require()
 // return the same object).
