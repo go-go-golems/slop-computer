@@ -155,6 +155,13 @@ func (s *Door) serveActorRoute(w http.ResponseWriter, r *http.Request, res *reso
 		if !registry.UnderPrefix(sub, api.Prefix) {
 			return false // not an API path of this mount: pages and the shell answer
 		}
+		// The host middlewares run first: what they refuse never builds
+		// or wakes the actor (apichain.go).
+		c := &apiCall{w: w, r: r, mount: res.m.Mount.Host + res.m.Mount.Path, api: api, p: p}
+		if !s.runAPIChain(c) {
+			return true
+		}
+		p = c.p
 	}
 	a, route, ok := s.A.MatchRoute(ctx, res.store, r.Method, sub, api)
 	if !ok {
