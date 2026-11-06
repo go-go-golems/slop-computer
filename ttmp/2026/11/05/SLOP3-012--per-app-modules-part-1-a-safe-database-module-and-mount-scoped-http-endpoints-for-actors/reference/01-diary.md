@@ -730,3 +730,20 @@ github.com/dop251/goja  v0.0.0-20251103141225-af2ceb9156d7  →  v0.0.0-20261103
 github.com/dlclark/regexp2 v1.11.5 (indirect)                →  github.com/dlclark/regexp2/v2 v2.11.0
 latest upstream at the time: v0.0.0-20261105002551-2413f2132ac8 (not taken)
 ```
+
+## Step 10: Vault report on part 2 (milestone)
+
+I wrote the vault report on part 2 myself instead of delegating it, because the work was done in this session and its details were already in context. It covers PR #32, the goja bump in PR #33 and the confirmed decisions. The note was committed and pushed to the go-go-parc vault.
+
+**User prompt (verbatim):** "write a detailed project report for the obsidian vault as a deep dive technical analysis blog post using a textbook writing style (no analogies, see skill). Commit and push the bsidian vault when done (go-go-parc vault)."
+
+- Note: `Projects/2026/11/05/PROJECT REPORT - slop v3 - Per-App Modules Part 2 - The Module Catalog, Configured Grants and an In-Memory fs - A Technical Deep Dive.md` (7,847 words, three mermaid diagrams).
+- Vault commit `c49057b`, pushed; only the note was staged.
+- Evidence:
+  - the `app.modules` JSON and the two error messages quoted in the note come from a temporary test, `pkg/host/zz_report_tmp_test.go`, run at `606997a` and deleted (never committed);
+  - `TestModuleCatalog`, `TestModuleInterceptor`, `TestFSModule`, `TestFetchRedirects` and `TestTrustEndsWithItsAdmin` pass with `-v`.
+- Checking the draft against the code found errors, which I fixed before committing:
+  - fourteen `path:line` ranges were off by up to six lines (`Register` had moved from line 139 to 177 when `exactKeys` was added);
+  - the turn rule is in `slop-v3.md` §6.3, not §6.5;
+  - the draft said `internal/archtest` forbids `pkg/actor` from importing `pkg/policy`. It does not: `policy` is a domain, which the runtime may import. The hook exists for decoupling, and the note now says that.
+- The mermaid diagrams were not rendered (no mermaid CLI here).
