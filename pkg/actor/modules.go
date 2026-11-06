@@ -28,10 +28,6 @@ func (a *Actor) module(name string) goja.Value {
 	switch name {
 	case "sql":
 		return a.sqlModule()
-	case "database":
-		return a.databaseModule(DatabaseConfig{})
-	case "express":
-		return a.expressModule()
 	case "db":
 		return a.dbModule()
 	case "files":
@@ -64,8 +60,8 @@ func (a *Actor) module(name string) goja.Value {
 			}
 			return goja.Null()
 		}
-		if v := a.trustedModule(name); v != nil {
-			return v
+		if mod, ok := a.m.modules[name]; ok {
+			return a.catalogModule(mod)
 		}
 	}
 	return goja.Null()

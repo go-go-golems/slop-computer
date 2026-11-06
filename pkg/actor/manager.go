@@ -43,14 +43,15 @@ type Manager struct {
 	logs   map[string][]LogLine
 
 	// Hooks provided by the host.
-	Policy  func(app, capability, audience string) bool
-	LLM     llm.Backend // the sample backend (nil: no LLM)
-	Secret  func(ctx context.Context, app, name string) (string, error)
-	Paths   Paths                                              // the db paths outside the store (aliases, _stores); nil: the store's own only
-	Trusted func(ctx context.Context, app, module string) bool // app.trust
+	Policy func(app, capability, audience string) bool
+	LLM    llm.Backend // the sample backend (nil: no LLM)
+	Secret func(ctx context.Context, app, name string) (string, error)
+	Paths  Paths                                                       // the db paths outside the store (aliases, _stores); nil: the store's own only
+	Grant  func(ctx context.Context, app, module string) (Grant, bool) // app.trust: an app's grant of a catalog module
 
 	provided map[string]func(*Actor) goja.Value // the door's capability bindings (Provide)
-	modules  map[string]Module                  // the registry (Register)
+	modules  map[string]Module                  // the catalog (Register; catalog.go)
+	calls    meters                             // module calls (catalog.go)
 }
 
 // New makes the actor manager and hooks it into the kernel (activation,
@@ -61,6 +62,7 @@ func New(k *kernel.Kernel) *Manager {
 	k.OnActivated = m.onActivated
 	k.Subscribe(m.onCommit)
 	m.followSystem()
+	m.registerBuiltins()
 	return m
 }
 

@@ -126,9 +126,10 @@ type Actor struct {
 	requires   map[string]rt.Level
 	undeclared []string
 
-	storage  goja.Value // use('storage'), built on first use (storage.go)
-	database goja.Value // use('database'), built on first use (database.go)
-	express  goja.Value // use('express'), built on first use (express.go)
+	storage  goja.Value            // use('storage'), built on first use (storage.go)
+	database goja.Value            // use('database'), built on first use (database.go)
+	express  goja.Value            // use('express'), built on first use (express.go)
+	loaded   map[string]goja.Value // catalog modules built for this actor (catalog.go)
 	// loading is true while actor.js (and what it requires) runs: the only
 	// time express routes may register; pending holds them until build
 	// merges them into def.http.

@@ -11,6 +11,7 @@ package actor
 
 import (
 	"strconv"
+	"strings"
 
 	"github.com/dop251/goja"
 
@@ -48,9 +49,17 @@ func (a *Actor) databaseModule(cfg DatabaseConfig) goja.Value {
 		caller = store.CallerActorRead
 	}
 	o := a.vm.NewObject()
+	check := func(err error) {
+		// actor-read's authorizer refuses writes as SQLite does ("not
+		// authorized"); say why.
+		if err != nil && cfg.ReadOnly && strings.Contains(err.Error(), "not authorized") {
+			a.throw(fail("permission_denied", "the database module is read-only for %s (its app.trust configuration): %v", a.run.App, err))
+		}
+		a.check(err)
+	}
 	query := func(call goja.FunctionCall) goja.Value {
 		rows, err := a.turn().t.Query(caller, call.Argument(0).String(), a.flatParams(call.Arguments[1:])...)
-		a.check(err)
+		check(err)
 		if cfg.MaxRows > 0 && len(rows) > cfg.MaxRows {
 			a.throw(fail("invalid_argument", "the query returned more than %d rows", cfg.MaxRows))
 		}
@@ -61,7 +70,7 @@ func (a *Actor) databaseModule(cfg DatabaseConfig) goja.Value {
 	}
 	exec := func(call goja.FunctionCall) goja.Value {
 		res, err := a.turn().t.Exec(caller, call.Argument(0).String(), a.flatParams(call.Arguments[1:])...)
-		a.check(err)
+		check(err)
 		n, _ := res.RowsAffected()
 		id, _ := res.LastInsertId()
 		return a.toJS(map[string]any{"success": true, "rowsAffected": n, "lastInsertId": id})

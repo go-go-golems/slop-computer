@@ -2,6 +2,7 @@ package actors
 
 import (
 	"context"
+	"encoding/json"
 	"strings"
 
 	"github.com/dop251/goja"
@@ -30,7 +31,10 @@ type modFunc struct {
 // Install puts the door's Go modules (system, workshop) and use('platform')
 // in the actor manager, with trust read from governance.
 func (s *Door) Install(m *actor.Manager) {
-	m.Trusted = s.Gov.Trusted
+	m.Grant = func(ctx context.Context, app, module string) (actor.Grant, bool) {
+		g, ok := s.Gov.ModuleGrant(ctx, app, module)
+		return actor.Grant{Config: json.RawMessage(g.Config), Current: g.Current}, ok
+	}
 	m.Provide("room", s.roomModule)
 	m.Provide("sample", func(a *actor.Actor) goja.Value { return s.sampleModule(m, a) })
 	m.Provide("platform", func(a *actor.Actor) goja.Value {
@@ -39,10 +43,10 @@ func (s *Door) Install(m *actor.Manager) {
 		}
 		return s.platformModule(a)
 	})
-	m.Register(actor.Module{Name: "system", Doc: "People, grants, links, mounts, policy, LLM budgets, comps, secrets and the system log, as the visitor.",
-		Load: s.systemModule})
-	m.Register(actor.Module{Name: "workshop", Doc: "Stores, snapshots, refs and files of any store the visitor may read; push to draft, publish, run drafts.",
-		Load: func(a *actor.Actor) goja.Value { return s.verbModule(a, "workshop", workshopFuncs) }})
+	m.Register(actor.Module{Name: "system", Class: actor.ClassTrusted, Doc: "People, grants, links, mounts, policy, LLM budgets, comps, secrets and the system log, as the visitor.",
+		Load: func(st actor.Setup) goja.Value { return s.systemModule(st.Actor) }})
+	m.Register(actor.Module{Name: "workshop", Class: actor.ClassTrusted, Doc: "Stores, snapshots, refs and files of any store the visitor may read; push to draft, publish, run drafts.",
+		Load: func(st actor.Setup) goja.Value { return s.verbModule(st.Actor, "workshop", workshopFuncs) }})
 }
 
 // verbModule builds a module's object from its functions.
