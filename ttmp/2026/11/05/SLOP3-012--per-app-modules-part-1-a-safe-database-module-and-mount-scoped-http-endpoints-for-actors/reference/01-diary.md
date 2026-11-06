@@ -647,7 +647,7 @@ Phase 5b adds the two modules the user named as examples of slop's own safe vers
 - The redirect check allows `http` and `https` only, matching the first request. An allowed `https` origin that redirects to its own `http` origin is refused unless both origins are listed.
 
 ### What should be done in the future
-- Open the stacked PR (base `task/slop3-012-modules`).
+- The stacked PR is open: https://github.com/go-go-golems/slop-computer/pull/32 (base `task/slop3-012-modules`); the user merges it after #31.
 - Follow-ups in `tasks.md`: exact names in `decodeArgs`; the floors and `ctx.body` review points; response-header filtering on non-API mounts; go-go-goja imports.
 
 ### Code review instructions
