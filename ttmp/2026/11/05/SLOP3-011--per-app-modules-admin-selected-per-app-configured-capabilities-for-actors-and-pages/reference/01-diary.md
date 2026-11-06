@@ -480,3 +480,61 @@ app.get("/feed.json").public().handle((req, res) =>
   res.json(db.query("SELECT id, title FROM posts WHERE status = 'published'")));
 // compiles to: http: { 'GET /feed.json': { level: 'public', run } }
 ```
+
+## Step 8: HTTP endpoints — the mount is the prefix, and the policy lives on the mount
+
+The user refined the HTTP requirement: an express-style module that cannot serve static files or listen, that only allows certain routes or route globs, under a configurable prefix, so that different apps can be given subpaths for API endpoints while slop keeps control of the endpoints and can add middleware. I checked how mounts assign paths and found that the prefix already exists: a mount maps host and path to a store and is set by an admin. So I recommended putting the HTTP policy on the mount, not only on the app, and sent the refinement to the report writer.
+
+### Prompt Context
+**User prompt (verbatim):** "1. make http / express configurable so that no static files / listen etc... is possible, or only certain routes or route globs, and a configurable prefix. that way we can assign different subpaths to apps that want to expose API endpoints, and we have control over the endopints ourselves, potentially passing middlewares and other stuff. Repeat what you understood from my approach and potentially better designs from yourselves, you know more about that area than i do"
+**Assistant interpretation:** Restate the approach, then design the HTTP module's configuration: no static/listen, a route allowlist, a prefix per app, host-controlled middleware; improve on it where possible.
+**Inferred user intent:** Let apps expose APIs on paths slop assigns, with slop, not the app, deciding what is reachable and how.
+
+### What I did
+- Read `pkg/registry/mounts.go:14-27` (`Mount{Host, Path, Store, StoreParam, Type, CreateApp, CreateAudience, Aliases, ChangedBy, ChangedAt}`; `Path` takes `/guestbook`, `/r/:store`, `/docs/*`).
+- `grep -rn 'Content-Security-Policy' pkg/doors pkg/host pkg/httpx --include='*.go'`: CSPs are set in `preview.go:47`, `sandbox.go:114`, `live.go:699` (`frame-ancestors 'none'`), `storebytes.go:97` (`sandbox; default-src 'none'`), `office/admin.go:41` and `host/host.go:192`, but not in `serveActorRoute`.
+- Sent the refinement to the report writer.
+
+### Why
+- A prefix the module config chose would duplicate what mounts do, and could disagree with them. Mounts are already admin-owned and are where an app is exposed, so endpoint policy belongs there.
+
+### What worked
+- The design:
+  - the mount is the prefix, preferably on a dedicated API host;
+  - an optional module `prefix` relative to the mount;
+  - a proposed `Mount.API{prefix, routes, floors, middleware, responseTypes, forwardHeaders}`;
+  - the effective routes are the app's registrations that match the allowlist, checked when `actor.js` loads (a registration outside it throws) and again at dispatch;
+  - a level floor per glob;
+  - `static`/`listen`/`mount` absent by construction;
+  - host middleware in Go before the actor wakes (`rateLimit`, `cors`, `maxBody`, `methods`, `requireContentType`, `verifyHmac`, `apiToken`, headers and cache, metering), app middleware via `app.use` inside the turn;
+  - JSON/text responses by default, HTML only if allowed and then with `CSP: sandbox`;
+  - forwarded headers as an allowlist, never cookies or `Authorization`.
+
+### What didn't work
+- No failures observed.
+
+### What I learned
+- The same app mounted twice can need different endpoint policies (public vs internal), which a per-app module config cannot express. That settles "grant per app or per mount" for HTTP: per mount.
+
+### What was tricky to build
+- N/A (design).
+
+### What warrants a second pair of eyes
+- `serveActorRoute` sets only `X-Content-Type-Options: nosniff`. An actor route's HTML is served on the live host's origin, which other apps on that host share. Not yet checked whether that allows cross-app calls with the visitor's cookie (for example `/_site/*`, which checks only `sameOrigin`). To verify, independent of this ticket.
+
+### What should be done in the future
+- Verify the shared-origin observation above.
+- Implementation ticket SLOP3-012.
+
+### Code review instructions
+- `pkg/registry/mounts.go:14`, `pkg/doors/pages/actors.go:serveActorRoute`, `pkg/doors/pages/storebytes.go:97`.
+
+### Technical details
+```jsonc
+// Mount.api (proposed)
+{ "prefix": "/api",
+  "routes": ["GET /api/*", "POST /api/items"],
+  "floors": { "POST /api/*": "interact" },
+  "middleware": [{"name":"rateLimit","per":"visitor","rate":"60/m"}, {"name":"cors","origins":["https://…"]}],
+  "responseTypes": ["application/json", "text/plain"] }
+```
