@@ -665,3 +665,68 @@ const items2 = JSON.parse(fs.readFileSync('/cache/feed.json', 'utf8'));
 ```text
 slop app trust journal fs --config '{"maxBytes":1048576,"maxFiles":200}'
 ```
+
+## Step 9: The goja bump (PR #33) and the confirmed design decisions
+
+The user asked for two things after PR #32. The first was to bump goja. I moved it to the version go-go-goja pins, a year newer than slop's, in its own PR from `main`, so it merges independently of #31 and #32. The full suite passes with it, both on `main` and on #32's code. The second was to confirm the design decisions. The guide's nine proposed decisions are now marked accepted, each with where it is implemented. §33 has become a record of the six open questions with the answer that stands. Every answer is the guide's default, and the code already follows it, so this step changes no code.
+
+### Prompt Context
+**User prompt (verbatim):** "bump goja, confirm design decisions."
+**Assistant interpretation:**
+- "Bump goja": update `github.com/dop251/goja`. The point is to align with go-go-goja (task `uwr5`), so the target is go-go-goja's version.
+- "Confirm design decisions": the user confirms the guide's decisions, which my last report listed as awaiting confirmation. I record them as accepted with the guide's default answers. I did not read it as "ask me about each one".
+**Inferred user intent:** Clear the two blockers I reported: the dependency gap to go-go-goja, and the unconfirmed decisions.
+**Commit (code):** `4f05ec9` — "Bump goja to 97b96e1e55f5 (2026-11-03), the version go-go-goja uses" (branch `task/goja-bump`, PR https://github.com/go-go-golems/slop-computer/pull/33)
+
+### What I did
+- New worktree `…/scratchpad/gojabump` on `task/goja-bump` from `origin/main` (`ecb5df9`).
+- Ran `GOWORK=off go get github.com/dop251/goja@v0.0.0-20261103151521-97b96e1e55f5`, then `go mod tidy`. The changes:
+  - `go.mod`: goja `af2ceb9156d7` → `97b96e1e55f5`; the indirect dependency `dlclark/regexp2 v1.11.5` → `dlclark/regexp2/v2 v2.11.0`;
+  - `go.sum`: also `goccy/go-yaml v1.19.2` (new) and `Masterminds/semver/v3` 3.3.0 → 3.5.0.
+- Compared the two goja trees in the module cache with `diff -rq` to see the size of the change: about a year of work, including new `builtin_iterator.go`, `base64.go` and `float16.go`, and changes to the compiler, `builtin_promise.go`, `builtin_regexp.go` and most built-ins.
+- Checked #32 against the bump in a throwaway detached worktree, `…/scratchpad/gojacheck`: `origin/task/slop3-012-part2` plus a cherry-pick of `4f05ec9`. I removed it afterwards.
+- Opened PR #33 (base `main`).
+- The guide (`design-doc/01-intern-guide-…md`):
+  - a status note under the introduction: everything is implemented in #31 and #32, the decisions are confirmed, and the migration is `012` and the catalog has `fs` and `path`;
+  - the nine `Status: proposed` lines now read `accepted (confirmed by the user, 2026-11-05)`, each with where it is implemented;
+  - §33 "Open decisions" is now "Decisions (confirmed 2026-11-05)", with each question's answer;
+  - the introduction's list of sections says "confirmed decisions".
+- `tasks.md`: `2kn3` is checked; `uwr5` notes that the bump is PR #33 and that the imports remain.
+
+### Why
+- **The target is go-go-goja's goja, not the newest.** The newest goja commit (`2413f2132ac8`) was from 00:25 UTC the same day. go-go-goja's is two days older, is the one its modules are tested with, and is the one Go's minimal version selection would pick anyway once slop imports go-go-goja.
+- **A separate PR from `main`.** The bump touches only `go.mod` and `go.sum`, which #31 and #32 do not touch. Stacking it on #32 would hold a dependency update behind a feature review.
+- **Decision 6 is answered "no one".** That is the rule part 2 implemented: `data` and `own` modules are on for every actor, and their grants only restrict them.
+
+### What worked
+- On `main` with the bump: `GOWORK=off go test ./... -count=1` gave 17 `ok` lines and no failures, and `golangci-lint run ./...` gave `0 issues.`
+- On #32 plus the bump: the same, 17 `ok` lines and `0 issues.` This covers the code that uses goja most directly: the catalog's interceptor, `fs`'s promises and `Uint8Array`s, `express.js` and the savepoint handles.
+- `grep -c 'accepted (confirmed by the user'` on the guide gives 9.
+
+### What didn't work
+- My first attempt at the check worktree ran `git cherry-pick $H` with `H=$(git rev-parse HEAD)` set in the same compound command. `H` came out empty, `git cherry-pick` printed its usage, and the tests that followed ran #32 on the old goja (17 `ok`). That run proved nothing about the bump. `git log` showed the commit was fine (`4f05ec9`), so I cherry-picked it by hash and reran. The results above come from that second run.
+
+### What I learned
+- `go mod tidy` after the bump also raised `Masterminds/semver/v3` and added `goccy/go-yaml`. These come from the new goja's own module graph, not from slop's code.
+
+### What was tricky to build
+- Nothing in code. The care went into the wording: the guide still describes the plan in the future tense, so the status note says the text says *proposed* where it described the plan, rather than rewriting every "proposed:" code comment.
+
+### What warrants a second pair of eyes
+- Behaviour changes inside goja that the tests do not reach. Regular expressions are the clearest case: goja moved to `regexp2/v2`, and app code with unusual regexes could behave differently. slop's tests exercise little regex code.
+- Whether "confirm design decisions" meant to accept the defaults, as recorded, or to go through them one by one. If any answer should differ, §33 and the matching `Status` lines are the places to change.
+
+### What should be done in the future
+- After #33 merges: rebase #31 and #32 on `main`.
+- Then go-go-goja imports (`uwr5`): wrap chosen go-go-goja modules as catalog entries of the right class (for example `yaml` and `crypto` as `data`).
+
+### Code review instructions
+- PR #33: `git diff origin/main..origin/task/goja-bump` (only `go.mod` and `go.sum`); validate with `GOWORK=off go test ./... -count=1`.
+- Decisions: §33 of the guide and its nine `Status:` lines (`grep -n 'Status:' design-doc/01-*.md`).
+
+### Technical details
+```text
+github.com/dop251/goja  v0.0.0-20251103141225-af2ceb9156d7  →  v0.0.0-20261103151521-97b96e1e55f5
+github.com/dlclark/regexp2 v1.11.5 (indirect)                →  github.com/dlclark/regexp2/v2 v2.11.0
+latest upstream at the time: v0.0.0-20261105002551-2413f2132ac8 (not taken)
+```

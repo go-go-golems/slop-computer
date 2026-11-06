@@ -25,7 +25,7 @@ RelatedFiles:
       Note: Mount, which gains the API policy
 ExternalSources: []
 Summary: Intern-level guide to slop's stores, apps, mounts, actors, use() and actor HTTP routes, then the design and phased implementation plan for a database module (go-go-goja's JS API over the actor's turn) and an express-style route builder whose routes are bounded by an API policy on the mount.
-LastUpdated: 2026-11-05T20:15:41-05:00
+LastUpdated: 2026-11-05T22:20:00-05:00
 WhatFor: Learning the parts of slop that per-app modules touch, and implementing SLOP3-012 phase by phase from file-level instructions, pseudocode and tests.
 WhenToUse: Before changing pkg/actor (modules, require, routes), pkg/store's SQL authorizer, pkg/registry mounts, pkg/doors/pages/actors.go or the mount verbs; when reviewing SLOP3-012 changes.
 ---
@@ -40,7 +40,9 @@ slop runs small web applications on **stores**. A store is a SQLite database wit
 2. **`express`**: an express-style route builder (`app.get(p).public().handle(fn)`) that compiles into the route table actors already have. It has no `static`, `listen` or `mount`.
 3. **A mount API policy**: the mount that exposes the store says which routes may be served, the minimum level per route, the host middlewares that run before the actor does any work, and which content types and headers may leave.
 
-Nothing described as *proposed* exists yet. Current behaviour is cited with repository-relative `path:line` references, checked at `origin/main` `639a68c`. The research behind the design is in SLOP3-011 (diary Steps 1–9) and in the vault report *PROJECT REPORT - slop v3 - Per-App Modules - Safe Database and HTTP Endpoints for Sandboxed Actors - A Technical Deep Dive*.
+> **Status (2026-11-05):** everything this guide proposes is implemented, in PR #31 (phases 1–4) and PR #32 (part 2, phase 5). The user confirmed the decisions on 2026-11-05; Section 33 records each answer. The text below still says *proposed* where it described the plan before implementation. Two details changed in implementation: the migration for `app_modules.config` is `012` (`011` is `mount_api`), and the catalog also has `fs` and `path`.
+
+When this guide was written, nothing described as *proposed* existed yet. Current behaviour is cited with repository-relative `path:line` references, checked at `origin/main` `639a68c`. The research behind the design is in SLOP3-011 (diary Steps 1–9) and in the vault report *PROJECT REPORT - slop v3 - Per-App Modules - Safe Database and HTTP Endpoints for Sandboxed Actors - A Technical Deep Dive*.
 
 The guide has five parts:
 
@@ -50,7 +52,7 @@ The guide has five parts:
 - **Part IV** is the implementation plan, phase by phase and file by file, with pseudocode and tests.
 - **Part V** is the API and file reference.
 
-Open decisions, risks and a glossary close the document.
+The confirmed decisions, risks and a glossary close the document.
 
 ---
 
@@ -572,7 +574,7 @@ ALTER TABLE app_modules ADD COLUMN config TEXT NOT NULL DEFAULT '{}';
 - **Decision:** Each module's configuration is a Go struct with a `Validate() error` method, decoded with `DisallowUnknownFields` as `verbs.Def` decodes arguments (`pkg/verbs/def.go:113-133`). Its JSON Schema is generated with `invopop/jsonschema`, already a dependency (`go.mod:9`), for display only.
 - **Rationale:** This adds no dependency, gives one source of truth, and reuses the same error messages as verbs.
 - **Consequences:** `app.trust` gains a `config` argument that is validated before it is stored. The admin's configuration is the only one that applies, and the manifest may only suggest one.
-- **Status:** proposed.
+- **Status:** accepted (confirmed by the user, 2026-11-05); implemented in part 2 (`pkg/actor/catalog.go`, `Module.DecodeConfig`). One addition: keys must match the JSON names exactly, because `encoding/json` matches field names without regard to case even with `DisallowUnknownFields` (diary Step 7).
 
 Figure 2 shows how a module name will resolve once part 2 exists. In part 1 only the "built in" branch is new.
 
@@ -647,7 +649,7 @@ While a handle is open, document writes through `db` or `storage` throw `conflic
 - **Decision:** `database` flattens one level, as go-go-goja does. Objects are still encoded as JSON strings, and `true`/`false` become 1/0 as in `sql`.
 - **Rationale:** The module exists to run scripts written against go-go-goja's API. `sql` stays as it is.
 - **Consequences:** The two modules differ for array arguments, and the API reference says so. A nested array (`[[1, 2]]`) becomes one JSON string, as in `sql`.
-- **Status:** proposed.
+- **Status:** accepted (confirmed by the user, 2026-11-05); implemented in phase 1 (`flatParams`, `pkg/actor/database.go`).
 
 ## 22. `require()` resolution
 
@@ -661,7 +663,7 @@ While a handle is open, document writes through `db` or `storage` throw `conflic
 - **Decision:** A small set of reserved names (`database`, `express`) resolves to the same object `use(name)` returns. If `use(name)` would return `null`, `require` throws `not_found: database is not available to <app>`. Other names keep today's behaviour.
 - **Rationale:** This matches `goja_nodejs`, where native modules resolve before `node_modules`. No app in the repository has a root `database.js`, `express.js`, `db.js` or `http.js`. A `require` that returned `null` would fail far from its cause.
 - **Consequences:** An app with a root `express.js` would need `require("./express.js")`. Relative paths are unaffected.
-- **Status:** proposed.
+- **Status:** accepted (confirmed by the user, 2026-11-05); implemented in phase 1, and part 2 adds `fs` and `path` to the reserved names.
 
 ## 23. The `express` module
 
@@ -695,7 +697,7 @@ app.post("/api/items").allow("interact").handle((ctx, res) => {
 - **Decision:** While `actor.js` loads, the builder records routes in Go. After `RunScript`, and before `readShape`, `build` writes each one into `a.def.http` as `{level, audience, run}`, creating `http` when it is absent. A key that `http:` already defines is a load error.
 - **Rationale:** `MatchRoute`, `Serve`, `fn`, `toRes` and `serveActorRoute` stay unchanged. Builder routes and `http:` routes are one table, governed by one policy.
 - **Consequences:** `.handle()` after load throws (`invalid_state: routes register only while actor.js loads`). The route table is fixed after load, so it can be listed for review.
-- **Status:** proposed.
+- **Status:** accepted (confirmed by the user, 2026-11-05); implemented in phase 2 (`mergeRoutes`, `pkg/actor/express.go`).
 
 The builder follows go-go-goja's stages. `handle` is reachable only after `public()` or `allow()`, so every route states who may call it:
 
@@ -745,7 +747,7 @@ A mount already assigns a host and a path to a store, only an admin sets it, and
 - **Decision:** An optional `api` block on `Mount`. A mount without it behaves exactly as today.
 - **Rationale:** Mounts are admin-owned and already the place where an app is exposed. `mount_log` and `mount.undo` already version them.
 - **Consequences:** The policy applies to all of a mount's actor routes, whether declared in `http:` or by the builder. Existing deployments are unaffected until an admin adds `api`.
-- **Status:** proposed.
+- **Status:** accepted (confirmed by the user, 2026-11-05); implemented in phase 3 (`Mount.API`, migration 011).
 
 ### 24.2 The proposed type
 
@@ -899,7 +901,7 @@ The routes a mount serves are the routes the app registers that the mount's allo
 - **Decision:** `Covers(allow, key)` is true when every request the key can match is also matched by `allow`.
 - **Rationale:** A key-level rule can be checked at load and listed for review, and dispatch stays a filter over keys.
 - **Consequences:** The pattern helpers move to `pkg/registry` (Section 31, phase 3) so that the actor, the door and the verbs share them.
-- **Status:** proposed.
+- **Status:** accepted (confirmed by the user, 2026-11-05); implemented in phase 3 (`registry.Covers`).
 
 ```go
 // proposed: pkg/registry/api.go
@@ -1016,7 +1018,7 @@ Running before `MatchRoute` means the chain can key only on the mount, the prefi
 - **Decision:** slop fixes the order. The policy's list only enables and configures steps.
 - **Rationale:** No admin can misorder security steps, and the code has one path to test.
 - **Consequences:** A new middleware needs a slot in the order.
-- **Status:** proposed.
+- **Status:** accepted (confirmed by the user, 2026-11-05); implemented in phase 4 (`runAPIChain`, `pkg/doors/pages/apichain.go`).
 
 ```text
 request on an API mount (path under api.prefix)
@@ -1083,7 +1085,7 @@ The response policy applies on API mounts only. After the turn, before writing, 
 - **Decision:** Leave them unchanged in this ticket.
 - **Rationale:** An existing app depends on the current behaviour. `blocks-site` serves its pages as actor-route HTML on the live host with its own CSP (`apps/blocks-site/actor.js:31, 137`), mounted at `/pub/:id` (`scripts/deploy-apps.sh:42`). Its settings page posts forms to `/_site` and `/_publish` at level `admin` (`apps/blocks-site/lib/render.js:355-360`, `actor.js:191-210`). A forced `sandbox` CSP without `allow-forms` would block those forms. With `allow-forms`, the document's opaque origin would make the posts cross-origin, so `sitePrincipal` would act as nobody and the `admin` routes would refuse them.
 - **Consequences:** The shared-origin question needs its own ticket. API mounts, which are new, start strict.
-- **Status:** proposed.
+- **Status:** accepted (confirmed by the user, 2026-11-05). Filtering response headers on non-API mounts remains a separate task.
 
 ## 29. Request policy
 
@@ -1103,7 +1105,7 @@ The request policy has three parts:
 - **Decision:** Reject with 413 `payload_too_large` on every actor route. On non-API mounts the limit stays 1 MiB, and on API mounts it is `MaxBodyBytes`. The check reads `limit+1` bytes and compares.
 - **Rationale:** A truncated body is never what a handler wants, and the change is one line.
 - **Consequences:** A client that sends more than 1 MiB to a non-API route now gets an error instead of a mangled request. No test or app in the repository depends on truncation.
-- **Status:** proposed (needs confirmation, Section 33).
+- **Status:** accepted (confirmed by the user, 2026-11-05); implemented in phase 3 for every actor route (Section 33, item 5).
 
 ## 30. A request on an API mount, end to end
 
@@ -1599,16 +1601,16 @@ slop mount routes api.example.test /journal
 
 `mount.routes` makes the fixed route table reviewable. When a new app version adds a key, the next `mount.routes` shows it. A version that adds a key no mount covers fails to load (Section 25.2), and `app.status` names the key.
 
-## 33. Open decisions
+## 33. Decisions (confirmed 2026-11-05)
 
-The following decisions are open:
+These were the guide's open questions. The user confirmed them on 2026-11-05 ("confirm design decisions"). The guide's default answer stands in every case, and each is implemented:
 
-1. **Should `database` and `express` be on by default, or granted?** They reach nothing that `sql` and `http:` do not already reach. This guide assumes they are on by default for every app with an actor in part 1, and part 2 makes them grantable with configuration such as `readOnly`.
-2. **Is a module grant per app or per mount?** For HTTP the policy is per mount (Section 24). For other modules, per app is simpler.
-3. **Is there a dedicated API host?** The guide assumes a second entry in `hosts.live` (`pkg/config/config.go:19`), which works today. A distinct host kind `api`, with no shell, no sign-in and tokens only, would be a later change to `HostKind` and `checkMount`.
-4. **Which host middlewares come first?** The guide proposes `rateLimit`, `cors`, `apiToken` and the built-in body limit. `methods` is derived from the allowlist. `requireContentType`, `verifyHmac` with a named slop secret, and metering come later.
-5. **Is the 413 rule applied to every actor route?** Section 29 proposes it. The alternative is API mounts only.
-6. **Who approves data-only modules in part 2?** No one, the admin per app, or once per platform.
+1. **Are `database` and `express` on by default, or granted?** On by default for every app with an actor. Part 2 makes them, and `fs` and `path`, configurable by a grant (`app.trust app database --config '{"readOnly":true}'`). The grant can only restrict them, and the restriction stays in force after its admin steps down.
+2. **Is a module grant per app or per mount?** Per app for modules (`app_modules`), and per mount for HTTP (`Mount.API`).
+3. **Is there a dedicated API host?** No. An API mount goes on a second entry in `hosts.live`. A distinct host kind `api` (no shell, no sign-in, tokens only) remains a possible later change to `HostKind` and `checkMount`.
+4. **Which host middlewares come first?** In this fixed order: `rateLimit` per ip, `cors`, methods (derived from the allowlist), the body limit, `apiToken`, `rateLimit` per visitor. Part 2 adds metering of module calls. `requireContentType`, `verifyHmac` with a named slop secret, and per-route HTTP metering come later.
+5. **Is the 413 rule applied to every actor route?** Yes. The limit is 1 MiB on non-API mounts and `maxBodyBytes` on API mounts.
+6. **Who approves data-only modules?** No one. `data` modules (`path`) are on for every actor, as `own` modules are, because they reach nothing outside the VM. `scoped` modules need an admin's grant per app, and `trusted` modules also need `slop.modules` in `app.json`.
 
 ## 34. Risks
 
