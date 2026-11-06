@@ -24,7 +24,7 @@ WhenToUse: ""
 
 ## Overview
 
-<!-- Provide a brief overview of the ticket, its goals, and current status -->
+First implementation of per-app modules (research: SLOP3-011). Part 1: a `database` module with go-go-goja's JavaScript API over the actor's own store (savepoint-backed `begin`, no `configure`, no handle to other databases), an `express`-style route builder compiled into the actor's route table, and a policy on the mount (`Mount.API`: route allowlist, level floors, a fixed host middleware chain, response and request policy). Part 2: the module type and admin grants with configuration. Start with the intern guide in `design-doc/01-intern-guide-…`. Status: design written; implementation not started.
 
 ## Key Links
 
