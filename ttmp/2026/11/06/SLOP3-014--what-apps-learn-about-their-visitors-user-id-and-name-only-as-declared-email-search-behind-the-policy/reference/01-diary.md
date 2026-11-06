@@ -48,7 +48,7 @@ The answer to the user's follow-up question ("user id and session id avail to ap
 **User prompt (verbatim):** "can JS apps properly handling the access rights to clips (ie has access to user information)?" then "ok ticket with tests and fixes and then PR. commit at appropriate intervals and keep a detailed diary as you work (using the diary format from the skill)" and, while I was working, "user id and session id avail to app?"
 **Assistant interpretation:** "clips" has no meaning in slop (the only matches are clipboard code), so the question is about user information. Turn the four findings into a ticket with failing tests, fix them, and open a PR. Cover the session question in the tests as well.
 **Inferred user intent:** Apps should learn about people exactly what their declared capabilities allow, so that slop is safe to host third-party apps.
-**Commit (code):** `cde6017` (ticket and failing tests); `7b51a87` (fixes and docs).
+**Commit (code):** `cde6017` (ticket and failing tests); `7b51a87` (fixes and docs). PR: https://github.com/go-go-golems/slop-computer/pull/34
 
 ### What I did
 - **Read the paths by which an app can learn who is visiting:**

@@ -6,5 +6,5 @@
 - [x] Fix: actor ctx.visitor name only with the profile scope (id kept: apps key data on it) <!-- t:9sqv -->
 - [x] Fix: user.search matches emails only when the user.email policy allows <!-- t:izad -->
 - [x] Docs: design §10 / claude-apis README on what the visitor carries <!-- t:1me3 -->
-- [ ] Full test suite and lint; PR <!-- t:no58 -->
+- [x] Full test suite and lint; PR <!-- t:no58 -->
 - [ ] Follow-up (not in this PR): per-app opaque ids instead of global usr_ ids <!-- t:zdmy -->
