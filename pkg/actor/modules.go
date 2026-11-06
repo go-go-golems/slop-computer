@@ -28,6 +28,8 @@ func (a *Actor) module(name string) goja.Value {
 	switch name {
 	case "sql":
 		return a.sqlModule()
+	case "database":
+		return a.databaseModule(DatabaseConfig{})
 	case "db":
 		return a.dbModule()
 	case "files":
@@ -283,6 +285,7 @@ func (a *Actor) resolve(path string, doc bool) (rt.Target, bool) {
 // one write writes one store, the actor's own, so a path in another store
 // (an alias, _stores) is refused.
 func (a *Actor) ownPath(path string) string {
+	a.noOpenTransaction("documents")
 	tgt, hidden := a.resolve(path, true)
 	if hidden || !tgt.Own {
 		a.throw(fail("permission_denied", "%s is in another store: an actor writes only its own (call that store's action through use('stores'))", path))
@@ -454,6 +457,7 @@ func (a *Actor) filesModule() goja.Value {
 		default:
 			b = []byte(data.String())
 		}
+		a.noOpenTransaction("files")
 		f, err := a.turn().t.PutFile(zone, path, b, ctype)
 		a.check(err)
 		return a.toJS(f)

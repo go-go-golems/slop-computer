@@ -5,6 +5,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"path/filepath"
 	"strings"
 	"testing"
@@ -176,6 +177,39 @@ func TestAppSQLAuthorizer(t *testing.T) {
 	_, err = s.Do(ctx, me, func(t *Turn) error { _, err := t.Exec(CallerAdminRead, `DELETE FROM items`); return err })
 	if err == nil {
 		t.Fatal("admin-read delete: expected denial")
+	}
+
+	// A read-only actor (database with readOnly, SLOP3-012) reads and takes
+	// savepoints; it writes nothing, not even through Query.
+	_, err = s.Do(ctx, me, func(t *Turn) error {
+		if _, err := t.Query(CallerActorRead, `SELECT name FROM items`); err != nil {
+			return err
+		}
+		if _, err := t.Query(CallerActorRead, `PRAGMA data_version`); err != nil {
+			return err
+		}
+		for _, q := range []string{`SAVEPOINT r1`, `ROLLBACK TO r1`, `RELEASE r1`} {
+			if _, err := t.Exec(CallerActorRead, q); err != nil {
+				return fmt.Errorf("%s: %w", q, err)
+			}
+		}
+		return nil
+	})
+	if err != nil {
+		t.Fatalf("actor-read reads: %v", err)
+	}
+	for _, q := range []string{
+		`INSERT INTO items (name) VALUES ('x')`,
+		`UPDATE items SET name = 'y'`,
+		`DELETE FROM items`,
+		`INSERT INTO items (name) VALUES ('z') RETURNING id`,
+		`CREATE TABLE more (x)`,
+		`ATTACH DATABASE ':memory:' AS other`,
+	} {
+		_, err := s.Do(ctx, me, func(t *Turn) error { _, err := t.Query(CallerActorRead, q); return err })
+		if err == nil {
+			t.Errorf("actor-read %s: expected denial", q)
+		}
 	}
 }
 

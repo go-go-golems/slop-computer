@@ -398,6 +398,7 @@ func (m *Manager) activate(ctx context.Context, t *store.Turn, r kernel.Running)
 	ev := &event{kind: "setup", visitor: m.storeVisitor(ctx, r.Store), via: "activate"}
 	a.cur = &turn{t: t, ev: ev, rev: t.Rev - 1}
 	defer func() { a.cur = nil }()
+	defer a.dropSavepoints() // after a failed hook; closeSavepoints ran otherwise
 	cx := a.ctxObject(ev)
 	for _, name := range []string{"setup", "smoke"} {
 		f := a.fn(name, "")
@@ -421,6 +422,7 @@ func (m *Manager) activate(ctx context.Context, t *store.Turn, r kernel.Running)
 			}
 		}
 	}
+	a.closeSavepoints() // a handle setup or smoke left open rolls back
 	// Recurring alarms from every: add new ones, update changed specs,
 	// drop those the version no longer declares.
 	declared := map[string]bool{}

@@ -126,7 +126,12 @@ type Actor struct {
 	requires   map[string]rt.Level
 	undeclared []string
 
-	storage goja.Value // use('storage'), built on first use (storage.go)
+	storage  goja.Value // use('storage'), built on first use (storage.go)
+	database goja.Value // use('database'), built on first use (database.go)
+	// savepoints are the open database.begin() handles of the current
+	// turn, outermost first; seq names them.
+	savepoints []*savepoint
+	seq        int
 
 	wake  chan struct{} // capacity 1: the store's inbox has something
 	stop  chan struct{}
@@ -260,6 +265,14 @@ func (a *Actor) requirer(files map[string][]byte, entry string) func(string) goj
 	cache := map[string]goja.Value{}
 	var req func(from, name string) goja.Value
 	req = func(from, name string) goja.Value {
+		// Module names resolve before tree files, as native modules do
+		// in goja_nodejs: require('database') is use('database').
+		if reservedModules[name] {
+			if v := a.module(name); v != nil && !goja.IsNull(v) {
+				return v
+			}
+			panic(a.vm.NewGoError(fail("not_found", "%s is not available to %s", name, a.run.App)))
+		}
 		p := name
 		if strings.HasPrefix(name, "./") || strings.HasPrefix(name, "../") {
 			dir := from[:strings.LastIndex(from, "/")+1]
@@ -388,8 +401,12 @@ func (a *Actor) handle(ev *event) {
 		}()
 		v, err := ev.run(a, ctxObj)
 		if err != nil {
+			a.dropSavepoints()
 			return err
 		}
+		// A database handle never outlives its turn: one still open
+		// (the handler returned, or awaited I/O) rolls back here.
+		a.closeSavepoints()
 		val = v
 		// A handler that threw after an await of something already
 		// resolved: its promise is rejected now, so this turn rolls back.
