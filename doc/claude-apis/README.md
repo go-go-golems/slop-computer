@@ -33,7 +33,7 @@ slop (as of 2026-11-02, `main` at 1af14cb).
 | `files` | read a Claude Code project's files | The project is a store's current tree: `files.project` names `_stores` (every store the viewer may open, as `<store>/<path>`; the app must be allowed `_stores`) or an alias of the app's store. `list`, `read` (`revision` is the content hash), `download` and `asSampleTools`, as the viewer; no consent prompt. |
 | `mcp` | the viewer's claude.ai connectors | Not served (`null`). Blocks hides its browser feature. |
 | `permissions` | built in; `state`/`request`/`manage` | Same, with the shell's consent dialog. |
-| `slop` | — | slop's own namespace, on every app view: actor `actions`/`call` (with the shell's confirmation flow), read aliases through `stores.open(alias)`, `visitor()`, `signIn()`, `subscribeUrl()`. |
+| `slop` | — | slop's own namespace, on every app view: actor `actions`/`call` (with the shell's confirmation flow), read aliases through `stores.open(alias)`, `visitor()` (audience, level, guest, subscribed, model allowance; the person's `id` only when the app declares `user`, their `name` only with its `profile` scope), `signIn()`, `subscribeUrl()`. |
 
 Where claude.ai has viewer roles (Viewer, Commenter, Contributor, Editor,
 Owner), slop has store levels (`view` < `interact` < `admin` < `owner`)

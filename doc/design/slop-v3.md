@@ -569,7 +569,7 @@ There is one list of capabilities, and each has the same name and the same rules
 | `files` | `slop.files` (read the tree) | `use('files')`, read and write | `files.*` | always on | tree and assets zones |
 | `assets` | contract | through `files` | `files.* --zone assets` | yes (contract) | uploads, in the contract's shape |
 | `room` | contract | `use('room')`: emit, peers; receive with `on: {'channel:<topic>'}` | `room.*` | yes (contract) | channel and presence |
-| `user` | contract | `ctx.principal`, `use('people')` | `whoami` | contract: always allowed | who is here |
+| `user` | contract | `ctx.principal`, `use('people')` | `whoami` | contract: always allowed | who is here; a page learns the person's id only by declaring `user`, and a name (page or actor) only with its `profile` scope (SLOP3-014) |
 | `comments` | contract | `use('comments')` | `comments.*` | yes (contract) | threads anchored on views |
 | `downloads` | contract | none | none | yes (contract) | save a file from the page |
 | `artifact` | contract `publish(html)` | none | `files.push` | yes, plus platform `refs:write` | snapshot this app's own tree |
