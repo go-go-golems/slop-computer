@@ -113,9 +113,12 @@ Reading francois without changing it works as follows:
 kubectl exec -i -n postgres postgres-0 -- sh -c \
   'PGOPTIONS="-c default_transaction_read_only=on" psql -U "$POSTGRES_USER" -d francois -At -f -' < query.sql
 
-# bytes: cat one blob out of the running pod
-kubectl exec -n francois deploy/francois -- cat /var/lib/francois/releases/blobs/58/583a…70e6 > blob
+# bytes: read one blob out of the running pod, in 4 MiB pieces
+kubectl exec -n francois deploy/francois -- sh -c 'tail -c +1 "$0" | head -c 4194304' \
+  /var/lib/francois/releases/blobs/58/583a…70e6 > piece-0
 ```
+
+One `kubectl exec … cat` of a large file is not reliable. In the rehearsal, a 12,848,209-byte attachment arrived as 10,780,672 bytes, with exit status 0. The importer therefore reads in 4 MiB pieces, checks each piece's length, retries a short piece up to four times, and checks the SHA-256 of the whole file before using it.
 
 Neither command writes to francois. The `PGOPTIONS` setting makes every statement in the session read-only. `cat` reads a file through the pod's filesystem.
 
@@ -332,7 +335,7 @@ push needed    ⇔ desired ≠ current           (paths and hashes, both ways)
 grants needed  ⇔ the set of @guest/@subscriber grants ≠ the desired set
 ```
 
-`files.push` always takes a snapshot (`pkg/commands/files.go:380`), even when nothing changed. The comparison above is therefore what keeps a second run from adding 103 empty snapshots.
+`files.push` runs a turn that rewrites every listed file and then calls `Turn.Snapshot` (`pkg/store/files.go:183`). `Turn.Snapshot` returns the ref's current snapshot when the tree hash is unchanged, so pushing the same tree twice does not add a snapshot. The comparison above still matters. It avoids 103 needless write turns and blob checks. It also produces a plan that a person can read before anything is written: "0 pushes" on a second run is the evidence that the import is complete.
 
 ### 8.6 Moving bytes cheaply
 
@@ -344,7 +347,7 @@ sequenceDiagram
   participant S as slop (files.push)
   participant K as kubectl exec francois
   I->>S: push(store, files by sha256)
-  S-->>I: error missing_blobs {missing: [sha…]}
+  S-->>I: 409 {"error": {"code": "missing_blobs", "extra": {"missing": [sha…]}}}
   loop each missing sha
     I->>K: cat /var/lib/francois/releases/blobs/xx/sha
     K-->>I: bytes (checked: sha256(bytes) == sha)
@@ -386,7 +389,7 @@ The plan and the apply log record each store's `main` before the run (`before.n`
 | Bytes | the importer compares `sha256(bytes)` with francois's recorded hash, for every blob it fetches | no mismatch |
 | Tree | after the push, `files.ls` equals the desired map | 103/103 |
 | Second run | `03-import.py` without `--apply` | `0 pushes, 0 grant changes` |
-| Access | anonymous `GET /f/<id>/` | free → 200; paid → not 200 (sign-in redirect) |
+| Access | as an anonymous visitor, `POST <live>/_site/views {"path": "/f/<id>/"}`, which is the request the mount's shell (`pkg/doors/pages/assets/shell.js`) makes; `GET /f/<id>/` is always 200, because it only returns the shell | free → 200 with `version` = `main`; paid → `401 unauthenticated` |
 | Rendering | Playwright, signed in as admin: open a former placeholder (`polis`) and a fixed-capability app (`hypercore-studio`) | the app renders; no console errors from `window.claude.use` |
 
 ## 10. Considered alternatives
@@ -423,7 +426,8 @@ for a in inv.artifacts (by id):
     grants  = {g.subject for g in call("grant.ls", store=a.id)
                if g.subject in ("@guest", "@subscriber") and g.via == "direct"}
     want_g  = {"@subscriber"} if paid else {"@guest"}
-    plan.add(a.id, push = tree != current, grants = (grants, want_g), tree, before=current_main)
+    refs    = call("ref.ls", store=a.id)              # {"main": n, "francois/0.1.0": n, …}
+    plan.add(a.id, push = tree != current, grants = (grants, want_g), tree, before=refs["main"])
 print(plan.summary())
 if not APPLY: exit
 
@@ -449,7 +453,7 @@ for p in plan.stores:
 | `files.ls` | `{"store"}` | `[{zone, path, sha256, size, type, rev}]` | the working tree; after a push to `main` it equals `main` |
 | `files.cat` | `{"store", "path"}` | the file's text | |
 | `snap.ls` | `{"store"}` | `[{n, rev, tree, message, by, at}]` | |
-| `ref.ls` / `ref.move` | `{"store"}` / `{"store", "ref", "n"}` | | rollback |
+| `ref.ls` / `ref.move` | `{"store"}` / `{"store", "ref", "n"}` | `{"main": n, "<ref>": n}` / | `snap.ls` lists newest first; `main` comes from `ref.ls` |
 | `files.push` | `{"store", "files": [{path, sha256, size, type?} \| {path, text}], "message", "ref"?, "prune"?: true}` | `{files, removed, n, rev}` | error `missing_blobs` with `extra.missing: [sha…]` |
 | `files.blobs` | `{"store", "blobs": {sha: base64}}` | `{stored}` | the HTTP body limit is 96 MiB; batch below 32 MiB |
 | `grant.ls` | `{"store"}` | `[{store, subject, level, via, createdBy, createdAt}]` | |
@@ -461,7 +465,7 @@ for p in plan.stores:
 | Source | Read with | Notes |
 | --- | --- | --- |
 | `catalog_artifacts`, `releases`, `release_files`, `release_attachments` | `psql` in `postgres-0`, `default_transaction_read_only=on` | `scripts/01-inventory.sh` |
-| `/var/lib/francois/releases/<storage_key>` | `kubectl exec -n francois deploy/francois -- cat` | the key matches `blobs/[0-9a-f]{2}/[0-9a-f]{64}`; anything else is refused |
+| `/var/lib/francois/releases/<storage_key>` | `kubectl exec -n francois deploy/francois -- sh -c 'tail -c +<off> "$0" \| head -c <n>' <path>`, in 4 MiB pieces | the key matches `blobs/[0-9a-f]{2}/[0-9a-f]{64}`; anything else is refused |
 | `GET https://slop.boutique/api/catalog` | anonymous | cross-check only: it lists the 100 *listed* artifacts |
 
 ## 13. Implementation and run plan

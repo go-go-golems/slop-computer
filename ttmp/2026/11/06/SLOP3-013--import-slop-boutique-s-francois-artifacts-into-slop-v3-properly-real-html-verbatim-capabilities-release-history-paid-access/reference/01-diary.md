@@ -106,3 +106,88 @@ slop.yolo: 112 stores; release 103; mount apps.slop.yolo.scapegoat.dev /f/:id --
 placeholders: blockout-studio hypercore-studio kiln-workbench living-comic-studio mimeo no-dom-the-interface-is-a-projection octavo-lab polis
 caps drift:   craftkit-workbench hypercore-studio lattice-arena lattice-arena-ds living-comic-studio sonnet-new-roman-modular
 ```
+
+## Step 2: The importer, the verifier, and a local rehearsal
+
+This step builds the four ticket scripts and rehearses them on a local slop. The rehearsal recreates seven production stores the way SLOP3-004 left them: two placeholders, wrong capabilities, attachments, an artifact with paid history and one with withdrawn releases. The importer then fixes them, and a second run plans nothing. History is exercised on a modified inventory, and the verifier checks trees, `main`, grants and anonymous access.
+
+The rehearsal caught two real bugs before production: a truncated `kubectl exec` stream, and a wrong "before" snapshot. It also corrected one claim in the guide (§8.5).
+
+### Prompt Context
+**User prompt (verbatim):** see Step 1
+**Assistant interpretation:** Implement the import designed in the guide, and prove it locally before touching production.
+**Inferred user intent:** A correct, repeatable import, with no surprises on the shared deployment.
+**Commit (code):** pending — scripts and this entry are committed together (next commit).
+
+### What I did
+- `scripts/01-inventory.sh`: one `json_build_object` query in a read-only session. It leaves out user ids (`grep -c @` → 0, `usr_` → 0). Committed output: `various/inventory-2026-11-06.json` (taken `2026-11-06T22:14:20Z`: 104 artifacts, 113 releases, 18 attachments).
+- `scripts/03-import.py`: the planner (dry run by default) and the applier (`--apply`).
+  - `desired_tree` builds `index.html`, `app.json` (`{title, page, capabilities: manifest}`, sorted keys), `francois.json` and `attachments/<safeName>`.
+  - The plan compares trees with `files.ls`, grants with `grant.ls`, and refs with `ref.ls`.
+  - `push` handles `missing_blobs`: it fetches the listed blobs, uploads them with `files.blobs` in batches of 32 MiB or less, and pushes again.
+  - Grants are swapped before the push for a paid store, and after it for a free one.
+  - `--history` writes older releases to `francois/<version>` refs.
+  - Options: `--only`, `--plan-out`, `--log-out` (JSONL), `--emit-apps`.
+- `scripts/02-rehearsal-fixtures.py`: rebuilds production-shaped release stores on a **local** server (it refuses any other) with SLOP3-004's `CAP_BLOCK` mapping, placeholders for paid releases, `@guest interact`, `sample` policies and the `/f/:id` mount.
+- `scripts/04-verify.py`: tree, `main`, grants and anonymous access, checked per store.
+- **Local server:**
+  - `go build -o fr013/slop ./cmd/slop` (worktree at `6fa32c2`; the code is the same as production's `a3da880`).
+  - `slop serve --local --listen 127.0.0.1:18413 --data fr013/local-data --admin-email admin@example.com` in tmux session `slop013`.
+  - Signed in with `POST /auth/local`, read the CSRF token from `GET /auth/session`, then `POST /api/v1/token.new {"scopes":"read,write,admin","days":1}`. The token went to `fr013/local-creds.json` (mode 600) and was never printed.
+- **Fixtures:** `weft polis hypercore-studio lattice-deck rag-workbench craftkit-studio lattice-arena`.
+- **Scratch validator:** `_validate/main.go` in the worktree, not committed. It runs `apps.Parse` and `Entry()` on each `--emit-apps` file.
+
+### Why
+- **Fixtures recreate SLOP3-004's output rather than copying production's stores.** The production bytes are francois's bytes, and the `CAP_BLOCK` mapping and placeholder are known, so the fixtures are faithful without any download from production.
+- **Anonymous access is tested with `POST /_site/views`, not `GET /f/<id>/`.** The GET returns the shell page, which is always 200. The shell's view request is where access is decided.
+
+### What worked
+- Fixture run: 7 stores at snapshot 1.
+- Dry run on the fixtures: `plan: 7 pushes ({'app.json': 7, 'provenance': 7, 'html': 2}), 2 grant changes, 0 history snapshots, 5 skipped`. The skipped entries were lattice-deck 0.1.0 and 0.1.1 ("paid release in a public store") and rag-workbench 0.1.0–0.1.2 ("withdrawn").
+- **Apply:**
+  - Every store moved to snapshot 2.
+  - `hypercore-studio` uploaded 8,179,289 B and `polis` 245,339 B; the other five uploaded 0 B, because their blobs were already present.
+  - The log shows `grant.set @subscriber`, then `grant.rm @guest`, then `push` for both paid stores, in that order.
+- Second dry run: `plan: 0 pushes ({}), 0 grant changes, 0 history snapshots, 0 skipped` on the history fixture; on the base inventory the result is the same, apart from the 5 deliberate skips.
+- **History,** on `inventory-history-fixture.json` (lattice-deck's releases marked free):
+  - The applier printed `history 0.1.0 → snapshot 3`, `history 0.1.1 → snapshot 4`, and `main 0.1.2 → snapshot 2`.
+  - `ref.ls` → `{"francois/0.1.0": 3, "francois/0.1.1": 4, "francois/0.1.2": 2, "main": 2}`.
+  - A rerun is a no-op.
+- Verifier: `7 stores, 0 failing; anonymous view status: {('free', 200): 5, ('paid', 401): 2}`.
+
+### What didn't work
+- **Fixture push, first try:** `imp.APIError: files.push: 409 missing_blobs: send these blobs` on the *second* push, after `files.blobs`. The cause: `APIError` read `missing` from `error`, while the server puts it in `error.extra.missing`; the body is `{'error': {'code': 'missing_blobs', 'message': 'send these blobs', 'extra': {'missing': […]}}}`. Fixed: `self.extra = err.get("extra") or {}`.
+- **Blob fetch:** `blob 20d3fc5a…cdb7: bytes hash to 1673683f…434f` (craftkit-studio's 12,848,209-byte `craftkit-studio-source-project.zip`).
+  - In the pod, `ls -l` and `sha256sum` were correct.
+  - `kubectl exec … cat … | wc -c` → `10780672`, so the exec stream ends early with no error.
+  - Fixed: `Blobs.fetch` reads 4 MiB pieces with `tail -c +off | head -c n`, retries a short piece up to 4 times, and still checks the hash of the whole blob. The fixtures then completed: craftkit-studio 27,724,957 B, lattice-arena 6,392,054 B.
+- **Wrong "before":** the plan's `before.n` came from `snap.ls[-1]`, but `snap.ls` lists **newest first**, so it named the oldest snapshot. Fixed: `before = ref.ls()["main"]`. The history check now looks up ref names in that dict, instead of a substring match on its JSON.
+- **First verifier:** `FAIL polis: … http=200` for both paid stores. `GET /f/<id>/` returns the shell page (200) whatever the grants are. Replaced with the `_site/views` request (paid → `401 {"error":{"code":"unauthenticated","message":"sign in to open this"}}`). The first version also let `**checks` overwrite the `http` field in each row, which produced a `Counter` of booleans.
+
+### What I learned
+- `Turn.Snapshot` (`pkg/store/files.go:183`) returns the ref's current snapshot when the tree hash is unchanged. The final `main` push after history reused snapshot 2. The guide's §8.5 said "always takes a snapshot"; it is corrected.
+- An anonymous `POST /_site/views` on a free app creates a visitor (`vis_…`) and sets a `slop_site` cookie. A production verification run therefore uses one cookie jar, which means one visitor, and closes each view with `DELETE /_site/views/<id>`.
+
+### What was tricky to build
+- **Silent truncation.** `kubectl exec` exits 0 with fewer bytes, so the only defence is to compare lengths and hashes.
+  - The importer checks the hash of the whole blob before uploading it, and that check is what caught the problem.
+  - The server checks as well. `putBlobs` (`pkg/commands/data.go:326`) refuses a blob whose bytes do not hash to its key (`invalid_argument … does not match its sha256`), so a corrupt file can never be stored. The local check gives the better message, because it names the source.
+
+### What warrants a second pair of eyes
+- `grant.rm` is called with `via: "direct"`, so a grant made through a share link (`via: lnk_…`) is left alone. Those are deliberate shares made by people, not import state.
+
+### What should be done in the future
+- N/A for this step.
+
+### Code review instructions
+- `scripts/03-import.py`: `plan`, `desired_tree`, `push`, `Blobs.fetch`, `apply` (grant order).
+- `scripts/04-verify.py`: `open_view`.
+- Rehearsal commands are in "Technical details".
+
+### Technical details
+```sh
+S=…/scratchpad; export TMPDIR=$S/fr013 SLOP_CREDENTIALS=$S/fr013/local-creds.json
+python3 -I scripts/02-rehearsal-fixtures.py various/inventory-2026-11-06.json apps.localhost:18413 weft polis …
+python3 -I scripts/03-import.py various/inventory-2026-11-06.json --only weft,polis,… [--apply --log-out local-apply.jsonl]
+python3 -I scripts/04-verify.py various/inventory-2026-11-06.json http://apps.localhost:18413 --only weft,polis,…
+```
