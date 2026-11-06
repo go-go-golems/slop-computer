@@ -689,6 +689,22 @@ func (a *Actor) storesModule() goja.Value {
 
 // --- fetch, secrets --------------------------------------------------------
 
+// fetchRedirect checks every redirect of a fetch as the first request was
+// checked: its origin must be in app.json slop.fetch (SLOP3-012 phase 5c).
+// Without it, an allowed origin could send the request on to any other,
+// internal addresses included.
+func (a *Actor) fetchRedirect(req *http.Request, via []*http.Request) error {
+	if len(via) >= 10 {
+		return fail("unavailable", "fetch stopped after 10 redirects")
+	}
+	u := req.URL
+	origin := u.Scheme + "://" + u.Host
+	if (u.Scheme != "https" && u.Scheme != "http") || !slices.Contains(a.run.Manifest.Slop.Fetch, origin) {
+		return fail("permission_denied", "fetch was redirected to %s, which is not in app.json slop.fetch", origin)
+	}
+	return nil
+}
+
 func (a *Actor) fetchModule() goja.Value {
 	return a.vm.ToValue(func(raw string, init goja.Value) goja.Value {
 		a.need("fetch")
@@ -727,8 +743,12 @@ func (a *Actor) fetchModule() goja.Value {
 			for k, v := range headers {
 				req.Header.Set(k, v)
 			}
-			c := &http.Client{Timeout: 30 * time.Second}
+			c := &http.Client{Timeout: 30 * time.Second, CheckRedirect: a.fetchRedirect}
 			r, err := c.Do(req)
+			var denied *Error
+			if errors.As(err, &denied) {
+				return nil, denied // a redirect left slop.fetch
+			}
 			if err != nil {
 				return nil, fail("unavailable", "fetch %s: %v", origin, err)
 			}
