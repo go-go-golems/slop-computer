@@ -208,3 +208,90 @@ tx.commit();                           // RELEASE dbsp<n>
 db.query('SELECT ? AS a, ? AS b', [1, 2]);   // [{a: 1, b: 2}]
 db.configure('sqlite3', '/x');         // throws permission_denied
 ```
+
+## Step 4: Phase 2 — the `express` route builder
+
+Phase 2 adds `use('express')` and `require('express')`. The builder is JavaScript (`express.js`, evaluated once per actor as `storage.js` is). Go keeps only what must be checked: `register` validates each route's key, level and audience, and refuses registration after load; `mergeRoutes` writes the routes into `def.http` before `readShape`. Builder routes and `http:` routes therefore form one table, served by the unchanged `MatchRoute`/`Serve`/`toRes`/`serveActorRoute`. The test passed on the first run, and a mutation check confirmed that it catches a missing load-time guard.
+
+### Prompt Context
+**User prompt (verbatim):** see Step 3
+**Assistant interpretation:** Phase 2 of the guide's plan.
+**Inferred user intent:** Apps can expose HTTP endpoints with the express API, inside slop's route machinery.
+**Commit (code):** `58285cd` — "SLOP3-012 phase 2: use('express'), go-go-goja's route builder over the actor's route table"
+
+### What I did
+- `pkg/registry/routes.go` (new): `RouteMethods`, `SplitKey`, `ValidRouteKey`, `ValidRoutePattern`.
+- `pkg/sysdb/records.go`: `ValidGroup(group)` (a group `GroupsOf` knows, with or without `@`).
+- `pkg/actor/express.js` (new):
+  - `app.use`, `get`/`head`/`post`/`put`/`patch`/`delete`/`options`/`all`/`route`;
+  - the staged builder `.public()`/`.allow(level)` → `.audience(g)` → `.handle(fn)`;
+  - `compile` (the `app.use` chain, then the handler; promise-aware), `envelope`, `newRes`;
+  - `not_supported` stubs for `static`, `staticFromAssetsModule`, `spaFromAssetsModule`, `mount`, `mountHandler`, `listen`, `.auth()` and the `ctx` fields slop lacks.
+- `pkg/actor/express.go` (new): `expressModule` (cached), `register`, `checkRouteLevel`, `mergeRoutes`.
+- `pkg/actor/actor.go`:
+  - fields `express`, `loading`, `pending`;
+  - `a.loading = true` around `RunScript`;
+  - `mergeRoutes()` after the `defineActor` check, before `readShape`.
+- `pkg/actor/modules.go`: `case "express"`. `reservedModules` gains `express`.
+- Test: `pkg/host/express_module_test.go` (new), `TestExpressModule`.
+
+### Why
+- I kept the builder in JavaScript because it composes functions (the middleware chain, buffered `res`, promise settling). That is natural in JS and awkward through goja's Go bindings. The security-relevant checks stay in Go.
+- `register` checks `a.loading`, not `a.cur == nil`, because requires and helper functions also run during load, and an action handler at run time has `a.cur` set too. The flag says exactly "actor.js is running".
+- `res.send(object)` sends JSON and `res.send(string)` sends text, as in go-go-goja, except that a string is never sniffed for HTML (guide §23.3).
+
+### What worked
+- `TestExpressModule` passed, with an assertion for each of these:
+  - a public route answers with params, query and method, and the `app.use` middleware's header `X-Mw: ran`;
+  - an `http:` route on the same table answers;
+  - `.allow('interact')` gives 404 to nobody and 403 to a signed-in viewer (`@member` at `view`), for GET and POST;
+  - at `interact`, `POST` with a JSON body returns 201 and `{id: 1}`, and the row exists;
+  - `redirect(303, …)` sets `Location`;
+  - an async handler with `await time.sleep(1)` answers;
+  - a returned string is `text/plain`;
+  - `twice` and `nothing` give 500 `invalid_state`;
+  - `object`, `cookies`, `static`, `listen` and `auth` give 500 `not_supported`;
+  - registering from an action gives `invalid_state`;
+  - four load errors break the actor, with messages in `app.status`:
+    - `GET /a is defined both in http: and by express`;
+    - `level "superuser": use public, view, interact, admin or owner`;
+    - `"GET a/*/b" is not a route`;
+    - `unknown audience "vip"`.
+- Mutation check: with `if !a.loading` replaced by `if false && !a.loading`, the test failed with `actor.call map[action:late store:ex]: want invalid_state, got 200`. I restored the file.
+- Full suite passed. `golangci-lint run` passed after one fix (below).
+
+### What didn't work
+- The first lint run on the new `routes.go` reported:
+  - `QF1001: could apply De Morgan's law (staticcheck)` on `validParam`;
+  - `nonamedreturns` on `SplitKey`.
+
+  I fixed both: named booleans `letter`/`digit`, and unnamed results.
+
+### What I learned
+- Load-time errors from a Go function called from JS carry goja's native frame (`at github.com/…/(*Actor).register-fm (native)`) in `app.status`. The message is still readable. Stripping the frame would be cosmetic and affect every Go-thrown error, so I left it.
+
+### What was tricky to build
+- One table, two sources. `http:` route objects and builder routes must look identical to `readShape` and `fn`. `mergeRoutes` writes `{level, audience, run}` objects into `def.http`, so `fn("http", key)` finds `run` as it does for hand-written routes. The compiled `run(ctx, req)` returns the same `{status, headers, json|text|html}` shape `toRes` already reads.
+- Errors inside `res.result`: they are thrown in JS with `e.code`, so `jsError` turns them into coded errors and `serveActorRoute` writes them as JSON errors with status 500. No new error path was needed.
+
+### What warrants a second pair of eyes
+- `ctx` is `Object.create(ctx)`. The actor's accessor properties (`now`, `rev`, `storage`) are Go functions that ignore `this`, so inheriting them works. A future accessor that used `this` would see the envelope.
+- `.audience(group)` accepts `store` because `ValidGroup` includes it. A route for `store` makes sense only for store-to-store calls, which HTTP routes do not get.
+
+### What should be done in the future
+- Phase 3: the mount policy, which also covers builder routes.
+
+### Code review instructions
+- Start at `pkg/actor/express.go` (`register`, `mergeRoutes`), then `pkg/actor/express.js` (`needsSecurity`, `compile`, `newRes`), then `build` in `pkg/actor/actor.go`.
+- Validate: `GOWORK=off go test ./pkg/host/ -run 'TestExpressModule$' -count=1 -v`.
+
+### Technical details
+```js
+const app = require('express').app();
+app.use((ctx, res, next) => { res.set('X-Mw', 'ran'); return next(); });
+app.post('/items').allow('interact').handle((ctx, res) => {
+  const r = require('database').exec('INSERT INTO items (title) VALUES (?)', ctx.body.title);
+  res.status(201).json({ id: r.lastInsertId });
+});
+// merged as def.http['POST /items'] = { level: 'interact', run }
+```
