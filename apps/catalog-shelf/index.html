@@ -1,0 +1,288 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Shelf — slop catalog</title>
+<style>
+  :root { --bg: #f6f5f1; --panel: #fff; --ink: #16161a; --muted: #6b6a66; --line: #dcdad3; --accent: #c2410c; --chip: #ecebe5;
+          --mono: ui-monospace, "SF Mono", Menlo, Consolas, monospace; --sans: system-ui, -apple-system, "Segoe UI", Roboto, sans-serif; color-scheme: light dark; }
+  @media (prefers-color-scheme: dark) { :root { --bg: #141414; --panel: #1c1c1e; --ink: #ecebe6; --muted: #9a9892; --line: #2f2f31; --accent: #fb923c; --chip: #262628; } }
+  * { box-sizing: border-box; }
+  body { margin: 0; background: var(--bg); color: var(--ink); font: 15px/1.45 var(--sans); }
+  a { color: inherit; }
+  button, input { font: inherit; color: inherit; }
+  header { display: flex; align-items: center; gap: 14px; padding: 12px 20px; border-bottom: 1px solid var(--line); position: sticky; top: 0; background: var(--bg); z-index: 2; flex-wrap: wrap; }
+  header h1 { font-size: 18px; margin: 0; }
+  header .sp { flex: 1; }
+  .me { display: flex; align-items: center; gap: 8px; font-size: 14px; }
+  .av { width: 26px; height: 26px; border-radius: 50%; object-fit: cover; flex: none; border: 2px solid var(--panel); background: var(--chip);
+        display: inline-grid; place-items: center; font: 700 10px var(--sans); color: #fff; overflow: hidden; }
+  .btn { border: 1px solid var(--line); background: var(--panel); border-radius: 8px; padding: 4px 12px; cursor: pointer; text-decoration: none; font-size: 14px; }
+  .btn:hover { border-color: var(--ink); }
+  .btn.primary { background: var(--ink); color: var(--bg); border-color: var(--ink); }
+  main { display: grid; grid-template-columns: 1fr 340px; gap: 20px; padding: 16px 20px 40px; max-width: 1280px; margin: 0 auto; }
+  @media (max-width: 860px) { main { grid-template-columns: 1fr; } }
+  .search { width: 100%; border: 1px solid var(--line); background: var(--panel); border-radius: 8px; padding: 7px 10px; margin-bottom: 10px; }
+  .list { display: flex; flex-direction: column; border-top: 1px solid var(--line); }
+  .row { display: grid; grid-template-columns: 56px 1fr auto; gap: 12px; align-items: center; padding: 8px 6px; border-bottom: 1px solid var(--line); cursor: pointer; }
+  .row:hover, .row.sel { background: var(--chip); }
+  .thumb { width: 56px; height: 40px; border-radius: 6px; overflow: hidden; background: var(--chip); display: grid; place-items: center; font: 700 14px var(--sans); color: var(--muted); }
+  .thumb img { width: 100%; height: 100%; object-fit: cover; }
+  .row b { display: block; font-weight: 600; }
+  .row small { color: var(--muted); display: block; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; max-width: 56ch; }
+  .row .side { display: flex; align-items: center; gap: 8px; }
+  .faces { display: flex; }
+  .faces .av { width: 22px; height: 22px; margin-left: -6px; }
+  .star { border: 0; background: none; cursor: pointer; font-size: 20px; line-height: 1; color: var(--muted); padding: 2px 4px; }
+  .star[aria-pressed="true"] { color: var(--accent); }
+  .star:disabled { opacity: .35; cursor: default; }
+  aside section { background: var(--panel); border: 1px solid var(--line); border-radius: 12px; padding: 14px; margin-bottom: 14px; }
+  aside h2 { font-size: 15px; margin: 0 0 8px; display: flex; align-items: center; gap: 8px; }
+  aside h2 small { color: var(--muted); font-weight: 400; font: 12px var(--mono); margin-left: auto; }
+  aside ol, aside ul { margin: 0; padding: 0; list-style: none; display: flex; flex-direction: column; gap: 6px; }
+  aside li { display: flex; align-items: center; gap: 8px; min-width: 0; }
+  aside li .t { flex: 1; min-width: 0; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; cursor: pointer; }
+  aside li .n { font: 12px var(--mono); color: var(--muted); }
+  .dim { color: var(--muted); font-size: 14px; }
+  .detail { border: 1px solid var(--line); background: var(--panel); border-radius: 12px; padding: 14px; margin-bottom: 14px; display: none; gap: 14px; }
+  .detail.on { display: grid; grid-template-columns: 160px 1fr; }
+  .detail .thumb { width: 160px; height: 110px; font-size: 32px; }
+  .detail h3 { margin: 0 0 4px; font-size: 20px; }
+  .detail p { margin: 0 0 8px; color: var(--muted); }
+  .tags { font: 12px var(--mono); color: var(--muted); }
+  label.share { display: flex; align-items: center; gap: 6px; font-size: 14px; margin-top: 10px; }
+</style>
+</head>
+<body>
+<header>
+  <h1>Shelf</h1>
+  <span class="dim" id="sub">apps you keep, and what people here are looking at</span>
+  <span class="sp"></span>
+  <a class="btn" id="back" href="#" target="_top">← Catalog</a>
+  <div class="me" id="me"></div>
+</header>
+<main>
+  <div>
+    <div class="detail" id="detail"></div>
+    <input class="search" id="q" type="search" placeholder="Search the catalog" aria-label="Search the catalog">
+    <div class="list" id="list" role="list"><p class="dim">Loading the catalog…</p></div>
+  </div>
+  <aside>
+    <section>
+      <h2>Your shelf <small id="mycount"></small></h2>
+      <ol id="mine"><li class="dim">Sign in to keep a shelf.</li></ol>
+      <label class="share" id="sharel" hidden><input type="checkbox" id="share"> show my shelf to others</label>
+    </section>
+    <section>
+      <h2>Here now <small id="herecount"></small></h2>
+      <ul id="here"><li class="dim">Connecting…</li></ul>
+    </section>
+    <section>
+      <h2>On people's shelves <small id="shelfcount"></small></h2>
+      <ol id="popular"><li class="dim">Nothing shared yet.</li></ol>
+    </section>
+  </aside>
+</main>
+<script>
+(async () => {
+  "use strict";
+  const $ = (id) => document.getElementById(id);
+  // el("a", {href, class, onclick}, children…), as in the catalog kit.
+  function el(tag, attrs, ...kids) {
+    const n = document.createElement(tag);
+    for (const [k, v] of Object.entries(attrs || {})) {
+      if (v == null || v === false) continue;
+      if (k.startsWith("on")) n.addEventListener(k.slice(2), v);
+      else if (k === "class") n.className = v;
+      else n.setAttribute(k, v === true ? "" : v);
+    }
+    for (const k of kids.flat()) if (k != null && k !== false) n.append(k.nodeType ? k : String(k));
+    return n;
+  }
+  // avatar: the profile's picture, or (slop gives no avatarUrl) its initials
+  // on its colour. prof may be null (someone without an id).
+  function avatar(prof, label) {
+    const name = (prof && prof.name) || label || "";
+    if (prof && prof.avatarUrl) return el("img", { class: "av", src: prof.avatarUrl, alt: "", title: name });
+    return el("span", { class: "av", title: name, "aria-hidden": "true", style: `background:${(prof && prof.color) || "var(--muted)"}` }, initials(name) === "·" ? "?" : initials(name));
+  }
+  const initials = (t) => (t || "").replace(/[^\p{L}\p{N} ]/gu, "").split(/\s+/).filter(Boolean).slice(0, 2).map((w) => w[0].toUpperCase()).join("") || "·";
+
+  const catalog = await fetch("data/catalog.json").then((r) => r.json());
+  const site = catalog.siteOrigin || "https://site.slop.yolo.scapegoat.dev";
+  $("back").href = site + "/catalog/";
+  const byId = new Map(catalog.items.map((i) => [i.id, i]));
+  const thumb = (i, cls) => el("div", { class: "thumb " + (cls || "") }, i.cover ? el("img", { src: site + i.cover.src, alt: "", loading: "lazy" }) : initials(i.title));
+
+  const [db, user, room, slop] = await Promise.all(["db", "user", "room", "slop"].map((n) => claude.use(n).catch(() => null)));
+  const me = user ? await user.me() : null;
+  const uid = me && me.id;
+
+  // --- who am I --------------------------------------------------------------
+  if (uid) {
+    $("me").replaceChildren(avatar(me, "you"), me.name || "you");
+  } else {
+    $("me").replaceChildren(slop && slop.signIn ? el("button", { class: "btn primary", type: "button", onclick: () => slop.signIn() }, "Sign in to keep a shelf") : el("span", { class: "dim" }, "Signed out"));
+  }
+
+  // --- state -----------------------------------------------------------------
+  const state = { q: "", sel: null, stars: {}, share: false, shelves: [], peers: [] };
+  const names = {}; // id -> profile, refreshed from user.profiles in render paths
+  async function profiles(ids) {
+    ids = [...new Set(ids.filter(Boolean))];
+    if (!user || !ids.length) return {};
+    const ps = await user.profiles(ids);
+    Object.assign(names, ps);
+    return ps;
+  }
+
+  // My shelf: one private doc (data/users/<id>/shelf). Shared shelves: one
+  // public doc per person who opts in (shelves/<id>), written only by them.
+  const mineRef = uid && db ? db.doc("data/users/" + uid + "/shelf") : null;
+  // The page owns its shelf: read once at load, then every change is
+  // written in order (one write at a time per document). Snapshots of the
+  // person's own doc are not used: one arriving late, from before a quick
+  // run of stars, would roll the page back.
+  let saving = Promise.resolve();
+  function save() {
+    if (!mineRef) return;
+    const body = { stars: state.stars, share: state.share, at: Date.now() };
+    const ids = Object.keys(state.stars).sort((a, b) => state.stars[b] - state.stars[a]);
+    saving = saving.then(async () => {
+      await mineRef.set(body);
+      const pub = db.doc("shelves/" + uid);
+      if (state.share) await pub.set({ apps: ids, at: Date.now() });
+      else await pub.delete();
+    }).catch((e) => { $("sub").textContent = "Could not save: " + (e.code || "") + " " + (e.message || e); });
+  }
+  if (mineRef) {
+    try {
+      const s = await mineRef.get();
+      const d = s.exists ? s.data() : {};
+      state.stars = Object.assign({}, d.stars || {});
+      state.share = !!d.share;
+    } catch (e) { $("sub").textContent = "Could not read your shelf: " + (e.code || e); }
+    $("share").checked = state.share;
+    $("sharel").hidden = false;
+  }
+  if (db) {
+    db.collection("shelves").orderBy("at", "desc").limit(500).onSnapshot((s) => {
+      state.shelves = s.docs.map((d) => ({ by: d.id, apps: (d.data().apps || []).filter((id) => byId.has(id)) }));
+      renderPopular();
+    }, () => {});
+  }
+  $("share").onchange = (e) => { state.share = e.target.checked; save(); };
+
+  function toggle(id) {
+    if (!uid) return slop && slop.signIn && slop.signIn();
+    if (state.stars[id]) delete state.stars[id]; else state.stars[id] = Date.now();
+    render();
+    save();
+  }
+
+  // --- presence: what each person here is looking at --------------------------
+  if (room) {
+    // onPeers fires on any presence change, often several times a second.
+    // Re-render only when who is looking at what has changed: rebuilding the
+    // list between a mousedown and its mouseup would swallow the click.
+    let sig = "";
+    room.onPeers((c) => {
+      state.peers = c.peers.filter((p) => p.kind === "viewer");
+      const next = state.peers.map((p) => `${p.peer}:${p.by}:${(p.presence && p.presence.looking) || ""}`).sort().join("|");
+      if (next === sig) return;
+      sig = next;
+      renderHere();
+      renderList();
+    }, () => { state.peers = []; sig = ""; renderHere(); });
+    room.presence({ looking: null });
+  }
+  function lookingAt(id) { return state.peers.filter((p) => p.presence && p.presence.looking === id); }
+  function face(p) {
+    const prof = p.by ? names[p.by] : null;
+    return avatar(prof, p.isMe ? "you" : "someone");
+  }
+
+  function select(id) {
+    state.sel = state.sel === id ? null : id;
+    if (room) room.presence({ looking: state.sel });
+    render();
+  }
+
+  // --- render ------------------------------------------------------------------
+  function renderDetail() {
+    const i = state.sel && byId.get(state.sel);
+    const d = $("detail");
+    d.classList.toggle("on", !!i);
+    if (!i) return d.replaceChildren();
+    const here = lookingAt(i.id).filter((p) => !p.isMe);
+    d.replaceChildren(thumb(i), el("div", {},
+      el("h3", {}, i.title),
+      el("p", {}, i.description),
+      el("div", { class: "tags" }, i.tags.join(" · "), " — ", i.capabilities.join(", ") || "no runtime", i.free ? "" : " — for subscribers"),
+      el("p", { class: "dim" }, here.length ? `${here.length} other ${here.length > 1 ? "people are" : "person is"} looking at this too.` : ""),
+      el("div", { style: "display:flex;gap:8px;margin-top:6px" },
+        el("a", { class: "btn primary", href: i.open, target: "_blank", rel: "noopener" }, "Open ↗"),
+        el("a", { class: "btn", href: site + "/catalog/list/?open=" + encodeURIComponent(i.id), target: "_blank", rel: "noopener" }, "Preview ↗"),
+        el("button", { class: "btn", type: "button", onclick: () => toggle(i.id), disabled: !db }, state.stars[i.id] ? "★ On your shelf" : "☆ Add to shelf"))));
+  }
+
+  function renderList() {
+    const words = state.q.toLowerCase().split(/\s+/).filter(Boolean);
+    const items = catalog.items.filter((i) => words.every((w) => (i.title + " " + i.description + " " + i.tags.join(" ")).toLowerCase().includes(w)));
+    $("list").replaceChildren(...items.map((i) => {
+      const faces = lookingAt(i.id).slice(0, 5).map(face);
+      return el("div", { class: "row" + (state.sel === i.id ? " sel" : ""), role: "listitem", onclick: () => select(i.id) },
+        thumb(i),
+        el("div", {}, el("b", {}, i.title), el("small", {}, i.description)),
+        el("div", { class: "side" }, el("div", { class: "faces" }, faces),
+          el("button", { class: "star", type: "button", "aria-pressed": state.stars[i.id] ? "true" : "false", disabled: !db,
+            title: uid ? (state.stars[i.id] ? "Remove from your shelf" : "Add to your shelf") : "Sign in to keep a shelf",
+            onclick: (e) => { e.stopPropagation(); toggle(i.id); } }, state.stars[i.id] ? "★" : "☆")));
+    }));
+  }
+
+  function renderMine() {
+    const ids = Object.keys(state.stars).filter((id) => byId.has(id)).sort((a, b) => state.stars[b] - state.stars[a]);
+    $("mycount").textContent = uid ? String(ids.length) : "";
+    if (!uid) return;
+    $("mine").replaceChildren(...(ids.length ? ids.map((id) => el("li", {},
+      el("span", { class: "t", onclick: () => select(id) }, byId.get(id).title),
+      el("button", { class: "star", type: "button", "aria-pressed": "true", title: "Remove", onclick: () => toggle(id) }, "★")))
+      : [el("li", { class: "dim" }, "Nothing yet: star apps on the left.")]));
+  }
+
+  async function renderHere() {
+    await profiles(state.peers.map((p) => p.by));
+    $("herecount").textContent = state.peers.length ? String(state.peers.length) : "";
+    $("here").replaceChildren(...(state.peers.length ? state.peers.map((p) => {
+      const prof = p.by ? names[p.by] : null;
+      const at = p.presence && p.presence.looking && byId.get(p.presence.looking);
+      return el("li", {}, face(p), el("span", { class: "t" }, (p.isMe ? "You" : (prof && prof.name) || "Someone") + (p.guest ? " (guest)" : "")),
+        el("span", { class: "n", style: "cursor:pointer", onclick: () => at && select(at.id) }, at ? at.title : "browsing"));
+    }) : [el("li", { class: "dim" }, room ? "Only you." : "Sign in to see who is here.")]));
+    renderDetail();
+  }
+
+  async function renderPopular() {
+    const count = {}, who = {};
+    state.shelves.forEach((s) => s.apps.forEach((id) => { count[id] = (count[id] || 0) + 1; (who[id] = who[id] || []).push(s.by); }));
+    const top = Object.keys(count).sort((a, b) => count[b] - count[a]).slice(0, 12);
+    await profiles(top.flatMap((id) => who[id].slice(0, 4)));
+    $("shelfcount").textContent = state.shelves.length ? `${state.shelves.length} shared` : "";
+    $("popular").replaceChildren(...(top.length ? top.map((id) => el("li", {},
+      el("span", { class: "t", onclick: () => select(id) }, byId.get(id).title),
+      el("span", { class: "faces" }, who[id].slice(0, 4).map((by) => avatar(names[by], "someone"))),
+      el("span", { class: "n" }, "×" + count[id])))
+      : [el("li", { class: "dim" }, db ? "Nothing shared yet." : "Sign in to see shared shelves.")]));
+  }
+
+  function render() { renderDetail(); renderList(); renderMine(); }
+  $("q").oninput = (e) => { state.q = e.target.value; renderList(); };
+  render();
+  renderHere();
+  renderPopular();
+})();
+</script>
+</body>
+</html>

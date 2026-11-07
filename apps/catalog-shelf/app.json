@@ -1,0 +1,12 @@
+{
+  "title": "Shelf — slop catalog",
+  "page": "index.html",
+  "capabilities": {
+    "db": { "rules": [
+      { "path": "shelves", "read": "view", "write": "owner" },
+      { "path": "shelves/{self}", "write": "interact" }
+    ] },
+    "user": { "scopes": ["profile"] },
+    "room": {}
+  }
+}

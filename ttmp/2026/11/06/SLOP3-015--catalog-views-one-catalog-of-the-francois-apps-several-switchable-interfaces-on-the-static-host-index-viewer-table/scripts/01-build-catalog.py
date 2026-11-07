@@ -54,6 +54,14 @@ VIEWS = [
 ]
 
 
+# Views that need slop's runtime run on the live host; they are listed with
+# absolute URLs (the static views use paths on the site host).
+LIVE_VIEWS = [
+    {"id": "shelf", "title": "Shelf", "path": "/catalog/shelf/",
+     "blurb": "Sign in and keep a shelf of apps; share it if you like, and see what people here are looking at."},
+]
+
+
 class Slop:
     def __init__(self):
         path = os.environ.get("SLOP_CREDENTIALS") or os.path.expanduser("~/.config/slop/credentials.json")
@@ -217,6 +225,7 @@ def main():
         "source": "https://slop.boutique",
         "appsOrigin": a.apps_origin,
         "mcp": a.mcp,
+        "siteOrigin": a.site_origin,
         "count": len(items),
         "totalBytes": sum(i["bytes"] for i in items),
         "tags": [{"tag": t, "count": n} for t, n in sorted(tags.items(), key=lambda kv: (-kv[1], kv[0]))],
@@ -225,7 +234,8 @@ def main():
     out = pathlib.Path(a.out)
     out.mkdir(parents=True, exist_ok=True)
     (out / "catalog.json").write_text(json.dumps(cat, ensure_ascii=False, indent=1) + "\n")
-    (out / "views.json").write_text(json.dumps(VIEWS, ensure_ascii=False, indent=1) + "\n")
+    views = VIEWS + [dict(v, path=a.apps_origin + v["path"], live=True) for v in LIVE_VIEWS]
+    (out / "views.json").write_text(json.dumps(views, ensure_ascii=False, indent=1) + "\n")
     (out / "feed.xml").write_text(atom(cat, a.site_origin))
     (out / "search-index.json").write_text(json.dumps(search_index(cat, a.site_origin), ensure_ascii=False, separators=(",", ":")) + "\n")
     (out / "llms.txt").write_text(llms_txt(cat, a.site_origin, a.mcp))

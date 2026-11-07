@@ -21,3 +21,4 @@
 - [x] View: roulette / like this, but… (live previews, related by tags and capabilities) <!-- t:e4qh -->
 - [x] View: text terminal (ls, grep, find, cat, open, run, tags, caps, du, cd) <!-- t:3cpc -->
 - [x] View: desktop (windows, start menu, taskbar, live previews, at most 5 running) <!-- t:9phe -->
+- [x] View 14: shelf (live host): private stars, opt-in shared shelves, presence; tested with two people locally <!-- t:d57a -->

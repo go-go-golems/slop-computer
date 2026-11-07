@@ -42,6 +42,11 @@ STORES = [
      "api": {"routes": ["POST /", "GET /"], "defaultMin": "public", "middleware": [
          {"name": "rateLimit", "config": {"per": "ip", "limit": 60, "window": "1m", "burst": 120}},
          {"name": "cors", "config": {"origins": [SITE]}}]}},
+    # View 14: stars kept per person (db, data/users/<id>/shelf), shelves
+    # shared by choice (shelves/<id>), and who is looking at what (room).
+    # Guests see the page; signed-in members keep a shelf.
+    {"store": "catalog-shelf", "src": "apps/catalog-shelf", "host": "live", "path": "/catalog/shelf",
+     "extra": {"data/catalog.json": "catalog.json"}, "grants": {"@guest": "view", "@member": "interact"}},
 ]
 GUEST_VIEW = {"@guest": "view"}
 
