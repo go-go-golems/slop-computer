@@ -173,3 +173,90 @@ stores: catalog (snapshot 3) · catalog-list (3) · catalog-table (3), each @gue
 mounts: site.slop.yolo.scapegoat.dev /catalog · /catalog/list · /catalog/table
 kit:    views.js?v=793e71cf135a · views.css?v=86942171e22c
 ```
+
+## Step 3: Second batch — palette, pager, contact sheet, capability map, zine (local)
+
+This step adds the four views proposed after the first deploy: a command palette in the shared kit, a contact sheet of live previews, a map of the runtime capabilities the apps declare, and a printable zine. The user asked for pagination midway, because a hundred items is too many on one page, especially on the sheet; the pager went into the kit and now serves the index, the table and the sheet. Everything was tested locally with `03-devserve.py` against production data. The deploy waits until the post-#31 image is running (deploy PR wesen/2026-03-27--hetzner-k3s#426, `sha-8e01dca`).
+
+### Prompt Context
+**User prompt (verbatim):** "ok, llet's continue with the #35 branch, and more moldandyeast stuff." followed by the pasted list of views (3 palette, 6 capability map, 7 contact sheet, 12 print/zine as the suggested batch); then "i guess we can test locally first, until we can then deploy the latest version when built"; then "we need gto paginate these apps btw, there's too many per page especially on like, sheet"; then "remember to commit at appropriate intervals and keep a detailed diary as you work (using the diary format from the skill)"
+**Assistant interpretation:** Build views 3, 6, 7 and 12 on the #35 branch, add pagination, test them locally, and deploy after the new image is out.
+**Inferred user intent:** More of Ramon's "many interfaces over one content" idea on slop.yolo, kept small and static, and usable with a hundred apps.
+**Commit (code):** `84fb146` — palette, pager, contact sheet, capability map, zine
+
+### What I did
+- **Kit (`apps/catalog/kit/views.js`, `views.css`):**
+  - `palette`: ⌘K or Ctrl K, plus a header button, opens a dialog. It searches the views, the 100 apps, the 125 tags, and (when a `caps` view exists) the capabilities. `fuzzy(text, q)` ranks substring matches first (more for a prefix or a word start), then subsequence matches with points for word starts and runs. If an app's title doesn't match, every word may instead match its id, tags, capabilities or description, at score 1. On a page with a bound viewer an app opens in the viewer; elsewhere it goes to the first view with `?open=`. Keys: ↑↓, Enter, Esc. `/` now only focuses the search box, and only when the focus is not in a field.
+  - `paged(items, size, hosts, redraw)`: reads `?page=`, clamps it, draws "‹ Prev 1 2 … n Next › from–to of N" into each host, and returns the slice. `paged.reset()` drops `?page`, so a view goes back to page 1 when its filters change.
+  - The viewer dispatches `catalog:viewer` `{open, id}` on window. `previewDoc`, `DEVICES` and `fuzzy` are now exported.
+- **`apps/catalog-sheet/`:** tiles at desktop (1280×800) or phone (390×844) aspect.
+  - An `IntersectionObserver` (100 px margin, settled for 150 ms) marks visible tiles.
+  - `schedule()` keeps the visible tiles running whose apps are free and at most 1.5 MB, in page order, `MAX_LIVE = 8` at once. It starts them one at a time: it fetches the HTML through `previewDoc`, sets `srcdoc` on an `allow-scripts`-only iframe, and waits for `load` or 4 s.
+  - Tiles that leave the screen lose their frame. While the viewer is open, everything stops.
+  - "Covers" mode, the default under `prefers-reduced-motion`, runs nothing.
+  - 24 tiles per page, 36 at phone aspect.
+- **`apps/catalog-caps/`:**
+  - One card per declared capability, with a count of the total, a bar, what it gives a page on slop (from `doc/claude-apis/README.md`, including the SLOP3-014 identity rules) and the apps as chips.
+  - A combinations table: one row per exact set, with dots per capability, a count bar and examples. A row expands into its apps.
+  - `#<cap>` anchors, which the palette links to.
+- **`apps/catalog-zine/`:**
+  - A cover page, contents pages (34 lines each) with page numbers, and one page per app: title, description, cover or monogram, then open URL, runtime, version and date, size and attachments, access and tags.
+  - Pages are sized in mm from `--pw`/`--ph`, with `@page { size; margin: 0 }` set from the paper choice: reMarkable 158×210 mm, A5, A4 or Letter. `?size=`, `?tag=` and search narrow or resize it.
+  - "Print or save as PDF" first switches every cover to eager loading and waits for all of them (`SlopZine.ready()`).
+- **Pagination in the existing views:** index 20 per page, table 50, each with a pager above and below. Sort, tag, capability and search changes reset to page 1.
+- **Wiring:** `01-build-catalog.py` VIEWS gains `sheet`, `caps` and `zine`. `02-deploy.py` STORES gains `catalog-sheet`, `catalog-caps` and `catalog-zine` on `/catalog/sheet`, `/catalog/caps` and `/catalog/zine`. `03-devserve.py` derives its mounts from a VIEWS list. `TestCatalogViewsOnStaticHost` serves six stores and checks each new page's title and that it loads the kit.
+- Rebuilt the catalog data (same counts: 100 listed, 7 subscribers, 94 covers, 125 tags), ran the dev server on :8765 and checked every view in Playwright.
+
+### Why
+- **The palette in the kit, not a view:** every view gets it with one change, and it makes a hundred apps reachable without scrolling or pages.
+- **A frame budget on the sheet:** 93 free apps add up to tens of MB of HTML, and several run animation loops. Running only the visible ones, a few at a time, keeps a laptop responsive, and leaving apps over 1.5 MB to the viewer avoids multi-MB fetches for a thumbnail.
+- **A pager rather than infinite scroll:** a page is a URL (`?page=3`) that can be shared and returned to. The sheet's frame budget also works best with a bounded set of tiles.
+- **Millimetres in the zine:** what the screen shows is what the printer gets, and Chromium's `preferCSSPageSize` takes the size from `@page`.
+
+### What worked
+- **Sheet, page 1:** "7 running" with the 2.6 MB Shop Next on its cover, marked "2.6 MB · view to run" (`various/screenshots/07-sheet-local.png`). On page 2, 24 tiles and the pager "‹ Prev 1 2 3 4 5 Next › 25–48 of 100".
+- **Palette:** on `/catalog/caps/`, Ctrl K and then "wft" gives Weft as the only result (`08-palette-local.png`). Enter opens the viewer at `?open=weft`, and `history.back()` closes it.
+- **Capability map:** the cards read sample 100, downloads 18, db 11, user 7, room 5. There are 9 combinations: sample alone 78, sample+downloads 9, sample+downloads+db+user 3, and so on (`09-caps-combos-local.png`).
+- **Zine:** Playwright's `page.pdf({preferCSSPageSize: true})` after `SlopZine.ready()` produced 104 pages at 448×595 pt (158×210 mm): cover, 3 contents pages and 100 app pages (`10-zine-pages-local.png`).
+- **Pagination:** list with `?tag=game`: 7 rows and no pager. Table `?page=2`: 50 rows, "51–100 of 100". After a capability filter: 5 rows, `?page` dropped, no pager.
+- `go test ./pkg/host` → `ok`. `make lint` → `0 issues.`
+
+### What didn't work
+- **The sheet's status read "0 running" while 3 frames were up:** `status()` ran only after `schedule()` finished its loop, and the loop was still waiting on loads. Fixed: `badge()` updates the status, and it counts only frames that have finished loading.
+- **The zine PDF was 88,833,182 bytes,** because Chromium embeds the covers at full size (some PNGs are 2,736 px wide). Ghostscript `-dPDFSETTINGS=/ebook -dColorImageResolution=150` brought it to 4,868,440 bytes with the same 104 pages. Kept outside the repository: `scratchpad/zine-remarkable.pdf`.
+- **Two writes the classifier blocked:** a screenshot written straight to the scratchpad (Playwright may only write under the checkout's `.playwright-mcp`, which is git-ignored; I copied it from there), and closing the superseded deploy PR #425 (external write; left for the user).
+
+### What I learned
+- **`beton-brut-studio` refers to `core.js`, `render.js`, `presets.js` and `ide.js`, and none of them is in its store.** The store holds only `index.html`, `app.json` and `francois.json`.
+  - On the static host they are 404.
+  - On the live host, `/f/beton-brut-studio/core.js` answers 200 with `text/html`, the app's own page, which nosniff refuses as a script.
+  - The preview still draws its static layout.
+  - I have not checked francois's `release_files` for this release, so I can't yet say whether this is a SLOP3-013 import gap or the app as published on slop.boutique.
+- Of the 100 apps, 78 declare only `sample`. Few use the shared-data or identity services.
+
+### What was tricky to build
+- **Starting frames one at a time:** a fast scroll changes the visible set while a load is in flight. `schedule()` is a single loop guarded by `busy`, and it recomputes the wanted set on every turn. A stopped tile clears `loading`, so `start()` notices and doesn't attach a stale frame. A tile that scrolls away mid-load is stopped on the next turn, at most 4 s later.
+- **Scaling sheet frames:** each iframe keeps its device size and is scaled to the tile's width (`clientWidth / w`) from the top-left. A `ResizeObserver` on the grid rescales the tiles when the layout changes.
+
+### What warrants a second pair of eyes
+- **The sheet runs third-party HTML** in `allow-scripts`-only frames: an opaque origin, no forms, no modals. Up to eight run at once, so a heavy app can still load the CPU while visible.
+- **The zine's eager loading** fetches up to 94 cover images (tens of MB) when someone presses Print.
+
+### What should be done in the future
+- Deploy the three new stores with `02-deploy.py --apply` once #426 is merged, then check them on production.
+- Upload the zine PDF to the reMarkable once it is generated from production.
+- Thumbnails for covers would help the sheet's cover mode and the zine size alike.
+- Check `beton-brut-studio`'s release files in francois.
+
+### Code review instructions
+- `apps/catalog/kit/views.js`: `fuzzy`, `entries`, `palette`, `paged`.
+- `apps/catalog-sheet/index.html`: `schedule`, `start` and `stop`.
+- `apps/catalog-caps/index.html` and `apps/catalog-zine/index.html`.
+- Validate locally: `python3 -I scripts/01-build-catalog.py <data>`, then `python3 -I scripts/03-devserve.py <repo> <data> 8765`, then open `/catalog/sheet/`, `/catalog/caps/` and `/catalog/zine/`, and press Ctrl K.
+
+### Technical details
+```
+views:  list (20/page) · table (50/page) · sheet (24/page desktop, 36 phone; MAX_LIVE 8, MAX_BYTES 1.5 MB) · caps · zine
+zine:   104 pages = cover + 3 contents (34/page) + 100 apps; 158×210 mm; 88.8 MB → 4.9 MB (gs /ebook, 150 dpi)
+caps:   sample 100 · downloads 18 · db 11 · user 7 · room 5; 9 combinations, sample-only 78
+```
