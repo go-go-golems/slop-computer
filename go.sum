@@ -241,8 +241,8 @@ github.com/tj/go-naturaldate v1.3.0 h1:OgJIPkR/Jk4bFMBLbxZ8w+QUxwjqSvzd9x+yXocY4
 github.com/tj/go-naturaldate v1.3.0/go.mod h1:rpUbjivDKiS1BlfMGc2qUKNZ/yxgthOfmytQs8d8hKk=
 github.com/ugorji/go/codec v1.3.0 h1:Qd2W2sQawAfG8XSvzwhBeoGq71zXOC/Q1E9y/wUcsUA=
 github.com/ugorji/go/codec v1.3.0/go.mod h1:pRBVtBSKl77K30Bv8R2P+cLSGaTtex6fsA2Wjqmfxj4=
-github.com/wesen/go-go-goja v0.0.4-0.20261107193645-822e67c611a8 h1:lAi8F3M31ZkgsxwlBdj+zVi5kK7VfXpgIT6oYLtWNo0=
-github.com/wesen/go-go-goja v0.0.4-0.20261107193645-822e67c611a8/go.mod h1:SzjO3fs74cZ3cDV3cmsGXY+P8UxP9WPx7oEWSn1E8bI=
+github.com/wesen/go-go-goja v0.0.4-0.20261107231049-0d995b4b7706 h1:KFk2NFLNy0CFLziTtjaHiKch7cMgEqKk3GqKhiUZBTA=
+github.com/wesen/go-go-goja v0.0.4-0.20261107231049-0d995b4b7706/go.mod h1:SzjO3fs74cZ3cDV3cmsGXY+P8UxP9WPx7oEWSn1E8bI=
 github.com/wk8/go-ordered-map/v2 v2.1.8 h1:5h/BUHu93oj4gIdvHHHGsScSTMijfx5PeYkE/fJgbpc=
 github.com/wk8/go-ordered-map/v2 v2.1.8/go.mod h1:5nJHM5DyteebpVlHnWMV0rPz6Zp7+xBAnxjb1X5vnTw=
 github.com/zenizh/go-capturer v0.0.0-20211219060012-52ea6c8fed04 h1:qXafrlZL1WsJW5OokjraLLRURHiw0OzKHD/RNdspp4w=

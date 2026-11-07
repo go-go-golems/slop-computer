@@ -1007,3 +1007,63 @@ Phase 6b closes the gap phase 3 left open. Until now, a board app written by som
 ### Technical details
 - Frame policy: `default-src 'none'; script-src 'unsafe-inline' 'unsafe-eval'; style-src 'unsafe-inline'; img-src blob: data:`.
 - Steps an app may send: `place, open, setAttr, insert, promote, move, resize, retitle, tag, untag, remove, group, ungroup, pin, close, setParam, setState, collection, update, removeRecord, demote`.
+||||||| dc00555
+
+
+## Step 14: Review fixes from go-go-goja#107, and why the plain-VM path stays
+
+The Codex review of go-go-golems/go-go-goja#107 found three problems. Two of them come from `InvokeInVM`, the plain-VM invoke that every app verb runs through (#37). I fixed all three upstream, pinned the fixed fork here, and closed the same kind of hole in slop's own error unwrapping.
+
+### Prompt Context
+**User prompt (verbatim):** "what's the plain VM path in go-go-goja? (read design docs / diaries if necessary) do we need it? or was it optional and we did too much? (See code review comments and how they are because of the plain one)", then "ok, address the issues".
+**Assistant interpretation:** Explain U3 and whether slop needs it, then fix the review findings in #107 and wherever they reach slop.
+**Inferred user intent:** Keep only what is needed, and make sure nothing that the plain path skips (the owner's recovery and its call context) leaves a hole in slop.
+**Commit (code):** `0e07f78` (slop); go-go-goja `3992113`, `363f343`, diary `0d995b4` (GOJA-069 step 6).
+
+### What I did
+- **Answered the question:**
+  - U3 (`Registry.InvokeInVM`) was optional for the actor migration (doc 02 §7) and is not used by #38.
+  - It is what #37's app verbs run on, in the CLI and in `app.verb`/MCP (`pkg/appverbs/appverbs.go`, `Invoker`). Each call uses a fresh `goja.New()` with a goja_nodejs `require` whose only native module is `slop`.
+  - The alternative is `InvokeInRuntime` on an engine runtime with its defaults switched off. It would cost an event-loop goroutine per call, owner scheduling and 5 ms promise polling, and its safety would hang on remembering the opt-outs: the engine's default builder enables every module, `fs` and `exec` included.
+- **Probes, as throwaway tests not committed:**
+  - What a verb's `require` can load: `fs`, `exec`, `os`, `database` and `child_process` fail with "Invalid module", and `node:fs` with "No such built-in module". goja_nodejs's own `url`, `util`, `buffer` and `console` load.
+  - What a getter in a verb's result does: one that throws, sync or async, and one that loops until the timeout all panicked out of `appverbs.Run` (`*goja.Exception`, `*goja.InterruptedError`).
+- **Upstream (GOJA-069 step 6):**
+  - `InvokeInVM` recovers JavaScript panics and makes `ctx` the runtimebridge call context on bound VMs.
+  - The default parser reads a file as the CommonJS function body, so a top-level `return` is legal.
+  - I replied on the three review threads.
+- **Here:**
+  - `go.mod` now replaces go-go-goja with `github.com/wesen/go-go-goja v0.0.4-0.20261107231049-0d995b4b7706`.
+  - `unwrap` runs `unwrapException` under a recover. A thrown value whose `code`, `message` or `toString` throws or loops becomes "the verb threw a value that cannot be read".
+  - `TestRunRecoversVerbPanics`, six cases.
+
+### Why
+- **`app.verb` runs on the request goroutine.** No door dispatches verbs to goroutines of their own, so a panic there is caught only by net/http's recovery. The client then gets a dropped connection instead of an error. In the CLI the panic kills `slop`.
+- **The thrown-value cases are slop's own.** After the go-go-goja bump the getter cases passed, but the thrown-value cases still panicked inside `unwrap`, which reads properties of the thrown object after `InvokeInVM` has returned. That made a slop-side recover necessary, not merely redundant.
+
+### What worked
+- On go-go-goja 0d995b4 with the new `unwrap`, `TestRunRecoversVerbPanics` passes.
+- `go test ./pkg/appverbs/... ./pkg/commands/...`: ok.
+- `go test ./pkg/host -run 'Pinboard|Verb|MCP|App'`: ok. That includes scanning Pinboard's verbs with the wrapped parser.
+
+### What didn't work
+- `go build ./...` in this worktree fails with "error obtaining VCS status: exit status 128". It is environmental (worktree under the scratchpad), and `GOFLAGS=-buildvcs=false` works around it.
+
+### What I learned
+- goja runs getters and `toString` with the VM's own machinery even when Go calls `Export`, `Get` or `String`. Outside a JavaScript frame, their throw is a Go panic. Inside a native function called from JavaScript, goja turns the same panic back into a JavaScript throw.
+
+### What was tricky to build
+- Telling which panics the upstream fix covers. The probe test had to be rerun after the bump, and that is what showed slop's own `unwrap` as a second site.
+
+### What warrants a second pair of eyes
+- `unwrap`'s recover is narrow: it covers only reading the thrown value. Anything else in the `Invoker` that runs verb code from Go (none today) would need the same care.
+
+### What should be done in the future
+- After #107 is merged and tagged, replace the fork with the tag on #37, #38 and #39.
+
+### Code review instructions
+- `git show 0e07f78 -- pkg/appverbs`.
+- `go test ./pkg/appverbs -run TestRunRecoversVerbPanics -v`.
+
+### Technical details
+- **Correction to step 10.** "No engine factory and no default modules (fs, exec, …) are linked into the CLI" is wrong. `pkg/jsverbs` imports `pkg/engine` (for `InvokeInRuntime`), so `go list -deps ./pkg/jsverbs` includes go-go-goja's `modules/fs`, `exec`, `database` and the rest. They are linked, but they are not reachable from a verb, as the probe above shows: slop's VM uses its own require registry, and those modules register only in go-go-goja's.

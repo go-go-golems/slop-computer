@@ -104,6 +104,38 @@ __verb__("spin", { parents: ["x"], output: "text" });
 	}
 }
 
+// A verb's own code cannot panic the host: getters that throw or loop while
+// its result is read, and thrown values whose code, message or toString
+// throw, all come back as errors (the server runs app.verb on the request).
+func TestRunRecoversVerbPanics(t *testing.T) {
+	for name, tc := range map[string]struct{ body, want string }{
+		"getter":          {`function g() { return { get x() { throw new Error("boom"); } }; }`, "boom"},
+		"async getter":    {`async function g() { return { get x() { throw new Error("boom"); } }; }`, "boom"},
+		"looping getter":  {`function g() { return { get x() { for (;;) {} } }; }`, "deadline exceeded"},
+		"thrown code":     {`function g() { throw { get code() { throw new Error("no code"); } }; }`, "cannot be read"},
+		"thrown toString": {`function g() { throw { toString() { throw new Error("no text"); } }; }`, "cannot be read"},
+		"looping message": {`function g() { throw { code: "x", get message() { for (;;) {} } }; }`, "cannot be read"},
+	} {
+		t.Run(name, func(t *testing.T) {
+			src := &Source{Store: "s-1", App: "x", Snapshot: 1, Files: []File{{Path: "verbs/x.js", Source: tc.body + "\n__verb__(\"g\", { parents: [\"x\"] });\n"}}}
+			reg, err := Scan(src)
+			if err != nil {
+				t.Fatal(err)
+			}
+			var logs bytes.Buffer
+			defer func() {
+				if r := recover(); r != nil {
+					t.Fatalf("panicked: %v", r)
+				}
+			}()
+			_, err = Run(context.Background(), reg, "x g", nil, &fake{}, mcpBoard, &logs, 100*time.Millisecond)
+			if err == nil || !strings.Contains(err.Error(), tc.want) {
+				t.Fatalf("err: %v", err)
+			}
+		})
+	}
+}
+
 // Fields that make Glazed read files are refused when the verbs are
 // scanned, on the server and in the CLI alike.
 func TestFileFieldsRefused(t *testing.T) {
