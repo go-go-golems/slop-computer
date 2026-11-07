@@ -10,6 +10,7 @@ import (
 const (
 	CallerKernel     = "kernel"      // the kernel's own statements: everything
 	CallerActor      = "actor"       // actor.js: read all, write app tables
+	CallerActorRead  = "actor-read"  // actor.js through a read-only database module: read all, savepoints
 	CallerMigration  = "migration"   // sql/*.sql: DDL on app names, FTS5
 	CallerAdminRead  = "admin-read"  // sql.query: read everything
 	CallerAdminWrite = "admin-write" // sql.exec --write: write app tables
@@ -125,8 +126,10 @@ func (s *Store) authorize(action int, a1, a2, dbName string) int {
 		}
 		return sqlite3.SQLITE_DENY
 	case sqlite3.SQLITE_SAVEPOINT:
-		if caller == CallerActor {
-			return sqlite3.SQLITE_OK // sql.transaction(fn) inside the turn
+		if caller == CallerActor || caller == CallerActorRead {
+			// sql.transaction(fn) and database.begin() inside the turn; a
+			// read-only caller's savepoints are harmless without writes
+			return sqlite3.SQLITE_OK
 		}
 		return sqlite3.SQLITE_DENY
 	case sqlite3.SQLITE_ANALYZE, sqlite3.SQLITE_REINDEX:

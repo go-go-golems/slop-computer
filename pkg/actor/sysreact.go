@@ -69,7 +69,7 @@ func (a *Actor) systemKeys() []string {
 // may follow the system log (declares and is trusted with system).
 func (a *Actor) followsSystem() bool {
 	return len(a.systemKeys()) > 0 && slices.Contains(a.run.Manifest.Slop.Modules, "system") &&
-		a.m.Trusted != nil && a.m.Trusted(context.Background(), a.run.App, "system")
+		a.m.trusted(a.run.App, "system")
 }
 
 // queueSystem queues one system reactor event (at most one is pending).

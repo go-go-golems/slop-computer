@@ -38,7 +38,7 @@ func mountVerbs(e mountEnv) []*verbs.Verb {
 			Run: func(r verbs.Req, in MountSetIn) (MountSetOut, error) {
 				e, p := e, r.Principal
 				m := registry.Mount{Host: in.Host, Path: in.Path, Store: in.Store, StoreParam: in.StoreParam,
-					Type: in.Type, CreateApp: in.CreateApp, CreateAudience: in.CreateAudience}
+					Type: in.Type, CreateApp: in.CreateApp, CreateAudience: in.CreateAudience, API: in.API}
 				if err := checkMount(r, e, &m); err != nil {
 					return MountSetOut{}, err
 				}
@@ -47,10 +47,12 @@ func mountVerbs(e mountEnv) []*verbs.Verb {
 					return MountSetOut{}, err
 				}
 				m.Aliases = t
+				before := e.mountAt(r, m.Host, m.Path)
 				m, err = e.K.Registry.SetMount(r, p.ID(), p.ViaLabel(), m)
 				if err != nil {
 					return MountSetOut{}, err
 				}
+				e.restartServed(r, before, &m)
 				out := MountSetOut{Mount: m, URL: e.Cfg.Origin(m.Host) + m.Path}
 				if m.Store != "" {
 					if d, _, _ := e.K.Access.Can(r, nil, m.Store, rt.LevelView, "", true); !d.OK {
@@ -66,9 +68,13 @@ func mountVerbs(e mountEnv) []*verbs.Verb {
 			Run: func(req verbs.Req, in MountRmIn) (MountRmOut, error) {
 				ctx := req.Context
 				p := req.Principal
+				before := e.mountAt(ctx, in.Host, in.Path)
 				err := e.K.Registry.RemoveMount(ctx, p.ID(), p.ViaLabel(), in.Host, in.Path)
 				if errors.Is(err, sysdb.ErrNotFound) {
 					return MountRmOut{}, verbs.Errf("not_found", "nothing is mounted at %s%s", in.Host, in.Path)
+				}
+				if err == nil {
+					e.restartServed(ctx, before, nil)
 				}
 				return MountRmOut{Removed: in.Host + in.Path}, err
 			}}.Verb(),
@@ -76,6 +82,7 @@ func mountVerbs(e mountEnv) []*verbs.Verb {
 			Run: func(req verbs.Req, in MountUndoIn) (MountUndoOut, error) {
 				ctx := req.Context
 				p := req.Principal
+				before := e.mountAt(ctx, in.Host, in.Path)
 				m, err := e.K.Registry.UndoMount(ctx, p.ID(), p.ViaLabel(), in.Host, in.Path)
 				if errors.Is(err, sysdb.ErrNotFound) {
 					return MountUndoOut{}, verbs.Errf("not_found", "no history for %s%s", in.Host, in.Path)
@@ -83,7 +90,13 @@ func mountVerbs(e mountEnv) []*verbs.Verb {
 				if err != nil {
 					return MountUndoOut{}, err
 				}
+				e.restartServed(ctx, before, m)
 				return MountUndoOut{Restored: m}, nil
+			}}.Verb(),
+		verbs.Def[MountRoutesIn, []MountRoute]{Name: "mount.routes", Doc: "The actor routes a mount serves: each route key of the store, whether the mount's API policy allows it, and the level and audiences it needs there.",
+			Scope: verbs.Read, AdminOnly: true, Action: authz.PlatformAdmin,
+			Run: func(req verbs.Req, in MountRoutesIn) ([]MountRoute, error) {
+				return e.mountRoutes(req.Context, in)
 			}}.Verb(),
 		verbs.Def[AppStatusIn, AppStatusOut]{Name: "app.status", Doc: "The app a store runs: app store, snapshot, manifest, and why it is broken if it is.", Scope: verbs.Read, Action: authz.StoreRead,
 			Run: func(req verbs.Req, in AppStatusIn) (AppStatusOut, error) {
@@ -98,6 +111,11 @@ func mountVerbs(e mountEnv) []*verbs.Verb {
 					return AppStatusOut{}, err
 				}
 				out := AppStatusOut{Store: r.Store, App: r.App, Ref: st.Meta("app_ref"), N: r.N, Broken: r.Broken()}
+				if out.Broken == "" && e.A != nil {
+					// a build that failed after activation (a mount's route
+					// policy, SLOP3-012): "app@n: why"
+					out.Broken = e.A.Broken(in.Store)
+				}
 				if m := r.Manifest; m != nil {
 					caps := []string{}
 					for c := range m.Caps.Declared {
@@ -144,6 +162,14 @@ func checkMount(ctx context.Context, e mountEnv, m *registry.Mount) error {
 	}
 	if !registry.ValidMountPath(m.Path) {
 		return verbs.Errf("invalid_argument", "a mount path is /, /name, /name/:param or /name/*")
+	}
+	if m.API != nil {
+		if kind != "live" {
+			return verbs.Errf("invalid_argument", "an API policy goes on a live host: static hosts serve no actor routes to visitors")
+		}
+		if err := registry.ValidateAPI(m.API); err != nil {
+			return verbs.Errf("invalid_argument", "api: %v", err)
+		}
 	}
 	if (m.Store == "") == (m.StoreParam == "") {
 		return verbs.Errf("invalid_argument", "give a store, or storeParam (a :param of the path)")
@@ -235,14 +261,32 @@ func aliasTemplate(ctx context.Context, e mountEnv, p *access.Principal, in []Al
 
 // MountSetIn is mount.set's input.
 type MountSetIn struct {
-	Host           string    `json:"host" slop:"pos=1" jsonschema_description:"a live or static host from the configuration"`
-	Path           string    `json:"path" slop:"pos=2" jsonschema_description:"the path pattern: /guestbook, /r/:store, /docs/*"`
-	Store          string    `json:"store,omitempty" slop:"pos=3" jsonschema_description:"the store mounted (or storeParam)"`
-	StoreParam     string    `json:"storeParam,omitempty" jsonschema_description:"the path parameter naming the store, e.g. store for /r/:store"`
-	Type           string    `json:"type,omitempty" jsonschema_description:"with storeParam: the store type required"`
-	CreateApp      string    `json:"createApp,omitempty" jsonschema_description:"live hosts: offer to create a store of this app"`
-	CreateAudience string    `json:"createAudience,omitempty" jsonschema:"enum=member,enum=subscriber,enum=admin" jsonschema_description:"who may create (default member)"`
-	Aliases        []AliasIn `json:"aliases,omitempty" jsonschema_description:"with createApp: bind each store created here"`
+	Host           string             `json:"host" slop:"pos=1" jsonschema_description:"a live or static host from the configuration"`
+	Path           string             `json:"path" slop:"pos=2" jsonschema_description:"the path pattern: /guestbook, /r/:store, /docs/*"`
+	Store          string             `json:"store,omitempty" slop:"pos=3" jsonschema_description:"the store mounted (or storeParam)"`
+	StoreParam     string             `json:"storeParam,omitempty" jsonschema_description:"the path parameter naming the store, e.g. store for /r/:store"`
+	Type           string             `json:"type,omitempty" jsonschema_description:"with storeParam: the store type required"`
+	CreateApp      string             `json:"createApp,omitempty" jsonschema_description:"live hosts: offer to create a store of this app"`
+	CreateAudience string             `json:"createAudience,omitempty" jsonschema:"enum=member,enum=subscriber,enum=admin" jsonschema_description:"who may create (default member)"`
+	Aliases        []AliasIn          `json:"aliases,omitempty" jsonschema_description:"with createApp: bind each store created here"`
+	API            *registry.MountAPI `json:"api,omitempty" jsonschema_description:"live hosts: the mount's API policy (route allowlist, floors, host middlewares, request and response rules); omit to serve every actor route"`
+}
+
+// MountRoutesIn is mount.routes's input.
+type MountRoutesIn struct {
+	Host  string `json:"host" slop:"pos=1"`
+	Path  string `json:"path" slop:"pos=2"`
+	Store string `json:"store,omitempty" slop:"pos=3" jsonschema_description:"for a :param mount: the store to list"`
+}
+
+// MountRoute is one actor route as a mount serves it.
+type MountRoute struct {
+	Store          string   `json:"store"`
+	Key            string   `json:"key"`
+	Allowed        bool     `json:"allowed"`        // the mount's allowlist covers the key (always, without a policy)
+	DeclaredLevel  string   `json:"declaredLevel"`  // what the app declared
+	EffectiveLevel string   `json:"effectiveLevel"` // with the mount's floor
+	Audiences      []string `json:"audiences"`      // groups the visitor must be in (the route's and the floor's)
 }
 
 // AliasIn is one entry of a mount's alias template: a binding without its
@@ -318,4 +362,115 @@ type AppStatusOut struct {
 	N        int64          `json:"n"`
 	Ref      string         `json:"ref"`
 	Store    string         `json:"store"`
+}
+
+// mountAt is the mount at host+path, or nil.
+func (e mountEnv) mountAt(ctx context.Context, host, path string) *registry.Mount {
+	ms, err := e.K.Registry.Mounts(ctx, host)
+	if err != nil {
+		return nil
+	}
+	for _, m := range ms {
+		if m.Path == path {
+			return &m
+		}
+	}
+	return nil
+}
+
+// servedStores are the stores a mount can serve: the one it names, or every
+// store of its :param's type (every store when it has no type).
+func (e mountEnv) servedStores(ctx context.Context, m *registry.Mount) []string {
+	if m == nil {
+		return nil
+	}
+	if m.Store != "" {
+		return []string{m.Store}
+	}
+	rows, err := e.K.Registry.Stores(ctx, "")
+	if err != nil {
+		return nil
+	}
+	var out []string
+	for _, r := range rows {
+		if m.Type == "" || r.Type == m.Type {
+			out = append(out, r.ID)
+		}
+	}
+	return out
+}
+
+// restartServed restarts the actors of the stores a changed mount served
+// before or serves now, when the change involves an API policy (the
+// effective route table and the load-time check depend on it), and any of
+// those stores that is broken (a mount change can fix a route-policy
+// failure). Restart also clears the broken cache and a failed activation.
+func (e mountEnv) restartServed(ctx context.Context, before, after *registry.Mount) {
+	if e.A == nil {
+		return
+	}
+	policy := (before != nil && before.API != nil) || (after != nil && after.API != nil)
+	seen := map[string]bool{}
+	for _, m := range []*registry.Mount{before, after} {
+		for _, id := range e.servedStores(ctx, m) {
+			if seen[id] {
+				continue
+			}
+			seen[id] = true
+			broken := e.A.Broken(id) != ""
+			if r, err := e.K.Running(ctx, id); err == nil && r.Broken() != "" {
+				broken = true
+			}
+			if policy || broken {
+				e.A.Restart(id)
+				// Build it again now, so app.status shows a route-policy
+				// failure (or its fix) at once, not at the next request.
+				_, _ = e.A.Get(ctx, id)
+			}
+		}
+	}
+}
+
+// mountRoutes lists the routes a mount serves, for review before or after
+// setting its API policy.
+func (e mountEnv) mountRoutes(ctx context.Context, in MountRoutesIn) ([]MountRoute, error) {
+	m := e.mountAt(ctx, in.Host, in.Path)
+	if m == nil {
+		return nil, verbs.Errf("not_found", "nothing is mounted at %s%s", in.Host, in.Path)
+	}
+	if e.A == nil {
+		return nil, verbs.Errf("unavailable", "this server runs no actors")
+	}
+	stores := e.servedStores(ctx, m)
+	if in.Store != "" {
+		if !slices.Contains(stores, in.Store) {
+			return nil, verbs.Errf("invalid_argument", "%s%s does not serve %s", in.Host, in.Path, in.Store)
+		}
+		stores = []string{in.Store}
+	} else if m.Store == "" {
+		return nil, verbs.Errf("invalid_argument", "%s%s is a :%s mount: give the store to list", in.Host, in.Path, m.StoreParam)
+	}
+	out := []MountRoute{}
+	for _, id := range stores {
+		routes, err := e.A.Routes(ctx, id)
+		if err != nil {
+			return nil, err
+		}
+		for _, r := range routes {
+			mr := MountRoute{Store: id, Key: r.Key, Allowed: true, DeclaredLevel: r.Level, EffectiveLevel: r.Level, Audiences: []string{}}
+			if r.Audience != "" {
+				mr.Audiences = append(mr.Audiences, r.Audience)
+			}
+			if m.API != nil {
+				mr.Allowed = m.API.AllowsKey(r.Key)
+				f := m.API.FloorOf(r.Key)
+				mr.EffectiveLevel = registry.MaxLevel(r.Level, f.Min)
+				if f.Audience != "" {
+					mr.Audiences = append(mr.Audiences, f.Audience)
+				}
+			}
+			out = append(out, mr)
+		}
+	}
+	return out, nil
 }

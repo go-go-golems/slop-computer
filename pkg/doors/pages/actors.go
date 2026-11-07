@@ -4,12 +4,16 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"io"
+	"mime"
 	"net/http"
+	"slices"
 	"strings"
 
 	"github.com/go-go-golems/slop-computer/pkg/access"
 	"github.com/go-go-golems/slop-computer/pkg/actor"
+	"github.com/go-go-golems/slop-computer/pkg/registry"
 	"github.com/go-go-golems/slop-computer/pkg/rt"
 )
 
@@ -123,43 +127,103 @@ func (s *Door) rpcSlopRead(ctx context.Context, v *rt.View, raw json.RawMessage)
 	return nil, rtErr("invalid_argument", "unknown read %q", a.Op)
 }
 
+// actorRouteBodyLimit is the request body limit of actor routes on mounts
+// without an API policy (with one, its maxBodyBytes).
+const actorRouteBodyLimit = 1 << 20
+
+// apiResponseHeaders are the response headers an actor may set on an API
+// mount (SLOP3-012): everything else (Set-Cookie, a CSP, framing,
+// Access-Control-*, which belongs to the cors middleware) is dropped.
+var apiResponseHeaders = map[string]bool{"Cache-Control": true, "Content-Type": true, "Content-Language": true, "Etag": true,
+	"Last-Modified": true, "Location": true, "Retry-After": true, "Link": true, "Vary": true}
+
 // serveActorRoute answers a request on a mount from the store's actor when
-// one of its http routes matches. It reports whether it answered.
+// one of its http routes matches. It reports whether it answered. A mount
+// with an API policy (SLOP3-012) answers only below its prefix, only with
+// the routes its allowlist covers, at the level its floors require, and
+// filters what the actor sends back.
 func (s *Door) serveActorRoute(w http.ResponseWriter, r *http.Request, res *resolved, p *access.Principal) bool {
 	if s.A == nil || res.run.Manifest == nil || res.run.Manifest.Actor == "" {
 		return false
 	}
 	ctx := r.Context()
 	sub := "/" + res.m.Rest
-	a, route, ok := s.A.MatchRoute(ctx, res.store, r.Method, sub)
+	var api *registry.MountAPI
+	if res.m.Mount.API != nil {
+		eff := res.m.Mount.API.WithDefaults()
+		api = &eff
+		if !registry.UnderPrefix(sub, api.Prefix) {
+			return false // not an API path of this mount: pages and the shell answer
+		}
+		// The host middlewares run first: what they refuse never builds
+		// or wakes the actor (apichain.go).
+		c := &apiCall{w: w, r: r, mount: res.m.Mount.Host + res.m.Mount.Path, api: api, p: p}
+		if !s.runAPIChain(c) {
+			return true
+		}
+		p = c.p
+	}
+	a, route, ok := s.A.MatchRoute(ctx, res.store, r.Method, sub, api)
 	if !ok {
+		if api != nil {
+			// Below an API prefix the path space is the API's: an
+			// unknown or disallowed route is a JSON 404, never the page.
+			writeJSONError(w, 404, "not_found", "no route "+r.Method+" "+sub+" on this API")
+			return true
+		}
 		return false
 	}
 	vis := s.A.VisitorOf(ctx, p, res.store)
-	if route.Level != "public" {
-		need, ok := rt.ParseLevel(route.Level)
+	need, audiences := route.Level, []string{}
+	if route.Audience != "" {
+		audiences = append(audiences, route.Audience)
+	}
+	if api != nil {
+		f := api.FloorOf(route.Key)
+		need = registry.MaxLevel(need, f.Min)
+		if f.Audience != "" {
+			audiences = append(audiences, f.Audience)
+		}
+	}
+	if need != "public" {
+		want, ok := rt.ParseLevel(need)
 		have, _ := rt.ParseLevel(vis.Level)
-		if !ok || have < need {
+		if !ok || have < want {
 			if have == rt.LevelNone {
 				notFound(w)
 			} else {
-				writeJSONError(w, 403, "permission_denied", "this needs "+route.Level)
+				writeJSONError(w, 403, "permission_denied", "this needs "+need)
 			}
 			return true
 		}
 	}
-	if route.Audience != "" && !access.Audience(vis.Audience).In(access.Group(route.Audience)) {
-		w.Header().Set("Content-Type", "application/json")
-		w.WriteHeader(403)
-		_ = json.NewEncoder(w).Encode(map[string]any{"error": map[string]any{"code": "audience_required", "audience": route.Audience}})
+	for _, aud := range audiences {
+		if !access.Audience(vis.Audience).In(access.Group(aud)) {
+			w.Header().Set("Content-Type", "application/json")
+			w.WriteHeader(403)
+			_ = json.NewEncoder(w).Encode(map[string]any{"error": map[string]any{"code": "audience_required", "audience": aud}})
+			return true
+		}
+	}
+	limit, forward := int64(actorRouteBodyLimit), registry.DefaultForwardHeaders
+	if api != nil {
+		limit, forward = api.MaxBodyBytes, api.ForwardHeaders
+	}
+	// Read one byte past the limit: a longer body is refused, not cut.
+	body, err := io.ReadAll(io.LimitReader(r.Body, limit+1))
+	if err != nil {
+		writeJSONError(w, 400, "invalid_argument", "the request body could not be read")
 		return true
 	}
-	body, _ := io.ReadAll(io.LimitReader(r.Body, 1<<20))
+	if int64(len(body)) > limit {
+		writeJSONError(w, 413, "payload_too_large", fmt.Sprintf("the body is limited to %d bytes", limit))
+		return true
+	}
 	req := actor.Req{Method: r.Method, Path: sub, Base: res.m.Base, Query: map[string]string{}, Headers: map[string]string{}, Body: string(body)}
 	for k := range r.URL.Query() {
 		req.Query[k] = r.URL.Query().Get(k)
 	}
-	for _, h := range []string{"Content-Type", "Accept", "User-Agent", "Referer"} {
+	for _, h := range forward {
 		if v := r.Header.Get(h); v != "" {
 			req.Headers[strings.ToLower(h)] = v
 		}
@@ -184,14 +248,45 @@ func (s *Door) serveActorRoute(w http.ResponseWriter, r *http.Request, res *reso
 		return true
 	}
 	if out.Asset != nil {
-		s.serveBoundAsset(w, r, res.store, out.Asset, out.Headers["Cache-Control"])
+		var allow func(string) bool
+		if api != nil {
+			allow = func(t string) bool { return responseTypeAllowed(api, t) }
+		}
+		s.serveBoundAsset(w, r, res.store, out.Asset, out.Headers["Cache-Control"], allow)
 		return true
 	}
+	ctype := out.Type
 	for k, v := range out.Headers {
+		if http.CanonicalHeaderKey(k) == "Content-Type" {
+			ctype = v
+		}
+	}
+	html := false
+	if api != nil {
+		// The response policy: a type the mount allows, only allowlisted
+		// headers, a bounded size, and HTML sandboxed.
+		if (ctype != "" || len(out.Body) > 0) && !responseTypeAllowed(api, ctype) {
+			writeJSONError(w, 500, "response_type_not_allowed", fmt.Sprintf("this mount's API answers %s, not %q", strings.Join(api.ResponseTypes, ", "), ctype))
+			return true
+		}
+		if int64(len(out.Body)) > api.MaxResponseBytes {
+			writeJSONError(w, 500, "response_too_large", fmt.Sprintf("this mount's API answers at most %d bytes", api.MaxResponseBytes))
+			return true
+		}
+		mt, _, _ := mime.ParseMediaType(ctype)
+		html = mt == "text/html"
+	}
+	for k, v := range out.Headers {
+		if api != nil && !apiResponseHeaders[http.CanonicalHeaderKey(k)] {
+			continue
+		}
 		w.Header().Set(k, v)
 	}
 	if w.Header().Get("Content-Type") == "" && out.Type != "" {
 		w.Header().Set("Content-Type", out.Type)
+	}
+	if html {
+		w.Header().Set("Content-Security-Policy", "sandbox; default-src 'none'")
 	}
 	if cc := w.Header().Get("Cache-Control"); cc == "" {
 		w.Header().Set("Cache-Control", "no-store")
@@ -205,12 +300,19 @@ func (s *Door) serveActorRoute(w http.ResponseWriter, r *http.Request, res *reso
 	return true
 }
 
+// responseTypeAllowed reports whether a Content-Type's media type is one
+// the mount's API answers.
+func responseTypeAllowed(api *registry.MountAPI, ctype string) bool {
+	mt, _, err := mime.ParseMediaType(ctype)
+	return err == nil && slices.Contains(api.ResponseTypes, strings.ToLower(mt))
+}
+
 // serveBoundAsset sends an uploaded file of a store bound to storeID with
 // uploads, rechecking the binding and the store's read: the actor names
 // the file, the server sends it, so no bytes pass through JavaScript.
 // Like /_blob/ on a sandbox origin, the file is never a page here (a
 // sandboxing CSP), and anything but media is a download.
-func (s *Door) serveBoundAsset(w http.ResponseWriter, r *http.Request, storeID string, ref *actor.AssetRef, cache string) {
+func (s *Door) serveBoundAsset(w http.ResponseWriter, r *http.Request, storeID string, ref *actor.AssetRef, cache string, allow func(ctype string) bool) {
 	ctx := r.Context()
 	b, err := s.Registry.BindingOf(ctx, storeID, ref.From)
 	if err != nil || !b.Assets {
@@ -226,6 +328,10 @@ func (s *Door) serveBoundAsset(w http.ResponseWriter, r *http.Request, storeID s
 	f, err := st.File(ctx, "assets", ref.ID)
 	if err != nil {
 		notFound(w)
+		return
+	}
+	if allow != nil && !allow(f.Type) {
+		writeJSONError(w, 500, "response_type_not_allowed", fmt.Sprintf("this mount's API does not answer %q", f.Type))
 		return
 	}
 	// The actor may ask for public caching (its Cache-Control); a shared
