@@ -144,7 +144,7 @@ slop hosts **stores**. A store holds documents (a Firestore-like `db`), files, u
 - **Actor.** Server-side JavaScript per store, one event at a time, with actions (`slop call <store> <action>`), HTTP routes, reactors on table changes and alarms.
 - **Verbs.** The server's API is a table of verbs (`docs.set`, `grant.set`, `link.new`, …). The CLI's commands, the HTTP API and the MCP door are all generated from it (`cmd/slop/cmds/root.go:49-64`, `pkg/doors/mcp/mcp.go`).
 - **Device login.** `slop auth login` prints a code; the person approves it in a browser where they are signed in; the CLI receives a token stored in `~/.config/slop/credentials.json` (or `$SLOP_CREDENTIALS`).
-- **createApp mounts.** A mount such as `/p/:id --type design --createApp pinup` serves any store of type `design` by id, and lets a member create a new one by visiting an unused id; the creator becomes its owner (`pkg/doors/pages/live.go:443-460`).
+- **createApp mounts.** A mount such as `/p/:id --type design --createApp pinup` serves any store of type `design` by id. At an id that does not exist, the shell offers a signed-in member "Create a new one"; the server then creates a store with a **generated** id (`s-xxxxxxxx`, `pkg/kernel/kernel.go:152-157`), makes the creator its owner, and the shell goes to the new store's path (`pkg/doors/pages/live.go:443-466`, `pkg/doors/pages/assets/shell.js:60-66`).
 
 ### 3.3 Prior art on slop: Pinup and Blocks
 
@@ -201,8 +201,8 @@ So a board is already reachable from the terminal at the level of raw documents.
 | Req. | What exists | What is missing |
 |---|---|---|
 | R1 live collaboration | db with live subscriptions; presence; Pinup's patterns | Pinboard store layer over db; remote changes into reactivity; collaborative undo; shared vs. per-viewer state; id scheme; presence UI |
-| R2 many boards | stores; `createApp` mounts; `store.ls` lists stores you own or hold a grant on | a "my boards" page in the app (the page cannot list stores today); board creation with a title |
-| R3 sharing | `grant.set`, `link.new`, levels, audiences | a share dialog the board's admin can use from the page (the page cannot call `grant.set`) |
+| R2 many boards | stores; `createApp` mounts create a new store with a generated id per click, owned by its creator; `store.ls` lists stores you own or hold a grant on | a "my boards" page in the app (the page cannot list stores today); a title per board (`board/meta`) |
+| R3 sharing | `grant.set`, `link.new`, levels, audiences, and the live shell's **Share** dialog for owners (audiences, people, links, revoke; `pkg/doors/pages/assets/shell.js:150-198`) | nothing for owners; board admins who are not owners cannot share; links from the dialog always last 30 days; inviting a named person needs the CLI (`grant.set`) |
 | R4 CLI with device login | device login; `docs.*`, `call`, `eval` verbs | nothing for raw access; the board vocabulary is missing |
 | R5 JS verbs in the CLI | `eval` runs JS on the server; actor actions | app-defined commands: declared, discovered, offered as CLI subcommands and MCP tools |
 | R6 apps built together | page `sample` with tools; apps as source | shared app storage with versions and authors; a trust model and isolation for others' code; server-side agent needs actor `sample` tools |
@@ -224,7 +224,7 @@ So a board is already reachable from the terminal at the level of raw documents.
    terminal ── slop CLI (device login token) ──▶ /api/v1: docs.*, actor.call, app.commands (new), eval
    agents  ── MCP door ─────────────────────────▶ verbs + app commands as tools (new)
                            app store "pinboard": app.json, index.html, js/*, core.js, actor.js
-                           home: /pb  → the "my boards" page (store "pinboard-home")
+                           home: /boards → the "my boards" page (store "pinboard-home")
 ```
 
 One **app store**, `pinboard`, holds the code. Each **board** is its own store of type `pinboard` that runs the app `pinboard`. The same JavaScript **core** (the mutation recorder, the clip and collection operations, `describe`) runs in three places: in the page against the page's `db`, in the actor against the actor's `db`, and therefore behind the CLI and MCP through actor actions.
@@ -239,8 +239,25 @@ slop policy set pinboard sample @member on    # the agent, on each member's own 
 slop policy set pinboard assets @member on    # default already, stated for clarity
 ```
 
-- Visiting `/pb/kitchen` as a member creates the store `kitchen` (type `pinboard`, app `pinboard`), and the visitor becomes its owner. This exists today (`live.go:443-460`).
-- The owner shares with `grant.set kitchen usr_… interact`, `grant.set kitchen @member view`, or `link.new kitchen interact`. Levels mean: `view` reads the board and runs its apps read-only; `interact` edits clips and records; `admin` also registers apps, changes rules of the board, and shares.
+- A member who opens `/pb/<any unused id>` (the home page's "New board" link uses a random unused id such as `/pb/new-4f9k2a`, so it never lands on an existing store) is offered "Create a new one". The server creates a store with a generated id such as `s-7k2m9xq4` (type `pinboard`, app `pinboard`), the member becomes its owner, and the shell moves to `/pb/s-7k2m9xq4`. This exists today (`live.go:443-466`, `kernel.go:152-157`, `shell.js:60-66`).
+- The owner shares from the shell's Share dialog (6.10), or with `grant.set <board> usr_… interact`, `grant.set <board> @member view`, `link.new <board> interact`. Levels mean: `view` reads the board and runs its apps read-only; `interact` edits clips and records; `admin` also registers apps and changes the board's settings; `owner` also shares and deletes.
+
+#### 6.2.1 Many boards per person, each shared separately
+
+A person can make as many boards as they like, and each one is independent, because **a board is a store**:
+
+| | Board "Kitchen" | Board "Work notes" | Board "Moodboard" |
+|---|---|---|---|
+| store (URL id) | `s-7k2m9xq4` | `s-p03dd1ra` | `s-x9a2be7c` |
+| title (`board/meta`) | Kitchen | Work notes | Moodboard |
+| owner | Ada | Ada | Ada |
+| grants | Bob `interact` (by link `lnk_a1…`) | `@member` `view` | none |
+| links | `lnk_a1…` interact, 30 days | none | `lnk_c4…` view, until revoked |
+
+- **Ids and titles.** Store ids are one namespace for the whole server, so boards made from the shell get generated ids and never collide. The name people see is the title in `board/meta`, which the page asks for right after creation. Someone who wants a readable URL can make the board from the CLI instead: `slop store new kitchen --app pinboard --type pinboard` (first come, first served; ids match `^[a-z0-9][a-z0-9-]{0,62}$`, `pkg/registry/stores.go:12`).
+- **Separate sharing.** Grants and links belong to one store, so a link to "Kitchen" opens only "Kitchen". Revoking it removes only the grants that link gave on that store (6.10).
+- **Finding them again.** The home page lists the person's boards ("mine", "shared with me") with titles (6.9). From the CLI, `slop store ls` lists every store the person owns or holds a grant on. The board commands (6.12) accept a board's id or its title among the person's boards: `slop pb Kitchen clip ls`.
+- **Deleting.** The owner deletes a board with `slop store rm <id>` (owners and admins only). The home page can offer the same through the owner's own actor action later.
 
 ### 6.3 The data model
 
@@ -371,7 +388,7 @@ On a shared board the agent's steps are transactions by `agent (for Ada)`; they 
 
 ### Decision: a runtime call for the person's stores of one type
 
-- **Context:** The home page at `/pb` must list "my boards" and "shared with me".
+- **Context:** The home page at `/boards` must list "my boards" and "shared with me". (It is a separate path, not `/pb`, so that it cannot be confused with the board mount `/pb/:id`.)
 - **Options considered:** (a) keep an index document per person in a home store, updated when boards are created or shared; (b) let the page read the registry through `_stores` path space (SLOP3-008), which requires the `stores` policy and exposes more than needed; (c) a new runtime call `slop.stores({type})` that returns the stores of that type the viewer holds a level on, with title and level.
 - **Decision:** (c).
 - **Rationale:** It is one read-only call, scoped by type, computed from grants the server already knows. (a) drifts when someone shares a board from the CLI. (b) is broader than the need.
@@ -380,18 +397,29 @@ On a shared board the agent's steps are transactions by `agent (for Ada)`; they 
 
 The board title lives in `board/meta`; the call returns it by reading that document when the store is of type `pinboard` (or `store.meta` gains a `title` field, which is simpler and serves Pinup too).
 
-### 6.10 Sharing from the page
+### 6.10 Sharing
 
-The page cannot call `grant.set` or `link.new`. The board's actor can, through the `platform` capability (`app.json slop.platform: ["grants.set", "links.new"]`, a policy cell `platform`, and the shell's confirmation flow for changes made on someone's behalf). The share dialog calls actor actions:
+Sharing needs no new machinery for a board's owner, because the live shell already provides it. Every page on the live host is framed by the shell, and the shell shows the store's owner a **Share** dialog (`pkg/doors/pages/assets/shell.js:150-198`, served by `POST /_site/access`, `/_site/grants`, `/_site/links` and `/_site/links/<id>/revoke`, `pkg/doors/pages/live.go:210-213`). Each board is its own store, so each board has its own grants and its own links.
 
-```js
-share:   { requires: 'admin', run(ctx, { subject, level }) { platform.grants.set({ store: ctx.store, subject, level }) } },
-link:    { requires: 'admin', run(ctx, { level, days }) { return platform.links.new({ store: ctx.store, level, days }) } },
-unshare: { requires: 'admin', run(ctx, { subject }) { platform.grants.rm({ store: ctx.store, subject }) } },
-people:  { requires: 'view',  run(ctx) { return platform.grants.ls({ store: ctx.store }) } },
+**How a share link works.**
+
+1. The owner makes a link with a level, `view` or `interact` (`Registry.CreateLink`, `pkg/registry/links.go`). The server stores only a hash of the token (`k_…`) and returns the URL once: `https://apps.<domain>/pb/s-7k2m9xq4?k=k_…`. The shell's dialog makes links that expire after 30 days; `slop link new s-7k2m9xq4 interact --days 0` makes one that lasts until revoked.
+2. Whoever opens the URL: the shell takes `k` out of the address bar (so it is not bookmarked or sent as a Referer) and sends it with the request that opens the view (`shell.js:27-35`). A signed-out visitor gets a guest identity first (`live.go:285-295`).
+3. The server redeems the token (`RedeemLink`): if the visitor holds less than the link's level on this store, it writes a grant for that person with `via = <link id>`. A link never lowers a level. An expired or revoked link answers `link_invalid`.
+4. From then on the person opens the board without the link: the grant stays. If a guest signs in later, the shell offers to keep what the guest had (grants and private documents, `sitelinks.go:83-140`).
+5. Revoking a link (`link.rm` or the dialog) deletes every grant that link gave (`RevokeLink`), at once, and open views are reviewed. Grants given directly are not affected. `link.ls` shows each link's level, expiry and how many grants it gave ("uses").
+
+```text
+owner:  Share → Make a link (interact) ─▶ links(id=lnk_a1, store=s-7k2m9xq4, level=interact, token_hash, expires)
+Bob:    opens …/pb/s-7k2m9xq4?k=k_… ─▶ RedeemLink ─▶ grants(store=s-7k2m9xq4, subject=usr_bob, level=interact, via=lnk_a1)
+owner:  Revoke lnk_a1               ─▶ DELETE grants WHERE store=s-7k2m9xq4 AND via=lnk_a1   (Bob's access ends)
 ```
 
-`links.new` and `grants.rm` must be added to the platform module's list, which today is `stores.create, mounts.set, grants.set` (`pkg/apps/manifest.go:45`). People are picked with `user.search()` (profile scope).
+**What remains to decide or add.**
+
+- Only the **owner** sees the dialog (`managed` requires `owner`, `live.go:487-501`). If board admins should share too, `managed` needs an option, or the app offers its own dialog through actor actions with the `platform` capability. That path needs `links.new` and `grants.rm` added to the platform list (`pkg/apps/manifest.go:45`, today `stores.create, mounts.set, grants.set`).
+- The dialog cannot invite a named person; it lists people who already have access. Inviting by name needs `slop grant set kitchen usr_… interact`, or a people picker (the `user.search()` profile scope) added to the dialog.
+- The dialog's 30 days are fixed; a choice of expiry would be a small shell change.
 
 ### 6.11 The core, shared by page and actor
 
@@ -469,20 +497,21 @@ function createCore(storage) {           // storage: { get(path), set(path, valu
 | M5 | platform runtime | `slop.stores({type})` in the page runtime and a view RPC |
 | M6 | platform | `slop.commands` in manifests; verb `app.commands`; CLI dynamic commands and aliases; MCP tools from app commands |
 | M7 | platform | tools in actor `sample` (server agent) |
-| M8 | platform | `links.new` (and `grants.rm`) in the platform module, if missing; optional `title` in `store.meta` |
+| M8 | platform | optional: sharing by board admins (not only owners), invite-by-name and expiry choice in the shell's Share dialog; `links.new`/`grants.rm` in the platform module only if the app gets its own dialog; optional `title` in `store.meta` |
 
 ## 7. Key flows
 
 ### 7.1 Creating and opening a board
 
 ```text
-Ada visits apps/<domain>/pb/kitchen
-  shell: no store "kitchen" → mount has createApp → Ada is a member → "Create kitchen?"   (live.go:270-272)
-  POST create → CreateStore(type pinboard, app pinboard), owner Ada                     (live.go:451)
+Ada, on /boards, presses "New board" → apps/<domain>/pb/new-4f9k2a
+  shell: no store "new-4f9k2a" → mount has createApp → Ada is a member → "Create a new one"   (live.go:270-272, shell.js:96)
+  POST /_site/create {path} → CreateStore(type pinboard, app pinboard), id s-7k2m9xq4, owner Ada   (live.go:451, kernel.go:152)
+  shell: location → /pb/s-7k2m9xq4                                                       (shell.js:63)
   shell opens a view → sandbox page loads index.html, js/*.js, core.js
   page: db, user, room, assets, sample, slop = await claude.use(...)
   page: subscribe clips, apps, colls, log, board/meta; fill PB.S; render
-  page: board/meta missing → first visit → seed welcome clips (one transaction)
+  page: board/meta missing → first visit → ask for a title → write board/meta, seed welcome clips (one transaction)
   page: room.presence({view, cursor:null, sel:[]})
 ```
 
@@ -544,7 +573,7 @@ Ada selects 14 clips, asks "make these a recipes collection and a browser app"
 | 1 | `core.js` with a storage adapter; page adapter; remote apply; queued writes; shared log; collaborative undo; ids | none | two browser contexts edit one board; undo conflict test |
 | 2 | Presence, cursors, follow; assets for images; `c.local` | none | two contexts: cursors, drags, image paste |
 | 3 | Apps as admin-written versions; trust prompt; narrowed scope | none | Bob's page refuses Ada's new version until accepted |
-| 4 | Actor actions over the core; share dialog through `platform`; "my boards" | M5, M8 | host tests for levels; share by link |
+| 4 | Actor actions over the core; "my boards"; sharing through the shell's dialog (and M8 if admins must share) | M5 (M8) | host tests for levels; share by link, revoke, link expiry |
 | 5 | App commands: manifest, `app.commands`, CLI dynamic commands and alias, MCP tools | M6 | CLI test against a local server; MCP SDK check |
 | 6 | Server agent (`slop pb ask`), log pruning alarm, iframe isolation for app windows | M7 | actor sample tools test; isolation test |
 

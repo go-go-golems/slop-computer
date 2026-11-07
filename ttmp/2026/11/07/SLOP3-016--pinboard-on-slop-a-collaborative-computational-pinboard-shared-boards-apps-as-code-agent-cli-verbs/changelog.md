@@ -11,3 +11,7 @@ Analysis and intern guide: Pinboard on slop (collaborative boards, apps as code 
 ## 2026-11-07
 
 Guide uploaded to reMarkable: /ai/2026/11/07/SLOP3-016/SLOP3-016 Pinboard on slop intern guide
+
+## 2026-11-07
+
+Guide corrected: share links and the shell's Share dialog already exist (owners); createApp makes generated ids, many boards per person each with its own grants and links (§6.2.1); home page at /boards
