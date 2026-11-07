@@ -314,11 +314,22 @@ func (m *Manager) Broken(id string) string {
 	return m.broken[id]
 }
 
+// onActivated stops the store's actor of an older version; the next event
+// builds the new one. builds in flight are discarded (gen): they may have
+// read the version before the activation committed.
+//
+// An actor of the version just activated stays. get sees a version only once
+// its activation has committed, so such an actor was built after it: a
+// request that waited on the activating turn ("another request activated it
+// first") can build and install it before the activating goroutine gets
+// here. Stopping it would restart it for nothing and forget its recent
+// crashes.
 func (m *Manager) onActivated(id string, r kernel.Running) {
+	key := r.App + "@" + strconv.FormatInt(r.N, 10)
 	m.mu.Lock()
 	m.gen++
 	delete(m.broken, id)
-	if a := m.actors[id]; a != nil {
+	if a := m.actors[id]; a != nil && a.key != key {
 		delete(m.actors, id)
 		close(a.stop)
 	}
