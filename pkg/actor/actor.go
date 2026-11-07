@@ -171,9 +171,13 @@ func (a *Actor) log(level, text string) {
 // build makes the runtime: it runs the app's actor.js, which must call
 // defineActor once.
 func build(ctx context.Context, m *Manager, st *store.Store, run kernel.Running, files map[string][]byte, checkPolicy bool) (*Actor, error) {
-	h := newDirectHost()
 	a := &Actor{m: m, st: st, run: run, key: run.App + "@" + strconv.FormatInt(run.N, 10),
-		host: h, vm: h.VM(), wake: make(chan struct{}, 1), stop: make(chan struct{})}
+		wake: make(chan struct{}, 1), stop: make(chan struct{})}
+	h, err := m.newHost(a)
+	if err != nil {
+		return nil, fail("actor_error", "runtime: %v", err)
+	}
+	a.host, a.vm = h, h.VM()
 	entry := run.Manifest.Actor
 	src, ok := files[entry]
 	if !ok {
