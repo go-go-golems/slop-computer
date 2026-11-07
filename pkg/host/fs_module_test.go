@@ -49,6 +49,15 @@ defineActor({
     },
     failAfterWrite() { fs.writeFileSync('/data/rolled', 'x'); throw new Error('boom'); },
     has(ctx, { p }) { return fs.existsSync(p); },
+    // Renaming a file onto itself changes nothing, the byte count included.
+    selfRename() { for (let i = 0; i < 3; i++) fs.renameSync('/big', '/big'); return [code(() => fs.writeFileSync('/extra', 'x')), fs.existsSync('/big')]; },
+    // Data that is no string, ArrayBuffer or typed array is a JavaScript
+    // error the action can catch, not a failed turn.
+    async badData() {
+      let p;
+      try { await fs.writeFile('/bad3', { a: 1 }); } catch (e) { p = e.code; }
+      return [code(() => fs.writeFileSync('/bad', { a: 1 })), code(() => fs.appendFileSync('/bad2', [1, 2])), p, fs.existsSync('/bad')];
+    },
     big(ctx, { n }) { return code(() => fs.writeFileSync('/big', 'x'.repeat(n))); },
     many(ctx, { n }) { for (let i = 0; i < n; i++) { const c = code(() => fs.writeFileSync('/f' + i, '')); if (c !== 'ok') return [i, c]; } return 'ok'; },
     async promised() { await fs.writeFile('/p.txt', 'async'); const s = await fs.readFile('/p.txt', 'utf8'); let c; try { await fs.readFile('/none'); } catch (e) { c = e.code; } return [s, c]; },
@@ -83,6 +92,7 @@ func TestFSModule(t *testing.T) {
 	eq("moves", call("moves", nil), `[false,[1,2,3],["g","n"],false,["data"]]`)
 	eq("paths", call("paths", nil), `["a/c/d.txt","/y/z","/x","/a/b","b",".gz","",false,"../../d","a/b/c/","/"]`)
 	eq("promised", call("promised", nil), `["async","ENOENT"]`)
+	eq("badData", call("badData", nil), `["invalid_argument","invalid_argument","invalid_argument",false]`)
 
 	// A turn that fails takes its fs writes with it.
 	h.fail(admin, "actor.call", map[string]any{"store": "fsx", "action": "failAfterWrite"}, "actor_error")
@@ -103,6 +113,7 @@ func TestFSModule(t *testing.T) {
 	// The load wrote /data/boot.txt (6 bytes) again: 94 more fit.
 	eq("big", call("big", map[string]any{"n": 95}), `"ENOSPC"`)
 	eq("big ok", call("big", map[string]any{"n": 94}), `"ok"`)
+	eq("selfRename", call("selfRename", nil), `["ENOSPC",true]`)
 	// "/", /data, /data/boot.txt and /big exist: one more file fits.
 	eq("many", call("many", map[string]any{"n": 3}), `[1,"ENOSPC"]`)
 	e := h.fail(admin, "app.trust", map[string]any{"app": "fsx", "module": "fs", "config": map[string]any{"maxBytes": 1 << 30}}, "invalid_argument")

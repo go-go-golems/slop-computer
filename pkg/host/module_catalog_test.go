@@ -129,6 +129,12 @@ func TestModuleCatalog(t *testing.T) {
 	if !strings.Contains(e["message"].(string), "grant it again") {
 		t.Fatalf("stale config: %v", e)
 	}
+	// Doing as the message says repairs it, with no manual restart: the
+	// grant's restart forgets the failed build.
+	h.call(admin, "app.trust", map[string]any{"app": "cat", "module": "database", "config": map[string]any{}})
+	if n := h.call(admin, "actor.call", map[string]any{"store": "cat", "action": "count"}); n != 2.0 {
+		t.Fatalf("after granting it again: %v", n)
+	}
 }
 
 // The interceptor: a scoped module's calls find its grant still current on

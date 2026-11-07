@@ -247,6 +247,9 @@ func (f *memFS) rename(from, to string) error {
 	if from == "/" || to == "/" || strings.HasPrefix(to, from+"/") {
 		return fsErr("EINVAL", "rename", from)
 	}
+	if from == to {
+		return nil // onto itself: nothing moves, and nothing is counted again
+	}
 	if err := f.parentDir("rename", to); err != nil {
 		return err
 	}
@@ -496,10 +499,26 @@ func (a *Actor) dataBytes(v goja.Value, enc string) []byte {
 		return x
 	}
 	if o, ok := v.(*goja.Object); ok {
-		if buf, ok := o.Get("buffer").Export().(goja.ArrayBuffer); ok {
-			off, n := o.Get("byteOffset").ToInteger(), o.Get("byteLength").ToInteger()
-			return buf.Bytes()[off : off+n]
+		// A typed array or DataView: its view of the buffer. Anything else
+		// (a plain object, an array) is refused, as Node does, rather than
+		// written as "[object Object]".
+		if b := o.Get("buffer"); b != nil {
+			if buf, ok := b.Export().(goja.ArrayBuffer); ok {
+				all := buf.Bytes()
+				off, n := int64(0), int64(len(all))
+				if v := o.Get("byteOffset"); v != nil {
+					off = v.ToInteger()
+				}
+				if v := o.Get("byteLength"); v != nil {
+					n = v.ToInteger()
+				}
+				if off < 0 || n < 0 || off+n > int64(len(all)) {
+					a.throw(fail("invalid_argument", "data's byteOffset and byteLength are outside its buffer"))
+				}
+				return all[off : off+n]
+			}
 		}
+		a.throw(fail("invalid_argument", "data must be a string, ArrayBuffer or typed array"))
 	}
 	return []byte(v.String())
 }

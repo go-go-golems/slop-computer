@@ -259,6 +259,14 @@ func (m *Manager) RestartApp(app string) {
 			close(a.stop)
 		}
 	}
+	// A failed build is cached per store (m.broken, keyed app@n). The
+	// changes that restart an app (a grant, its configuration, a policy)
+	// can make that build succeed, so the next request builds again.
+	for id, why := range m.broken {
+		if strings.HasPrefix(why, app+"@") {
+			delete(m.broken, id)
+		}
+	}
 }
 
 func (m *Manager) Restart(id string) {
