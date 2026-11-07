@@ -805,4 +805,14 @@ This guide was written before the implementation. The code is in PR #36 (phases 
 - **Not built:** the CLI does not show the app and snapshot the first time it runs verbs from it (6.12, Security).
 - **Dependency cost:** glazed's CLI glue adds about 9.5 MB to the release binary (vault API client, go-openapi/strfmt, mongo bson through go-pretty). tree-sitter is not linked.
 
-**Open:** M8 sharing options (board admins sharing, inviting a named person, link expiry), which need a decision. Phase 6.
+**Phase 6 (PR #39)**
+- **Server agent:** actor `sample` takes tools (`{name, description, inputSchema, execute}`). Each tool call runs as its own turn of the calling event (`Actor.Later`). A tool that throws rolls back only its own turn, and the model reads the error. Pinboard's `ask` gives the model the board's actions as the person asking: read tools from view, write tools from interact. It is logged as `agent (for <name>)`. The verb is `board ask`, not `slop pb ask`.
+- **Log pruning:** an `every` alarm (6 h) keeps the newest 500 steps and anything newer than `board/meta.logDays` (30 by default).
+- **Isolation:**
+  - Every app that is not built in runs in an `<iframe sandbox="allow-scripts">`, with an opaque origin and `default-src 'none'`.
+  - Inside it, `dsl.js` and `render.js` work on a copy of the board, and the page applies only content steps, as `app:<name>`. Its source is never evaluated in the page.
+  - Known limit: a frame can navigate itself, so it could carry the board copy out. That is not an escalation, since only board admins register apps.
+  - App menus and `agentDescribe` of framed apps are not carried over.
+- **Fixed on the way:** in the actor `db`, `orderBy(field)` without a direction crashed the turn (a nil `goja.Value`).
+
+**Open:** M8 sharing options (board admins sharing, inviting a named person, link expiry), which need a decision.

@@ -31,3 +31,7 @@ Design doc 02: migrating the actor VM to a go-go-goja engine runtime (difference
 ## 2026-11-07
 
 Implementation: Pinboard phases 0-4 in PR #36, app verbs (slop on / slop pb, app.verb, MCP pb_* tools) in PR #37, actor VM phases 1-4 in PR #38 (engine behind actors.runtime; activation race fixed), go-go-goja#107 (U1-U4). Guide §13 and doc 02 §12 record where the implementation differs from the design; tasks checked with PR references.
+
+## 2026-11-07
+
+Phase 6 in PR #39 (stacked on #37): actor sample tools (Actor.Later; a tool call per turn), Pinboard's server agent (ask, board ask, pb_board_ask), log pruning alarm, apps written by other people in sandboxed frames (frames.js/frame.js); actor db orderBy nil crash fixed. Guide §13 updated; phase 6 task checked.

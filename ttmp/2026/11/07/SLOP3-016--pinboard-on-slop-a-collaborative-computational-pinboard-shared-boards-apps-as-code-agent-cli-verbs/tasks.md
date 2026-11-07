@@ -7,7 +7,7 @@
 - [x] Phase 3: apps as admin-written versions; trust prompt; narrowed scope (PR #36) <!-- t:bkuj -->
 - [x] Phase 4: actor actions over the core; share dialog via platform; my boards (slop.stores runtime call) (PR #36; M8 sharing options pending a decision) <!-- t:82uq -->
 - [x] Phase 5: app commands (manifest, app.commands verb, CLI dynamic commands + alias, MCP tools) (PR #37: slop.verbs, app.verbs, slop on / slop pb, app.verb, MCP tools pb_*) <!-- t:842z -->
-- [ ] Phase 6: server agent (actor sample tools), log pruning, iframe isolation for app windows <!-- t:rx3v -->
+- [x] Phase 6: server agent (actor sample tools), log pruning, iframe isolation for app windows (PR #39) <!-- t:rx3v -->
 - [x] Analysis/design guide written and uploaded to reMarkable <!-- t:o85w -->
 - [x] Actor VM migration phase 0: upstream go-go-goja U1 (runtimebridge owner option) and U2 (skip default globals) (go-go-golems/go-go-goja#107, U1-U4) <!-- t:4qot -->
 - [x] Actor VM migration phase 1: vmHost interface + directHost, all VM entry points through host.Run (no behaviour change) (PR #38) <!-- t:cfik -->
