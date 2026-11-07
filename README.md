@@ -34,7 +34,7 @@ make build           # ./slop, server and CLI (cgo: SQLite)
 | `apps/upstream/` | Claude Blocks and Pinup: unmodified claude.ai artifacts with their build steps (`make blocks pinup`) |
 | `web/runtime` | the page runtime (`window.claude`), built into `pkg/doors/pages/assets/claude.js`; `conformance/` checks it in a browser (`make conformance`) |
 | `web/admin` | the back office, built into `pkg/doors/office/admin/` (`/admin`) and `apps/backoffice/` (`make admin`) |
-| `doc/` | the v3 design (`doc/design/slop-v3.md`), the claude.ai artifact guides (`doc/claude-apis/`), production notes |
+| `doc/` | the v3 design (`doc/design/slop-v3.md`), the claude.ai artifact guides (`doc/claude-apis/`), building and deploying apps (`doc/building-apps.md`), production notes |
 | `scripts/` | `deploy-apps.sh`: every app and example with its mounts (`make deploy-apps`) |
 | `ttmp/` | tickets: designs, intern guides and diaries (v3: `ttmp/2026/11/01/SLOP3-*`) |
 
