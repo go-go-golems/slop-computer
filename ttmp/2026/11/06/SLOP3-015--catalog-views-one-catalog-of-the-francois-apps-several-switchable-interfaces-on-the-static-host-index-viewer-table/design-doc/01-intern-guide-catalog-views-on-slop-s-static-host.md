@@ -193,7 +193,7 @@ open(item):
   modal.title = item.title
   devices = {phone: 390×844, tablet: 820×1180, desktop: 1280×800}
   if item.preview:                                   // free app
-    frame = <iframe sandbox="allow-scripts" src=item.preview referrerpolicy="no-referrer">
+    frame = <iframe sandbox="allow-scripts allow-forms allow-modals" src=item.preview referrerpolicy="no-referrer">
     size frame to the device; scale it to fit the modal with CSS transform
     note: "Preview without slop's runtime; model calls, shared data and rooms need Open."
   else:                                              // paid app
@@ -233,7 +233,7 @@ It uses the same comparison as SLOP3-013's importer: path and SHA-256 against `f
 ### 3.6 Security and privacy
 
 - **The views run with no privileges.** The static host has no session. The pages read only public files, and the catalog contains only public listing data.
-- **The preview cannot escape its iframe.** `sandbox="allow-scripts"` without `allow-same-origin` gives it an opaque origin. `referrerpolicy="no-referrer"` keeps the catalog URL away from the app.
+- **The preview cannot escape its iframe.** `sandbox="allow-scripts allow-forms allow-modals"` without `allow-same-origin` gives it an opaque origin. `referrerpolicy="no-referrer"` keeps the catalog URL away from the app.
 - **Paid apps are never previewed.** Their HTML is not reachable anonymously (SLOP3-013's grants). The catalog does not link to it either: `preview` and `download` are `null` for them.
 - **No visitor data is collected,** and no third-party script or font is loaded. The pages use system fonts. The design is our own: Ramon's site is the pattern, not the look, and no assets or typeface are copied from it.
 

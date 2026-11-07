@@ -1,0 +1,51 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>slop catalog</title>
+<meta name="description" content="The apps imported from slop.boutique, in several views over one catalog.">
+<link rel="stylesheet" href="/catalog/kit/views.css">
+<style>
+  .views { display: grid; grid-template-columns: repeat(auto-fill, minmax(280px, 1fr)); gap: 16px; margin: 28px 0; }
+  .view { display: block; text-decoration: none; background: var(--panel); border: 1px solid var(--line); border-radius: 12px; padding: 18px; }
+  .view:hover { border-color: var(--ink); }
+  .view strong { display: block; font-size: 20px; margin-bottom: 4px; }
+  .view span { color: var(--muted); }
+  .facts { display: flex; gap: 24px; flex-wrap: wrap; margin-top: 8px; }
+  .facts b { display: block; font-size: 28px; font-weight: 650; }
+</style>
+</head>
+<body>
+<div id="head"></div>
+<main class="wrap">
+  <section class="cv-hero">
+    <h1>One catalog, several ways to look at it.</h1>
+    <p>Every app imported from slop.boutique, generated from the stores that hold them. Each view below is its own small store on this host, reading the same <a href="/catalog/data/catalog.json">catalog.json</a>.</p>
+    <div class="facts cv-meta" id="facts"></div>
+  </section>
+  <section class="views" id="views" aria-label="Views"></section>
+</main>
+<footer class="cv-foot"><div class="wrap">Data: <a href="/catalog/data/catalog.json">catalog.json</a> · <a href="/catalog/data/views.json">views.json</a> · apps run on <span id="origin"></span></div></footer>
+<script src="/catalog/kit/views.js"></script>
+<script>
+(async () => {
+  const { el, bytes } = SlopCatalog;
+  await SlopCatalog.header(document.querySelector("#head"), null);
+  const { catalog, views } = await SlopCatalog.load();
+  const paid = catalog.items.filter((i) => !i.free).length;
+  document.querySelector("#facts").replaceChildren(
+    el("div", {}, el("b", {}, catalog.count), "apps"),
+    el("div", {}, el("b", {}, paid), "for subscribers"),
+    el("div", {}, el("b", {}, catalog.tags.length), "tags"),
+    el("div", {}, el("b", {}, bytes(catalog.totalBytes)), "of HTML"));
+  document.querySelector("#views").replaceChildren(...views.map((v) =>
+    el("a", { class: "view", href: v.path }, el("strong", {}, v.title), el("span", {}, v.blurb))));
+  document.querySelector("#origin").textContent = catalog.appsOrigin.replace(/^https?:\/\//, "");
+  // A viewer link on the landing page goes to the index.
+  const open = new URLSearchParams(location.search).get("open");
+  if (open) location.replace(views[0].path + "?open=" + encodeURIComponent(open));
+})();
+</script>
+</body>
+</html>

@@ -1,0 +1,68 @@
+package host
+
+// SLOP3-015: the catalog views are static stores on nested mounts of the
+// static host: /catalog (the kit and the data), /catalog/list and
+// /catalog/table (one view each). The most specific mount answers, every
+// page reaches the shared kit and data on the same origin, and no app
+// runtime is involved.
+
+import (
+	"strings"
+	"testing"
+)
+
+func TestCatalogViewsOnStaticHost(t *testing.T) {
+	h := newHarness(t)
+	admin := h.tokenFor("admin@example.com", "read", "write", "admin")
+	static := h.cfg.Hosts.Static[0]
+	catalog := appDir(t, "catalog")
+	catalog = append(catalog,
+		map[string]any{"path": "data/catalog.json", "text": `{"count":1,"items":[{"id":"weft","title":"Weft"}],"tags":[]}`},
+		map[string]any{"path": "data/views.json", "text": `[{"id":"list","title":"Index","path":"/catalog/list/"}]`})
+	for _, s := range []struct {
+		id, mount string
+		files     []any
+	}{
+		{"catalog", "/catalog", catalog},
+		{"catalog-list", "/catalog/list", appDir(t, "catalog-list")},
+		{"catalog-table", "/catalog/table", appDir(t, "catalog-table")},
+	} {
+		h.call(admin, "store.new", map[string]any{"id": s.id})
+		h.call(admin, "files.push", map[string]any{"store": s.id, "files": s.files})
+		h.call(admin, "grant.set", map[string]any{"store": s.id, "subject": "@guest", "level": "view"})
+		h.call(admin, "mount.set", map[string]any{"host": static, "path": s.mount, "store": s.id})
+	}
+
+	for path, want := range map[string]string{
+		"/catalog/":                  "One catalog, several ways to look at it.",
+		"/catalog/list/":             "<title>Index — slop catalog</title>",
+		"/catalog/table/":            "<title>Table — slop catalog</title>",
+		"/catalog/kit/views.js":      "window.SlopCatalog",
+		"/catalog/kit/views.css":     ".cv-viewer",
+		"/catalog/data/catalog.json": `"id":"weft"`,
+	} {
+		r, body := h.get(static, path)
+		if r.StatusCode != 200 || !strings.Contains(body, want) {
+			t.Errorf("%s: %d, want %q in %.120q", path, r.StatusCode, want, body)
+		}
+		// Static pages: files only, no runtime injected.
+		if strings.Contains(body, "/_slop/claude.js") {
+			t.Errorf("%s: an app runtime was injected", path)
+		}
+	}
+	// Each view loads the shared kit from the catalog mount.
+	for _, path := range []string{"/catalog/list/", "/catalog/table/"} {
+		if _, body := h.get(static, path); !strings.Contains(body, `src="/catalog/kit/views.js"`) {
+			t.Errorf("%s does not load the kit", path)
+		}
+	}
+	// A mount root without its slash goes to the slash (relative URLs).
+	if r, _ := h.get(static, "/catalog/list"); r.StatusCode != 308 || r.Header.Get("Location") != "/catalog/list/" {
+		t.Errorf("/catalog/list: %d %q", r.StatusCode, r.Header.Get("Location"))
+	}
+	// Without @guest view the static host shows nothing.
+	h.call(admin, "grant.rm", map[string]any{"store": "catalog-table", "subject": "@guest"})
+	if r, _ := h.get(static, "/catalog/table/"); r.StatusCode != 404 {
+		t.Errorf("/catalog/table/ without a guest grant: %d", r.StatusCode)
+	}
+}
