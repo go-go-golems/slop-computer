@@ -540,3 +540,60 @@ Phase 3 implements the guide's security decision for shared app code: admins reg
 
 ### Technical details
 - App record: `{name, source, icon, title, about, shortcut, hidden, order, version, by, uid, at, sha256}`; version document: `{source, by, uid, at, sha256, note}`; trust document: `{apps: {<name>: <sha256>}}`.
+
+## Step 9: Phase 4, actor actions, "my boards", board names
+
+Phase 4 gives callers without a page (the CLI, MCP, other apps) the board's vocabulary through actor actions over the same core, adds the platform call that lets a page list a person's boards (M5), and the `/boards` home page.
+
+### Prompt Context
+**User prompt (verbatim):** (same as step 5)
+**Assistant interpretation:** Pinboard phase 4: actor actions over the core; "my boards" (`slop.stores` runtime call); sharing through the shell's dialog.
+**Inferred user intent:** Many boards per person, each found again and shared separately, and the board reachable from outside the page.
+**Commit (code):** `f6fc10a`
+
+### What I did
+- `apps/pinboard/actor.js`: `require('./core.js')` with a storage adapter over the actor's `db` (one turn, so one transaction); actions `describe`, `clips` (kind, tag, q), `addClip` (text, url or an asset id; placed below everything if no position), `removeClip`, `tagClip`, `collections`, `query` (where, orderBy, desc, limit), `insert`, `update`, `log`. Mutating actions require `interact` and write a log entry with `by: "<name> (<via>)"`.
+- `pkg/doors/pages/storesrpc.go`: the view RPC `slop.stores {type, title?}`: `K.VisibleStores` (owned, granted, audience), narrowed to the type, newest first, at most 200; each row `{id, app, level, mine, createdAt, title?}`; the title is the `title` field of the document at `title`, read with `K.Open` and the store's rules as the viewer (`storeTitle`). Registered in `rpcTable` with `authz.DocRead`.
+- `web/runtime/src/caps.ts`: `slop.stores.list({type, title})`; `pnpm build` regenerated `pkg/doors/pages/assets/claude.js`.
+- `apps/pinboard-home`: the `/boards` page (yours, shared with you, search, New board → `/pb/new-<random>`), linking with `target="_top"` to the live host taken from the frame's `parent` parameter.
+- `main.js`: a new board is titled "Untitled board" and the title is selected for typing.
+- `pkg/host/pinboard_test.go` (`TestPinboardApp`): Ada creates two boards through `/_site/create`; Bob `interact` and Carol `view` on one; rules (Bob cannot write `apps/evil`, `apps/evil/versions/1` or `board/meta`; Carol cannot write clips; Bob cannot read Ada's trust document); actor actions per level (Carol refused `addClip` and `insert`; `query` with a `where`; `describe`; `clips` by tag; `log` with `bob (cli)`); `slop.stores` for Ada (`Work notes:owner:mine,Kitchen:owner:mine`), Bob (`Kitchen:interact:shared`), Dave (none), and a missing type refused.
+- Validation: `go test -buildvcs=false ./...` all pass; `GOFLAGS=-buildvcs=false golangci-lint run` 0 issues; `pnpm build` ok (`pnpm check` fails on `test/vectors.test.ts` missing `node:fs` types, unrelated and unchanged).
+- Browser check on the local server (rebuilt and restarted): `/boards` for Ada listed "Work notes" and "Kitchen", for Bob "Kitchen · can edit" under shared; New board → Create → the title selected → typed "Moodboard" + Enter → listed as the newest. Screenshot `various/05-phase4-boards-home-ada.png`. From the CLI (`lslop call s-5povfcfc …`): `describe`, `addClip` with `via: cli`, `query`, `log`.
+
+### Why
+- **Actions instead of raw documents for the CLI.** The CLI's verbs (phase 5) can call `describe` once instead of reading every document over HTTP, and the server applies the same validation and log as the page.
+- **A runtime call, not an index document** (the guide's decision for M5): it is computed from grants the server already has, so sharing from the CLI or by link shows up without the app keeping anything in sync.
+- **Title by document path.** The platform should not know Pinboard's layout; `title: "board/meta"` names the document, and the read goes through the store's rules as the viewer, so a title hidden from someone stays hidden.
+
+### What worked
+- `/_site/create` and the shell's "Create a new one" needed nothing new; the home page only links to an unused id.
+- The test harness's `openView`/`rpc` reached the new RPC with no harness change.
+
+### What didn't work
+- First version of the RPC returned nothing, in the browser and in the test. Debug output showed `ok=false level=owner trace=[… owner of s-4jlxsv5j]`: `Access.Level` computes the level but leaves `Decision.OK` false, which only a check against a needed level sets. The filter now compares `d.Level` only, as `store.ls` does.
+- My first log assertion expected the newest entry to be the CLI's; the newest was an `insert`. Rewrote it to look for `"by":"bob (cli)"` in the four entries.
+
+### What I learned
+- `pkg/access` `Decision`: `Level()` fills `Level` and `Trace`; `OK` belongs to `Check`.
+- The live shell's iframe has no `sandbox` attribute, so a page link with `target="_top"` navigates the top window on a click.
+
+### What was tricky to build
+- **Whose rules apply to the title.** Reading `board/meta` from many stores in one call could leak if read with the platform's rights. Each read opens the store as the viewer (`K.Open(..., LevelView, ...)`) and filters by `rules.CanRead(path, id, level)`, like `slop.read`.
+
+### What warrants a second pair of eyes
+- `slop.stores` opens up to 200 stores per call to read titles. For a person with many boards that is many store opens per page load; a cache or a title in the registry row (`store.meta`) would be cheaper.
+- `VisibleStores` includes stores open to an audience the person is in. A board shared with `@member view` appears under "Shared with you" for every member.
+- M8 is not done: the Share dialog is owner-only, says "Share Pinboard" (the app's title, not the board's), cannot invite a named person and has a fixed 30-day link. These are the guide's optional items; they need the user's decision on whether board admins should share.
+
+### What should be done in the future
+- Phase 5: app verbs in the CLI (jsverbs) and MCP tools.
+- The Share dialog's title (board title) and the M8 options, if wanted.
+
+### Code review instructions
+- `pkg/doors/pages/storesrpc.go`, `apps/pinboard/actor.js`, `pkg/host/pinboard_test.go`.
+- `go test -buildvcs=false ./pkg/host -run TestPinboardApp`.
+
+### Technical details
+- RPC: `{"method":"slop.stores","args":{"type":"pinboard","title":"board/meta"}}` → `{"stores":[{"id":"s-…","app":"pinboard","level":"owner","mine":true,"createdAt":…,"title":"Kitchen"}]}`.
+- Actor log `by` for an action: `ctx.visitor.name || email || id` + ` (via)`, `via` from the arguments (default `actor`).
