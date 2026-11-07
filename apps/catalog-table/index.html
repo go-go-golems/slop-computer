@@ -1,0 +1,109 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Table — slop catalog</title>
+<link rel="stylesheet" href="/catalog/kit/views.css">
+<style>
+  .bar { display: flex; flex-wrap: wrap; gap: 8px 16px; align-items: center; margin: 24px 0 12px; }
+  .bar h1 { font-size: 24px; margin: 0; letter-spacing: -.01em; }
+  .capf { display: flex; gap: 4px; flex-wrap: wrap; }
+  .capf button { border: 1px solid var(--line); background: transparent; border-radius: 6px; padding: 1px 8px; font: 12px var(--mono); cursor: pointer; color: var(--muted); }
+  .capf button[aria-pressed="true"] { background: var(--ink); color: var(--bg); border-color: var(--ink); }
+  .scroll { overflow-x: auto; border: 1px solid var(--line); border-radius: 10px; background: var(--panel); }
+  table { border-collapse: collapse; width: 100%; font-size: 14px; }
+  th, td { padding: 7px 10px; border-bottom: 1px solid var(--line); text-align: left; white-space: nowrap; }
+  th { position: sticky; top: 0; background: var(--panel); font-weight: 600; cursor: pointer; user-select: none; }
+  th[aria-sort="ascending"]::after { content: " ↑"; }
+  th[aria-sort="descending"]::after { content: " ↓"; }
+  td.num, th.num { text-align: right; font-family: var(--mono); }
+  td.cap, th.cap { text-align: center; }
+  td.cap { font-family: var(--mono); color: var(--muted); }
+  td.cap.on { color: var(--ink); }
+  tbody tr { cursor: pointer; }
+  tbody tr:hover { background: var(--chip); }
+  td.title { font-weight: 600; white-space: normal; min-width: 180px; }
+  td.title small { display: block; font-weight: 400; color: var(--muted); max-width: 46ch; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+</style>
+</head>
+<body>
+<div id="head"></div>
+<main class="wrap">
+  <div class="bar">
+    <h1 id="count">Apps</h1>
+    <div class="capf" id="caps" role="group" aria-label="Needs capability"></div>
+  </div>
+  <div id="pgt"></div>
+  <div class="scroll"><table id="t"><thead></thead><tbody><tr><td class="cv-empty">Loading the catalog…</td></tr></tbody></table></div>
+  <div id="pgb"></div>
+</main>
+<footer class="cv-foot"><div class="wrap">Click a column to sort; click a row to view. Columns sample · db · room · user · downloads are the runtime capabilities each app declares.</div></footer>
+<script src="/catalog/kit/views.js"></script>
+<script>
+(async () => {
+  const { el, bytes, date, matches, paged } = SlopCatalog;
+  const PER_PAGE = 50;
+  await SlopCatalog.header(document.querySelector("#head"), "table");
+  const { catalog } = await SlopCatalog.load();
+  SlopCatalog.viewer.bind(catalog);
+  const CAPS = ["sample", "db", "room", "user", "downloads"];
+  const cols = [
+    { key: "title", label: "App", get: (i) => i.title.toLowerCase() },
+    ...CAPS.map((c) => ({ key: c, label: c, cap: true, get: (i) => (i.capabilities.includes(c) ? 1 : 0) })),
+    { key: "access", label: "Access", get: (i) => (i.free ? 0 : 1) },
+    { key: "version", label: "Version", get: (i) => i.version || "" },
+    { key: "published", label: "Published", get: (i) => i.publishedAt || "" },
+    { key: "size", label: "Size", num: true, get: (i) => i.bytes },
+    { key: "files", label: "Attachments", num: true, get: (i) => i.attachments.length },
+  ];
+  const params = new URLSearchParams(location.search);
+  const state = { by: params.get("by") || "published", dir: params.get("dir") === "asc" ? 1 : -1, q: params.get("q") || "", need: new Set() };
+  window.addEventListener("catalog:search", (e) => { state.q = e.detail.query; paged.reset(); render(); });
+
+  function keep() {
+    const u = new URL(location.href);
+    u.searchParams.set("by", state.by);
+    u.searchParams.set("dir", state.dir > 0 ? "asc" : "desc");
+    history.replaceState(history.state, "", u);
+  }
+
+  function head() {
+    document.querySelector("#t thead").replaceChildren(el("tr", {}, cols.map((c) => el("th", {
+      class: c.num ? "num" : c.cap ? "cap" : null, scope: "col",
+      "aria-sort": state.by === c.key ? (state.dir > 0 ? "ascending" : "descending") : null,
+      onclick: () => { state.dir = state.by === c.key ? -state.dir : (c.key === "title" ? 1 : -1); state.by = c.key; keep(); paged.reset(); render(); },
+    }, c.label))));
+    document.querySelector("#caps").replaceChildren(el("span", { class: "cv-meta" }, "needs"), ...CAPS.map((c) => el("button", {
+      type: "button", "aria-pressed": state.need.has(c) ? "true" : "false",
+      onclick: () => { state.need.has(c) ? state.need.delete(c) : state.need.add(c); paged.reset(); render(); },
+    }, c)));
+  }
+
+  function render() {
+    head();
+    const col = cols.find((c) => c.key === state.by) || cols[0];
+    const items = catalog.items
+      .filter((i) => matches(i, state.q))
+      .filter((i) => [...state.need].every((c) => i.capabilities.includes(c)))
+      .sort((a, b) => {
+        const x = col.get(a), y = col.get(b);
+        return (x < y ? -1 : x > y ? 1 : a.title.localeCompare(b.title)) * state.dir;
+      });
+    document.querySelector("#count").textContent = items.length === catalog.count ? `${catalog.count} apps` : `${items.length} of ${catalog.count} apps`;
+    const page = paged(items, PER_PAGE, [document.querySelector("#pgt"), document.querySelector("#pgb")], render);
+    document.querySelector("#t tbody").replaceChildren(...page.map((i) => el("tr", { onclick: () => SlopCatalog.viewer.open(i), tabindex: "0",
+      onkeydown: (e) => { if (e.key === "Enter") SlopCatalog.viewer.open(i); } },
+      el("td", { class: "title" }, i.title, el("small", {}, i.description)),
+      CAPS.map((c) => el("td", { class: "cap" + (i.capabilities.includes(c) ? " on" : "") }, i.capabilities.includes(c) ? "●" : "·")),
+      el("td", {}, i.free ? "free" : el("span", { class: "cv-paid" }, "subscribers")),
+      el("td", { class: "cv-meta" }, i.version || ""),
+      el("td", { class: "cv-meta" }, date(i.publishedAt)),
+      el("td", { class: "num" }, bytes(i.bytes)),
+      el("td", { class: "num" }, i.attachments.length || ""))));
+  }
+  render();
+})();
+</script>
+</body>
+</html>

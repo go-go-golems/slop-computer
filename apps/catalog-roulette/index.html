@@ -1,0 +1,135 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Roulette — slop catalog</title>
+<link rel="stylesheet" href="/catalog/kit/views.css">
+<style>
+  .bar { display: flex; flex-wrap: wrap; gap: 10px 14px; align-items: center; margin: 22px 0 14px; }
+  .bar h1 { font-size: 24px; margin: 0; letter-spacing: -.01em; }
+  .bar .sp { flex: 1; }
+  .seg { display: flex; gap: 4px; background: var(--chip); padding: 3px; border-radius: 999px; }
+  .seg button { border: 0; background: transparent; padding: 3px 12px; border-radius: 999px; font-size: 14px; color: var(--muted); cursor: pointer; }
+  .seg button[aria-pressed="true"] { background: var(--panel); color: var(--ink); box-shadow: var(--shadow); }
+  .spin { font-size: 16px; padding: 7px 18px; }
+  .stage { display: grid; gap: 16px; grid-template-columns: 1fr; }
+  .stage.two { grid-template-columns: 1fr 1fr; }
+  .card { background: var(--panel); border: 1px solid var(--line); border-radius: 14px; overflow: hidden; display: flex; flex-direction: column; min-width: 0; }
+  .screen { position: relative; overflow: hidden; aspect-ratio: 16 / 10; background: var(--chip); border-bottom: 1px solid var(--line); }
+  .about { padding: 16px 18px; display: flex; flex-direction: column; gap: 8px; }
+  .about h2 { margin: 0; font-size: 26px; letter-spacing: -.02em; display: flex; gap: 10px; align-items: center; flex-wrap: wrap; }
+  .about p { margin: 0; color: var(--muted); }
+  .acts { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 4px; }
+  .like { margin-top: 18px; }
+  .like h3 { font-size: 15px; margin: 0 0 8px; color: var(--muted); font-weight: 500; }
+  .like .row { display: flex; flex-wrap: wrap; gap: 8px; }
+  .pick { display: flex; flex-direction: column; text-align: left; gap: 2px; border: 1px solid var(--line); background: var(--panel); border-radius: 10px; padding: 8px 12px; cursor: pointer; max-width: 260px; }
+  .pick:hover { border-color: var(--ink); }
+  .pick b { font-size: 14px; }
+  .pick span { font: 11px var(--mono); color: var(--muted); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  @media (max-width: 760px) { .stage.two { grid-template-columns: 1fr; } }
+</style>
+</head>
+<body>
+<div id="head"></div>
+<main class="wrap">
+  <div class="bar">
+    <h1>Point at an app</h1>
+    <span class="sp"></span>
+    <div class="seg" role="group" aria-label="How many" id="mode"></div>
+    <label class="cv-meta"><input type="checkbox" id="freeonly" checked> free only</label>
+    <button class="cv-btn primary spin" type="button" id="spin">Spin · Space</button>
+  </div>
+  <section class="stage" id="stage" aria-live="polite"><p class="cv-empty">Loading the catalog…</p></section>
+  <section class="like" id="like"></section>
+</main>
+<footer class="cv-foot"><div class="wrap">A random app, or two side by side. "Like this" shares the most tags and capabilities; "but different" shares the least. The address keeps the picks, so a spin can be sent to someone.</div></footer>
+<script src="/catalog/kit/views.js"></script>
+<script>
+(async () => {
+  const { el, bytes, live, related, matches } = SlopCatalog;
+  await SlopCatalog.header(document.querySelector("#head"), "roulette");
+  const { catalog } = await SlopCatalog.load();
+  SlopCatalog.viewer.bind(catalog);
+  const byId = new Map(catalog.items.map((i) => [i.id, i]));
+  const params = new URLSearchParams(location.search);
+  const state = { two: params.has("b"), free: params.get("all") == null, q: params.get("q") || "",
+    picks: [params.get("a"), params.get("b")].filter((id) => byId.has(id)).map((id) => byId.get(id)) };
+  let stops = [];
+
+  const pool = () => catalog.items.filter((i) => (!state.free || i.free) && matches(i, state.q));
+  function rnd(except) {
+    const p = pool().filter((i) => !except.includes(i));
+    return p.length ? p[Math.floor(Math.random() * p.length)] : null;
+  }
+  function keep() {
+    const u = new URL(location.href);
+    ["a", "b"].forEach((k, n) => { if (state.picks[n] && (n === 0 || state.two)) u.searchParams.set(k, state.picks[n].id); else u.searchParams.delete(k); });
+    if (state.free) u.searchParams.delete("all"); else u.searchParams.set("all", "1");
+    history.replaceState(history.state, "", u);
+  }
+  function spin() {
+    const n = state.two ? 2 : 1, picks = [];
+    for (let k = 0; k < n; k++) { const p = rnd(picks); if (p) picks.push(p); }
+    state.picks = picks;
+    show();
+  }
+  function set(n, item) { state.picks[n] = item; show(); }
+
+  function card(item, n) {
+    const screen = el("div", { class: "screen" });
+    stops.push(live(screen, item, "desktop"));
+    return el("article", { class: "card" }, screen, el("div", { class: "about" },
+      el("h2", {}, item.title, item.free ? null : el("span", { class: "cv-paid" }, "subscribers")),
+      el("p", {}, item.description),
+      el("div", { class: "cv-tags" }, item.tags.map((t) => el("span", { class: "cv-tag" }, t))),
+      el("span", { class: "cv-meta" }, `${item.capabilities.join(" · ") || "no runtime"} · ${bytes(item.bytes)} · v${item.version}`),
+      el("div", { class: "acts" },
+        el("a", { class: "cv-btn primary", href: item.open, target: "_blank", rel: "noopener" }, "Open ↗"),
+        el("button", { class: "cv-btn", type: "button", onclick: () => SlopCatalog.viewer.open(item) }, "View"),
+        el("button", { class: "cv-btn", type: "button", onclick: () => set(n, rnd(state.picks)) }, "Another"))));
+  }
+
+  function picks(label, list, n) {
+    return el("div", {}, el("h3", {}, label), el("div", { class: "row" }, list.map((r) => el("button", {
+      class: "pick", type: "button", onclick: () => set(n, r.item), title: r.item.description },
+    el("b", {}, r.item.title), el("span", {}, r.item.tags.slice(0, 3).join(" · ") || r.item.capabilities.join(" · "))))));
+  }
+
+  function show() {
+    stops.forEach((s) => s());
+    stops = [];
+    keep();
+    const stage = document.querySelector("#stage");
+    stage.classList.toggle("two", state.two);
+    if (!state.picks.length) { stage.replaceChildren(el("p", { class: "cv-empty" }, "Nothing to pick from.")); return; }
+    stage.replaceChildren(...state.picks.map(card));
+    const first = state.picks[0];
+    const rel = related(first, pool());
+    document.querySelector("#like").replaceChildren(
+      picks(`Like ${first.title}`, rel.slice(0, 4), 0),
+      picks("…but different", rel.slice(-3).reverse(), 0));
+  }
+
+  const mode = document.querySelector("#mode");
+  const drawMode = () => mode.replaceChildren(...[[false, "One"], [true, "Two"]].map(([v, l]) => el("button", {
+    type: "button", "aria-pressed": state.two === v ? "true" : "false",
+    onclick: () => { state.two = v; if (v && state.picks.length < 2) { const p = rnd(state.picks); if (p) state.picks.push(p); } if (!v) state.picks.length = Math.min(1, state.picks.length); drawMode(); show(); },
+  }, l)));
+  drawMode();
+  const free = document.querySelector("#freeonly");
+  free.checked = state.free;
+  free.onchange = () => { state.free = free.checked; spin(); };
+  document.querySelector("#spin").onclick = spin;
+  document.addEventListener("keydown", (e) => {
+    if (e.key === " " && !SlopCatalog.viewer.item && !/^(INPUT|TEXTAREA|SELECT|BUTTON)$/.test(document.activeElement.tagName)) { e.preventDefault(); spin(); }
+  });
+  window.addEventListener("catalog:search", (e) => { state.q = e.detail.query; });
+  // While the viewer is open, the cards' frames rest.
+  window.addEventListener("catalog:viewer", (e) => { if (e.detail.open) { stops.forEach((s) => s()); stops = []; } else show(); });
+  if (state.picks.length < (state.two ? 2 : 1)) spin(); else show();
+})();
+</script>
+</body>
+</html>

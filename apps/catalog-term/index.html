@@ -1,0 +1,160 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Terminal — slop catalog</title>
+<link rel="stylesheet" href="/catalog/kit/views.css">
+<style>
+  /* The terminal keeps its own colours in both schemes. */
+  .term { --fg: #d7f5c4; --dim: #7fa36b; --hi: #fff6a8; --err: #ff9a8a; --tbg: #0d120b;
+          background: var(--tbg); color: var(--fg); font: 15px/1.45 var(--mono); border-radius: 10px; margin: 20px 0;
+          height: calc(100vh - 170px); min-height: 420px; overflow: auto; padding: 16px 18px; box-shadow: var(--shadow); }
+  .term pre { margin: 0; white-space: pre-wrap; word-break: break-word; font: inherit; }
+  .term .dim { color: var(--dim); }
+  .term .hi { color: var(--hi); }
+  .term .err { color: var(--err); }
+  .term a { color: var(--hi); }
+  .term .lnk { color: var(--hi); text-decoration: underline; cursor: pointer; }
+  .line { display: flex; gap: 8px; }
+  .line input { flex: 1; background: transparent; border: 0; outline: none; color: var(--fg); font: inherit; caret-color: var(--hi); padding: 0; }
+</style>
+</head>
+<body>
+<div id="head"></div>
+<main class="wrap">
+  <div class="term" id="term" role="log" aria-live="polite">
+    <div id="out"></div>
+    <div class="line"><span class="dim" id="ps1">guest@slop:~$</span><input id="in" aria-label="Command" autocomplete="off" autocapitalize="off" spellcheck="false" autofocus></div>
+  </div>
+</main>
+<footer class="cv-foot"><div class="wrap">Type <code>help</code>. Tab completes commands and app ids, ↑ ↓ walk the history, Ctrl L clears.</div></footer>
+<script src="/catalog/kit/views.js"></script>
+<script>
+(async () => {
+  const { el, bytes, date, matches, fuzzy } = SlopCatalog;
+  await SlopCatalog.header(document.querySelector("#head"), "term");
+  const { catalog, views } = await SlopCatalog.load();
+  SlopCatalog.viewer.bind(catalog);
+  const items = catalog.items, byId = new Map(items.map((i) => [i.id, i]));
+  const out = document.querySelector("#out"), input = document.querySelector("#in"), term = document.querySelector("#term");
+  const hist = [];
+  let hpos = 0;
+
+  // S is a styled span: class, text and an optional click action. print
+  // appends a line built from strings and S parts, in (nested) lists.
+  const S = (c, t, f) => ({ c, t, f });
+  function print(...parts) {
+    const pre = el("pre");
+    for (const p of parts.flat(Infinity)) {
+      if (p == null) continue;
+      if (typeof p === "string") pre.append(p);
+      else pre.append(el("span", { class: p.c + (p.f ? " lnk" : ""), onclick: p.f || null }, p.t));
+    }
+    out.append(pre);
+  }
+  const pad = (s, n) => (s.length > n ? s.slice(0, n - 1) + "…" : s.padEnd(n));
+  const lnk = (item) => S("hi", item.id, () => SlopCatalog.viewer.open(item));
+  const find = (id) => byId.get(id) || items.find((i) => i.id.startsWith(id)) || null;
+
+  function list(rows, long) {
+    if (!rows.length) return print(S("dim", "(nothing)"));
+    if (!long) {
+      const w = Math.max(...rows.map((i) => i.id.length)) + 2, cols = Math.max(1, Math.floor((term.clientWidth - 40) / (w * 9)));
+      for (let k = 0; k < rows.length; k += cols) print(rows.slice(k, k + cols).map((i) => [lnk(i), " ".repeat(w - i.id.length)]));
+    } else {
+      rows.forEach((i) => print(i.free ? "-r--  " : S("err", "-s--  "), pad(bytes(i.bytes), 9), pad(date(i.publishedAt), 14), lnk(i), S("dim", "  " + i.capabilities.join(","))));
+    }
+    print(S("dim", `${rows.length} app${rows.length === 1 ? "" : "s"}`));
+  }
+
+  const CMDS = {
+    help: ["", "this list", () => Object.entries(CMDS).forEach(([k, [a, d]]) => print(S("hi", pad(k + (a ? " " + a : ""), 22)), S("dim", d)))],
+    ls: ["[-l] [tag]", "list apps, newest first (-l: access, size, date, runtime)", (args) => {
+      const long = args[0] === "-l"; if (long) args.shift();
+      list(args[0] ? items.filter((i) => i.tags.includes(args[0])) : items, long);
+    }],
+    grep: ["<words…>", "apps whose title, description, id or tags hold every word", (args) => list(items.filter((i) => matches(i, args.join(" "))), true)],
+    find: ["<text>", "fuzzy-find app titles", (args) => {
+      const q = args.join(" ").toLowerCase();
+      list(items.map((i) => [fuzzy(i.title, q), i]).filter(([s]) => s > 0).sort((a, b) => b[0] - a[0]).slice(0, 12).map(([, i]) => i), false);
+    }],
+    cat: ["<id>", "an app's description and facts", (args) => {
+      const i = find(args[0] || ""); if (!i) return print(S("err", `cat: ${args[0] || ""}: no such app`));
+      print(S("hi", i.title), S("dim", `  v${i.version} · ${date(i.publishedAt)}`));
+      print(i.description);
+      print(S("dim", "tags     "), i.tags.join(" ") || "-");
+      print(S("dim", "runtime  "), i.capabilities.join(" ") || "-");
+      print(S("dim", "size     "), bytes(i.bytes), i.attachments.length ? ` + ${i.attachments.length} attachment(s)` : "");
+      print(S("dim", "access   "), i.free ? "free" : S("err", "subscribers"));
+      print(S("dim", "open     "), S("hi", i.open, () => window.open(i.open, "_blank", "noopener")));
+      (i.releases || []).filter((r) => r.changelog).forEach((r) => print(S("dim", `${r.version}  `), r.changelog));
+    }],
+    open: ["<id>", "preview an app in the viewer", (args) => { const i = find(args[0] || ""); if (!i) return print(S("err", `open: ${args[0] || ""}: no such app`)); print(S("dim", "opening "), lnk(i), S("dim", " (Esc to come back)")); SlopCatalog.viewer.open(i); }],
+    run: ["<id>", "run an app for real, in a new tab", (args) => { const i = find(args[0] || ""); if (!i) return print(S("err", `run: ${args[0] || ""}: no such app`)); print(S("dim", "→ "), i.open); window.open(i.open, "_blank", "noopener"); }],
+    tags: ["", "tags by how many apps use them", () => {
+      const t = catalog.tags.slice(0, 60); for (let k = 0; k < t.length; k += 4) print(t.slice(k, k + 4).map((x) => [S("hi", pad(x.tag, 20), () => exec("ls " + x.tag)), S("dim", pad(String(x.count), 5))]));
+      print(S("dim", `${catalog.tags.length} tags; ls <tag> lists one`));
+    }],
+    caps: ["[cap]", "runtime capabilities, or the apps that declare one", (args) => {
+      if (args[0]) return list(items.filter((i) => i.capabilities.includes(args[0])), true);
+      const n = {}; items.forEach((i) => i.capabilities.forEach((c) => { n[c] = (n[c] || 0) + 1; }));
+      Object.entries(n).sort((a, b) => b[1] - a[1]).forEach(([c, k]) => print(S("hi", pad(c, 12), () => exec("caps " + c)), "#".repeat(Math.ceil(k / 2)), S("dim", " " + k)));
+    }],
+    du: ["[n]", "the largest apps", (args) => { const n = +args[0] || 10; [...items].sort((a, b) => b.bytes - a.bytes).slice(0, n).forEach((i) => print(pad(bytes(i.bytes), 9), lnk(i))); }],
+    new: ["[n]", "the newest apps", (args) => list(items.slice(0, +args[0] || 10), true)],
+    random: ["", "a random app", () => exec("cat " + items[Math.floor(Math.random() * items.length)].id)],
+    cd: ["<view>", "go to another view: " + views.map((v) => v.id).join(" "), (args) => {
+      const v = views.find((x) => x.id === args[0]); if (!v) return print(S("err", `cd: ${args[0] || ""}: no such view`)); location.href = v.path;
+    }],
+    whoami: ["", "who you are here", () => print("guest, on the static host: files only, no session, no runtime.")],
+    history: ["", "commands so far", () => hist.forEach((h, k) => print(S("dim", pad(String(k + 1), 5)), h))],
+    clear: ["", "clear the screen", () => out.replaceChildren()],
+  };
+
+  function exec(line) {
+    print(S("dim", "guest@slop:~$ "), line);
+    const [cmd, ...args] = line.trim().split(/\s+/);
+    if (!cmd) return;
+    const c = CMDS[cmd];
+    if (!c) print(S("err", `${cmd}: command not found`), S("dim", " (help lists them)"));
+    else c[2](args);
+    term.scrollTop = term.scrollHeight;
+  }
+
+  function complete() {
+    const v = input.value, parts = v.split(/\s+/);
+    const last = parts[parts.length - 1];
+    const pool = parts.length === 1 ? Object.keys(CMDS)
+      : parts[0] === "cd" ? views.map((x) => x.id)
+      : parts[0] === "ls" || parts[0] === "caps" ? (parts[0] === "ls" ? catalog.tags.map((t) => t.tag) : ["sample", "db", "room", "user", "downloads"])
+      : items.map((i) => i.id);
+    const hits = pool.filter((p) => p.startsWith(last));
+    if (hits.length === 1) { parts[parts.length - 1] = hits[0]; input.value = parts.join(" ") + " "; }
+    else if (hits.length > 1) {
+      let pre = hits[0]; hits.forEach((h) => { while (!h.startsWith(pre)) pre = pre.slice(0, -1); });
+      if (pre.length > last.length) { parts[parts.length - 1] = pre; input.value = parts.join(" "); }
+      else { print(S("dim", "guest@slop:~$ "), v); print(hits.slice(0, 40).join("  ") + (hits.length > 40 ? "  …" : "")); term.scrollTop = term.scrollHeight; }
+    }
+  }
+
+  input.addEventListener("keydown", (e) => {
+    if (e.key === "Enter") { const v = input.value; input.value = ""; if (v.trim()) { hist.push(v); hpos = hist.length; } exec(v); }
+    else if (e.key === "Tab") { e.preventDefault(); complete(); }
+    else if (e.key === "ArrowUp") { e.preventDefault(); if (hpos > 0) input.value = hist[--hpos]; }
+    else if (e.key === "ArrowDown") { e.preventDefault(); hpos = Math.min(hist.length, hpos + 1); input.value = hist[hpos] || ""; }
+    else if (e.key === "l" && e.ctrlKey) { e.preventDefault(); out.replaceChildren(); }
+  });
+  term.addEventListener("click", () => { if (!getSelection().toString()) input.focus(); });
+  window.addEventListener("catalog:viewer", (e) => { if (!e.detail.open) input.focus(); });
+
+  print(S("hi", "slop catalog"), S("dim", ` · ${catalog.count} apps · ${bytes(catalog.totalBytes)} · data of ${date(catalog.generated)}`));
+  print(S("dim", "type "), S("hi", "help", () => exec("help")), S("dim", ", or try "), S("hi", "ls game", () => exec("ls game")), S("dim", ", "), S("hi", "grep shader", () => exec("grep shader")), S("dim", ", "), S("hi", "cat weft", () => exec("cat weft")), S("dim", ", "), S("hi", "open weft", () => exec("open weft")));
+  print("");
+  const q = new URLSearchParams(location.search).get("cmd");
+  if (q) exec(q);
+  input.focus();
+})();
+</script>
+</body>
+</html>

@@ -1,0 +1,33 @@
+catalog        files.push (6 changed: data/catalog.json, data/feed.xml, data/views.json, index.html, kit/views.css, kit/views.js)
+               snapshot 5
+catalog-list   files.push (1 changed: index.html)
+               snapshot 5
+catalog-table  files.push (1 changed: index.html)
+               snapshot 5
+catalog-sheet  files.push (1 changed: index.html)
+               snapshot 2
+catalog-caps   files.push (1 changed: index.html)
+               snapshot 2
+catalog-zine   files.push (1 changed: index.html)
+               snapshot 2
+catalog-timeline store.new, files.push (1 changed: index.html), grant.set @guest view, mount.set site.slop.yolo.scapegoat.dev/catalog/timeline
+               snapshot 1
+catalog-treemap store.new, files.push (1 changed: index.html), grant.set @guest view, mount.set site.slop.yolo.scapegoat.dev/catalog/treemap
+               snapshot 1
+catalog-roulette store.new, files.push (1 changed: index.html), grant.set @guest view, mount.set site.slop.yolo.scapegoat.dev/catalog/roulette
+               snapshot 1
+catalog-term   store.new, files.push (1 changed: index.html), grant.set @guest view, mount.set site.slop.yolo.scapegoat.dev/catalog/term
+               snapshot 1
+catalog-desktop store.new, files.push (1 changed: index.html), grant.set @guest view, mount.set site.slop.yolo.scapegoat.dev/catalog/desktop
+               snapshot 1
+https://site.slop.yolo.scapegoat.dev/catalog/
+https://site.slop.yolo.scapegoat.dev/catalog/list/
+https://site.slop.yolo.scapegoat.dev/catalog/table/
+https://site.slop.yolo.scapegoat.dev/catalog/sheet/
+https://site.slop.yolo.scapegoat.dev/catalog/caps/
+https://site.slop.yolo.scapegoat.dev/catalog/zine/
+https://site.slop.yolo.scapegoat.dev/catalog/timeline/
+https://site.slop.yolo.scapegoat.dev/catalog/treemap/
+https://site.slop.yolo.scapegoat.dev/catalog/roulette/
+https://site.slop.yolo.scapegoat.dev/catalog/term/
+https://site.slop.yolo.scapegoat.dev/catalog/desktop/

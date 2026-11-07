@@ -1,0 +1,120 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Index — slop catalog</title>
+<link rel="stylesheet" href="/catalog/kit/views.css">
+<style>
+  .controls { display: flex; flex-wrap: wrap; align-items: baseline; gap: 10px 18px; margin: 18px 0 10px; }
+  .controls select { border: 1px solid var(--line); background: var(--panel); border-radius: 8px; padding: 4px 8px; font-size: 14px; }
+  .tagbar { display: flex; flex-wrap: wrap; gap: 6px; }
+  .tagbar button { border: 1px solid var(--line); background: transparent; border-radius: 999px; padding: 1px 10px; font-size: 13px; cursor: pointer; color: var(--muted); }
+  .tagbar button[aria-pressed="true"] { background: var(--ink); color: var(--bg); border-color: var(--ink); }
+  .tagbar button small { font-family: var(--mono); opacity: .7; margin-left: 3px; }
+  .rows { border-top: 1px solid var(--ink); margin-top: 16px; }
+  .row { display: grid; grid-template-columns: minmax(0, 360px) 1fr; gap: 28px; padding: 22px 0; border-bottom: 1px solid var(--line); }
+  .thumb { aspect-ratio: 3 / 2; border-radius: 10px; overflow: hidden; background: var(--chip); border: 1px solid var(--line); cursor: pointer; padding: 0; display: block; width: 100%; }
+  .thumb img { width: 100%; height: 100%; object-fit: cover; display: block; }
+  .thumb .cv-mono { width: 100%; height: 100%; font-size: 56px; }
+  .body { display: flex; flex-direction: column; gap: 10px; min-width: 0; }
+  .body h2 { margin: 0; font-size: clamp(24px, 3vw, 34px); letter-spacing: -.02em; line-height: 1.1; font-weight: 650; display: flex; gap: 10px; align-items: center; flex-wrap: wrap; }
+  .body p { margin: 0; color: var(--muted); max-width: 64ch; }
+  .acts { margin-top: auto; display: flex; flex-wrap: wrap; gap: 14px; align-items: center; }
+  .acts a, .acts button { font-size: 15px; background: none; border: 0; padding: 0; cursor: pointer; text-decoration: underline; text-underline-offset: 4px; }
+  @media (max-width: 720px) { .row { grid-template-columns: 1fr; gap: 14px; } }
+</style>
+</head>
+<body>
+<div id="head"></div>
+<main class="wrap">
+  <section class="cv-hero">
+    <h1>Apps you can open, read and take apart.</h1>
+    <p>Single-file HTML apps from slop.boutique, running on slop. Free ones can be previewed and downloaded; the rest are for subscribers.</p>
+  </section>
+  <div class="controls">
+    <label class="cv-meta">Sort
+      <select id="sort" aria-label="Sort">
+        <option value="new">Newest first</option>
+        <option value="az">A–Z</option>
+        <option value="small">Smallest first</option>
+        <option value="large">Largest first</option>
+      </select>
+    </label>
+    <div class="tagbar" id="tags" role="group" aria-label="Filter by tag"></div>
+  </div>
+  <div id="pgt"></div>
+  <section class="rows" id="rows" aria-label="Apps"><p class="cv-empty">Loading the catalog…</p></section>
+  <div id="pgb"></div>
+</main>
+<footer class="cv-foot"><div class="wrap">Views over <a href="/catalog/data/catalog.json">one catalog</a>. Press / to search.</div></footer>
+<script src="/catalog/kit/views.js"></script>
+<script>
+(async () => {
+  const { el, bytes, monogram, matches, paged } = SlopCatalog;
+  const PER_PAGE = 20;
+  await SlopCatalog.header(document.querySelector("#head"), "list");
+  const { catalog } = await SlopCatalog.load();
+  SlopCatalog.viewer.bind(catalog);
+  const params = new URLSearchParams(location.search);
+  const state = { sort: params.get("sort") || "new", tag: params.get("tag") || "", q: params.get("q") || "", allTags: false };
+  const sorters = {
+    new: (a, b) => (b.publishedAt || "").localeCompare(a.publishedAt || ""),
+    az: (a, b) => a.title.localeCompare(b.title),
+    small: (a, b) => a.bytes - b.bytes,
+    large: (a, b) => b.bytes - a.bytes,
+  };
+  const sort = document.querySelector("#sort");
+  sort.value = state.sort;
+  sort.onchange = () => { state.sort = sort.value; keep("sort", state.sort === "new" ? "" : state.sort); paged.reset(); render(); };
+  window.addEventListener("catalog:search", (e) => { state.q = e.detail.query; paged.reset(); render(); });
+
+  function keep(k, v) {
+    const u = new URL(location.href);
+    if (v) u.searchParams.set(k, v); else u.searchParams.delete(k);
+    history.replaceState(history.state, "", u);
+  }
+
+  function tagbar() {
+    const top = state.allTags ? catalog.tags : catalog.tags.slice(0, 14);
+    const btn = (tag, label, n) => el("button", {
+      type: "button", "aria-pressed": state.tag === tag ? "true" : "false",
+      onclick: () => { state.tag = state.tag === tag ? "" : tag; keep("tag", state.tag); paged.reset(); render(); },
+    }, label, n != null ? el("small", {}, n) : null);
+    const list = [btn("", "All", catalog.count), ...top.map((t) => btn(t.tag, t.tag, t.count))];
+    if (state.tag && !top.some((t) => t.tag === state.tag)) list.push(btn(state.tag, state.tag, null));
+    list.push(el("button", { type: "button", onclick: () => { state.allTags = !state.allTags; render(); } },
+      state.allTags ? "fewer" : `+${catalog.tags.length - top.length} more`));
+    document.querySelector("#tags").replaceChildren(...list);
+  }
+
+  function row(item) {
+    const view = () => SlopCatalog.viewer.open(item);
+    const thumb = el("button", { class: "thumb", type: "button", onclick: view, "aria-label": "View " + item.title },
+      item.cover ? el("img", { src: item.cover.src, alt: "", loading: "lazy", decoding: "async" }) : monogram(item));
+    return el("article", { class: "row" }, thumb,
+      el("div", { class: "body" },
+        el("h2", {}, item.title, item.free ? null : el("span", { class: "cv-paid" }, "subscribers")),
+        el("p", {}, item.description),
+        el("div", { class: "cv-tags" }, item.tags.map((t) => el("span", { class: "cv-tag" }, t))),
+        el("div", { class: "acts" },
+          el("button", { type: "button", onclick: view }, "View"),
+          el("a", { href: item.open, target: "_blank", rel: "noopener" }, "Open ↗"),
+          el("span", { class: "cv-meta" }, `/f/${item.id} · ${bytes(item.bytes)} · v${item.version}`))));
+  }
+
+  function render() {
+    tagbar();
+    const items = catalog.items
+      .filter((i) => !state.tag || i.tags.includes(state.tag))
+      .filter((i) => matches(i, state.q))
+      .sort(sorters[state.sort] || sorters.new);
+    const rows = document.querySelector("#rows");
+    const page = paged(items, PER_PAGE, [document.querySelector("#pgt"), document.querySelector("#pgb")], render);
+    rows.replaceChildren(...(items.length ? page.map(row) : [el("p", { class: "cv-empty" }, "Nothing matches.")]));
+  }
+  render();
+})();
+</script>
+</body>
+</html>

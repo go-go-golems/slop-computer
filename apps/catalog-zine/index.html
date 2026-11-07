@@ -1,0 +1,337 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Zine — slop catalog</title>
+<link rel="stylesheet" href="/catalog/kit/views.css">
+<style id="paper"></style>
+<style>
+  /* Everything is sized in millimetres so the screen shows what the printer
+     gets. A .page is one zine page (--pw × --ph, set on its container); a
+     .sheet is one side of the paper in the folding layouts, holding pages in
+     .slot cells, scaled and turned as the layout needs. */
+  .bar { display: flex; flex-wrap: wrap; gap: 10px 16px; align-items: center; margin: 24px 0 10px; }
+  .bar h1 { font-size: 24px; margin: 0; letter-spacing: -.01em; }
+  .bar .sp { flex: 1; }
+  .bar select { border: 1px solid var(--line); background: var(--panel); border-radius: 8px; padding: 4px 8px; font-size: 14px; }
+  .how { color: var(--muted); font-size: 14px; max-width: 80ch; margin: 0 0 18px; }
+  .how ol { margin: 6px 0 0; padding-left: 20px; }
+  .pages { display: flex; flex-direction: column; align-items: center; gap: 24px; padding-bottom: 24px; }
+  .page { width: var(--pw); height: var(--ph); background: #fff; color: #111; position: relative; overflow: hidden; flex: none;
+          padding: 14mm 13mm 16mm; display: flex; flex-direction: column; font: 10.5pt/1.45 Georgia, "Times New Roman", serif; }
+  .pages > .page, .sheet { box-shadow: var(--shadow); }
+  .page .folio { position: absolute; left: 13mm; right: 13mm; bottom: 7mm; display: flex; justify-content: space-between; font: 7.5pt var(--mono); color: #666; }
+  .page h2 { font: 700 21pt/1.08 var(--sans); letter-spacing: -.02em; margin: 0 0 3mm; }
+  .page .desc { margin: 0 0 4mm; font-size: 11pt; }
+  .page .art { flex: 1 1 auto; min-height: 0; margin: 0 0 4mm; border: .3mm solid #ccc; display: flex; align-items: center; justify-content: center; overflow: hidden; background: #f3f3f0; }
+  .page .art img { width: 100%; height: 100%; object-fit: contain; display: block; }
+  .page .art .cv-mono { width: 100%; height: 100%; font: 700 54pt var(--sans); background: #f3f3f0; color: #999; }
+  .page dl { display: grid; grid-template-columns: auto 1fr; gap: 1mm 5mm; margin: 0 0 3mm; font: 8.5pt/1.4 var(--sans); }
+  .page dt { color: #666; }
+  .page dd { margin: 0; }
+  .page .url { font: 8.5pt var(--mono); word-break: break-all; }
+  .page .tags { font: 8pt var(--mono); color: #555; }
+  .page .paid { font: 700 7.5pt var(--mono); letter-spacing: .08em; text-transform: uppercase; border: .3mm solid #111; padding: 0 1.5mm; vertical-align: middle; margin-left: 2mm; }
+  .cover { justify-content: flex-end; padding-bottom: 24mm; }
+  .cover .kicker { font: 9pt var(--mono); letter-spacing: .08em; text-transform: uppercase; color: #666; }
+  .cover h2 { font-size: 40pt; margin: 3mm 0 5mm; }
+  .cover p { font-size: 12pt; max-width: 110mm; margin: 0 0 3mm; }
+  .toc h2 { font-size: 15pt; }
+  .toc ol { list-style: none; margin: 0; padding: 0; font: 9pt/1.5 var(--sans); }
+  .toc li { display: flex; gap: 2mm; }
+  .toc li span.t { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  .toc li i { flex: 1; border-bottom: .3mm dotted #aaa; margin-bottom: 1.2mm; }
+  .toc li b { font-family: var(--mono); font-weight: 400; }
+  .back { justify-content: flex-end; }
+  .back h3 { font: 700 13pt var(--sans); margin: 0 0 3mm; }
+  .back ol { margin: 0 0 5mm; padding-left: 5mm; font: 9.5pt/1.45 var(--sans); }
+  .back p { font: 9pt/1.4 var(--sans); margin: 0 0 2mm; }
+  .blank { background: #fff; }
+
+  /* The 8-page fold: a page is drawn at twice its printed size and scaled
+     by half, so the type is set larger to stay readable at 50 %. */
+  .mini { padding: 12mm 11mm 18mm; font-size: 17pt; line-height: 1.35; }
+  .mini h2 { font-size: 34pt; margin-bottom: 4mm; }
+  .mini .desc { font-size: 16pt; margin-bottom: 5mm; }
+  .mini dl { font-size: 14pt; gap: 1.5mm 5mm; }
+  .mini .url { font-size: 13pt; }
+  .mini .tags { display: none; }
+  .mini .folio { font-size: 13pt; bottom: 6mm; left: 11mm; right: 11mm; }
+  .mini.cover h2 { font-size: 56pt; }
+  .mini.cover p, .mini.cover .kicker { font-size: 17pt; }
+  .mini.back h3 { font-size: 22pt; }
+  .mini.back ol, .mini.back p { font-size: 15pt; }
+
+  .sheet { width: var(--sw); height: var(--sh); background: #fff; position: relative; display: grid; flex: none; }
+  .sheet.fold8 { grid-template-columns: repeat(4, 1fr); grid-template-rows: repeat(2, 1fr); }
+  .sheet.booklet { grid-template-columns: repeat(2, 1fr); }
+  .slot { position: relative; overflow: hidden; }
+  .slot > .page { position: absolute; left: 0; top: 0; transform-origin: 0 0; }
+  .sheet .side { position: absolute; right: 3mm; top: 2mm; font: 7pt var(--mono); color: #999; z-index: 1; }
+  /* fold and cut marks */
+  .sheet .mark { position: absolute; pointer-events: none; z-index: 1; }
+  .sheet .mark.v { top: 0; bottom: 0; border-left: .2mm dashed #bbb; }
+  .sheet .mark.h { left: 0; right: 0; border-top: .2mm dashed #bbb; }
+  .sheet .mark.cut { border-top: .4mm solid #111; }
+  .sheet .mark.cut::after { content: "✂ cut"; position: absolute; left: 0; top: -4mm; font: 7pt var(--mono); color: #111; background: #fff; padding: 0 1mm; }
+
+  @media screen and (max-width: 900px) { .pages { zoom: .5; } }
+  @media print {
+    body { background: #fff; }
+    #head, .bar, .how, .cv-foot { display: none !important; }
+    .wrap { max-width: none; padding: 0; }
+    .pages { display: block; padding: 0; zoom: 1; }
+    .pages > .page, .sheet { box-shadow: none; break-after: page; margin: 0; }
+  }
+</style>
+</head>
+<body>
+<div id="head"></div>
+<main class="wrap">
+  <div class="bar">
+    <h1 id="count">Zine</h1>
+    <span class="cv-meta" id="status"></span>
+    <span class="sp"></span>
+    <label class="cv-meta">Layout
+      <select id="layout" aria-label="Layout">
+        <option value="pages">One page per sheet</option>
+        <option value="fold8">8-page fold (one sheet, one side)</option>
+        <option value="booklet16">16-page booklet (two-sided)</option>
+      </select>
+    </label>
+    <label class="cv-meta" id="partl">Part <select id="part" aria-label="Part"></select></label>
+    <label class="cv-meta">Paper <select id="size" aria-label="Paper"></select></label>
+    <button class="cv-btn primary" type="button" id="print">Print or save as PDF</button>
+  </div>
+  <div class="how" id="how"></div>
+  <section class="pages" id="pages" aria-label="Pages"><p class="cv-empty">Loading the catalog…</p></section>
+</main>
+<footer class="cv-foot"><div class="wrap">Search or <code>?tag=</code> chooses the apps; the folding layouts take them in order, a part at a time. <code>?layout=fold8|booklet16</code>, <code>?part=</code> and <code>?size=</code> are kept in the address.</div></footer>
+<script src="/catalog/kit/views.js"></script>
+<script>
+(async () => {
+  const { el, bytes, date, monogram, matches } = SlopCatalog;
+  await SlopCatalog.header(document.querySelector("#head"), "zine");
+  const { catalog } = await SlopCatalog.load();
+
+  // Paper in mm, portrait. The folding layouts print landscape on A4 or Letter.
+  const PAPER = {
+    remarkable: { label: "reMarkable (158 × 210 mm)", w: 158, h: 210 },
+    a5: { label: "A5", w: 148, h: 210 },
+    a4: { label: "A4", w: 210, h: 297 },
+    letter: { label: "Letter", w: 215.9, h: 279.4 },
+  };
+  const LAYOUT = {
+    pages: { papers: ["remarkable", "a5", "a4", "letter"], pages: null },
+    fold8: { papers: ["a4", "letter"], pages: 8 },
+    booklet16: { papers: ["a4", "letter"], pages: 16 },
+  };
+  const HOW = {
+    pages: "One zine page per sheet: cover, contents, then one page per app. Sized for the reMarkable by default; print or save as PDF.",
+    fold8: ["One sheet, printed on one side (landscape, actual size, no margins), makes an 8-page zine of six apps:",
+      "Fold it in half along the long side, printed side out, and open it again.",
+      "Fold it in half along the short side, then each half back to the middle (accordion), and open it again.",
+      "Fold along the long side again and cut the marked line between the middle panels, through both layers.",
+      "Open it, push the ends together so the slit opens into a cross, and fold it flat into a booklet with the cover outside."],
+    booklet16: ["Four sheets, printed on both sides (landscape, flip on the short edge, actual size), make a 16-page booklet of fourteen apps:",
+      "Print all eight pages of the PDF two-sided.",
+      "Stack the four sheets in printed order, fold the stack in half, and staple twice along the fold."],
+  };
+  const PER_TOC = 34; // contents lines per page in the "pages" layout
+  const params = new URLSearchParams(location.search);
+  const state = {
+    layout: LAYOUT[params.get("layout")] ? params.get("layout") : "pages",
+    size: PAPER[params.get("size")] ? params.get("size") : "",
+    part: Math.max(1, parseInt(params.get("part"), 10) || 1),
+    q: params.get("q") || "",
+    tag: params.get("tag") || "",
+  };
+
+  function keep(k, v) {
+    const u = new URL(location.href);
+    if (v) u.searchParams.set(k, v); else u.searchParams.delete(k);
+    history.replaceState(history.state, "", u);
+  }
+  const paperOf = () => (LAYOUT[state.layout].papers.includes(state.size) ? state.size : LAYOUT[state.layout].papers[0]);
+
+  const layoutSel = document.querySelector("#layout");
+  const sizeSel = document.querySelector("#size");
+  const partSel = document.querySelector("#part");
+  layoutSel.value = state.layout;
+  layoutSel.onchange = () => { state.layout = layoutSel.value; state.part = 1; keep("layout", state.layout === "pages" ? "" : state.layout); keep("part", ""); render(); };
+  sizeSel.onchange = () => { state.size = sizeSel.value; keep("size", state.size); render(); };
+  partSel.onchange = () => { state.part = +partSel.value; keep("part", state.part > 1 ? state.part : ""); render(); };
+  window.addEventListener("catalog:search", (e) => { state.q = e.detail.query; state.part = 1; keep("part", ""); render(); });
+
+  const host = (u) => u.replace(/^https?:\/\//, "");
+  const folio = (n, label) => el("div", { class: "folio" }, el("span", {}, label), el("span", {}, n));
+
+  // --- pages ---------------------------------------------------------------
+
+  function appPage(item, n, mini) {
+    return el("article", { class: "page" + (mini ? " mini" : "") },
+      el("h2", {}, item.title, item.free ? null : el("span", { class: "paid" }, "subscribers")),
+      el("p", { class: "desc" }, item.description),
+      el("div", { class: "art" }, item.cover ? el("img", { src: item.cover.src, alt: "", loading: "lazy", decoding: "async" }) : monogram(item)),
+      el("dl", {},
+        el("dt", {}, "Open"), el("dd", { class: "url" }, host(item.open)),
+        el("dt", {}, "Runtime"), el("dd", {}, item.capabilities.join(", ") || "none"),
+        mini ? null : [el("dt", {}, "Version"), el("dd", {}, (item.version || "") + (item.publishedAt ? " · " + date(item.publishedAt) : "")),
+          el("dt", {}, "Size"), el("dd", {}, bytes(item.bytes) + " of HTML" +
+            (item.attachments.length ? " · " + item.attachments.length + " attachment" + (item.attachments.length > 1 ? "s" : "") : ""))],
+        el("dt", {}, "Access"), el("dd", {}, item.free ? (mini ? "free" : "free; preview and download on the catalog") : "for subscribers")),
+      el("div", { class: "tags" }, item.tags.map((t) => "#" + t).join("  ")),
+      folio(n, "slop catalog"));
+  }
+
+  function coverPage(title, lines, mini, n) {
+    return el("article", { class: "page cover" + (mini ? " mini" : "") },
+      el("div", { class: "kicker" }, "slop catalog · " + date(catalog.generated)),
+      el("h2", {}, title),
+      lines.map((l) => el("p", {}, l)),
+      folio(n || "", mini ? "" : host(location.origin) + location.pathname));
+  }
+
+  function backPage(apps, n, mini) {
+    return el("article", { class: "page back" + (mini ? " mini" : "") },
+      el("h3", {}, "In this zine"),
+      el("ol", {}, apps.map((a, i) => el("li", { value: i + 2 }, a.title))), // numbered by page
+      el("p", {}, "Every app, and more ways to look at them:"),
+      el("p", { class: "url" }, host(location.origin) + "/catalog/"),
+      el("p", {}, "Apps run at " + host(catalog.appsOrigin) + "/f/<id>/"),
+      folio(n, "slop catalog"));
+  }
+
+  // zinePages returns the logical pages of a folding layout: a cover, the
+  // part's apps, then a back cover; blank pages fill a short last part.
+  function zinePages(items, total, mini, title) {
+    const per = total - 2;
+    const parts = Math.max(1, Math.ceil(items.length / per));
+    const part = Math.min(state.part, parts);
+    const apps = items.slice((part - 1) * per, part * per);
+    const pages = [coverPage(title, [
+      `${apps.length} of ${items.length} single-file HTML apps from slop.boutique, running on slop.`,
+      parts > 1 ? `Part ${part} of ${parts}.` : "",
+    ].filter(Boolean), mini, 1)];
+    apps.forEach((a, i) => pages.push(appPage(a, i + 2, mini)));
+    while (pages.length < total - 1) pages.push(el("article", { class: "page blank" + (mini ? " mini" : "") }));
+    pages.push(backPage(apps, total, mini));
+    return { pages, parts, part, apps };
+  }
+
+  // --- imposition ------------------------------------------------------------
+
+  // slot puts a page into a sheet cell, scaled by s and turned 180° if flip.
+  function slot(page, wmm, hmm, s, flip) {
+    page.style.transform = flip ? `translate(${wmm}mm, ${hmm}mm) rotate(180deg) scale(${s})` : `scale(${s})`;
+    return el("div", { class: "slot" }, page);
+  }
+  const mark = (cls, style) => el("span", { class: "mark " + cls, style });
+
+  // The 8-page fold on one landscape side, four by two. The top row is
+  // upside down: once the sheet is folded and cut, pages 1 to 8 follow.
+  //   [5] [4] [3] [2]   (turned 180°)
+  //   [6] [7] [8] [1]
+  function fold8(pages, p) {
+    const sw = p.h, sh = p.w, cw = sw / 4, ch = sh / 2;
+    const order = [5, 4, 3, 2, 6, 7, 8, 1];
+    const sheet = el("div", { class: "sheet fold8", style: `--sw:${sw}mm;--sh:${sh}mm;--pw:${cw * 2}mm;--ph:${ch * 2}mm` },
+      order.map((n, i) => slot(pages[n - 1], cw, ch, 0.5, i < 4)),
+      [1, 2, 3].map((c) => mark("v", `left:${c * cw}mm`)),
+      mark("h", `top:${ch}mm`),
+      mark("cut", `top:${ch}mm;left:${cw}mm;width:${2 * cw}mm`));
+    return [sheet];
+  }
+
+  // A saddle-stitched booklet: sheet s (from the outside in) carries pages
+  // n-2s and 2s+1 on its front, 2s+2 and n-2s-1 on its back, two A5 (or half
+  // Letter) pages per landscape side.
+  function booklet(pages, p) {
+    const n = pages.length, sw = p.h, sh = p.w;
+    const out = [];
+    for (let s = 0; s < n / 4; s++) {
+      for (const [side, l, r] of [["front", n - 2 * s, 2 * s + 1], ["back", 2 * s + 2, n - 2 * s - 1]]) {
+        out.push(el("div", { class: "sheet booklet", style: `--sw:${sw}mm;--sh:${sh}mm;--pw:${sw / 2}mm;--ph:${sh}mm` },
+          slot(pages[l - 1], 0, 0, 1, false), slot(pages[r - 1], 0, 0, 1, false),
+          mark("v", `left:${sw / 2}mm`),
+          el("span", { class: "side" }, `sheet ${s + 1} ${side}`)));
+      }
+    }
+    return out;
+  }
+
+  // --- render ----------------------------------------------------------------
+
+  function controls(parts) {
+    const papers = LAYOUT[state.layout].papers;
+    sizeSel.replaceChildren(...papers.map((k) => el("option", { value: k }, PAPER[k].label)));
+    sizeSel.value = paperOf();
+    document.querySelector("#partl").hidden = !parts || parts < 2;
+    if (parts) {
+      partSel.replaceChildren(...Array.from({ length: parts }, (_, i) => el("option", { value: i + 1 }, `${i + 1} of ${parts}`)));
+      partSel.value = Math.min(state.part, parts);
+    }
+    const how = HOW[state.layout];
+    document.querySelector("#how").replaceChildren(...(typeof how === "string" ? [how]
+      : [how[0], el("ol", {}, how.slice(1).map((t) => el("li", {}, t)))]));
+  }
+
+  function render() {
+    const items = catalog.items.filter((i) => (!state.tag || i.tags.includes(state.tag)) && matches(i, state.q));
+    const title = state.tag ? "#" + state.tag : state.q ? "“" + state.q + "”" : "Every app";
+    const p = PAPER[paperOf()];
+    const box = document.querySelector("#pages");
+    let parts = null, nodes, label;
+    if (!items.length) {
+      nodes = [el("p", { class: "cv-empty" }, "Nothing matches.")];
+      label = "Zine";
+    } else if (state.layout === "pages") {
+      const tocPages = Math.max(1, Math.ceil(items.length / PER_TOC));
+      const first = 2 + tocPages;
+      nodes = [coverPage(title, [
+        `${items.length} single-file HTML apps from slop.boutique, running on slop at ${host(catalog.appsOrigin)}.`,
+        "One page per app: what it is, what it asks of the runtime, and where to open it."], false, 1)];
+      for (let t = 0; t < tocPages; t++) {
+        const part = items.slice(t * PER_TOC, (t + 1) * PER_TOC);
+        nodes.push(el("article", { class: "page toc" },
+          t === 0 ? el("h2", {}, "Contents") : null,
+          el("ol", {}, part.map((item, i) => el("li", {},
+            el("span", { class: "t" }, item.title), el("i"), el("b", {}, first + t * PER_TOC + i)))),
+          folio(2 + t, "contents")));
+      }
+      items.forEach((item, i) => nodes.push(appPage(item, first + i, false)));
+      label = `Zine · ${items.length} apps · ${nodes.length} pages`;
+    } else {
+      const total = LAYOUT[state.layout].pages;
+      const z = zinePages(items, total, state.layout === "fold8", title);
+      parts = z.parts;
+      nodes = state.layout === "fold8" ? fold8(z.pages, p) : booklet(z.pages, p);
+      label = `Zine · ${z.apps.length} apps · ${total} pages on ${nodes.length} ${nodes.length > 1 ? "sides" : "side"}`;
+    }
+    controls(parts);
+    document.querySelector("#count").textContent = label;
+    const landscape = state.layout !== "pages";
+    box.style.cssText = landscape ? "" : `--pw:${p.w}mm;--ph:${p.h}mm`;
+    document.querySelector("#paper").textContent = `@page { size: ${landscape ? p.h : p.w}mm ${landscape ? p.w : p.h}mm; margin: 0; }`;
+    box.replaceChildren(...nodes);
+  }
+
+  // Covers load lazily on screen; printing needs all of them first.
+  async function ready() {
+    const imgs = [...document.querySelectorAll(".page img")];
+    imgs.forEach((i) => { i.loading = "eager"; });
+    const st = document.querySelector("#status");
+    let done = 0;
+    await Promise.all(imgs.map((i) => (i.complete ? Promise.resolve() : new Promise((r) => { i.onload = i.onerror = r; }))
+      .then(() => { st.textContent = `covers ${++done}/${imgs.length}`; })));
+    st.textContent = "";
+    document.documentElement.dataset.zineReady = "1";
+  }
+  document.querySelector("#print").onclick = async () => { await ready(); window.print(); };
+  window.SlopZine = { ready };
+  render();
+})();
+</script>
+</body>
+</html>
