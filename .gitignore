@@ -14,3 +14,7 @@ coverage/
 *.db
 *.db-wal
 *.db-shm
+
+# Python bytecode (ticket scripts)
+__pycache__/
+*.pyc
