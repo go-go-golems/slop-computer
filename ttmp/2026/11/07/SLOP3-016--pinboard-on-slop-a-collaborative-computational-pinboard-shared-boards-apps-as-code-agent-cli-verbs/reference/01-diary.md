@@ -486,3 +486,57 @@ Phase 2 shows who else is on a board and what they are doing, and separates per-
 
 ### Technical details
 - Presence patch example: `{"cursor":{"x":460,"y":308},"sel":["clip:…"],"view":{"x":-300,"y":-120,"z":0.75},"drag":{"ids":["clip:…"],"dx":120,"dy":40}}`.
+
+## Step 8: Phase 3, apps written by other people
+
+Phase 3 implements the guide's security decision for shared app code: admins register apps, every version records its author and hash, and each person runs someone else's version only after accepting it. Meanwhile the go-go-goja upstream agent finished; I opened its PR (go-go-golems/go-go-goja#107) after the agent's own attempt was blocked, since the user had allowed it, and sent the actor VM agent on to phases 2–4.
+
+### Prompt Context
+**User prompt (verbatim):** (same as step 5; "it's ok, you can PR into go-go-goja")
+**Assistant interpretation:** Pinboard phase 3: apps as admin-written versions, trust prompt, narrowed scope. Open the upstream PR.
+**Inferred user intent:** Building apps together without letting one collaborator silently run code as another.
+**Commit (code):** `2728fe5`
+
+### What I did
+- `core.js`: `sha256` in plain JavaScript (round constants computed from the primes' cube and square roots), checked against `node:crypto` on six inputs including astral characters and the padding boundaries 55/56; `m.register` replaces the record whole.
+- `store.js`: the storage adapter hides built-in apps from the core (`isBuiltin`), so a registration over a built-in name records `before: null` and its undo deletes the board document and shows the shipped app again; `PB.saveVersion`, `PB.versions(name)`; `PB.trust` (`data/users/<me>/trust` with `{apps: {name: sha256}}`, browser storage below `interact`), loaded at boot.
+- `apps.js`:
+  - `registerSource` evaluates the source narrowed, computes `version` (previous + 1), `sha256`, `by`, `uid`, `at`, writes the record and `apps/<name>/versions/<n>`;
+  - `trusted(a)`: the built-in object itself (identity, not a `builtin` field a document could claim), the author's own `uid`, or a trust record for that `sha256`;
+  - `def(name)` returns an `untrusted` stub (not cached) instead of evaluating; `view` shows the prompt with "Run it" and "View source";
+  - `evalSource(src, {narrow})` passes `PB` as `undefined`; `render.js` gives narrowed apps no `agent()` and `apps.narrow` (`open`, `list`);
+  - remote changes to `apps:<name>` drop the cached definition; `board.js` re-renders that app's windows on `apps:<name>`.
+- Tests: 11 `node:test` cases now (added sha256 and whole-record register).
+- go-go-goja: wrote a PR body from the agent's report (its body file was missing) and opened go-go-golems/go-go-goja#107 from `wesen:task/host-runtime-options` (`822e67c`).
+- Two-person check: Bob's `registerSource` → "Only board admins register apps."; Ada's "Greeter" ran at once for her and printed `PB is undefined`; versions `1 Ada Lovelace 3b669e00dfb7`; Bob's window showed "Greeter v1 was written by Ada Lovelace, just now. … Run it only if you trust Ada Lovelace."; after "Run it" the app ran and `trust` held `greeter`; Ada's v2 brought the prompt back for Bob. Screenshot `various/04-phase3-trust-prompt.png`.
+
+### Why
+- **Identity, not a flag, for built-ins.** A `builtin` field in a board document could be written by any admin through the CLI; comparing with the in-memory object shipped with the code cannot be forged from the board.
+- **Whole-record register.** The prototype merged the new definition into the old record. With trust tied to fields of the record, a merge could carry a field (such as `builtin`) from an old record into a new version.
+
+### What worked
+- Hiding built-ins from the storage adapter fixed undo and registration over built-in names with one function.
+
+### What didn't work
+- The upstream agent's PR body file (`scratchpad/gogoja-pr.md`) did not exist when I looked; I wrote a new body from its report.
+
+### What I learned
+- A `new Function` parameter named `PB` shadows the global for `typeof PB` and plain `PB.x`, but `window.PB` stays reachable: the narrowed scope is a guard, as the guide says, not isolation.
+
+### What was tricky to build
+- **When the stub is not cached.** The untrusted stub must not be cached, or accepting would not take effect until reload; the trusted definition must be cached, or every render would re-evaluate source. `trust()` deletes the cache entry and emits `apps:<name>`.
+
+### What warrants a second pair of eyes
+- An app registered by a board admin can still read `window.PB`, `claude.use('sample')` and the page's db as the viewer once trusted. The prompt says so; phase 6's iframe isolation is the real fix.
+- Versions are written as separate documents with a 40 ms debounce; if that write fails the record exists without its version document.
+
+### What should be done in the future
+- Restore an earlier version from `apps/<name>/versions` (the data is there; no UI yet).
+- Phase 4: actor actions over the core, "my boards", sharing.
+
+### Code review instructions
+- `git show 2728fe5 -- apps/pinboard/js/apps.js apps/pinboard/js/store.js`, then `core.js` (`sha256`, `register`).
+- `node --test apps/pinboard/test/core.test.js`.
+
+### Technical details
+- App record: `{name, source, icon, title, about, shortcut, hidden, order, version, by, uid, at, sha256}`; version document: `{source, by, uid, at, sha256, note}`; trust document: `{apps: {<name>: <sha256>}}`.
