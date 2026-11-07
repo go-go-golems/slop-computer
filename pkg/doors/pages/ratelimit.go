@@ -3,7 +3,7 @@ package pages
 // Token buckets for the rateLimit middleware (SLOP3-012 phase 4), in
 // memory: one per (mount, rule, key), holding burst tokens (default limit)
 // and refilled at limit per window. A bucket whose rule changed starts
-// full; idle buckets are dropped by the door's minute tick.
+// full; the door's minute tick drops buckets that would be full again.
 
 import (
 	"sync"
@@ -53,12 +53,20 @@ func (l *rateLimiter) take(key string, rule registry.RateLimitConfig, now time.T
 	return false, time.Duration((1 - b.tokens) / rate * float64(time.Second))
 }
 
-// sweep drops buckets idle for twice their window (they would be full).
+// sweep drops the buckets that would be full again by now: forgetting one
+// then changes nothing, since a new bucket starts full. A bucket's refill
+// time is (capacity - tokens) / rate, which with a burst well above the
+// limit is many windows, so no fixed multiple of the window will do.
 func (l *rateLimiter) sweep(now time.Time) {
 	l.mu.Lock()
 	defer l.mu.Unlock()
 	for k, b := range l.buckets {
-		if now.Sub(b.last) > 2*b.rule.WindowDuration() {
+		rate := float64(b.rule.Limit) / b.rule.WindowDuration().Seconds()
+		if rate <= 0 {
+			continue // no refill: keep it (validation forbids this rule)
+		}
+		refill := time.Duration((capacity(b.rule) - b.tokens) / rate * float64(time.Second))
+		if now.Sub(b.last) >= refill {
 			delete(l.buckets, k)
 		}
 	}

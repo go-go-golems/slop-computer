@@ -49,3 +49,42 @@ func TestRateLimiter(t *testing.T) {
 		t.Fatalf("after sweep, size = %d", l.size())
 	}
 }
+
+// A bucket is dropped only once it would be full again: with a burst much
+// larger than the limit, refilling takes far longer than two windows, and
+// dropping it early would hand the next request a fresh full burst.
+func TestRateLimiterSweepWaitsForRefill(t *testing.T) {
+	var l rateLimiter
+	rule := registry.RateLimitConfig{Per: "ip", Limit: 1, Window: "1h", Burst: 100}
+	t0 := time.Unix(1000, 0)
+	for i := 0; i < 100; i++ {
+		if ok, _ := l.take("k", rule, t0); !ok {
+			t.Fatalf("take %d of the burst refused", i)
+		}
+	}
+	// Just past two windows: two tokens are back, not a hundred.
+	t2 := t0.Add(2*time.Hour + time.Minute)
+	l.sweep(t2)
+	if l.size() != 1 {
+		t.Fatalf("a drained bucket was swept after two windows (size %d)", l.size())
+	}
+	got := 0
+	for {
+		if ok, _ := l.take("k", rule, t2); !ok {
+			break
+		}
+		got++
+	}
+	if got != 2 {
+		t.Fatalf("after 2h at 1/h: %d requests allowed, want 2", got)
+	}
+	// Once it would be full (empty again: 100 h to refill), it may go.
+	l.sweep(t2.Add(99 * time.Hour))
+	if l.size() != 1 {
+		t.Fatalf("swept before it refilled (size %d)", l.size())
+	}
+	l.sweep(t2.Add(100*time.Hour + time.Second))
+	if l.size() != 0 {
+		t.Fatalf("a full bucket was kept (size %d)", l.size())
+	}
+}
