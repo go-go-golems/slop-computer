@@ -14,6 +14,7 @@
     "Everything is kept on this board, for everyone it is shared with. Copy clips with ⌘C to carry them to another board.",
   ].join('\n');
 
+  let fresh = false;
   async function seed() {
     if (PB.meta('seeded') || !PB.can('admin')) return;
     PB.mutate(m => {
@@ -21,7 +22,7 @@
       m.place({ kind: 'note', title: '', text: 'try: paste a link, a screenshot, a paragraph\nthen select them and ask the agent', x: 460, y: 40, w: 220, h: 100, tags: ['todo'] });
       m.place({ kind: 'link', title: 'Are.na', url: 'https://www.are.na/', desc: 'a reference for the pinboard idea', x: 460, y: 170, w: 260, h: 110, tags: ['inspo'] });
     });
-    PB.meta('seeded', 1);
+    PB.meta('seeded', 1); PB.meta('title', 'Untitled board'); fresh = true;
   }
 
   function theme() {
@@ -45,6 +46,8 @@
     document.getElementById('refbtn').addEventListener('click', () => PB.apps.open('reference'));
     document.getElementById('qlbtn').addEventListener('click', () => PB.board.quicklaunch());
     document.getElementById('logbtn').addEventListener('click', () => PB.apps.open('log'));
+    // A new board: its name is the first thing to give it.
+    if (fresh) setTimeout(() => { title.focus(); const r = document.createRange(); r.selectNodeContents(title); const s = getSelection(); s.removeAllRanges(); s.addRange(r); PB.toast('a new board: give it a name, then press Enter'); }, 300);
     PB.subscribe();
     PB.presence.init();
     PB.on('meta', (m) => { if (document.activeElement !== title) title.textContent = m.title || 'My board'; document.title = (m.title || 'Board') + ' · Pinboard'; });

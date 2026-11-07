@@ -570,6 +570,7 @@ func (s *Door) rpcTable() map[string]rpcMethod {
 		"artifact.publish":            {authz.CodePush, s.rpcArtifactPublish},
 		"slop.call":                   {authz.ActorCall, s.rpcSlopCall},
 		"slop.read":                   {authz.DocRead, s.rpcSlopRead},
+		"slop.stores":                 {authz.DocRead, s.rpcSlopStores},
 		"files.list":                  {authz.DocRead, s.rpcFilesList},
 		"files.read":                  {authz.DocRead, s.rpcFilesRead},
 		"permissions.state": {authz.StoreRead, func(_ context.Context, v *rt.View, _ json.RawMessage) (any, error) {

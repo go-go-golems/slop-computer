@@ -1,4 +1,4 @@
-/* slop page runtime (window.claude), built from web/runtime: do not edit. source sha256:acc4b5da51674f63470ebd4ed148894f2b4718db794a0e42b12991ffe1b1344f */
+/* slop page runtime (window.claude), built from web/runtime: do not edit. source sha256:1e09d74a10aa3fc11392a37eba7756d262c94540fade4e15facfde444ff0a92f */
 "use strict";
 (() => {
   // src/limits.ts
@@ -646,7 +646,10 @@
     return freeze({
       actions,
       call: call3,
-      stores: freeze({ open }),
+      // open(alias) reads a store bound to this app; list({type, title?}) lists
+      // the stores of a type the visitor can open (a "my boards" page), with
+      // each one's title read from the document at `title` (e.g. board/meta).
+      stores: freeze({ open, list: async (o) => (await rpc("slop.stores", o ?? {})).stores }),
       visitor: async () => h.me.visitor ?? null,
       signIn: () => post({ type: "signin" }),
       subscribeUrl: () => String(cfg.subscribeUrl ?? "")

@@ -2,6 +2,7 @@
   "title": "Pinboard",
   "type": "pinboard",
   "page": "index.html",
+  "actor": "actor.js",
   "capabilities": {
     "db": { "rules": [
       { "path": "board", "read": "view", "write": "admin" },

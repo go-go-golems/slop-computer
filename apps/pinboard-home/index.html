@@ -1,0 +1,82 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Boards</title>
+<style>
+  :root { --bg: #fafaf8; --fg: #1b1b1a; --muted: #6d6a64; --line: #e3e0d9; --card: #fff; --accent: #1b1b1a; }
+  @media (prefers-color-scheme: dark) { :root { --bg: #161615; --fg: #ecebe8; --muted: #9b978f; --line: #2c2b29; --card: #1e1d1c; --accent: #ecebe8; } }
+  * { box-sizing: border-box; }
+  body { margin: 0; background: var(--bg); color: var(--fg); font: 15px/1.45 system-ui, -apple-system, Segoe UI, sans-serif; }
+  main { max-width: 860px; margin: 0 auto; padding: 32px 20px 64px; }
+  header { display: flex; align-items: center; gap: 12px; margin-bottom: 24px; }
+  h1 { font-size: 22px; margin: 0; }
+  h2 { font-size: 13px; text-transform: uppercase; letter-spacing: .06em; color: var(--muted); margin: 28px 0 10px; font-weight: 600; }
+  .sp { flex: 1; }
+  .btn { display: inline-block; padding: 7px 14px; border: 1px solid var(--accent); border-radius: 6px; color: var(--bg); background: var(--accent); text-decoration: none; font-weight: 600; font-size: 14px; cursor: pointer; }
+  .btn.ghost { background: transparent; color: var(--fg); border-color: var(--line); }
+  input.in { padding: 7px 10px; border: 1px solid var(--line); border-radius: 6px; background: var(--card); color: var(--fg); font: inherit; width: 220px; }
+  ul { list-style: none; padding: 0; margin: 0; display: grid; grid-template-columns: repeat(auto-fill, minmax(240px, 1fr)); gap: 10px; }
+  li a { display: block; padding: 14px 16px; background: var(--card); border: 1px solid var(--line); border-radius: 8px; color: inherit; text-decoration: none; min-height: 84px; }
+  li a:hover { border-color: var(--muted); }
+  .t { font-weight: 600; font-size: 16px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .meta { color: var(--muted); font-size: 12.5px; margin-top: 6px; display: flex; gap: 8px; flex-wrap: wrap; }
+  .lv { border: 1px solid var(--line); border-radius: 10px; padding: 0 7px; }
+  .empty { color: var(--muted); padding: 10px 0; }
+  .note { color: var(--muted); font-size: 13px; margin-top: 36px; }
+</style>
+</head>
+<body>
+<main>
+  <header>
+    <h1>Boards</h1>
+    <span class="sp"></span>
+    <input class="in" id="q" placeholder="find a board" spellcheck="false">
+    <a class="btn" id="new" target="_top">New board</a>
+  </header>
+  <div id="out"><p class="empty">Loading…</p></div>
+  <p class="note">A board is shared on its own: open it and use Share. Each link opens only that board.</p>
+</main>
+<script>
+(async () => {
+  const $ = (id) => document.getElementById(id);
+  const el = (tag, cls, ...kids) => { const e = document.createElement(tag); if (cls) e.className = cls; kids.forEach(k => k != null && e.append(k)); return e; };
+  // The page runs on a sandbox origin; boards open on the live host that framed it.
+  const host = new URLSearchParams(location.search).get('parent') || '';
+  const boardURL = (id) => host + '/pb/' + encodeURIComponent(id);
+  const rand = () => Array.from(crypto.getRandomValues(new Uint8Array(6)), b => (b % 36).toString(36)).join('');
+  $('new').href = host + '/pb/new-' + rand();
+
+  const slop = window.claude ? await claude.use('slop').catch(() => null) : null;
+  const visitor = slop ? await slop.visitor().catch(() => null) : null;
+  if (!slop || !slop.stores || !slop.stores.list) { $('out').replaceChildren(el('p', 'empty', 'Open this page on slop to see your boards.')); return; }
+  if (!visitor || visitor.guest) {
+    $('new').style.display = 'none';
+    const b = el('button', 'btn', 'Sign in'); b.onclick = () => slop.signIn();
+    $('out').replaceChildren(el('p', 'empty', 'Sign in to see your boards and make new ones. Boards shared with you by a link open from that link.'), b);
+  }
+  let boards = [];
+  try { boards = await slop.stores.list({ type: 'pinboard', title: 'board/meta' }); }
+  catch (e) { $('out').replaceChildren(el('p', 'empty', 'Your boards could not be listed: ' + (e.message || e))); return; }
+
+  const said = { view: 'can view', interact: 'can edit', admin: 'admin', owner: 'owner' };
+  const ago = (t) => { const d = (Date.now() - t) / 1000; return d < 3600 ? Math.max(1, Math.round(d / 60)) + ' min ago' : d < 86400 ? Math.round(d / 3600) + ' h ago' : new Date(t).toLocaleDateString(); };
+  function card(b) {
+    const a = el('a', '', el('div', 't', b.title || 'Untitled board'), el('div', 'meta', el('span', 'lv', said[b.level] || b.level), el('span', '', ago(b.createdAt)), el('span', '', b.id)));
+    a.href = boardURL(b.id); a.target = '_top';
+    return el('li', '', a);
+  }
+  function render() {
+    const q = $('q').value.trim().toLowerCase();
+    const hit = (b) => !q || (b.title || '').toLowerCase().includes(q) || b.id.includes(q);
+    const mine = boards.filter(b => b.mine && hit(b)), shared = boards.filter(b => !b.mine && hit(b));
+    const section = (title, list, none) => [el('h2', '', title + (list.length ? ' · ' + list.length : '')), list.length ? el('ul', '', ...list.map(card)) : el('p', 'empty', none)];
+    $('out').replaceChildren(...section('Yours', mine, q ? 'No board of yours matches.' : 'No boards yet. Make one with New board.'), ...section('Shared with you', shared, q ? 'Nothing shared matches.' : 'Nothing shared with you yet.'));
+  }
+  $('q').addEventListener('input', render);
+  render();
+})();
+</script>
+</body>
+</html>
