@@ -10,6 +10,7 @@ import (
 
 	"github.com/go-go-golems/slop-computer/pkg/access"
 	"github.com/go-go-golems/slop-computer/pkg/actor"
+	"github.com/go-go-golems/slop-computer/pkg/appverbs"
 	"github.com/go-go-golems/slop-computer/pkg/billing/stripe"
 	capsample "github.com/go-go-golems/slop-computer/pkg/caps/sample"
 	"github.com/go-go-golems/slop-computer/pkg/config"
@@ -47,7 +48,7 @@ func Verbs(e *Env) []*verbs.Verb {
 		accessVerbs(k), actorVerbs(actorEnv{k, a}), billingVerbs(billingEnv{k, cfg, service}),
 		confirmVerbs(confirmEnv{confirm}), dataVerbs(k), docsVerbs(k), evalVerbs(evalEnv{table}),
 		filesVerbs(k), mountVerbs(mountEnv{k, cfg, a}), peopleVerbs(people),
-		policyVerbs(policyEnv{k, cfg, a}), previewVerbs(previewEnv{k, cfg}), storeVerbs(k), appVerbs(k),
+		policyVerbs(policyEnv{k, cfg, a}), previewVerbs(previewEnv{k, cfg}), storeVerbs(k), appVerbs(appVerbsEnv{k, table, appverbs.NewCache(64)}),
 	}
 	var vs []*verbs.Verb
 	for _, g := range groups {

@@ -184,7 +184,7 @@ func typeOf(a *aliasInfo) string {
 func resolveBoard(c *client.Client, dir string, alias *aliasInfo, arg string) (appverbs.Board, *appverbs.Source, error) {
 	src, err := appverbs.Fetch(c, arg, dir)
 	if err == nil {
-		b := appverbs.Board{ID: arg, Type: src.Type, App: src.App}
+		b := appverbs.Board{ID: arg, Type: src.Type, App: src.App, Via: "cli"}
 		if src.Title != "" {
 			b.Title = titleOf(c, arg, src.Title)
 		}
@@ -210,7 +210,7 @@ func resolveBoard(c *client.Client, dir string, alias *aliasInfo, arg string) (a
 			continue
 		}
 		if t := titleOf(c, id, alias.Title); strings.EqualFold(t, arg) {
-			matches = append(matches, appverbs.Board{ID: id, Title: t, Type: alias.Type, App: alias.App})
+			matches = append(matches, appverbs.Board{ID: id, Title: t, Type: alias.Type, App: alias.App, Via: "cli"})
 		}
 	}
 	switch len(matches) {

@@ -30,6 +30,7 @@ import (
 	"github.com/spf13/cobra"
 
 	"github.com/go-go-golems/slop-computer/pkg/client"
+	"github.com/go-go-golems/slop-computer/pkg/verbs"
 )
 
 // Caller calls a server verb as the person (pkg/client.Client does).
@@ -127,7 +128,14 @@ func Scan(src *Source) (*jsverbs.Registry, error) {
 	for _, f := range src.Files {
 		files = append(files, jsverbs.SourceFile{Path: f.Path, Source: []byte(f.Source)})
 	}
-	return jsverbs.ScanSources(files, jsverbs.DefaultScanOptions())
+	reg, err := jsverbs.ScanSources(files, jsverbs.DefaultScanOptions())
+	if err != nil {
+		return nil, err
+	}
+	if err := checkTypes(reg); err != nil {
+		return nil, err
+	}
+	return reg, nil
 }
 
 // Execute runs one command line (the words after the store) against a
@@ -169,6 +177,7 @@ type Board struct {
 	Title string
 	Type  string
 	App   string
+	Via   string // how the verb was reached: cli, mcp or verb (board().via)
 }
 
 // Commands builds the Glazed commands of a registry, each running locally
@@ -186,6 +195,8 @@ func Invoker(c Caller, b Board, stderr io.Writer) jsverbs.VerbInvoker {
 		r.RegisterNativeModule("slop", Module(c, b))
 		req := r.Enable(vm)
 		installConsole(vm, stderr)
+		stop := context.AfterFunc(ctx, func() { vm.Interrupt(verb.FullPath() + ": " + context.Cause(ctx).Error()) })
+		defer stop()
 		out, err := reg.InvokeInVM(ctx, vm, func(p string) (goja.Value, error) { return req.Require(p) }, verb, parsed)
 		if err != nil {
 			return nil, unwrap(err)
@@ -244,6 +255,7 @@ func boardObject(vm *goja.Runtime, c Caller, b Board) *goja.Object {
 	_ = o.Set("title", b.Title)
 	_ = o.Set("type", b.Type)
 	_ = o.Set("app", b.App)
+	_ = o.Set("via", b.Via)
 	_ = o.Set("call", func(action string, args goja.Value) goja.Value {
 		return call("actor.call", map[string]any{"store": b.ID, "action": action, "args": obj(args)})
 	})
@@ -279,17 +291,33 @@ func boardObject(vm *goja.Runtime, c Caller, b Board) *goja.Object {
 func jsError(vm *goja.Runtime, err error) goja.Value {
 	e := vm.NewGoError(err)
 	var ae *client.APIError
-	if errors.As(err, &ae) {
+	var ve *verbs.Error
+	switch {
+	case errors.As(err, &ae):
 		_ = e.Set("code", ae.Code)
 		_ = e.Set("message", ae.Message)
+	case errors.As(err, &ve):
+		_ = e.Set("code", ve.Code)
+		_ = e.Set("message", ve.Message)
 	}
 	return e
 }
 
-// unwrap turns a goja exception into its message, without the stack.
+// unwrap turns a goja exception into its message, without the stack; an
+// error that carries a code (a server refusal the verb let escape, or one
+// it threw itself with .code) keeps it.
 func unwrap(err error) error {
 	var ex *goja.Exception
 	if errors.As(err, &ex) {
+		if obj, ok := ex.Value().(*goja.Object); ok {
+			if c := obj.Get("code"); c != nil && !goja.IsUndefined(c) && !goja.IsNull(c) {
+				msg := ex.Value().String()
+				if m := obj.Get("message"); m != nil && !goja.IsUndefined(m) {
+					msg = m.String()
+				}
+				return &verbs.Error{Code: c.String(), Message: msg}
+			}
+		}
 		return errors.New(ex.Value().String())
 	}
 	return err

@@ -35,7 +35,9 @@ func (c harnessCaller) Call(verb string, args map[string]any) (any, error) {
 	return out["result"], nil
 }
 
-func TestPinboardVerbs(t *testing.T) {
+// kitchen installs the Pinboard app and Ada's board "Kitchen", with Bob at
+// interact and Carol at view.
+func kitchen(t *testing.T) (*harness, string, string, string) {
 	h := newHarness(t)
 	admin := h.tokenFor("admin@example.com", "read", "write", "admin")
 	h.call(admin, "store.new", map[string]any{"id": "pinboard"})
@@ -46,6 +48,11 @@ func TestPinboardVerbs(t *testing.T) {
 	idOf := func(tok string) string { return h.call(tok, "whoami", nil).(map[string]any)["id"].(string) }
 	h.call(ada, "grant.set", map[string]any{"store": "kitchen", "subject": idOf(bob), "level": "interact"})
 	h.call(ada, "grant.set", map[string]any{"store": "kitchen", "subject": idOf(carol), "level": "view"})
+	return h, ada, bob, carol
+}
+
+func TestPinboardVerbs(t *testing.T) {
+	h, _, bob, carol := kitchen(t)
 
 	// app.verbs: the board's app's verb files, to a viewer; the app store
 	// itself is not readable by Carol.
@@ -105,5 +112,73 @@ func TestPinboardVerbs(t *testing.T) {
 	}
 	if out, err := run(carol, "board", "log", "--format", "json"); err != nil || !strings.Contains(out, "bob (cli)") {
 		t.Fatalf("log: %v %s", err, out)
+	}
+}
+
+// Phase 5b: the same verbs run on the server (app.verb) with values as
+// JSON, and are MCP tools named <alias>_<group>_<verb> (app.tools).
+func TestPinboardVerbsRemote(t *testing.T) {
+	h, _, bob, carol := kitchen(t)
+	verb := func(tok, path string, values map[string]any) map[string]any {
+		t.Helper()
+		return h.call(tok, "app.verb", map[string]any{"store": "kitchen", "verb": path, "values": values}).(map[string]any)
+	}
+	added := verb(bob, "clip add", map[string]any{"text": "from the server", "tags": []any{"m"}})
+	if r, _ := added["result"].(map[string]any); r == nil || r["kind"] != "note" || added["output"] != "glaze" {
+		t.Fatalf("bob adds: %v", added)
+	}
+	verb(bob, "coll insert", map[string]any{"coll": "recipes", "set": []any{"title=Soup", "minutes=20"}})
+	rows := verb(carol, "coll query", map[string]any{"coll": "recipes", "where": []any{"minutes<30"}})
+	if !strings.Contains(asJSON(rows["result"]), `"title":"Soup"`) {
+		t.Fatalf("carol queries: %v", rows)
+	}
+	if d := verb(carol, "board describe", nil); d["output"] != "text" || !strings.Contains(d["result"].(string), "from the server") {
+		t.Fatalf("carol describes: %v", d)
+	}
+	// Refusals keep their codes; values are checked like flags.
+	h.fail(carol, "app.verb", map[string]any{"store": "kitchen", "verb": "clip add", "values": map[string]any{"text": "no"}}, "permission_denied")
+	h.fail(bob, "app.verb", map[string]any{"store": "kitchen", "verb": "clip add", "values": map[string]any{"colour": "red"}}, "invalid_argument")
+	h.fail(bob, "app.verb", map[string]any{"store": "kitchen", "verb": "clip fly"}, "not_found")
+	h.fail(bob, "app.verb", map[string]any{"store": "kitchen", "verb": "clip ls", "alias": "xx"}, "invalid_argument")
+	dave := h.tokenFor("dave@example.com")
+	h.fail(dave, "app.verb", map[string]any{"store": "kitchen", "verb": "clip ls"}, "not_found")
+
+	// app.tools: once per app, with the store as an argument; none for Dave.
+	tools := h.call(carol, "app.tools", nil).(map[string]any)["tools"].([]any)
+	names := []string{}
+	for _, x := range tools {
+		names = append(names, x.(map[string]any)["name"].(string))
+	}
+	if !strings.Contains(strings.Join(names, ","), "pb_clip_add") || len(names) != 9 {
+		t.Fatalf("app.tools: %v", names)
+	}
+	if got := h.call(dave, "app.tools", nil).(map[string]any)["tools"].([]any); len(got) != 0 {
+		t.Fatalf("dave's tools: %v", got)
+	}
+
+	// Through the MCP door, as Bob: listed, called, logged as mcp.
+	listed := mcpResult(t, mcpPost(t, h, bob, map[string]any{"id": 1, "method": "tools/list"}, nil))
+	var add map[string]any
+	for _, x := range listed["tools"].([]any) {
+		if m := x.(map[string]any); m["name"] == "pb_clip_add" {
+			add = m
+		}
+	}
+	if add == nil || !strings.Contains(asJSON(add["inputSchema"]), `"required":["store"]`) {
+		t.Fatalf("pb_clip_add listed: %v", add)
+	}
+	res := mcpResult(t, mcpPost(t, h, bob, map[string]any{"id": 2, "method": "tools/call",
+		"params": map[string]any{"name": "pb_clip_add", "arguments": map[string]any{"store": "kitchen", "url": "https://are.na/y", "title": "via mcp"}}}, nil))
+	if res["isError"] == true || !strings.Contains(asJSON(res["structuredContent"]), `"kind":"link"`) {
+		t.Fatalf("pb_clip_add: %v", res)
+	}
+	refused := mcpResult(t, mcpPost(t, h, carol, map[string]any{"id": 3, "method": "tools/call",
+		"params": map[string]any{"name": "pb_clip_add", "arguments": map[string]any{"store": "kitchen", "text": "no"}}}, nil))
+	if refused["isError"] != true || !strings.Contains(asJSON(refused["content"]), "permission_denied") {
+		t.Fatalf("carol's pb_clip_add: %v", refused)
+	}
+	log := verb(carol, "board log", nil)
+	if s := asJSON(log["result"]); !strings.Contains(s, "bob (mcp)") {
+		t.Fatalf("log: %s", s)
 	}
 }

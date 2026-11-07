@@ -47,7 +47,8 @@ function insert(coll, set) {
     data[kv.slice(0, i).trim()] = value(kv.slice(i + 1));
   }
   if (!Object.keys(data).length) throw new Error("nothing to insert: give --set field=value");
-  return require("slop").board().call("insert", { coll, data, via: "cli" });
+  const b = require("slop").board();
+  return b.call("insert", { coll, data, via: b.via || "cli" });
 }
 __verb__("insert", {
   parents: ["coll"],

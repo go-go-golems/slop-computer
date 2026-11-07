@@ -11,7 +11,7 @@ the command line.`;
 
 function add(url, text, title, tags, note) {
   const b = require("slop").board();
-  return b.call("addClip", { url, text, title, tags, note, via: "cli" });
+  return b.call("addClip", { url, text, title, tags, note, via: b.via || "cli" });
 }
 __verb__("add", {
   parents: ["clip"],
@@ -41,7 +41,8 @@ __verb__("ls", {
 });
 
 function rm(id) {
-  return require("slop").board().call("removeClip", { id, via: "cli" });
+  const b = require("slop").board();
+  return b.call("removeClip", { id, via: b.via || "cli" });
 }
 __verb__("rm", {
   parents: ["clip"],
@@ -50,7 +51,8 @@ __verb__("rm", {
 });
 
 function tag(id, add, remove) {
-  return require("slop").board().call("tagClip", { id, tags: add, untag: remove, via: "cli" });
+  const b = require("slop").board();
+  return b.call("tagClip", { id, tags: add, untag: remove, via: b.via || "cli" });
 }
 __verb__("tag", {
   parents: ["clip"],
