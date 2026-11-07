@@ -56,7 +56,7 @@ func TestCatalogMCPEndpoint(t *testing.T) {
 	if code, _, body := rpc(`{"jsonrpc":"2.0","method":"notifications/initialized"}`); code != 202 || body != "" {
 		t.Fatalf("notification: %d %q", code, body)
 	}
-	_, out, body = rpc(`{"jsonrpc":"2.0","id":2,"method":"tools/list"}`)
+	_, _, body = rpc(`{"jsonrpc":"2.0","id":2,"method":"tools/list"}`)
 	if !strings.Contains(body, `"search_apps"`) || !strings.Contains(body, `"readOnlyHint":true`) {
 		t.Fatalf("tools/list: %s", body)
 	}
