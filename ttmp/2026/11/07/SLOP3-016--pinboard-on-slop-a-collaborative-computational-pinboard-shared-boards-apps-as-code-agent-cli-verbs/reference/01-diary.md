@@ -597,3 +597,126 @@ Phase 4 gives callers without a page (the CLI, MCP, other apps) the board's voca
 ### Technical details
 - RPC: `{"method":"slop.stores","args":{"type":"pinboard","title":"board/meta"}}` → `{"stores":[{"id":"s-…","app":"pinboard","level":"owner","mine":true,"createdAt":…,"title":"Kitchen"}]}`.
 - Actor log `by` for an action: `ctx.visitor.name || email || id` + ` (via)`, `via` from the arguments (default `actor`).
+
+## Step 10: Phase 5a, app verbs in the CLI (`slop on`, `slop pb`)
+
+Phase 5a lets an app ship command-line verbs, as JavaScript files in its own tree, and lets the slop CLI run them on one store. Pinboard ships `clip`, `coll` and `board` verbs. `slop pb Kitchen clip add --url …` now reaches the board's actor as the person running it.
+
+### Prompt Context
+**User prompt (verbatim):** (same as step 5); during this step: "it's ok, you can PR into go-go-goja"
+**Assistant interpretation:** Pinboard phase 5: app verbs in the CLI, built on go-go-goja's jsverbs (the upstream changes U1–U4 are PR go-go-goja#107), with the board as the scope. The remote invoker and MCP tools come in a later step (5b).
+**Inferred user intent:** The same board vocabulary from a terminal or a script as in the page, without hand-written RPC calls, and without a CLI release for each app change.
+**Commit (code):** `c8ec9c7`
+
+### What I did
+- **Manifest** (`pkg/apps/manifest.go`): `slop.verbs {alias, include, title}`.
+  - `alias` matches `^[a-z][a-z0-9-]{0,15}$`.
+  - `include` holds 1–16 relative doublestar patterns, with no `..` and no leading `/`.
+  - `title` must be a document path.
+  - Tests are in `pkg/apps/verbs_test.go`.
+- **`app.verbs {store, have?}`** (`pkg/commands/appverbs.go`):
+  - Opens the store at `view` and finds the app it runs (`K.Running`).
+  - Reads that app's snapshot files (`SnapshotFiles`/`ReadFile`) that match `include`, with at most 200 files and 2 MB.
+  - Returns `{store, type, app, snapshot, alias, title, include, files:[{path, source}]}`.
+  - If `have` equals `<app>@<snapshot>`, it returns `unchanged: true` with no files.
+  - It reads as the platform, so a person who can view a board gets the verbs even when the app's own store is hidden from them.
+- **`pkg/appverbs`**:
+  - `Fetch`: `app.verbs` plus a cache keyed by `app@snapshot` under `<UserConfigDir>/slop/verbs/<host>/`.
+  - `Scan`: jsverbs `ScanSources`.
+  - `Execute`: builds the cobra chain `slop <name> <store>` and adds the glazed commands with `glazedcli.AddCommandsToRootCommand`.
+  - `Invoker`: a fresh goja runtime per call, with a goja_nodejs `require` registry and `WithLoader(reg.RequireLoader())`, so verb files can `require('./lib.js')` among themselves. It registers the native `slop` module, sends the console to stderr and calls `InvokeInVM`.
+  - The `slop` module's `board(x?)` returns the store the command runs on, by id or title. Naming another store throws "this command runs on … only".
+  - The board object has `id`, `title`, `type`, `app`, `call(action, args)` (`actor.call`), `me()`, `meta()`, and `docs.get/query/set/update/rm`.
+  - Errors keep the server's `code`, and `json.Number` becomes a JS number.
+- **CLI** (`cmd/slop/cmds/appverbs.go`):
+  - `slop on <store> …` is always present.
+  - `slop <alias> <id|title> …` is added for each alias the CLI has seen (`aliases.json`), unless it shadows a built-in command.
+  - Flag parsing is off, because the verbs have their own flags, so `--server` is stripped by hand.
+  - A title is resolved over `store.ls`, narrowed to the alias's type, matching the `title` field of the app's title document. An ambiguous title lists the ids.
+- **Pinboard verbs** (`apps/pinboard/verbs/`):
+  - `clip.js`: `add`, `ls`, `rm`, `tag`.
+  - `coll.js`: `ls`; `query <coll> --where field<op>value` (with `~` for contains); `insert <coll> --set k=v`.
+  - `board.js`: `describe` (text) and `log`.
+  - Every mutation goes through an actor action with `via: "cli"`, so the board log says `bob (cli)`.
+- **Tests:**
+  - `pkg/appverbs/appverbs_test.go`, against a fake `Caller`:
+    - Scan finds all nine verbs.
+    - `clip add` sends `addClip` with the tags and `via`.
+    - `--where` conditions are parsed into `[field, op, value]`.
+    - Rows come back with numbers as numbers.
+    - A `permission_denied` reaches the person.
+    - The `slop` module refuses another store, and `require('fs')` fails.
+    - `Fetch` caches and sends `have`.
+  - `pkg/host/pinboard_verbs_test.go` (`TestPinboardVerbs`), against a real server through the host harness:
+    - Carol (view) gets the verbs while `files.ls` on the app store is `not_found` for her.
+    - `have` gives `unchanged`.
+    - Dave gets `not_found`.
+    - Bob runs `clip add` and `coll insert`.
+    - Carol runs `coll query`, `board describe` and `board log`, and her `clip add` is refused.
+- **Validation:**
+  - `GOFLAGS=-buildvcs=false go test ./...` passes.
+  - `golangci-lint run` reports 0 issues.
+  - `GOFLAGS=-buildvcs=false go list -deps ./cmd/slop | grep -c tree-sitter` gives 0.
+  - On the local server through the `lslop` wrapper, these worked:
+    - `lslop on s-5povfcfc clip ls`;
+    - `lslop pb Kitchen board describe`;
+    - `lslop pb Kitchen clip add --text …` appeared on the open board at once;
+    - `lslop pb Kitchen clip rm --help` reads `slop pb Kitchen clip rm <id>`.
+
+### Why
+- **Verbs come from the app's snapshot, not from the CLI.** A new verb ships with an app update, and the CLI only caches it per snapshot. That is the guide's decision ("apps as code" all the way to the terminal).
+- **They run locally, with a store-scoped module.** The JavaScript runs in the person's CLI, but every effect is an RPC as that person. The verbs therefore have no rights the person lacks, and a verb written by the app's author cannot reach other stores: `board()` is the only door, and it opens one store.
+- **The commands are `slop on`, not `slop app`:** `slop app` is already the app-management group (publish, ls, …).
+- **No board argument in each verb.** The board is the command's second word, so verbs take only their own arguments. The guide had `clip add <board> …`.
+- **Explicit `parents`.** jsverbs derives default parents from the file's directory, which would make every command `verbs clip add`. Each `__verb__` therefore says `parents: ["clip"]`.
+
+### What worked
+- go-go-goja#107's `RequireLoader` and `InvokeInVM` were enough to run verbs in a runtime slop builds itself, with only its own native module. No engine factory and no default modules (fs, exec, …) are linked into the CLI.
+- The host harness's client satisfied `Caller` through a three-line adapter, so the host test runs the same `appverbs.Execute` as the CLI.
+
+### What didn't work
+- `go get github.com/go-go-golems/go-go-goja@822e67c` failed with "unknown revision": the commit exists only as the PR head. I replaced the module with the wesen fork at the same commit (`v0.0.4-0.20261107193645-822e67c611a8`), which the module proxy serves.
+- My first command name was `slop app <store>`, which collided with the existing `slop app` group. Renamed to `slop on`.
+- `titleOf` read `data.title`, but `docs.get` returns the document under `body`, so title lookup found nothing.
+- Glazed writes rows to `os.Stdout`, not to cobra's writer, so the first tests saw empty output. Tests now capture `os.Stdout` with a pipe. Glazed's output flag is `--format`, not `-o`.
+- Title lookup by the local admin found no board: `store.ls` lists only owned and granted stores, and the admin had neither on Ada's board. That behaviour is correct, so the try-out gave the admin a grant.
+- I first expected Carol's `files.ls` on the hidden app store to be `permission_denied`. It is `not_found`: the store is invisible to her, not merely forbidden.
+
+### What I learned
+- jsverbs builds glazed `cmds.Command`s whose run calls a `VerbInvoker`. The invoker owns the runtime, so the host decides the runtime's modules.
+- goja_nodejs `require.WithLoader` composes with jsverbs' loader. Relative requires between verb files resolve inside the scanned sources and never touch the disk.
+- `json.Number` from the client's decoder must be converted before reaching goja. Otherwise rows print numbers as strings.
+
+### What was tricky to build
+- **Who may see the verbs.** The app's store is usually private to the author, but every viewer of a board needs its verbs. `app.verbs` therefore authorizes on the board (`view`) and reads only the files `include` names from the running snapshot. It never lists the app store. The host test checks both sides: Carol gets the verbs, and her own `files.ls` on the app store is still `not_found`.
+- **Flags before the store.** With cobra flag parsing off, `slop pb --server X Kitchen clip ls` has to strip `--server` by hand before the store is resolved. The verbs' own flags then reach glazed unchanged.
+- **Aliases before the server is known.** Commands are added before flags are parsed, so aliases are read from every cached server's `aliases.json`. An alias seen on one server appears for all of them, and resolving it still goes to the server given.
+
+### What warrants a second pair of eyes
+- **Binary size:**
+  - `cmd/slop` grows from 59,784,224 to 73,293,120 bytes (+22.6%).
+  - The release build (`-trimpath -s -w`) grows from 42,326,392 to 51,803,480 bytes (+9.5 MB).
+  - goja and grpc were already linked. The growth is glazed's CLI glue: `glazed/pkg/cli` → `pkg/cmds/sources` → `hashicorp/vault/api`, and `formatters/table` → `jedib0t/go-pretty` → `go-openapi/strfmt` → `mongo-driver/bson`; plus sprig and jsverbs.
+  - A glazed-free runner (flags from the verb specs, JSON or text output) would avoid most of it, at the cost of glazed's output formats.
+- **The go-go-goja replace** must be removed once #107 is merged and tagged. The actor VM branch (`task/slop3-016-actor-host`) requires a different pseudo-version (`v0.10.8-…`) of the same commit, so whichever merges second has to reconcile go.mod.
+- **Verbs run on the person's machine**, as code written by the app's author. They have only the `slop` module (no fs, exec or network), but a verb can still loop or print misleading output. Trust in the CLI is "I trust this board's app"; there is no sha256 consent prompt as in the page (phase 3).
+- **The alias cache is shared across servers** (see above).
+
+### What should be done in the future
+- Phase 5b: `app.verb` on the server (verbs run without a CLI, for MCP and agents) and MCP tools named `<alias>_<group>_<verb>`.
+- Swap the go-go-goja replace for the tag after #107.
+- Decide on the binary size (keep glazed, or write a slim runner).
+
+### Code review instructions
+- Start with `pkg/appverbs/appverbs.go` (`Execute`, `Invoker`, `Module`, `boardObject`), then `pkg/commands/appverbs.go` and `cmd/slop/cmds/appverbs.go`.
+- Run `GOFLAGS=-buildvcs=false go test ./pkg/appverbs ./pkg/apps` and then `GOFLAGS=-buildvcs=false go test ./pkg/host -run TestPinboardVerbs`.
+- To try it on a local server: run `slop pb <board title> --help`, then `slop pb <title> board describe`.
+
+### Technical details
+- Cache layout:
+  - `<UserConfigDir>/slop/verbs/<host>/aliases.json` contains `{"pb":{"app":"pinboard","type":"pinboard","title":"board/meta"}}`;
+  - `apps/<app>@<snapshot>.json` holds the files;
+  - `stores/<store>` holds the last key.
+- `app.verbs` request: `{"store":"s-…","have":"pinboard@3"}`. Response when cached: `{"store":"s-…","app":"pinboard","snapshot":3,"unchanged":true,"files":[]}`.
+- A verb's call to the actor: `actor.call {"store":"s-1","action":"addClip","args":{"tags":["a","b"],"url":"…","via":"cli"}}`.
+- Limits: 200 files and 2 MB per `app.verbs`.
