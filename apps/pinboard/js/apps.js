@@ -259,7 +259,16 @@
 
   A.BUILTIN = SRC;
   A.seed = function () {
-    Object.keys(SRC).forEach(name => { if (!PB.S.apps[name] || PB.S.apps[name].builtin !== 'v1') { try { A.registerSource(SRC[name], { builtin: 'v1' }); } catch (e) { console.error('seed ' + name, e); } } });
+    // Built-in apps ship with the code: they live in memory (PB.builtins), are
+    // never written to a board, and a board's own app of the same name wins.
+    Object.keys(SRC).forEach(name => {
+      try {
+        const def = A.evalSource(SRC[name]);
+        const rec = { name: def.name, source: SRC[name], icon: def.icon || '△', title: def.title || def.name, about: def.about || '', shortcut: def.shortcut || '', hidden: !!def.hidden, order: def.order, builtin: 'v1' };
+        PB.builtins[def.name] = rec;
+        if (!PB.S.apps[def.name] || PB.S.apps[def.name].builtin) { PB.S.apps[def.name] = rec; defs[def.name] = def; }
+      } catch (e) { console.error('seed ' + name, e); }
+    });
     PB.history.txs.length = 0; PB.history.idx = 0;
   };
 

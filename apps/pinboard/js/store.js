@@ -1,75 +1,191 @@
-/* Pinboard · store: IndexedDB persistence, in-memory state, mutations with undo. */
+/* Pinboard · store: the board's slop db, in-memory state, mutations with undo.
+ *
+ * PB.S keeps the prototype's five maps; rendering reads them as before. What
+ * changed is where they live:
+ *
+ *   PB.S.clips[id]        db clips/<id>
+ *   PB.S.apps[name]       db apps/<name>        (built-in apps stay in memory)
+ *   PB.S.collections[n]   db colls/<n>
+ *   PB.S.records[id]      db records/<id>       (each record carries its coll)
+ *   PB.S.meta[k]          board/meta for the shared keys (title, seeded),
+ *                         data/users/<me>/view for this viewer's keys
+ *   blobs                 assets; a clip keeps "blob:<asset id>"
+ *
+ * Without the slop runtime (a file opened locally) everything stays in memory.
+ */
 window.PB = window.PB || {};
 (function (PB) {
   'use strict';
-  const DB_NAME = 'pinboard.v1', STORES = ['clips', 'blobs', 'apps', 'collections', 'records', 'meta'];
+  const COLL = { clips: 'clips', apps: 'apps', collections: 'colls', records: 'records' };
+  const SHARED_META = new Set(['title', 'seeded', 'about']);
+  const LEVELS = ['view', 'interact', 'admin', 'owner'];
 
-  // ---------- IndexedDB (with an in-memory fallback) ----------
-  let dbp = null, memory = false;
-  function open() {
-    if (dbp) return dbp;
-    dbp = new Promise((res, rej) => {
-      let r;
-      try { r = indexedDB.open(DB_NAME, 1); } catch (e) { memory = true; return res(null); }
-      r.onupgradeneeded = () => { const d = r.result; STORES.forEach(s => { if (!d.objectStoreNames.contains(s)) d.createObjectStore(s); }); };
-      r.onsuccess = () => res(r.result);
-      r.onerror = () => { memory = true; res(null); };
-    });
-    return dbp;
-  }
-  async function tx(store, mode, fn) {
-    const d = await open(); if (!d) return null;
-    return new Promise((res, rej) => {
-      const t = d.transaction(store, mode); const req = fn(t.objectStore(store));
-      t.oncomplete = () => res(req && req.result); t.onerror = () => rej(t.error);
-    });
-  }
-  PB.idb = {
-    get: (s, k) => tx(s, 'readonly', o => o.get(k)),
-    put: (s, k, v) => tx(s, 'readwrite', o => o.put(v, k)),
-    del: (s, k) => tx(s, 'readwrite', o => o.delete(k)),
-    all: async s => {
-      const d = await open(); if (!d) return {};
-      const o = d.transaction(s, 'readonly').objectStore(s);
-      const req = r => new Promise((res, rej) => { r.onsuccess = () => res(r.result); r.onerror = () => rej(r.error); });
-      const [keys, vals] = await Promise.all([req(o.getAllKeys()), req(o.getAll())]);
-      const m = {}; keys.forEach((k, i) => m[k] = vals[i]); return m;
-    },
-    clear: async () => { for (const s of STORES) await tx(s, 'readwrite', o => o.clear()); },
-    get memory() { return memory; }
+  // ---------- the runtime ----------
+  PB.rt = { db: null, user: null, assets: null, slop: null, room: null, me: null, visitor: null, level: 'owner', online: false };
+  PB.can = (level) => LEVELS.indexOf(PB.rt.level) >= LEVELS.indexOf(level);
+  PB.connect = async function () {
+    const has = window.claude && typeof claude.use === 'function';
+    const use = (n) => has ? claude.use(n).catch(() => null) : Promise.resolve(null);
+    const [db, user, assets, slop, room] = await Promise.all(['db', 'user', 'assets', 'slop', 'room'].map(use));
+    Object.assign(PB.rt, { db, user, assets, slop, room, online: !!db });
+    PB.rt.me = user ? await user.me().catch(() => null) : null;
+    PB.rt.visitor = slop && slop.visitor ? await slop.visitor().catch(() => null) : null;
+    if (db) PB.rt.level = (PB.rt.visitor && PB.rt.visitor.level) || ((user && await user.canEdit().catch(() => false)) ? 'admin' : 'interact');
+    PB.actor = (PB.rt.me && (PB.rt.me.name || PB.rt.me.email)) || 'you';
+    return PB.rt;
   };
+
+  // ---------- ids and values ----------
+  // Ten base-36 characters: about 3.6e15 values, enough for many writers
+  // without coordination.
+  PB.id = (p) => {
+    const a = new Uint8Array(10); crypto.getRandomValues(a);
+    return p + ':' + Array.from(a, b => (b % 36).toString(36)).join('');
+  };
+  PB.clone = (v) => v === undefined ? undefined : JSON.parse(JSON.stringify(v));
+  PB.same = (a, b) => JSON.stringify(a === undefined ? null : a) === JSON.stringify(b === undefined ? null : b);
+
+  // A db path segment allows letters, digits and _ - . ~ : @ +. Collection
+  // names are free text, so anything else is written as ~ and two hex digits.
+  const SEG_OK = /[A-Za-z0-9_\-.:@+]/;
+  PB.seg = (s) => Array.from(new TextEncoder().encode(String(s)), b => {
+    const c = String.fromCharCode(b);
+    return b < 128 && SEG_OK.test(c) ? c : '~' + b.toString(16).padStart(2, '0');
+  }).join('');
+  PB.unseg = (s) => {
+    const bytes = []; for (let i = 0; i < s.length; i++) {
+      if (s[i] === '~') { bytes.push(parseInt(s.slice(i + 1, i + 3), 16)); i += 2; } else bytes.push(s.charCodeAt(i));
+    }
+    return new TextDecoder().decode(new Uint8Array(bytes));
+  };
+  PB.pathOf = (store, id) => COLL[store] + '/' + PB.seg(id);
 
   // ---------- state ----------
   PB.S = { clips: {}, apps: {}, collections: {}, records: {}, meta: {} };
-  PB.blobs = {};            // id → Blob (loaded lazily)
-  const urls = {};
-  PB.blobURL = function (id) {
-    const b = PB.blobs[id]; if (!b) return '';
-    if (!urls[id]) urls[id] = URL.createObjectURL(b); return urls[id];
-  };
-  PB.putBlob = async function (blob) {
-    const id = PB.id('blob'); PB.blobs[id] = blob;
-    try { await PB.idb.put('blobs', id, blob); } catch (e) { console.warn('blob not persisted', e); }
-    return id;
-  };
-  PB.id = (p) => p + ':' + Math.random().toString(36).slice(2, 7);
-  PB.clone = (v) => v === undefined ? undefined : JSON.parse(JSON.stringify(v));
+  PB.builtins = {};            // name → app record, shipped with the code, never in the db
 
-  const saveTimers = {};
-  PB.save = function (store, id) {
-    const v = PB.S[store][id];
-    clearTimeout(saveTimers[store + id]);
-    saveTimers[store + id] = setTimeout(() => { PB.idb.put(store, id, PB.clone(v)).catch(e => console.warn('save failed', e)); }, 40);
+  // ---------- writing: debounced per document, then in order ----------
+  // The runtime already sends one write at a time per document; the timers
+  // here coalesce bursts (typing, dragging) into one write per pause.
+  const timers = {}, getters = {}, dirty = new Set();
+  let inflight = 0, failed = 0;
+  function status() { PB.emit('saving', { inflight, dirty: dirty.size, failed }); }
+  function send(path, value) {
+    const db = PB.rt.db; if (!db) return;
+    inflight++; status();
+    const ref = db.doc(path);
+    (value == null ? ref.delete() : ref.set(PB.clone(value)))
+      .catch(e => { failed++; writeFailed(path, e); })
+      .finally(() => { inflight--; status(); });
+  }
+  function writeFailed(path, e) {
+    console.warn('write failed', path, e);
+    const code = e && e.code;
+    if (code === 'invalid_argument' && /level|denied|permission|write/i.test(e.message || '')) PB.toast('⚠ this board is read-only for you', 'long');
+    else if (code === 'quota_exceeded') PB.toast('⚠ the board is full: ' + (e.message || ''), 'long');
+    else PB.toast('⚠ not saved: ' + (e && e.message || e), 'long');
+  }
+  function schedule(path, get, delay) {
+    clearTimeout(timers[path]); dirty.add(path); getters[path] = get; status();
+    timers[path] = setTimeout(() => fire(path), delay);
+  }
+  function fire(path) {
+    clearTimeout(timers[path]); delete timers[path]; dirty.delete(path);
+    const get = getters[path]; delete getters[path]; if (get) send(path, get());
+  }
+  PB.save = function (store, id, delay = 40) {
+    if (store === 'meta') return saveMeta(id);
+    if (store === 'apps' && PB.builtins[id] && PB.S.apps[id] === PB.builtins[id]) return;
+    if (!PB.can(store === 'apps' ? 'admin' : 'interact')) return;   // a viewer's z-order, typing: this tab only
+    schedule(PB.pathOf(store, id), () => PB.S[store][id], delay);
   };
-  PB.del = function (store, id) { clearTimeout(saveTimers[store + id]); PB.idb.del(store, id).catch(() => { }); };
+  PB.del = function (store, id) {
+    if (!PB.can(store === 'apps' ? 'admin' : 'interact')) return;
+    const path = PB.pathOf(store, id);
+    clearTimeout(timers[path]); delete timers[path]; delete getters[path]; dirty.delete(path);
+    send(path, null);
+  };
+  PB.isDirty = (path) => dirty.has(path);
+  PB.flush = function () { Object.keys(timers).forEach(fire); };
+  window.addEventListener('pagehide', () => PB.flush());
+
+  // ---------- meta: shared keys in board/meta, the rest per viewer ----------
+  const VIEW_DOC = () => PB.rt.me && PB.rt.me.id ? 'data/users/' + PB.rt.me.id + '/view' : null;
+  const local = {
+    get(k) { try { const v = localStorage.getItem('pinboard.' + k); return v == null ? undefined : JSON.parse(v); } catch (e) { return undefined; } },
+    set(k, v) { try { localStorage.setItem('pinboard.' + k, JSON.stringify(v)); } catch (e) { } },
+  };
+  function saveMeta(k) {
+    if (SHARED_META.has(k)) {
+      if (!PB.can('admin')) return;
+      const shared = {}; SHARED_META.forEach(x => { if (PB.S.meta[x] !== undefined) shared[x] = PB.S.meta[x]; });
+      return schedule('board/meta', () => shared, 40);
+    }
+    // Per viewer: in the db when this person may write their own subtree,
+    // otherwise in this browser only.
+    const doc = VIEW_DOC();
+    if (!doc || !PB.can('interact')) return local.set(k, PB.S.meta[k]);
+    schedule(doc, () => viewDoc(), 300);
+  }
+  // The view document holds every per-viewer key; agent threads are trimmed so
+  // that it stays well below the 256 KiB document limit.
+  function viewDoc() {
+    const out = {}; Object.keys(PB.S.meta).forEach(k => { if (!SHARED_META.has(k)) out[k] = PB.S.meta[k]; });
+    let threads = out.threads || [];
+    while (threads.length && JSON.stringify(out).length > 200000) { threads = threads.slice(0, -1); out.threads = threads; }
+    return out;
+  }
   PB.meta = function (k, v) {
     if (v === undefined) return PB.S.meta[k];
     PB.S.meta[k] = v; PB.save('meta', k); return v;
   };
 
+  // ---------- loading ----------
   PB.load = async function () {
-    for (const s of ['clips', 'apps', 'collections', 'records', 'meta']) { try { PB.S[s] = await PB.idb.all(s); } catch (e) { PB.S[s] = {}; } }
-    try { PB.blobs = await PB.idb.all('blobs'); } catch (e) { PB.blobs = {}; }
+    const db = PB.rt.db;
+    if (!db) {
+      ['view', 'minimap', 'threads', 'agentOpen', 'agentMode', 'agentTier'].forEach(k => { const v = local.get(k); if (v !== undefined) PB.S.meta[k] = v; });
+      Object.assign(PB.S.apps, PB.builtins); return;
+    }
+    const all = async (coll) => (await db.collection(coll).get()).docs;
+    const [clips, apps, colls, recs, meta] = await Promise.all([
+      all('clips'), all('apps'), all('colls'), all('records'), db.doc('board/meta').get(),
+    ]);
+    PB.S.clips = {}; clips.forEach(d => { PB.S.clips[PB.unseg(d.id)] = PB.clone(d.data()); });
+    PB.S.apps = {}; apps.forEach(d => { PB.S.apps[PB.unseg(d.id)] = PB.clone(d.data()); });
+    PB.S.collections = {}; colls.forEach(d => { PB.S.collections[PB.unseg(d.id)] = PB.clone(d.data()); });
+    PB.S.records = {}; recs.forEach(d => { PB.S.records[PB.unseg(d.id)] = PB.clone(d.data()); });
+    PB.S.meta = Object.assign({}, meta.exists ? PB.clone(meta.data()) : {});
+    // This viewer's keys: the db document, else this browser.
+    const doc = VIEW_DOC();
+    const mine = doc && PB.can('interact') ? await db.doc(doc).get().catch(() => null) : null;
+    if (mine && mine.exists) Object.assign(PB.S.meta, PB.clone(mine.data()));
+    else ['view', 'minimap', 'threads', 'agentOpen', 'agentMode', 'agentTier'].forEach(k => { const v = local.get(k); if (v !== undefined) PB.S.meta[k] = v; });
+    Object.assign(PB.S.apps, PB.builtins);
+  };
+
+  // ---------- blobs: assets ----------
+  // A clip's blobId is "blob:<asset id>"; the asset is served at /_blob/<id>.
+  PB.blobs = {};               // blobId → Blob, fetched on demand (agent images, copy)
+  const ASSET = (blobId) => String(blobId || '').replace(/^blob:/, '');
+  PB.isAssetRef = (s) => typeof s === 'string' && /^blob:[^\s/:]+$/.test(s);
+  PB.blobURL = function (id) {
+    if (!id) return '';
+    if (PB.blobs[id] && !PB.rt.assets) { const b = PB.blobs[id]; return b._url || (b._url = URL.createObjectURL(b)); }
+    return '/_blob/' + ASSET(id);
+  };
+  PB.putBlob = async function (blob) {
+    if (!PB.rt.assets) {                      // no runtime: keep it in memory for this visit
+      const id = 'blob:mem' + PB.id('b').slice(2);
+      PB.blobs[id] = blob; return id;
+    }
+    const r = await PB.rt.assets.upload(blob, { type: blob.type || undefined });
+    const id = 'blob:' + r.id; PB.blobs[id] = blob; return id;
+  };
+  PB.fetchBlob = async function (id) {
+    if (PB.blobs[id]) return PB.blobs[id];
+    const r = await fetch(PB.blobURL(id)); if (!r.ok) throw new Error('image ' + id + ': ' + r.status);
+    return (PB.blobs[id] = await r.blob());
   };
 
   // ---------- events ----------
@@ -90,9 +206,17 @@ window.PB = window.PB || {};
     if (store === 'clips') { const c = (after || before || {}); if (c.binding) k.add('coll:' + c.binding.coll); }
     return k;
   }
+  PB.keysFor = keysFor;
+  // Who may change what: the store refuses anyway; checking first gives a clear
+  // message instead of a failed write after the screen already changed.
+  function check(store) {
+    if (!PB.can('interact')) throw new Error('This board is read-only for you (level ' + PB.rt.level + ').');
+    if (store === 'apps' && !PB.can('admin')) throw new Error('Only board admins register apps.');
+  }
   function recorder(ops, keys, by) {
     const m = {};
     m.set = function (store, id, fn, label) {
+      check(store);
       const before = PB.clone(PB.S[store][id]);
       let after = fn(PB.clone(before));
       if (after === undefined) after = null;
@@ -146,7 +270,7 @@ window.PB = window.PB || {};
     m.setParam = (id, name, val) => m.set('clips', id, c => (c.params = c.params || {}, c.params[name] = val, c), 'param ' + name + '=' + JSON.stringify(val));
     m.setState = (id, patch) => m.set('clips', id, c => (c.state = Object.assign(c.state || {}, patch), c), 'state ' + Object.keys(patch).join(','));
     // data
-    m.collection = (name, schema) => m.set('collections', name, old => Object.assign(old || { name, fields: [], indexes: [], store: 'indexeddb', version: 1 }, schema), 'collection ' + name);
+    m.collection = (name, schema) => m.set('collections', name, old => Object.assign(old || { name, fields: [], indexes: [], store: 'db', version: 1 }, schema), 'collection ' + name);
     m.insert = function (coll, data) {
       if (!PB.S.collections[coll]) m.collection(coll, { name: coll, fields: Object.keys(data || {}).map(k => ({ name: k, type: 'text' })) });
       const id = PB.id('rec'); const rec = Object.assign({}, data, { id, coll, added: (data && data.added) || Date.now() });
@@ -169,7 +293,7 @@ window.PB = window.PB || {};
     return m;
   }
   PB.zTop = 1;
-  PB.mutate = function (fn, by = 'you', opts = {}) {
+  PB.mutate = function (fn, by = PB.actor || 'you', opts = {}) {
     if (PB.readonly) throw new Error('Read-only mode: mutations are off. Switch the agent mode to Ask or Auto.');
     const ops = [], keys = new Set();
     const m = recorder(ops, keys, by);
@@ -201,16 +325,19 @@ window.PB = window.PB || {};
   };
   PB.revertTo = function (idx) { while (PB.history.idx > idx) PB.undo(); };
 
-  // Quiet changes: persisted, not in history (typing, pan, z-order).
+  // Quiet changes: persisted, not in history (typing, pan, z-order). Typing
+  // is coalesced into one write per 300 ms pause.
   PB.quiet = function (store, id, patch, keys) {
     const v = PB.S[store][id]; if (!v) return;
+    if (store !== 'meta' && !PB.can('interact')) return;
     Object.assign(v, typeof patch === 'function' ? patch(v) || {} : patch);
-    PB.save(store, id);
+    PB.save(store, id, 300);
     const ks = new Set(keys || [store + ':' + id]); PB.emit('change', ks);
   };
   PB.setState = function (clipId, patch) {
     const c = PB.S.clips[clipId]; if (!c) return;
-    c.state = Object.assign(c.state || {}, patch); PB.save('clips', clipId);
+    c.state = Object.assign(c.state || {}, patch);
+    if (PB.can('interact')) PB.save('clips', clipId, 300);
     PB.emit('change', new Set(Object.keys(patch).map(k => 'state:' + clipId + ':' + k)));
   };
 

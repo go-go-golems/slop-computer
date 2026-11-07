@@ -51,7 +51,7 @@
     if (m.error) d.append(el('div', 'fail', m.error));
     return d;
   }
-  function linkIds(html) { return html.replace(/\b(clip:[a-z0-9]{5})\b/g, '<a href="#" data-focus="$1">$1</a>'); }
+  function linkIds(html) { return html.replace(/\b(clip:[a-z0-9]{5,10})\b/g, '<a href="#" data-focus="$1">$1</a>'); }
   function stepEl(s) {
     const d = el('div', 'step ' + s.status); s._el = d;
     const head = el('div', 'shead'); head.append(el('span', 'sdot'), el('span', 'slbl', 'step ' + s.n + (s.by === 'you' ? ' · console' : '') + (s.status === 'waiting' ? ' · waiting for you' : s.status === 'declined' ? ' · declined' : s.status === 'reverted' ? ' · reverted' : '')), el('span', 'sp'), el('span', 'stime', s.ms != null ? (s.ms / 1000).toFixed(2) + ' s' : ''));
@@ -93,7 +93,7 @@
   // ---------- images ----------
   function imagesToSend(text) {
     const sel = [...PB.board.sel].map(i => PB.S.clips[i]).filter(c => c && c.kind === 'image' && PB.blobs[c.blobId]);
-    const named = [...new Set((text.match(/clip:[a-z0-9]{5}/g) || []))].map(i => PB.S.clips[i]).filter(c => c && c.kind === 'image' && PB.blobs[c.blobId]);
+    const named = [...new Set((text.match(/clip:[a-z0-9]{5,10}/g) || []))].map(i => PB.S.clips[i]).filter(c => c && c.kind === 'image' && PB.blobs[c.blobId]);
     const clips = [...new Map([...(A.sendSelected ? sel : []), ...named].map(c => [c.id, c])).values()];
     const list = [...A.attachments.map(a => ({ blob: a.blob, label: a.name })), ...clips.map(c => ({ blob: PB.blobs[c.blobId], label: c.id + (c.title ? ' "' + c.title + '"' : '') + (c.dims ? ' ' + c.dims.w + '×' + c.dims.h : '') }))];
     const max = A.limits && A.limits.images ? A.limits.images.maxCount : 0;
@@ -184,6 +184,7 @@
     $panel.querySelector('.close').addEventListener('click', () => A.toggle(false));
     document.getElementById('agentbtn').addEventListener('click', () => A.toggle());
     PB.on('selection', () => A.open && renderAttachments());
+    PB.on('blobs', () => A.open && renderAttachments());
     if (PB.meta('agentOpen') !== false) { A.open = true; document.body.classList.add('agent-open'); }
     // Claude
     const off = $panel.querySelector('.offbanner');

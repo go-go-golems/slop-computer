@@ -11,11 +11,11 @@
     "- The **agent** (right) organises clips into collections and builds apps. Select some clips and tell it what they are. Image clips you select are sent along so it can look at them.",
     "- Apps are written in a small grammar: open **App editor** from the dock, or read **Reference**.",
     "",
-    "Everything is kept in this browser (IndexedDB). Copy clips with ⌘C to carry them elsewhere.",
+    "Everything is kept on this board, for everyone it is shared with. Copy clips with ⌘C to carry them to another board.",
   ].join('\n');
 
   async function seed() {
-    if (PB.meta('seeded')) return;
+    if (PB.meta('seeded') || !PB.can('admin')) return;
     PB.mutate(m => {
       m.place({ kind: 'doc', title: 'Read me', md: WELCOME, x: 40, y: 40, w: 380, h: 330, tags: ['help'] });
       m.place({ kind: 'note', title: '', text: 'try: paste a link, a screenshot, a paragraph\nthen select them and ask the agent', x: 460, y: 40, w: 220, h: 100, tags: ['todo'] });
@@ -32,22 +32,33 @@
   }
 
   async function boot() {
-    try { await PB.load(); } catch (e) { console.error(e); }
+    try { await PB.connect(); } catch (e) { console.error(e); }
+    try { await PB.load(); } catch (e) { console.error(e); PB.toast('⚠ the board could not be loaded: ' + (e.message || e), 'long'); }
     PB.apps.seed();
-    if (!PB.S.apps.counter) { try { PB.apps.registerSource(PB.apps.TEMPLATE); } catch (e) { console.error(e); } }
+    if (!PB.meta('seeded') && PB.can('admin') && !PB.S.apps.counter) { try { PB.apps.registerSource(PB.apps.TEMPLATE); } catch (e) { console.error(e); } }
     await seed();
+    document.body.classList.toggle('readonly', !PB.can('interact'));
     PB.history.txs.length = 0; PB.history.idx = 0;
     PB.board.init();
     theme();
-    const title = document.getElementById('boardtitle'); title.textContent = PB.meta('title') || 'My board'; title.addEventListener('blur', () => PB.meta('title', title.textContent.trim() || 'My board')); title.addEventListener('keydown', ev => { PB.keyStop(ev); if (ev.key === 'Enter') { ev.preventDefault(); title.blur(); } });
+    const title = document.getElementById('boardtitle'); title.textContent = PB.meta('title') || 'My board'; document.title = (PB.meta('title') || 'Board') + ' · Pinboard'; title.contentEditable = PB.can('admin') ? 'true' : 'false'; title.addEventListener('blur', () => PB.meta('title', title.textContent.trim() || 'My board')); title.addEventListener('keydown', ev => { PB.keyStop(ev); if (ev.key === 'Enter') { ev.preventDefault(); title.blur(); } });
     document.getElementById('refbtn').addEventListener('click', () => PB.apps.open('reference'));
     document.getElementById('qlbtn').addEventListener('click', () => PB.board.quicklaunch());
     document.getElementById('logbtn').addEventListener('click', () => PB.apps.open('log'));
     await PB.agent.init();
-    PB.board.cacheBlobs();
-    PB.on('mutation', (tx) => { const s = document.getElementById('status'); s.textContent = Object.keys(PB.S.clips).length + ' clips · ' + Object.keys(PB.S.collections).length + ' collections · ' + PB.history.idx + ' changes'; });
-    document.getElementById('status').textContent = Object.keys(PB.S.clips).length + ' clips · ' + Object.keys(PB.S.collections).length + ' collections';
-    if (PB.idb.memory) PB.toast('⚠ storage is unavailable in this browser; nothing will be kept between visits', 'long');
+    PB.on('selection', (ids) => PB.board.cacheBlobs(ids));
+    let saving = { inflight: 0, dirty: 0, failed: 0 };
+    const status = () => {
+      const s = document.getElementById('status');
+      const busy = saving.inflight + saving.dirty;
+      s.textContent = Object.keys(PB.S.clips).length + ' clips · ' + Object.keys(PB.S.collections).length + ' collections'
+        + (PB.history.idx ? ' · ' + PB.history.idx + ' changes' : '')
+        + (PB.rt.online ? (busy ? ' · saving…' : ' · saved') : ' · not saved (no slop runtime)')
+        + (PB.can('interact') ? '' : ' · view only');
+    };
+    PB.on('mutation', status); PB.on('saving', (s) => { saving = s; status(); });
+    status();
+    if (!PB.rt.online) PB.toast('⚠ the slop runtime is not available here; nothing will be kept between visits', 'long');
     window.PB = PB;
   }
   if (document.readyState === 'loading') document.addEventListener('DOMContentLoaded', boot); else boot();

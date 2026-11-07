@@ -1,0 +1,16 @@
+{
+  "title": "Pinboard",
+  "type": "pinboard",
+  "page": "index.html",
+  "capabilities": {
+    "db": { "rules": [
+      { "path": "board", "read": "view", "write": "admin" },
+      { "path": "apps", "read": "view", "write": "admin" }
+    ] },
+    "user": { "scopes": ["profile"] },
+    "room": {},
+    "assets": {},
+    "downloads": true,
+    "sample": {}
+  }
+}

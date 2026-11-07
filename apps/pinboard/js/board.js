@@ -346,13 +346,20 @@
     return { pinboard: 1, clips, text: clips.map(c => c.title || c.url || c.text || c.kind).join('\n') };
   };
   const blobCache = {}; // id → base64 (filled lazily for copy)
-  B.cacheBlobs = async function () { for (const id of Object.keys(PB.blobs)) if (!blobCache[id]) { try { blobCache[id] = await blobToB64(PB.blobs[id]); } catch (e) { } } };
+  // Images live in assets; copying clips carries their bytes, so the selected
+  // image clips are fetched ahead of a copy (and for the agent to look at).
+  B.cacheBlobs = async function (ids) {
+    const want = (ids || []).map(i => PB.S.clips[i]).filter(c => c && c.kind === 'image' && c.blobId).map(c => c.blobId);
+    let got = 0;
+    for (const id of want) if (!blobCache[id]) { try { blobCache[id] = await blobToB64(await PB.fetchBlob(id)); got++; } catch (e) { } }
+    if (got) PB.emit('blobs', want);
+  };
   function blobToB64(b) { return new Promise((res, rej) => { const r = new FileReader(); r.onload = () => res(r.result.split(',')[1]); r.onerror = rej; r.readAsDataURL(b); }); }
   B.importJSON = async function (data, pos) {
     const ids = []; const idmap = {};
     for (const c of data.clips || []) {
       const o = PB.clone(c); const oldId = o.id; delete o.id; delete o.z;
-      if (o.blob && o.blob.data) { const bin = atob(o.blob.data); const u8 = new Uint8Array(bin.length); for (let i = 0; i < bin.length; i++) u8[i] = bin.charCodeAt(i); o.blobId = await PB.putBlob(new Blob([u8], { type: o.blob.type })); } else if (o.blobId && !PB.blobs[o.blobId]) { o.kind = 'note'; o.text = '(image not carried over)'; }
+      if (o.blob && o.blob.data) { const bin = atob(o.blob.data); const u8 = new Uint8Array(bin.length); for (let i = 0; i < bin.length; i++) u8[i] = bin.charCodeAt(i); o.blobId = await PB.putBlob(new Blob([u8], { type: o.blob.type })); } else if (o.blobId && !PB.isAssetRef(o.blobId) && !PB.blobs[o.blobId]) { o.kind = 'note'; o.text = '(image not carried over)'; }
       delete o.blob; o.x = pos.x + (o.x - (data.clips[0].x || 0)); o.y = pos.y + (o.y - (data.clips[0].y || 0));
       const id = PB.mutate(m => m.place(o)); idmap[oldId] = id; ids.push(id);
     }

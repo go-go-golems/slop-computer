@@ -48,7 +48,7 @@
   function resolveSrc(src) {
     if (!src) return '';
     if (src instanceof Blob) { if (!src._url) src._url = URL.createObjectURL(src); return src._url; }
-    if (typeof src === 'string' && src.startsWith('blob:')) return PB.blobs[src] ? PB.blobURL(src) : src;
+    if (PB.isAssetRef(src)) return PB.blobURL(src);
     return String(src);
   }
   PB.resolveSrc = resolveSrc;
