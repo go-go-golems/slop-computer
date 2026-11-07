@@ -830,3 +830,91 @@ Phase 5b runs an app's verbs on the server (`app.verb`), for callers that cannot
 - `app.verb` request: `{"store":"kitchen","verb":"coll query","values":{"coll":"recipes","where":["minutes<30"],"limit":10}}`. Response: `{"result":[…rows…],"output":"glaze","logs":[…]}`. Text verbs return `"output":"text"` and a string result.
 - MCP: `tools/call {"name":"pb_clip_add","arguments":{"store":"kitchen","url":"…"}}` becomes `app.verb {"store":"kitchen","verb":"clip add","alias":"pb","values":{"url":"…"}}`.
 - Allowed field types: `string`, `bool`, `int`, `float`, `stringList`, `intList`, `floatList`, `choice`, `choiceList`, `date`.
+
+## Step 12: Phase 6a, actor sample tools, the board's server agent, log pruning
+
+Phase 6a adds tools to actor `sample` (platform change M7). With them, Pinboard gets an agent on the server (`ask`, `slop pb … board ask`, MCP `pb_board_ask`) and a recurring log-pruning alarm. On the way I found and fixed a nil-pointer crash in the actor `db`'s `orderBy`.
+
+### Prompt Context
+**User prompt (verbatim):** (same as step 5)
+**Assistant interpretation:** Guide decision "the page agent stays in the page; a server agent comes later". The consequence named there: actor `sample` accepts `tools` with JavaScript `execute` functions run in the actor's turn, with the same 16-tool limit and metering. Plus the log pruning alarm.
+**Inferred user intent:** Ask the board from a terminal or an agent without a browser, and keep the shared log from growing without bound.
+**Commits (code):** `f26267a` (tools, agent, pruning, nil fix); `d266886` (`app.verb` limit raised to 4 minutes).
+
+### What I did
+- **`pkg/actor`:**
+  - `event.failed`.
+  - `Actor.Later()`: returns `run(fn, failed)`, which posts `fn` as a continuation turn of the event in progress, from any goroutine.
+  - In `handle`, a turn with `failed` set reports its error there (the turn has rolled back) instead of replying to the parked handler. On success it skips the settle-or-park step, which the I/O's own continuation always does afterwards.
+  - The loop reports a lost `Later` turn (actor stopped) to `failed`.
+- **`pkg/doors/actors/sample.go`:**
+  - `sampleTools` reads `opts.tools` (name, description, inputSchema, execute), refusing a duplicate name and a missing `execute`.
+  - `toolRunner` is the backend's `ExecuteTool`. Each tool call goes through `later(...)`. In that turn the tool's input is parsed and `execute(input)` is called. A plain result is sent at once. A promise that is already fulfilled or rejected is handled in that turn: fulfilled is the result, rejected rolls the turn back. A pending one gets `then` handlers, which run in the turn that settles it.
+  - The result goes back over a channel, bounded by `ToolTimeout` (60 s) and the sample's context.
+- **Pinboard `actor.js`:**
+  - Actions now live in a `const actions`, and `who()` writes `agent (for <name>)` for `via: 'agent'`.
+  - `ask {question}` (requires view) builds tools from `AGENT_TOOLS`: five read tools for everyone, and five write tools only from interact up. Each tool's `execute` is the action's `run(ctx, {...input, via: 'agent'})`. It returns `{answer, model}` and fails with `unavailable` while the policy is off.
+  - `pruneLog` keeps the newest 500 steps and anything newer than `board/meta.logDays` (default 30, clamped to 1–365), deleting older steps 1000 per run. It is an admin action with an optional `keep`, plus `every: {pruneLog: {every: '6h'}}`.
+- **Verb:** `board ask <question>` (text output).
+- **Fix in `pkg/actor/modules.go`:** `absent(v)` (nil, undefined or null) for `orderBy`'s direction and `files.list`'s prefix.
+- **Tests:**
+  - `pkg/host/actor_tools_test.go` `TestActorSampleTools`:
+    - a tool's write commits;
+    - a tool that throws after writing rolls back (`written: false`), and the model reads the error;
+    - a tool that awaits another `sample` answers when that settles;
+    - a tool without `execute` is `invalid_argument`;
+    - `orderBy('at')` and `files.list()` with no arguments no longer crash. I checked that this test fails with the old code: `turn panicked: runtime error: invalid memory address`.
+  - `TestPinboardAgentAndPrune`:
+    - `ask` is `unavailable` until `policy.set`; then Bob and Carol get the fake model's answer (it calls the first tool, `describe`);
+    - an empty question is refused;
+    - `app.verb board ask` gives a text result;
+    - pruning with backdated log entries (`at` 40 and 2 days ago, `keep: 2`) removes the 40-day one at 30 days, then the 2-day one after `logDays: 1`;
+    - Bob may not prune.
+  - `-race` passes on the tools and LLM budget tests (×3). The whole suite, lint, and the 11 core node tests pass.
+
+### Why
+- **Tool calls as turns of the same event.** A tool needs the store, and the store is only reachable inside a turn. The backend's loop waits on a goroutine, which must not touch the VM. A turn per call keeps one-writer-per-store and gives each tool call its own transaction.
+- **A failed tool rolls back alone.** Document writes cannot be undone partway through a turn: `noOpenTransaction` says a `ROLLBACK TO` would leave change events for writes that never committed. So a tool gets a whole turn, and its failure goes to the model instead of failing the handler.
+- **The agent asks as the person.** Its tools are the same actions, the core checks the person's level again for each operation, the person's model access and budget pay, and the log names the agent and the person.
+
+### What worked
+- `continueWith` was already safe to call from another goroutine (the inbox is under the manager's lock), so `Later` is a few lines.
+- The fake backend calls the first tool, which made the whole loop testable offline: a tool's write, a throw, and an awaiting tool.
+
+### What didn't work
+- The first prune test run failed with `turn panicked: runtime error: invalid memory address or nil pointer dereference`. A stack printed temporarily from `store.doLocked`'s recover (removed afterwards) pointed at `pkg/actor/modules.go:398`, `query.func2`. `orderBy('at')` without a direction passed a nil `goja.Value`, which `goja.IsUndefined` doesn't catch, and then `dir.String()` panicked. `files.list()` had the same pattern. Both exist on main.
+- `TestPinboardVerbsRemote` expected 9 tools and `TestPinboardVerbsScan` 9 verbs; the new `board ask` makes 10.
+- `node --test test/` treats `test/` as a file in this Node version; `node --test test/core.test.js` runs the 11 tests.
+- Lint: `exhaustive` on the promise-state switch (an explicit `Pending` case added) and `nonamedreturns` on `Later`.
+
+### What I learned
+- goja's reflection-based wrappers pass `nil` for a `goja.Value` parameter the caller left out. The safe test is `v == nil || IsUndefined(v) || IsNull(v)`.
+- The fake backend's tool behaviour: it calls `r.Tools[0]` once with `{}`, then answers "The browser tool completed successfully." or "… reported an error."
+
+### What was tricky to build
+- **Settlement after a tool turn.** The handle path settles or parks using the parent's root promise. A `Later` turn that ran it could decrement `parks` and reply a second time if something else had already settled the root. Since the I/O's own continuation always follows its tool turns (FIFO inbox), `Later` turns now skip that step.
+- **A tool that awaits.** If `execute` returns a pending promise, its turn commits what ran before the await, and the result comes when the promise settles in a later turn. The `then` handlers run there, and that is where `send` happens. The `nested` test case covers it.
+
+### What warrants a second pair of eyes
+- **This branch is stacked on #37, which predates #38's `turnFor` refactor.** The `failed` branch and the skip after `afterTurn` sit in `handle` here. The merge with #38 must carry both into `turnFor`. They are small, but they must not be lost.
+- **`app.verb` is now 4 minutes, wall time.** A verb's endless loop holds a server goroutine that long.
+- **The agent's prompt is minimal,** and Pinboard has no way yet to show the agent's answer in the page.
+- **`pruneLog` reads the newest 500 log documents to find the floor.** A log entry can be up to 200 KB, so a run can read up to about 100 MB on a very busy board. A `select` or `count` in the actor `db` query would avoid this.
+
+### What should be done in the future
+- Phase 6b: iframe isolation for app windows.
+- Merge order: #36, then #37 (rebased), then this branch, with #38 reconciled in `pkg/actor`.
+
+### Code review instructions
+- `pkg/actor/modules.go` `Later`, and `pkg/actor/actor.go` `handle` (the two `ev.failed` branches).
+- `pkg/doors/actors/sample.go` `sampleTools` and `toolRunner`.
+- `apps/pinboard/actor.js` `ask` and `pruneLog`.
+- Run `go test -buildvcs=false ./pkg/host -run 'TestActorSampleTools|TestPinboardAgentAndPrune' -count=1 -v`.
+
+### Technical details
+- Actor API:
+  ```js
+  const r = await sample(prompt, { tools: [{ name, description, inputSchema, execute(input) { … } }] });
+  // r = {text, model, usage}
+  ```
+- A failed tool reaches the model as `{"error": "<code>: <message>"}` with `isError: true`.
