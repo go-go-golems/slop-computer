@@ -444,3 +444,47 @@ I (the coordinating agent, not the fork that wrote steps 1–4) reviewed the bra
 
 ### Technical details
 - Key format: `app@N` (`kernel.Running.App` + `N`), the same in `get`, `build` and now `onActivated`.
+
+## Step 6: go-go-goja pinned at the #107 review fixes (coordinator)
+
+The review fixes to go-go-golems/go-go-goja#107 concern `InvokeInVM` and the jsverbs parser, and neither is used by this PR. #38 moves to the same fork commit as #37 and #39 anyway, so that all three pin one go-go-goja until #107 is tagged.
+
+### Prompt Context
+**User prompt (verbatim):** "ok, address the issues" (the Codex findings on #107; see SLOP3-016 diary step 14)
+**Assistant interpretation:** After fixing #107, move every slop branch that pins the fork to the fixed commit.
+**Inferred user intent:** One go-go-goja revision across the stack, so that merging #38 next to #37 and #39 brings no version conflict.
+**Commit (code):** see `git log` for "actor VM: go-go-goja pinned at the #107 review fixes".
+
+### What I did
+- `go mod edit -replace github.com/go-go-golems/go-go-goja=github.com/wesen/go-go-goja@0d995b4…`, then `go mod tidy`.
+  - The pseudo-version is now `v0.0.4-0.20261107231049-0d995b4b7706`.
+  - tidy also marked `goja_nodejs` as a direct requirement: `pkg/actor/bridge.go` imports it.
+
+### Why
+- #37 and #39 now pin 0d995b4. If #38 kept 822e67c, whichever merged second would carry a `go.mod` conflict.
+
+### What worked
+- `go build ./...`: ok.
+- `go test ./pkg/actor/... ./pkg/host/...`: ok, direct mode, 21.7 s.
+- `SLOP_TEST_ACTORS_RUNTIME=engine go test ./pkg/host/...`: ok, 15.9 s.
+
+### What didn't work
+- Nothing.
+
+### What I learned
+- The #107 fixes touch only `pkg/jsverbs`. U1 and U2, which this PR uses, are unchanged since 822e67c.
+
+### What was tricky to build
+- Nothing.
+
+### What warrants a second pair of eyes
+- None beyond step 5.
+
+### What should be done in the future
+- Replace the fork with the go-go-goja tag once #107 is merged and tagged.
+
+### Code review instructions
+- `git diff HEAD~1 -- go.mod`.
+
+### Technical details
+- `git diff 822e67c..0d995b4 --stat` in go-go-goja touches `pkg/jsverbs/runtime.go`, `goja_parser.go`, their tests, `pkg/doc/11-jsverbs-example-reference.md` and the GOJA-069 ticket.

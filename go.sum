@@ -159,8 +159,8 @@ github.com/tj/assert v0.0.0-20190920132354-ee03d75cd160 h1:NSWpaDaurcAJY7PkL8Xt0
 github.com/tj/assert v0.0.0-20190920132354-ee03d75cd160/go.mod h1:mZ9/Rh9oLWpLLDRpvE+3b7gP/C2YyLFYxNmcLnPTMe0=
 github.com/tj/go-naturaldate v1.3.0 h1:OgJIPkR/Jk4bFMBLbxZ8w+QUxwjqSvzd9x+yXocY4RI=
 github.com/tj/go-naturaldate v1.3.0/go.mod h1:rpUbjivDKiS1BlfMGc2qUKNZ/yxgthOfmytQs8d8hKk=
-github.com/wesen/go-go-goja v0.0.4-0.20261107193645-822e67c611a8 h1:lAi8F3M31ZkgsxwlBdj+zVi5kK7VfXpgIT6oYLtWNo0=
-github.com/wesen/go-go-goja v0.0.4-0.20261107193645-822e67c611a8/go.mod h1:SzjO3fs74cZ3cDV3cmsGXY+P8UxP9WPx7oEWSn1E8bI=
+github.com/wesen/go-go-goja v0.0.4-0.20261107231049-0d995b4b7706 h1:KFk2NFLNy0CFLziTtjaHiKch7cMgEqKk3GqKhiUZBTA=
+github.com/wesen/go-go-goja v0.0.4-0.20261107231049-0d995b4b7706/go.mod h1:SzjO3fs74cZ3cDV3cmsGXY+P8UxP9WPx7oEWSn1E8bI=
 github.com/wk8/go-ordered-map/v2 v2.1.8 h1:5h/BUHu93oj4gIdvHHHGsScSTMijfx5PeYkE/fJgbpc=
 github.com/wk8/go-ordered-map/v2 v2.1.8/go.mod h1:5nJHM5DyteebpVlHnWMV0rPz6Zp7+xBAnxjb1X5vnTw=
 github.com/zitadel/oidc/v3 v3.51.16 h1:yx6YApCQUNBPTC30czcIMUJFqjXtidf9B9eXHbmlZwE=

@@ -22,7 +22,7 @@ require (
 
 require (
 	github.com/dop251/base64dec v0.0.0-20231022112746-c6c9f9a96217 // indirect
-	github.com/dop251/goja_nodejs v0.0.0-20260918173711-b481721df8a2 // indirect
+	github.com/dop251/goja_nodejs v0.0.0-20260918173711-b481721df8a2
 )
 
 require (
@@ -90,4 +90,4 @@ require (
 	gopkg.in/yaml.v2 v2.4.0 // indirect
 )
 
-replace github.com/go-go-golems/go-go-goja => github.com/wesen/go-go-goja v0.0.4-0.20261107193645-822e67c611a8
+replace github.com/go-go-golems/go-go-goja => github.com/wesen/go-go-goja v0.0.4-0.20261107231049-0d995b4b7706
