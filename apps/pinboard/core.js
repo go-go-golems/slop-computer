@@ -46,6 +46,34 @@
     return kind + ':' + s;
   }
 
+  // SHA-256 of a string's UTF-8 bytes, as hex. Pure JavaScript, so it runs in
+  // the page, in Node and in goja alike (app versions are identified by it).
+  const rotr = (x, n) => (x >>> n) | (x << (32 - n));
+  const frac = (x) => ((x - Math.floor(x)) * 0x100000000) >>> 0;
+  const PRIMES = []; for (let n = 2; PRIMES.length < 64; n++) if (PRIMES.every(p => n % p)) PRIMES.push(n);
+  const K = PRIMES.map(p => frac(Math.cbrt(p)));
+  const H0 = PRIMES.slice(0, 8).map(p => frac(Math.sqrt(p)));
+  function sha256(str) {
+    const bytes = []; const enc = encodeURIComponent(String(str));
+    for (let i = 0; i < enc.length; i++) { if (enc[i] === '%') { bytes.push(parseInt(enc.substr(i + 1, 2), 16)); i += 2; } else bytes.push(enc.charCodeAt(i)); }
+    const bits = bytes.length * 8; bytes.push(0x80); while (bytes.length % 64 !== 56) bytes.push(0);
+    const hi = Math.floor(bits / 0x100000000), lo = bits >>> 0;
+    bytes.push((hi >>> 24) & 255, (hi >>> 16) & 255, (hi >>> 8) & 255, hi & 255, (lo >>> 24) & 255, (lo >>> 16) & 255, (lo >>> 8) & 255, lo & 255);
+    const H = H0.slice(), W = new Array(64);
+    for (let i = 0; i < bytes.length; i += 64) {
+      for (let t = 0; t < 16; t++) W[t] = (bytes[i + 4 * t] << 24) | (bytes[i + 4 * t + 1] << 16) | (bytes[i + 4 * t + 2] << 8) | bytes[i + 4 * t + 3];
+      for (let t = 16; t < 64; t++) { const s0 = rotr(W[t - 15], 7) ^ rotr(W[t - 15], 18) ^ (W[t - 15] >>> 3), s1 = rotr(W[t - 2], 17) ^ rotr(W[t - 2], 19) ^ (W[t - 2] >>> 10); W[t] = (W[t - 16] + s0 + W[t - 7] + s1) | 0; }
+      let [a, b, c, d, e, f, g, h] = H;
+      for (let t = 0; t < 64; t++) {
+        const t1 = (h + (rotr(e, 6) ^ rotr(e, 11) ^ rotr(e, 25)) + ((e & f) ^ (~e & g)) + K[t] + W[t]) | 0;
+        const t2 = ((rotr(a, 2) ^ rotr(a, 13) ^ rotr(a, 22)) + ((a & b) ^ (a & c) ^ (b & c))) | 0;
+        h = g; g = f; f = e; e = (d + t1) | 0; d = c; c = b; b = a; a = (t1 + t2) | 0;
+      }
+      H[0] = (H[0] + a) | 0; H[1] = (H[1] + b) | 0; H[2] = (H[2] + c) | 0; H[3] = (H[3] + d) | 0; H[4] = (H[4] + e) | 0; H[5] = (H[5] + f) | 0; H[6] = (H[6] + g) | 0; H[7] = (H[7] + h) | 0;
+    }
+    return H.map(x => (x >>> 0).toString(16).padStart(8, '0')).join('');
+  }
+
   // A db path segment allows letters, digits and _ - . ~ : @ +. Free text
   // (collection names) is written as UTF-8 bytes, ~ and two hex digits each.
   const SEG_OK = /^[A-Za-z0-9_\-.:@+]$/;
@@ -173,7 +201,9 @@
       };
       m.demote = (clipId) => m.set('clips', clipId, c => (need(c, clipId), c.binding = null, c), 'unbind ' + clipId);
       // apps
-      m.register = (def) => m.set('apps', def.name, old => Object.assign(old || {}, def), 'register ' + def.name);
+      // An app record is replaced whole: nothing of an earlier version (or of a
+      // built-in app of the same name) carries over.
+      m.register = (def) => m.set('apps', def.name, () => Object.assign({}, def), 'register ' + def.name + (def.version ? ' v' + def.version : ''));
       m.unregister = (name) => m.set('apps', name, () => null, 'unregister ' + name);
       return m;
     }
@@ -261,5 +291,5 @@
     return rows.slice(0, q.limit || rows.length);
   }
 
-  return { COLL, STORE_OF, LEVELS, atLeast, clone, same, canon, newId, seg, unseg, pathOf, parsePath, keysFor, fromClip, createCore, logEntry, describe, query };
+  return { COLL, STORE_OF, LEVELS, atLeast, clone, same, canon, sha256, newId, seg, unseg, pathOf, parsePath, keysFor, fromClip, createCore, logEntry, describe, query };
 });

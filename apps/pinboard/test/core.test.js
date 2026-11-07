@@ -90,3 +90,17 @@ test('log entries keep values, or only paths when too large', () => {
   const big = C.logEntry({ id: 'tx:2', by: 'Ada', at: 1, label: 'x', ops: [{ store: 'clips', id: 'c', before: null, after: { t: 'x'.repeat(300000) }, label: 'x' }] });
   assert.ok(big.trimmed && big.ops[0].trimmed && big.ops[0].after === undefined);
 });
+
+test('sha256 matches the reference implementation', () => {
+  const crypto = require('node:crypto');
+  for (const s of ['', 'abc', 'ä€𝄞 app(\'x\')', 'x'.repeat(1000), 'y'.repeat(55), 'z'.repeat(56)]) {
+    assert.strictEqual(C.sha256(s), crypto.createHash('sha256').update(s, 'utf8').digest('hex'));
+  }
+});
+
+test('registering replaces the app record whole', () => {
+  const { S, core } = board('admin');
+  S.apps.x = { name: 'x', source: 'old', builtin: 'v1', extra: 1 };
+  core.mutate(m => m.register({ name: 'x', source: 'new', version: 1 }));
+  assert.deepStrictEqual(S.apps.x, { name: 'x', source: 'new', version: 1 });
+});

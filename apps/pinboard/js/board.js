@@ -660,6 +660,7 @@
     if (dockDirty) B.renderDock();
     const touched = new Set();
     for (const k of keys) { if (k.startsWith('clips:')) touched.add(k.slice(6)); }
+    for (const k of keys) if (k.startsWith('apps:')) { const n = k.slice(5); Object.values(PB.S.clips).forEach(c => { if (c.kind === 'app' && c.app === n) touched.add(c.id); }); }
     // app windows whose deps intersect
     Object.keys(wins).forEach(id => { const w = wins[id]; if (touched.has(id)) return; const c = PB.S.clips[id]; if (!c) return; if (!w.deps) return; for (const k of keys) { if (w.deps.has(k) || (k.startsWith('coll:') && w.deps.has(k)) || (k === 'records' && [...w.deps].some(d => d.startsWith('coll:'))) || (k === 'clips' && w.deps.has('clips')) || (k === 'selection' && w.deps.has('selection'))) { touched.add(id); break; } } });
     if (allDirty) B.renderAll(); else touched.forEach(id => B.renderClip(id));

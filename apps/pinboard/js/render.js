@@ -28,7 +28,7 @@
       mutate: (fn) => PB.mutate(fn, clip.kind === 'app' ? 'app:' + clip.app : PB.actor),
       toast: (msg) => PB.toast(msg),
       sel: () => { const c = PB.S.clips[id] || clip; return c.binding ? PB.S.records[c.binding.id] : null; },
-      agent: () => PB.agent, apps: PB.apps,
+      agent: () => (def && def._narrow ? null : PB.agent), apps: def && def._narrow ? PB.apps.narrow : PB.apps,
       ui, fragment: PB.fragment, ago: PB.ago, match: PB.match, clock: PB.clock,
     };
     return Object.assign(ctx, extra);

@@ -165,6 +165,7 @@ window.PB = window.PB || {};
     if (mine && mine.exists) Object.assign(PB.S.meta, PB.clone(mine.data()));
     else VIEW_KEYS.forEach(k => { const v = local.get(k); if (v !== undefined) PB.S.meta[k] = v; });
     Object.keys(PB.builtins).forEach(n => { if (!PB.S.apps[n]) PB.S.apps[n] = PB.builtins[n]; });
+    await PB.trust.load();
     PB.zTop = Math.max(1, ...Object.values(PB.S.clips).map(c => c.z || 0));
   };
 
@@ -234,13 +235,17 @@ window.PB = window.PB || {};
   PB.emit = (ev, ...a) => { (listeners[ev] || []).forEach(f => { try { f(...a); } catch (e) { console.error(e); } }); };
 
   // ---------- transactions ----------
+  const isBuiltin = (store, id) => store === 'apps' && PB.builtins[id] && PB.S.apps[id] === PB.builtins[id];
   function put(store, id, val) {
-    if (val == null) { delete PB.S[store][id]; PB.del(store, id); }
-    else { PB.S[store][id] = val; PB.save(store, id); }
+    if (val == null) {
+      if (isBuiltin(store, id)) return;
+      delete PB.S[store][id]; PB.del(store, id);
+      if (store === 'apps' && PB.builtins[id]) PB.S.apps[id] = PB.builtins[id];   // the shipped app shows again
+    } else { PB.S[store][id] = val; PB.save(store, id); }
   }
   PB.zTop = 1;
   PB.core = C.createCore({
-    get: (store, id) => PB.S[store][id],
+    get: (store, id) => (isBuiltin(store, id) ? undefined : PB.S[store][id]),
     put,
     list: (store) => Object.values(PB.S[store]),
     level: () => PB.rt.level,
@@ -334,6 +339,37 @@ window.PB = window.PB || {};
     PB.save(store, id, 300);
     const ks = new Set(keys || [store + ':' + id]); PB.emit('change', ks);
   };
+  // ---------- app versions and trust ----------
+  // Every registered version is kept at apps/<name>/versions/<n> (admins
+  // write apps/). Running an app written by someone else needs this viewer's
+  // consent for that exact source (its sha256), kept in data/users/<me>/trust,
+  // or in this browser for viewers.
+  PB.saveVersion = function (name, n, doc) {
+    if (!PB.rt.db || !PB.can('admin')) return;
+    schedule('apps/' + PB.seg(name) + '/versions/' + n, () => doc, 40);
+  };
+  PB.versions = async function (name) {
+    if (!PB.rt.db) return [];
+    const s = await PB.rt.db.collection('apps/' + PB.seg(name) + '/versions').get();
+    return s.docs.map(d => Object.assign({ n: Number(d.id) }, d.data())).sort((a, b) => b.n - a.n);
+  };
+  const TRUST_DOC = () => PB.myId() ? 'data/users/' + PB.myId() + '/trust' : null;
+  PB.trust = {
+    apps: {},
+    async load() {
+      const doc = TRUST_DOC();
+      if (doc && PB.rt.db && PB.can('interact')) { const s = await PB.rt.db.doc(doc).get().catch(() => null); if (s && s.exists) this.apps = PB.clone(s.data().apps || {}); }
+      else this.apps = local.get('trust') || {};
+    },
+    has(name, sha) { return !!sha && this.apps[name] === sha; },
+    set(name, sha) {
+      this.apps[name] = sha;
+      const doc = TRUST_DOC();
+      if (doc && PB.rt.db && PB.can('interact')) schedule(doc, () => ({ apps: this.apps }), 40);
+      else local.set('trust', this.apps);
+    },
+  };
+
   // c.local: per viewer and per window, kept in this tab only (a search box,
   // a selected row), so one person's typing does not change everyone's view.
   PB.local = {};

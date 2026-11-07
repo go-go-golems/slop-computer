@@ -35,27 +35,57 @@
   const defs = {};
   const A = PB.apps = {
     _capture: null,
-    evalSource(src) {
+    // App source is evaluated with the grammar and the board API. Apps that
+    // are not built in get a narrower scope: no PB (the page's internals),
+    // and at run time no agent and only open/list of apps (render.js). This
+    // prevents accidents, not a determined author: the code still runs in the
+    // page's realm. Isolation in a frame is a later phase.
+    evalSource(src, opts = {}) {
       const cap = []; const prev = A._capture; A._capture = cap;
       try {
         const fn = new Function('ui', 'app', 'db', 'fragment', 'board', 'PB', 'helpers', '"use strict";\n' + src + '\n');
-        fn(ui, PB.app, PB.db, PB.fragment, PB.boardAPI, PB, { ago: PB.ago, match: PB.match, clock: PB.clock, host: PB.host, md: PB.md, toYAML: PB.toYAML });
+        fn(ui, PB.app, PB.db, PB.fragment, PB.boardAPI, opts.narrow ? undefined : PB, { ago: PB.ago, match: PB.match, clock: PB.clock, host: PB.host, md: PB.md, toYAML: PB.toYAML });
       } finally { A._capture = prev; }
       if (!cap.length) throw new Error('the source registers nothing: end it with app(\'name\')….register()');
-      return cap[cap.length - 1];
+      const def = cap[cap.length - 1];
+      return opts.narrow ? Object.assign({}, def, { _narrow: true }) : def;
     },
+    // Registering writes a new version: apps/<name> (replaced whole) and
+    // apps/<name>/versions/<n>, with the author and the source's sha256.
     registerSource(src, extra = {}) {
-      const def = A.evalSource(src);
+      const def = A.evalSource(src, { narrow: true });
       delete defs[def.name];
-      PB.mutate(m => m.register(Object.assign({ name: def.name, source: src, icon: def.icon || '△', title: def.title || def.name, about: def.about || '', shortcut: def.shortcut || '', hidden: !!def.hidden, order: def.order }, extra)), PB.actor);
+      const old = PB.S.apps[def.name];
+      const version = ((old && old !== PB.builtins[def.name] && old.version) || 0) + 1;
+      const sha256 = PinboardCore.sha256(src), at = Date.now();
+      const rec = Object.assign({ name: def.name, source: src, icon: def.icon || '△', title: def.title || def.name, about: def.about || '', shortcut: def.shortcut || '', hidden: !!def.hidden, order: def.order, version, by: PB.myName(), uid: PB.myId(), at, sha256 }, extra);
+      PB.mutate(m => m.register(rec), PB.actor);
+      PB.saveVersion(def.name, version, { source: src, by: rec.by, uid: rec.uid, at, sha256, note: extra.note || '' });
       defs[def.name] = def; return def;
+    },
+    // Built-in apps, and apps this person wrote, run without asking; any
+    // other app runs only after this person accepted that exact source.
+    trusted(a) {
+      if (!a) return false;
+      if (a === PB.builtins[a.name]) return true;
+      if (a.uid && a.uid === PB.myId()) return true;
+      return PB.trust.has(a.name, a.sha256 || PinboardCore.sha256(a.source || ''));
+    },
+    trust(name) {
+      const a = PB.S.apps[name]; if (!a) return;
+      PB.trust.set(name, a.sha256 || PinboardCore.sha256(a.source || ''));
+      delete defs[name];
+      PB.emit('change', new Set(['apps:' + name]));
     },
     def(name) {
       if (defs[name]) return defs[name];
       const a = PB.S.apps[name]; if (!a) return null;
-      try { defs[name] = A.evalSource(a.source); } catch (e) { defs[name] = { name, error: e, params: [], state: {}, icon: a.icon, title: a.title }; }
+      if (!A.trusted(a)) return { name, untrusted: true, record: a, params: [], state: {}, icon: a.icon, title: a.title, w: 420, h: 320 };
+      const narrow = a !== PB.builtins[name];
+      try { defs[name] = A.evalSource(a.source, { narrow }); } catch (e) { defs[name] = { name, error: e, params: [], state: {}, icon: a.icon, title: a.title }; }
       return defs[name];
     },
+    narrow: Object.freeze({ open: (name, opts) => A.open(name, opts), list: () => A.list().map(a => ({ name: a.name, title: a.title, icon: a.icon, by: a.by, version: a.version })) }),
     invalidate(name) { if (name) delete defs[name]; else Object.keys(defs).forEach(k => delete defs[k]); },
     source: (name) => (PB.S.apps[name] || {}).source || '',
     list: () => Object.values(PB.S.apps),
@@ -77,6 +107,7 @@
       const def = A.def(clip.app);
       const root = el('div', 'appview');
       if (!def) { root.append(el('div', 'rerr', 'app "' + clip.app + '" is not registered. Open the editor to write it, or ⌘Z.')); return root; }
+      if (def.untrusted) return trustPrompt(def.record, root);
       if (def.error) { root.append(el('div', 'fail', 'app ' + clip.app + ' failed to load: ' + def.error.message)); const b = el('button', 'btn sm', 'edit source'); b.addEventListener('click', () => A.edit(clip.app)); root.append(b); return root; }
       if (def.toolbar) { const tb = el('div', 'toolbar'); tb.append(PB.render(def.toolbar, ctx)); root.append(tb); }
       const main = el('div', 'appmain'); const body = el('div', 'scroll'); body.append(def.view ? PB.render(def.view, ctx) : el('div', 'empty padded', 'this app has no view')); main.append(body);
@@ -85,6 +116,22 @@
     },
   };
   PB.on('mutation', (tx, keys) => { for (const k of keys) if (k.startsWith('apps:')) delete defs[k.slice(5)]; });
+  PB.on('remote', (keys) => { for (const k of keys) if (k.startsWith('apps:')) delete defs[k.slice(5)]; });
+
+  // "Moodboard v4 by Ada · run it · view source": shown instead of an app
+  // written by someone else until this viewer accepts that version.
+  function trustPrompt(a, root) {
+    const box = el('div', 'trust padded');
+    box.append(
+      el('p', '', (a.title || a.name) + (a.version ? ' v' + a.version : '') + ' was written by ' + (a.by || 'someone') + (a.at ? ', ' + PB.ago(a.at) : '') + '.'),
+      el('p', 'small muted', 'Apps run in your page as you: they can change this board and use your model allowance. Run it only if you trust ' + (a.by || 'its author') + '. You are asked again when it changes.'));
+    const row = el('div', 'row');
+    const run = el('button', 'btn primary sm', 'Run it'); run.addEventListener('click', () => A.trust(a.name));
+    const src = el('button', 'btn sm', 'View source');
+    const pre = el('pre', 'mono small srcview'); pre.textContent = a.source || ''; pre.style.display = 'none';
+    src.addEventListener('click', () => { pre.style.display = pre.style.display === 'none' ? '' : 'none'; });
+    row.append(run, src); box.append(row, pre); root.append(box); return root;
+  }
 
   // ---------- built-in apps (plain sources, so the agent and the editor can read and change them) ----------
   A.TEMPLATE = [
@@ -269,7 +316,7 @@
         const def = A.evalSource(SRC[name]);
         const rec = { name: def.name, source: SRC[name], icon: def.icon || '△', title: def.title || def.name, about: def.about || '', shortcut: def.shortcut || '', hidden: !!def.hidden, order: def.order, builtin: 'v1' };
         PB.builtins[def.name] = rec;
-        if (!PB.S.apps[def.name] || PB.S.apps[def.name].builtin) { PB.S.apps[def.name] = rec; defs[def.name] = def; }
+        if (!PB.S.apps[def.name]) { PB.S.apps[def.name] = rec; defs[def.name] = def; }
       } catch (e) { console.error('seed ' + name, e); }
     });
     PB.history.txs.length = 0; PB.history.idx = 0;
@@ -302,7 +349,7 @@
     "  .agent.describe(c => '…').agent.allow(['insert']).agent.suggest(['…'])",
     "  .register()",
     "```",
-    "Apps are kept as source in the browser and re-evaluated at load. `apps.open(name, { state, params })`, `apps.edit(name)`, `apps.registerSource(src)`, `apps.source(name)`, `apps.unregister(name)`, `apps.list()`.",
+    "Apps are kept as source on the board (apps/<name>, every version in apps/<name>/versions/<n> with its author and sha256) and re-evaluated at load. Only board admins register apps. Everyone else's app runs for a person only after they accept that version (a prompt in its window); built-in apps and your own run at once. Board apps get a narrower scope than built-ins: no `PB`, and in `c` no `agent()` and only `apps.open`/`apps.list`. `apps.open(name, { state, params })`, `apps.edit(name)`, `apps.registerSource(src)`, `apps.source(name)`, `apps.unregister(name)`, `apps.list()`.",
     "",
     "## Fragments",
     "`fragment('taggable').attr('tags', []).method('tag', (b, ...t) => b.set('tags', x => [...x, ...t])).query('hasTag', (node, t) => …).decorate(b => b.footer(…)).on('paste', (b, data) => …)`; use with `.use(taggable)`; `.global()` adds its methods to every builder. Every clip carries taggable, sourced, bound and annotated.",
