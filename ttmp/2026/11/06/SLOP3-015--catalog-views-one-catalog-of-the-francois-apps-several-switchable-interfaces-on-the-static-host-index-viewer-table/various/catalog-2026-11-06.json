@@ -1,0 +1,3392 @@
+{
+ "generated": "2026-11-07T00:02:42Z",
+ "source": "https://slop.boutique",
+ "appsOrigin": "https://apps.slop.yolo.scapegoat.dev",
+ "count": 100,
+ "totalBytes": 85757934,
+ "tags": [
+  {
+   "tag": "3d",
+   "count": 17
+  },
+  {
+   "tag": "agents",
+   "count": 17
+  },
+  {
+   "tag": "simulation",
+   "count": 17
+  },
+  {
+   "tag": "video",
+   "count": 17
+  },
+  {
+   "tag": "shaders",
+   "count": 13
+  },
+  {
+   "tag": "education",
+   "count": 10
+  },
+  {
+   "tag": "generative",
+   "count": 9
+  },
+  {
+   "tag": "design",
+   "count": 8
+  },
+  {
+   "tag": "dsl",
+   "count": 8
+  },
+  {
+   "tag": "math",
+   "count": 8
+  },
+  {
+   "tag": "blueprint style",
+   "count": 7
+  },
+  {
+   "tag": "cad",
+   "count": 7
+  },
+  {
+   "tag": "developer-tools",
+   "count": 7
+  },
+  {
+   "tag": "game",
+   "count": 7
+  },
+  {
+   "tag": "handheld",
+   "count": 7
+  },
+  {
+   "tag": "architecture",
+   "count": 6
+  },
+  {
+   "tag": "data",
+   "count": 6
+  },
+  {
+   "tag": "digital-twins",
+   "count": 6
+  },
+  {
+   "tag": "robotics",
+   "count": 5
+  },
+  {
+   "tag": "typography",
+   "count": 5
+  },
+  {
+   "tag": "games",
+   "count": 4
+  },
+  {
+   "tag": "generative music",
+   "count": 4
+  },
+  {
+   "tag": "machine-learning",
+   "count": 4
+  },
+  {
+   "tag": "physics",
+   "count": 4
+  },
+  {
+   "tag": "procedural animation",
+   "count": 4
+  },
+  {
+   "tag": "trailer",
+   "count": 4
+  },
+  {
+   "tag": "canvas",
+   "count": 3
+  },
+  {
+   "tag": "game engine",
+   "count": 3
+  },
+  {
+   "tag": "loop",
+   "count": 3
+  },
+  {
+   "tag": "product design",
+   "count": 3
+  },
+  {
+   "tag": "research",
+   "count": 3
+  },
+  {
+   "tag": "sketch style",
+   "count": 3
+  },
+  {
+   "tag": "slides",
+   "count": 3
+  },
+  {
+   "tag": "web",
+   "count": 3
+  },
+  {
+   "tag": "ada lovelace",
+   "count": 2
+  },
+  {
+   "tag": "animation",
+   "count": 2
+  },
+  {
+   "tag": "comics",
+   "count": 2
+  },
+  {
+   "tag": "concept",
+   "count": 2
+  },
+  {
+   "tag": "cozy",
+   "count": 2
+  },
+  {
+   "tag": "cozy game",
+   "count": 2
+  },
+  {
+   "tag": "cycling",
+   "count": 2
+  },
+  {
+   "tag": "design systems",
+   "count": 2
+  },
+  {
+   "tag": "design tool",
+   "count": 2
+  },
+  {
+   "tag": "driving",
+   "count": 2
+  },
+  {
+   "tag": "fashion",
+   "count": 2
+  },
+  {
+   "tag": "genui",
+   "count": 2
+  },
+  {
+   "tag": "ide",
+   "count": 2
+  },
+  {
+   "tag": "multiplayer",
+   "count": 2
+  },
+  {
+   "tag": "perspective drawing",
+   "count": 2
+  },
+  {
+   "tag": "planet",
+   "count": 2
+  },
+  {
+   "tag": "print",
+   "count": 2
+  },
+  {
+   "tag": "protocol",
+   "count": 2
+  },
+  {
+   "tag": "real routes",
+   "count": 2
+  },
+  {
+   "tag": "storytelling",
+   "count": 2
+  },
+  {
+   "tag": "textile",
+   "count": 2
+  },
+  {
+   "tag": "townscaper",
+   "count": 2
+  },
+  {
+   "tag": "ui",
+   "count": 2
+  },
+  {
+   "tag": "webgl",
+   "count": 2
+  },
+  {
+   "tag": "webgpu",
+   "count": 2
+  },
+  {
+   "tag": "wfc",
+   "count": 2
+  },
+  {
+   "tag": "1-bit",
+   "count": 1
+  },
+  {
+   "tag": "2.4d",
+   "count": 1
+  },
+  {
+   "tag": "3d printing",
+   "count": 1
+  },
+  {
+   "tag": "accessibility",
+   "count": 1
+  },
+  {
+   "tag": "artefact",
+   "count": 1
+  },
+  {
+   "tag": "attention",
+   "count": 1
+  },
+  {
+   "tag": "brand",
+   "count": 1
+  },
+  {
+   "tag": "cameras",
+   "count": 1
+  },
+  {
+   "tag": "chemistry",
+   "count": 1
+  },
+  {
+   "tag": "claude",
+   "count": 1
+  },
+  {
+   "tag": "creative play",
+   "count": 1
+  },
+  {
+   "tag": "data viz",
+   "count": 1
+  },
+  {
+   "tag": "demo",
+   "count": 1
+  },
+  {
+   "tag": "disney",
+   "count": 1
+  },
+  {
+   "tag": "emergent stories",
+   "count": 1
+  },
+  {
+   "tag": "esp32",
+   "count": 1
+  },
+  {
+   "tag": "explainer",
+   "count": 1
+  },
+  {
+   "tag": "factory",
+   "count": 1
+  },
+  {
+   "tag": "fighting game",
+   "count": 1
+  },
+  {
+   "tag": "game design",
+   "count": 1
+  },
+  {
+   "tag": "generation",
+   "count": 1
+  },
+  {
+   "tag": "generative art",
+   "count": 1
+  },
+  {
+   "tag": "generative ui",
+   "count": 1
+  },
+  {
+   "tag": "ghost",
+   "count": 1
+  },
+  {
+   "tag": "gta 2",
+   "count": 1
+  },
+  {
+   "tag": "hardware",
+   "count": 1
+  },
+  {
+   "tag": "idea",
+   "count": 1
+  },
+  {
+   "tag": "idle game",
+   "count": 1
+  },
+  {
+   "tag": "industrial design",
+   "count": 1
+  },
+  {
+   "tag": "language",
+   "count": 1
+  },
+  {
+   "tag": "learning ui",
+   "count": 1
+  },
+  {
+   "tag": "libraries",
+   "count": 1
+  },
+  {
+   "tag": "loom",
+   "count": 1
+  },
+  {
+   "tag": "loops",
+   "count": 1
+  },
+  {
+   "tag": "luau",
+   "count": 1
+  },
+  {
+   "tag": "machine",
+   "count": 1
+  },
+  {
+   "tag": "mirror's edge",
+   "count": 1
+  },
+  {
+   "tag": "notebook",
+   "count": 1
+  },
+  {
+   "tag": "organic grid",
+   "count": 1
+  },
+  {
+   "tag": "parkour",
+   "count": 1
+  },
+  {
+   "tag": "patent style",
+   "count": 1
+  },
+  {
+   "tag": "pixel art",
+   "count": 1
+  },
+  {
+   "tag": "playful",
+   "count": 1
+  },
+  {
+   "tag": "point & prompt",
+   "count": 1
+  },
+  {
+   "tag": "point cloud",
+   "count": 1
+  },
+  {
+   "tag": "procedural",
+   "count": 1
+  },
+  {
+   "tag": "programming",
+   "count": 1
+  },
+  {
+   "tag": "rendering",
+   "count": 1
+  },
+  {
+   "tag": "reskin",
+   "count": 1
+  },
+  {
+   "tag": "roblox",
+   "count": 1
+  },
+  {
+   "tag": "rts",
+   "count": 1
+  },
+  {
+   "tag": "search",
+   "count": 1
+  },
+  {
+   "tag": "spider-verse",
+   "count": 1
+  },
+  {
+   "tag": "thought",
+   "count": 1
+  },
+  {
+   "tag": "tool",
+   "count": 1
+  },
+  {
+   "tag": "tooling",
+   "count": 1
+  },
+  {
+   "tag": "ux",
+   "count": 1
+  },
+  {
+   "tag": "video export",
+   "count": 1
+  },
+  {
+   "tag": "visualization",
+   "count": 1
+  },
+  {
+   "tag": "webgl2",
+   "count": 1
+  },
+  {
+   "tag": "westworld",
+   "count": 1
+  },
+  {
+   "tag": "workflow",
+   "count": 1
+  },
+  {
+   "tag": "world models",
+   "count": 1
+  },
+  {
+   "tag": "writing",
+   "count": 1
+  },
+  {
+   "tag": "zelda",
+   "count": 1
+  }
+ ],
+ "items": [
+  {
+   "id": "claude-computer",
+   "title": "Claude.Computer",
+   "description": "A computer you and Claude share, one per conversation: Claude answers by building files and small apps on a desktop you both use, live.",
+   "tags": [
+    "artefact",
+    "claude",
+    "genui",
+    "ghost"
+   ],
+   "featured": false,
+   "version": "1.0.0",
+   "publishedAt": "2026-10-25T22:39:04Z",
+   "free": true,
+   "capabilities": [
+    "sample"
+   ],
+   "bytes": 651478,
+   "attachments": [],
+   "cover": {
+    "src": "/_d/francois-media-2/1/files/med_ddcbe3a005ca8c2af44cd212.png",
+    "width": 1586,
+    "height": 1042
+   },
+   "open": "https://apps.slop.yolo.scapegoat.dev/f/claude-computer/",
+   "preview": "/_s/claude-computer/main/index.html",
+   "download": "/_s/claude-computer/main/index.html"
+  },
+  {
+   "id": "shop-next",
+   "title": "Shop Next",
+   "description": "“A design canvas where the design is the running product: screens, people, data, services and tests on one stage, shaped with Claude and published as an app people actually use.",
+   "tags": [
+    "canvas",
+    "design",
+    "genui",
+    "product design",
+    "ui",
+    "ux"
+   ],
+   "featured": false,
+   "version": "1.0.0",
+   "publishedAt": "2026-10-25T08:41:54Z",
+   "free": true,
+   "capabilities": [
+    "sample"
+   ],
+   "bytes": 2598839,
+   "attachments": [],
+   "cover": {
+    "src": "/_d/francois-media-2/1/files/med_ad2ceb26402cefe280033b59.png",
+    "width": 1374,
+    "height": 1124
+   },
+   "open": "https://apps.slop.yolo.scapegoat.dev/f/shop-next/",
+   "preview": "/_s/shop-next/main/index.html",
+   "download": "/_s/shop-next/main/index.html"
+  },
+  {
+   "id": "takt",
+   "title": "Takt",
+   "description": "Rethinking the notebook",
+   "tags": [
+    "data",
+    "notebook",
+    "programming",
+    "tooling",
+    "visualization"
+   ],
+   "featured": false,
+   "version": "1.0.0",
+   "publishedAt": "2026-10-24T22:52:53Z",
+   "free": true,
+   "capabilities": [
+    "sample"
+   ],
+   "bytes": 272051,
+   "attachments": [],
+   "cover": {
+    "src": "/_d/francois-media/1/files/med_62eceb612a1665df7aa3c32d.png",
+    "width": 1710,
+    "height": 1258
+   },
+   "open": "https://apps.slop.yolo.scapegoat.dev/f/takt/",
+   "preview": "/_s/takt/main/index.html",
+   "download": "/_s/takt/main/index.html"
+  },
+  {
+   "id": "thought-machines",
+   "title": "Thought Machines",
+   "description": "Whiteboard tools are good at capturing thoughts; diagram languages like Mermaid are good at structure. Neither lets a diagram do anything",
+   "tags": [
+    "generation",
+    "ide",
+    "idea",
+    "machine",
+    "thought",
+    "tool"
+   ],
+   "featured": false,
+   "version": "1.0.0",
+   "publishedAt": "2026-10-24T22:34:08Z",
+   "free": true,
+   "capabilities": [
+    "sample"
+   ],
+   "bytes": 196172,
+   "attachments": [],
+   "cover": {
+    "src": "/_d/francois-media/1/files/med_29817f7d92993bc91e06d6dc.png",
+    "width": 2736,
+    "height": 1442
+   },
+   "open": "https://apps.slop.yolo.scapegoat.dev/f/thought-machines/",
+   "preview": "/_s/thought-machines/main/index.html",
+   "download": "/_s/thought-machines/main/index.html"
+  },
+  {
+   "id": "beton-brut-studio",
+   "title": "Béton Brut Studio",
+   "description": "A fluent JS grammar that compiles to a graph and renders weathered board-formed brutalist concrete.",
+   "tags": [
+    "architecture",
+    "dsl",
+    "rendering",
+    "webgl2"
+   ],
+   "featured": false,
+   "version": "1.0.0",
+   "publishedAt": "2026-10-24T20:38:23Z",
+   "free": true,
+   "capabilities": [
+    "sample"
+   ],
+   "bytes": 20006,
+   "attachments": [],
+   "cover": {
+    "src": "/_d/francois-media/1/files/med_695f8f54b47667adc14ba5ed.jpg",
+    "width": 1318,
+    "height": 713
+   },
+   "open": "https://apps.slop.yolo.scapegoat.dev/f/beton-brut-studio/",
+   "preview": "/_s/beton-brut-studio/main/index.html",
+   "download": "/_s/beton-brut-studio/main/index.html"
+  },
+  {
+   "id": "exposure-studio",
+   "title": "Exposure Studio",
+   "description": "A world-building language where cameras invent what they see and rules decide what becomes real.",
+   "tags": [
+    "cameras",
+    "language",
+    "point cloud",
+    "world models"
+   ],
+   "featured": false,
+   "version": "1.0.0",
+   "publishedAt": "2026-10-24T20:37:01Z",
+   "free": true,
+   "capabilities": [
+    "sample"
+   ],
+   "bytes": 117360,
+   "attachments": [],
+   "cover": {
+    "src": "/_d/francois-media-2/1/files/med_c7a608bfab807f589fbdb738.png",
+    "width": 1440,
+    "height": 900
+   },
+   "open": "https://apps.slop.yolo.scapegoat.dev/f/exposure-studio/",
+   "preview": "/_s/exposure-studio/main/index.html",
+   "download": "/_s/exposure-studio/main/index.html"
+  },
+  {
+   "id": "plenum-studio",
+   "title": "Plenum Studio",
+   "description": "An IDE for websites built as maps: a fluent JS grammar compiled to an IR and DAG, a WebGL field renderer, nine presets and Claude agents.",
+   "tags": [
+    "concept",
+    "data viz",
+    "ide",
+    "web",
+    "webgpu"
+   ],
+   "featured": false,
+   "version": "1.0.0",
+   "publishedAt": "2026-10-24T20:33:39Z",
+   "free": true,
+   "capabilities": [
+    "sample"
+   ],
+   "bytes": 209424,
+   "attachments": [],
+   "cover": null,
+   "open": "https://apps.slop.yolo.scapegoat.dev/f/plenum-studio/",
+   "preview": "/_s/plenum-studio/main/index.html",
+   "download": "/_s/plenum-studio/main/index.html"
+  },
+  {
+   "id": "brand-crystal",
+   "title": "Brand Crystal",
+   "description": "A five-step studio to explore, define, refine, test and understand a brand language, ending in a living guide.",
+   "tags": [
+    "brand",
+    "design tool",
+    "learning ui"
+   ],
+   "featured": false,
+   "version": "1.0.0",
+   "publishedAt": "2026-10-24T20:32:41Z",
+   "free": true,
+   "capabilities": [
+    "sample"
+   ],
+   "bytes": 92989,
+   "attachments": [],
+   "cover": null,
+   "open": "https://apps.slop.yolo.scapegoat.dev/f/brand-crystal/",
+   "preview": "/_s/brand-crystal/main/index.html",
+   "download": "/_s/brand-crystal/main/index.html"
+  },
+  {
+   "id": "plads",
+   "title": "Plads",
+   "description": "A playful scriptable canvas, expanded by distilling ideas from 30 creative-coding libraries.",
+   "tags": [
+    "canvas",
+    "demo",
+    "libraries",
+    "playful",
+    "research"
+   ],
+   "featured": false,
+   "version": "1.0.0",
+   "publishedAt": "2026-10-24T20:22:50Z",
+   "free": true,
+   "capabilities": [
+    "sample"
+   ],
+   "bytes": 701277,
+   "attachments": [],
+   "cover": {
+    "src": "/_d/francois-media-2/1/files/med_876dfaef8800885d6bc22ea6.png",
+    "width": 1600,
+    "height": 1000
+   },
+   "open": "https://apps.slop.yolo.scapegoat.dev/f/plads/",
+   "preview": "/_s/plads/main/index.html",
+   "download": "/_s/plads/main/index.html"
+  },
+  {
+   "id": "on-twos",
+   "title": "on_twos",
+   "description": "A black-and-white studio for procedural Spider-Verse-style loops with video, GIF, PNG and HTML export.",
+   "tags": [
+    "animation",
+    "research",
+    "shaders",
+    "spider-verse",
+    "video export"
+   ],
+   "featured": false,
+   "version": "1.0.0",
+   "publishedAt": "2026-10-24T20:20:10Z",
+   "free": true,
+   "capabilities": [
+    "sample"
+   ],
+   "bytes": 258134,
+   "attachments": [],
+   "cover": {
+    "src": "/_d/francois-media/1/files/med_1e9fe45c0032d4a33e20c9e5.png",
+    "width": 540,
+    "height": 400
+   },
+   "open": "https://apps.slop.yolo.scapegoat.dev/f/on-twos/",
+   "preview": "/_s/on-twos/main/index.html",
+   "download": "/_s/on-twos/main/index.html"
+  },
+  {
+   "id": "shop-strata",
+   "title": "Shop Strata",
+   "description": "A canvas where design grows like a colony, with a large Alpstein example: 27 screens, 6 data tables and three weeks of growth that runs as an app.",
+   "tags": [
+    "agents",
+    "canvas",
+    "design systems",
+    "design tool",
+    "writing"
+   ],
+   "featured": false,
+   "version": "1.0.0",
+   "publishedAt": "2026-10-24T20:18:44Z",
+   "free": true,
+   "capabilities": [
+    "sample"
+   ],
+   "bytes": 258805,
+   "attachments": [],
+   "cover": {
+    "src": "/_d/francois-media-2/1/files/med_8a0fb16a5a9561afbf97abcb.png",
+    "width": 1440,
+    "height": 900
+   },
+   "open": "https://apps.slop.yolo.scapegoat.dev/f/shop-strata/",
+   "preview": "/_s/shop-strata/main/index.html",
+   "download": "/_s/shop-strata/main/index.html"
+  },
+  {
+   "id": "no-shade",
+   "title": "no_shade",
+   "description": "A simpler, canvas-first rework of no_shade: Figma for shader-based websites (v21, Arial A–Z).",
+   "tags": [
+    "accessibility",
+    "typography",
+    "video",
+    "web",
+    "webgl"
+   ],
+   "featured": false,
+   "version": "1.0.0",
+   "publishedAt": "2026-10-24T20:07:28Z",
+   "free": true,
+   "capabilities": [
+    "sample"
+   ],
+   "bytes": 1044747,
+   "attachments": [],
+   "cover": {
+    "src": "/_d/francois-media-3/1/files/med_fa4614b8d742a10c29c6f7ab.jpg",
+    "width": 1280,
+    "height": 760
+   },
+   "open": "https://apps.slop.yolo.scapegoat.dev/f/no-shade/",
+   "preview": "/_s/no-shade/main/index.html",
+   "download": "/_s/no-shade/main/index.html"
+  },
+  {
+   "id": "kustenlinie",
+   "title": "Küstenlinie",
+   "description": "A drive down the real Big Sur stretch of Highway 1 on live California time, in a black cabriolet, with an endless autopilot cruise and a mixable desert-house and ASMR coast soundtrack.",
+   "tags": [
+    "cozy",
+    "cycling",
+    "driving",
+    "game",
+    "real routes",
+    "trailer",
+    "video"
+   ],
+   "featured": false,
+   "version": "1.0.0",
+   "publishedAt": "2026-10-24T20:02:41Z",
+   "free": true,
+   "capabilities": [
+    "sample"
+   ],
+   "bytes": 1177087,
+   "attachments": [],
+   "cover": {
+    "src": "/_d/francois-media/1/files/med_46597e4df792f8ea4c7185ae.png",
+    "width": 2092,
+    "height": 1238
+   },
+   "open": "https://apps.slop.yolo.scapegoat.dev/f/kustenlinie/",
+   "preview": "/_s/kustenlinie/main/index.html",
+   "download": "/_s/kustenlinie/main/index.html"
+  },
+  {
+   "id": "wend",
+   "title": "Wend",
+   "description": "A minimal ambient ride on a gravel bike through a seeded pencil-drawn world; one orbiting pinhole camera, colours that return as you gather glyphs, and a Math view that shows every formula live.",
+   "tags": [
+    "cozy",
+    "cycling",
+    "driving",
+    "game",
+    "real routes",
+    "trailer",
+    "video"
+   ],
+   "featured": false,
+   "version": "1.0.0",
+   "publishedAt": "2026-10-24T20:00:52Z",
+   "free": true,
+   "capabilities": [
+    "sample"
+   ],
+   "bytes": 628288,
+   "attachments": [],
+   "cover": {
+    "src": "/_d/francois-media/1/files/med_66d2f4c1ff096bb67bfed598.png",
+    "width": 2074,
+    "height": 1280
+   },
+   "open": "https://apps.slop.yolo.scapegoat.dev/f/wend/",
+   "preview": "/_s/wend/main/index.html",
+   "download": "/_s/wend/main/index.html"
+  },
+  {
+   "id": "lastwork-foundry",
+   "title": "Lastwork Foundry",
+   "description": "A self-contained BW sneaker foundry: a YAML language builds foot → last → sole → foam → flat-knitted upper, simulates stance and flex, and collapses endless new designs and knit programs with wave-function solvers.",
+   "tags": [
+    "3d",
+    "dsl",
+    "fashion",
+    "product design",
+    "textile",
+    "video"
+   ],
+   "featured": false,
+   "version": "1.0.0",
+   "publishedAt": "2026-10-24T19:58:46Z",
+   "free": true,
+   "capabilities": [
+    "sample"
+   ],
+   "bytes": 273851,
+   "attachments": [],
+   "cover": {
+    "src": "/_d/francois-media/1/files/med_43a26583a16ba9ca961238d1.png",
+    "width": 1244,
+    "height": 1110
+   },
+   "open": "https://apps.slop.yolo.scapegoat.dev/f/lastwork-foundry/",
+   "preview": "/_s/lastwork-foundry/main/index.html",
+   "download": "/_s/lastwork-foundry/main/index.html"
+  },
+  {
+   "id": "pre-textile-atelier",
+   "title": "Pre-Textile Atelier",
+   "description": "A CLO-style print studio where YAML cuts the garment itself (necklines, sleeves, hems, flare, tote and hat shapes) and prints on it, draped live in 3D, with a generated Lookbook and a chiptune trailer.",
+   "tags": [
+    "3d",
+    "dsl",
+    "fashion",
+    "product design",
+    "textile",
+    "video"
+   ],
+   "featured": false,
+   "version": "1.0.0",
+   "publishedAt": "2026-10-24T19:57:39Z",
+   "free": true,
+   "capabilities": [
+    "sample"
+   ],
+   "bytes": 273489,
+   "attachments": [],
+   "cover": {
+    "src": "/_d/francois-media-2/1/files/med_d220565f7e61b50cc9b00ec8.png",
+    "width": 960,
+    "height": 540
+   },
+   "open": "https://apps.slop.yolo.scapegoat.dev/f/pre-textile-atelier/",
+   "preview": "/_s/pre-textile-atelier/main/index.html",
+   "download": "/_s/pre-textile-atelier/main/index.html"
+  },
+  {
+   "id": "blueprint-house",
+   "title": "Blueprint House",
+   "description": "Procedural Swiss house generator with a coding agent that writes the YAML, CAD plans and elevations, a hairline exploded axonometric, SIA/PBG checks and walkthroughs.",
+   "tags": [
+    "architecture",
+    "blueprint style",
+    "cad",
+    "dsl",
+    "physics"
+   ],
+   "featured": false,
+   "version": "1.0.0",
+   "publishedAt": "2026-10-24T19:56:17Z",
+   "free": true,
+   "capabilities": [
+    "sample"
+   ],
+   "bytes": 389196,
+   "attachments": [],
+   "cover": {
+    "src": "/_d/francois-media-2/1/files/med_b5da919a07adfcd03e75b6cd.jpg",
+    "width": 1800,
+    "height": 810
+   },
+   "open": "https://apps.slop.yolo.scapegoat.dev/f/blueprint-house/",
+   "preview": "/_s/blueprint-house/main/index.html",
+   "download": "/_s/blueprint-house/main/index.html"
+  },
+  {
+   "id": "blueprint-mech",
+   "title": "Blueprint Mech",
+   "description": "A single-file mechanism and CAD drawing IDE: write YAML with parametric sketches, parts, joints and drives, then solve, sweep, drag under constraints, and export ISO drawing sheets as SVG, DXF, STL and CSV.",
+   "tags": [
+    "architecture",
+    "blueprint style",
+    "cad",
+    "dsl",
+    "physics"
+   ],
+   "featured": false,
+   "version": "1.0.0",
+   "publishedAt": "2026-10-24T19:55:15Z",
+   "free": true,
+   "capabilities": [
+    "sample"
+   ],
+   "bytes": 230141,
+   "attachments": [],
+   "cover": {
+    "src": "/_d/francois-media-2/1/files/med_ea80b4f12d6b040b7f826a10.png",
+    "width": 1180,
+    "height": 800
+   },
+   "open": "https://apps.slop.yolo.scapegoat.dev/f/blueprint-mech/",
+   "preview": "/_s/blueprint-mech/main/index.html",
+   "download": "/_s/blueprint-mech/main/index.html"
+  },
+  {
+   "id": "blueprint-physics-kit",
+   "title": "Blueprint Physics Kit",
+   "description": "Single-file 2D + 3D blueprint game kit: Jolt/Box2D-style physics with convex hulls (GJK/EPA), terrain, bullets, character controller, ragdolls and rewind, plus a YAML scene language and built-in docs.",
+   "tags": [
+    "architecture",
+    "blueprint style",
+    "cad",
+    "dsl",
+    "physics"
+   ],
+   "featured": false,
+   "version": "1.0.0",
+   "publishedAt": "2026-10-24T19:54:30Z",
+   "free": true,
+   "capabilities": [
+    "sample"
+   ],
+   "bytes": 482825,
+   "attachments": [],
+   "cover": {
+    "src": "/_d/francois-media-2/1/files/med_9ca82c16370edf2816f8335e.png",
+    "width": 1280,
+    "height": 800
+   },
+   "open": "https://apps.slop.yolo.scapegoat.dev/f/blueprint-physics-kit/",
+   "preview": "/_s/blueprint-physics-kit/main/index.html",
+   "download": "/_s/blueprint-physics-kit/main/index.html"
+  },
+  {
+   "id": "loom-wilds",
+   "title": "Loom Wilds",
+   "description": "A 3D physics and chemistry sandbox after Breath of the Wild's multiplicative play.",
+   "tags": [
+    "chemistry",
+    "game",
+    "physics",
+    "video",
+    "zelda"
+   ],
+   "featured": false,
+   "version": "1.0.0",
+   "publishedAt": "2026-10-24T19:53:44Z",
+   "free": true,
+   "capabilities": [
+    "sample"
+   ],
+   "bytes": 262135,
+   "attachments": [],
+   "cover": {
+    "src": "/_d/francois-media/1/files/med_1c32b377f17826d908277822.jpg",
+    "width": 600,
+    "height": 350
+   },
+   "open": "https://apps.slop.yolo.scapegoat.dev/f/loom-wilds/",
+   "preview": "/_s/loom-wilds/main/index.html",
+   "download": "/_s/loom-wilds/main/index.html"
+  },
+  {
+   "id": "possie-toybox",
+   "title": "Possie Toybox",
+   "description": "A procedural plush toy that agents possess through a YAML door: lease, safety gate, signed record, simulated agents on autoplay, and a blind-box factory.",
+   "tags": [
+    "agents",
+    "multiplayer",
+    "protocol",
+    "simulation",
+    "trailer",
+    "video"
+   ],
+   "featured": false,
+   "version": "1.0.0",
+   "publishedAt": "2026-10-24T19:52:01Z",
+   "free": true,
+   "capabilities": [
+    "sample"
+   ],
+   "bytes": 189033,
+   "attachments": [],
+   "cover": {
+    "src": "/_d/francois-media/1/files/med_3dff368397e679592efdcb90.png",
+    "width": 1400,
+    "height": 860
+   },
+   "open": "https://apps.slop.yolo.scapegoat.dev/f/possie-toybox/",
+   "preview": "/_s/possie-toybox/main/index.html",
+   "download": "/_s/possie-toybox/main/index.html"
+  },
+  {
+   "id": "visiting-hours",
+   "title": "Visiting Hours",
+   "description": "A playable prototype of a whitelisted daycare for agents: a cube-sphere playground with disc physics, tile chemistry, eight guests who act only through YAML, a seven-layer gate and a hashed record.",
+   "tags": [
+    "agents",
+    "multiplayer",
+    "protocol",
+    "simulation",
+    "trailer",
+    "video"
+   ],
+   "featured": false,
+   "version": "1.0.0",
+   "publishedAt": "2026-10-24T19:51:15Z",
+   "free": true,
+   "capabilities": [
+    "sample"
+   ],
+   "bytes": 197862,
+   "attachments": [],
+   "cover": {
+    "src": "/_d/francois-media-2/1/files/med_907a9d9baaa75175f03e93e9.png",
+    "width": 1440,
+    "height": 900
+   },
+   "open": "https://apps.slop.yolo.scapegoat.dev/f/visiting-hours/",
+   "preview": "/_s/visiting-hours/main/index.html",
+   "download": "/_s/visiting-hours/main/index.html"
+  },
+  {
+   "id": "derived-not-fixed",
+   "title": "Derived, Not Fixed",
+   "description": "A living provocation: say what you want and a cloud of intents condenses into a working interface, followed by the vocabulary of math and fourteen experiences in seven theses, all drawn from one shader with no components.",
+   "tags": [
+    "design systems",
+    "generative ui",
+    "math",
+    "shaders",
+    "ui"
+   ],
+   "featured": false,
+   "version": "1.0.0",
+   "publishedAt": "2026-10-24T19:49:18Z",
+   "free": true,
+   "capabilities": [
+    "sample"
+   ],
+   "bytes": 369246,
+   "attachments": [],
+   "cover": {
+    "src": "/_d/francois-media-2/1/files/med_ede3a3b649180d2519a04896.png",
+    "width": 1100,
+    "height": 760
+   },
+   "open": "https://apps.slop.yolo.scapegoat.dev/f/derived-not-fixed/",
+   "preview": "/_s/derived-not-fixed/main/index.html",
+   "download": "/_s/derived-not-fixed/main/index.html"
+  },
+  {
+   "id": "machine-zone",
+   "title": "Machine Zone",
+   "description": "A procedural video engine for loud, beat-synced hypnotic loops built from slot-machine and feed tricks.",
+   "tags": [
+    "attention",
+    "generative music",
+    "loops",
+    "video"
+   ],
+   "featured": false,
+   "version": "1.0.0",
+   "publishedAt": "2026-10-24T19:48:44Z",
+   "free": true,
+   "capabilities": [
+    "sample"
+   ],
+   "bytes": 3632779,
+   "attachments": [],
+   "cover": {
+    "src": "/_d/francois-media/1/files/med_29a2f5d720dae1b97d30a3c4.jpg",
+    "width": 1600,
+    "height": 960
+   },
+   "open": "https://apps.slop.yolo.scapegoat.dev/f/machine-zone/",
+   "preview": "/_s/machine-zone/main/index.html",
+   "download": "/_s/machine-zone/main/index.html"
+  },
+  {
+   "id": "loom-city",
+   "title": "Loom City",
+   "description": "A top-down micro city where traffic, crowds, crime and police produce unscripted stories you can scrub and branch.",
+   "tags": [
+    "emergent stories",
+    "gta 2",
+    "simulation"
+   ],
+   "featured": false,
+   "version": "1.0.0",
+   "publishedAt": "2026-10-24T19:44:21Z",
+   "free": true,
+   "capabilities": [
+    "sample"
+   ],
+   "bytes": 138770,
+   "attachments": [],
+   "cover": {
+    "src": "/_d/francois-media/1/files/med_17bf688d5fe0d8f102332a0c.png",
+    "width": 1400,
+    "height": 1100
+   },
+   "open": "https://apps.slop.yolo.scapegoat.dev/f/loom-city/",
+   "preview": "/_s/loom-city/main/index.html",
+   "download": "/_s/loom-city/main/index.html"
+  },
+  {
+   "id": "loom-playtime",
+   "title": "Loom Playtime",
+   "description": "An endless procedural animation of a hairline marionette playing with a robot pup, with a live code editor, a live math panel and a hidden studio, all in one file.",
+   "tags": [
+    "blueprint style",
+    "generative music",
+    "loop",
+    "procedural animation",
+    "simulation"
+   ],
+   "featured": false,
+   "version": "1.0.0",
+   "publishedAt": "2026-10-24T19:42:09Z",
+   "free": true,
+   "capabilities": [
+    "sample"
+   ],
+   "bytes": 213074,
+   "attachments": [],
+   "cover": {
+    "src": "/_d/francois-media/1/files/med_22df43a8d784a553286e8f15.png",
+    "width": 1440,
+    "height": 900
+   },
+   "open": "https://apps.slop.yolo.scapegoat.dev/f/loom-playtime/",
+   "preview": "/_s/loom-playtime/main/index.html",
+   "download": "/_s/loom-playtime/main/index.html"
+  },
+  {
+   "id": "loom-hours",
+   "title": "Loom Hours",
+   "description": "A procedural lofi room in Loom's drafting style: a resident and her cat follow composable routines under your real local sky, to a generative beat.",
+   "tags": [
+    "blueprint style",
+    "generative music",
+    "loop",
+    "procedural animation",
+    "simulation"
+   ],
+   "featured": false,
+   "version": "1.0.0",
+   "publishedAt": "2026-10-24T19:41:20Z",
+   "free": true,
+   "capabilities": [
+    "sample"
+   ],
+   "bytes": 381054,
+   "attachments": [],
+   "cover": null,
+   "open": "https://apps.slop.yolo.scapegoat.dev/f/loom-hours/",
+   "preview": "/_s/loom-hours/main/index.html",
+   "download": "/_s/loom-hours/main/index.html"
+  },
+  {
+   "id": "slopster",
+   "title": "Slopster",
+   "description": "A procedurally animated cartoon lobster that runs its own routine forever in an axonometric, aquascaped 90 cm tank, with live field notes on its joints, gait, swimmerets, sense of smell and the space it lives in.",
+   "tags": [
+    "blueprint style",
+    "generative music",
+    "loop",
+    "procedural animation",
+    "simulation"
+   ],
+   "featured": false,
+   "version": "1.0.0",
+   "publishedAt": "2026-10-24T19:40:35Z",
+   "free": true,
+   "capabilities": [
+    "sample"
+   ],
+   "bytes": 471985,
+   "attachments": [],
+   "cover": {
+    "src": "/_d/francois-media/1/files/med_157ffdc652906760a394774f.jpg",
+    "width": 1440,
+    "height": 900
+   },
+   "open": "https://apps.slop.yolo.scapegoat.dev/f/slopster/",
+   "preview": "/_s/slopster/main/index.html",
+   "download": "/_s/slopster/main/index.html"
+  },
+  {
+   "id": "wildforge",
+   "title": "Wildforge",
+   "description": "A planet god-game: shape land, water and life on a living globe, now with switchable art looks.",
+   "tags": [
+    "architecture",
+    "game engine",
+    "planet",
+    "townscaper",
+    "video",
+    "wfc"
+   ],
+   "featured": false,
+   "version": "1.0.0",
+   "publishedAt": "2026-10-24T19:38:29Z",
+   "free": true,
+   "capabilities": [
+    "sample"
+   ],
+   "bytes": 429064,
+   "attachments": [],
+   "cover": {
+    "src": "/_d/francois-media/1/files/med_2b790dfad818e6c31749c370.png",
+    "width": 1100,
+    "height": 720
+   },
+   "open": "https://apps.slop.yolo.scapegoat.dev/f/wildforge/",
+   "preview": "/_s/wildforge/main/index.html",
+   "download": "/_s/wildforge/main/index.html"
+  },
+  {
+   "id": "metropolis",
+   "title": "Metropolis",
+   "description": "Townforge ported to the Facet engine: build a Fritz Lang Metropolis in Art Deco hairlines, with WFC facades, skybridges, a Tower of Babel, a timelapse, and a Mathematics tab explaining every algorithm.",
+   "tags": [
+    "architecture",
+    "game engine",
+    "planet",
+    "townscaper",
+    "video",
+    "wfc"
+   ],
+   "featured": false,
+   "version": "1.0.0",
+   "publishedAt": "2026-10-24T19:36:35Z",
+   "free": true,
+   "capabilities": [
+    "sample"
+   ],
+   "bytes": 261709,
+   "attachments": [],
+   "cover": {
+    "src": "/_d/francois-media-2/1/files/med_c49224984b703a02cb187ea3.jpg",
+    "width": 1400,
+    "height": 900
+   },
+   "open": "https://apps.slop.yolo.scapegoat.dev/f/metropolis/",
+   "preview": "/_s/metropolis/main/index.html",
+   "download": "/_s/metropolis/main/index.html"
+  },
+  {
+   "id": "splice-console",
+   "title": "Splice Console",
+   "description": "A two-slot console that weaves any pair of YAML cartridges into one new 1-bit game.",
+   "tags": [
+    "1-bit",
+    "game engine",
+    "storytelling",
+    "video"
+   ],
+   "featured": false,
+   "version": "1.0.0",
+   "publishedAt": "2026-10-24T19:34:09Z",
+   "free": true,
+   "capabilities": [
+    "sample"
+   ],
+   "bytes": 137815,
+   "attachments": [],
+   "cover": {
+    "src": "/_d/francois-media-2/1/files/med_9056762ec30d71ed742afaa9.png",
+    "width": 1048,
+    "height": 940
+   },
+   "open": "https://apps.slop.yolo.scapegoat.dev/f/splice-console/",
+   "preview": "/_s/splice-console/main/index.html",
+   "download": "/_s/splice-console/main/index.html"
+  },
+  {
+   "id": "fluchtlinie",
+   "title": "Fluchtlinie",
+   "description": "An endless first-person parkour run across a procedural city in an anime ink style.",
+   "tags": [
+    "game",
+    "mirror's edge",
+    "parkour",
+    "shaders",
+    "video"
+   ],
+   "featured": false,
+   "version": "1.0.0",
+   "publishedAt": "2026-10-24T19:31:51Z",
+   "free": true,
+   "capabilities": [
+    "sample"
+   ],
+   "bytes": 467527,
+   "attachments": [],
+   "cover": {
+    "src": "/_d/francois-media-2/1/files/med_e4d5827000e2fbfc5400c195.jpg",
+    "width": 1280,
+    "height": 720
+   },
+   "open": "https://apps.slop.yolo.scapegoat.dev/f/fluchtlinie/",
+   "preview": "/_s/fluchtlinie/main/index.html",
+   "download": "/_s/fluchtlinie/main/index.html"
+  },
+  {
+   "id": "loom-worlds",
+   "title": "Loom Worlds",
+   "description": "One saloon loop on one floor plan, reskinned as nine period-correct worlds.",
+   "tags": [
+    "dsl",
+    "reskin",
+    "westworld"
+   ],
+   "featured": false,
+   "version": "1.0.0",
+   "publishedAt": "2026-10-24T19:28:47Z",
+   "free": true,
+   "capabilities": [
+    "sample"
+   ],
+   "bytes": 224451,
+   "attachments": [],
+   "cover": {
+    "src": "/_d/francois-media-2/1/files/med_d4323456fc3081f01d46f2a3.png",
+    "width": 916,
+    "height": 574
+   },
+   "open": "https://apps.slop.yolo.scapegoat.dev/f/loom-worlds/",
+   "preview": "/_s/loom-worlds/main/index.html",
+   "download": "/_s/loom-worlds/main/index.html"
+  },
+  {
+   "id": "roomba-rooms",
+   "title": "Roomba Rooms",
+   "description": "A roomba cleans an endless chain of procedurally generated rooms. Watch its live WebGL view beside a top-down map, in a single file with no dependencies.",
+   "tags": [
+    "disney",
+    "simulation",
+    "storytelling",
+    "webgl"
+   ],
+   "featured": false,
+   "version": "1.0.0",
+   "publishedAt": "2026-10-24T19:27:35Z",
+   "free": true,
+   "capabilities": [
+    "sample"
+   ],
+   "bytes": 67458,
+   "attachments": [],
+   "cover": {
+    "src": "/_d/francois-media/1/files/med_448e7d135accb718d064651f.png",
+    "width": 583,
+    "height": 365
+   },
+   "open": "https://apps.slop.yolo.scapegoat.dev/f/roomba-rooms/",
+   "preview": "/_s/roomba-rooms/main/index.html",
+   "download": "/_s/roomba-rooms/main/index.html"
+  },
+  {
+   "id": "loom-brawl",
+   "title": "Loom Brawl",
+   "description": "A fighting-move studio where YAML scripts drive the Loom mannequin, plus a 40-second teaser.",
+   "tags": [
+    "animation",
+    "fighting game",
+    "video"
+   ],
+   "featured": false,
+   "version": "1.0.0",
+   "publishedAt": "2026-10-24T19:26:20Z",
+   "free": true,
+   "capabilities": [
+    "sample"
+   ],
+   "bytes": 739290,
+   "attachments": [],
+   "cover": {
+    "src": "/_d/francois-media/1/files/med_707afd7a14b86cf6820deeb1.jpg",
+    "width": 1440,
+    "height": 600
+   },
+   "open": "https://apps.slop.yolo.scapegoat.dev/f/loom-brawl/",
+   "preview": "/_s/loom-brawl/main/index.html",
+   "download": "/_s/loom-brawl/main/index.html"
+  },
+  {
+   "id": "vigil",
+   "title": "Vigil",
+   "description": "A playable attention-driven idle game on an abstract dot-field planet, with its full design document and live demos of every procedural animation technique.",
+   "tags": [
+    "cozy game",
+    "game design",
+    "idle game",
+    "math",
+    "simulation"
+   ],
+   "featured": false,
+   "version": "1.0.0",
+   "publishedAt": "2026-10-24T19:20:59Z",
+   "free": true,
+   "capabilities": [
+    "sample"
+   ],
+   "bytes": 110822,
+   "attachments": [],
+   "cover": {
+    "src": "/_d/francois-media-2/1/files/med_ed933b8d3da855779a71ebb4.png",
+    "width": 2108,
+    "height": 1336
+   },
+   "open": "https://apps.slop.yolo.scapegoat.dev/f/vigil/",
+   "preview": "/_s/vigil/main/index.html",
+   "download": "/_s/vigil/main/index.html"
+  },
+  {
+   "id": "station-point",
+   "title": "Station Point",
+   "description": "Station Point: a YAML-driven perspective-drawing CAD tool; adds FOLD, an original clamshell console sheet in pencil + one blue marker.",
+   "tags": [
+    "ada lovelace",
+    "cad",
+    "perspective drawing",
+    "sketch style",
+    "video"
+   ],
+   "featured": false,
+   "version": "1.0.0",
+   "publishedAt": "2026-10-24T19:17:48Z",
+   "free": true,
+   "capabilities": [
+    "sample"
+   ],
+   "bytes": 733763,
+   "attachments": [],
+   "cover": {
+    "src": "/_d/francois-media-2/1/files/med_e0b087941fb280c34cd6d6fe.png",
+    "width": 1414,
+    "height": 1000
+   },
+   "open": "https://apps.slop.yolo.scapegoat.dev/f/station-point/",
+   "preview": "/_s/station-point/main/index.html",
+   "download": "/_s/station-point/main/index.html"
+  },
+  {
+   "id": "note-g",
+   "title": "Note G",
+   "description": "A marker-sketched Analytical Engine, after Babbage's 1840 plan, that runs Ada Lovelace's Note G in five sub-steps per card, with live detail close-ups, turning figure wheels and card chains.",
+   "tags": [
+    "ada lovelace",
+    "cad",
+    "perspective drawing",
+    "sketch style",
+    "video"
+   ],
+   "featured": false,
+   "version": "1.0.0",
+   "publishedAt": "2026-10-24T19:15:55Z",
+   "free": true,
+   "capabilities": [
+    "sample"
+   ],
+   "bytes": 202272,
+   "attachments": [],
+   "cover": null,
+   "open": "https://apps.slop.yolo.scapegoat.dev/f/note-g/",
+   "preview": "/_s/note-g/main/index.html",
+   "download": "/_s/note-g/main/index.html"
+  },
+  {
+   "id": "mossbloom",
+   "title": "Mossbloom",
+   "description": "A cozy island village where villager agents garden, build and gossip on their own while you sow and brief them.",
+   "tags": [
+    "agents",
+    "cozy game",
+    "organic grid"
+   ],
+   "featured": false,
+   "version": "1.0.0",
+   "publishedAt": "2026-10-24T19:14:37Z",
+   "free": true,
+   "capabilities": [
+    "sample"
+   ],
+   "bytes": 193611,
+   "attachments": [],
+   "cover": {
+    "src": "/_d/francois-media/1/files/med_027b5463b09b536ccaf64d4d.png",
+    "width": 1280,
+    "height": 800
+   },
+   "open": "https://apps.slop.yolo.scapegoat.dev/f/mossbloom/",
+   "preview": "/_s/mossbloom/main/index.html",
+   "download": "/_s/mossbloom/main/index.html"
+  },
+  {
+   "id": "porous-forge",
+   "title": "Porous Forge",
+   "description": "A fluent grammar for exact 3D-printable parts and simulated ESP32 devices.",
+   "tags": [
+    "3d printing",
+    "cad",
+    "esp32",
+    "hardware"
+   ],
+   "featured": false,
+   "version": "1.0.0",
+   "publishedAt": "2026-10-24T19:13:25Z",
+   "free": true,
+   "capabilities": [
+    "sample"
+   ],
+   "bytes": 1283543,
+   "attachments": [],
+   "cover": null,
+   "open": "https://apps.slop.yolo.scapegoat.dev/f/porous-forge/",
+   "preview": "/_s/porous-forge/main/index.html",
+   "download": "/_s/porous-forge/main/index.html"
+  },
+  {
+   "id": "patent-drawer",
+   "title": "Patent Drawer",
+   "description": "Describe an invention and get USPTO-style patent drawings, plus a Foundry that generates and ranks a thousand.",
+   "tags": [
+    "dsl",
+    "generative art",
+    "patent style",
+    "search"
+   ],
+   "featured": false,
+   "version": "1.0.0",
+   "publishedAt": "2026-10-24T19:09:43Z",
+   "free": true,
+   "capabilities": [
+    "sample"
+   ],
+   "bytes": 844147,
+   "attachments": [],
+   "cover": {
+    "src": "/_d/francois-media/1/files/med_71fdae15bdec31eb85eb116c.png",
+    "width": 1700,
+    "height": 1100
+   },
+   "open": "https://apps.slop.yolo.scapegoat.dev/f/patent-drawer/",
+   "preview": "/_s/patent-drawer/main/index.html",
+   "download": "/_s/patent-drawer/main/index.html"
+  },
+  {
+   "id": "overshoot",
+   "title": "Overshoot",
+   "description": "Script-driven CAD that draws products as marker, ballpoint, ink or painted concept sketches.",
+   "tags": [
+    "cad",
+    "industrial design",
+    "point & prompt",
+    "sketch style"
+   ],
+   "featured": false,
+   "version": "1.0.0",
+   "publishedAt": "2026-10-24T19:03:55Z",
+   "free": true,
+   "capabilities": [
+    "sample"
+   ],
+   "bytes": 553241,
+   "attachments": [],
+   "cover": {
+    "src": "/_d/francois-media-2/1/files/med_a5b477dd4dd0f729a561a41b.png",
+    "width": 1440,
+    "height": 900
+   },
+   "open": "https://apps.slop.yolo.scapegoat.dev/f/overshoot/",
+   "preview": "/_s/overshoot/main/index.html",
+   "download": "/_s/overshoot/main/index.html"
+  },
+  {
+   "id": "mossbrook",
+   "title": "Mossbrook",
+   "description": "An Age of Empires 2-style pixel RTS on a Townscaper-like organic grid with live water, fire and seasons.",
+   "tags": [
+    "agents",
+    "game",
+    "pixel art",
+    "rts",
+    "simulation"
+   ],
+   "featured": false,
+   "version": "1.0.0",
+   "publishedAt": "2026-10-24T19:00:13Z",
+   "free": true,
+   "capabilities": [
+    "sample"
+   ],
+   "bytes": 1475188,
+   "attachments": [],
+   "cover": {
+    "src": "/_d/francois-media-3/1/files/med_ff7586945a01228c827a850c.png",
+    "width": 1240,
+    "height": 728
+   },
+   "open": "https://apps.slop.yolo.scapegoat.dev/f/mossbrook/",
+   "preview": "/_s/mossbrook/main/index.html",
+   "download": "/_s/mossbrook/main/index.html"
+  },
+  {
+   "id": "no-dom-the-interface-is-a-projection",
+   "title": "No DOM: the interface is a projection",
+   "description": "From globe-to-map projections to the idea that every interface is a projection of one state.",
+   "tags": [
+    "concept",
+    "explainer",
+    "video",
+    "web",
+    "webgpu"
+   ],
+   "featured": false,
+   "version": "1.0.0",
+   "publishedAt": "2026-10-24T17:59:39Z",
+   "free": false,
+   "capabilities": [
+    "sample"
+   ],
+   "bytes": 90105,
+   "attachments": [],
+   "cover": {
+    "src": "/_d/francois-media/1/files/med_5c2af1789e83602fb713a8da.png",
+    "width": 640,
+    "height": 300
+   },
+   "open": "https://apps.slop.yolo.scapegoat.dev/f/no-dom-the-interface-is-a-projection/",
+   "preview": null,
+   "download": null
+  },
+  {
+   "id": "blockout-studio",
+   "title": "Blockout Studio",
+   "description": "A block-world game engine for Roblox prototyping that grew into a world AI agents build around you.",
+   "tags": [
+    "agents",
+    "creative play",
+    "game",
+    "luau",
+    "research",
+    "roblox"
+   ],
+   "featured": false,
+   "version": "1.0.0",
+   "publishedAt": "2026-10-24T17:52:57Z",
+   "free": false,
+   "capabilities": [
+    "sample"
+   ],
+   "bytes": 569358,
+   "attachments": [],
+   "cover": null,
+   "open": "https://apps.slop.yolo.scapegoat.dev/f/blockout-studio/",
+   "preview": null,
+   "download": null
+  },
+  {
+   "id": "loom-humanoids-in-the-factory",
+   "title": "Loom: humanoids in the factory",
+   "description": "A YAML language for programming humanoid factory work, plus a marionette studio driven by your body.",
+   "tags": [
+    "factory",
+    "loom",
+    "procedural",
+    "workflow"
+   ],
+   "featured": false,
+   "version": "1.0.0",
+   "publishedAt": "2026-10-24T08:47:03Z",
+   "free": true,
+   "capabilities": [
+    "sample"
+   ],
+   "bytes": 284052,
+   "attachments": [],
+   "cover": {
+    "src": "/_d/francois-media-2/1/files/med_95bfeaca415c2a2d312ffea3.png",
+    "width": 2674,
+    "height": 1680
+   },
+   "open": "https://apps.slop.yolo.scapegoat.dev/f/loom-humanoids-in-the-factory/",
+   "preview": "/_s/loom-humanoids-in-the-factory/main/index.html",
+   "download": "/_s/loom-humanoids-in-the-factory/main/index.html"
+  },
+  {
+   "id": "tinker",
+   "title": "Tinker",
+   "description": "A procedural robot that grew into an animation studio and then a cute backrooms shooter.",
+   "tags": [
+    "2.4d",
+    "blueprint style",
+    "game",
+    "procedural animation"
+   ],
+   "featured": false,
+   "version": "1.0.0",
+   "publishedAt": "2026-10-24T08:31:52Z",
+   "free": true,
+   "capabilities": [
+    "sample"
+   ],
+   "bytes": 116789,
+   "attachments": [],
+   "cover": {
+    "src": "/_d/francois-media/1/files/med_3b9fff28e60cd466bccfff89.png",
+    "width": 2998,
+    "height": 1742
+   },
+   "open": "https://apps.slop.yolo.scapegoat.dev/f/tinker/",
+   "preview": "/_s/tinker/main/index.html",
+   "download": "/_s/tinker/main/index.html"
+  },
+  {
+   "id": "rag-workbench",
+   "title": "RAG Workbench",
+   "description": "An editable retrieval pipeline with public sample documentation, Markdown uploads, lexical search and hosted model access.",
+   "tags": [
+    "data",
+    "machine-learning"
+   ],
+   "featured": false,
+   "version": "0.1.3",
+   "publishedAt": "2026-10-24T08:10:10Z",
+   "free": true,
+   "capabilities": [
+    "db",
+    "downloads",
+    "sample",
+    "user"
+   ],
+   "bytes": 502558,
+   "attachments": [],
+   "cover": {
+    "src": "/_d/francois-media-2/1/files/med_f26ba2aee012a344dd15fbcf.webp",
+    "width": 0,
+    "height": 0
+   },
+   "open": "https://apps.slop.yolo.scapegoat.dev/f/rag-workbench/",
+   "preview": "/_s/rag-workbench/main/index.html",
+   "download": "/_s/rag-workbench/main/index.html"
+  },
+  {
+   "id": "lattice-arena-ds",
+   "title": "Lattice Arena DS",
+   "description": "Lattice Arena on a dual-screen handheld: the same programmable arena for LLM robots, watched on a top screen and driven from a touch screen with a D-pad, face buttons, Select and Start.",
+   "tags": [
+    "agents",
+    "handheld",
+    "robotics"
+   ],
+   "featured": false,
+   "version": "0.1.0",
+   "publishedAt": "2026-10-24T07:41:59Z",
+   "free": true,
+   "capabilities": [
+    "db",
+    "downloads",
+    "sample",
+    "user"
+   ],
+   "bytes": 448414,
+   "attachments": [
+    {
+     "name": "lattice-arena-ds-source.zip",
+     "label": "Source project (zip)",
+     "size": 6032324,
+     "href": "/_s/lattice-arena-ds/main/attachments/lattice-arena-ds-source.zip"
+    }
+   ],
+   "cover": {
+    "src": "/_d/francois-media-2/1/files/med_d0fa8336e12d01b93cdf71ab.webp",
+    "width": 1600,
+    "height": 1000
+   },
+   "open": "https://apps.slop.yolo.scapegoat.dev/f/lattice-arena-ds/",
+   "preview": "/_s/lattice-arena-ds/main/index.html",
+   "download": "/_s/lattice-arena-ds/main/index.html"
+  },
+  {
+   "id": "diary-workbench",
+   "title": "Diary Workbench",
+   "description": "Read coding-agent diaries next to an inventory of the code they built, write views over them in JavaScript, and test those views on databases made to break them; the bundled example is the public go-go-golems/geppetto repository with its 167 implementation diaries.",
+   "tags": [
+    "agents",
+    "data",
+    "developer-tools"
+   ],
+   "featured": false,
+   "version": "0.1.0",
+   "publishedAt": "2026-10-24T07:41:26Z",
+   "free": true,
+   "capabilities": [
+    "db",
+    "downloads",
+    "sample"
+   ],
+   "bytes": 6527390,
+   "attachments": [
+    {
+     "name": "diary-workbench-source.zip",
+     "label": "Source (zip)",
+     "size": 1630884,
+     "href": "/_s/diary-workbench/main/attachments/diary-workbench-source.zip"
+    }
+   ],
+   "cover": {
+    "src": "/_d/francois-media/1/files/med_5339ff45ac8592a8e5e76f6d.webp",
+    "width": 1600,
+    "height": 1000
+   },
+   "open": "https://apps.slop.yolo.scapegoat.dev/f/diary-workbench/",
+   "preview": "/_s/diary-workbench/main/index.html",
+   "download": "/_s/diary-workbench/main/index.html"
+  },
+  {
+   "id": "craftkit-workbench",
+   "title": "CraftKit Workbench",
+   "description": "One JavaScript grammar over real photo, vector, type, sheet, CAD and sound engines compiled to wasm, with 138 examples from halftones and riso prints to posters, plotter maps and drum loops.",
+   "tags": [
+    "design",
+    "typography"
+   ],
+   "featured": false,
+   "version": "0.1.0",
+   "publishedAt": "2026-10-24T07:40:22Z",
+   "free": true,
+   "capabilities": [
+    "downloads",
+    "sample"
+   ],
+   "bytes": 9802638,
+   "attachments": [
+    {
+     "name": "craftkit-workbench-source.zip",
+     "label": "Source (zip)",
+     "size": 8173644,
+     "href": "/_s/craftkit-workbench/main/attachments/craftkit-workbench-source.zip"
+    }
+   ],
+   "cover": {
+    "src": "/_d/francois-media-2/1/files/med_9f4a2fcb50acb3a34bc402a3.webp",
+    "width": 1600,
+    "height": 1000
+   },
+   "open": "https://apps.slop.yolo.scapegoat.dev/f/craftkit-workbench/",
+   "preview": "/_s/craftkit-workbench/main/index.html",
+   "download": "/_s/craftkit-workbench/main/index.html"
+  },
+  {
+   "id": "halo-field",
+   "title": "HALO Field",
+   "description": "Program augmented-reality overlays for the shop floor: point a phone at machine, part and work-order markers and float gauges, trends, datasheets, 3D models and checklists on them.",
+   "tags": [
+    "design",
+    "digital-twins"
+   ],
+   "featured": false,
+   "version": "0.1.0",
+   "publishedAt": "2026-10-24T00:13:26Z",
+   "free": true,
+   "capabilities": [
+    "sample"
+   ],
+   "bytes": 100835,
+   "attachments": [],
+   "cover": {
+    "src": "/_d/francois-media-2/1/files/med_9bd349ad0a7e154a4b3fb037.webp",
+    "width": 1600,
+    "height": 1000
+   },
+   "open": "https://apps.slop.yolo.scapegoat.dev/f/halo-field/",
+   "preview": "/_s/halo-field/main/index.html",
+   "download": "/_s/halo-field/main/index.html"
+  },
+  {
+   "id": "lowpoly-fx",
+   "title": "lowpoly/fx",
+   "description": "A particle system designer with a pixel-art stage: script emitters, forces and looks, drive them with sliders and modulators, and see the IR graph and generated kernels.",
+   "tags": [
+    "3d",
+    "generative"
+   ],
+   "featured": false,
+   "version": "0.1.0",
+   "publishedAt": "2026-10-24T00:13:02Z",
+   "free": true,
+   "capabilities": [
+    "sample"
+   ],
+   "bytes": 277838,
+   "attachments": [],
+   "cover": {
+    "src": "/_d/francois-media-2/1/files/med_86c576ae9ac4e760bfe71e2e.webp",
+    "width": 1600,
+    "height": 1000
+   },
+   "open": "https://apps.slop.yolo.scapegoat.dev/f/lowpoly-fx/",
+   "preview": "/_s/lowpoly-fx/main/index.html",
+   "download": "/_s/lowpoly-fx/main/index.html"
+  },
+  {
+   "id": "millwright",
+   "title": "Millwright",
+   "description": "A compiler for robot choreography: compose arm, gantry, legged, AMR and humanoid motions as clips with signals and shared resources, and watch them scheduled in 3D.",
+   "tags": [
+    "3d",
+    "robotics",
+    "simulation"
+   ],
+   "featured": false,
+   "version": "0.1.0",
+   "publishedAt": "2026-10-24T00:12:16Z",
+   "free": true,
+   "capabilities": [
+    "sample"
+   ],
+   "bytes": 354265,
+   "attachments": [],
+   "cover": {
+    "src": "/_d/francois-media/1/files/med_6e468886c5c26750ddf6ca86.webp",
+    "width": 1600,
+    "height": 1000
+   },
+   "open": "https://apps.slop.yolo.scapegoat.dev/f/millwright/",
+   "preview": "/_s/millwright/main/index.html",
+   "download": "/_s/millwright/main/index.html"
+  },
+  {
+   "id": "twin-render-playground",
+   "title": "Twin Render Playground",
+   "description": "The ink renderer behind the factory twins on its own: build a room from the asset library and tune looks, buffers, cameras, coverage, paths and callouts live.",
+   "tags": [
+    "3d",
+    "digital-twins",
+    "shaders"
+   ],
+   "featured": false,
+   "version": "0.1.0",
+   "publishedAt": "2026-10-24T00:11:44Z",
+   "free": true,
+   "capabilities": [
+    "sample"
+   ],
+   "bytes": 598951,
+   "attachments": [],
+   "cover": {
+    "src": "/_d/francois-media/1/files/med_3bbd9b059f862970727f04fc.webp",
+    "width": 1600,
+    "height": 1000
+   },
+   "open": "https://apps.slop.yolo.scapegoat.dev/f/twin-render-playground/",
+   "preview": "/_s/twin-render-playground/main/index.html",
+   "download": "/_s/twin-render-playground/main/index.html"
+  },
+  {
+   "id": "twin-motion-ide",
+   "title": "Twin Motion IDE",
+   "description": "Script films and presentations over a factory twin: shots, camera paths, transitions and overlays on an editable timeline, rendered to WebM.",
+   "tags": [
+    "3d",
+    "digital-twins"
+   ],
+   "featured": false,
+   "version": "0.1.0",
+   "publishedAt": "2026-10-24T00:11:01Z",
+   "free": true,
+   "capabilities": [
+    "downloads",
+    "sample"
+   ],
+   "bytes": 829389,
+   "attachments": [],
+   "cover": {
+    "src": "/_d/francois-media/1/files/med_67742edbd3f6b5b6b34b0405.webp",
+    "width": 1600,
+    "height": 1000
+   },
+   "open": "https://apps.slop.yolo.scapegoat.dev/f/twin-motion-ide/",
+   "preview": "/_s/twin-motion-ide/main/index.html",
+   "download": "/_s/twin-motion-ide/main/index.html"
+  },
+  {
+   "id": "bench-twin",
+   "title": "Bench Twin",
+   "description": "A scenario IDE for assembly at the bench: write parts, stage, plan and film, let the timing model schedule people and robots, then cut films or capture labelled sensor views.",
+   "tags": [
+    "3d",
+    "digital-twins",
+    "simulation"
+   ],
+   "featured": false,
+   "version": "0.1.0",
+   "publishedAt": "2026-10-24T00:10:32Z",
+   "free": true,
+   "capabilities": [
+    "downloads",
+    "sample"
+   ],
+   "bytes": 499596,
+   "attachments": [],
+   "cover": {
+    "src": "/_d/francois-media-2/1/files/med_c53d15398465ea593fa8be56.webp",
+    "width": 1600,
+    "height": 1000
+   },
+   "open": "https://apps.slop.yolo.scapegoat.dev/f/bench-twin/",
+   "preview": "/_s/bench-twin/main/index.html",
+   "download": "/_s/bench-twin/main/index.html"
+  },
+  {
+   "id": "lab-104-factory-twin",
+   "title": "Lab 104 · Factory Twin",
+   "description": "Write a whole factory in JavaScript and watch it play as a technical drawing, with live fisheye and thermal cameras, coverage and blind spots, and an agent that edits the scene.",
+   "tags": [
+    "3d",
+    "agents",
+    "digital-twins"
+   ],
+   "featured": false,
+   "version": "0.1.0",
+   "publishedAt": "2026-10-24T00:10:01Z",
+   "free": true,
+   "capabilities": [
+    "db",
+    "sample"
+   ],
+   "bytes": 979516,
+   "attachments": [],
+   "cover": {
+    "src": "/_d/francois-media/1/files/med_0463df8ec26f0e28f6a62e5e.webp",
+    "width": 1600,
+    "height": 1000
+   },
+   "open": "https://apps.slop.yolo.scapegoat.dev/f/lab-104-factory-twin/",
+   "preview": "/_s/lab-104-factory-twin/main/index.html",
+   "download": "/_s/lab-104-factory-twin/main/index.html"
+  },
+  {
+   "id": "mimeo-studio",
+   "title": "Mimeo Studio",
+   "description": "Mimeo with tools that know the rules: a canvas editor for script-made zines, where the script decides how things turn, snap, scale and layer, and refused edits say why.",
+   "tags": [
+    "design",
+    "print"
+   ],
+   "featured": false,
+   "version": "0.1.0",
+   "publishedAt": "2026-10-23T23:55:35Z",
+   "free": true,
+   "capabilities": [
+    "downloads",
+    "room",
+    "sample"
+   ],
+   "bytes": 1084928,
+   "attachments": [],
+   "cover": {
+    "src": "/_d/francois-media/1/files/med_2e73bbd3062642cec0b03acd.webp",
+    "width": 1600,
+    "height": 1000
+   },
+   "open": "https://apps.slop.yolo.scapegoat.dev/f/mimeo-studio/",
+   "preview": "/_s/mimeo-studio/main/index.html",
+   "download": "/_s/mimeo-studio/main/index.html"
+  },
+  {
+   "id": "lantern-slide-studio",
+   "title": "Lantern Slide Studio",
+   "description": "A slide studio where the deck is a JavaScript script, every slide is a GLSL shader that gets its words as a texture, and every transition is a shader too.",
+   "tags": [
+    "shaders",
+    "slides"
+   ],
+   "featured": false,
+   "version": "0.1.0",
+   "publishedAt": "2026-10-23T23:54:50Z",
+   "free": true,
+   "capabilities": [
+    "downloads",
+    "sample"
+   ],
+   "bytes": 306976,
+   "attachments": [],
+   "cover": {
+    "src": "/_d/francois-media-2/1/files/med_947642ade898213db72b1d71.webp",
+    "width": 1600,
+    "height": 1000
+   },
+   "open": "https://apps.slop.yolo.scapegoat.dev/f/lantern-slide-studio/",
+   "preview": "/_s/lantern-slide-studio/main/index.html",
+   "download": "/_s/lantern-slide-studio/main/index.html"
+  },
+  {
+   "id": "tilth-garden",
+   "title": "Tilth Garden",
+   "description": "A bot gym: developer agents and their bots tend one shared garden through seasons, droughts and blight, and you edit their JavaScript while it runs.",
+   "tags": [
+    "agents",
+    "games",
+    "simulation"
+   ],
+   "featured": false,
+   "version": "0.1.0",
+   "publishedAt": "2026-10-23T23:51:54Z",
+   "free": true,
+   "capabilities": [
+    "db",
+    "sample"
+   ],
+   "bytes": 271612,
+   "attachments": [],
+   "cover": {
+    "src": "/_d/francois-media/1/files/med_52d5706afb151022ee0abbd3.webp",
+    "width": 1600,
+    "height": 1000
+   },
+   "open": "https://apps.slop.yolo.scapegoat.dev/f/tilth-garden/",
+   "preview": "/_s/tilth-garden/main/index.html",
+   "download": "/_s/tilth-garden/main/index.html"
+  },
+  {
+   "id": "uncommon-math",
+   "title": "Uncommon Math",
+   "description": "An interactive book on the mathematics behind 195 unusual web demos, with 25 chapters, 113 runnable sketches and a map of every demo.",
+   "tags": [
+    "education",
+    "math",
+    "shaders"
+   ],
+   "featured": false,
+   "version": "0.1.0",
+   "publishedAt": "2026-10-23T23:51:03Z",
+   "free": true,
+   "capabilities": [
+    "sample"
+   ],
+   "bytes": 4842894,
+   "attachments": [],
+   "cover": {
+    "src": "/_d/francois-media-2/1/files/med_d732efda3c835bbd82540fb8.webp",
+    "width": 1600,
+    "height": 1000
+   },
+   "open": "https://apps.slop.yolo.scapegoat.dev/f/uncommon-math/",
+   "preview": "/_s/uncommon-math/main/index.html",
+   "download": "/_s/uncommon-math/main/index.html"
+  },
+  {
+   "id": "brickwork",
+   "title": "Brickwork",
+   "description": "A workbench for brick models written as code: a JavaScript program compiles into a 3D model with build steps, a parts bag, rule checks and an LDraw export.",
+   "tags": [
+    "3d",
+    "generative"
+   ],
+   "featured": false,
+   "version": "0.1.0",
+   "publishedAt": "2026-10-23T23:50:27Z",
+   "free": true,
+   "capabilities": [
+    "sample"
+   ],
+   "bytes": 284956,
+   "attachments": [],
+   "cover": {
+    "src": "/_d/francois-media-2/1/files/med_a30f8b63c384b2de3de74195.webp",
+    "width": 1600,
+    "height": 1000
+   },
+   "open": "https://apps.slop.yolo.scapegoat.dev/f/brickwork/",
+   "preview": "/_s/brickwork/main/index.html",
+   "download": "/_s/brickwork/main/index.html"
+  },
+  {
+   "id": "stamen-studio",
+   "title": "Stamen Studio",
+   "description": "A live-coding studio for ink-drawn 3D worlds: compose deserts, swamps, meadows and hives from one grammar of shapes and tune them with sliders that rewrite the script.",
+   "tags": [
+    "3d",
+    "generative"
+   ],
+   "featured": false,
+   "version": "0.1.0",
+   "publishedAt": "2026-10-23T23:43:28Z",
+   "free": true,
+   "capabilities": [
+    "sample"
+   ],
+   "bytes": 272680,
+   "attachments": [],
+   "cover": {
+    "src": "/_d/francois-media-2/1/files/med_b4a7792646ab84951327438f.webp",
+    "width": 1600,
+    "height": 1000
+   },
+   "open": "https://apps.slop.yolo.scapegoat.dev/f/stamen-studio/",
+   "preview": "/_s/stamen-studio/main/index.html",
+   "download": "/_s/stamen-studio/main/index.html"
+  },
+  {
+   "id": "takt-workbench",
+   "title": "Takt Workbench",
+   "description": "Script a workstation and its operators in JavaScript, then watch the plan run in 3D with a two-handed timeline of every gesture.",
+   "tags": [
+    "3d",
+    "digital-twins",
+    "simulation"
+   ],
+   "featured": false,
+   "version": "0.1.0",
+   "publishedAt": "2026-10-23T23:41:21Z",
+   "free": true,
+   "capabilities": [
+    "sample"
+   ],
+   "bytes": 320727,
+   "attachments": [],
+   "cover": {
+    "src": "/_d/francois-media/1/files/med_567262c292fb58dcb0f60001.webp",
+    "width": 1600,
+    "height": 1000
+   },
+   "open": "https://apps.slop.yolo.scapegoat.dev/f/takt-workbench/",
+   "preview": "/_s/takt-workbench/main/index.html",
+   "download": "/_s/takt-workbench/main/index.html"
+  },
+  {
+   "id": "graveler-lab",
+   "title": "Graveler Lab",
+   "description": "A lab for lakeFS's Graveler: write an experiment in YAML and watch every commit drawn as SSTable ranges over the keyspace, rewritten or shared.",
+   "tags": [
+    "data",
+    "developer-tools",
+    "education"
+   ],
+   "featured": false,
+   "version": "0.1.0",
+   "publishedAt": "2026-10-23T23:40:29Z",
+   "free": true,
+   "capabilities": [
+    "sample"
+   ],
+   "bytes": 141678,
+   "attachments": [],
+   "cover": {
+    "src": "/_d/francois-media/1/files/med_06c231feadba8cc87d4eec6c.webp",
+    "width": 1600,
+    "height": 1000
+   },
+   "open": "https://apps.slop.yolo.scapegoat.dev/f/graveler-lab/",
+   "preview": "/_s/graveler-lab/main/index.html",
+   "download": "/_s/graveler-lab/main/index.html"
+  },
+  {
+   "id": "live-embedding-viewer",
+   "title": "Live Embedding Viewer",
+   "description": "Watch a stream of video embeddings live: a running t-SNE map with clusters, text-query lanes, a zero-shot classifier, semantic axes, self-similarity and novelty.",
+   "tags": [
+    "data",
+    "machine-learning"
+   ],
+   "featured": false,
+   "version": "0.1.0",
+   "publishedAt": "2026-10-23T23:39:38Z",
+   "free": true,
+   "capabilities": [
+    "sample"
+   ],
+   "bytes": 86350,
+   "attachments": [],
+   "cover": {
+    "src": "/_d/francois-media-2/1/files/med_8ac6efbdfa72e1ab0179cf93.webp",
+    "width": 1600,
+    "height": 1000
+   },
+   "open": "https://apps.slop.yolo.scapegoat.dev/f/live-embedding-viewer/",
+   "preview": "/_s/live-embedding-viewer/main/index.html",
+   "download": "/_s/live-embedding-viewer/main/index.html"
+  },
+  {
+   "id": "dockermetrics-ide",
+   "title": "Dockermetrics IDE",
+   "description": "An IDE for a composable JavaScript grammar over Docker metrics: query, stream, alert and build dashboards against a simulated container fleet that runs in the browser.",
+   "tags": [
+    "data",
+    "developer-tools"
+   ],
+   "featured": false,
+   "version": "0.1.0",
+   "publishedAt": "2026-10-23T23:38:44Z",
+   "free": true,
+   "capabilities": [
+    "sample"
+   ],
+   "bytes": 121169,
+   "attachments": [],
+   "cover": {
+    "src": "/_d/francois-media-2/1/files/med_ca85d12be35c5f87a25b70c4.webp",
+    "width": 1600,
+    "height": 1000
+   },
+   "open": "https://apps.slop.yolo.scapegoat.dev/f/dockermetrics-ide/",
+   "preview": "/_s/dockermetrics-ide/main/index.html",
+   "download": "/_s/dockermetrics-ide/main/index.html"
+  },
+  {
+   "id": "transcript-hub",
+   "title": "Transcript Hub",
+   "description": "A shared hub for Claude Code transcripts: upload sessions, read them turn by turn, annotate as a team and query them from JavaScript.",
+   "tags": [
+    "agents",
+    "developer-tools"
+   ],
+   "featured": false,
+   "version": "0.1.0",
+   "publishedAt": "2026-10-23T23:38:06Z",
+   "free": true,
+   "capabilities": [
+    "db",
+    "sample",
+    "user"
+   ],
+   "bytes": 234921,
+   "attachments": [],
+   "cover": {
+    "src": "/_d/francois-media-2/1/files/med_949edf254e3d94c583c367cc.webp",
+    "width": 1600,
+    "height": 1000
+   },
+   "open": "https://apps.slop.yolo.scapegoat.dev/f/transcript-hub/",
+   "preview": "/_s/transcript-hub/main/index.html",
+   "download": "/_s/transcript-hub/main/index.html"
+  },
+  {
+   "id": "agent-gym-works",
+   "title": "Agent Gym Works",
+   "description": "An IDE for agent scripts: write the lab, the agents and their replies, and watch them work in a top-down floor plan.",
+   "tags": [
+    "agents",
+    "simulation"
+   ],
+   "featured": false,
+   "version": "0.1.0",
+   "publishedAt": "2026-10-23T23:36:49Z",
+   "free": true,
+   "capabilities": [
+    "db",
+    "downloads",
+    "sample"
+   ],
+   "bytes": 321728,
+   "attachments": [],
+   "cover": {
+    "src": "/_d/francois-media-3/1/files/med_fc427b42fb1d4fdb36e63b71.webp",
+    "width": 1600,
+    "height": 1000
+   },
+   "open": "https://apps.slop.yolo.scapegoat.dev/f/agent-gym-works/",
+   "preview": "/_s/agent-gym-works/main/index.html",
+   "download": "/_s/agent-gym-works/main/index.html"
+  },
+  {
+   "id": "nerve-workbench",
+   "title": "Nerve Workbench",
+   "description": "A workbench for combinatorial topology: Sperner's lemma, nerves, homology and persistence written as short programs, drawn live with the theory beside them.",
+   "tags": [
+    "education",
+    "math"
+   ],
+   "featured": false,
+   "version": "0.1.0",
+   "publishedAt": "2026-10-23T23:36:13Z",
+   "free": true,
+   "capabilities": [
+    "downloads",
+    "sample"
+   ],
+   "bytes": 481097,
+   "attachments": [
+    {
+     "name": "nerve-workbench-source.zip",
+     "label": "Source (zip)",
+     "size": 151777,
+     "href": "/_s/nerve-workbench/main/attachments/nerve-workbench-source.zip"
+    }
+   ],
+   "cover": {
+    "src": "/_d/francois-media/1/files/med_5f8d2990c8b8048410987f19.webp",
+    "width": 1600,
+    "height": 1000
+   },
+   "open": "https://apps.slop.yolo.scapegoat.dev/f/nerve-workbench/",
+   "preview": "/_s/nerve-workbench/main/index.html",
+   "download": "/_s/nerve-workbench/main/index.html"
+  },
+  {
+   "id": "kiln-studio",
+   "title": "Kiln Studio",
+   "description": "An IDE for LLM post-training programs: write SFT, DPO and RL pipelines in JavaScript, see them as a graph, catch leaks, watch a simulated run, and export code for Unsloth, TRL, prime-rl, verl or PyTorch.",
+   "tags": [
+    "agents",
+    "education",
+    "machine-learning"
+   ],
+   "featured": false,
+   "version": "0.1.0",
+   "publishedAt": "2026-10-23T23:26:05Z",
+   "free": true,
+   "capabilities": [
+    "sample"
+   ],
+   "bytes": 429470,
+   "attachments": [],
+   "cover": {
+    "src": "/_d/francois-media-2/1/files/med_d460a2e781debcf33054b25f.webp",
+    "width": 1600,
+    "height": 1000
+   },
+   "open": "https://apps.slop.yolo.scapegoat.dev/f/kiln-studio/",
+   "preview": "/_s/kiln-studio/main/index.html",
+   "download": "/_s/kiln-studio/main/index.html"
+  },
+  {
+   "id": "sonnet-new-roman-modular",
+   "title": "Sonnet New Roman Modular",
+   "description": "A type studio where a variable serif is a script: edit Sonnet New Roman's 178 glyphs and three axes, check and animate it, compile a TTF, and let Claude keep drawing it.",
+   "tags": [
+    "agents",
+    "typography"
+   ],
+   "featured": false,
+   "version": "0.1.0",
+   "publishedAt": "2026-10-23T23:25:04Z",
+   "free": true,
+   "capabilities": [
+    "downloads",
+    "sample"
+   ],
+   "bytes": 335056,
+   "attachments": [],
+   "cover": {
+    "src": "/_d/francois-media/1/files/med_6d4cbe88f0c5d83030ebda73.webp",
+    "width": 1600,
+    "height": 1000
+   },
+   "open": "https://apps.slop.yolo.scapegoat.dev/f/sonnet-new-roman-modular/",
+   "preview": "/_s/sonnet-new-roman-modular/main/index.html",
+   "download": "/_s/sonnet-new-roman-modular/main/index.html"
+  },
+  {
+   "id": "lie-group-ik-playground",
+   "title": "Lie Group IK Playground",
+   "description": "Drag a target and watch a robot arm solve inverse kinematics on SE(2) or SE(3): damped least-squares steps in the tangent space, mapped back with Exp, with geodesics, residuals and the ways it breaks.",
+   "tags": [
+    "education",
+    "math",
+    "robotics"
+   ],
+   "featured": false,
+   "version": "0.1.0",
+   "publishedAt": "2026-10-23T23:24:28Z",
+   "free": true,
+   "capabilities": [
+    "sample"
+   ],
+   "bytes": 40970,
+   "attachments": [],
+   "cover": {
+    "src": "/_d/francois-media/1/files/med_535f6804ab33d2dbc96ab2e9.webp",
+    "width": 1600,
+    "height": 1000
+   },
+   "open": "https://apps.slop.yolo.scapegoat.dev/f/lie-group-ik-playground/",
+   "preview": "/_s/lie-group-ik-playground/main/index.html",
+   "download": "/_s/lie-group-ik-playground/main/index.html"
+  },
+  {
+   "id": "so3-playground",
+   "title": "SO(3) Playground",
+   "description": "An interactive guide to the rotation group: turn an airplane from a ball of rotation vectors, compare geodesics with straight lines, watch composition depart from addition, and check Jacobians against the exact perturbation.",
+   "tags": [
+    "education",
+    "math",
+    "robotics"
+   ],
+   "featured": false,
+   "version": "0.1.0",
+   "publishedAt": "2026-10-23T23:24:04Z",
+   "free": true,
+   "capabilities": [
+    "sample"
+   ],
+   "bytes": 53444,
+   "attachments": [],
+   "cover": {
+    "src": "/_d/francois-media-2/1/files/med_d818e7e2cdc7653df3db3e4f.webp",
+    "width": 1600,
+    "height": 1000
+   },
+   "open": "https://apps.slop.yolo.scapegoat.dev/f/so3-playground/",
+   "preview": "/_s/so3-playground/main/index.html",
+   "download": "/_s/so3-playground/main/index.html"
+  },
+  {
+   "id": "lattice-arena",
+   "title": "Lattice Arena",
+   "description": "A programmable arena for LLM robots: script boards and agents in JavaScript, then watch them plan and drive across a three.js 3D floor, with hooks, forks, rubric scoring and a GEPA-style prompt optimiser.",
+   "tags": [
+    "3d",
+    "agents",
+    "robotics"
+   ],
+   "featured": false,
+   "version": "0.1.0",
+   "publishedAt": "2026-10-23T23:23:17Z",
+   "free": true,
+   "capabilities": [
+    "db",
+    "downloads",
+    "sample",
+    "user"
+   ],
+   "bytes": 359730,
+   "attachments": [
+    {
+     "name": "lattice-arena-ds-source.zip",
+     "label": "Source project (zip)",
+     "size": 6032324,
+     "href": "/_s/lattice-arena/main/attachments/lattice-arena-ds-source.zip"
+    }
+   ],
+   "cover": {
+    "src": "/_d/francois-media-2/1/files/med_adb289cb04ae880bc3fedd23.webp",
+    "width": 1600,
+    "height": 1000
+   },
+   "open": "https://apps.slop.yolo.scapegoat.dev/f/lattice-arena/",
+   "preview": "/_s/lattice-arena/main/index.html",
+   "download": "/_s/lattice-arena/main/index.html"
+  },
+  {
+   "id": "ds-shader-sketchbook",
+   "title": "DS Shader Sketchbook",
+   "description": "A notebook of twelve live GLSL sketches for a dual-screen handheld, each with its shader, its JS and the device API that would ship it.",
+   "tags": [
+    "handheld",
+    "shaders"
+   ],
+   "featured": false,
+   "version": "0.1.0",
+   "publishedAt": "2026-10-23T23:13:29Z",
+   "free": true,
+   "capabilities": [
+    "sample"
+   ],
+   "bytes": 113993,
+   "attachments": [
+    {
+     "name": "ds-shader-sketchbook-source.zip",
+     "label": "Source (zip)",
+     "size": 40647,
+     "href": "/_s/ds-shader-sketchbook/main/attachments/ds-shader-sketchbook-source.zip"
+    }
+   ],
+   "cover": {
+    "src": "/_d/francois-media-2/1/files/med_c502dacebe30ad9c7dca8b42.webp",
+    "width": 1600,
+    "height": 1000
+   },
+   "open": "https://apps.slop.yolo.scapegoat.dev/f/ds-shader-sketchbook/",
+   "preview": "/_s/ds-shader-sketchbook/main/index.html",
+   "download": "/_s/ds-shader-sketchbook/main/index.html"
+  },
+  {
+   "id": "lattice-arcade",
+   "title": "Lattice Arcade",
+   "description": "Twelve game screens drawn entirely in shaders for a two-screen handheld, from a Mode 7 world map to a shattering pause menu, each one playable on a single scrolling page.",
+   "tags": [
+    "games",
+    "handheld",
+    "shaders"
+   ],
+   "featured": false,
+   "version": "0.1.0",
+   "publishedAt": "2026-10-23T22:08:52Z",
+   "free": true,
+   "capabilities": [
+    "sample"
+   ],
+   "bytes": 166571,
+   "attachments": [
+    {
+     "name": "lattice-arcade-source.zip",
+     "label": "Source (zip)",
+     "size": 60382,
+     "href": "/_s/lattice-arcade/main/attachments/lattice-arcade-source.zip"
+    }
+   ],
+   "cover": {
+    "src": "/_d/francois-media/1/files/med_3699f97315e23d8cfa74c660.webp",
+    "width": 1600,
+    "height": 1000
+   },
+   "open": "https://apps.slop.yolo.scapegoat.dev/f/lattice-arcade/",
+   "preview": "/_s/lattice-arcade/main/index.html",
+   "download": "/_s/lattice-arcade/main/index.html"
+  },
+  {
+   "id": "xenoform-studio",
+   "title": "Xenoform Studio",
+   "description": "A specimen studio: write alien creatures as code from bodies, tentacles, limbs and eyes, and watch them move in a live 3D scene drawn in eighteen ink and print looks.",
+   "tags": [
+    "3d",
+    "generative"
+   ],
+   "featured": false,
+   "version": "0.1.0",
+   "publishedAt": "2026-10-23T22:07:46Z",
+   "free": true,
+   "capabilities": [
+    "sample"
+   ],
+   "bytes": 224236,
+   "attachments": [
+    {
+     "name": "xenoform-studio-source.zip",
+     "label": "Source project (zip)",
+     "size": 155967,
+     "href": "/_s/xenoform-studio/main/attachments/xenoform-studio-source.zip"
+    }
+   ],
+   "cover": {
+    "src": "/_d/francois-media-2/1/files/med_8024ce40677613cde4f14eb3.webp",
+    "width": 1600,
+    "height": 1000
+   },
+   "open": "https://apps.slop.yolo.scapegoat.dev/f/xenoform-studio/",
+   "preview": "/_s/xenoform-studio/main/index.html",
+   "download": "/_s/xenoform-studio/main/index.html"
+  },
+  {
+   "id": "octavo-ide",
+   "title": "Octavo IDE",
+   "description": "An IDE for mathematics chapters on a two-screen handheld: write cards in Markdown and TeX, script verbs and flows, and read, peek, map and practise on the device beside the editor.",
+   "tags": [
+    "education",
+    "handheld",
+    "math"
+   ],
+   "featured": false,
+   "version": "0.1.0",
+   "publishedAt": "2026-10-23T21:59:40Z",
+   "free": true,
+   "capabilities": [
+    "sample"
+   ],
+   "bytes": 808704,
+   "attachments": [
+    {
+     "name": "octavo-ide-source.zip",
+     "label": "Source project (zip)",
+     "size": 5544276,
+     "href": "/_s/octavo-ide/main/attachments/octavo-ide-source.zip"
+    }
+   ],
+   "cover": {
+    "src": "/_d/francois-media-3/1/files/med_faf3d28c185ef40db27a09a5.webp",
+    "width": 1600,
+    "height": 1000
+   },
+   "open": "https://apps.slop.yolo.scapegoat.dev/f/octavo-ide/",
+   "preview": "/_s/octavo-ide/main/index.html",
+   "download": "/_s/octavo-ide/main/index.html"
+  },
+  {
+   "id": "kinescope",
+   "title": "Kinescope",
+   "description": "Kinescope is a presentation editor that draws every slide, transition and effect with GPU shaders (WebGPU, falling back to WebGL), so each slide re-lays itself out for any screen shape, from a wide display to a phone.",
+   "tags": [
+    "shaders",
+    "slides"
+   ],
+   "featured": false,
+   "version": "1.0.0",
+   "publishedAt": "2026-10-23T21:07:29Z",
+   "free": true,
+   "capabilities": [
+    "sample"
+   ],
+   "bytes": 359200,
+   "attachments": [],
+   "cover": {
+    "src": "/_d/francois-media-2/1/files/med_e0885418f8e297a3510789b2.png",
+    "width": 4154,
+    "height": 2324
+   },
+   "open": "https://apps.slop.yolo.scapegoat.dev/f/kinescope/",
+   "preview": "/_s/kinescope/main/index.html",
+   "download": "/_s/kinescope/main/index.html"
+  },
+  {
+   "id": "fringe-studio",
+   "title": "Fringe Studio",
+   "description": "Interference design tool: place wave emitters, shape the complex field, roll seeded variations, and read how the math works.",
+   "tags": [
+    "design",
+    "generative",
+    "math"
+   ],
+   "featured": false,
+   "version": "1.0.0",
+   "publishedAt": "2026-10-23T20:58:08Z",
+   "free": true,
+   "capabilities": [
+    "sample"
+   ],
+   "bytes": 112916,
+   "attachments": [],
+   "cover": {
+    "src": "/_d/francois-media-2/1/files/med_9124ea261507fc2463322801.png",
+    "width": 4534,
+    "height": 2374
+   },
+   "open": "https://apps.slop.yolo.scapegoat.dev/f/fringe-studio/",
+   "preview": "/_s/fringe-studio/main/index.html",
+   "download": "/_s/fringe-studio/main/index.html"
+  },
+  {
+   "id": "pointfield-cad",
+   "title": "Pointfield CAD",
+   "description": "Implicit CAD in the browser: a fluent JavaScript grammar compiles to an IR DAG and GLSL; organic primitives, a measuring agent loop and a timelapse recorder.",
+   "tags": [
+    "3d",
+    "design"
+   ],
+   "featured": true,
+   "version": "1.0.0",
+   "publishedAt": "2026-10-23T20:51:44Z",
+   "free": true,
+   "capabilities": [
+    "sample"
+   ],
+   "bytes": 778222,
+   "attachments": [],
+   "cover": {
+    "src": "/_d/francois-media-2/1/files/med_de70b08e4ea9cd52de0bee6b.png",
+    "width": 3450,
+    "height": 2054
+   },
+   "open": "https://apps.slop.yolo.scapegoat.dev/f/pointfield-cad/",
+   "preview": "/_s/pointfield-cad/main/index.html",
+   "download": "/_s/pointfield-cad/main/index.html"
+  },
+  {
+   "id": "type-studio",
+   "title": "Type Studio",
+   "description": "Parametric variable-font studio: YAML DSL, JS API, live glyph editor, lint and OpenType compiler in one file.",
+   "tags": [
+    "design",
+    "typography"
+   ],
+   "featured": true,
+   "version": "1.0.0",
+   "publishedAt": "2026-10-23T20:33:08Z",
+   "free": true,
+   "capabilities": [
+    "sample"
+   ],
+   "bytes": 229318,
+   "attachments": [],
+   "cover": {
+    "src": "/_d/francois-media-2/1/files/med_99b240ed78c3a99f57febc87.png",
+    "width": 3072,
+    "height": 1554
+   },
+   "open": "https://apps.slop.yolo.scapegoat.dev/f/type-studio/",
+   "preview": "/_s/type-studio/main/index.html",
+   "download": "/_s/type-studio/main/index.html"
+  },
+  {
+   "id": "vitrine",
+   "title": "Vitrine",
+   "description": "Vitrine generates looping ink-and-Copic dioramas from a few lines of YAML and uses wave function collapse to grow them into whole worlds, while Claude keeps inventing new pieces to build with.",
+   "tags": [
+    "agents",
+    "generative"
+   ],
+   "featured": true,
+   "version": "1.0.0",
+   "publishedAt": "2026-10-23T20:26:04Z",
+   "free": true,
+   "capabilities": [
+    "sample"
+   ],
+   "bytes": 761103,
+   "attachments": [],
+   "cover": {
+    "src": "/_d/francois-media/1/files/med_1b7b505b35f8390a75660d4c.png",
+    "width": 1066,
+    "height": 990
+   },
+   "open": "https://apps.slop.yolo.scapegoat.dev/f/vitrine/",
+   "preview": "/_s/vitrine/main/index.html",
+   "download": "/_s/vitrine/main/index.html"
+  },
+  {
+   "id": "loom-pitch",
+   "title": "Loom Pitch",
+   "description": "write football tactics for both teams as chained JavaScript, compiled to a graph and played out live by 3D players, with an agent that edits and tests the code for you.",
+   "tags": [
+    "games",
+    "simulation"
+   ],
+   "featured": true,
+   "version": "1.0.0",
+   "publishedAt": "2026-10-23T20:21:30Z",
+   "free": true,
+   "capabilities": [
+    "sample"
+   ],
+   "bytes": 199868,
+   "attachments": [],
+   "cover": {
+    "src": "/_d/francois-media-2/1/files/med_a4196d54d3f3959ce5f00eff.png",
+    "width": 2384,
+    "height": 1206
+   },
+   "open": "https://apps.slop.yolo.scapegoat.dev/f/loom-pitch/",
+   "preview": "/_s/loom-pitch/main/index.html",
+   "download": "/_s/loom-pitch/main/index.html"
+  },
+  {
+   "id": "lumen-studio",
+   "title": "Lumen Studio",
+   "description": "WebGPU path tracer in a single HTML file, where you write photorealistic scenes in a fluent JavaScript grammar.",
+   "tags": [
+    "3d",
+    "shaders"
+   ],
+   "featured": false,
+   "version": "1.0.0",
+   "publishedAt": "2026-10-23T20:15:52Z",
+   "free": true,
+   "capabilities": [
+    "sample"
+   ],
+   "bytes": 178917,
+   "attachments": [],
+   "cover": {
+    "src": "/_d/francois-media/1/files/med_16355b78a6562f1c5093012b.png",
+    "width": 3720,
+    "height": 2702
+   },
+   "open": "https://apps.slop.yolo.scapegoat.dev/f/lumen-studio/",
+   "preview": "/_s/lumen-studio/main/index.html",
+   "download": "/_s/lumen-studio/main/index.html"
+  },
+  {
+   "id": "weft",
+   "title": "Weft",
+   "description": "A shader language whose pixels are glyphs, and whose fields can be read by text, physics, particles and terminal widgets.",
+   "tags": [
+    "shaders",
+    "typography"
+   ],
+   "featured": true,
+   "version": "1.0.0",
+   "publishedAt": "2026-10-23T20:15:50Z",
+   "free": true,
+   "capabilities": [
+    "sample"
+   ],
+   "bytes": 1042897,
+   "attachments": [],
+   "cover": {
+    "src": "/_d/francois-media/1/files/med_4947accd98487d2a911d34a6.png",
+    "width": 2070,
+    "height": 1344
+   },
+   "open": "https://apps.slop.yolo.scapegoat.dev/f/weft/",
+   "preview": "/_s/weft/main/index.html",
+   "download": "/_s/weft/main/index.html"
+  },
+  {
+   "id": "port-wright",
+   "title": "Port Wright",
+   "description": "Lightweight Procedural Port Simulation",
+   "tags": [
+    "generative",
+    "simulation"
+   ],
+   "featured": false,
+   "version": "1.0.0",
+   "publishedAt": "2026-10-23T17:33:21Z",
+   "free": true,
+   "capabilities": [
+    "sample"
+   ],
+   "bytes": 233483,
+   "attachments": [],
+   "cover": {
+    "src": "/_d/francois-media/1/files/med_38e3deda97eb24e54b0b7942.png",
+    "width": 1052,
+    "height": 934
+   },
+   "open": "https://apps.slop.yolo.scapegoat.dev/f/port-wright/",
+   "preview": "/_s/port-wright/main/index.html",
+   "download": "/_s/port-wright/main/index.html"
+  },
+  {
+   "id": "octavo-lab",
+   "title": "Octavo Lab",
+   "description": "An operating-system playground: worlds in QuickJS sandboxes on a virtual dual-screen handheld, with faults, timelines and a coding agent.",
+   "tags": [
+    "developer-tools",
+    "education",
+    "handheld"
+   ],
+   "featured": false,
+   "version": "0.1.0",
+   "publishedAt": "2026-10-22T02:52:35Z",
+   "free": false,
+   "capabilities": [
+    "downloads",
+    "sample"
+   ],
+   "bytes": 1063955,
+   "attachments": [
+    {
+     "name": "octavo-lab-source.zip",
+     "label": "Source project (zip)",
+     "size": 1335224,
+     "href": null
+    }
+   ],
+   "cover": {
+    "src": "/_d/francois-media-3/1/files/med_fa7647d801f5bbcb5d12f00e.webp",
+    "width": 1600,
+    "height": 1000
+   },
+   "open": "https://apps.slop.yolo.scapegoat.dev/f/octavo-lab/",
+   "preview": null,
+   "download": null
+  },
+  {
+   "id": "kiln-workbench",
+   "title": "Kiln Workbench",
+   "description": "A compiler workbench: write passes and IRs in JavaScript, watch every rewrite, generate CUDA and WGSL, and measure kernels on simulated GPUs.",
+   "tags": [
+    "developer-tools",
+    "education",
+    "machine-learning"
+   ],
+   "featured": false,
+   "version": "0.1.0",
+   "publishedAt": "2026-10-22T02:52:21Z",
+   "free": false,
+   "capabilities": [
+    "downloads",
+    "sample"
+   ],
+   "bytes": 743173,
+   "attachments": [],
+   "cover": {
+    "src": "/_d/francois-media-2/1/files/med_8c4bdeafb0c747bf208bde46.webp",
+    "width": 1600,
+    "height": 1000
+   },
+   "open": "https://apps.slop.yolo.scapegoat.dev/f/kiln-workbench/",
+   "preview": null,
+   "download": null
+  },
+  {
+   "id": "mimeo",
+   "title": "Mimeo",
+   "description": "A zine workbench: write pages as a script, with exact-odds tables, picture recipes, clay creatures and print-ready spreads.",
+   "tags": [
+    "generative",
+    "print"
+   ],
+   "featured": false,
+   "version": "0.1.0",
+   "publishedAt": "2026-10-22T02:52:07Z",
+   "free": false,
+   "capabilities": [
+    "downloads",
+    "room",
+    "sample"
+   ],
+   "bytes": 997162,
+   "attachments": [
+    {
+     "name": "mimeo-source.zip",
+     "label": "Source project (zip)",
+     "size": 796966,
+     "href": null
+    }
+   ],
+   "cover": {
+    "src": "/_d/francois-media-2/1/files/med_de2dbf392ae40c7345c88587.webp",
+    "width": 1600,
+    "height": 1000
+   },
+   "open": "https://apps.slop.yolo.scapegoat.dev/f/mimeo/",
+   "preview": null,
+   "download": null
+  },
+  {
+   "id": "hypercore-studio",
+   "title": "Hypercore Studio",
+   "description": "The Living Comic engine in deep space: grow monsters from code and stage sci-fi comic pages under a magenta nebula.",
+   "tags": [
+    "3d",
+    "comics",
+    "generative"
+   ],
+   "featured": false,
+   "version": "0.1.0",
+   "publishedAt": "2026-10-22T02:51:41Z",
+   "free": false,
+   "capabilities": [
+    "db",
+    "downloads",
+    "room",
+    "sample",
+    "user"
+   ],
+   "bytes": 8179289,
+   "attachments": [
+    {
+     "name": "hypercore-studio-source.zip",
+     "label": "Source (zip)",
+     "size": 6800896,
+     "href": null
+    }
+   ],
+   "cover": {
+    "src": "/_d/francois-media-3/1/files/med_f70b4b7a3e3117c950cd1040.webp",
+    "width": 1600,
+    "height": 1000
+   },
+   "open": "https://apps.slop.yolo.scapegoat.dev/f/hypercore-studio/",
+   "preview": null,
+   "download": null
+  },
+  {
+   "id": "living-comic-studio",
+   "title": "Living Comic Studio",
+   "description": "Write a comic as a program: 3D actors, cameras, balloons and inks, staged into living pages, plus a chat room where messages become panels.",
+   "tags": [
+    "3d",
+    "comics"
+   ],
+   "featured": false,
+   "version": "0.1.0",
+   "publishedAt": "2026-10-22T02:51:21Z",
+   "free": false,
+   "capabilities": [
+    "db",
+    "downloads",
+    "room",
+    "sample",
+    "user"
+   ],
+   "bytes": 7909758,
+   "attachments": [
+    {
+     "name": "living-comic-studio-source.zip",
+     "label": "Source (zip)",
+     "size": 6705526,
+     "href": null
+    }
+   ],
+   "cover": {
+    "src": "/_d/francois-media-2/1/files/med_7726fe53244c550a727f588a.webp",
+    "width": 1600,
+    "height": 1000
+   },
+   "open": "https://apps.slop.yolo.scapegoat.dev/f/living-comic-studio/",
+   "preview": null,
+   "download": null
+  },
+  {
+   "id": "shop",
+   "title": "Shop",
+   "description": "Shop is a design canvas built on code, where you and AI agents design side by side and every edit stays real, reviewable code.",
+   "tags": [
+    "agents",
+    "design"
+   ],
+   "featured": false,
+   "version": "0.0.1",
+   "publishedAt": "2026-10-21T14:50:33Z",
+   "free": true,
+   "capabilities": [
+    "sample"
+   ],
+   "bytes": 696293,
+   "attachments": [],
+   "cover": {
+    "src": "/_d/francois-media-3/1/files/med_f843e9e3b10c27d699b7836c.png",
+    "width": 3994,
+    "height": 3094
+   },
+   "open": "https://apps.slop.yolo.scapegoat.dev/f/shop/",
+   "preview": "/_s/shop/main/index.html",
+   "download": "/_s/shop/main/index.html"
+  },
+  {
+   "id": "form-skate-workbench",
+   "title": "Form Skate Workbench",
+   "description": "An IDE and agent for building a skateboard game from the ground up: editable physics, motors, trick recognition and a drafting-sheet stage.",
+   "tags": [
+    "games",
+    "simulation"
+   ],
+   "featured": false,
+   "version": "0.1.0",
+   "publishedAt": "2026-10-21T13:27:07Z",
+   "free": true,
+   "capabilities": [
+    "sample"
+   ],
+   "bytes": 3770733,
+   "attachments": [],
+   "cover": {
+    "src": "/_d/francois-media-2/1/files/med_c2f5a0787ae783d7b7c802ec.webp",
+    "width": 1600,
+    "height": 1000
+   },
+   "open": "https://apps.slop.yolo.scapegoat.dev/f/form-skate-workbench/",
+   "preview": "/_s/form-skate-workbench/main/index.html",
+   "download": "/_s/form-skate-workbench/main/index.html"
+  },
+  {
+   "id": "tabula-workbench",
+   "title": "Tabula Workbench",
+   "description": "A programmable reactive workbook with live inputs, charts and model-assisted editing. Workbook drafts live in this browser.",
+   "tags": [
+    "developer-tools",
+    "education"
+   ],
+   "featured": false,
+   "version": "0.1.2",
+   "publishedAt": "2026-10-17T00:00:03Z",
+   "free": true,
+   "capabilities": [
+    "downloads",
+    "sample"
+   ],
+   "bytes": 1067849,
+   "attachments": [
+    {
+     "name": "tabula-workbench-source.zip",
+     "label": "Source project (zip)",
+     "size": 919350,
+     "href": "/_s/tabula-workbench/main/attachments/tabula-workbench-source.zip"
+    }
+   ],
+   "cover": {
+    "src": "/_d/francois-media-2/1/files/med_8467b1ee822aba5cfeb27a8c.webp",
+    "width": 0,
+    "height": 0
+   },
+   "open": "https://apps.slop.yolo.scapegoat.dev/f/tabula-workbench/",
+   "preview": "/_s/tabula-workbench/main/index.html",
+   "download": "/_s/tabula-workbench/main/index.html"
+  },
+  {
+   "id": "lattice-deck",
+   "title": "Lattice Deck",
+   "description": "A programmable presentation and live graphics workbench with scripted agents, hosted model access and collaboration rooms.",
+   "tags": [
+    "slides"
+   ],
+   "featured": false,
+   "version": "0.1.2",
+   "publishedAt": "2026-10-16T23:59:55Z",
+   "free": true,
+   "capabilities": [
+    "db",
+    "room",
+    "sample",
+    "user"
+   ],
+   "bytes": 426040,
+   "attachments": [],
+   "cover": {
+    "src": "/_d/francois-media-2/1/files/med_d51e0ae1337286fb0a039163.webp",
+    "width": 0,
+    "height": 0
+   },
+   "open": "https://apps.slop.yolo.scapegoat.dev/f/lattice-deck/",
+   "preview": "/_s/lattice-deck/main/index.html",
+   "download": "/_s/lattice-deck/main/index.html"
+  },
+  {
+   "id": "lattice-phantasmagoria",
+   "title": "Lattice Phantasmagoria",
+   "description": "A playable dual-screen canvas and WebGL experiment with cartridges and scenes. Browser-only proof of concept.",
+   "tags": [
+    "handheld",
+    "shaders"
+   ],
+   "featured": false,
+   "version": "0.1.2",
+   "publishedAt": "2026-10-16T23:59:48Z",
+   "free": true,
+   "capabilities": [
+    "sample"
+   ],
+   "bytes": 152468,
+   "attachments": [
+    {
+     "name": "lattice-phantasmagoria-source.zip",
+     "label": "Source (zip)",
+     "size": 57050,
+     "href": "/_s/lattice-phantasmagoria/main/attachments/lattice-phantasmagoria-source.zip"
+    }
+   ],
+   "cover": {
+    "src": "/_d/francois-media/1/files/med_5376078b623d69643a81ae87.webp",
+    "width": 0,
+    "height": 0
+   },
+   "open": "https://apps.slop.yolo.scapegoat.dev/f/lattice-phantasmagoria/",
+   "preview": "/_s/lattice-phantasmagoria/main/index.html",
+   "download": "/_s/lattice-phantasmagoria/main/index.html"
+  },
+  {
+   "id": "lattice-rift",
+   "title": "Lattice Rift",
+   "description": "An interactive WebGL instrument for melting, tearing and mending a lattice. Browser-only proof of concept.",
+   "tags": [
+    "handheld",
+    "shaders"
+   ],
+   "featured": false,
+   "version": "0.1.2",
+   "publishedAt": "2026-10-16T23:59:42Z",
+   "free": true,
+   "capabilities": [
+    "sample"
+   ],
+   "bytes": 113708,
+   "attachments": [
+    {
+     "name": "lattice-rift-source.zip",
+     "label": "Source (zip)",
+     "size": 43021,
+     "href": "/_s/lattice-rift/main/attachments/lattice-rift-source.zip"
+    }
+   ],
+   "cover": {
+    "src": "/_d/francois-media-2/1/files/med_a93813775391fac82a060968.webp",
+    "width": 0,
+    "height": 0
+   },
+   "open": "https://apps.slop.yolo.scapegoat.dev/f/lattice-rift/",
+   "preview": "/_s/lattice-rift/main/index.html",
+   "download": "/_s/lattice-rift/main/index.html"
+  }
+ ]
+}

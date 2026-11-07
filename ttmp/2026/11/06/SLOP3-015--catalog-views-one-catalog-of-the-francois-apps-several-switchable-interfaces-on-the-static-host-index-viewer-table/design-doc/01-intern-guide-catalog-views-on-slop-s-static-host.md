@@ -95,7 +95,7 @@ The shell on the live host answers with `Content-Security-Policy: frame-ancestor
 
 The static host does serve a store's tree files at `/_s/<store>/<ref>/<path>` (`serveStoreFile`, `site.go:159`), to anyone who may read the store. For a free app, `/_s/weft/main/index.html` is the app's own HTML, served as `text/html`. For a paid app (`@subscriber` only, SLOP3-013), an anonymous request gets 404. This gives the viewer an honest preview:
 
-- **Free app:** the raw HTML in an `<iframe sandbox="allow-scripts">`. The page runs, but in an opaque origin. It cannot read the catalog page, its cookies or its storage, and it has no `window.claude`. Features that need the runtime (`sample`, `db`, `room`) are unavailable in the preview. The viewer says so and offers "Open" for the real thing. Weft, for example, renders fully this way, and only its agent panel says it needs Claude.
+- **Free app:** the raw HTML in an `<iframe sandbox="allow-scripts allow-forms allow-modals">`, passed as `srcdoc` (§3.3). The page runs, but in an opaque origin. It cannot read the catalog page, its cookies or its storage, and it has no `window.claude`. Features that need the runtime (`sample`, `db`, `room`) are unavailable in the preview. The viewer says so and offers "Open" for the real thing. Weft, for example, renders fully this way, and only its agent panel says it needs Claude.
 - **Paid app:** the cover image and a notice that the app is for subscribers, with "Open" (which asks for sign-in on the live host).
 
 ## 3. Design
@@ -193,7 +193,9 @@ open(item):
   modal.title = item.title
   devices = {phone: 390×844, tablet: 820×1180, desktop: 1280×800}
   if item.preview:                                   // free app
-    frame = <iframe sandbox="allow-scripts allow-forms allow-modals" src=item.preview referrerpolicy="no-referrer">
+    html  = fetch(item.preview)                      // same origin; cached per item
+    doc   = html with "<base href=/_s/<id>/main/><script>SHIM</script>" after <head>
+    frame = <iframe sandbox="allow-scripts allow-forms allow-modals" srcdoc=doc referrerpolicy="no-referrer">
     size frame to the device; scale it to fit the modal with CSS transform
     note: "Preview without slop's runtime; model calls, shared data and rooms need Open."
   else:                                              // paid app
@@ -204,6 +206,13 @@ close(): remove the iframe (stops the app), history back to the list URL
 ```
 
 The iframe sandbox omits `allow-same-origin`, so the previewed app runs in an opaque origin. It cannot reach the catalog page through `window.parent`, and it cannot read or write the site host's storage.
+
+That isolation has a cost: in an opaque origin the browser throws on `localStorage` and `sessionStorage`, and many apps read them while starting. Lattice Arena, for example, rendered a blank frame. The viewer therefore does not point the iframe at the file. It fetches the HTML itself and passes it as `srcdoc`, with two additions placed right after `<head>`:
+
+- `<base href="/_s/<id>/main/">`, so the app's relative URLs still resolve against its own files;
+- `SHIM`, a few lines that replace each storage object with an in-memory `Map` when touching the real one throws.
+
+`window.claude` is left absent. Apps written for claude.ai check for it, and Lattice Arena, for example, says "Claude is not available here". If the fetch fails, the viewer shows the cover instead.
 
 ### 3.4 The two views
 
@@ -228,12 +237,14 @@ for store, source, mount in [(catalog, apps/catalog + data, /catalog),
     mount.set(site host, mount, store)     if missing
 ```
 
-It uses the same comparison as SLOP3-013's importer: path and SHA-256 against `files.ls`, so a second run changes nothing. Adding a view later means adding one directory under `apps/` and one line each in `views.json` and the deploy script's list.
+It uses the same comparison as SLOP3-013's importer: path and SHA-256 against `files.ls`, so a second run changes nothing.
+
+**Versioned kit URLs.** The static host lets browsers keep a file for 60 s and then use it stale for 600 s more (`stale-while-revalidate`), so a changed `views.js` could reach returning visitors up to 11 minutes late. When the deploy script copies a page, it rewrites `"/catalog/kit/views.js"` and `"/catalog/kit/views.css"` to `…?v=<first 12 hex of the file's SHA-256>`. A changed kit therefore has a new URL. The static host ignores the query string when serving the file. Adding a view later means adding one directory under `apps/` and one line each in `views.json` and the deploy script's list.
 
 ### 3.6 Security and privacy
 
 - **The views run with no privileges.** The static host has no session. The pages read only public files, and the catalog contains only public listing data.
-- **The preview cannot escape its iframe.** `sandbox="allow-scripts allow-forms allow-modals"` without `allow-same-origin` gives it an opaque origin. `referrerpolicy="no-referrer"` keeps the catalog URL away from the app.
+- **The preview cannot escape its iframe.** `srcdoc` with `sandbox="allow-scripts allow-forms allow-modals"` and without `allow-same-origin` gives it an opaque origin. `referrerpolicy="no-referrer"` keeps the catalog URL away from the app.
 - **Paid apps are never previewed.** Their HTML is not reachable anonymously (SLOP3-013's grants). The catalog does not link to it either: `preview` and `download` are `null` for them.
 - **No visitor data is collected,** and no third-party script or font is loaded. The pages use system fonts. The design is our own: Ramon's site is the pattern, not the look, and no assets or typeface are copied from it.
 

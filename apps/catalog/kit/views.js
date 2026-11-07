@@ -92,6 +92,45 @@
 
   // --- the viewer -----------------------------------------------------------
 
+  // The preview runs in an opaque origin (sandbox without allow-same-origin),
+  // where the browser throws on localStorage and sessionStorage. Many apps
+  // read them while starting, so the preview gets in-memory stand-ins, and a
+  // <base> so the app's relative URLs resolve against its own files.
+  const SHIM = "(" + function () {
+    function mem() {
+      const m = new Map();
+      return {
+        getItem: (k) => (m.has(String(k)) ? m.get(String(k)) : null),
+        setItem: (k, v) => { m.set(String(k), String(v)); },
+        removeItem: (k) => { m.delete(String(k)); },
+        clear: () => m.clear(),
+        key: (i) => [...m.keys()][i] ?? null,
+        get length() { return m.size; },
+      };
+    }
+    for (const name of ["localStorage", "sessionStorage"]) {
+      try { void window[name].length; } catch (e) {
+        try { Object.defineProperty(window, name, { value: mem(), configurable: true }); } catch (e2) { /* leave it */ }
+      }
+    }
+  } + ")();";
+  const previews = new Map();
+
+  async function previewDoc(item) {
+    if (!previews.has(item.id)) {
+      previews.set(item.id, fetch(item.preview).then((r) => {
+        if (!r.ok) throw new Error("preview: " + r.status);
+        return r.text();
+      }).then((html) => {
+        const base = new URL(item.preview, location.href).href.replace(/[^/]*$/, "");
+        const head = `<base href="${base}"><script>${SHIM}<\/script>`;
+        const m = html.match(/<head[^>]*>/i);
+        return m ? html.slice(0, m.index + m[0].length) + head + html.slice(m.index + m[0].length) : head + html;
+      }).catch((e) => { previews.delete(item.id); throw e; }));
+    }
+    return previews.get(item.id);
+  }
+
   const DEVICES = { phone: [390, 844], tablet: [820, 1180], desktop: [1280, 800] };
   const viewer = {
     catalog: null,
@@ -151,9 +190,14 @@
       const [w, h] = DEVICES[this.device];
       const device = el("div", { class: "cv-device", style: `width:${w}px;height:${h}px` },
         item.preview
-          ? el("iframe", { src: item.preview, sandbox: "allow-scripts allow-forms allow-modals", referrerpolicy: "no-referrer",
-            title: item.title + " (preview)", loading: "eager" })
+          ? el("iframe", { sandbox: "allow-scripts allow-forms allow-modals", referrerpolicy: "no-referrer",
+            title: item.title + " (preview)" })
           : item.cover ? el("img", { src: item.cover.src, alt: item.title }) : monogram(item, "cover"));
+      if (item.preview) {
+        const frame = device.firstChild;
+        previewDoc(item).then((doc) => { if (this.item === item) frame.srcdoc = doc; })
+          .catch(() => { if (this.item === item) frame.replaceWith(item.cover ? el("img", { src: item.cover.src, alt: item.title }) : monogram(item)); });
+      }
       if (!item.preview && !item.cover) device.firstChild.style.cssText = "width:100%;height:100%;font-size:96px";
       const dims = el("span", { class: "cv-meta" }, `${w} × ${h}`);
       const att = item.attachments.length
