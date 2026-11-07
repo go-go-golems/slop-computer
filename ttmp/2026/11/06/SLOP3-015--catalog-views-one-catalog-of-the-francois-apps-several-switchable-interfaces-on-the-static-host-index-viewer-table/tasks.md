@@ -16,3 +16,8 @@
 - [x] View: zine (catalog-zine): one page per app, print CSS, PDF for the reMarkable <!-- t:cijn -->
 - [x] Local test (devserve), then deploy when the post-#31 image is out <!-- t:nqrb -->
 - [x] Zine: 8-page fold (one sheet, one side) and 16-page two-sided booklet layouts, in parts <!-- t:mi9a -->
+- [x] View: timeline + Atom feed (release history from the SLOP3-013 inventory) <!-- t:ppe0 -->
+- [x] View: size treemap (squarified; group by capabilities, tag, access) <!-- t:nh5v -->
+- [x] View: roulette / like this, but… (live previews, related by tags and capabilities) <!-- t:e4qh -->
+- [x] View: text terminal (ls, grep, find, cat, open, run, tags, caps, du, cd) <!-- t:3cpc -->
+- [x] View: desktop (windows, start menu, taskbar, live previews, at most 5 running) <!-- t:9phe -->

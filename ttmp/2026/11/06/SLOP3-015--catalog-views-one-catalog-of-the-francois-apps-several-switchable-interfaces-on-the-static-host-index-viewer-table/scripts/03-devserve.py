@@ -4,7 +4,7 @@ apps/catalog-<view>, /catalog/ from apps/catalog plus the built data dir, and
 import http.server, sys, os, urllib.request, mimetypes
 REPO, DATA, PORT = sys.argv[1], sys.argv[2], int(sys.argv[3])
 UP = "https://site.slop.yolo.scapegoat.dev"
-VIEWS = ["list", "table", "sheet", "caps", "zine"]
+VIEWS = ["list", "table", "sheet", "caps", "zine", "timeline", "treemap", "roulette", "term", "desktop"]
 MOUNTS = [("/catalog/" + v, os.path.join(REPO, "apps/catalog-" + v)) for v in VIEWS] + [
           ("/catalog/data", DATA), ("/catalog", os.path.join(REPO, "apps/catalog"))]
 class H(http.server.BaseHTTPRequestHandler):

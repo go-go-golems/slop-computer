@@ -311,6 +311,41 @@
   }
 
   const DEVICES = { phone: [390, 844], tablet: [820, 1180], desktop: [1280, 800] };
+
+  // live mounts an app's preview into box: a sandboxed frame at the device's
+  // size (DEVICES key, or [w, h]), scaled to box's width and height, never up.
+  // Free apps only; others get their cover. Returns stop(), which removes it.
+  function live(box, item, device) {
+    const [w, h] = Array.isArray(device) ? device : DEVICES[device || "desktop"];
+    if (!item.preview) {
+      box.replaceChildren(item.cover ? el("img", { src: item.cover.src, alt: item.title, class: "cv-livecover" }) : monogram(item, "cv-livecover"));
+      return () => box.replaceChildren();
+    }
+    const f = el("iframe", { sandbox: "allow-scripts allow-forms allow-modals", referrerpolicy: "no-referrer",
+      title: item.title + " (preview)", class: "cv-liveframe", style: `width:${w}px;height:${h}px` });
+    const fit = () => {
+      const s = Math.min(1, box.clientWidth / w, box.clientHeight / h || Infinity);
+      f.style.transform = `translate(${(box.clientWidth - w * s) / 2}px, 0) scale(${s})`;
+    };
+    const ro = new ResizeObserver(fit);
+    ro.observe(box);
+    box.replaceChildren(f);
+    fit();
+    let stopped = false;
+    previewDoc(item).then((doc) => { if (!stopped) f.srcdoc = doc; })
+      .catch(() => { if (!stopped) box.replaceChildren(item.cover ? el("img", { src: item.cover.src, alt: item.title, class: "cv-livecover" }) : monogram(item, "cv-livecover")); });
+    return () => { stopped = true; ro.disconnect(); box.replaceChildren(); };
+  }
+
+  // related ranks other apps by how much they share with item: tags (Jaccard)
+  // plus a little for the same capabilities. Most similar first.
+  function related(item, items) {
+    const jac = (a, b) => { const A = new Set(a), B = new Set(b); let n = 0; A.forEach((x) => { if (B.has(x)) n++; }); return n / (A.size + B.size - n || 1); };
+    return items.filter((o) => o.id !== item.id)
+      .map((o) => [jac(item.tags, o.tags) + 0.25 * jac(item.capabilities, o.capabilities), o])
+      .sort((a, b) => b[0] - a[0]).map(([s, o]) => Object.assign({ score: s }, { item: o }));
+  }
+
   const viewer = {
     catalog: null,
     node: null,
@@ -431,5 +466,5 @@
     },
   };
 
-  window.SlopCatalog = { load, header, viewer, palette, paged, previewDoc, DEVICES, fuzzy, el, bytes, date, monogram, matches };
+  window.SlopCatalog = { load, header, viewer, palette, paged, live, related, previewDoc, DEVICES, fuzzy, el, bytes, date, monogram, matches };
 })();

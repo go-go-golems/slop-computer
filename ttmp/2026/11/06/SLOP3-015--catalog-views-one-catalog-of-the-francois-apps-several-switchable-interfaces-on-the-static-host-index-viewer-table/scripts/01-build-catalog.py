@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """SLOP3-015: build the catalog the views read.
 
-usage: 01-build-catalog.py <out-dir> [--apps-origin URL]
+usage: 01-build-catalog.py <out-dir> [--apps-origin URL] [--site-origin URL] [--history inventory.json]
 
 Reads (never writes) the slop server of the CLI's default login
 ($SLOP_CREDENTIALS or ~/.config/slop/credentials.json; the token is read,
@@ -9,11 +9,15 @@ never printed):
   store.ls --all                          the release stores
   files.cat <store> francois.json         each release's facts (SLOP3-013)
   files.cat boutique _data/francois-catalog.json   covers and featured flags
-and writes <out-dir>/catalog.json and <out-dir>/views.json (guide §3.2).
+and writes <out-dir>/catalog.json and <out-dir>/views.json (guide §3.2), plus
+feed.xml (Atom, one entry per release). With --history (SLOP3-013's
+francois inventory, read from the file) each item also gets "releases":
+every published release of the app, newest first, with its changelog.
 Only listed apps go in; paid apps get no preview, download or attachment
 links (the static host would answer 404 to a guest anyway).
 """
 import argparse
+import html
 import collections
 import json
 import os
@@ -33,7 +37,17 @@ VIEWS = [
     {"id": "caps", "title": "Capabilities", "path": "/catalog/caps/",
      "blurb": "The apps by what they ask of slop's runtime: model, documents, rooms, identity, downloads."},
     {"id": "zine", "title": "Zine", "path": "/catalog/zine/",
-     "blurb": "One printed page per app, sized for the reMarkable, A5, A4 or Letter."},
+     "blurb": "One printed page per app, sized for the reMarkable, A5, A4 or Letter; or a zine to fold."},
+    {"id": "timeline", "title": "Timeline", "path": "/catalog/timeline/",
+     "blurb": "Releases day by day, with versions and changelogs, and an Atom feed."},
+    {"id": "treemap", "title": "Sizes", "path": "/catalog/treemap/",
+     "blurb": "A treemap of the apps by the size of their HTML, from 10 MB down to 40 KB."},
+    {"id": "roulette", "title": "Roulette", "path": "/catalog/roulette/",
+     "blurb": "A random app, or two side by side; then one like it, or one quite unlike it."},
+    {"id": "term", "title": "Terminal", "path": "/catalog/term/",
+     "blurb": "A keyboard-only catalog: ls, grep, cat, open, run, tags, caps, du."},
+    {"id": "desktop", "title": "Desktop", "path": "/catalog/desktop/",
+     "blurb": "The apps as windows on a desktop, with a start menu and a taskbar."},
 ]
 
 
@@ -83,10 +97,60 @@ def item(fj, store, rec, apps_origin):
     }
 
 
+def history(path):
+    """artifact id -> its published releases, newest first, from the francois inventory."""
+    inv = json.load(open(path))
+    out = collections.defaultdict(list)
+    for r in inv["releases"]:
+        if r.get("state") != "published":
+            continue
+        out[r["artifact"]].append({"version": r.get("version"), "publishedAt": (r.get("publishedAt") or "")[:19] + "Z",
+                                   "changelog": (r.get("changelog") or "").strip()})
+    for v in out.values():
+        v.sort(key=lambda r: r["publishedAt"], reverse=True)
+    return out
+
+
+def atom(cat, site):
+    """An Atom feed with one entry per release (or per app, without history), newest first."""
+    esc = html.escape
+    entries = []
+    for i in cat["items"]:
+        rels = i.get("releases") or [{"version": i["version"], "publishedAt": i["publishedAt"], "changelog": ""}]
+        for k, r in enumerate(rels):
+            first = k == len(rels) - 1
+            title = f"{i['title']} {r['version']}" + ("" if first else " (update)")
+            body = r["changelog"] or i["description"]
+            link = f"{site}/catalog/list/?open={urllib.parse.quote(i['id'])}"
+            entries.append((r["publishedAt"] or cat["generated"], f"""  <entry>
+    <id>tag:slop.yolo.scapegoat.dev,2026:catalog/{esc(i['id'])}/{esc(r['version'] or '')}</id>
+    <title>{esc(title)}</title>
+    <updated>{r['publishedAt'] or cat['generated']}</updated>
+    <link rel="alternate" type="text/html" href="{esc(link)}"/>
+    <link rel="related" type="text/html" href="{esc(i['open'])}"/>
+    <summary>{esc(body)}</summary>
+{''.join(f'    <category term="{esc(t)}"/>' + chr(10) for t in i['tags'])}  </entry>
+"""))
+    entries.sort(key=lambda e: e[0], reverse=True)
+    updated = entries[0][0] if entries else cat["generated"]
+    return f"""<?xml version="1.0" encoding="utf-8"?>
+<feed xmlns="http://www.w3.org/2005/Atom">
+  <id>tag:slop.yolo.scapegoat.dev,2026:catalog</id>
+  <title>slop catalog</title>
+  <subtitle>Releases of the apps imported from slop.boutique, running on slop.</subtitle>
+  <updated>{updated}</updated>
+  <link rel="self" type="application/atom+xml" href="{site}/catalog/data/feed.xml"/>
+  <link rel="alternate" type="text/html" href="{site}/catalog/timeline/"/>
+{''.join(e[1] for e in entries)}</feed>
+"""
+
+
 def main():
     ap = argparse.ArgumentParser()
     ap.add_argument("out")
     ap.add_argument("--apps-origin", default="https://apps.slop.yolo.scapegoat.dev")
+    ap.add_argument("--site-origin", default="https://site.slop.yolo.scapegoat.dev")
+    ap.add_argument("--history", help="SLOP3-013 inventory JSON: add each app's release history")
     a = ap.parse_args()
     slop = Slop()
     covers = {r["id"]: r for r in json.loads(slop("files.cat", {"store": "boutique", "path": "_data/francois-catalog.json"}))}
@@ -100,6 +164,10 @@ def main():
             continue
         items.append(item(fj, s["id"], covers.get(fj["artifact"]["id"]), a.apps_origin))
     items.sort(key=lambda i: (i["publishedAt"] or "", i["id"]), reverse=True)
+    if a.history:
+        hist = history(a.history)
+        for i in items:
+            i["releases"] = hist.get(i["id"]) or [{"version": i["version"], "publishedAt": i["publishedAt"], "changelog": ""}]
     tags = collections.Counter(t for i in items for t in i["tags"])
     cat = {
         "generated": time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime()),
@@ -114,6 +182,7 @@ def main():
     out.mkdir(parents=True, exist_ok=True)
     (out / "catalog.json").write_text(json.dumps(cat, ensure_ascii=False, indent=1) + "\n")
     (out / "views.json").write_text(json.dumps(VIEWS, ensure_ascii=False, indent=1) + "\n")
+    (out / "feed.xml").write_text(atom(cat, a.site_origin))
     print(f"{len(items)} listed apps ({sum(not i['free'] for i in items)} for subscribers, "
           f"{sum(1 for i in items if i['cover'])} with covers), {len(tags)} tags; left out (hidden): {', '.join(hidden)}")
 

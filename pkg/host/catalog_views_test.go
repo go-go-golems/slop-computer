@@ -2,8 +2,9 @@ package host
 
 // SLOP3-015: the catalog views are static stores on nested mounts of the
 // static host: /catalog (the kit and the data), and /catalog/list,
-// /catalog/table, /catalog/sheet, /catalog/caps and /catalog/zine (one view
-// each). The most specific mount answers, every page reaches the shared kit
+// /catalog/table, /catalog/sheet, /catalog/caps, /catalog/zine,
+// /catalog/timeline, /catalog/treemap, /catalog/roulette, /catalog/term and
+// /catalog/desktop (one view each). The most specific mount answers, every page reaches the shared kit
 // and data on the same origin, and no app runtime is involved.
 
 import (
@@ -29,6 +30,11 @@ func TestCatalogViewsOnStaticHost(t *testing.T) {
 		{"catalog-sheet", "/catalog/sheet", appDir(t, "catalog-sheet")},
 		{"catalog-caps", "/catalog/caps", appDir(t, "catalog-caps")},
 		{"catalog-zine", "/catalog/zine", appDir(t, "catalog-zine")},
+		{"catalog-timeline", "/catalog/timeline", appDir(t, "catalog-timeline")},
+		{"catalog-treemap", "/catalog/treemap", appDir(t, "catalog-treemap")},
+		{"catalog-roulette", "/catalog/roulette", appDir(t, "catalog-roulette")},
+		{"catalog-term", "/catalog/term", appDir(t, "catalog-term")},
+		{"catalog-desktop", "/catalog/desktop", appDir(t, "catalog-desktop")},
 	} {
 		h.call(admin, "store.new", map[string]any{"id": s.id})
 		h.call(admin, "files.push", map[string]any{"store": s.id, "files": s.files})
@@ -43,6 +49,11 @@ func TestCatalogViewsOnStaticHost(t *testing.T) {
 		"/catalog/sheet/":            "<title>Contact sheet — slop catalog</title>",
 		"/catalog/caps/":             "<title>Capabilities — slop catalog</title>",
 		"/catalog/zine/":             "<title>Zine — slop catalog</title>",
+		"/catalog/timeline/":         "<title>Timeline — slop catalog</title>",
+		"/catalog/treemap/":          "<title>Sizes — slop catalog</title>",
+		"/catalog/roulette/":         "<title>Roulette — slop catalog</title>",
+		"/catalog/term/":             "<title>Terminal — slop catalog</title>",
+		"/catalog/desktop/":          "<title>Desktop — slop catalog</title>",
 		"/catalog/kit/views.js":      "palette",
 		"/catalog/kit/views.css":     ".cv-viewer",
 		"/catalog/data/catalog.json": `"id":"weft"`,
@@ -57,7 +68,8 @@ func TestCatalogViewsOnStaticHost(t *testing.T) {
 		}
 	}
 	// Each view loads the shared kit from the catalog mount.
-	for _, path := range []string{"/catalog/list/", "/catalog/table/", "/catalog/sheet/", "/catalog/caps/", "/catalog/zine/"} {
+	for _, path := range []string{"/catalog/list/", "/catalog/table/", "/catalog/sheet/", "/catalog/caps/", "/catalog/zine/",
+		"/catalog/timeline/", "/catalog/treemap/", "/catalog/roulette/", "/catalog/term/", "/catalog/desktop/"} {
 		if _, body := h.get(static, path); !strings.Contains(body, `src="/catalog/kit/views.js"`) {
 			t.Errorf("%s does not load the kit", path)
 		}

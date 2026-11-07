@@ -36,10 +36,12 @@ button, input, select { font: inherit; color: inherit; }
 .cv-head .wrap { display: flex; align-items: center; gap: 18px; height: 56px; }
 .cv-brand { font-weight: 650; text-decoration: none; white-space: nowrap; }
 .cv-brand small { color: var(--muted); font-weight: 400; font-family: var(--mono); font-size: 12px; margin-left: 6px; }
-.cv-switch { display: flex; gap: 4px; background: var(--chip); padding: 3px; border-radius: 999px; }
+.cv-switch { display: flex; gap: 4px; background: var(--chip); padding: 3px; border-radius: 999px; min-width: 0; overflow-x: auto; scrollbar-width: none; flex: 0 1 auto; }
+.cv-switch::-webkit-scrollbar { display: none; }
+.cv-switch a { white-space: nowrap; }
 .cv-switch a { text-decoration: none; padding: 3px 12px; border-radius: 999px; font-size: 14px; color: var(--muted); }
 .cv-switch a[aria-current="page"] { background: var(--panel); color: var(--ink); box-shadow: var(--shadow); }
-.cv-search { margin-left: auto; width: min(320px, 40vw); border: 1px solid var(--line); background: var(--panel); border-radius: 8px; padding: 6px 10px; font-size: 14px; }
+.cv-search { margin-left: auto; width: min(260px, 30vw); flex: none; border: 1px solid var(--line); background: var(--panel); border-radius: 8px; padding: 6px 10px; font-size: 14px; }
 .cv-search:focus { outline: 2px solid var(--accent); outline-offset: -1px; }
 
 .cv-kbd { border: 1px solid var(--line); background: var(--panel); border-radius: 6px; padding: 3px 8px; font: 12px var(--mono); color: var(--muted); cursor: pointer; white-space: nowrap; }
@@ -65,6 +67,11 @@ button, input, select { font: inherit; color: inherit; }
 .cv-pager button[aria-current="page"] { background: var(--ink); color: var(--bg); border-color: var(--ink); }
 .cv-pager .gap { color: var(--muted); padding: 0 4px; }
 .cv-pager .cv-meta { margin-left: 8px; }
+
+/* live previews (SlopCatalog.live) */
+.cv-liveframe { position: absolute; top: 0; left: 0; border: 0; background: #fff; transform-origin: 0 0; }
+.cv-livecover { position: absolute; inset: 0; width: 100%; height: 100%; object-fit: contain; background: var(--chip); }
+.cv-livecover.cv-mono { font-size: 64px; }
 
 /* shared bits */
 .cv-hero { padding: 48px 0 20px; }
