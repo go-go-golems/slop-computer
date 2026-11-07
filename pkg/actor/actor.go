@@ -126,9 +126,11 @@ type Actor struct {
 	requires   map[string]rt.Level
 	undeclared []string
 
-	storage  goja.Value // use('storage'), built on first use (storage.go)
-	database goja.Value // use('database'), built on first use (database.go)
-	express  goja.Value // use('express'), built on first use (express.go)
+	storage  goja.Value            // use('storage'), built on first use (storage.go)
+	database goja.Value            // use('database'), built on first use (database.go)
+	express  goja.Value            // use('express'), built on first use (express.go)
+	loaded   map[string]goja.Value // catalog modules built for this actor (catalog.go)
+	fs       *memFS                // use('fs')'s tree (memfs.go)
 	// loading is true while actor.js (and what it requires) runs: the only
 	// time express routes may register; pending holds them until build
 	// merges them into def.http.
@@ -432,6 +434,7 @@ func (a *Actor) handle(ev *event) {
 		}
 		return nil
 	})
+	a.fs.end(err == nil) // the fs module's writes follow the turn
 	if err != nil {
 		var ie *goja.InterruptedError
 		if errors.As(err, &ie) || strings.Contains(err.Error(), "turn panicked") {

@@ -473,3 +473,334 @@ Phase 4 runs the mount's host middlewares in the pages door, after the prefix ch
 ```
 - Pull request: https://github.com/go-go-golems/slop-computer/pull/31 (branch `task/slop3-012-modules`, phases 1–4 and diary steps 3–6).
 - Answers: 429 `rate_limited` (+ `Retry-After`), 403 `origin_not_allowed`, 405 `method_not_allowed` (+ `Allow`), 413 `payload_too_large`, 401 `unauthenticated` (+ `WWW-Authenticate: Bearer`), 403 `insufficient_scope`.
+
+## Step 7: Part 2, phase 5a — the module catalog and grants with a configuration
+
+Part 2 starts with the catalog the guide proposed in §20. Every Go module an actor can `use()` or `require()` by name now has a class (`data`, `own`, `scoped`, `trusted`), an optional Go config struct, TypeScript declarations and a `Load(Setup)`. `database` and `express` moved out of the `use()` switch into the catalog as `own` modules; `system` and `workshop` are `trusted`. An admin's grant (`app.trust`) now carries a configuration that is decoded strictly, validated, stored in a new column and applied when the module loads. An interceptor wraps each catalog module's functions to count calls and, for modules that need a grant, re-check it on every call. Two findings changed the code along the way: Go's JSON decoder accepts `readonly` for `readOnly`, and a grant that restricts a default module must not lapse when its admin steps down.
+
+### Prompt Context
+**User prompt (verbatim):** "then do part 2. commit at appropriate intervals and keep a detailed diary as you work (using the diary format from the skill)"
+**Assistant interpretation:** Implement the guide's phase 5 (§19–20) on a branch stacked on PR #31, in sub-phases: 5a catalog and grants, 5b an in-memory `fs` and `path`, 5c `fetch` redirect checks; one diary step per sub-phase.
+**Inferred user intent:** Admins choose and configure, per app, which modules a sandboxed script gets, with slop's own safe versions (no real filesystem, no handles to other databases).
+**Commit (code):** `301384d` — "SLOP3-012 phase 5a: module catalog and grants with a configuration" (branch `task/slop3-012-part2`, rebased onto `75e85e1`; the hashes in steps 7 and 8 are after that rebase)
+
+### What I did
+- `pkg/actor/catalog.go` (new):
+  - `Class` with `Default()` (true for `data` and `own`), `Module{Name, Class, Doc, Config, TypeScript, Load}`, `Setup{Actor, Config}`, `Grant{Config, Current}`;
+  - `Module.DecodeConfig` (strict decode into a fresh copy of `Config`, exact key names via `exactKeys`, then `Validate()` if the struct has it) and `CanonicalConfig` (what is stored);
+  - `Register` (moved from `registry.go`; default class `trusted`), `Modules`, `Module`, `grant`, `trusted`;
+  - `catalogModule`: the resolution rule, cached per actor in `Actor.loaded`;
+  - `intercept`: wraps the functions of the module object and of plain objects under it;
+  - `meters`, `meter`, `ModuleCalls`: per app and module, in memory.
+- `pkg/actor/builtins.go` (new): `registerBuiltins` (called from `New`), `DatabaseConfig.Validate` (`maxRows` 0–10000), `databaseTS`, `expressTS`.
+- `pkg/actor/modules.go`: the `database`/`express` cases are gone; the `default` branch tries provided names, then the catalog. `registry.go` keeps only `Provide`.
+- `pkg/actor/manager.go`: `Trusted` hook replaced by `Grant func(ctx, app, module) (Grant, bool)`; field `calls meters`. `sysreact.go` uses `a.m.trusted`.
+- `pkg/actor/database.go`: under `readOnly`, an authorizer refusal (`not authorized`) is thrown as `permission_denied` naming the grant.
+- `pkg/sysdb/migrations/012_app_module_config.sql`: `ALTER TABLE app_modules ADD COLUMN config TEXT NOT NULL DEFAULT '{}'`.
+- `pkg/policy/modules.go`: `AppModule` gains `Config` and `Current`; `TrustModule(..., config)` logs the old and new config as `Before`/`After`; `ModuleGrant` returns a grant whether current or not; `Trusted` is `ModuleGrant(...).Current`; `AppModules` selects both.
+- `pkg/doors/actors/modules.go`: `Install` sets `m.Grant` from `Gov.ModuleGrant`; `system` and `workshop` register as `ClassTrusted` with the new `Load` signature.
+- `pkg/commands/actors.go`:
+  - `app.trust` looks the module up in the catalog (`e.A.Module`), requires `slop.modules` only for `trusted` modules, and takes `config` (`map[string]any`), stored as `CanonicalConfig`;
+  - `app.modules` rows carry `class`, `default`, `config` (JSON Schema) and `typescript`; for one app it adds `calls`;
+  - `apps` import dropped (`apps.Modules` is now only the manifest's list of declarable names).
+- `pkg/verbs/def.go`: exported `SchemaFor(v any)` over the existing reflector.
+- Tests, in `pkg/host/module_catalog_test.go` (new):
+  - `TestModuleCatalog`: catalog rows, strict and validated configs, a read-only grant that survives its admin's demotion, `maxRows`, untrust, a stale stored config;
+  - `TestModuleInterceptor`: a test-registered `scoped` module `probe`.
+
+### Why
+- **A default module's grant is a restriction, so it applies whether or not it is current.** `Current` (the granter is still an admin, SLOP3-007) exists so a privilege lapses with its admin. If the same rule applied to `database {readOnly: true}`, demoting the admin who set it would silently make the app read-write. `catalogModule` therefore checks `Current` only for `scoped` and `trusted` modules.
+- **A stored config that no longer decodes fails closed.** If a later module version drops a field, falling back to the zero config would lift the restriction. Instead, `use()` throws `unavailable … an admin must grant it again`, and the actor fails to build (`actor_error` at the call).
+- **The interceptor re-checks per call** so that withdrawing a grant or demoting its admin takes effect without a restart. `system`/`workshop` already did this inside `callVerb`; the interceptor makes it true of every non-default module, including future `scoped` ones that do not go through verbs.
+- **`trusted` alone needs `slop.modules`.** Those modules act as the visitor across the platform, so the app has to ask for them in its manifest. A `scoped` module's grant is the admin's decision alone, and a default module needs no request at all.
+
+### What worked
+- `GOWORK=off go test ./... -count=1`: every package `ok`. `golangci-lint run ./...`: `0 issues.`
+- `TestModuleCatalog` asserts, among other things:
+  - the `database` config schema has `readOnly`, `maxRows` and `additionalProperties: false`;
+  - every `trusted` catalog module is in `apps.Modules`, and no other module is;
+  - `{"readonly": true}` and `{"maxRows": 20000}` are `invalid_argument`, as are config on `express` and an unknown module;
+  - after ada's `readOnly`/`maxRows 1` grant and her demotion to member, `add` is `permission_denied`, `count` works, the grant row shows `current: false`, and `calls.database >= 2`;
+  - untrust brings the default back (2 rows readable again);
+  - a stored `{"gone":true}` makes the next call `actor_error` with "grant it again".
+- `TestModuleInterceptor`: `use('probe')` is null before the grant; after ada's grant `p.ping() + p.inner.deep()` is `pong7`, with 2 calls counted; after her demotion, with no restart, the next call is `permission_denied … no longer trusted with probe`.
+- Mutation checks, each restored from a backup and confirmed with `cmp`:
+  - M1, `exactKeys` disabled: `TestModuleCatalog` failed at line 80 (`readonly` accepted, 200);
+  - M2, a lapsed grant's config dropped: failed at line 99 (`add` returned 1 instead of `permission_denied`);
+  - M3, per-call re-check disabled: `TestModuleInterceptor` failed at line 172 (`pong7` after demotion).
+
+### What didn't work
+- First full run: `TestTrustEndsWithItsAdmin` failed with `permission_denied` and message `tool is no longer granted system`, against an expected "no longer trusted". The interceptor now refuses before `callVerb` does, with its own wording; I changed the wording to `… is no longer trusted with …`.
+- `TestModuleCatalog` failed at the strict-config check: `app.trust {"config":{"readonly":true}}` returned 200 with `config: {readOnly: true}`. `encoding/json` matches field names case-insensitively even with `DisallowUnknownFields`. Fix: `exactKeys` compares every key, recursively, with the struct's exact JSON names.
+- The read-only refusal first surfaced as `500 actor_error "Error: not authorized at …intercept.func1 (native)"`. It is now `permission_denied` with the reason (see above).
+- The stale-config assertion first used an empty expected code; the actual code is `actor_error` (the actor fails to build), and the test now says so.
+
+### What I learned
+- The same case-insensitive matching applies to `verbs.decodeArgs` (`pkg/verbs/def.go`): a verb argument `Store` is accepted for `store`. That is not a security issue for verbs (the name maps to the right field), but it is the same "a near-miss is silently accepted" class. I left it alone here.
+
+### What was tricky to build
+- **Rethrowing from the interceptor.** The wrapper calls the original with `f(call.This, call.Arguments...)` and, on error, panics with the returned `*goja.Exception` so JavaScript sees the original exception (with its `.code`). Interrupts arrive the same way and keep working.
+- **Function properties.** `intercept` copies the own keys of a wrapped function onto its wrapper, so a module function that carries properties keeps them. It recurses only into plain `Object`s, so arrays, promises and class instances are left alone.
+
+### What warrants a second pair of eyes
+- Call counts are per process and in memory, like the rate-limit buckets. They reset on restart, and `app.modules` says "since the process started".
+- `intercept` mutates the module's object once, when the actor first loads it. A module that adds functions later (after `Load` returns) would not have them counted.
+- The read-only mapping matches the string `not authorized` from SQLite's authorizer.
+
+### What should be done in the future
+- 5b: an `own` in-memory `fs` with go-go-goja's names, and a `data` `path`.
+- 5c: `fetch` re-checks `slop.fetch` on every redirect.
+- A follow-up: exact key matching in `verbs.decodeArgs`.
+
+### Code review instructions
+- Start at `catalogModule` and `intercept` in `pkg/actor/catalog.go`, then `DecodeConfig`/`exactKeys`, then `app.trust` in `pkg/commands/actors.go` and `ModuleGrant` in `pkg/policy/modules.go`.
+- Validate: `GOWORK=off go test ./pkg/host -run 'TestModuleCatalog|TestModuleInterceptor|TestTrust|TestModule' -count=1 -v`.
+
+### Technical details
+```text
+use(name):
+  built-in switch (sql, db, files, alarm, storage, time, log, stores, fetch, secrets)
+  provided (room, sample, platform)
+  catalog:
+    data/own     → on; grant (if any) configures, current or not
+    scoped       → needs a current grant
+    trusted      → needs slop.modules and a current grant
+    config       → strict decode + exact keys + Validate; undecodable → throw (fail closed)
+    object       → intercepted (count; re-check grant for scoped/trusted), cached per actor
+```
+```text
+slop app trust cat database --config '{"readOnly":true,"maxRows":100}'
+```
+
+## Step 8: Phases 5b and 5c — an in-memory `fs`, `path`, `fetch` redirects; docs; the report writer's corrections
+
+Phase 5b adds the two modules the user named as examples of slop's own safe versions: `fs`, go-go-goja's fs API over an in-memory tree the actor owns, and `path`, its pure string API. `fs` is an `own` module with a configuration (`maxBytes`, `maxFiles`), and its writes follow the turn: a turn that rolls back takes them with it, as it does the store's writes. Phase 5c closes the `fetch` redirect hole recorded in step 6. Before it, an allowed origin could redirect a fetch to any other origin, and the test shows the actor reading that origin's answer. The design document now describes the catalog, and the tasks record the follow-ups. This step also records the corrections and review findings of the report writer, whose vault report on PR #31 is now pushed.
+
+### Prompt Context
+**User prompt (verbatim):** see Step 7
+**Assistant interpretation:** The rest of phase 5: 5b (`fs`, `path`), 5c (`fetch` redirects), then the docs and bookkeeping.
+**Inferred user intent:** "no fs for example except against a virtual in memory fs" (the user's earlier message, Step 1 of SLOP3-011's context): modules that cannot reach the host.
+**Commit (code):** `b31d09b` — "SLOP3-012 phase 5b: an in-memory fs and path in the catalog"; `39b2daf` — "SLOP3-012 phase 5c: fetch checks slop.fetch on every redirect"
+
+### What I did
+- `pkg/actor/memfs.go` (new):
+  - `FSConfig{MaxBytes, MaxFiles}` with `Validate` (caps of 64 MiB and 10000), defaults of 8 MiB and 1000;
+  - `memFS`: absolute clean paths to `*memFile` (`"/"` always exists), a byte count, and `snap` (taken by `touch()` at a turn's first change, restored by `end(false)`); `missing` gives `ENOTDIR` for a path through a file, else `ENOENT`;
+  - operations `read`, `write` (append too), `mkdir` (recursive), `readdir`, `remove` (recursive, force), `rename` (whole subtrees), with Node's error codes;
+  - `fsModule`: the 11 operations, each as `xSync` and as a promise form that settles at once (`catch` turns a throw into a rejection), plus `isReadOnly()`;
+  - encodings: `utf8`, `base64`, `hex`; without one, `readFile` returns a `Uint8Array`; writes take strings, `ArrayBuffer` and typed arrays.
+- `pkg/actor/pathmod.go` (new): `join`, `resolve` (against `/`), `normalize`, `dirname`, `basename`, `extname`, `isAbsolute`, `relative` (`relPath`), `sep`, `separator`, `delimiter`.
+- `pkg/actor/builtins.go`: `fs` (`ClassOwn`, `FSConfig`) and `path` (`ClassData`) registered, with `fsTS` and `pathTS`. `database.go`: `reservedModules` gains `fs` and `path`.
+- Turn hooks: `actor.go` calls `a.fs.end(err == nil)` after `a.st.Do` returns, so a commit that fails also restores; `manager.go`'s setup/smoke path ends it with `true` on success, with a deferred `end(false)` (a no-op after `end(true)`). `end` on a nil tree does nothing.
+- `pkg/actor/modules.go`: `fetchRedirect` is the client's `CheckRedirect`: each hop's origin must be in `slop.fetch`, and it stops after 10 hops; `fetch` returns that `*Error` as is instead of wrapping it as `unavailable`.
+- Tests: `pkg/host/fs_module_test.go` (`TestFSModule`, plus a `jsonString` helper) and `pkg/host/fetch_redirect_test.go` (`TestFetchRedirects`, two `httptest` servers). The second is the first test of actor `fetch` in the repository.
+- `doc/design/slop-v3.md`: a paragraph on the catalog after the `database`/`express` paragraph (§6.2); in §7.1, rows for `fs` and `path`, the `database` row says a grant configures it, and the `fetch` row says redirects are checked; §6.5 lists `fs` and `path` among the bare names.
+- `tasks.md`:
+  - phase 5 is checked, and the fetch half of `b4cu` is marked done;
+  - new tasks for the `decodeArgs` case-insensitivity, the two report-writer findings, and go-go-goja imports.
+- On the part 1 branch: committed and pushed the report writer's diary (`75e85e1`, `reference/02-diary-report-writer.md`).
+
+### Why
+- **The tree follows the turn because the store does.** An actor that writes a file and a row and then throws would otherwise keep the file and lose the row, so a retried event would see half of its own earlier attempt. The snapshot is a shallow `maps.Clone` taken only on a turn's first change. Entries are never changed in place (a write stores a new `memFile`), so the clone is a consistent copy.
+- **Writes during load are not snapshotted.** `actor.js` runs outside any turn. If the build fails, the actor and its tree are discarded together.
+- **The tree is not persisted.** It is memory the actor owns, which is what makes it an `own` module. Durable files are `use('files')` or `use('db')`. A restart, including the one `app.trust` causes, empties it, and the test asserts that.
+- **The redirect check is the first request's check, not a looser one.** `slop.fetch` is a list of origins, so a redirect to a path on the same origin is allowed, and anything else is refused before the request is sent.
+
+### What worked
+- `TestFSModule` asserts each of these as exact JSON:
+  - round trip: `["hello world",11,104,"aGVsbG8gd29ybGQ=",["a.txt","boot.txt"],true,11,false,"loaded"]` (the last value was written while `actor.js` loaded);
+  - errors: `ENOENT`, `ENOENT`, `EEXIST`, `ENOTEMPTY`, `EISDIR`, `ENOTDIR`, `ENOENT` for `/../../etc/passwd` (it is `/etc/passwd` in the tree), and `existsSync('/etc/passwd') === false`;
+  - moves: rename of a subtree, `copyFile` of bytes `[1,2,3]`, recursive `rm`;
+  - path: `["a/c/d.txt","/y/z","/x","/a/b","b",".gz","",false,"../../d","a/b/c/","/"]`;
+  - promises: `["async","ENOENT"]`;
+  - a failing turn's write is gone and an earlier committed one stays; 9 MiB is `ENOSPC` by default;
+  - after `app.trust fs {"maxBytes":100,"maxFiles":5}`, the tree is empty, 95 bytes is `ENOSPC` and 94 fits (the reload wrote `boot.txt`'s 6 bytes again), the second extra file is `ENOSPC`, and `maxBytes: 1<<30` is refused naming 64 MiB.
+- `TestFetchRedirects`: a same-origin redirect works; a redirect to the second server is `permission_denied`, names its origin, and the second server counts 0 hits; a redirect loop is `unavailable … 10 redirects`.
+- Mutation checks, each restored and confirmed with `cmp`:
+  - fs M1, `end(true)` regardless of the error: failed at line 90 (`a failed turn's write stayed`);
+  - fs M2, byte limit disabled: failed at line 96 (`big default: got "ok"`);
+  - fetch, `CheckRedirect` removed: failed at line 52 with `got 200 map[result:map[secret:true]]`. That is the hole: the actor read an undeclared origin's answer.
+- `GOWORK=off go test ./... -count=1`: every package `ok`. `golangci-lint run ./...`: `0 issues.`
+
+### What didn't work
+- `go build`: `cleanPath redeclared in this block` (`pkg/actor/actor.go:336` already has one for the tree). I renamed mine to `fsPath`.
+- `TestFSModule` errors: `got […,"ENOENT",…] want […,"ENOTDIR",…]` for `readFileSync('/data/a.txt/x')`. A path through a file is `ENOTDIR` on a real filesystem; `missing` now walks the ancestors.
+- `TestFSModule` limits: `big ok: got "ENOSPC" want "ok"`. That was my arithmetic: the restart reran `actor.js`, which wrote `boot.txt` again. The test now says why 94 fits.
+- Lint: `nonamedreturns` on `catch`, and `SA5011` (possible nil dereference) after `throwFS` in `stat`, because staticcheck does not know that `throwFS` panics. `catch` no longer uses named results: a recovered panic makes the inner function return `false`, its zero value. `stat` now has an unreachable `return` after `throwFS`.
+
+### What I learned
+- The report writer checked my diary against the code and found three mistakes, which I record here rather than editing steps 3 and 5:
+  - Step 5 says an "11-byte JSON body against a 10-byte limit gives 413". The harness JSON-encodes the string `"0123456789abc"`, so the body is 15 bytes.
+  - Step 3 places the `a2 == ""` pragma check at `pkg/store/sqlpolicy.go:123`. It is at line 124; line 123 is `case sqlite3.SQLITE_PRAGMA:`.
+  - Step 5 does not say that, since phase 4, the API mount's 413 in `TestMountAPIPolicy` comes from `maxBodyStep` (the request has a `Content-Length`), not from the body read in `serveActorRoute`. No test now sends an over-limit body without a `Content-Length` to an API mount.
+- The writer also found two behaviours worth a review, now tasks `f8pw` and `4nwl`:
+  - Floors do not combine. The most specific floor wins alone, and an audience-only floor takes `DefaultMin` for the level, so adding an audience requirement under a broader `admin` floor lowers the level to `view`.
+  - `ctx.body` is parsed only when the request's `content-type` is forwarded, so a `forwardHeaders` without it turns parsing off.
+
+### What was tricky to build
+- **Where the turn ends.** The fs tree has to be kept or restored once the store's commit is known, not when the handler returns, so `end` runs after `a.st.Do`. The setup path is different: it runs inside the kernel's activation turn, so it ends the tree itself, with a deferred `end(false)` covering the failure returns.
+- **Throwing Node-shaped errors.** go-go-goja's fs errors are Go errors with `code`, `syscall` and `path`. `throwFS` builds one with `vm.NewGoError` and those properties and panics with it, which goja throws as that value. The promise forms recover it into a rejection.
+
+### What warrants a second pair of eyes
+- `fs` counts `"/"` against `maxFiles`. The limit is on entries, including directories.
+- `readFile` without an encoding returns a `Uint8Array`, not a Node `Buffer`, because slop has no `Buffer`. Code that calls `buf.toString()` on it gets the typed array's comma-joined bytes.
+- The redirect check allows `http` and `https` only, matching the first request. An allowed `https` origin that redirects to its own `http` origin is refused unless both origins are listed.
+
+### What should be done in the future
+- The stacked PR is open: https://github.com/go-go-golems/slop-computer/pull/32 (base `task/slop3-012-modules`); the user merges it after #31.
+- Follow-ups in `tasks.md`: exact names in `decodeArgs`; the floors and `ctx.body` review points; response-header filtering on non-API mounts; go-go-goja imports.
+
+### Code review instructions
+- `fs`: start at `memFS.write`, `touch`/`end`, and the two `end` call sites (`actor.go` after `a.st.Do`, `manager.go` in setup), then `fsModule`.
+- `fetch`: `fetchRedirect` in `pkg/actor/modules.go` and the `errors.As` after `c.Do`.
+- Validate: `GOWORK=off go test ./pkg/host -run 'TestFSModule|TestFetchRedirects|TestModuleCatalog|TestModuleInterceptor' -count=1 -v`.
+
+### Technical details
+```js
+const fs = require('fs'), path = require('path');
+fs.mkdirSync('/cache', { recursive: true });
+fs.writeFileSync(path.join('/cache', 'feed.json'), JSON.stringify(items));
+const items2 = JSON.parse(fs.readFileSync('/cache/feed.json', 'utf8'));
+```
+```text
+slop app trust journal fs --config '{"maxBytes":1048576,"maxFiles":200}'
+```
+
+## Step 9: The goja bump (PR #33) and the confirmed design decisions
+
+The user asked for two things after PR #32. The first was to bump goja. I moved it to the version go-go-goja pins, a year newer than slop's, in its own PR from `main`, so it merges independently of #31 and #32. The full suite passes with it, both on `main` and on #32's code. The second was to confirm the design decisions. The guide's nine proposed decisions are now marked accepted, each with where it is implemented. §33 has become a record of the six open questions with the answer that stands. Every answer is the guide's default, and the code already follows it, so this step changes no code.
+
+### Prompt Context
+**User prompt (verbatim):** "bump goja, confirm design decisions."
+**Assistant interpretation:**
+- "Bump goja": update `github.com/dop251/goja`. The point is to align with go-go-goja (task `uwr5`), so the target is go-go-goja's version.
+- "Confirm design decisions": the user confirms the guide's decisions, which my last report listed as awaiting confirmation. I record them as accepted with the guide's default answers. I did not read it as "ask me about each one".
+**Inferred user intent:** Clear the two blockers I reported: the dependency gap to go-go-goja, and the unconfirmed decisions.
+**Commit (code):** `4f05ec9` — "Bump goja to 97b96e1e55f5 (2026-11-03), the version go-go-goja uses" (branch `task/goja-bump`, PR https://github.com/go-go-golems/slop-computer/pull/33)
+
+### What I did
+- New worktree `…/scratchpad/gojabump` on `task/goja-bump` from `origin/main` (`ecb5df9`).
+- Ran `GOWORK=off go get github.com/dop251/goja@v0.0.0-20261103151521-97b96e1e55f5`, then `go mod tidy`. The changes:
+  - `go.mod`: goja `af2ceb9156d7` → `97b96e1e55f5`; the indirect dependency `dlclark/regexp2 v1.11.5` → `dlclark/regexp2/v2 v2.11.0`;
+  - `go.sum`: also `goccy/go-yaml v1.19.2` (new) and `Masterminds/semver/v3` 3.3.0 → 3.5.0.
+- Compared the two goja trees in the module cache with `diff -rq` to see the size of the change: about a year of work, including new `builtin_iterator.go`, `base64.go` and `float16.go`, and changes to the compiler, `builtin_promise.go`, `builtin_regexp.go` and most built-ins.
+- Checked #32 against the bump in a throwaway detached worktree, `…/scratchpad/gojacheck`: `origin/task/slop3-012-part2` plus a cherry-pick of `4f05ec9`. I removed it afterwards.
+- Opened PR #33 (base `main`).
+- The guide (`design-doc/01-intern-guide-…md`):
+  - a status note under the introduction: everything is implemented in #31 and #32, the decisions are confirmed, and the migration is `012` and the catalog has `fs` and `path`;
+  - the nine `Status: proposed` lines now read `accepted (confirmed by the user, 2026-11-05)`, each with where it is implemented;
+  - §33 "Open decisions" is now "Decisions (confirmed 2026-11-05)", with each question's answer;
+  - the introduction's list of sections says "confirmed decisions".
+- `tasks.md`: `2kn3` is checked; `uwr5` notes that the bump is PR #33 and that the imports remain.
+
+### Why
+- **The target is go-go-goja's goja, not the newest.** The newest goja commit (`2413f2132ac8`) was from 00:25 UTC the same day. go-go-goja's is two days older, is the one its modules are tested with, and is the one Go's minimal version selection would pick anyway once slop imports go-go-goja.
+- **A separate PR from `main`.** The bump touches only `go.mod` and `go.sum`, which #31 and #32 do not touch. Stacking it on #32 would hold a dependency update behind a feature review.
+- **Decision 6 is answered "no one".** That is the rule part 2 implemented: `data` and `own` modules are on for every actor, and their grants only restrict them.
+
+### What worked
+- On `main` with the bump: `GOWORK=off go test ./... -count=1` gave 17 `ok` lines and no failures, and `golangci-lint run ./...` gave `0 issues.`
+- On #32 plus the bump: the same, 17 `ok` lines and `0 issues.` This covers the code that uses goja most directly: the catalog's interceptor, `fs`'s promises and `Uint8Array`s, `express.js` and the savepoint handles.
+- `grep -c 'accepted (confirmed by the user'` on the guide gives 9.
+
+### What didn't work
+- My first attempt at the check worktree ran `git cherry-pick $H` with `H=$(git rev-parse HEAD)` set in the same compound command. `H` came out empty, `git cherry-pick` printed its usage, and the tests that followed ran #32 on the old goja (17 `ok`). That run proved nothing about the bump. `git log` showed the commit was fine (`4f05ec9`), so I cherry-picked it by hash and reran. The results above come from that second run.
+
+### What I learned
+- `go mod tidy` after the bump also raised `Masterminds/semver/v3` and added `goccy/go-yaml`. These come from the new goja's own module graph, not from slop's code.
+
+### What was tricky to build
+- Nothing in code. The care went into the wording: the guide still describes the plan in the future tense, so the status note says the text says *proposed* where it described the plan, rather than rewriting every "proposed:" code comment.
+
+### What warrants a second pair of eyes
+- Behaviour changes inside goja that the tests do not reach. Regular expressions are the clearest case: goja moved to `regexp2/v2`, and app code with unusual regexes could behave differently. slop's tests exercise little regex code.
+- Whether "confirm design decisions" meant to accept the defaults, as recorded, or to go through them one by one. If any answer should differ, §33 and the matching `Status` lines are the places to change.
+
+### What should be done in the future
+- After #33 merges: rebase #31 and #32 on `main`.
+- Then go-go-goja imports (`uwr5`): wrap chosen go-go-goja modules as catalog entries of the right class (for example `yaml` and `crypto` as `data`).
+
+### Code review instructions
+- PR #33: `git diff origin/main..origin/task/goja-bump` (only `go.mod` and `go.sum`); validate with `GOWORK=off go test ./... -count=1`.
+- Decisions: §33 of the guide and its nine `Status:` lines (`grep -n 'Status:' design-doc/01-*.md`).
+
+### Technical details
+```text
+github.com/dop251/goja  v0.0.0-20251103141225-af2ceb9156d7  →  v0.0.0-20261103151521-97b96e1e55f5
+github.com/dlclark/regexp2 v1.11.5 (indirect)                →  github.com/dlclark/regexp2/v2 v2.11.0
+latest upstream at the time: v0.0.0-20261105002551-2413f2132ac8 (not taken)
+```
+
+## Step 10: Vault report on part 2 (milestone)
+
+I wrote the vault report on part 2 myself instead of delegating it, because the work was done in this session and its details were already in context. It covers PR #32, the goja bump in PR #33 and the confirmed decisions. The note was committed and pushed to the go-go-parc vault.
+
+**User prompt (verbatim):** "write a detailed project report for the obsidian vault as a deep dive technical analysis blog post using a textbook writing style (no analogies, see skill). Commit and push the bsidian vault when done (go-go-parc vault)."
+
+- Note: `Projects/2026/11/05/PROJECT REPORT - slop v3 - Per-App Modules Part 2 - The Module Catalog, Configured Grants and an In-Memory fs - A Technical Deep Dive.md` (7,847 words, three mermaid diagrams).
+- Vault commit `c49057b`, pushed; only the note was staged.
+- Evidence:
+  - the `app.modules` JSON and the two error messages quoted in the note come from a temporary test, `pkg/host/zz_report_tmp_test.go`, run at `606997a` and deleted (never committed);
+  - `TestModuleCatalog`, `TestModuleInterceptor`, `TestFSModule`, `TestFetchRedirects` and `TestTrustEndsWithItsAdmin` pass with `-v`.
+- Checking the draft against the code found errors, which I fixed before committing:
+  - fourteen `path:line` ranges were off by up to six lines (`Register` had moved from line 139 to 177 when `exactKeys` was added);
+  - the turn rule is in `slop-v3.md` §6.3, not §6.5;
+  - the draft said `internal/archtest` forbids `pkg/actor` from importing `pkg/policy`. It does not: `policy` is a domain, which the runtime may import. The hook exists for decoupling, and the note now says that.
+- The mermaid diagrams were not rendered (no mermaid CLI here).
+
+## Step 11: Fixing the Codex review of #32
+
+Codex's automatic review of #32 left three findings. Each was real. For the first two I reproduced the failure with a new test before fixing it; the third test could only fail after the first fix let it run. All three fixes are small. The broken-cache finding is the one that changes behaviour beyond its module: `RestartApp` now also forgets the app's cached build failures.
+
+### Prompt Context
+**User prompt (verbatim):** "tackle comment on https://github.com/go-go-golems/slop-computer/pull/32"
+**Assistant interpretation:** Address the open Codex review comments on #32: fix them, test them, push, and reply.
+**Inferred user intent:** Clear #32's review so it can be merged.
+**Commit (code):** fcdc778 — "SLOP3-012 part 2: fixes for the Codex review of #32"
+
+### What I did
+- Read the PR's comments (`gh pr view 32`, `gh api …/pulls/32/comments`). There were three P2 inline findings:
+  1. `pkg/actor/memfs.go:261`: rename onto itself breaks the byte count;
+  2. `pkg/actor/catalog.go:239`: a cached build failure is not cleared when the grant is repaired;
+  3. `pkg/actor/memfs.go:499`: `o.Get("buffer").Export()` on nil.
+- **Tests first:**
+  - `fs_module_test.go` gained `selfRename` (three `renameSync('/big','/big')` with the 100-byte quota full, then a 1-byte write → must be `ENOSPC`) and `badData` (`writeFileSync` with a plain object, `appendFileSync` with an array, `await writeFile` with an object → each `invalid_argument`, caught; no `/bad` file).
+  - `module_catalog_test.go`, after the stale-config failure: `app.trust database {}`, then `count` must return 2 with no `h.a.Restart`.
+- **Fixes:**
+  - `memFS.rename`: `if from == to { return nil }`, after the existence and root checks.
+  - `dataOf`: read `buffer` only when the property exists. Clamp `byteOffset`/`byteLength` against the buffer, and refuse any other object with `invalid_argument` ("data must be a string, ArrayBuffer or typed array") instead of writing `[object Object]`.
+  - `Manager.RestartApp`: also delete `m.broken` entries whose value starts with `app + "@"`. This covers its callers `app.trust`, `app.untrust` and `policy.set`.
+
+### Why
+- **Refuse plain objects:** writing `"[object Object]"` would have hidden a bug in the app. Node throws `ERR_INVALID_ARG_TYPE` in the same case.
+- **Clear the cache in `RestartApp`** rather than only in `app.trust`: every governance change that restarts an app can change whether its build succeeds (a policy can make `use()` return a module). One rule covers all three callers.
+
+### What worked
+- Before the fixes:
+  - `badData`: `500 … turn panicked: runtime error: invalid memory address or nil pointer dereference`;
+  - repair: `the actor is broken: … database's configuration has no field "gone"; an admin must grant it again`.
+- After the fixes: `go test ./pkg/host -run 'TestFSModule|TestModuleCatalog$'` → `ok`; the full suite passes; `make lint` → `0 issues.`
+- **Undo-each-fix check** (backup and restore from the same `$B` path this time):
+  - M1 (no early return): fails at `selfRename`;
+  - M2 (no nil check): fails with `turn panicked`;
+  - M3 (no cache clearing): fails at the repaired `count`.
+
+  Afterwards `grep -c "false &&\|; true {"` → 0 in both files, and the tests pass.
+
+### What didn't work
+- The self-rename test could not show its own failure at first: `badData` ran earlier in the same test and failed with the panic. It was confirmed by the undo check once the panic was fixed.
+
+### What I learned
+- `goja.Object.Get` returns nil for a missing property, not `undefined`. Any `.Export()` or `.ToInteger()` on an optional property needs a nil check.
+
+### What was tricky to build
+- **`m.broken` holds two kinds of entry,** build failures and crash breakers (three crashes a minute), both keyed `app@n: why`. Clearing them on `RestartApp` resets both, which is what an admin's restart of an app means: the next request builds a fresh actor.
+
+### What warrants a second pair of eyes
+- A store broken by a route policy (`routes.go:70`) is also in `m.broken`. After `RestartApp` its next request rebuilds and, if the policy is still invalid, breaks again with the same message. That costs one extra build.
+
+### What should be done in the future
+- N/A
+
+### Code review instructions
+- `pkg/actor/memfs.go` `rename` and `dataOf`; `pkg/actor/manager.go` `RestartApp`; the new cases in `pkg/host/fs_module_test.go` and `module_catalog_test.go`.

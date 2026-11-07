@@ -43,14 +43,15 @@ type Manager struct {
 	logs   map[string][]LogLine
 
 	// Hooks provided by the host.
-	Policy  func(app, capability, audience string) bool
-	LLM     llm.Backend // the sample backend (nil: no LLM)
-	Secret  func(ctx context.Context, app, name string) (string, error)
-	Paths   Paths                                              // the db paths outside the store (aliases, _stores); nil: the store's own only
-	Trusted func(ctx context.Context, app, module string) bool // app.trust
+	Policy func(app, capability, audience string) bool
+	LLM    llm.Backend // the sample backend (nil: no LLM)
+	Secret func(ctx context.Context, app, name string) (string, error)
+	Paths  Paths                                                       // the db paths outside the store (aliases, _stores); nil: the store's own only
+	Grant  func(ctx context.Context, app, module string) (Grant, bool) // app.trust: an app's grant of a catalog module
 
 	provided map[string]func(*Actor) goja.Value // the door's capability bindings (Provide)
-	modules  map[string]Module                  // the registry (Register)
+	modules  map[string]Module                  // the catalog (Register; catalog.go)
+	calls    meters                             // module calls (catalog.go)
 }
 
 // New makes the actor manager and hooks it into the kernel (activation,
@@ -61,6 +62,7 @@ func New(k *kernel.Kernel) *Manager {
 	k.OnActivated = m.onActivated
 	k.Subscribe(m.onCommit)
 	m.followSystem()
+	m.registerBuiltins()
 	return m
 }
 
@@ -257,6 +259,14 @@ func (m *Manager) RestartApp(app string) {
 			close(a.stop)
 		}
 	}
+	// A failed build is cached per store (m.broken, keyed app@n). The
+	// changes that restart an app (a grant, its configuration, a policy)
+	// can make that build succeed, so the next request builds again.
+	for id, why := range m.broken {
+		if strings.HasPrefix(why, app+"@") {
+			delete(m.broken, id)
+		}
+	}
 }
 
 func (m *Manager) Restart(id string) {
@@ -400,6 +410,7 @@ func (m *Manager) activate(ctx context.Context, t *store.Turn, r kernel.Running)
 	a.cur = &turn{t: t, ev: ev, rev: t.Rev - 1}
 	defer func() { a.cur = nil }()
 	defer a.dropSavepoints() // after a failed hook; closeSavepoints ran otherwise
+	defer a.fs.end(false)    // likewise for the fs module (a no-op after end(true))
 	cx := a.ctxObject(ev)
 	for _, name := range []string{"setup", "smoke"} {
 		f := a.fn(name, "")
@@ -424,6 +435,7 @@ func (m *Manager) activate(ctx context.Context, t *store.Turn, r kernel.Running)
 		}
 	}
 	a.closeSavepoints() // a handle setup or smoke left open rolls back
+	a.fs.end(true)
 	// Recurring alarms from every: add new ones, update changed specs,
 	// drop those the version no longer declares.
 	declared := map[string]bool{}

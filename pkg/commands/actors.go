@@ -2,12 +2,13 @@ package commands
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"slices"
+	"strings"
 
 	"github.com/go-go-golems/slop-computer/pkg/access"
 	"github.com/go-go-golems/slop-computer/pkg/actor"
-	"github.com/go-go-golems/slop-computer/pkg/apps"
 	"github.com/go-go-golems/slop-computer/pkg/authz"
 	"github.com/go-go-golems/slop-computer/pkg/policy"
 	"github.com/go-go-golems/slop-computer/pkg/registry"
@@ -76,28 +77,44 @@ func actorVerbs(e actorEnv) []*verbs.Verb {
 				}
 				return AppRestartOut{Store: r.Store, App: r.App, N: r.N, Broken: r.Broken()}, nil
 			}}.Verb(),
-		verbs.Def[AppTrustIn, AppTrustOut]{Name: "app.trust", Doc: "Trust an app with a Go module it declares in app.json slop.modules (system, workshop); restarts its actors.", Scope: verbs.Write, AdminOnly: true, Action: authz.PlatformAdmin,
+		verbs.Def[AppTrustIn, AppTrustOut]{Name: "app.trust", Doc: "Grant an app a Go module from the catalog (app.modules), with an optional configuration checked against the module's; restarts its actors. Trusted modules (system, workshop) must be declared in app.json slop.modules; modules on by default (database, express, fs, path) are only configured by a grant.", Scope: verbs.Write, AdminOnly: true, Action: authz.PlatformAdmin,
 			Run: func(req verbs.Req, in AppTrustIn) (AppTrustOut, error) {
 				ctx := req.Context
 				p := req.Principal
-				app, mod := in.App, in.Module
-				if !apps.Modules[mod] {
-					return AppTrustOut{}, verbs.Errf("invalid_argument", "no module %q (system, workshop)", mod)
+				app := in.App
+				mod, ok := e.A.Module(in.Module)
+				if !ok {
+					names := []string{}
+					for _, m := range e.A.Modules() {
+						names = append(names, m.Name)
+					}
+					return AppTrustOut{}, verbs.Errf("invalid_argument", "no module %q (%s)", in.Module, strings.Join(names, ", "))
 				}
 				r, err := e.K.Running(ctx, app)
 				if err != nil || r.Manifest == nil {
 					return AppTrustOut{}, verbs.Errf("not_found", "%s is not an app (no app.json)", app)
 				}
-				if !slices.Contains(r.Manifest.Slop.Modules, mod) {
-					return AppTrustOut{}, verbs.Errf("invalid_argument", "%s does not declare %s in app.json slop.modules", app, mod)
+				if mod.Class == actor.ClassTrusted && !slices.Contains(r.Manifest.Slop.Modules, mod.Name) {
+					return AppTrustOut{}, verbs.Errf("invalid_argument", "%s does not declare %s in app.json slop.modules", app, mod.Name)
 				}
-				if err := e.K.Gov.TrustModule(ctx, p.ID(), p.ViaLabel(), app, mod); err != nil {
+				raw, err := json.Marshal(in.Config)
+				if err != nil {
+					return AppTrustOut{}, verbs.Errf("invalid_argument", "config: %v", err)
+				}
+				if in.Config == nil {
+					raw = nil
+				}
+				config, err := mod.CanonicalConfig(raw)
+				if err != nil {
+					return AppTrustOut{}, verbs.Errf("invalid_argument", "%v", err)
+				}
+				if err := e.K.Gov.TrustModule(ctx, p.ID(), p.ViaLabel(), app, mod.Name, config); err != nil {
 					return AppTrustOut{}, err
 				}
 				e.A.RestartApp(app) // use() is evaluated at start
-				return AppTrustOut{App: app, Module: mod, Trusted: true}, nil
+				return AppTrustOut{App: app, Module: mod.Name, Trusted: true, Config: json.RawMessage(config)}, nil
 			}}.Verb(),
-		verbs.Def[AppUntrustIn, AppUntrustOut]{Name: "app.untrust", Doc: "Withdraw an app's trust with a Go module; restarts its actors.", Scope: verbs.Write, AdminOnly: true, Action: authz.PlatformAdmin,
+		verbs.Def[AppUntrustIn, AppUntrustOut]{Name: "app.untrust", Doc: "Withdraw an app's grant of a Go module (a module on by default returns to its default configuration); restarts its actors.", Scope: verbs.Write, AdminOnly: true, Action: authz.PlatformAdmin,
 			Run: func(req verbs.Req, in AppUntrustIn) (AppUntrustOut, error) {
 				ctx := req.Context
 				p := req.Principal
@@ -150,7 +167,14 @@ func actorVerbs(e actorEnv) []*verbs.Verb {
 				p := req.Principal
 				reg := []map[string]any{}
 				for _, m := range e.A.Modules() {
-					reg = append(reg, map[string]any{"name": m.Name, "doc": m.Doc})
+					row := map[string]any{"name": m.Name, "doc": m.Doc, "class": string(m.Class), "default": m.Class.Default()}
+					if m.Config != nil {
+						row["config"] = verbs.SchemaFor(m.Config)
+					}
+					if m.TypeScript != "" {
+						row["typescript"] = m.TypeScript
+					}
+					reg = append(reg, row)
 				}
 				trust, err := e.K.Gov.AppModules(ctx, in.App)
 				if err != nil {
@@ -165,7 +189,8 @@ func actorVerbs(e actorEnv) []*verbs.Verb {
 					if r, err := e.K.Running(ctx, app); err == nil && r.Manifest != nil {
 						declared = append(declared, r.Manifest.Slop.Modules...)
 					}
-					out.App, out.Declared = &app, &declared
+					calls := e.A.ModuleCalls(app)
+					out.App, out.Declared, out.Calls = &app, &declared, &calls
 				}
 				return out, nil
 			}}.Verb(),
@@ -283,6 +308,8 @@ type AppRestartIn struct {
 type AppTrustIn struct {
 	App    string `json:"app" slop:"pos=1"`
 	Module string `json:"module" slop:"pos=2"`
+	// Config is the module's configuration (its schema is in app.modules).
+	Config map[string]any `json:"config,omitempty"`
 }
 
 // AppUntrustIn is app.untrust's input.
@@ -350,9 +377,10 @@ type AppRestartOut struct {
 
 // AppTrustOut is app.trust's result.
 type AppTrustOut struct {
-	App     string `json:"app"`
-	Module  string `json:"module"`
-	Trusted bool   `json:"trusted"`
+	App     string          `json:"app"`
+	Module  string          `json:"module"`
+	Trusted bool            `json:"trusted"`
+	Config  json.RawMessage `json:"config"`
 }
 
 // AppUntrustOut is app.untrust's result.
@@ -385,6 +413,7 @@ type BindRmOut struct {
 type AppModulesOut struct {
 	App      *string            `json:"app,omitempty"`
 	Declared *[]string          `json:"declared,omitempty"`
+	Calls    *map[string]int64  `json:"calls,omitempty"` // module calls since the process started (one app)
 	Modules  []map[string]any   `json:"modules"`
 	Trusted  []policy.AppModule `json:"trusted"`
 }

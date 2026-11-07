@@ -148,6 +148,15 @@ func schemaOf(t reflect.Type) *jsonschema.Schema {
 	return s
 }
 
+// SchemaFor is the JSON Schema of v's type (a module configuration's, for
+// app.modules); nil for nil.
+func SchemaFor(v any) *jsonschema.Schema {
+	if v == nil {
+		return nil
+	}
+	return schemaOf(reflect.TypeOf(v))
+}
+
 // outputSchema is t's schema as a result's: wherever Go can encode null (a
 // nil pointer, slice or map), the schema allows it, so a client checking
 // structured results against it (MCP) accepts what the verb returns.
