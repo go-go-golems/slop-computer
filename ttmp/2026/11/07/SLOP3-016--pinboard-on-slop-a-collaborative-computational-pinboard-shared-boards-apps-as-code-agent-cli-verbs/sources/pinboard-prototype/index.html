@@ -1,0 +1,61 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Pinboard</title>
+<link rel="stylesheet" href="style.css">
+</head>
+<body>
+<header class="bar">
+  <span class="brand">Pinboard</span>
+  <span id="boardtitle" class="btitle" contenteditable="true" spellcheck="false">My board</span>
+  <span id="status" class="small muted"></span>
+  <span id="filterbar"></span>
+  <span class="sp"></span>
+  <input id="filter" class="in filterin" placeholder="search clips and apps" spellcheck="false">
+  <button id="mapbtn" class="btn" title="minimap · m">▦ Map</button>
+  <button id="logbtn" class="btn" title="mutations">≡ Log</button>
+  <button id="refbtn" class="btn" title="the grammar, in one page">▸ Reference</button>
+  <button id="qlbtn" class="btn" title="quicklaunch">⌘K</button>
+  <button id="agentbtn" class="btn agentbtn">Agent</button>
+  <button id="themebtn" class="ibtn" title="theme: system · light · dark">◐</button>
+</header>
+<main id="main">
+  <div id="boardwrap" tabindex="-1">
+    <div id="canvas"></div>
+    <div id="marquee"></div>
+    <div id="pinzone"></div>
+    <div id="dock"></div>
+    <div id="minimap"><div class="mmhead"><span class="small muted">map · click to go</span><span class="sp"></span><button class="ib" title="hide · m">×</button></div><canvas width="220" height="150"></canvas></div>
+  </div>
+  <aside id="pins" class="empty"></aside>
+  <aside id="agentpanel">
+    <div class="ahead">
+      <b>Agent</b>
+      <span class="seg modes"></span>
+      <span class="seg tiers"></span>
+      <span class="sp"></span>
+      <button class="ib close" title="close">×</button>
+    </div>
+    <div class="threads"></div>
+    <div class="offbanner">Looking for Claude…</div>
+    <div class="msgs"></div>
+    <div class="composer">
+      <div class="attachments" style="display:none"></div>
+      <textarea rows="3" placeholder="ask the agent"></textarea>
+      <div class="crow"><span class="small muted">⌘↩ send · <b>&gt;</b> runs code · drop or paste images</span><span class="sp"></span><button class="btn primary send">Send</button></div>
+    </div>
+  </aside>
+</main>
+<div id="ql"><div class="qlbox"><input class="in" placeholder="apps, clips, collections… Enter asks the agent" spellcheck="false"><div class="qllist"></div></div></div>
+<div id="toasts"></div>
+<script src="js/store.js"></script>
+<script src="js/dsl.js"></script>
+<script src="js/render.js"></script>
+<script src="js/board.js"></script>
+<script src="js/apps.js"></script>
+<script src="js/agent.js"></script>
+<script src="js/main.js"></script>
+</body>
+</html>

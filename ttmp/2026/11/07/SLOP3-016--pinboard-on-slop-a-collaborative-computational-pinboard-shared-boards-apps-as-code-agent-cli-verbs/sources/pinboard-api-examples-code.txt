@@ -1,0 +1,384 @@
+===== EXAMPLE 0
+import { ui, app, board, db, fragment, split, tile } from 'pinboard'
+
+// Atoms: leaves and containers. Children are builders or lambdas.
+ui.text('hello')  ui.image(src)  ui.note(text)  ui.doc(markdown)  ui.screenshot(blob)
+ui.link(url)                                 // unfurls title and favicon at runtime
+ui.input('q')                                // writes state.q
+ui.button('Send')  ui.chip(t)  ui.swatch(hex)  ui.segmented('by')  ui.dropzone({ accepts })
+ui.stack(...kids)  ui.row(...kids)  ui.grid(kids).cols(3)  ui.table(rows, { columns })
+ui.list(items, it => ui.text(it.title))      // BUILD-TIME: expanded once, into children
+ui.each(query, it => ui.text(it.title))      // RUNTIME: a node that re-runs when the query changes
+ui.when(c => c.state.open, ui.text('…'))     // RUNTIME predicate
+ui.slot('body')                              // a hole, filled later with .fill('body', …)
+
+// Modifiers. A prop takes a value or a lambda; a lambda makes a runtime edge.
+.gap(8) .pad(12) .size(240, 160) .cols(4)        // px or tokens: 'xs' 4 · 's' 8 · 'm' 12 · 'l' 16
+.title('…') .caption(…) .footer(…) .hint('…')    // window and chrome
+.on('click', (ev, c) => …)                       // runtime; c is the context: state param db board window set
+.bind(c => c.state.n)                            // runtime, reactive; the node's deps are what the lambda read
+.map(b => b.pad(4))                              // build-time; transform this builder and return it
+.use(fragment)                                   // mix a fragment in: new methods, attributes, decorations
+.id('results') .ref('results')                   // name a node; point at one (a second parent → DAG, not a tree)
+.draggable({ kind }) .at(x, y) .near(window)     // placement on the board
+
+// Three ways out
+ui.stack(…).build()        // → IR: plain objects, inspectable, diffable
+ui.stack(…).mount(el)      // → a live view with .state and .mutate()
+ui.stack(…).describe()     // → one screen of YAML; what the agent reads
+
+// Rule of thumb: a lambda that receives a builder (b) runs at build time.
+// A lambda that receives a context (c) or an event runs at runtime.
+===== EXAMPLE 1
+board.clip(ui.note('buy 60×60 matte tiles')).at(120, 80)
+
+// clip() wraps any builder in a window: title strip, drag, resize, footer.
+// Without .at() it lands at the cursor, snapped to the 24 px grid.
+===== EXAMPLE 2
+board.on('paste', data => {
+  if (data.image) return ui.screenshot(data.image).caption(data.title ?? 'pasted')
+  if (data.url)   return ui.link(data.url)                 // title and favicon arrive at runtime
+  if (data.html)  return ui.doc(data.html).title(data.title)
+  if (data.files) return ui.list(data.files, f => ui.file(f))  // one clip per file, build-time
+  return ui.note(data.text)
+})
+// Return a builder and it becomes a clip at the cursor. Return null to ignore the paste.
+// The default handler is exactly this; override it per board or per kind:
+board.on('paste:url', data => data.url.includes('are.na') ? ui.arena(data.url) : ui.link(data.url))
+===== EXAMPLE 3
+app('counter')
+  .icon('△')                 // a text glyph; there is no icon set
+  .title('Counter')
+  .state({ n: 0 })
+  .view(ui.stack(
+    ui.text().bind(c => c.state.n).size('xl'),                      // re-renders when state.n changes
+    ui.row(
+      ui.button('−').on('click', (_, c) => c.set('n', c.state.n - 1)),
+      ui.button('+').on('click', (_, c) => c.set('n', c.state.n + 1)),
+    ).gap(6),
+  ).pad(12))
+  .register()
+
+// register() puts the app in the quicklaunch (⌘K counter) and keeps it in the browser:
+//   localStorage  pinboard.v1.apps.counter = { source, icon, title, params, ir }
+// The source is re-evaluated when the board loads. Each open window of the app has its
+// own state and params; close one and they are kept under its window id.
+===== EXAMPLE 4
+app('gallery')
+  .icon('▦')
+  .param.slider('cols', 3, { min: 1, max: 8, step: 1 })
+  .param.slider('gap', 8, { min: 0, max: 32, unit: 'px' })
+  .param.toggle('captions', true)
+  .param.select('sort', 'added', ['added', 'colour', 'size'])
+  .param.text('prefix', '', { placeholder: 'caption prefix' })
+  .view(
+    ui.grid(ui.each(db.gallery.orderBy(c => c.param('sort')), im =>
+      ui.image(im.src).caption(ui.when(c => c.param('captions'), ui.text(c => c.param('prefix') + im.caption)))
+    ))
+    .cols(c => c.param('cols'))          // param.cols → grid.cols   (an edge in the DAG)
+    .gap(c => c.param('gap'))            // param.gap  → grid.gap
+  )
+  .register()
+
+// The ◇ button in the title strip opens the params column (288 px, rows of 30 px).
+// Values persist per window. Build-time use is fine too:
+//   .view(c => …)  is not allowed; use .map(b => …) for build-time shaping and c.param at runtime.
+===== EXAMPLE 5
+const taggable = fragment('taggable')
+  .attr('tags', [])                                                // a new attribute on the node
+  .method('tag', (b, ...tags) => b.set('tags', t => [...new Set([...t, ...tags])]))   // build-time method
+  .method('untag', (b, tag) => b.set('tags', t => t.filter(x => x !== tag)))
+  .query('hasTag', (node, tag) => node.attrs.tags.includes(tag))   // readable from IR and from the agent
+  .decorate(b => b.strip(ui.row(ui.each(c => c.attr('tags'), t => ui.chip(t).on('click', (_, c) => c.board.filter({ tag: t })))).gap(4)))
+
+const sourced = fragment('sourced')
+  .attr('source', null)
+  .on('paste', (b, data) => b.set('source', { from: data.origin, at: Date.now() }))   // lifecycle hook, build-time
+  .decorate(b => b.footer(ui.text(c => `pasted ${ago(c.attr('source').at)} · ${c.attr('source').from}`).small()))
+
+const annotated = fragment('annotated')
+  .attr('note', '')
+  .decorate(b => b.after(ui.input('note').placeholder('your note on the clip').multiline()))
+
+// Every clip gets all three
+board.clipDefaults(c => c.use(taggable).use(sourced).use(annotated))
+
+// Fragments are typed into the builder, so .tag exists only after .use(taggable):
+board.clip(ui.link('https://are.na/ms/kitchen-tiles')).tag('inspo', 'kitchen')
+ui.text('x').tag('a')   // Error: text has no method "tag". It comes from fragment taggable; add .use(taggable) first.
+
+// A fragment can also extend a whole grammar entry, for every builder:
+fragment('measured').method('size', (b, w, h, unit = 'px') => b.set('w', w).set('h', h).set('unit', unit)).global()
+===== EXAMPLE 6
+const search = ui.row(
+  ui.input('q').id('search'),
+  ui.each(db.links.where(c => l => l.title.includes(c.state.q)), l => ui.link(l.url)).id('results'),
+  ui.text(c => `${c.ir('results').count} of ${c.db.links.count()}`).id('count'),
+)
+
+const ir = search.build()
+ir.nodes.length              // 4
+ir.node('results').deps      // ['state.q', 'db.links']
+ir.node('count').deps        // ['ir.results', 'db.links']   ← a node can depend on another node: DAG
+ir.edges()                   // [['state.q','results'], ['db.links','results'], ['results','count'], ['db.links','count']]
+
+ir.toYAML()
+// kind: row
+// children:
+//   - { kind: input, id: search, writes: state.q }
+//   - { kind: each, id: results, deps: [state.q, db.links], template: link }
+//   - { kind: text, id: count, deps: [ir.results, db.links] }
+
+// Build-time lambdas have already run (ui.list is expanded into children);
+// runtime lambdas are kept as nodes with deps. Same builder, same IR, so diffs are cheap:
+ir.diff(search.map(b => b.gap(12)).build())      // [{ op: 'set', at: '/', prop: 'gap', from: 8, to: 12 }]
+
+// Shared nodes: .ref() points a second parent at a node instead of copying it.
+const toolbar = ui.row(ui.input('q').id('search'))
+const page = ui.stack(toolbar, ui.row(ui.ref('search'), ui.text('← the same node, mounted once')))
+
+// The renderer walks the DAG once per change: it re-runs only the nodes whose deps changed,
+// in topological order, so count never renders with a stale results count.
+===== EXAMPLE 7
+db.collection('recipes')
+  .field('title', 'text').required()
+  .field('url', 'url')
+  .field('serves', 'int', { min: 1 })
+  .field('tags', 'text[]')
+  .field('note', 'text')
+  .field('added', 'time').auto()
+  .index('tags')
+  .store('indexeddb')          // 'local' for small sets; same API, same queries
+
+db.recipes.insert({ title: 'Shakshuka', url, serves: 2, tags: ['eggs', 'dinner'] })
+db.recipes.update(4, r => ({ ...r, serves: 4 }))
+db.recipes.where(r => r.tags.includes('eggs')).orderBy('added', 'desc').limit(20)   // a live query
+db.recipes.count()  db.recipes.get(4)  db.recipes.distinct('tags')
+
+// A clip becomes a row and keeps its window. Edits go both ways (sheet 02, footer).
+board.clip('clip:7a2').promote('recipes', clip => ({
+  title: clip.title, url: clip.link?.url, note: clip.attr('note'), tags: clip.attr('tags'),
+}))
+
+// A row can come back out as a clip
+db.recipes.get(4).toClip().near(window)
+
+// Schema changes are migrations, kept with the collection:
+db.recipes.migrate(2, s => s.field('cuisine', 'text').rename('serves', 'servings'))
+===== EXAMPLE 8
+// Anything on the board is draggable with a kind. Clips get one for free: 'clip:link', 'clip:note', …
+ui.image(src).draggable({ kind: 'clip:image', payload: im => ({ src: im.src, tags: im.tags }) })
+
+app('reading-list')
+  .icon('○')
+  .view(ui.stack(
+    ui.dropzone({ accepts: ['clip:link', 'text/uri-list', 'Files'] })
+      .hint('drop links here')                                           // the ink-2 sentence in the empty zone
+      .on('drop', (item, c) => c.db.readinglist.insert({ url: item.url, from: item.clipId }))
+      .on('reject', (item, c) => c.toast(`${item.kind} is not a link`)),  // a refused kind says why, once
+    ui.each(db.readinglist.orderBy('added', 'desc'), r => ui.link(r.url).draggable({ kind: 'clip:link' })),
+  ))
+  .register()
+
+// Dropping an app onto the quicklaunch pins it; dropping a clip onto it asks the agent to wrap it:
+board.quicklaunch.on('drop', (item, c) => item.kind.startsWith('app:')
+  ? c.quicklaunch.pin(item.appId)
+  : c.agent.ask(`wrap ${item.clipId} as an app`))
+
+board.targets.list()
+// canvas        any           place at the cursor, snapped
+// clip strip    clip:*        group with it (○); dropping on the body does nothing
+// app window    what its dropzones accept; no dropzone → refused with a hint
+// quicklaunch   app:* clip:*  pin, or register through the agent
+// tile edge     window:*      the outer 22 % splits that tile and pins the window there
+// trash (⌫)     any           remove; a promoted clip asks whether the row goes too
+===== EXAMPLE 9
+ui.stack().gap('big')
+// TypeError: stack.gap(value) expects a number of px or a spacing token ('xs' 4 · 's' 8 · 'm' 12 · 'l' 16); got "big".
+//   at moodboard.js:12   ui.stack().gap('big')
+//                                       ^^^^^
+
+ui.stack(ui.text('a')).colums(3)
+// Error: stack has no method "colums". Did you mean "cols"? cols is on grid, not stack:
+//   use ui.grid(…) or .use(gridlike).
+
+ui.each(db.recipes, r => ui.text(r.title)).build()
+// Warning: each#3 has a runtime lambda but no .id(); the agent cannot address it. Add .id('rows').
+
+app('x').state({ m: 0 }).view(ui.text().bind(c => c.state.n)).build()
+// Error at build: text#2 reads state.n, which app "x" never declares. Known: m.
+
+ui.row(ui.text('a')).fill('body', ui.text('b'))
+// Error: row has no slot "body". Slots here: none. Declare one with ui.slot('body').
+
+const b = ui.stack(); b.pad(8); b.build()
+// Warning: pad(8) was called but its result was discarded. Builders are immutable; use b = b.pad(8).
+
+// How: every builder is a Proxy over a frozen record. An unknown property finds the nearest
+// name by edit distance across the grammar and says which atom owns it. A wrong argument
+// prints the grammar entry's signature. A discarded result is caught by a dev-mode finaliser.
+// Call sites come from Error.captureStackTrace, kept in dev and stripped in prod.
+// The same checks run on IR the agent emits, so a bad step fails before it is shown, with the same text.
+ui.strict(true)   // warnings become errors (the agent runs in strict)
+===== EXAMPLE 10
+const h = board.handle()           // the live board
+
+h.mutate(m => m
+  .move('clip:7a2', { x: 420, y: 160 })
+  .retitle('clip:7a2', 'Tiles — matte 60×60')
+  .tag('clip:7a2', 'kitchen')
+  .group(['clip:7a2', 'clip:7a3'], { title: 'tiles' })
+  .resize('win:budget', { w: 340, h: 200 })
+)                                  // one transaction · one undo step · one 'mutation' event
+
+h.on('mutation', ({ ops, by, at }) => log(by, ops))    // by: 'you' | 'agent' | 'app:recipes'
+h.undo(); h.redo()
+h.history.since('19:27')           // the log on sheet 04
+
+// The op set is small on purpose; the agent gets the same one.
+// board    move resize retitle tag untag group ungroup remove restore place(builder, at)
+// data     insert update remove promote demote migrate
+// apps     register unregister pin unpin open close setParam
+// layout   split merge pin tile free save load
+
+// Within a view, the context carries a scoped mutate:
+ui.button('archive').on('click', (_, c) => c.mutate(m => m.tag(c.window.id, 'archived').close(c.window.id)))
+===== EXAMPLE 11
+board.agent({
+  tool: 'eval',                               // one tool. Input { code }: the body of an async function.
+  scope: () => ({ board: h, db, ui, app, m: h.mutate, describe, log }),
+  mode: 'ask',                                // 'auto' runs each step · 'ask' waits · 'read-only' makes every mutation throw
+  context: () => h.describe({ selection: true, apps: true, collections: true, layout: false }),
+  limits: { stepTimeout: 25_000, resultCut: 9_000 },     // and the result comes back as YAML, cut with a note
+})
+
+// A turn, as sheet 04 shows it
+// You     these are all recipes, make them a database and give me a browser for it
+// Agent   Working ▪
+// step 1  looked at the selection                                             0.21 s
+//         const sel = board.selection(); sel.map(describe)
+//         => 14 · 11 link · 2 note · 1 image · 12 have a title · 9 share [dinner]
+// step 2  proposed a collection                                               ran
+//         db.collection('recipes').field('title','text').required()
+//           .field('url','url').field('serves','int').field('tags','text[]').field('note','text')
+// step 3  promote the 14 clips                              [Run this step] [Decline]
+//         m(x => sel.forEach(c => x.promote(c.id, 'recipes', fromClip)))        reverts in one step
+// step 4  build an app and register it
+//         app('recipes').icon('▤')
+//           .param.select('sort', 'added', ['added', 'title', 'serves'])
+//           .view(ui.table(db.recipes.orderBy(c => c.param('sort')), { columns: ['title', 'serves', 'tags'] }))
+//           .register()
+// Agent   14 recipes are in `recipes`. Open it with ⌘K recipes. Two clips had no title;
+//         I used the link's domain: rows 9 and 12.
+
+// An app can say what the agent should know about it, and what it may do there unasked
+app('recipes')
+  .agent.describe(c => `recipes: ${c.db.recipes.count()} rows, sorted by ${c.param('sort')}`)
+  .agent.allow(['insert', 'tag', 'retitle'])          // beyond this, mode 'ask' applies even in 'auto'
+  .agent.suggest(['find duplicates', 'fill in serves from the page', 'tag by cuisine'])
+
+// Links in an answer carry into the board: pin:recipes/9 opens that row; pin:win:7a2 brings a window forward.
+===== EXAMPLE 12
+board.layout(
+  split('row', [0.55, 0.45],
+    tile('canvas', 'notes'),                                        // the free pinboard, as a tile with tabs
+    split('col', [0.5, 0.5],
+      tile('app:recipes', 'app:budget'),
+      tile('app:moodboard'),
+    ),
+  ),
+)
+board.layouts.save('Cooking')      // localStorage pinboard.v1.layouts.Cooking
+board.layouts.load('Cooking')
+board.layout(tile('canvas'))       // back to one free board
+
+// By hand: ⇧-drag a window's title strip to a tile edge (outer 22 %) to pin it there;
+// drag a tab onto the canvas to free it as a window again (sheet 06).
+h.mutate(m => m.pin('win:budget', { tile: 'right-top', side: 'bottom' }).free('win:moodboard').near('win:budget'))
+
+// A tile is a size container: under 640 px an app stacks its params column under its body.
+// Under 640 px of window the board is one tile with the canvas in front.
+===== EXAMPLE 13
+const palette = fragment('palette')
+  .attr('swatches', [])
+  .on('image', async (b, img) => b.set('swatches', await dominant(img, 5)))          // runs when the image loads
+  .decorate(b => b.footer(ui.row(ui.each(c => c.attr('swatches'), s => ui.swatch(s).size(12, 6))).gap(2)))
+
+db.collection('moodboard')
+  .field('src', 'image').required()
+  .field('caption', 'text').field('tags', 'text[]').field('swatches', 'colour[]')
+  .field('added', 'time').auto()
+  .index('tags')
+
+const byParam = c => ({ added: ['added', 'desc'], hue: ['swatches.0.h', 'asc'], tag: ['tags.0', 'asc'] })[c.param('by')]
+
+app('moodboard')
+  .icon('▦').title('Moodboard').shortcut('⌘⇧M')
+  .param.slider('cols', 4, { min: 2, max: 8 })
+  .param.slider('gap', 8, { min: 0, max: 24, unit: 'px' })
+  .param.select('by', 'added', ['added', 'hue', 'tag'])
+  .param.toggle('captions', false)
+  .param.toggle('swatches', true)
+  .state({ q: '', selected: null })
+  .toolbar(ui.row(
+    ui.input('q').placeholder('search captions and tags'),
+    ui.segmented('by'),                                                 // bound to the param of the same name
+    ui.text(c => `${c.db.moodboard.count()} images · ${c.db.moodboard.distinct('tags').length} tags`).small(),
+  ))
+  .view(ui.dropzone({ accepts: ['clip:image', 'clip:link', 'Files', 'text/uri-list'] })
+    .hint('drop images or links anywhere in the grid')
+    .on('drop', (it, c) => c.db.moodboard.insert({ src: it.image ?? it.url, caption: it.title ?? '', tags: it.tags ?? [] }))
+    .child(ui.grid(
+      ui.each(db.moodboard.where(c => im => match(im, c.state.q)).orderBy(c => ...byParam(c)), im =>
+        ui.image(im.src)
+          .use(taggable).use(palette)
+          .map(b => c => c.param('swatches') ? b : b.footer(null))      // build-time shape, runtime switch
+          .caption(ui.when(c => c.param('captions'), ui.text(im.caption).small()))
+          .selected(c => c.state.selected === im.id)                    // the dashed accent frame on sheet 03
+          .on('click', (_, c) => c.set('selected', im.id))
+          .on('dblclick', (_, c) => c.board.clip(ui.image(im.src).use(taggable).tag(...im.tags)).near(c.window))   // pop out
+          .draggable({ kind: 'clip:image', payload: () => im })
+      ).id('images'),
+    ).cols(c => c.param('cols')).gap(c => c.param('gap'))))
+  .side(ui.when(c => c.state.selected, ui.stack(                      // below the params in the side column
+    ui.text(c => c.db.moodboard.get(c.state.selected).caption).bold(),
+    ui.text(c => `added ${ago(c.sel().added)} · ${c.sel().src.width} × ${c.sel().src.height}`).small(),
+    ui.row(ui.each(c => c.sel().tags, t => ui.chip(t))).gap(4),
+    ui.link('pop out as a clip').on('click', (_, c) => c.board.clip(ui.image(c.sel().src)).near(c.window)),
+  ).gap(6)))
+  .agent.describe(c => `moodboard: ${c.db.moodboard.count()} images · by ${c.param('by')} · q "${c.state.q}"`)
+  .agent.allow(['insert', 'tag', 'retitle'])
+  .agent.suggest(['group by dominant colour', 'caption the untitled ones', 'make a palette clip from the selection'])
+  .register()
+
+// What this produces: sheet 03. The IR has 11 nodes and these runtime edges:
+//   state.q → images · param.by → images · db.moodboard → images, count
+//   param.cols → grid.cols · param.gap → grid.gap · param.captions → when#caption · state.selected → side, selected
+// Reopen the board tomorrow and ⌘K moodboard brings it back, params and all.
+===== EXAMPLE 14
+
+(function(){
+  const esc = s => s.replace(/&/g,'&').replace(/</g,'<').replace(/>/g,'>');
+  const re = /(\/\/[^\n]*)|(`(?:\\.|[^`\\])*`|'(?:\\.|[^'\\\n])*'|"(?:\\.|[^"\\\n])*")|(=>)|(\b(?:const|let|var|return|if|else|await|async|import|from|export|new|function|true|false|null|undefined)\b)|(\b\d[\d_.]*\b)|([{}()\[\].,;:?!=<>+\-*\/&|%]+)/g;
+  function hl(src){
+    let out='', last=0, m;
+    while((m=re.exec(src))){
+      out+=esc(src.slice(last,m.index));
+      const [all,c,s,a,k,n,p]=m;
+      if(c) out+=`<span class="com">${esc(c)}</span>`;
+      else if(s) out+=`<span class="str">${esc(s)}</span>`;
+      else if(a) out+=`<span class="arrow">=></span>`;
+      else if(k) out+=`<b>${k}</b>`;
+      else if(n) out+=`<span class="num">${n}</span>`;
+      else out+=`<span class="punc">${esc(p)}</span>`;
+      last=m.index+all.length;
+    }
+    return out+esc(src.slice(last));
+  }
+  document.querySelectorAll('script[type="text/x-src"]').forEach(s=>{
+    const pre=document.createElement('pre'); pre.className='src';
+    pre.innerHTML=hl(s.textContent.replace(/^\n/,''));
+    s.replaceWith(pre);
+  });
+})();
+
