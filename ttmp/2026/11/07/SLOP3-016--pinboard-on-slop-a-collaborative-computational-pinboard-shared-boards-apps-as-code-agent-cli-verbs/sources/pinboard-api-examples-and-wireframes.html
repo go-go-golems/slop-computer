@@ -1,0 +1,1183 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Pinboard · API examples and wireframes</title>
+<style>
+:root{
+  --bg:#ffffff; --fill:#f6f6f6; --fill-2:#e6e6e6; --ink:#1a1a1a; --ink-2:#737373;
+  --hair:#d6d6d6; --rule:#ededed; --code-bg:#fbfbfb; --accent:#e2001a; --sel:rgba(226,0,26,.10);
+  --tok-str:#6b6b6b; --tok-com:#a3a3a3; --tok-punc:#a3a3a3;
+  --blue:#2f6fe4; --amber:#d98a00; --violet:#7a4fd8; --shadow:#8c8c8c;
+  --ui:Arial,"Helvetica Neue",Helvetica,sans-serif; --code:ui-monospace,Menlo,Consolas,"Courier New",monospace;
+}
+@media (prefers-color-scheme:dark){:root{
+  --bg:#1a1a1a; --fill:#222; --fill-2:#3a3a3a; --ink:#f2f2f2; --ink-2:#9a9a9a; --hair:#3d3d3d; --rule:#2a2a2a;
+  --code-bg:#1d1d1d; --accent:#ff3b4a; --sel:rgba(255,59,74,.16); --tok-str:#a6a6a6; --tok-com:#6e6e6e; --tok-punc:#6e6e6e;
+  --blue:#6b9cf5; --amber:#e8a93a; --violet:#a78bf0; --shadow:#8c8c8c;
+}}
+*{box-sizing:border-box}
+html,body{margin:0;background:var(--bg);color:var(--ink);font:12px/1.45 var(--ui)}
+.bar{height:52px;display:flex;align-items:center;gap:12px;padding:0 16px;border-bottom:1px solid var(--hair);position:sticky;top:0;background:var(--bg);z-index:2}
+.bar .brand{font-weight:700;font-size:15px;letter-spacing:-.01em}
+.bar .about{font-size:10.5px;color:var(--ink-2)}
+.bar .sp{flex:1}
+.bar nav a{color:var(--ink);text-decoration:none;font-size:12px;margin-left:14px}
+.bar nav a:hover{text-decoration:underline}
+main{max-width:980px;margin:0 auto;padding:18px 22px 64px}
+h1{font-size:22px;line-height:1.2;letter-spacing:-.01em;margin:16px 0 6px}
+.lede{font-size:13px;color:var(--ink-2);max-width:76ch;margin:0 0 18px}
+.doc p{font-size:13.5px;line-height:1.65;max-width:76ch;margin:8px 0}
+h2{font-size:16px;line-height:1.3;margin:34px 0 8px;padding-top:10px;border-top:1px solid var(--ink)}
+h2 small{font-weight:400;color:var(--ink-2);font-size:12px;margin-left:8px}
+h3{font-size:13.5px;margin:22px 0 6px}
+.lbl{font-size:10.5px;color:var(--ink-2);letter-spacing:.06em;text-transform:uppercase;margin:26px 0 6px}
+.contents{font-size:12px;color:var(--ink-2);border-bottom:1px solid var(--rule);padding-bottom:10px;margin-bottom:14px}
+.contents b{color:var(--ink)}
+figure{margin:12px 0 4px}
+figure svg{display:block;width:100%;height:auto;border:1px solid var(--hair);background:var(--bg)}
+figcaption{font-size:12px;color:var(--ink-2);margin-top:6px;max-width:68ch}
+figcaption b{color:var(--ink)}
+pre.src{font:11.5px/1.5 var(--code);background:var(--code-bg);border:1px solid var(--hair);padding:12px 14px;margin:8px 0 0;overflow:auto;color:var(--ink);white-space:pre}
+pre.src b{font-weight:700}
+pre.src .str{color:var(--tok-str)}
+pre.src .com{color:var(--tok-com);font-style:italic}
+pre.src .punc{color:var(--tok-punc)}
+pre.src .arrow{color:var(--accent);font-weight:700}
+.ex{margin-top:28px}
+.ex .hd{display:flex;align-items:baseline;gap:10px;border-top:1px dotted var(--hair);padding-top:10px}
+.ex .hd .n{font:700 10.5px var(--ui);letter-spacing:.14em;color:var(--accent)}
+.ex .hd h3{margin:0}
+.ex .hd .ab{color:var(--ink-2);font-size:12px}
+code{font:11px var(--code);background:var(--fill);padding:1px 4px}
+table.rt{border-collapse:collapse;font-size:12px;margin:8px 0}
+table.rt th{text-align:left;font-weight:700;border-bottom:1px solid var(--hair);padding:5px 10px 5px 0}
+table.rt td{border-bottom:1px solid var(--rule);padding:5px 10px 5px 0;vertical-align:top}
+table.rt td:first-child{font-family:var(--code);font-size:11px;white-space:nowrap}
+.callout{border-left:1px solid var(--ink);padding:6px 12px;background:var(--fill);font-size:12.5px;max-width:76ch;margin:12px 0}
+/* svg classes */
+svg text{font-family:var(--code);font-size:9.5px;fill:var(--ink);font-weight:500}
+svg .ui{font-family:var(--ui);font-size:11px;font-weight:400}
+svg .ui.b{font-weight:700}
+svg .xs{font-size:9px}
+svg .t2{fill:var(--ink-2)}
+svg .acc{fill:var(--accent)}
+svg .blue{fill:var(--blue)} svg .amber{fill:var(--amber)} svg .violet{fill:var(--violet)}
+svg .ln{stroke:var(--ink);stroke-width:1;fill:none;shape-rendering:crispEdges}
+svg .paper{fill:var(--bg);stroke:var(--ink);stroke-width:1;shape-rendering:crispEdges}
+svg .hr{stroke:var(--hair);stroke-width:1;fill:none;shape-rendering:crispEdges}
+svg .rl{stroke:var(--rule);stroke-width:1;fill:none;shape-rendering:crispEdges}
+svg .inkfill{fill:var(--ink)}
+svg .onink{fill:var(--bg)}
+svg .fill{fill:var(--fill)}
+svg .selw{fill:var(--sel);stroke:var(--accent);stroke-width:1;shape-rendering:crispEdges}
+svg .hatch{fill:url(#hatch)}
+svg .lead{stroke:var(--ink);stroke-width:.6;fill:none}
+svg .lead-b{stroke:var(--blue);stroke-width:.8;fill:none}
+svg .lead-v{stroke:var(--violet);stroke-width:.8;fill:none}
+svg .dash{stroke-dasharray:4 3}
+svg .dot{fill:var(--ink)}
+svg .ghost{opacity:.55}
+svg .strike{text-decoration:line-through}
+</style>
+</head>
+<body>
+<div class="bar">
+  <span class="brand">Pinboard</span><span class="about">a pinboard of windows, an agent, and a grammar for little apps</span>
+  <span class="sp"></span>
+  <nav><a href="#sheets">Sheets</a><a href="#pipeline">Pipeline</a><a href="#examples">Examples</a></nav>
+</div>
+<main class="doc">
+<h1>Pinboard: API examples and wireframes</h1>
+<p class="lede">Clips (notes, links, screenshots, documents, app windows) sit free on a canvas like a pinboard. A fluent, immutable builder grammar makes the clips and the ad-hoc apps that live among them; apps register into a quicklaunch and are kept in the browser. An agent with one tool, <code>eval</code>, turns loose clips into collections and builds apps over them, through the same mutations you make by hand.</p>
+<div class="contents"><b>Sheets</b> 01 the board · 02 anatomy of a clip · 03 an app window · 04 the agent organising · 05 drop targets · 06 pinned and tiled &nbsp;·&nbsp; <b>Pipeline</b> builders → IR → render; mutations &nbsp;·&nbsp; <b>Examples</b> 00 the grammar · 01 a note · 02 paste · 03 first app · 04 params · 05 fragments · 06 IR and the DAG · 07 collections · 08 drag and drop · 09 diagnostics · 10 mutations · 11 the agent · 12 pin and tile · 13 everything at once</div>
+
+<!-- shared svg defs -->
+<svg width="0" height="0" style="position:absolute">
+  <defs>
+    <pattern id="hatch" width="6" height="6" patternUnits="userSpaceOnUse" patternTransform="rotate(45)">
+      <line x1="0" y1="0" x2="0" y2="6" stroke="var(--shadow)" stroke-width=".6"/>
+    </pattern>
+    <pattern id="grid" width="24" height="24" patternUnits="userSpaceOnUse">
+      <rect x="0" y="0" width="1" height="1" fill="var(--hair)"/>
+    </pattern>
+    <marker id="arr" viewBox="0 0 8 8" refX="7" refY="4" markerWidth="7" markerHeight="7" orient="auto-start-reverse">
+      <path d="M0 0 L8 4 L0 8 z" fill="var(--blue)"/>
+    </marker>
+    <marker id="arr-i" viewBox="0 0 8 8" refX="7" refY="4" markerWidth="7" markerHeight="7" orient="auto-start-reverse">
+      <path d="M0 0 L8 4 L0 8 z" fill="var(--ink)"/>
+    </marker>
+    <marker id="arr-v" viewBox="0 0 8 8" refX="7" refY="4" markerWidth="7" markerHeight="7" orient="auto-start-reverse">
+      <path d="M0 0 L8 4 L0 8 z" fill="var(--violet)"/>
+    </marker>
+  </defs>
+</svg>
+
+<h2 id="sheets">Wireframes <small>six sheets, drawn as drafting sheets: ink hairlines, paper fills, hatched shadows</small></h2>
+
+<!-- ============ SHEET 01 ============ -->
+<figure>
+<svg viewBox="0 0 920 560" xmlns="http://www.w3.org/2000/svg">
+  <rect x=".5" y=".5" width="919" height="559" class="hr"/>
+  <!-- header bar -->
+  <line x1="0" y1="52.5" x2="920" y2="52.5" class="hr"/>
+  <text x="16" y="31" class="ui b" style="font-size:15px">Pinboard</text>
+  <text x="86" y="31" class="ui t2" style="font-size:10.5px">board</text>
+  <rect x="130.5" y="12.5" width="160" height="28" class="hr"/>
+  <text x="140" y="30" class="ui t2" style="font-size:10.5px">B-03</text>
+  <text x="166" y="30" class="ui b" style="font-size:13px">Kitchen reno</text>
+  <text x="276" y="30" class="ui">▾</text>
+  <rect x="440.5" y="12.5" width="190" height="28" class="hr"/>
+  <text x="450" y="30" class="ui t2">search clips and apps</text>
+  <rect x="640.5" y="12.5" width="84" height="28" class="hr"/>
+  <text x="650" y="30" class="ui">▦ Layout ▾</text>
+  <rect x="734.5" y="12.5" width="60" height="28" class="hr"/>
+  <text x="744" y="30" class="ui">⌘K</text>
+  <rect x="804" y="12" width="56" height="29" class="inkfill"/>
+  <text x="818" y="30" class="ui onink">Agent</text>
+  <rect x="870.5" y="12.5" width="34" height="28" class="hr"/>
+  <circle cx="887.5" cy="26.5" r="5" class="ln"/>
+  <!-- canvas -->
+  <rect x="0" y="53" width="660" height="507" fill="url(#grid)"/>
+  <line x1="660.5" y1="53" x2="660.5" y2="560" class="hr"/>
+
+  <!-- note clip -->
+  <rect x="44" y="84" width="150" height="110" class="hatch"/>
+  <rect x="40.5" y="80.5" width="150" height="110" class="paper"/>
+  <line x1="40.5" y1="104.5" x2="190.5" y2="104.5" class="rl"/>
+  <text x="48" y="97" class="ui">■</text>
+  <text x="60" y="97" class="ui t2" style="font-size:10.5px">note</text>
+  <text x="178" y="97" class="ui t2">×</text>
+  <text x="50" y="124" class="ui">buy 60×60 matte tiles</text>
+  <text x="50" y="140" class="ui">ask about grout colour</text>
+  <text x="50" y="156" class="ui t2">4.2 m² · two boxes spare</text>
+  <!-- link clip -->
+  <rect x="234" y="76" width="230" height="80" class="hatch"/>
+  <rect x="230.5" y="72.5" width="230" height="80" class="paper"/>
+  <line x1="230.5" y1="96.5" x2="460.5" y2="96.5" class="rl"/>
+  <text x="238" y="89" class="ui">λ</text>
+  <text x="250" y="89" class="ui t2" style="font-size:10.5px">link</text>
+  <rect x="396.5" y="78.5" width="34" height="14" class="hr"/><text x="400" y="89" class="ui xs">inspo</text>
+  <text x="448" y="89" class="ui t2">×</text>
+  <rect x="240.5" y="106.5" width="16" height="16" class="paper"/>
+  <text x="264" y="118" class="ui b">Are.na — Kitchen tiles</text>
+  <text x="264" y="133" class="ui t2" style="font-size:10.5px">are.na/ms/kitchen-tiles · 38 blocks</text>
+  <!-- screenshot clip -->
+  <rect x="424" y="174" width="220" height="150" class="hatch"/>
+  <rect x="420.5" y="170.5" width="220" height="150" class="paper"/>
+  <line x1="420.5" y1="194.5" x2="640.5" y2="194.5" class="rl"/>
+  <text x="428" y="187" class="ui">▢</text>
+  <text x="440" y="187" class="ui t2" style="font-size:10.5px">screenshot</text>
+  <text x="628" y="187" class="ui t2">×</text>
+  <rect x="428.5" y="202.5" width="204" height="110" class="hatch"/>
+  <rect x="428.5" y="202.5" width="204" height="110" class="hr"/>
+  <rect x="490" y="250" width="80" height="14" class="fill"/>
+  <text x="494" y="260" class="t2">1280 × 800 · png</text>
+  <!-- doc clip -->
+  <rect x="64" y="234" width="190" height="210" class="hatch"/>
+  <rect x="60.5" y="230.5" width="190" height="210" class="paper"/>
+  <line x1="60.5" y1="254.5" x2="250.5" y2="254.5" class="rl"/>
+  <text x="68" y="247" class="ui">▤</text>
+  <text x="80" y="247" class="ui t2" style="font-size:10.5px">doc · tiles.md</text>
+  <text x="238" y="247" class="ui t2">×</text>
+  <text x="70" y="276" class="ui b" style="font-size:13px">Tiling plan</text>
+  <g class="rl">
+    <line x1="70" y1="292" x2="236" y2="292"/><line x1="70" y1="302" x2="222" y2="302"/><line x1="70" y1="312" x2="236" y2="312"/>
+    <line x1="70" y1="322" x2="190" y2="322"/><line x1="70" y1="342" x2="236" y2="342"/><line x1="70" y1="352" x2="230" y2="352"/>
+    <line x1="70" y1="362" x2="236" y2="362"/><line x1="70" y1="372" x2="160" y2="372"/><line x1="70" y1="392" x2="236" y2="392"/>
+    <line x1="70" y1="402" x2="214" y2="402"/><line x1="70" y1="412" x2="236" y2="412"/>
+  </g>
+  <!-- app window -->
+  <rect x="294" y="254" width="340" height="200" class="hatch"/>
+  <rect x="290.5" y="250.5" width="340" height="200" class="paper"/>
+  <line x1="290.5" y1="278.5" x2="630.5" y2="278.5" class="hr"/>
+  <text x="298" y="268" class="ui">△</text>
+  <text x="312" y="268" class="ui b" style="font-size:13px">Budget</text>
+  <text x="596" y="268" class="ui">◇</text>
+  <text x="616" y="268" class="ui t2">×</text>
+  <!-- toolbar -->
+  <line x1="290.5" y1="308.5" x2="540.5" y2="308.5" class="hr"/>
+  <rect x="298" y="285" width="44" height="18" class="inkfill"/><text x="306" y="297" class="ui onink">Table</text>
+  <rect x="342.5" y="285.5" width="44" height="18" class="hr"/><text x="350" y="297" class="ui">Chart</text>
+  <text x="400" y="297" class="ui t2">12 rows · €4,280 · 3 over</text>
+  <!-- table -->
+  <text x="300" y="325" class="ui b" style="font-size:10.5px">item</text><text x="420" y="325" class="ui b" style="font-size:10.5px">qty</text><text x="470" y="325" class="ui b" style="font-size:10.5px">cost</text>
+  <line x1="298" y1="330.5" x2="534" y2="330.5" class="hr"/>
+  <text x="300" y="346" class="ui">tiles 60×60 matte</text><text x="420" y="346" class="ui">2 bx</text><text x="470" y="346" class="ui">€ 312.00</text>
+  <line x1="298" y1="352.5" x2="534" y2="352.5" class="rl"/>
+  <line x1="298.5" y1="354" x2="298.5" y2="372.0" style="stroke:var(--accent);stroke-width:1"/>
+  <text x="304" y="366" class="ui b">grout, anthracite</text><text x="420" y="366" class="ui">3</text><text x="470" y="366" class="ui">€ 41.70</text>
+  <line x1="298" y1="372.5" x2="534" y2="372.5" class="rl"/>
+  <text x="300" y="386" class="ui">tap, brushed</text><text x="420" y="386" class="ui">1</text><text x="470" y="386" class="ui">€ 189.00</text>
+  <line x1="298" y1="392.5" x2="534" y2="392.5" class="rl"/>
+  <text x="300" y="406" class="ui">plumber</text><text x="420" y="406" class="ui">4 h</text><text x="470" y="406" class="ui acc">€ 480.00</text>
+  <line x1="298" y1="412.5" x2="534" y2="412.5" class="rl"/>
+  <text x="300" y="440" class="ui t2" style="font-size:10.5px">drop a clip here to add a row</text>
+  <!-- side params -->
+  <line x1="540.5" y1="278.5" x2="540.5" y2="450.5" class="hr"/>
+  <text x="548" y="298" class="ui b" style="font-size:13px">Params</text>
+  <text x="548" y="320" class="ui">vat</text><text x="620" y="320" class="ui" text-anchor="end">21 %</text>
+  <line x1="548" y1="330.5" x2="620" y2="330.5" class="hr"/><rect x="590" y="327" width="7" height="7" class="inkfill"/>
+  <text x="548" y="352" class="ui">unit</text><text x="620" y="352" class="ui" text-anchor="end">EUR ▾</text>
+  <text x="548" y="376" class="ui">over budget</text><rect x="611" y="368" width="9" height="9" class="inkfill"/>
+  <text x="548" y="400" class="ui">budget</text><text x="620" y="400" class="ui" text-anchor="end">€ 4,000</text>
+  <line x1="548" y1="410.5" x2="620" y2="410.5" class="hr"/><rect x="580" y="407" width="7" height="7" class="inkfill"/>
+  <!-- small note overlapping -->
+  <rect x="544" y="464" width="100" height="60" class="hatch"/>
+  <rect x="540.5" y="460.5" width="100" height="60" class="paper"/>
+  <line x1="540.5" y1="480.5" x2="640.5" y2="480.5" class="rl"/>
+  <text x="546" y="475" class="ui">■</text><text x="630" y="475" class="ui t2">×</text>
+  <text x="548" y="500" class="ui">call Mo re: Tue</text>
+
+  <!-- quicklaunch -->
+  <rect x="150.5" y="500.5" width="360" height="48" class="paper"/>
+  <g>
+    <rect x="166.5" y="508.5" width="28" height="28" class="hr"/><text x="175" y="527" class="ui" style="font-size:13px">△</text><text x="180" y="546" class="xs t2" text-anchor="middle">budget</text>
+    <rect x="212.5" y="508.5" width="28" height="28" class="hr"/><text x="221" y="527" class="ui" style="font-size:13px">▤</text><text x="226" y="546" class="xs t2" text-anchor="middle">recipes</text>
+    <rect x="258.5" y="508.5" width="28" height="28" class="hr"/><text x="267" y="527" class="ui" style="font-size:13px">▦</text><text x="272" y="546" class="xs t2" text-anchor="middle">mood</text>
+    <rect x="304.5" y="508.5" width="28" height="28" class="hr"/><text x="313" y="527" class="ui" style="font-size:13px">○</text><text x="318" y="546" class="xs t2" text-anchor="middle">reading</text>
+    <rect x="350.5" y="508.5" width="28" height="28" class="hr"/><text x="359" y="527" class="ui" style="font-size:13px">◎</text><text x="364" y="546" class="xs t2" text-anchor="middle">watch</text>
+    <rect x="396.5" y="508.5" width="28" height="28" class="hr"/><text x="405" y="527" class="ui" style="font-size:13px">λ</text><text x="410" y="546" class="xs t2" text-anchor="middle">links</text>
+    <line x1="440.5" y1="508" x2="440.5" y2="536" class="hair hr"/>
+    <rect x="456.5" y="508.5" width="28" height="28" class="hr"/><text x="466" y="527" class="ui" style="font-size:13px">+</text><text x="470" y="546" class="xs t2" text-anchor="middle">new app</text>
+  </g>
+
+  <!-- agent panel -->
+  <text x="672" y="72" class="ui b" style="font-size:13px">Agent</text>
+  <rect x="716.5" y="60.5" width="62" height="18" class="hr"/><text x="722" y="73" class="ui" style="font-size:10.5px">Mode Ask ▾</text>
+  <rect x="786.5" y="60.5" width="58" height="18" class="hr"/><text x="792" y="73" class="ui" style="font-size:10.5px">Model ▾</text>
+  <text x="876" y="73" class="ui" style="font-size:10.5px">+ New</text>
+  <line x1="660.5" y1="88.5" x2="920" y2="88.5" class="hr"/>
+  <text x="672" y="106" class="ui b">organise clips</text><line x1="672" y1="111.5" x2="742" y2="111.5" class="ln" style="stroke-dasharray:1 2"/>
+  <text x="756" y="106" class="ui t2">budget</text>
+  <text x="810" y="106" class="ui t2">tiles.md</text>
+  <line x1="660.5" y1="118.5" x2="920" y2="118.5" class="rl"/>
+  <text x="672" y="138" class="ui b" style="font-size:10.5px">You</text>
+  <text x="672" y="152" class="ui">these are all recipes, make them a</text>
+  <text x="672" y="165" class="ui">database and give me a browser for it</text>
+  <text x="672" y="190" class="ui b" style="font-size:10.5px">Agent</text>
+  <rect x="672" y="200" width="5" height="5" class="inkfill"/>
+  <text x="684" y="206" class="ui">looked at the 14 selected clips</text>
+  <text x="684" y="219" class="t2">sel.map(c =&gt; describe(c))</text>
+  <text x="684" y="231" class="t2">=&gt; 14 clips · 11 link · 2 note · 1 image</text>
+  <text x="872" y="206" class="xs t2">0.21 s</text>
+  <rect x="672" y="246" width="5" height="5" class="acc"/>
+  <text x="684" y="252" class="ui">proposed a collection</text>
+  <rect x="684.5" y="260.5" width="220" height="40" class="hr" style="fill:var(--code-bg)"/>
+  <text x="690" y="273">db.collection('recipes')</text>
+  <text x="690" y="285">  .field('title','text').required()</text>
+  <text x="690" y="297">  .field('url','url').field('tags',…)</text>
+  <rect x="684" y="308" width="82" height="20" class="inkfill"/><text x="692" y="322" class="ui onink">Run this step</text>
+  <rect x="772.5" y="308.5" width="52" height="20" class="hr"/><text x="782" y="322" class="ui">Decline</text>
+  <rect x="672" y="344" width="5" height="5" class="hr"/>
+  <text x="684" y="350" class="ui t2">promote the clips</text>
+  <rect x="672" y="364" width="5" height="5" class="hr"/>
+  <text x="684" y="370" class="ui t2">build an app and register it</text>
+  <text x="672" y="398" class="ui t2" style="font-size:10.5px">Waiting ▪</text>
+  <!-- composer -->
+  <line x1="660.5" y1="500.5" x2="920" y2="500.5" class="hr"/>
+  <rect x="672.5" y="512.5" width="180" height="32" class="hr" style="fill:var(--code-bg)"/>
+  <text x="680" y="532" class="ui t2">ask the agent</text>
+  <rect x="862" y="512" width="44" height="33" class="inkfill"/><text x="872" y="533" class="ui onink">Send</text>
+
+  <!-- leaders & labels -->
+  <circle cx="190" cy="140" r="1.6" class="dot"/><line x1="190" y1="140" x2="214" y2="200" class="lead"/><text x="140" y="212" class="xs">clip · note</text>
+  <circle cx="300" cy="153" r="1.6" class="dot"/><line x1="300" y1="153" x2="300" y2="160" class="lead"/><text x="240" y="167" class="xs">clip · link, unfurled at runtime</text>
+  <circle cx="460" cy="451" r="1.6" class="dot"/><line x1="460" y1="451" x2="460" y2="462" class="lead"/><text x="300" y="470" class="xs">app window · from the grammar · ◇ = params</text>
+  <circle cx="510" cy="524" r="1.6" class="dot"/><line x1="510" y1="524" x2="560" y2="548" class="lead"/><text x="564" y="551" class="xs">quicklaunch · ⌘K</text>
+  <circle cx="660" cy="430" r="1.6" class="dot"/><line x1="660" y1="430" x2="700" y2="470" class="lead"/><text x="704" y="474" class="xs">agent panel · one tool, eval</text>
+  <text x="16" y="490" class="xs t2">canvas · pan with space-drag · zoom ⌘-wheel · 24 px snap</text>
+
+  <!-- furniture -->
+  <line x1="16" y1="548.5" x2="96" y2="548.5" class="ln"/><line x1="16.5" y1="544" x2="16.5" y2="553" class="ln"/><line x1="96.5" y1="544" x2="96.5" y2="553" class="ln"/>
+  <text x="100" y="551" class="xs t2">80 px · 1 : 1</text>
+</svg>
+<figcaption><b>Sheet 01 · the board.</b> Header bar, free canvas with clips of four kinds and one app window, the quicklaunch, and the agent panel docked right. Everything is paper with 1 px ink; shadows are hatched, never grey.</figcaption>
+</figure>
+
+<!-- ============ SHEET 02 ============ -->
+<figure>
+<svg viewBox="0 0 920 480" xmlns="http://www.w3.org/2000/svg">
+  <rect x=".5" y=".5" width="919" height="479" class="hr"/>
+  <!-- the clip -->
+  <rect x="204" y="64" width="420" height="300" class="hatch"/>
+  <rect x="200.5" y="60.5" width="420" height="300" class="paper"/>
+  <line x1="201.5" y1="61" x2="201.5" y2="360.0" style="stroke:var(--accent);stroke-width:1"/>
+  <line x1="200.5" y1="88.5" x2="620.5" y2="88.5" class="hr"/>
+  <text x="212" y="79" class="ui">λ</text>
+  <text x="226" y="79" class="ui b" style="font-size:13px">Are.na — Kitchen tiles</text>
+  <rect x="440.5" y="68.5" width="36" height="14" class="hr"/><text x="445" y="79" class="ui xs">inspo</text>
+  <rect x="480.5" y="68.5" width="44" height="14" class="hr"/><text x="485" y="79" class="ui xs">kitchen</text>
+  <text x="580" y="80" class="ui">◇</text>
+  <text x="602" y="80" class="ui t2">×</text>
+  <!-- body -->
+  <rect x="212.5" y="100.5" width="160" height="120" class="hatch"/>
+  <rect x="212.5" y="100.5" width="160" height="120" class="hr"/>
+  <text x="386" y="116" class="ui b" style="font-size:13px">Kitchen tiles</text>
+  <text x="386" y="132" class="ui t2" style="font-size:10.5px">are.na · channel · 38 blocks · 3 d ago</text>
+  <g class="rl"><line x1="386" y1="150" x2="604" y2="150"/><line x1="386" y1="160" x2="580" y2="160"/><line x1="386" y1="170" x2="604" y2="170"/><line x1="386" y1="180" x2="520" y2="180"/></g>
+  <text x="386" y="214" class="ui" style="text-decoration:underline">are.na/ms/kitchen-tiles</text>
+  <text x="212" y="248" class="ui">Matte 60×60 in warm grey. Check lead time, the amber one is 6 weeks.</text>
+  <text x="212" y="264" class="ui t2" style="font-size:10.5px">your note on the clip · edited 19:31</text>
+  <!-- footer -->
+  <line x1="200.5" y1="336.5" x2="620.5" y2="336.5" class="hr"/>
+  <text x="212" y="352" class="ui">→ recipes · row 4</text>
+  <text x="608" y="352" class="ui t2" style="font-size:10.5px" text-anchor="end">pasted 19:26 · clipboard · 2 of 14 selected</text>
+  <g class="ln"><line x1="610" y1="358" x2="618" y2="350"/><line x1="614" y1="358" x2="618" y2="354"/></g>
+  <!-- dimensions -->
+  <g class="lead"><line x1="200.5" y1="424" x2="620.5" y2="424"/><line x1="200.5" y1="420" x2="200.5" y2="428"/><line x1="620.5" y1="420" x2="620.5" y2="428"/></g>
+  <rect x="372" y="418" width="76" height="12" style="fill:var(--bg)"/><text x="410" y="427" class="xs" text-anchor="middle">420 · min 160</text>
+  <g class="lead"><line x1="192" y1="60.5" x2="192" y2="88.5"/><line x1="188" y1="60.5" x2="196" y2="60.5"/><line x1="188" y1="88.5" x2="196" y2="88.5"/></g><text x="186" y="78" class="xs" text-anchor="end">28</text>
+  <g class="lead"><line x1="192" y1="336.5" x2="192" y2="360.5"/><line x1="188" y1="336.5" x2="196" y2="336.5"/><line x1="188" y1="360.5" x2="196" y2="360.5"/></g><text x="186" y="352" class="xs" text-anchor="end">24</text>
+  <!-- callouts, right -->
+  <g class="lead">
+    <line x1="620" y1="74" x2="640" y2="74"/><circle cx="620" cy="74" r="1.6" class="dot"/>
+    <path d="M470 84 L470 96 L640 96"/><circle cx="470" cy="84" r="1.6" class="dot"/>
+    <path d="M584 86 L584 118 L640 118"/><circle cx="584" cy="86" r="1.6" class="dot"/>
+    <line x1="620" y1="170" x2="640" y2="170"/><circle cx="620" cy="170" r="1.6" class="dot"/>
+    <line x1="620" y1="248" x2="640" y2="248"/><circle cx="620" cy="248" r="1.6" class="dot"/>
+    <line x1="618" y1="356" x2="640" y2="356"/><circle cx="618" cy="356" r="1.6" class="dot"/>
+  </g>
+  <text x="644" y="77" class="xs">title strip · drag to move</text>
+  <text x="644" y="88" class="xs t2">double-click renames · ⇧-drag tiles</text>
+  <text x="644" y="99" class="xs">chips · from the taggable fragment</text>
+  <text x="644" y="110" class="xs t2">click one to filter the board</text>
+  <text x="644" y="121" class="xs">◇ properties of a clip, params of an app</text>
+  <text x="644" y="132" class="xs t2">opens a 288 px side column</text>
+  <text x="644" y="173" class="xs">body · whatever the builder renders</text>
+  <text x="644" y="184" class="xs t2">here ui.link, unfurled at runtime</text>
+  <text x="644" y="251" class="xs">your note · the annotated fragment</text>
+  <text x="644" y="359" class="xs">resize from any edge</text>
+  <text x="644" y="370" class="xs t2">corner keeps ratio on images</text>
+  <!-- callouts, left -->
+  <g class="lead">
+    <path d="M212 70 L212 40 L230 40"/><circle cx="212" cy="70" r="1.6" class="dot"/>
+    <line x1="201" y1="200" x2="176" y2="200"/><circle cx="201" cy="200" r="1.6" class="dot"/>
+    <line x1="212" y1="160" x2="176" y2="160"/><circle cx="212" cy="160" r="1.6" class="dot"/>
+  </g>
+  <text x="234" y="43" class="xs">glyph = kind · ■ note  λ link  ▢ image  ▤ doc  △ app  ○ group</text>
+  <text x="172" y="163" class="xs" text-anchor="end">unfurled preview</text>
+  <text x="172" y="174" class="xs t2" text-anchor="end">og:image, or a capture</text>
+  <text x="172" y="203" class="xs" text-anchor="end">accent hairline = selected</text>
+  <text x="172" y="214" class="xs t2" text-anchor="end">red is only for selection and errors</text>
+  <!-- callouts, below -->
+  <g class="lead">
+    <path d="M262 356 L262 400"/><circle cx="262" cy="356" r="1.6" class="dot"/>
+    <path d="M560 356 L560 400"/><circle cx="560" cy="356" r="1.6" class="dot"/>
+  </g>
+  <text x="268" y="403" class="xs">binding · also row 4 of recipes · edits go both ways</text>
+  <text x="566" y="403" class="xs">provenance · the sourced fragment</text>
+  <!-- states row -->
+  <text x="40" y="446" class="xs t2">STATES</text>
+  <g>
+    <rect x="90.5" y="436.5" width="70" height="28" class="hr"/><text x="96" y="454" class="ui xs">rest · hair</text>
+    <rect x="170.5" y="436.5" width="70" height="28" class="paper"/><text x="176" y="454" class="ui xs">hover · ink</text>
+    <rect x="250.5" y="436.5" width="70" height="28" class="paper"/><line x1="251.5" y1="437" x2="251.5" y2="464.0" style="stroke:var(--accent);stroke-width:1"/><text x="258" y="454" class="ui xs">selected</text>
+    <rect x="334" y="440" width="70" height="28" class="hr"/><rect x="330.5" y="436.5" width="70" height="28" class="paper"/><text x="336" y="454" class="ui xs">grouped · stack</text>
+    <rect x="420.5" y="436.5" width="76" height="28" class="hr dash"/><text x="426" y="454" class="ui xs t2">dragging · ghost</text>
+    <rect x="506.5" y="436.5" width="70" height="28" class="selw"/><text x="512" y="454" class="ui xs">drop here</text>
+    <rect x="586.5" y="436.5" width="100" height="28" class="hr" style="stroke:var(--accent)"/><text x="592" y="454" class="ui xs acc">failed · link 404</text>
+    <rect x="696.5" y="436.5" width="90" height="28" class="hr" style="opacity:.4"/><text x="702" y="454" class="ui xs">disabled · 40 %</text>
+    <rect x="796.5" y="436.5" width="100" height="28" class="hr"/><rect x="796.5" y="436.5" width="100" height="14" class="fill"/><text x="802" y="454" class="ui xs">archived · tag</text>
+  </g>
+  <line x1="16" y1="470.5" x2="56" y2="470.5" class="ln"/><text x="60" y="473" class="xs t2">40 px</text>
+</svg>
+<figcaption><b>Sheet 02 · anatomy of a clip.</b> Every window on the board has the same bones: a 28 px title strip, a body the builder renders, a 24 px footer that fragments fill. The state row shows the only ways a clip looks different.</figcaption>
+</figure>
+
+<!-- ============ SHEET 03 ============ -->
+<figure>
+<svg viewBox="0 0 920 500" xmlns="http://www.w3.org/2000/svg">
+  <rect x=".5" y=".5" width="919" height="499" class="hr"/>
+  <rect x="44" y="74" width="480" height="370" class="hatch"/>
+  <rect x="40.5" y="70.5" width="480" height="370" class="paper"/>
+  <line x1="40.5" y1="98.5" x2="520.5" y2="98.5" class="hr"/>
+  <text x="52" y="89" class="ui">▦</text><text x="66" y="89" class="ui b" style="font-size:13px">Moodboard</text>
+  <text x="140" y="89" class="ui t2" style="font-size:10.5px">app · ⌘⇧M</text>
+  <text x="480" y="90" class="ui">◇</text><text x="502" y="90" class="ui t2">×</text>
+  <!-- toolbar -->
+  <line x1="40.5" y1="136.5" x2="390.5" y2="136.5" class="hr"/>
+  <rect x="52.5" y="107.5" width="150" height="22" class="hr" style="fill:var(--code-bg)"/><text x="60" y="122" class="ui t2">search captions and tags</text>
+  <rect x="212" y="107" width="46" height="23" class="inkfill"/><text x="220" y="122" class="ui onink">added</text>
+  <rect x="258.5" y="107.5" width="34" height="22" class="hr"/><text x="266" y="122" class="ui">hue</text>
+  <rect x="292.5" y="107.5" width="30" height="22" class="hr"/><text x="299" y="122" class="ui">tag</text>
+  <text x="332" y="122" class="ui t2" style="font-size:10.5px">38 · 6 tags</text>
+  <!-- masonry 4 cols of 76 -->
+  <g class="hr">
+    <rect x="52.5" y="148.5" width="76" height="60" class="hatch"/><rect x="52.5" y="148.5" width="76" height="60"/>
+    <rect x="52.5" y="222.5" width="76" height="100" class="hatch"/><rect x="52.5" y="222.5" width="76" height="100"/>
+    <rect x="52.5" y="336.5" width="76" height="70" class="hatch"/><rect x="52.5" y="336.5" width="76" height="70"/>
+    <rect x="136.5" y="148.5" width="76" height="90" class="hatch"/><rect x="136.5" y="148.5" width="76" height="90"/>
+    <rect x="136.5" y="252.5" width="76" height="70" class="hatch"/><rect x="136.5" y="252.5" width="76" height="70"/>
+    <rect x="136.5" y="336.5" width="76" height="70" class="hatch"/><rect x="136.5" y="336.5" width="76" height="70"/>
+    <rect x="220.5" y="148.5" width="76" height="50" class="hatch"/><rect x="220.5" y="148.5" width="76" height="50"/>
+    <rect x="220.5" y="212.5" width="76" height="110" class="hatch"/><rect x="220.5" y="212.5" width="76" height="110"/>
+    <rect x="220.5" y="336.5" width="76" height="70" class="hatch"/><rect x="220.5" y="336.5" width="76" height="70"/>
+    <rect x="304.5" y="148.5" width="76" height="74" class="hatch"/><rect x="304.5" y="148.5" width="76" height="74"/>
+    <rect x="304.5" y="236.5" width="76" height="86" class="hatch"/><rect x="304.5" y="236.5" width="76" height="86"/>
+    <rect x="304.5" y="336.5" width="76" height="70" class="hatch"/><rect x="304.5" y="336.5" width="76" height="70"/>
+  </g>
+  <!-- swatch footer on the bottom-left image -->
+  <rect x="52.5" y="398.5" width="12" height="6" class="paper"/><rect x="66.5" y="398.5" width="12" height="6" class="fill" style="stroke:var(--ink);stroke-width:1"/><rect x="80.5" y="398.5" width="12" height="6" class="hatch" style="stroke:var(--ink);stroke-width:1"/><rect x="94.5" y="398.5" width="12" height="6" class="inkfill"/>
+  <text x="52" y="218" class="ui xs t2">terrazzo, warm</text>
+  <text x="220" y="208" class="ui xs t2">brass tap</text>
+  <!-- selected image -->
+  <rect x="304.5" y="236.5" width="76" height="86" class="ln" style="stroke-dasharray:1 2"/>
+  <!-- side column -->
+  <line x1="390.5" y1="98.5" x2="390.5" y2="440.5" class="hr"/>
+  <text x="402" y="118" class="ui b" style="font-size:13px">Params</text>
+  <text x="402" y="144" class="ui">cols</text><text x="508" y="144" class="ui" text-anchor="end">4</text>
+  <line x1="402" y1="154.5" x2="508" y2="154.5" class="hr"/><rect x="440" y="151" width="7" height="7" class="inkfill"/>
+  <text x="402" y="178" class="ui">gap</text><text x="508" y="178" class="ui" text-anchor="end">8 px</text>
+  <line x1="402" y1="188.5" x2="508" y2="188.5" class="hr"/><rect x="430" y="185" width="7" height="7" class="inkfill"/>
+  <text x="402" y="212" class="ui">by</text><text x="508" y="212" class="ui" text-anchor="end">added ▾</text>
+  <text x="402" y="236" class="ui">captions</text><rect x="499.5" y="228.5" width="9" height="9" class="hr"/>
+  <text x="402" y="260" class="ui">swatches</text><rect x="499" y="252" width="9" height="9" class="inkfill"/>
+  <line x1="402" y1="276.5" x2="508" y2="276.5" class="ln"/>
+  <text x="402" y="294" class="ui b" style="font-size:13px">Selected</text>
+  <text x="402" y="312" class="ui">brass tap · 1200 × 1600</text>
+  <text x="402" y="326" class="ui t2" style="font-size:10.5px">added 2 d ago · clipboard</text>
+  <rect x="402.5" y="336.5" width="30" height="14" class="hr"/><text x="407" y="347" class="ui xs">brass</text>
+  <rect x="436.5" y="336.5" width="24" height="14" class="hr"/><text x="441" y="347" class="ui xs">tap</text>
+  <text x="402" y="370" class="ui" style="text-decoration:underline">pop out as a clip</text>
+  <text x="402" y="386" class="ui" style="text-decoration:underline">open source page</text>
+  <!-- footer hint -->
+  <line x1="40.5" y1="424.5" x2="390.5" y2="424.5" class="rl"/>
+  <text x="52" y="436" class="ui t2" style="font-size:10.5px">drop images or links anywhere · double-click pops one out</text>
+
+  <!-- runtime edges, blue dashed, routed outside the window -->
+  <g class="lead-b dash">
+    <path d="M128 107 L128 48 L560 48 L560 64" marker-end="url(#arr)"/>
+    <path d="M520 151 L556 151" marker-end="url(#arr)"/>
+    <path d="M520 185 L556 185" marker-end="url(#arr)"/>
+    <path d="M520 209 L556 209" marker-end="url(#arr)"/>
+    <path d="M260 440 L260 462 L548 462 L548 410" marker-end="url(#arr)"/>
+  </g>
+  <text x="566" y="40" class="xs blue">RUNTIME EDGES OF THE DAG</text>
+  <text x="566" y="68" class="xs">state.q → each#images</text>
+  <text x="566" y="79" class="xs t2">ui.input('q') writes state; the query reads it</text>
+  <text x="566" y="154" class="xs">param.cols → grid.cols</text>
+  <text x="566" y="188" class="xs">param.gap → grid.gap</text>
+  <text x="566" y="212" class="xs">param.by → query.orderBy → each#images</text>
+  <text x="566" y="404" class="xs">db.moodboard → each#images, count</text>
+  <text x="566" y="415" class="xs t2">a node re-runs only when one of its deps changes</text>
+  <!-- ink leaders -->
+  <g class="lead">
+    <path d="M300 107 L300 56 L544 56 L544 92"/><circle cx="300" cy="107" r="1.6" class="dot"/>
+    <line x1="520" y1="114" x2="556" y2="114"/><circle cx="520" cy="114" r="1.6" class="dot"/>
+    <line x1="520" y1="318" x2="556" y2="318"/><circle cx="520" cy="318" r="1.6" class="dot"/>
+    <path d="M100 407 L100 452 L540 452 L540 346"/><circle cx="100" cy="407" r="1.6" class="dot"/>
+    <path d="M340 440 L340 472 L556 472 L556 372"/><circle cx="340" cy="440" r="1.6" class="dot"/>
+  </g>
+  <text x="566" y="100" class="xs">ui.segmented('by') binds the param of that name</text>
+  <text x="566" y="117" class="xs">params column generated from .param.*</text>
+  <text x="566" y="128" class="xs t2">30 px rows · slider, select, toggle, text</text>
+  <text x="566" y="321" class="xs">.side(…) adds blocks under the params</text>
+  <text x="566" y="349" class="xs">footer from the palette fragment</text>
+  <text x="566" y="360" class="xs t2">swatches read at runtime, drawn 12 × 6</text>
+  <text x="566" y="375" class="xs">ui.dropzone wraps the grid</text>
+  <text x="566" y="386" class="xs t2">hint text is its empty state</text>
+  <line x1="16" y1="488.5" x2="56" y2="488.5" class="ln"/><text x="60" y="491" class="xs t2">40 px</text>
+</svg>
+<figcaption><b>Sheet 03 · an app window built with the grammar.</b> Toolbar, body and a params side column, all from one builder chain (example 13). Blue dashed lines are the runtime edges: which inputs re-run which nodes.</figcaption>
+</figure>
+
+<!-- ============ SHEET 04 ============ -->
+<figure>
+<svg viewBox="0 0 920 500" xmlns="http://www.w3.org/2000/svg">
+  <rect x=".5" y=".5" width="919" height="499" class="hr"/>
+  <text x="16" y="24" class="xs t2">BEFORE · 14 loose clips, selected</text>
+  <text x="330" y="24" class="xs t2">THE TURN · mode Ask</text>
+  <text x="640" y="24" class="xs t2">AFTER · a collection and an app</text>
+  <!-- before: scattered clips -->
+  <rect x="16.5" y="36.5" width="290" height="300" fill="url(#grid)" class="hr"/>
+  <rect x="24.5" y="44.5" width="274" height="284" class="hr dash" style="stroke:var(--accent)"/>
+  <g>
+    <rect x="36.5" y="56.5" width="90" height="46" class="paper"/><line x1="37.5" y1="57" x2="37.5" y2="102.0" style="stroke:var(--accent);stroke-width:1"/><text x="44" y="70" class="ui xs">λ shakshuka</text><text x="44" y="84" class="ui xs t2">ottolenghi.co.uk</text>
+    <rect x="140.5" y="64.5" width="100" height="46" class="paper"/><line x1="141.5" y1="65" x2="141.5" y2="110.0" style="stroke:var(--accent);stroke-width:1"/><text x="148" y="78" class="ui xs">λ dal, 40 min</text><text x="148" y="92" class="ui xs t2">bbc.co.uk/food</text>
+    <rect x="60.5" y="118.5" width="96" height="60" class="paper"/><line x1="61.5" y1="119" x2="61.5" y2="178.0" style="stroke:var(--accent);stroke-width:1"/><text x="68" y="132" class="ui xs">■ mum's soup</text><text x="68" y="146" class="ui xs t2">leek, potato, bay</text><text x="68" y="160" class="ui xs t2">serves 4</text>
+    <rect x="176.5" y="124.5" width="110" height="80" class="paper"/><line x1="177.5" y1="125" x2="177.5" y2="204.0" style="stroke:var(--accent);stroke-width:1"/><text x="184" y="138" class="ui xs">▢ screenshot</text><rect x="184.5" y="144.5" width="94" height="52" class="hatch"/>
+    <rect x="40.5" y="196.5" width="104" height="46" class="paper"/><line x1="41.5" y1="197" x2="41.5" y2="242.0" style="stroke:var(--accent);stroke-width:1"/><text x="48" y="210" class="ui xs">λ miso aubergine</text><text x="48" y="224" class="ui xs t2">nyt cooking</text>
+    <rect x="130.5" y="222.5" width="96" height="46" class="paper"/><line x1="131.5" y1="223" x2="131.5" y2="268.0" style="stroke:var(--accent);stroke-width:1"/><text x="138" y="236" class="ui xs">λ focaccia</text><text x="138" y="250" class="ui xs t2">seriouseats.com</text>
+    <rect x="200.5" y="260.5" width="90" height="46" class="paper"/><line x1="201.5" y1="261" x2="201.5" y2="306.0" style="stroke:var(--accent);stroke-width:1"/><text x="208" y="274" class="ui xs">λ ramen eggs</text><text x="208" y="288" class="ui xs t2">justonecookbook</text>
+    <rect x="36.5" y="266.5" width="80" height="46" class="paper"/><line x1="37.5" y1="267" x2="37.5" y2="312.0" style="stroke:var(--accent);stroke-width:1"/><text x="44" y="280" class="ui xs">■ note</text><text x="44" y="294" class="ui xs t2">double the garlic</text>
+  </g>
+  <text x="24" y="350" class="xs t2">+ 6 more · 9 share tag [dinner]</text>
+  <!-- the turn -->
+  <rect x="320.5" y="36.5" width="290" height="300" class="hr"/>
+  <text x="332" y="56" class="ui b" style="font-size:10.5px">You</text>
+  <text x="332" y="70" class="ui">these are all recipes, make them a database</text>
+  <text x="332" y="83" class="ui">and give me a browser for it</text>
+  <text x="332" y="106" class="ui b" style="font-size:10.5px">Agent</text>
+  <rect x="332" y="116" width="5" height="5" class="inkfill"/><text x="344" y="122" class="ui">looked at the selection</text><text x="598" y="122" class="xs t2" text-anchor="end">0.21 s</text>
+  <text x="344" y="135" class="t2">board.selection().map(describe)</text>
+  <text x="344" y="147" class="t2">=&gt; 14 · 11 link · 2 note · 1 image · 12 titled</text>
+  <rect x="332" y="162" width="5" height="5" class="inkfill"/><text x="344" y="168" class="ui">proposed a collection</text><text x="598" y="168" class="xs t2" text-anchor="end">ran</text>
+  <text x="344" y="181" class="t2">db.collection('recipes').field('title','text')</text>
+  <text x="344" y="193" class="t2">  .field('url','url').field('serves','int')</text>
+  <text x="344" y="205" class="t2">  .field('tags','text[]').field('note','text')</text>
+  <rect x="332" y="220" width="5" height="5" class="acc"/><text x="344" y="226" class="ui">promote the 14 clips</text>
+  <text x="344" y="239" class="t2">m(x =&gt; sel.forEach(c =&gt;</text>
+  <text x="344" y="251" class="t2">  x.promote(c.id, 'recipes', fromClip)))</text>
+  <rect x="344" y="260" width="82" height="20" class="inkfill"/><text x="352" y="274" class="ui onink">Run this step</text>
+  <rect x="432.5" y="260.5" width="52" height="20" class="hr"/><text x="442" y="274" class="ui">Decline</text>
+  <text x="494" y="274" class="ui t2" style="font-size:10.5px">reverts in one step</text>
+  <rect x="332" y="294" width="5" height="5" class="hr"/><text x="344" y="300" class="ui t2">build recipes app, register it</text>
+  <text x="332" y="320" class="ui t2" style="font-size:10.5px">Waiting ▪  ·  files snapshotted before each step</text>
+  <!-- after -->
+  <rect x="624.5" y="36.5" width="280" height="300" fill="url(#grid)" class="hr"/>
+  <rect x="640" y="56" width="250" height="200" class="hatch"/>
+  <rect x="636.5" y="52.5" width="250" height="200" class="paper"/>
+  <line x1="636.5" y1="76.5" x2="886.5" y2="76.5" class="hr"/>
+  <text x="644" y="69" class="ui">▤</text><text x="658" y="69" class="ui b" style="font-size:12px">Recipes</text><text x="712" y="69" class="ui t2" style="font-size:10.5px">14 rows · recipes</text>
+  <text x="866" y="70" class="ui">◇</text>
+  <text x="646" y="92" class="ui b" style="font-size:10px">title</text><text x="760" y="92" class="ui b" style="font-size:10px">serves</text><text x="800" y="92" class="ui b" style="font-size:10px">tags</text>
+  <line x1="644" y1="97.5" x2="880" y2="97.5" class="hr"/>
+  <g class="ui xs">
+    <text x="646" y="110">shakshuka</text><text x="760" y="110">2</text><text x="800" y="110">eggs · dinner</text>
+    <text x="646" y="126">dal, 40 min</text><text x="760" y="126">4</text><text x="800" y="126">dinner</text>
+    <text x="646" y="142">mum's soup</text><text x="760" y="142">4</text><text x="800" y="142">soup</text>
+    <text x="646" y="158">miso aubergine</text><text x="760" y="158">2</text><text x="800" y="158">dinner</text>
+    <text x="646" y="174">focaccia</text><text x="760" y="174">—</text><text x="800" y="174">bread</text>
+    <text x="646" y="190">ramen eggs</text><text x="760" y="190">—</text><text x="800" y="190">eggs</text>
+    <text x="646" y="206" class="acc">(untitled) · nyt</text><text x="760" y="206">—</text><text x="800" y="206">dinner</text>
+  </g>
+  <g class="rl"><line x1="644" y1="114.5" x2="880" y2="114.5"/><line x1="644" y1="130.5" x2="880" y2="130.5"/><line x1="644" y1="146.5" x2="880" y2="146.5"/><line x1="644" y1="162.5" x2="880" y2="162.5"/><line x1="644" y1="178.5" x2="880" y2="178.5"/><line x1="644" y1="194.5" x2="880" y2="194.5"/><line x1="644" y1="210.5" x2="880" y2="210.5"/></g>
+  <text x="646" y="240" class="ui t2" style="font-size:10.5px">7 more · rows 9 and 12 titled from the domain</text>
+  <!-- dock with new icon -->
+  <rect x="660.5" y="286.5" width="200" height="40" class="paper"/>
+  <rect x="672.5" y="292.5" width="28" height="28" class="hr"/><text x="681" y="311" class="ui" style="font-size:13px">△</text>
+  <rect x="708.5" y="292.5" width="28" height="28" class="hr"/><text x="717" y="311" class="ui" style="font-size:13px">▦</text>
+  <rect x="744" y="292" width="29" height="29" class="selw"/><text x="753" y="311" class="ui" style="font-size:13px">▤</text>
+  <rect x="780.5" y="292.5" width="28" height="28" class="hr"/><text x="789" y="311" class="ui" style="font-size:13px">○</text>
+  <rect x="816.5" y="292.5" width="28" height="28" class="hr"/><text x="826" y="311" class="ui" style="font-size:13px">+</text>
+  <!-- arrows -->
+  <path d="M306 180 L320 180" class="lead-b" marker-end="url(#arr)"/>
+  <text x="313" y="350" class="xs blue" text-anchor="middle">↑ describe()</text>
+  <path d="M610 180 L624 180" class="lead-b" marker-end="url(#arr)"/>
+  <text x="617" y="350" class="xs blue" text-anchor="middle">↑ m.promote · app().register()</text>
+  <!-- mutation log -->
+  <line x1="16" y1="356.5" x2="904" y2="356.5" class="ln"/>
+  <text x="16" y="372" class="ui b" style="font-size:13px">Mutations</text><text x="80" y="372" class="ui t2" style="font-size:10.5px">every change on the board, yours and the agent's · ⌘Z walks back one transaction</text>
+  <g class="t2" style="font-size:9.5px">
+    <text x="16" y="392">19:27:03.120  agent    db.collection  recipes {title url serves tags note}</text>
+    <text x="16" y="406">19:27:09.004  agent    promote        clip:7a2 → recipes/1 · clip:7a3 → recipes/2 · … · clip:81c → recipes/14     ×14 in one transaction</text>
+    <text x="16" y="420">19:27:09.310  agent    app.register   recipes  icon ▤  params [sort]  ir 9 nodes</text>
+    <text x="16" y="434">19:27:14.882  you      move           clip:7a2  (120,80) → (420,160)</text>
+    <text x="16" y="448">19:27:16.201  you      retitle        recipes/9 "(untitled)" → "Caramelised onion galette"</text>
+    <text x="16" y="462">19:27:16.201  app:recipes  write      recipes/9 title          ← mirrored from the clip</text>
+  </g>
+  <text x="16" y="488" class="xs t2">one tool · eval · the scope is the public API: board, db, ui, app, m, describe</text>
+</svg>
+<figcaption><b>Sheet 04 · the agent organising.</b> Left: a selection. Middle: the turn, step by step, with a waiting step in red. Right: the collection the steps made and the new app in the quicklaunch. Below: the mutation log both of you write to.</figcaption>
+</figure>
+
+<!-- ============ SHEET 05 ============ -->
+<figure>
+<svg viewBox="0 0 920 440" xmlns="http://www.w3.org/2000/svg">
+  <rect x=".5" y=".5" width="919" height="439" class="hr"/>
+  <rect x="0" y="0" width="660" height="340" fill="url(#grid)"/>
+  <line x1="660.5" y1="0" x2="660.5" y2="340" class="hr"/>
+  <!-- A canvas target -->
+  <rect x="40.5" y="40.5" width="200" height="120" class="selw" style="stroke-dasharray:4 3"/>
+  <text x="48" y="56" class="ui b">A</text><text x="60" y="56" class="ui xs t2">canvas · place at cursor</text>
+  <!-- B clip target -->
+  <rect x="284" y="64" width="150" height="90" class="hatch"/>
+  <rect x="280.5" y="60.5" width="150" height="90" class="paper"/>
+  <rect x="280.5" y="60.5" width="150" height="24" class="selw"/>
+  <text x="288" y="77" class="ui">■</text><text x="300" y="77" class="ui xs t2">note</text>
+  <text x="290" y="106" class="ui">tiles, grout, tap</text>
+  <text x="288" y="140" class="ui b">B</text><text x="300" y="140" class="ui xs t2">title strip · group with it</text>
+  <!-- C app dropzone -->
+  <rect x="464" y="44" width="180" height="140" class="hatch"/>
+  <rect x="460.5" y="40.5" width="180" height="140" class="paper"/>
+  <line x1="460.5" y1="64.5" x2="640.5" y2="64.5" class="hr"/>
+  <text x="468" y="57" class="ui">○</text><text x="482" y="57" class="ui b">Reading list</text>
+  <rect x="468.5" y="72.5" width="164" height="100" class="selw" style="stroke-dasharray:4 3"/>
+  <text x="550" y="118" class="ui t2" text-anchor="middle">drop links here</text>
+  <text x="550" y="132" class="ui xs t2" text-anchor="middle">accepts clip:link · text/uri-list</text>
+  <text x="468" y="166" class="ui b">C</text><text x="480" y="166" class="ui xs t2">app dropzone · the app decides</text>
+  <!-- dragged ghost -->
+  <g class="ghost">
+    <rect x="200.5" y="200.5" width="170" height="60" class="hr dash" style="fill:var(--bg)"/>
+    <text x="208" y="217" class="ui">λ</text><text x="220" y="217" class="ui t2" style="font-size:10.5px">link</text>
+    <text x="210" y="240" class="ui b">Are.na — Kitchen tiles</text>
+  </g>
+  <path d="M372 262 l0 -14 l10 10 l4 -1 l-7 -8 l5 0 z" class="inkfill"/>
+  <text x="384" y="276" class="xs">clip:link · ⌥ copies</text>
+  <!-- D quicklaunch -->
+  <rect x="150.5" y="292.5" width="360" height="40" class="paper"/>
+  <g class="hr">
+    <rect x="166.5" y="298.5" width="28" height="28"/><rect x="202.5" y="298.5" width="28" height="28"/><rect x="238.5" y="298.5" width="28" height="28"/>
+  </g>
+  <text x="175" y="317" class="ui" style="font-size:13px">△</text><text x="211" y="317" class="ui" style="font-size:13px">▤</text><text x="247" y="317" class="ui" style="font-size:13px">▦</text>
+  <rect x="274" y="298" width="29" height="29" class="selw" style="stroke-dasharray:4 3"/>
+  <text x="288" y="318" class="ui" text-anchor="middle">+</text>
+  <text x="316" y="313" class="ui xs t2">register as an app · pin an app</text>
+  <text x="150" y="286" class="ui b">D</text><text x="162" y="286" class="ui xs t2">quicklaunch · needs app:* or a clip the agent can wrap</text>
+  <!-- E tile edge -->
+  <rect x="660.5" y="0.5" width="52" height="340" class="selw" style="stroke-dasharray:4 3"/>
+  <text x="672" y="20" class="ui b">E</text>
+  <text x="672" y="34" class="ui xs t2">tile edge</text>
+  <text x="672" y="46" class="ui xs t2">outer 22 %</text>
+  <text x="672" y="58" class="ui xs t2">split + pin</text>
+  <rect x="720.5" y="0.5" width="199" height="340" class="hr"/>
+  <text x="732" y="20" class="ui t2">Recipes</text><text x="784" y="20" class="ui b">Budget</text><line x1="784" y1="25.5" x2="824" y2="25.5" class="ln" style="stroke-dasharray:1 2"/>
+  <line x1="720.5" y1="32.5" x2="920" y2="32.5" class="hr"/>
+  <g class="rl"><line x1="732" y1="56" x2="900" y2="56"/><line x1="732" y1="72" x2="900" y2="72"/><line x1="732" y1="88" x2="900" y2="88"/><line x1="732" y1="104" x2="900" y2="104"/></g>
+  <!-- legend table -->
+  <line x1="0" y1="340.5" x2="920" y2="340.5" class="ln"/>
+  <g class="ui" style="font-size:10.5px">
+    <text x="16" y="358" class="b">target</text><text x="130" y="358" class="b">accepts</text><text x="290" y="358" class="b">what happens</text><text x="620" y="358" class="b">feedback</text>
+    <line x1="16" y1="363.5" x2="904" y2="363.5" class="hr"/>
+    <text x="16" y="378">A canvas</text><text x="130" y="378">anything</text><text x="290" y="378">a new clip at the cursor, snapped to 24 px</text><text x="620" y="378">sel wash where it will land</text>
+    <text x="16" y="392">B clip title strip</text><text x="130" y="392">clip:*</text><text x="290" y="392">groups the two; the group is a clip with a ○ glyph</text><text x="620" y="392">the strip washes; the body does not</text>
+    <text x="16" y="406">C app dropzone</text><text x="130" y="406">what ui.dropzone declares</text><text x="290" y="406">its on('drop') runs; usually an insert</text><text x="620" y="406">hint text; a refused kind says why, once</text>
+    <text x="16" y="420">D quicklaunch</text><text x="130" y="420">app:* · clip:app</text><text x="290" y="420">registers or pins; a plain clip goes via the agent</text><text x="620" y="420">a dashed + slot opens</text>
+    <text x="16" y="434">E tile edge</text><text x="130" y="434">window:*</text><text x="290" y="434">splits the tile on that side and pins the window there</text><text x="620" y="434">outer 22 % washes; 0.08 s slide between targets</text>
+  </g>
+</svg>
+<figcaption><b>Sheet 05 · drop targets.</b> One dragged link clip and the five places it can land. Targets show themselves with the red wash and nothing else; a refused drop says why in one line.</figcaption>
+</figure>
+
+<!-- ============ SHEET 06 ============ -->
+<figure>
+<svg viewBox="0 0 920 460" xmlns="http://www.w3.org/2000/svg">
+  <rect x=".5" y=".5" width="919" height="459" class="hr"/>
+  <line x1="0" y1="52.5" x2="920" y2="52.5" class="hr"/>
+  <text x="16" y="31" class="ui b" style="font-size:15px">Pinboard</text>
+  <text x="86" y="31" class="ui t2" style="font-size:10.5px">board</text>
+  <rect x="130.5" y="12.5" width="160" height="28" class="hr"/><text x="140" y="30" class="ui t2" style="font-size:10.5px">B-03</text><text x="166" y="30" class="ui b" style="font-size:13px">Kitchen reno</text><text x="276" y="30" class="ui">▾</text>
+  <rect x="640.5" y="12.5" width="110" height="28" class="hr"/><text x="650" y="30" class="ui">▦ Cooking ▾</text>
+  <rect x="760.5" y="12.5" width="60" height="28" class="hr"/><text x="770" y="30" class="ui">⌘K</text>
+  <rect x="830.5" y="12.5" width="56" height="28" class="hr"/><text x="844" y="30" class="ui">Agent</text>
+  <!-- left tile: canvas -->
+  <rect x="0" y="53" width="505" height="407" fill="url(#grid)"/>
+  <line x1="0" y1="92.5" x2="505" y2="92.5" class="hr"/>
+  <text x="12" y="78" class="ui b" style="font-size:13px">Canvas</text><line x1="12" y1="84.5" x2="54" y2="84.5" class="ln" style="stroke-dasharray:1 2"/>
+  <text x="70" y="78" class="ui t2" style="font-size:13px">Notes</text>
+  <text x="112" y="78" class="ui t2" style="font-size:13px">+</text>
+  <text x="493" y="78" class="ui t2" text-anchor="end">23 clips · 2 groups</text>
+  <g>
+    <rect x="34" y="114" width="120" height="80" class="hatch"/><rect x="30.5" y="110.5" width="120" height="80" class="paper"/><line x1="30.5" y1="130.5" x2="150.5" y2="130.5" class="rl"/><text x="38" y="124" class="ui xs">■ note</text>
+    <rect x="184" y="134" width="160" height="60" class="hatch"/><rect x="180.5" y="130.5" width="160" height="60" class="paper"/><line x1="180.5" y1="150.5" x2="340.5" y2="150.5" class="rl"/><text x="188" y="144" class="ui xs">λ link</text>
+    <rect x="74" y="224" width="170" height="120" class="hatch"/><rect x="70.5" y="220.5" width="170" height="120" class="paper"/><line x1="70.5" y1="240.5" x2="240.5" y2="240.5" class="rl"/><text x="78" y="234" class="ui xs">▢ screenshot</text><rect x="78.5" y="248.5" width="154" height="84" class="hatch"/>
+    <rect x="284" y="224" width="190" height="130" class="hatch"/><rect x="280.5" y="220.5" width="190" height="130" class="paper"/><line x1="280.5" y1="240.5" x2="470.5" y2="240.5" class="rl"/><text x="288" y="234" class="ui xs">○ tiles · 3 clips</text>
+    <rect x="292.5" y="252.5" width="80" height="40" class="hr"/><rect x="300.5" y="260.5" width="80" height="40" class="paper"/><rect x="308.5" y="268.5" width="80" height="40" class="paper"/>
+    <rect x="364" y="394" width="110" height="46" class="hatch"/><rect x="360.5" y="390.5" width="110" height="46" class="paper"/><line x1="360.5" y1="410.5" x2="470.5" y2="410.5" class="rl"/><text x="368" y="404" class="ui xs">■ note</text>
+  </g>
+  <!-- gutter -->
+  <line x1="505.5" y1="53" x2="505.5" y2="460" class="hr"/>
+  <!-- right top tile -->
+  <line x1="506" y1="92.5" x2="920" y2="92.5" class="hr"/>
+  <text x="518" y="78" class="ui b" style="font-size:13px">Recipes</text><line x1="518" y1="84.5" x2="568" y2="84.5" class="ln" style="stroke-dasharray:1 2"/>
+  <text x="584" y="78" class="ui t2" style="font-size:13px">Budget</text>
+  <text x="634" y="78" class="ui t2" style="font-size:13px">+</text>
+  <text x="908" y="78" class="ui t2" text-anchor="end">×</text>
+  <line x1="506" y1="124.5" x2="920" y2="124.5" class="hr"/>
+  <rect x="518.5" y="100.5" width="140" height="18" class="hr" style="fill:var(--code-bg)"/><text x="524" y="113" class="ui t2" style="font-size:10.5px">filter</text>
+  <rect x="668" y="100" width="40" height="19" class="inkfill"/><text x="675" y="113" class="ui onink" style="font-size:10.5px">Table</text>
+  <rect x="708.5" y="100.5" width="40" height="18" class="hr"/><text x="715" y="113" class="ui" style="font-size:10.5px">Cards</text>
+  <text x="760" y="113" class="ui t2" style="font-size:10.5px">14 rows · sort added</text>
+  <g class="ui xs">
+    <text x="518" y="142" class="b">title</text><text x="760" y="142" class="b">serves</text><text x="820" y="142" class="b">tags</text>
+    <line x1="518" y1="147.5" x2="908" y2="147.5" class="hr"/>
+    <text x="518" y="162">shakshuka</text><text x="760" y="162">2</text><text x="820" y="162">eggs · dinner</text>
+    <line x1="518.5" y1="168" x2="518.5" y2="182.0" style="stroke:var(--accent);stroke-width:1"/><text x="524" y="178" class="b">dal, 40 min</text><text x="760" y="178">4</text><text x="820" y="178">dinner</text>
+    <text x="518" y="194">mum's soup</text><text x="760" y="194">4</text><text x="820" y="194">soup</text>
+    <text x="518" y="210">miso aubergine</text><text x="760" y="210">2</text><text x="820" y="210">dinner</text>
+    <text x="518" y="226">focaccia</text><text x="760" y="226">—</text><text x="820" y="226">bread</text>
+  </g>
+  <g class="rl"><line x1="518" y1="166.5" x2="908" y2="166.5"/><line x1="518" y1="182.5" x2="908" y2="182.5"/><line x1="518" y1="198.5" x2="908" y2="198.5"/><line x1="518" y1="214.5" x2="908" y2="214.5"/><line x1="518" y1="230.5" x2="908" y2="230.5"/></g>
+  <!-- gutter -->
+  <line x1="506" y1="256.5" x2="920" y2="256.5" class="hr"/>
+  <!-- right bottom tile -->
+  <line x1="506" y1="296.5" x2="920" y2="296.5" class="hr"/>
+  <text x="518" y="282" class="ui b" style="font-size:13px">Moodboard</text><line x1="518" y1="288.5" x2="590" y2="288.5" class="ln" style="stroke-dasharray:1 2"/>
+  <text x="606" y="282" class="ui t2" style="font-size:13px">+</text>
+  <text x="908" y="282" class="ui t2" text-anchor="end">×</text>
+  <g class="hr">
+    <rect x="518.5" y="308.5" width="88" height="60" class="hatch"/><rect x="518.5" y="308.5" width="88" height="60"/>
+    <rect x="518.5" y="378.5" width="88" height="70" class="hatch"/><rect x="518.5" y="378.5" width="88" height="70"/>
+    <rect x="616.5" y="308.5" width="88" height="90" class="hatch"/><rect x="616.5" y="308.5" width="88" height="90"/>
+    <rect x="616.5" y="408.5" width="88" height="40" class="hatch"/><rect x="616.5" y="408.5" width="88" height="40"/>
+    <rect x="714.5" y="308.5" width="88" height="50" class="hatch"/><rect x="714.5" y="308.5" width="88" height="50"/>
+    <rect x="714.5" y="368.5" width="88" height="80" class="hatch"/><rect x="714.5" y="368.5" width="88" height="80"/>
+    <rect x="812.5" y="308.5" width="88" height="70" class="hatch"/><rect x="812.5" y="308.5" width="88" height="70"/>
+    <rect x="812.5" y="388.5" width="88" height="60" class="hatch"/><rect x="812.5" y="388.5" width="88" height="60"/>
+  </g>
+  <!-- drag a tab out -->
+  <path d="M590 90 C 560 96, 470 100, 432 118" class="lead-b dash" marker-end="url(#arr)"/>
+  <text x="200" y="120" class="xs blue">drag a tab onto the canvas to free it</text>
+  <path d="M340 160 C 420 160, 480 200, 512 200" class="lead-b dash" marker-end="url(#arr)"/>
+  <text x="344" y="214" class="xs blue">⇧-drag to a tile edge to pin</text>
+  <!-- layout tree -->
+  <rect x="16.5" y="364.5" width="300" height="88" class="hr" style="fill:var(--code-bg)"/>
+  <text x="24" y="378" class="t2">// layout 'Cooking' · pinboard.v1.layouts</text>
+  <text x="24" y="392">split('row', [.55, .45],</text>
+  <text x="24" y="404">  tile('canvas', 'notes'),</text>
+  <text x="24" y="416">  split('col', [.5, .5],</text>
+  <text x="24" y="428">    tile('app:recipes', 'app:budget'),</text>
+  <text x="24" y="440">    tile('app:moodboard')))</text>
+</svg>
+<figcaption><b>Sheet 06 · pinned and tiled.</b> The same board with a saved layout: the free canvas is one tile, two app tiles are split on the right. Tiles split by 1 px gutters, tabs are 13 px with a dotted ink underline when active. The layout is a small tree kept in the browser.</figcaption>
+</figure>
+
+<!-- ============ PIPELINE ============ -->
+<h2 id="pipeline">Pipeline <small>what a builder becomes, and how runtime change flows back</small></h2>
+<figure>
+<svg viewBox="0 0 920 300" xmlns="http://www.w3.org/2000/svg">
+  <rect x=".5" y=".5" width="919" height="299" class="hr"/>
+  <!-- build row -->
+  <rect x="30.5" y="40.5" width="170" height="60" class="paper"/><text x="40" y="60" class="ui b">builders</text><text x="40" y="74" class="ui xs t2">fluent · immutable · Proxy-wrapped</text><text x="40" y="88" class="ui xs t2">ui.* app() db.* fragment()</text>
+  <rect x="250.5" y="40.5" width="170" height="60" class="paper"/><text x="260" y="60" class="ui b">IR</text><text x="260" y="74" class="ui xs t2">a DAG of plain nodes</text><text x="260" y="88" class="ui xs t2">{ kind, props, children, deps, id }</text>
+  <rect x="470.5" y="40.5" width="170" height="60" class="paper"/><text x="480" y="60" class="ui b">renderer</text><text x="480" y="74" class="ui xs t2">re-runs a node when a dep changes</text><text x="480" y="88" class="ui xs t2">DOM · windows · dropzones</text>
+  <rect x="690.5" y="40.5" width="200" height="60" class="paper"/><text x="700" y="60" class="ui b">the board</text><text x="700" y="74" class="ui xs t2">clips · app windows · quicklaunch</text><text x="700" y="88" class="ui xs t2">layout tree · tiles</text>
+  <g class="lead-b"><path d="M200 70 L250 70" marker-end="url(#arr)"/><path d="M420 70 L470 70" marker-end="url(#arr)"/><path d="M640 70 L690 70" marker-end="url(#arr)"/></g>
+  <text x="225" y="62" class="xs blue" text-anchor="middle">.build()</text>
+  <text x="445" y="62" class="xs blue" text-anchor="middle">.mount()</text>
+  <text x="665" y="62" class="xs blue" text-anchor="middle">clip()</text>
+  <!-- build-time lambdas -->
+  <text x="30" y="122" class="xs t2">build-time lambdas run once, at .build():  .map(b =&gt; …) · ui.list(items, it =&gt; …) · fragment.method(…)</text>
+  <text x="250" y="140" class="xs t2">runtime lambdas live on as nodes with deps:  .bind(c =&gt; …) · .on(ev, (e, c) =&gt; …) · ui.each(query, …) · ui.when(c =&gt; …)</text>
+  <!-- store row -->
+  <rect x="250.5" y="180.5" width="390" height="60" class="paper"/><text x="260" y="200" class="ui b">store</text><text x="260" y="214" class="ui xs t2">state · params · db collections · layout · app registry</text><text x="260" y="228" class="ui xs t2">localStorage for small things, IndexedDB for collections · key prefix pinboard.v1</text>
+  <g class="lead-b"><path d="M445 180 L445 100" marker-end="url(#arr)"/></g>
+  <text x="452" y="146" class="xs blue">deps changed</text>
+  <!-- mutations -->
+  <rect x="30.5" y="180.5" width="170" height="60" class="paper"/><text x="40" y="200" class="ui b">mutations</text><text x="40" y="214" class="ui xs t2">m.move m.retitle m.tag m.group</text><text x="40" y="228" class="ui xs t2">m.promote m.insert · one tx, one undo</text>
+  <g class="lead-b"><path d="M200 210 L250 210" marker-end="url(#arr)"/></g>
+  <!-- actors -->
+  <rect x="30.5" y="262.5" width="80" height="26" class="hr"/><text x="40" y="279" class="ui">you</text>
+  <rect x="120.5" y="262.5" width="80" height="26" class="hr" style="stroke:var(--violet)"/><text x="130" y="279" class="ui violet">agent</text>
+  <g class="lead"><path d="M70 262 L70 240" marker-end="url(#arr-i)"/></g>
+  <g class="lead-v"><path d="M160 262 L160 240" marker-end="url(#arr-v)"/></g>
+  <text x="30" y="256" class="xs t2">you: drag, type, paste  ·  agent: eval { code } against the same scope</text>
+  <!-- describe -->
+  <rect x="690.5" y="180.5" width="200" height="60" class="paper" style="stroke:var(--violet)"/><text x="700" y="200" class="ui b violet">describe()</text><text x="700" y="214" class="ui xs t2">one screen of YAML the agent reads:</text><text x="700" y="228" class="ui xs t2">selection, apps, collections, layout</text>
+  <g class="lead-v dash"><path d="M790 180 L790 100" marker-end="url(#arr-v)"/><path d="M690 236 C 560 296, 320 296, 204 280" marker-end="url(#arr-v)"/></g>
+  <text x="798" y="146" class="xs violet">reads</text>
+</svg>
+<figcaption><b>Pipeline.</b> Builders are for shape and compile to an IR once; the store and mutations are for change. The agent reads the board through <code>describe()</code> and changes it through the same mutations you do, so its work shows in the same log and undoes the same way.</figcaption>
+</figure>
+
+<!-- ============ EXAMPLES ============ -->
+<h2 id="examples">Examples <small>simple to complex · every builder is immutable, every call returns a new one</small></h2>
+
+<section class="ex"><div class="hd"><span class="n">00</span><h3>The grammar in one screen</h3><span class="ab">atoms, modifiers, three ways out</span></div>
+<script type="text/x-src">import { ui, app, board, db, fragment, split, tile } from 'pinboard'
+
+// Atoms: leaves and containers. Children are builders or lambdas.
+ui.text('hello')  ui.image(src)  ui.note(text)  ui.doc(markdown)  ui.screenshot(blob)
+ui.link(url)                                 // unfurls title and favicon at runtime
+ui.input('q')                                // writes state.q
+ui.button('Send')  ui.chip(t)  ui.swatch(hex)  ui.segmented('by')  ui.dropzone({ accepts })
+ui.stack(...kids)  ui.row(...kids)  ui.grid(kids).cols(3)  ui.table(rows, { columns })
+ui.list(items, it => ui.text(it.title))      // BUILD-TIME: expanded once, into children
+ui.each(query, it => ui.text(it.title))      // RUNTIME: a node that re-runs when the query changes
+ui.when(c => c.state.open, ui.text('…'))     // RUNTIME predicate
+ui.slot('body')                              // a hole, filled later with .fill('body', …)
+
+// Modifiers. A prop takes a value or a lambda; a lambda makes a runtime edge.
+.gap(8) .pad(12) .size(240, 160) .cols(4)        // px or tokens: 'xs' 4 · 's' 8 · 'm' 12 · 'l' 16
+.title('…') .caption(…) .footer(…) .hint('…')    // window and chrome
+.on('click', (ev, c) => …)                       // runtime; c is the context: state param db board window set
+.bind(c => c.state.n)                            // runtime, reactive; the node's deps are what the lambda read
+.map(b => b.pad(4))                              // build-time; transform this builder and return it
+.use(fragment)                                   // mix a fragment in: new methods, attributes, decorations
+.id('results') .ref('results')                   // name a node; point at one (a second parent → DAG, not a tree)
+.draggable({ kind }) .at(x, y) .near(window)     // placement on the board
+
+// Three ways out
+ui.stack(…).build()        // → IR: plain objects, inspectable, diffable
+ui.stack(…).mount(el)      // → a live view with .state and .mutate()
+ui.stack(…).describe()     // → one screen of YAML; what the agent reads
+
+// Rule of thumb: a lambda that receives a builder (b) runs at build time.
+// A lambda that receives a context (c) or an event runs at runtime.</script>
+</section>
+
+<section class="ex"><div class="hd"><span class="n">01</span><h3>A note on the board</h3><span class="ab">one line</span></div>
+<script type="text/x-src">board.clip(ui.note('buy 60×60 matte tiles')).at(120, 80)
+
+// clip() wraps any builder in a window: title strip, drag, resize, footer.
+// Without .at() it lands at the cursor, snapped to the 24 px grid.</script>
+</section>
+
+<section class="ex"><div class="hd"><span class="n">02</span><h3>Paste anything</h3><span class="ab">the board decides the clip kind from what arrived</span></div>
+<script type="text/x-src">board.on('paste', data => {
+  if (data.image) return ui.screenshot(data.image).caption(data.title ?? 'pasted')
+  if (data.url)   return ui.link(data.url)                 // title and favicon arrive at runtime
+  if (data.html)  return ui.doc(data.html).title(data.title)
+  if (data.files) return ui.list(data.files, f => ui.file(f))  // one clip per file, build-time
+  return ui.note(data.text)
+})
+// Return a builder and it becomes a clip at the cursor. Return null to ignore the paste.
+// The default handler is exactly this; override it per board or per kind:
+board.on('paste:url', data => data.url.includes('are.na') ? ui.arena(data.url) : ui.link(data.url))</script>
+</section>
+
+<section class="ex"><div class="hd"><span class="n">03</span><h3>A first app, registered in the quicklaunch</h3><span class="ab">state, two runtime lambdas, an icon</span></div>
+<script type="text/x-src">app('counter')
+  .icon('△')                 // a text glyph; there is no icon set
+  .title('Counter')
+  .state({ n: 0 })
+  .view(ui.stack(
+    ui.text().bind(c => c.state.n).size('xl'),                      // re-renders when state.n changes
+    ui.row(
+      ui.button('−').on('click', (_, c) => c.set('n', c.state.n - 1)),
+      ui.button('+').on('click', (_, c) => c.set('n', c.state.n + 1)),
+    ).gap(6),
+  ).pad(12))
+  .register()
+
+// register() puts the app in the quicklaunch (⌘K counter) and keeps it in the browser:
+//   localStorage  pinboard.v1.apps.counter = { source, icon, title, params, ir }
+// The source is re-evaluated when the board loads. Each open window of the app has its
+// own state and params; close one and they are kept under its window id.</script>
+</section>
+
+<section class="ex"><div class="hd"><span class="n">04</span><h3>Parameters</h3><span class="ab">sliders and toggles become a side column; reading one makes a runtime edge</span></div>
+<script type="text/x-src">app('gallery')
+  .icon('▦')
+  .param.slider('cols', 3, { min: 1, max: 8, step: 1 })
+  .param.slider('gap', 8, { min: 0, max: 32, unit: 'px' })
+  .param.toggle('captions', true)
+  .param.select('sort', 'added', ['added', 'colour', 'size'])
+  .param.text('prefix', '', { placeholder: 'caption prefix' })
+  .view(
+    ui.grid(ui.each(db.gallery.orderBy(c => c.param('sort')), im =>
+      ui.image(im.src).caption(ui.when(c => c.param('captions'), ui.text(c => c.param('prefix') + im.caption)))
+    ))
+    .cols(c => c.param('cols'))          // param.cols → grid.cols   (an edge in the DAG)
+    .gap(c => c.param('gap'))            // param.gap  → grid.gap
+  )
+  .register()
+
+// The ◇ button in the title strip opens the params column (288 px, rows of 30 px).
+// Values persist per window. Build-time use is fine too:
+//   .view(c => …)  is not allowed; use .map(b => …) for build-time shaping and c.param at runtime.</script>
+</section>
+
+<section class="ex"><div class="hd"><span class="n">05</span><h3>Fragments</h3><span class="ab">extend what a component can do, and what it draws, without subclassing</span></div>
+<script type="text/x-src">const taggable = fragment('taggable')
+  .attr('tags', [])                                                // a new attribute on the node
+  .method('tag', (b, ...tags) => b.set('tags', t => [...new Set([...t, ...tags])]))   // build-time method
+  .method('untag', (b, tag) => b.set('tags', t => t.filter(x => x !== tag)))
+  .query('hasTag', (node, tag) => node.attrs.tags.includes(tag))   // readable from IR and from the agent
+  .decorate(b => b.strip(ui.row(ui.each(c => c.attr('tags'), t => ui.chip(t).on('click', (_, c) => c.board.filter({ tag: t })))).gap(4)))
+
+const sourced = fragment('sourced')
+  .attr('source', null)
+  .on('paste', (b, data) => b.set('source', { from: data.origin, at: Date.now() }))   // lifecycle hook, build-time
+  .decorate(b => b.footer(ui.text(c => `pasted ${ago(c.attr('source').at)} · ${c.attr('source').from}`).small()))
+
+const annotated = fragment('annotated')
+  .attr('note', '')
+  .decorate(b => b.after(ui.input('note').placeholder('your note on the clip').multiline()))
+
+// Every clip gets all three
+board.clipDefaults(c => c.use(taggable).use(sourced).use(annotated))
+
+// Fragments are typed into the builder, so .tag exists only after .use(taggable):
+board.clip(ui.link('https://are.na/ms/kitchen-tiles')).tag('inspo', 'kitchen')
+ui.text('x').tag('a')   // Error: text has no method "tag". It comes from fragment taggable; add .use(taggable) first.
+
+// A fragment can also extend a whole grammar entry, for every builder:
+fragment('measured').method('size', (b, w, h, unit = 'px') => b.set('w', w).set('h', h).set('unit', unit)).global()</script>
+</section>
+
+<section class="ex"><div class="hd"><span class="n">06</span><h3>The IR and the DAG</h3><span class="ab">build is pure; inspect, diff, and reason about deps</span></div>
+<script type="text/x-src">const search = ui.row(
+  ui.input('q').id('search'),
+  ui.each(db.links.where(c => l => l.title.includes(c.state.q)), l => ui.link(l.url)).id('results'),
+  ui.text(c => `${c.ir('results').count} of ${c.db.links.count()}`).id('count'),
+)
+
+const ir = search.build()
+ir.nodes.length              // 4
+ir.node('results').deps      // ['state.q', 'db.links']
+ir.node('count').deps        // ['ir.results', 'db.links']   ← a node can depend on another node: DAG
+ir.edges()                   // [['state.q','results'], ['db.links','results'], ['results','count'], ['db.links','count']]
+
+ir.toYAML()
+// kind: row
+// children:
+//   - { kind: input, id: search, writes: state.q }
+//   - { kind: each, id: results, deps: [state.q, db.links], template: link }
+//   - { kind: text, id: count, deps: [ir.results, db.links] }
+
+// Build-time lambdas have already run (ui.list is expanded into children);
+// runtime lambdas are kept as nodes with deps. Same builder, same IR, so diffs are cheap:
+ir.diff(search.map(b => b.gap(12)).build())      // [{ op: 'set', at: '/', prop: 'gap', from: 8, to: 12 }]
+
+// Shared nodes: .ref() points a second parent at a node instead of copying it.
+const toolbar = ui.row(ui.input('q').id('search'))
+const page = ui.stack(toolbar, ui.row(ui.ref('search'), ui.text('← the same node, mounted once')))
+
+// The renderer walks the DAG once per change: it re-runs only the nodes whose deps changed,
+// in topological order, so count never renders with a stale results count.</script>
+</section>
+
+<section class="ex"><div class="hd"><span class="n">07</span><h3>Collections</h3><span class="ab">schema as a builder; live queries feed ui.each; clips can be promoted into rows</span></div>
+<script type="text/x-src">db.collection('recipes')
+  .field('title', 'text').required()
+  .field('url', 'url')
+  .field('serves', 'int', { min: 1 })
+  .field('tags', 'text[]')
+  .field('note', 'text')
+  .field('added', 'time').auto()
+  .index('tags')
+  .store('indexeddb')          // 'local' for small sets; same API, same queries
+
+db.recipes.insert({ title: 'Shakshuka', url, serves: 2, tags: ['eggs', 'dinner'] })
+db.recipes.update(4, r => ({ ...r, serves: 4 }))
+db.recipes.where(r => r.tags.includes('eggs')).orderBy('added', 'desc').limit(20)   // a live query
+db.recipes.count()  db.recipes.get(4)  db.recipes.distinct('tags')
+
+// A clip becomes a row and keeps its window. Edits go both ways (sheet 02, footer).
+board.clip('clip:7a2').promote('recipes', clip => ({
+  title: clip.title, url: clip.link?.url, note: clip.attr('note'), tags: clip.attr('tags'),
+}))
+
+// A row can come back out as a clip
+db.recipes.get(4).toClip().near(window)
+
+// Schema changes are migrations, kept with the collection:
+db.recipes.migrate(2, s => s.field('cuisine', 'text').rename('serves', 'servings'))</script>
+</section>
+
+<section class="ex"><div class="hd"><span class="n">08</span><h3>Drag and drop</h3><span class="ab">kinds on the dragged thing, accepts on the target; built-in targets listed</span></div>
+<script type="text/x-src">// Anything on the board is draggable with a kind. Clips get one for free: 'clip:link', 'clip:note', …
+ui.image(src).draggable({ kind: 'clip:image', payload: im => ({ src: im.src, tags: im.tags }) })
+
+app('reading-list')
+  .icon('○')
+  .view(ui.stack(
+    ui.dropzone({ accepts: ['clip:link', 'text/uri-list', 'Files'] })
+      .hint('drop links here')                                           // the ink-2 sentence in the empty zone
+      .on('drop', (item, c) => c.db.readinglist.insert({ url: item.url, from: item.clipId }))
+      .on('reject', (item, c) => c.toast(`${item.kind} is not a link`)),  // a refused kind says why, once
+    ui.each(db.readinglist.orderBy('added', 'desc'), r => ui.link(r.url).draggable({ kind: 'clip:link' })),
+  ))
+  .register()
+
+// Dropping an app onto the quicklaunch pins it; dropping a clip onto it asks the agent to wrap it:
+board.quicklaunch.on('drop', (item, c) => item.kind.startsWith('app:')
+  ? c.quicklaunch.pin(item.appId)
+  : c.agent.ask(`wrap ${item.clipId} as an app`))
+
+board.targets.list()
+// canvas        any           place at the cursor, snapped
+// clip strip    clip:*        group with it (○); dropping on the body does nothing
+// app window    what its dropzones accept; no dropzone → refused with a hint
+// quicklaunch   app:* clip:*  pin, or register through the agent
+// tile edge     window:*      the outer 22 % splits that tile and pins the window there
+// trash (⌫)     any           remove; a promoted clip asks whether the row goes too</script>
+</section>
+
+<section class="ex"><div class="hd"><span class="n">09</span><h3>Diagnostics through proxies</h3><span class="ab">misuse gets a sentence, a suggestion and a source span</span></div>
+<script type="text/x-src">ui.stack().gap('big')
+// TypeError: stack.gap(value) expects a number of px or a spacing token ('xs' 4 · 's' 8 · 'm' 12 · 'l' 16); got "big".
+//   at moodboard.js:12   ui.stack().gap('big')
+//                                       ^^^^^
+
+ui.stack(ui.text('a')).colums(3)
+// Error: stack has no method "colums". Did you mean "cols"? cols is on grid, not stack:
+//   use ui.grid(…) or .use(gridlike).
+
+ui.each(db.recipes, r => ui.text(r.title)).build()
+// Warning: each#3 has a runtime lambda but no .id(); the agent cannot address it. Add .id('rows').
+
+app('x').state({ m: 0 }).view(ui.text().bind(c => c.state.n)).build()
+// Error at build: text#2 reads state.n, which app "x" never declares. Known: m.
+
+ui.row(ui.text('a')).fill('body', ui.text('b'))
+// Error: row has no slot "body". Slots here: none. Declare one with ui.slot('body').
+
+const b = ui.stack(); b.pad(8); b.build()
+// Warning: pad(8) was called but its result was discarded. Builders are immutable; use b = b.pad(8).
+
+// How: every builder is a Proxy over a frozen record. An unknown property finds the nearest
+// name by edit distance across the grammar and says which atom owns it. A wrong argument
+// prints the grammar entry's signature. A discarded result is caught by a dev-mode finaliser.
+// Call sites come from Error.captureStackTrace, kept in dev and stripped in prod.
+// The same checks run on IR the agent emits, so a bad step fails before it is shown, with the same text.
+ui.strict(true)   // warnings become errors (the agent runs in strict)</script>
+</section>
+
+<section class="ex"><div class="hd"><span class="n">10</span><h3>Mutations at runtime</h3><span class="ab">builders are for shape; mutations are for change</span></div>
+<script type="text/x-src">const h = board.handle()           // the live board
+
+h.mutate(m => m
+  .move('clip:7a2', { x: 420, y: 160 })
+  .retitle('clip:7a2', 'Tiles — matte 60×60')
+  .tag('clip:7a2', 'kitchen')
+  .group(['clip:7a2', 'clip:7a3'], { title: 'tiles' })
+  .resize('win:budget', { w: 340, h: 200 })
+)                                  // one transaction · one undo step · one 'mutation' event
+
+h.on('mutation', ({ ops, by, at }) => log(by, ops))    // by: 'you' | 'agent' | 'app:recipes'
+h.undo(); h.redo()
+h.history.since('19:27')           // the log on sheet 04
+
+// The op set is small on purpose; the agent gets the same one.
+// board    move resize retitle tag untag group ungroup remove restore place(builder, at)
+// data     insert update remove promote demote migrate
+// apps     register unregister pin unpin open close setParam
+// layout   split merge pin tile free save load
+
+// Within a view, the context carries a scoped mutate:
+ui.button('archive').on('click', (_, c) => c.mutate(m => m.tag(c.window.id, 'archived').close(c.window.id)))</script>
+</section>
+
+<section class="ex"><div class="hd"><span class="n">11</span><h3>The agent</h3><span class="ab">one tool, the public API as its scope, the person chooses how much to approve</span></div>
+<script type="text/x-src">board.agent({
+  tool: 'eval',                               // one tool. Input { code }: the body of an async function.
+  scope: () => ({ board: h, db, ui, app, m: h.mutate, describe, log }),
+  mode: 'ask',                                // 'auto' runs each step · 'ask' waits · 'read-only' makes every mutation throw
+  context: () => h.describe({ selection: true, apps: true, collections: true, layout: false }),
+  limits: { stepTimeout: 25_000, resultCut: 9_000 },     // and the result comes back as YAML, cut with a note
+})
+
+// A turn, as sheet 04 shows it
+// You     these are all recipes, make them a database and give me a browser for it
+// Agent   Working ▪
+// step 1  looked at the selection                                             0.21 s
+//         const sel = board.selection(); sel.map(describe)
+//         => 14 · 11 link · 2 note · 1 image · 12 have a title · 9 share [dinner]
+// step 2  proposed a collection                                               ran
+//         db.collection('recipes').field('title','text').required()
+//           .field('url','url').field('serves','int').field('tags','text[]').field('note','text')
+// step 3  promote the 14 clips                              [Run this step] [Decline]
+//         m(x => sel.forEach(c => x.promote(c.id, 'recipes', fromClip)))        reverts in one step
+// step 4  build an app and register it
+//         app('recipes').icon('▤')
+//           .param.select('sort', 'added', ['added', 'title', 'serves'])
+//           .view(ui.table(db.recipes.orderBy(c => c.param('sort')), { columns: ['title', 'serves', 'tags'] }))
+//           .register()
+// Agent   14 recipes are in `recipes`. Open it with ⌘K recipes. Two clips had no title;
+//         I used the link's domain: rows 9 and 12.
+
+// An app can say what the agent should know about it, and what it may do there unasked
+app('recipes')
+  .agent.describe(c => `recipes: ${c.db.recipes.count()} rows, sorted by ${c.param('sort')}`)
+  .agent.allow(['insert', 'tag', 'retitle'])          // beyond this, mode 'ask' applies even in 'auto'
+  .agent.suggest(['find duplicates', 'fill in serves from the page', 'tag by cuisine'])
+
+// Links in an answer carry into the board: pin:recipes/9 opens that row; pin:win:7a2 brings a window forward.</script>
+</section>
+
+<section class="ex"><div class="hd"><span class="n">12</span><h3>Pin and tile</h3><span class="ab">free windows by default; a layout is a small tree you can save</span></div>
+<script type="text/x-src">board.layout(
+  split('row', [0.55, 0.45],
+    tile('canvas', 'notes'),                                        // the free pinboard, as a tile with tabs
+    split('col', [0.5, 0.5],
+      tile('app:recipes', 'app:budget'),
+      tile('app:moodboard'),
+    ),
+  ),
+)
+board.layouts.save('Cooking')      // localStorage pinboard.v1.layouts.Cooking
+board.layouts.load('Cooking')
+board.layout(tile('canvas'))       // back to one free board
+
+// By hand: ⇧-drag a window's title strip to a tile edge (outer 22 %) to pin it there;
+// drag a tab onto the canvas to free it as a window again (sheet 06).
+h.mutate(m => m.pin('win:budget', { tile: 'right-top', side: 'bottom' }).free('win:moodboard').near('win:budget'))
+
+// A tile is a size container: under 640 px an app stacks its params column under its body.
+// Under 640 px of window the board is one tile with the canvas in front.</script>
+</section>
+
+<section class="ex"><div class="hd"><span class="n">13</span><h3>Everything at once: a moodboard</h3><span class="ab">fragments, params, state, a live query, drag and drop, agent hooks</span></div>
+<script type="text/x-src">const palette = fragment('palette')
+  .attr('swatches', [])
+  .on('image', async (b, img) => b.set('swatches', await dominant(img, 5)))          // runs when the image loads
+  .decorate(b => b.footer(ui.row(ui.each(c => c.attr('swatches'), s => ui.swatch(s).size(12, 6))).gap(2)))
+
+db.collection('moodboard')
+  .field('src', 'image').required()
+  .field('caption', 'text').field('tags', 'text[]').field('swatches', 'colour[]')
+  .field('added', 'time').auto()
+  .index('tags')
+
+const byParam = c => ({ added: ['added', 'desc'], hue: ['swatches.0.h', 'asc'], tag: ['tags.0', 'asc'] })[c.param('by')]
+
+app('moodboard')
+  .icon('▦').title('Moodboard').shortcut('⌘⇧M')
+  .param.slider('cols', 4, { min: 2, max: 8 })
+  .param.slider('gap', 8, { min: 0, max: 24, unit: 'px' })
+  .param.select('by', 'added', ['added', 'hue', 'tag'])
+  .param.toggle('captions', false)
+  .param.toggle('swatches', true)
+  .state({ q: '', selected: null })
+  .toolbar(ui.row(
+    ui.input('q').placeholder('search captions and tags'),
+    ui.segmented('by'),                                                 // bound to the param of the same name
+    ui.text(c => `${c.db.moodboard.count()} images · ${c.db.moodboard.distinct('tags').length} tags`).small(),
+  ))
+  .view(ui.dropzone({ accepts: ['clip:image', 'clip:link', 'Files', 'text/uri-list'] })
+    .hint('drop images or links anywhere in the grid')
+    .on('drop', (it, c) => c.db.moodboard.insert({ src: it.image ?? it.url, caption: it.title ?? '', tags: it.tags ?? [] }))
+    .child(ui.grid(
+      ui.each(db.moodboard.where(c => im => match(im, c.state.q)).orderBy(c => ...byParam(c)), im =>
+        ui.image(im.src)
+          .use(taggable).use(palette)
+          .map(b => c => c.param('swatches') ? b : b.footer(null))      // build-time shape, runtime switch
+          .caption(ui.when(c => c.param('captions'), ui.text(im.caption).small()))
+          .selected(c => c.state.selected === im.id)                    // the dashed accent frame on sheet 03
+          .on('click', (_, c) => c.set('selected', im.id))
+          .on('dblclick', (_, c) => c.board.clip(ui.image(im.src).use(taggable).tag(...im.tags)).near(c.window))   // pop out
+          .draggable({ kind: 'clip:image', payload: () => im })
+      ).id('images'),
+    ).cols(c => c.param('cols')).gap(c => c.param('gap'))))
+  .side(ui.when(c => c.state.selected, ui.stack(                      // below the params in the side column
+    ui.text(c => c.db.moodboard.get(c.state.selected).caption).bold(),
+    ui.text(c => `added ${ago(c.sel().added)} · ${c.sel().src.width} × ${c.sel().src.height}`).small(),
+    ui.row(ui.each(c => c.sel().tags, t => ui.chip(t))).gap(4),
+    ui.link('pop out as a clip').on('click', (_, c) => c.board.clip(ui.image(c.sel().src)).near(c.window)),
+  ).gap(6)))
+  .agent.describe(c => `moodboard: ${c.db.moodboard.count()} images · by ${c.param('by')} · q "${c.state.q}"`)
+  .agent.allow(['insert', 'tag', 'retitle'])
+  .agent.suggest(['group by dominant colour', 'caption the untitled ones', 'make a palette clip from the selection'])
+  .register()
+
+// What this produces: sheet 03. The IR has 11 nodes and these runtime edges:
+//   state.q → images · param.by → images · db.moodboard → images, count
+//   param.cols → grid.cols · param.gap → grid.gap · param.captions → when#caption · state.selected → side, selected
+// Reopen the board tomorrow and ⌘K moodboard brings it back, params and all.</script>
+</section>
+
+<div class="callout" style="margin-top:34px">Conventions carried from the design systems: white ground, one ink, Arial in two weights, 1 px rules for structure and one line weight only: state is carried by line style (solid, dotted, dashed) and by colour, never by thickness; square corners, no shadows in the UI (hatching on the sheets), one red for trouble and selection, text glyphs instead of icons, numbers tabular with units, copy in sentence case with no exclamation marks. Overlay hues (blue for data edges, violet for the agent) appear only in annotations, never in the interface.</div>
+</main>
+
+<script>
+(function(){
+  const esc = s => s.replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;');
+  const re = /(\/\/[^\n]*)|(`(?:\\.|[^`\\])*`|'(?:\\.|[^'\\\n])*'|"(?:\\.|[^"\\\n])*")|(=>)|(\b(?:const|let|var|return|if|else|await|async|import|from|export|new|function|true|false|null|undefined)\b)|(\b\d[\d_.]*\b)|([{}()\[\].,;:?!=<>+\-*\/&|%]+)/g;
+  function hl(src){
+    let out='', last=0, m;
+    while((m=re.exec(src))){
+      out+=esc(src.slice(last,m.index));
+      const [all,c,s,a,k,n,p]=m;
+      if(c) out+=`<span class="com">${esc(c)}</span>`;
+      else if(s) out+=`<span class="str">${esc(s)}</span>`;
+      else if(a) out+=`<span class="arrow">=&gt;</span>`;
+      else if(k) out+=`<b>${k}</b>`;
+      else if(n) out+=`<span class="num">${n}</span>`;
+      else out+=`<span class="punc">${esc(p)}</span>`;
+      last=m.index+all.length;
+    }
+    return out+esc(src.slice(last));
+  }
+  document.querySelectorAll('script[type="text/x-src"]').forEach(s=>{
+    const pre=document.createElement('pre'); pre.className='src';
+    pre.innerHTML=hl(s.textContent.replace(/^\n/,''));
+    s.replaceWith(pre);
+  });
+})();
+</script>
+</body>
+</html>
