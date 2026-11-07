@@ -361,3 +361,75 @@ Phase 0 puts the prototype on slop for one person per board. The UI files stay t
 ### Technical details
 - Board store created by the shell: `s-5povfcfc` (`POST /_site/create`), app `pinboard`, type `pinboard`.
 - Status line format: `<n> clips · <n> collections[ · <n> changes] · saved|saving…[ · view only]`.
+
+## Step 6: Phase 1, live collaboration
+
+Phase 1 makes a board shared in real time. The operations moved into `apps/pinboard/core.js`, a file with no DOM that the actor and CLI verbs will load too. The page store now subscribes to the board's collections, applies other people's changes, writes every transaction to a shared log, and undoes by a rule that keeps other people's work.
+
+### Prompt Context
+**User prompt (verbatim):** (same as step 5)
+**Assistant interpretation:** Pinboard phase 1 of the guide's plan: core.js with a storage adapter, remote apply, queued writes, shared log, collaborative undo, ids.
+**Inferred user intent:** Several people on one board, each seeing the others' changes, without losing work to undo.
+**Commit (code):** `2b4472f`
+
+### What I did
+- `core.js` (UMD: `window.PinboardCore` in the page, `module.exports` elsewhere):
+  - `createCore(storage)` with `mutate`, `recorder`, `revert`, `check`; storage adapter `{get, put, list, level, now, id, z, appDef}`;
+  - the recorder from the prototype, plus `need()` so that operations on a missing clip throw instead of crashing;
+  - `mutate` puts back what a failing transaction changed and rethrows;
+  - `revert(ops, mayOverwrite)` puts a document back only if it still holds what the op wrote, or if `mayOverwrite(op, current)` allows it;
+  - `canon`/`same` (sorted keys), `seg`/`unseg` (now with `encodeURIComponent`, no `TextEncoder`, so it runs in goja), `pathOf`/`parsePath`, `keysFor`, `fromClip`, `logEntry`, `describe`, `query`, `newId`.
+- `js/store.js` rewritten around the core:
+  - `PB.subscribe()`: `onSnapshot` on `clips`, `apps`, `colls`, `records`, `board/meta`, and `log` ordered by `at` descending, limit 200;
+  - `applyRemote`: per `docChanges()` entry, skip a path with an unsent local edit (`dirty`), skip when equal to `PB.S`, otherwise update `PB.S`, note `remoteAt[path]`, and emit the render keys (`change` and `remote`); deleted board apps fall back to the built-in of that name;
+  - every transaction becomes `log/<tx id>` (`C.logEntry`), with `by` as a name (`Ada Lovelace`, `agent (Ada Lovelace)`) and `uid`;
+  - `PB.undo`/`PB.redo` revert my own transaction with `mayOverwrite = nobody else changed this document since the transaction` (`remoteAt <= tx.at`), mark the log entry `undone`, and say how many changes were kept;
+  - `PB.revertLogEntry(id)` reverts anyone's step by the strict rule (value still as written), records the revert as a transaction with `revertOf`, and marks the entry `undone`.
+- Log app: "Board log", everyone's steps with a revert button per step; board API `log(n)` (tracks the render key `log`) and `revert(id)`.
+- `board.js`: a clip being dragged keeps its on-screen place when a remote change re-renders it.
+- `test/core.test.js`: nine `node:test` cases (equality, segments, ids, transactions, rollback, revert with and without conflicts, levels, query and describe, log trimming). `node --test apps/pinboard/test/core.test.js`: 9 pass.
+- Two-person browser check on the local server: Ada made an interact link in the shell's Share dialog; Bob signed in and opened it (`level: interact`, `k` removed from the address). Results:
+  - Bob's new note appeared on Ada's screen; Ada's move of it appeared on Bob's;
+  - Ada placed a note, Bob moved it, Ada pressed undo: the note stayed at Bob's position, toast "1 change was not undone: someone changed it since";
+  - Ada placed a note and undid it: gone for Bob; redo: back for Bob;
+  - Bob reverted Ada's "place" from the log: gone for Ada; the log shows `Bob Builder · revert: place clip:…` and Ada's entry as reverted;
+  - Ada typing into Bob's note (`PB.quiet`) showed in Bob's note within 1.5 s.
+- Screenshot `various/02-phase1-bob-board-log.png`.
+
+### Why
+- **Undo by "nobody else changed it since", not by value.** The guide proposed "undo only if the document still holds the value the op wrote". My own quiet edits (typing in a note I just placed, bringing it to the front) change the value too, and would make every undo of my own work fail. `remoteAt` records only other people's changes, so my own later edits do not block my undo while anyone else's do. Reverting someone else's step from the log uses the strict value rule, because there is no local record of what else happened.
+- **Log entries with values.** Reverting a step from another tab or another person needs the before and after values; keeping them in the entry avoids reading history from elsewhere. Entries over 200 KB keep only paths and cannot be reverted by others.
+
+### What worked
+- The runtime's pending-write overlay (`hasPendingWrites`) means my own writes come back as equal values and are skipped by the equality check; no echo suppression by id was needed.
+- `PB.rerender` already keeps focus and caret for elements with `data-key`, so a remote re-render of a note being read does not lose the caret.
+
+### What didn't work
+- The first two-person run: Ada's undo of her own just-placed note did nothing for Bob (`bobAfterUndo2: true`). Cause: equality was `JSON.stringify(a) === JSON.stringify(b)`, and documents come back from the server with their keys sorted, so Ada's own echo looked like someone else's change: `remoteAt` was set and the undo was treated as a conflict. Fixed with `canon()` (sorted keys) in `core.same`.
+- `slop link new <board> interact` as the server admin: `permission_denied: link.new on s-5povfcfc needs owner … admins are admin on every store`. Only the owner makes links; I used the shell's Share dialog as Ada instead, which is the real flow anyway.
+- `node --test test/` with a directory argument ran nothing useful under Node 24 (`test at test:1:1 … 'test failed'`); naming the file works.
+
+### What I learned
+- Server documents have sorted keys; anything comparing documents must be order-independent.
+- The shell's Share dialog shows "Share Pinboard" (the app's title), not the board's title. Worth a small M8 change.
+
+### What was tricky to build
+- **Which changes count as someone else's.** A snapshot can carry my own pending write (overlay), my own confirmed write, or another person's write. The page cannot tell them apart by metadata reliably (a confirmed own write has `hasPendingWrites: false`). Comparing with `PB.S` (canonically) separates "nothing new" from "new"; only new values set `remoteAt`.
+- **Redo order.** `core.revert` walks ops backwards. Redo needs the original order, so it passes the inverted ops reversed.
+
+### What warrants a second pair of eyes
+- `applyRemote` skips a document while it is dirty and never re-applies the skipped value. If my debounced write then fails (refused), `PB.S` keeps my value while the server has the other person's. A failed write should re-read the document.
+- The log subscription loads the newest 200 entries for every viewer; on a busy board that is a lot of data per page load. Pruning (phase 6) bounds the total; a smaller page size for the log app could follow.
+
+### What should be done in the future
+- Phase 2: presence (cursors, selection, follow, live drag), `c.local`.
+- Re-read a document after a failed write.
+
+### Code review instructions
+- `apps/pinboard/core.js` (the shared semantics), then `apps/pinboard/js/store.js` sections "loading and others' changes" and "transactions".
+- `node --test apps/pinboard/test/core.test.js`.
+- Two people: deploy as in step 5, share with the shell's dialog, open in two browser profiles.
+
+### Technical details
+- Log document: `{id, by, uid, at, label, ops: [{store, id, before, after, label}], undone, revertOf?, trimmed?, undoneBy?, undoneAt?}`.
+- Render keys: `clips`, `clips:<id>`, `records`, `records:<id>`, `coll:<name>`, `apps`, `apps:<name>`, `collections`, `log`.
