@@ -113,8 +113,11 @@ type Actor struct {
 	run kernel.Running
 	key string // app@n it was built from
 
-	vm  *goja.Runtime
-	def *goja.Object
+	// host owns the VM (host.go): every entry into it from Go is one
+	// host.Run. vm is the host's runtime, for code already inside a Run.
+	host vmHost
+	vm   *goja.Runtime
+	def  *goja.Object
 	// groups and routes are the definition's shape as Go data, read once at
 	// build: other goroutines (callers, the commit and system-log
 	// followers) consult them; only the actor's goroutine touches def.
@@ -168,14 +171,32 @@ func (a *Actor) log(level, text string) {
 // build makes the runtime: it runs the app's actor.js, which must call
 // defineActor once.
 func build(ctx context.Context, m *Manager, st *store.Store, run kernel.Running, files map[string][]byte, checkPolicy bool) (*Actor, error) {
+	h := newDirectHost()
 	a := &Actor{m: m, st: st, run: run, key: run.App + "@" + strconv.FormatInt(run.N, 10),
-		vm: goja.New(), wake: make(chan struct{}, 1), stop: make(chan struct{})}
-	a.vm.SetFieldNameMapper(goja.TagFieldNameMapper("json", true))
+		host: h, vm: h.VM(), wake: make(chan struct{}, 1), stop: make(chan struct{})}
 	entry := run.Manifest.Actor
 	src, ok := files[entry]
 	if !ok {
+		a.release()
 		return nil, fail("actor_error", "%s is not in %s", entry, a.key)
 	}
+	if err := a.enter(ctx, "load", func(vm *goja.Runtime) error { return a.load(files, entry, src) }); err != nil {
+		a.release()
+		return nil, err
+	}
+	if checkPolicy {
+		if err := a.checkRoutePolicies(ctx); err != nil {
+			a.release()
+			return nil, fail("actor_error", "%v", err)
+		}
+	}
+	return a, nil
+}
+
+// load installs the globals, runs actor.js and reads the definition's
+// shape (inside the host's "load" run).
+func (a *Actor) load(files map[string][]byte, entry string, src []byte) error {
+	a.vm.SetFieldNameMapper(goja.TagFieldNameMapper("json", true))
 	g := a.vm.GlobalObject()
 	_ = g.Set("defineActor", func(call goja.FunctionCall) goja.Value {
 		obj, ok := call.Argument(0).(*goja.Object)
@@ -203,32 +224,27 @@ func build(ctx context.Context, m *Manager, st *store.Store, run kernel.Running,
 		return time.Now().UnixMilli()
 	})
 	if _, err := a.vm.RunString(`Date.now = function () { return __slopNow(); };`); err != nil {
-		return nil, err
+		return err
 	}
-	timer := time.AfterFunc(TurnLimit, func() { a.vm.Interrupt("actor.js took too long to load") })
-	a.loading = true
-	_, err := a.vm.RunScript(entry, string(src))
-	a.loading = false
-	timer.Stop()
-	a.vm.ClearInterrupt()
+	err := a.limited("actor.js took too long to load", func() error {
+		a.loading = true
+		defer func() { a.loading = false }()
+		_, err := a.vm.RunScript(entry, string(src))
+		return err
+	})
 	if err != nil {
-		return nil, fail("actor_error", "%s: %v", entry, err)
+		return fail("actor_error", "%s: %v", entry, err)
 	}
 	if a.def == nil {
-		return nil, fail("actor_error", "%s did not call defineActor", entry)
+		return fail("actor_error", "%s did not call defineActor", entry)
 	}
 	if err := a.mergeRoutes(); err != nil {
-		return nil, fail("actor_error", "%s: %v", entry, err)
+		return fail("actor_error", "%s: %v", entry, err)
 	}
 	if err := a.readShape(); err != nil {
-		return nil, fail("actor_error", "%s: %v", entry, err)
+		return fail("actor_error", "%s: %v", entry, err)
 	}
-	if checkPolicy {
-		if err := a.checkRoutePolicies(ctx); err != nil {
-			return nil, fail("actor_error", "%v", err)
-		}
-	}
-	return a, nil
+	return nil
 }
 
 // readShape copies the definition's group keys and route options to Go.
@@ -352,6 +368,7 @@ func cleanPath(p string) string {
 // loop is the actor's goroutine: one event at a time, from the store's
 // inbox, until the actor no longer runs the store.
 func (a *Actor) loop() {
+	defer a.release() // nothing runs on this runtime once its loop ends
 	idle := time.NewTimer(IdleTimeout)
 	defer idle.Stop()
 	for {
@@ -392,9 +409,29 @@ func (a *Actor) loop() {
 	}
 }
 
-// handle runs one event as one turn.
+// handle runs one event as one turn: the transaction, the JavaScript and
+// the reply, in one run of the host.
 func (a *Actor) handle(ev *event) {
 	ctx := context.Background()
+	err := a.enter(ctx, "turn "+ev.kind, func(*goja.Runtime) error {
+		a.turnFor(ctx, ev)
+		return nil
+	})
+	if err != nil {
+		// The host could not run the turn at all (its runtime is closed).
+		target := ev
+		if ev.parent != nil && ev.parent.park != nil {
+			target = ev.parent.park.ev
+		}
+		if target.reply != nil {
+			target.reply <- result{err: fail("actor_error", "the actor could not run: %v", err)}
+		}
+		a.log("error", ev.kind+" not run: "+err.Error())
+	}
+}
+
+// turnFor runs ev in one store transaction, then replies or parks it.
+func (a *Actor) turnFor(ctx context.Context, ev *event) {
 	who := store.Who{ID: ev.visitor.ID, Via: ev.via, Level: ev.visitor.Level, App: a.key}
 	var pk *park
 	if ev.parent != nil {
@@ -412,27 +449,24 @@ func (a *Actor) handle(ev *event) {
 		} else if ev.parent == nil {
 			ctxObj = a.ctxObject(ev)
 		}
-		timer := time.AfterFunc(TurnLimit, func() { a.vm.Interrupt("turn took longer than " + TurnLimit.String()) })
-		defer func() {
-			timer.Stop()
-			a.vm.ClearInterrupt()
-		}()
-		v, err := ev.run(a, ctxObj)
-		if err != nil {
-			a.dropSavepoints()
-			return err
-		}
-		// A database handle never outlives its turn: one still open
-		// (the handler returned, or awaited I/O) rolls back here.
-		a.closeSavepoints()
-		val = v
-		// A handler that threw after an await of something already
-		// resolved: its promise is rejected now, so this turn rolls back.
-		root := pk.rootOr(v)
-		if root != nil && root.State() == goja.PromiseStateRejected {
-			return a.jsError(root.Result())
-		}
-		return nil
+		return a.limited("turn took longer than "+TurnLimit.String(), func() error {
+			v, err := ev.run(a, ctxObj)
+			if err != nil {
+				a.dropSavepoints()
+				return err
+			}
+			// A database handle never outlives its turn: one still open
+			// (the handler returned, or awaited I/O) rolls back here.
+			a.closeSavepoints()
+			val = v
+			// A handler that threw after an await of something already
+			// resolved: its promise is rejected now, so this turn rolls back.
+			root := pk.rootOr(v)
+			if root != nil && root.State() == goja.PromiseStateRejected {
+				return a.jsError(root.Result())
+			}
+			return nil
+		})
 	})
 	a.fs.end(err == nil) // the fs module's writes follow the turn
 	if err != nil {

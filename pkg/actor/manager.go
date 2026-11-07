@@ -48,6 +48,10 @@ type Manager struct {
 	Secret func(ctx context.Context, app, name string) (string, error)
 	Paths  Paths                                                       // the db paths outside the store (aliases, _stores); nil: the store's own only
 	Grant  func(ctx context.Context, app, module string) (Grant, bool) // app.trust: an app's grant of a catalog module
+	// Around, when set, wraps every entry into an actor's VM (op is
+	// "load", "setup" or "turn <kind>"); run does the work and must be
+	// called once. For tests and measurements; set it before actors start.
+	Around func(op string, run func() error) error
 
 	provided map[string]func(*Actor) goja.Value // the door's capability bindings (Provide)
 	modules  map[string]Module                  // the catalog (Register; catalog.go)
@@ -189,6 +193,7 @@ func (m *Manager) get(ctx context.Context, id string) (*Actor, bool, error) {
 	m.mu.Lock()
 	if m.gen != gen {
 		m.mu.Unlock()
+		a.release()
 		return nil, true, nil // a restart happened during the build
 	}
 	if err != nil {
@@ -199,6 +204,7 @@ func (m *Manager) get(ctx context.Context, id string) (*Actor, bool, error) {
 	if old := m.actors[id]; old != nil {
 		if old.key == key {
 			m.mu.Unlock()
+			a.release()
 			return old, false, nil // someone else built it meanwhile
 		}
 		close(old.stop)
@@ -403,10 +409,19 @@ func (m *Manager) activate(ctx context.Context, t *store.Turn, r kernel.Running)
 	if err != nil {
 		return err
 	}
+	// This actor only runs setup: the store's actor is built on first use.
+	defer a.release()
+	return a.enter(ctx, "setup", func(*goja.Runtime) error { return m.setup(ctx, t, a) })
+}
+
+// setup runs setup and smoke inside the activation turn, then records the
+// version's recurring alarms and its reactors' cursors.
+func (m *Manager) setup(ctx context.Context, t *store.Turn, a *Actor) error {
+	st := a.st
 	for _, name := range a.undeclared {
 		a.log("warn", fmt.Sprintf("action %s declares no requires; callers need admin", name))
 	}
-	ev := &event{kind: "setup", visitor: m.storeVisitor(ctx, r.Store), via: "activate"}
+	ev := &event{kind: "setup", visitor: m.storeVisitor(ctx, st.ID), via: "activate"}
 	a.cur = &turn{t: t, ev: ev, rev: t.Rev - 1}
 	defer func() { a.cur = nil }()
 	defer a.dropSavepoints() // after a failed hook; closeSavepoints ran otherwise
@@ -417,10 +432,12 @@ func (m *Manager) activate(ctx context.Context, t *store.Turn, r kernel.Running)
 		if f == nil {
 			continue
 		}
-		timer := time.AfterFunc(TurnLimit, func() { a.vm.Interrupt(name + " took too long") })
-		v, err := f(goja.Undefined(), cx)
-		timer.Stop()
-		a.vm.ClearInterrupt()
+		var v goja.Value
+		err := a.limited(name+" took too long", func() error {
+			var err error
+			v, err = f(goja.Undefined(), cx)
+			return err
+		})
 		if err != nil {
 			return fmt.Errorf("%s: %v", name, a.asError(err).Message)
 		}
