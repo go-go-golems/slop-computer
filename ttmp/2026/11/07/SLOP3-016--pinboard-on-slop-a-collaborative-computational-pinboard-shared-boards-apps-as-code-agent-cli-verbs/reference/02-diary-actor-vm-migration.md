@@ -366,3 +366,81 @@ This step bridges three go-go-goja modules, `yaml`, `crypto` and `events`, into 
   crypto.createHash('sha256').update('slop').digest('hex');   // 64 hex characters
   crypto.randomBytes(8) instanceof Buffer;                    // true
   ```
+
+## Step 5: Review of phases 1–4; a flaky crash test caused by an activation race (coordinator)
+
+I (the coordinating agent, not the fork that wrote steps 1–4) reviewed the branch before opening its PR and reran the suites myself. The engine-mode host suite failed once in `TestActorCrashPath`. The failure turned out to be a race between activation and the first request, which is older than this branch. This step records the cause and the fix.
+
+### Prompt Context
+**User prompt (verbatim):** "Ok, do the tickets, commit at appropriate intervals and keep a detailed diary as you work (using the diary format from the skill)"
+**Assistant interpretation:** Review the fork's phases 2–4 before they go up for review, verify its claims by rerunning, and fix what fails.
+**Inferred user intent:** A PR that is green and whose tests can be trusted, with the migration still off by default.
+**Commit (code):** `601bbc2` — "actor: an activation no longer stops an actor of the version it activated"
+
+### What I did
+- Read `host.go`, `enginehost.go`, `bridge.go`, and the diffs of `actor.go`, `manager.go`, `catalog.go`, `config.go`, the CI workflow and the Makefile.
+- Reran `go test ./pkg/actor ./pkg/config` and then `SLOP_TEST_ACTORS_RUNTIME=engine go test ./pkg/host/`, which failed:
+  `actor_runtime_test.go:212: actor.call map[action:ok store:crash]: want actor_error, got 200 map[result:1]`.
+- Reran `TestActorCrashPath` alone 8 times without the env var and 6 times with it. It failed once in the **direct** subtest, so the cause is not the engine.
+- Added temporary `log.Printf` lines (removed before the commit) in:
+  - the crash path (`turnFor`'s error branch);
+  - every place that stops an actor: `onActivated`, `Restart`, `RestartApp`, `retire`, `markBroken`, replacement in `get`;
+  - `get`'s install and gen-mismatch branches;
+  - the loop's exit and `handle`.
+- Looped the test until it failed. The failing run logged:
+  ```
+  install 0x…a000 crash@1 gen 0
+  handle  0x…a000 action boom
+  onActivated crash crash@1
+  install 0x…a180 crash@1 gen 1
+  genchanged release 0x…0180
+  CRASH 0x…a000 action boom  (turn panicked)
+  loop exit 0x…a000
+  handle 0x…a180 action ok / spin / spin / ok
+  ```
+  `boom`'s crash was counted on actor A, and both spins on actor B. B therefore saw only two crashes and was never marked broken.
+- Fix in `pkg/actor/manager.go` `onActivated`: stop the store's actor only when its key differs from the activated `app@N`. `gen++` and clearing `broken` stay as they were.
+- Validation after the fix:
+  - `TestActorCrashPath` failed 0 times in 40 runs (before the fix, about 1 in 6);
+  - `go test ./...` passes;
+  - the engine-mode `pkg/host` suite passes in 16.3 s;
+  - `-race` on `TestActor|TestPinboard|TestBridged` in engine mode passes;
+  - golangci-lint reports 0 issues.
+
+### Why
+- **The activated version's actor can only have been built after the activation committed.**
+  - `get` builds from `Running`, which reports version N only when `app_version == N` has been read outside a turn, which means after the commit.
+  - An actor with key N therefore always runs on N's activated state, and stopping it in `onActivated` gains nothing.
+  - An actor of an older version still has to stop.
+- **`gen` still discards builds in flight.** A build that read `Running` before the commit may be building the old version.
+
+### What worked
+- Pointer-tagged logs in every place that removes an actor found the cause in one failing run: the actor was stopped by `onActivated`, which only the install log made visible.
+
+### What didn't work
+- The first reading, "engine mode is flaky", was wrong. The failing subtest was `direct`, and the env var plays no part, because this test sets the runtime explicitly.
+
+### What I learned
+- `files.push` gets a store activated off the request path, and a concurrent request can finish activating it first: the second `s.Do` waits on the first, sees `from == n` and returns "another request activated it first". `kernel.activate` calls `OnActivated` after its turn returns, outside the store's serialization, so the manager can see "active" before it hears "activated".
+- In-memory actor state therefore did not survive the first seconds after an activation: crash counts, parked handlers' VM, the fs module's tree.
+
+### What was tricky to build
+- Telling "replaced" from "stopped": without the install log, the second actor looked like a replacement in `get`, which logs nothing because the first actor was already gone from the map.
+
+### What warrants a second pair of eyes
+- **Re-activating the same N** (a failed activation retried, or a ref moved away and back). Moving away to M stops the N actor through `onActivated(M)`. A retry of a failed N had no actor running N, because `get` refuses a broken version.
+- **`fork B`'s `turnOwner.Call`** refuses every call from another goroutine. Calls that arrive while a turn holds the loop run after it, and are refused then. That is the intended "no JavaScript between turns", but any go-go-goja module that calls `Owner.Call` synchronously from the loop relies on the engine's owner running same-goroutine calls inline. None of the bridged modules does.
+- **`goid()` parses `runtime.Stack`.** It runs only on `Post`, but it is a hack. If go-go-goja's owner can report whether the caller is on the loop, that would be cleaner.
+
+### What should be done in the future
+- The same race may matter elsewhere: anything that keeps per-actor memory across turns relied on it not happening.
+- Phase 6's blockers are unchanged (see step 4).
+
+### Code review instructions
+- `pkg/actor/manager.go` `onActivated`.
+- Reproduce on the parent commit with
+  `for i in $(seq 1 20); do go test -buildvcs=false ./pkg/host/ -run TestActorCrashPath -count=1 | tail -1; done`.
+  It fails about once in 6 runs; with the fix, 0 in 40.
+
+### Technical details
+- Key format: `app@N` (`kernel.Running.App` + `N`), the same in `get`, `build` and now `onActivated`.
