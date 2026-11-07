@@ -111,7 +111,7 @@ This step builds the catalog, the kit and the two views, tests the static-host s
 **User prompt (verbatim):** see Step 1
 **Assistant interpretation:** Implement the guide's §4 plan and deploy it.
 **Inferred user intent:** Working catalog views on slop.yolo.
-**Commit (code):** `5ff4fc0` (kit, views, builder, test); this entry's commit (deploy script, the `srcdoc` preview, loading states, versioned kit URLs, evidence).
+**Commit (code):** `5ff4fc0` (kit, views, builder, test); `c69d4f8` (deploy script, the `srcdoc` preview, loading states, versioned kit URLs, evidence). PR: https://github.com/go-go-golems/slop-computer/pull/35
 
 ### What I did
 - **`scripts/01-build-catalog.py`** reads `store.ls`, each release store's `francois.json`, and `boutique`'s `_data/francois-catalog.json`, and writes `catalog.json` and `views.json`. Output: `100 listed apps (7 for subscribers, 94 with covers), 125 tags; left out (hidden): craftkit-studio, polis, stackchan-pet-studio`. A copy is in `various/catalog-2026-11-06.json`.
