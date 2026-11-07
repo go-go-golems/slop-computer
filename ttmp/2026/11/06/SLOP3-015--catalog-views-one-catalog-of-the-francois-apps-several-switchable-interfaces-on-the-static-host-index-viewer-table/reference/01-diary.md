@@ -495,3 +495,114 @@ POST https://apps.slop.yolo.scapegoat.dev/catalog/mcp   (JSON-RPC; JSON answers;
 api policy: routes [POST /, GET /], defaultMin public, rateLimit ip 60/1m burst 120, cors [https://site.slop.yolo.scapegoat.dev]
 files: /catalog/llms.txt (28.8 KB) · /catalog/data/search-index.json (72 KB) · /catalog/data/feed.xml (73 KB)
 ```
+
+## Step 7: Views 14 and 15, the shelf and the curator, on the live host
+
+The last two views use slop's runtime rather than only its file hosting, so they are apps on the live host.
+
+- **The shelf:** each signed-in person keeps private stars and may choose to share them. Presence shows who is looking at which app, with names from the `profile` scope introduced by #34.
+- **The curator:** a person asks slop's model for apps, and the model reads the whole catalog as context. Once a day an actor action chooses three "apps of the day", on the allowance of the first member who opens the page, and stores them for everyone.
+
+Both were tested with two signed-in people on a local server, have host tests, and are deployed. On production they have only been checked as a guest.
+
+### Prompt Context
+**User prompt (verbatim):** see Step 5. During this step: "can these apps properly manage cache (for example for images, or other stuff) / what would be required to put this into prod (the catalog apps). yes", "i'm happy to log in on the real site for you if you want..", and the request for the vault report and a developer guide.
+**Assistant interpretation:** Build 14 and 15, check them as real members, and answer the caching question with measured headers.
+**Inferred user intent:** Catalog views that show what slop's runtime adds, and an honest view of what production still needs.
+**Commit (code):** `34624d8` shelf; the shelf sign-in fix (`git log --grep "offers sign-in"`); `2d24b58` curator
+
+### What I did
+- **Local server for signed-in tests:**
+  - `go build -buildvcs=false -o scratchpad/slopbin ./cmd/slop`, then `slopbin serve --local --llm fake --data scratchpad/localdata --admin-email admin@example.com`;
+  - a device login (`auth login`) with `SLOP_CREDENTIALS=scratchpad/local-creds.json`, so the production login stays the default;
+  - `02-deploy.py --only <store> --live apps.localhost:18300 --static site.localhost:18300`, with the same variable.
+- **`apps/catalog-shelf/`, a page-only app:**
+  - Manifest: `db` rules `shelves` read view / write owner and `shelves/{self}` write interact; `user` with `profile`; `room`.
+  - Stars are one private document, `data/users/<id>/shelf`. "Show my shelf to others" writes `shelves/<id>`.
+  - "On people's shelves" counts the shared shelves, with faces. Presence carries `{looking: <app id>}`, which feeds "Here now" and the faces on rows.
+  - The catalog ships with the store (`data/catalog.json`, fetched relatively), and covers load from the site host.
+  - `TestCatalogShelfApp` checks that another person can read a shared shelf but not a private one, can write neither, and that a guest writes nothing.
+- **`apps/catalog-curator/`, page plus actor:**
+  - Manifest: `sample`, `db` (`picks` read view / write admin) and `user`. `curate.js` is shared by page and actor: `prompt` (one line per app, 24 KB), `parse` (the first JSON object, and only ids that exist) and `seeded` (picks by the date).
+  - The page's "Ask" calls `sample` itself, so the asker pays. Unusable answers are shown as text, and `quota_exceeded` gets its own message.
+  - The actor's `today` (requires interact) returns `picks/<day>` if present. Otherwise it calls `sample` as the visitor, checks again after the `await` (a new turn), and stores the picks. A prose answer falls back to the seeded picks.
+  - `TestCatalogCuratorApp`: refused without model access; after `llm.set`, the seeded picks are stored once and returned again; a guest reads them and cannot run `today`.
+- **Deploy:**
+  - `02-deploy.py` records for both: live host, `@guest view`, `@member interact`, and for the curator `policy sample @member on`.
+  - `LIVE_VIEWS` in the builder lists them in `views.json` by absolute URL.
+  - Production: `catalog-shelf` at snapshots 1–3 and `catalog-curator` at snapshot 1, both 200.
+- **Cache measurements on production** (see What I learned).
+
+### Why
+- **The shelf's own document is read once:** the page is the only writer of it, and late snapshots rolled the page back (see below).
+- **The asker pays for "Ask":** a question is personal. The page's `sample` is metered against the viewer.
+- **"Apps of the day" as an actor action:** the result is shared, so it is stored once. Run as the calling member, it needs no `@store` model budget.
+
+### What worked
+- **Shelf, locally, with Ada and Bob in two browser contexts:**
+  - names show ("Ada Lovelace", "Bob Builder");
+  - Bob saw "Ada Lovelace — Weft" in Here now and her face on Weft's row;
+  - Ada's four stars survived reloads;
+  - her shared shelf showed in Bob's "On people's shelves" (Mimeo Studio, Lattice Deck, Tabula Workbench, Weft ×1 each);
+  - Bob un-starring Weft dropped its count;
+  - Bob's `db.get` of `data/users/<ada>/shelf` → `exists: false`, and his write to `shelves/<ada>` → `invalid_argument`.
+- **Curator, locally:**
+  - as a guest: "Three free apps for 2026-11-07, picked by the date" and "Sign in as a member";
+  - as Ada with `llm set ada@example.com on --budget 200000`: "member · model allowance left: 200000"; `today` stored `{by: seed, model: test/fake}`; Ask showed the fake model's "slop is connected." as text;
+  - a guest then read the stored picks.
+- **Production as a guest:** the shelf shows 100 rows, "Sign in to keep a shelf" and "You (guest)" in Here now; the curator answers 200.
+- `go test ./pkg/host` → `ok`; `make lint` → `0 issues.`
+
+### What didn't work
+- **The shelf rolled back its own stars:**
+  - The first version applied `onSnapshot` of the person's own document to the page's state, and a late snapshot from before a quick run of stars undid them; the share checkbox reset itself.
+  - Skipping snapshots while saves were pending was not enough: the initial snapshot can arrive after the first clicks.
+  - Fixed by reading the document once and writing in order.
+- **Clicks vanished:**
+  - `onPeers` fires on any presence change, and each call rebuilt the list. A rebuild between mousedown and mouseup loses the click. It now re-renders only when the who-looks-at-what signature changes.
+  - Separately, Playwright mouse clicks into the cross-origin app iframe of a background browser window reached nothing: an event log in the frame stayed empty. `bringToFront` helped once. For the stars I used `dispatchEvent('click')`, which runs the same handlers.
+- **Avatars were broken images:** on slop `user.me().avatarUrl` is `""`, unlike claude.ai's always-renderable URL. Avatars are now initials on the profile's `color`.
+- **A guest looked like a member:** on production a guest has an id, so the first shelf offered stars that the store would refuse (guests have view). The page now checks `slop.visitor()` (`guest`, `level`).
+- **Members have no model:** `sample` needs the policy cell, and also the payer's LLM access and budget. On production `slop llm ls` lists only `@admin` (allowed, no budget). Members see "no model allowance" until someone runs `llm set @member on --budget N`. I left that platform-wide spending decision to the user.
+- **The first curator test** passed `budget` as a string: `cannot unmarshal string into Go struct field LlmSetIn.budget of type int64`.
+- **`go build` failed** with "error obtaining VCS status" in this worktree; `-buildvcs=false` avoids it (the same error as the one-off lint failure in Step 5).
+
+### What I learned
+**Caching on production today** (`curl -D-`):
+
+| Resource | Cache-Control | Validator | Notes |
+|---|---|---|---|
+| static pages, kit (`?v=`), `catalog.json`, `/_s/` files, `/_d/` covers | `public, max-age=60, stale-while-revalidate=600` | strong ETag (sha256); `If-None-Match` → 304 | zstd for text |
+| live shell pages (`/catalog/shelf/`), MCP | `no-store` | — | — |
+
+The 94 covers total 76,310,460 bytes. The largest is 16,977,574 bytes and the median width is 1600 px. They are sent at full size into 56 px and 3:2 thumbnails. The content-addressed URLs (`/_d/…`, `?v=<hash>`) could be cached as `immutable` for a year, but the static host has one policy for all files.
+
+### What was tricky to build
+- **The curator's "first answer wins":** the turn ends at `await sample(...)`, and the code after it runs in a new turn. Reading `picks/<day>` again before `set` keeps the first stored answer if two members race. Both still pay for their call.
+
+### What warrants a second pair of eyes
+- **The curator prompt is ~24 KB** (about 6k tokens) per question. A cheaper index, such as titles and tags only, would cut it.
+- **Rebuilds always push:** `catalog.json` carries `generated`, so every rebuild changes it, and with it `catalog`, `catalog-mcp`, `catalog-shelf` and `catalog-curator`.
+
+### What should be done in the future
+- Decide model access for members (`llm set @member on --budget …`).
+- Check the shelf and the curator on production as a signed-in member (the user offered to sign in).
+- **Production readiness** (also in the developer guide):
+  - build-time cover thumbnails (`srcset`);
+  - an `immutable` cache policy for content-addressed URLs;
+  - a stable `generated`;
+  - catalog rebuilds triggered by releases;
+  - a favicon;
+  - the sandbox `/v/<n>/` viewer check.
+
+### Code review instructions
+- `apps/catalog-shelf/index.html`: `save`, the `onPeers` signature, `avatar`, `canKeep`.
+- `apps/catalog-curator/`: `curate.js`, `actor.js`, `index.html`.
+- `pkg/host/catalog_shelf_test.go`, `pkg/host/catalog_curator_test.go`.
+
+### Technical details
+```
+live: apps.slop.yolo.scapegoat.dev /catalog/shelf (catalog-shelf) · /catalog/curator (catalog-curator) · /catalog/mcp (catalog-mcp)
+grants: @guest view, @member interact; curator policy: sample @member on; production llm access: @admin only
+local: slopbin serve --local --llm fake --data scratchpad/localdata; SLOP_CREDENTIALS=scratchpad/local-creds.json
+```
