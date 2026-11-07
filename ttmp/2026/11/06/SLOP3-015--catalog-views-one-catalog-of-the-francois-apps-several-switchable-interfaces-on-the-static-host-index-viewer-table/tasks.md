@@ -15,3 +15,4 @@
 - [x] View: capability map (catalog-caps): apps by runtime capability and by combination <!-- t:utcp -->
 - [x] View: zine (catalog-zine): one page per app, print CSS, PDF for the reMarkable <!-- t:cijn -->
 - [ ] Local test (devserve), then deploy when the post-#31 image is out <!-- t:nqrb -->
+- [x] Zine: 8-page fold (one sheet, one side) and 16-page two-sided booklet layouts, in parts <!-- t:mi9a -->
