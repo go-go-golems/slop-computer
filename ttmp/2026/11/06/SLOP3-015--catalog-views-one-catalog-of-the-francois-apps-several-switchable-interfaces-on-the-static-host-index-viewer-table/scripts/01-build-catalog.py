@@ -10,7 +10,8 @@ never printed):
   files.cat <store> francois.json         each release's facts (SLOP3-013)
   files.cat boutique _data/francois-catalog.json   covers and featured flags
 and writes <out-dir>/catalog.json and <out-dir>/views.json (guide §3.2), plus
-feed.xml (Atom, one entry per release). With --history (SLOP3-013's
+feed.xml (Atom, one entry per release), and for agents llms.txt (a Markdown
+index, https://llmstxt.org) and search-index.json (one flat record per app). With --history (SLOP3-013's
 francois inventory, read from the file) each item also gets "releases":
 every published release of the app, newest first, with its changelog.
 Only listed apps go in; paid apps get no preview, download or attachment
@@ -48,6 +49,8 @@ VIEWS = [
      "blurb": "A keyboard-only catalog: ls, grep, cat, open, run, tags, caps, du."},
     {"id": "desktop", "title": "Desktop", "path": "/catalog/desktop/",
      "blurb": "The apps as windows on a desktop, with a start menu and a taskbar."},
+    {"id": "agents", "title": "Agents", "path": "/catalog/agents/",
+     "blurb": "The catalog for programs: a read-only MCP server, llms.txt, a search index and the feed."},
 ]
 
 
@@ -145,12 +148,52 @@ def atom(cat, site):
 """
 
 
+def search_index(cat, site):
+    """One flat record per app, with a text field to match against."""
+    return {
+        "generated": cat["generated"], "count": cat["count"],
+        "fields": ["id", "title", "description", "tags", "capabilities", "access", "version", "publishedAt", "bytes", "open", "html", "text"],
+        "apps": [{
+            "id": i["id"], "title": i["title"], "description": i["description"], "tags": i["tags"],
+            "capabilities": i["capabilities"], "access": "free" if i["free"] else "subscribers",
+            "version": i["version"], "publishedAt": i["publishedAt"], "bytes": i["bytes"], "open": i["open"],
+            "html": site + i["download"] if i["download"] else None,
+            "text": " ".join([i["title"], i["description"], i["id"], *i["tags"]]).lower(),
+        } for i in cat["items"]],
+    }
+
+
+def llms_txt(cat, site, mcp):
+    """llms.txt: what the catalog is, where its data is, and every app."""
+    lines = [
+        "# slop catalog", "",
+        f"> {cat['count']} single-file HTML apps imported from slop.boutique, running on slop "
+        f"({cat['appsOrigin']}). Free apps can be opened, previewed and downloaded by anyone; "
+        f"the rest are for subscribers.", "",
+        "Every app is one HTML file. Apps may declare slop runtime capabilities: sample (model calls), "
+        "db (shared documents), room (real-time presence), user (who is looking), downloads (save files).", "",
+        "## For agents", "",
+        f"- [MCP endpoint]({mcp}): read-only, Streamable HTTP (JSON answers, stateless); tools search_apps, get_app, list_tags, list_capabilities",
+        f"- [search-index.json]({site}/catalog/data/search-index.json): one flat record per app, with a lower-case text field",
+        f"- [catalog.json]({site}/catalog/data/catalog.json): the full catalog the views read",
+        f"- [feed.xml]({site}/catalog/data/feed.xml): Atom, one entry per release",
+        f"- [Agents page]({site}/catalog/agents/): how to connect, with examples", "",
+        "## Apps", "",
+    ]
+    for i in cat["items"]:
+        extra = ", ".join(x for x in [", ".join(i["tags"][:4]), "runtime: " + "+".join(i["capabilities"]) if i["capabilities"] else "",
+                                      "free" if i["free"] else "subscribers"] if x)
+        lines.append(f"- [{i['title']}]({i['open']}): {i['description']} ({extra})")
+    return "\n".join(lines) + "\n"
+
+
 def main():
     ap = argparse.ArgumentParser()
     ap.add_argument("out")
     ap.add_argument("--apps-origin", default="https://apps.slop.yolo.scapegoat.dev")
     ap.add_argument("--site-origin", default="https://site.slop.yolo.scapegoat.dev")
     ap.add_argument("--history", help="SLOP3-013 inventory JSON: add each app's release history")
+    ap.add_argument("--mcp", default="https://apps.slop.yolo.scapegoat.dev/catalog/mcp", help="the MCP endpoint's URL")
     a = ap.parse_args()
     slop = Slop()
     covers = {r["id"]: r for r in json.loads(slop("files.cat", {"store": "boutique", "path": "_data/francois-catalog.json"}))}
@@ -173,6 +216,7 @@ def main():
         "generated": time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime()),
         "source": "https://slop.boutique",
         "appsOrigin": a.apps_origin,
+        "mcp": a.mcp,
         "count": len(items),
         "totalBytes": sum(i["bytes"] for i in items),
         "tags": [{"tag": t, "count": n} for t, n in sorted(tags.items(), key=lambda kv: (-kv[1], kv[0]))],
@@ -183,6 +227,8 @@ def main():
     (out / "catalog.json").write_text(json.dumps(cat, ensure_ascii=False, indent=1) + "\n")
     (out / "views.json").write_text(json.dumps(VIEWS, ensure_ascii=False, indent=1) + "\n")
     (out / "feed.xml").write_text(atom(cat, a.site_origin))
+    (out / "search-index.json").write_text(json.dumps(search_index(cat, a.site_origin), ensure_ascii=False, separators=(",", ":")) + "\n")
+    (out / "llms.txt").write_text(llms_txt(cat, a.site_origin, a.mcp))
     print(f"{len(items)} listed apps ({sum(not i['free'] for i in items)} for subscribers, "
           f"{sum(1 for i in items if i['cover'])} with covers), {len(tags)} tags; left out (hidden): {', '.join(hidden)}")
 
