@@ -209,6 +209,8 @@ window.PB = window.PB || {};
 
   // ---------- images: assets ----------
   // A clip's blobId is "blob:<asset id>"; the asset is served at /_blob/<id>.
+  // PB.isAssetRef is the one test for "this names stored bytes"; PB.blobs only
+  // caches bytes (it is empty after a reload until something fetches them).
   PB.blobs = {};               // blobId → Blob, fetched on demand (agent images, copy)
   const ASSET = (blobId) => String(blobId || '').replace(/^blob:/, '');
   PB.isAssetRef = (s) => typeof s === 'string' && /^blob:[^\s/:]+$/.test(s);

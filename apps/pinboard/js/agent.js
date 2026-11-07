@@ -92,10 +92,13 @@
 
   // ---------- images ----------
   function imagesToSend(text) {
-    const sel = [...PB.board.sel].map(i => PB.S.clips[i]).filter(c => c && c.kind === 'image' && PB.blobs[c.blobId]);
-    const named = [...new Set((text.match(/clip:[a-z0-9]{5,10}/g) || []))].map(i => PB.S.clips[i]).filter(c => c && c.kind === 'image' && PB.blobs[c.blobId]);
+    // An image clip counts by its reference; its bytes may not be cached yet
+    // (A.send fetches them).
+    const isImage = (c) => c && c.kind === 'image' && PB.isAssetRef(c.blobId);
+    const sel = [...PB.board.sel].map(i => PB.S.clips[i]).filter(isImage);
+    const named = [...new Set((text.match(/clip:[a-z0-9]{5,10}/g) || []))].map(i => PB.S.clips[i]).filter(isImage);
     const clips = [...new Map([...(A.sendSelected ? sel : []), ...named].map(c => [c.id, c])).values()];
-    const list = [...A.attachments.map(a => ({ blob: a.blob, label: a.name })), ...clips.map(c => ({ blob: PB.blobs[c.blobId], label: c.id + (c.title ? ' "' + c.title + '"' : '') + (c.dims ? ' ' + c.dims.w + '×' + c.dims.h : '') }))];
+    const list = [...A.attachments.map(a => ({ blob: a.blob, label: a.name })), ...clips.map(c => ({ blob: PB.blobs[c.blobId] || null, ref: c.blobId, label: c.id + (c.title ? ' "' + c.title + '"' : '') + (c.dims ? ' ' + c.dims.w + '×' + c.dims.h : '') }))];
     const max = A.limits && A.limits.images ? A.limits.images.maxCount : 0;
     return { list: list.slice(0, max || list.length), dropped: max ? Math.max(0, list.length - max) : 0, max };
   }
@@ -120,6 +123,8 @@
     }
     if (!A.available) { PB.toast('Claude is not available here. Start a message with > to run code directly.'); $ta.value = text; return; }
     const imgs = imagesToSend(text);
+    for (const i of imgs.list) if (!i.blob && i.ref) i.blob = await PB.fetchBlob(i.ref).catch(() => null);
+    imgs.list = imgs.list.filter(i => i.blob);
     const you = { role: 'you', text, images: imgs.list.map(i => i.label) }; A.cur.msgs.push(you); $msgs.append(msgEl(you));
     if (A.cur.msgs.length === 1) { A.cur.title = text.slice(0, 40); renderThreads(); }
     const agentMsg = { role: 'agent', text: '', steps: [], status: 'thinking' }; A.cur.msgs.push(agentMsg); $msgs.append(msgEl(agentMsg)); $msgs.scrollTop = $msgs.scrollHeight;

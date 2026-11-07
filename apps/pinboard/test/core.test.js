@@ -91,6 +91,21 @@ test('log entries keep values, or only paths when too large', () => {
   assert.ok(big.trimmed && big.ops[0].trimmed && big.ops[0].after === undefined);
 });
 
+test('byteLength counts UTF-8 bytes, as the store does', () => {
+  for (const s of ['', 'abc', 'é', '日本語', '😀', 'a\u0800b', '\ud800x']) {
+    const want = Buffer.byteLength(s.replace(/[\ud800-\udbff](?![\udc00-\udfff])/g, '\ufffd'), 'utf8');
+    assert.strictEqual(C.byteLength(s), want, JSON.stringify(s));
+  }
+});
+
+test('a log entry over the byte budget is trimmed even when its characters fit', () => {
+  // 2 × 40,000 CJK characters: 80,000 UTF-16 units but about 240 KB of UTF-8.
+  const text = '日'.repeat(40000);
+  const e = C.logEntry({ id: 'tx:3', by: 'Ada', at: 1, label: 'x', ops: [{ store: 'clips', id: 'c', before: { t: text }, after: { t: text + '!' }, label: 'x' }] });
+  assert.strictEqual(e.trimmed, true);
+  assert.ok(C.byteLength(JSON.stringify(e)) < 256 * 1024);
+});
+
 test('sha256 matches the reference implementation', () => {
   const crypto = require('node:crypto');
   for (const s of ['', 'abc', 'ä€𝄞 app(\'x\')', 'x'.repeat(1000), 'y'.repeat(55), 'z'.repeat(56)]) {

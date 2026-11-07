@@ -246,15 +246,29 @@
     return { mutate, recorder, revert, check, setZ: (z) => { zTop = Math.max(zTop, z || 0); } };
   }
 
+  // UTF-8 length of a string, as the store counts a document's size. core.js
+  // also runs in the actor, which has no TextEncoder.
+  function byteLength(str) {
+    let n = 0;
+    for (let i = 0; i < str.length; i++) {
+      const c = str.charCodeAt(i);
+      if (c < 0x80) n += 1;
+      else if (c < 0x800) n += 2;
+      else if (c >= 0xd800 && c <= 0xdbff && i + 1 < str.length && (str.charCodeAt(i + 1) & 0xfc00) === 0xdc00) { n += 4; i++; }
+      else n += 3;
+    }
+    return n;
+  }
+
   // The shared log entry for a transaction. Documents are at most 256 KiB, so
   // a transaction whose values do not fit keeps only which documents changed
   // (it can then not be reverted by others).
-  const MAX_LOG = 200000;
+  const MAX_LOG_BYTES = 200 * 1024;
   function logEntry(tx) {
     const ops = tx.ops.map(o => ({ store: o.store, id: o.id, before: o.before, after: o.after, label: o.label }));
     const e = { id: tx.id, by: tx.by, uid: tx.uid || null, at: tx.at, label: tx.label, ops, undone: !!tx.undone };
     if (tx.revertOf) e.revertOf = tx.revertOf;
-    if (JSON.stringify(e).length > MAX_LOG) {
+    if (byteLength(JSON.stringify(e)) > MAX_LOG_BYTES) {
       e.ops = ops.map(o => ({ store: o.store, id: o.id, label: o.label, trimmed: true }));
       e.trimmed = true;
     }
@@ -293,5 +307,5 @@
     return rows.slice(0, q.limit || rows.length);
   }
 
-  return { COLL, STORE_OF, LEVELS, atLeast, clone, same, canon, sha256, newId, seg, unseg, pathOf, parsePath, keysFor, fromClip, createCore, logEntry, describe, query };
+  return { COLL, STORE_OF, LEVELS, atLeast, clone, same, canon, sha256, byteLength, newId, seg, unseg, pathOf, parsePath, keysFor, fromClip, createCore, logEntry, describe, query };
 });
