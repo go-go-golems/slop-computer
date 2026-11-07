@@ -423,3 +423,75 @@ verify (SLOP3-013): 103 stores, 0 failing; free 200 ×95, paid 401 ×8 (sha-8e01
 stores: catalog (5), list (5), table (5), sheet (2), caps (2), zine (2), timeline/treemap/roulette/term/desktop (1); all @guest view
 feed:   107 entries; text/xml; history for tabula-workbench, lattice-deck, lattice-rift (3), lattice-phantasmagoria (2)
 ```
+
+## Step 6: View 4, the catalog for agents
+
+View 4 makes the catalog readable by programs. Three static files come from the builder: `llms.txt`, a flat `search-index.json`, and the feed from Step 5. An `/agents` page explains them. The fourth piece is a read-only MCP server, written as an express actor (#31's module) behind a mount API policy (#31's rate limiter and CORS). It is the first use of those features on production. The official Python MCP SDK connects to it there, and the agents page calls it from the browser through CORS.
+
+### Prompt Context
+**User prompt (verbatim):** see Step 5
+**Assistant interpretation:** View 4: llms.txt, search-index.json, a read-only MCP endpoint and an /agents page.
+**Inferred user intent:** Agents can find and use the catalog without scraping pages.
+**Commit (code):** `4bed408` — view 4; `2640087` — lint fix in its test
+
+### What I did
+- **`apps/catalog-mcp/`:** `app.json` (title and actor) and `actor.js`.
+  - `require('express').app()` with `app.post('/').public()` and `app.get('/').public()`; `require('./data/catalog.json')` loads the deployed catalog with the actor.
+  - JSON-RPC 2.0: `initialize` (picks the client's version among 2025-06-18, 2025-03-26 and 2024-11-05, otherwise the newest), `ping`, `tools/list` (annotations `readOnlyHint: true`, `openWorldHint: false`) and `tools/call`.
+  - Four tools: `search_apps` (query, tag, capability, free_only, limit ≤ 50), `get_app` (full record with absolute links to the HTML, viewer, cover and attachments, plus release history), `list_tags`, `list_capabilities`.
+  - Batches answer each request. Notifications get `202` with an empty body. An unknown method gets `-32601`. An unknown app is a tool result with `isError: true`, as the protocol asks for tool failures.
+  - `GET` answers `405` with `Allow: POST` and a short description.
+- **`pkg/host/catalog_mcp_test.go` `TestCatalogMCPEndpoint`:** the store on a live mount with the deploy's API policy. It covers initialize, the notification, tools/list, search, get_app (found and not found), an unknown method, a batch, the CORS preflight from the allowed origin (`204`), a POST from the allowed origin (with `Access-Control-Allow-Origin`) and from another (without it), and the GET.
+- **Builder:**
+  - `llms.txt`: summary, "For agents" links, and one line per app with tags, runtime and access;
+  - `search-index.json`: flat records with a lower-case `text` field, 72 KB;
+  - `catalog.json` gains `"mcp"`.
+- **`apps/catalog-agents/`:** cards with copy buttons for the endpoint and files; connection snippets (`claude mcp add --transport http slop-catalog <url>`, an `mcpServers` JSON and `curl`); a console that runs `initialize` and `tools/list`, then calls the chosen tool with JSON arguments.
+- **`02-deploy.py`, rewritten around store records:** either host, wanted grants (default `@guest view`), policy cells, mount API policies (compared with `covers()`, since the server may add defaults) and `--only`. `catalog-mcp` goes to `apps.slop.yolo.scapegoat.dev/catalog/mcp` with routes `POST /` and `GET /`, `defaultMin: public`, `rateLimit {per: ip, limit: 60, window: 1m, burst: 120}` and `cors {origins: [site]}`.
+- **Deploy** (`various/deploy-2026-11-07c.txt`): `catalog` went to snapshot 6 (llms.txt, the search index and views.json). `catalog-agents` and `catalog-mcp` were created at snapshot 1.
+- **`scripts/04-mcp-check.py`:** a client on the official SDK.
+
+### Why
+- **The live host:** `mount.set` refuses an actor store on a static host (`catalog-mcp runs a live app (capabilities or an actor): mount it on a live host`). A public route on the live host needs no session.
+- **The catalog shipped with the actor, not read from the `catalog` store:** `require` of a tree JSON file is the simplest read with no binding or grant. A new catalog means a new snapshot of `catalog-mcp`, which rebuilds the actor.
+- **A rate limit on an open endpoint:** anyone can call it, and each call is an actor turn.
+- **CORS for one origin:** the agents page needs it, and the policy allows no wildcard.
+
+### What worked
+- `go test ./pkg/host -run TestCatalog` → both tests pass; `make lint` → `0 issues.` after the fix below.
+- **Production by `curl`:** `initialize` → 200 with `serverInfo.name: slop-catalog`. `search_apps {query: shader, limit: 3}` → total 14: `ds-shader-sketchbook, on-twos, no-shade`. `GET` → 405. The preflight from the site → `204` with `access-control-allow-origin: https://site.slop.yolo.scapegoat.dev`. `llms.txt` → 200 `text/plain`.
+- **Production with the official SDK** (`uvx --with mcp`, mcp 2.3.0): `server: slop-catalog 2025-06-18`; tools `search_apps, get_app, list_tags, list_capabilities`; `get_app weft` → `Weft free https://site.slop.yolo.scapegoat.dev/_s/weft/main/index.html`; `search_apps {capability: room}` → `mimeo-studio, mimeo, hypercore-studio, living-comic-studio, lattice-deck`.
+- **The agents page on production:** the console's `search_apps {query: game, limit: 3}` answered in 339 ms through CORS (`various/screenshots/20-agents-prod.png`).
+
+### What didn't work
+- **The first test mounted the endpoint on the static host** and `mount.set` refused it (quoted above). Moved to the live host.
+- **Lint:** `catalog_mcp_test.go:59:5: ineffectual assignment to out (ineffassign)`. Fixed in `2640087`. I committed `4bed408` before reading the lint output, which I should have read first.
+- **The SDK script needed three tries:** `streamablehttp_client` is now `streamable_http_client`, it yields two streams instead of three, and results use snake_case (`server_info`, `structured_content`). All three are SDK API changes, not server problems.
+- **My first browser check** waited for /connected/, which "not connected" also matches, so it read the status before the handshake. The tool call afterwards worked, and a second read showed the status line.
+
+### What I learned
+- A mount API policy's `defaultMin` is `view`, so public routes behind a policy need `defaultMin: "public"`, or every guest gets 404.
+- The CORS middleware answers preflights before the actor is built, so a preflight costs no turn.
+
+### What was tricky to build
+- **The `202`:** MCP wants an empty `202 Accepted` for a POST that holds only notifications. `res.status(202).end()` gives exactly that.
+
+### What warrants a second pair of eyes
+- **`get_app` returns absolute site URLs** built from a constant in `actor.js`. If the site host changes, the actor needs a new push.
+- **The rate limit counts per IP,** so agents behind one NAT share 60 calls per minute.
+
+### What should be done in the future
+- The site has no `favicon.ico` (404 on every page). Each page could link the slop favicon.
+
+### Code review instructions
+- `apps/catalog-mcp/actor.js`: `answer`, `TOOLS`, the two routes.
+- `pkg/host/catalog_mcp_test.go`.
+- `scripts/02-deploy.py`: the `catalog-mcp` record, `covers`, `main`.
+- Validate: `uvx --with mcp python -I scripts/04-mcp-check.py https://apps.slop.yolo.scapegoat.dev/catalog/mcp`, then open https://site.slop.yolo.scapegoat.dev/catalog/agents/ and call a tool.
+
+### Technical details
+```
+POST https://apps.slop.yolo.scapegoat.dev/catalog/mcp   (JSON-RPC; JSON answers; stateless)
+api policy: routes [POST /, GET /], defaultMin public, rateLimit ip 60/1m burst 120, cors [https://site.slop.yolo.scapegoat.dev]
+files: /catalog/llms.txt (28.8 KB) · /catalog/data/search-index.json (72 KB) · /catalog/data/feed.xml (73 KB)
+```
