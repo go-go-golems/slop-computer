@@ -27,3 +27,7 @@ Guide §6.12 rewritten: app CLI verbs use go-go-goja jsverbs (verbs/*.js with __
 ## 2026-11-07
 
 Design doc 02: migrating the actor VM to a go-go-goja engine runtime (difference table, six decisions, upstream U1-U4, phases, parity tests)
+
+## 2026-11-07
+
+Implementation: Pinboard phases 0-4 in PR #36, app verbs (slop on / slop pb, app.verb, MCP pb_* tools) in PR #37, actor VM phases 1-4 in PR #38 (engine behind actors.runtime; activation race fixed), go-go-goja#107 (U1-U4). Guide §13 and doc 02 §12 record where the implementation differs from the design; tasks checked with PR references.

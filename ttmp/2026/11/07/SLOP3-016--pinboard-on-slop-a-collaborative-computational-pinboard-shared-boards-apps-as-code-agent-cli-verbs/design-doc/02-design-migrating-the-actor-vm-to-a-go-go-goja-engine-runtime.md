@@ -343,3 +343,28 @@ U1 and U2 are small (options on the builder) and useful beyond slop: any host th
 - `pkg/jsverbs/runtime.go:48-70` — `InvokeInRuntime` (uses `Owner.Call` and `Require.Require`).
 
 **SLOP3-016:** `design-doc/01-…` §6.12 (app verbs with jsverbs), diary steps 3-4.
+
+## 12. As built (phases 0–4): where the implementation differs
+
+The code is in go-go-golems/go-go-goja#107 (U1–U4) and PR #38 (phases 1–4). The diary is `reference/02-diary-actor-vm-migration.md`. Differences from this design:
+
+- **D1, one host run per whole event.** One `host.Run` wraps the whole event, the store transaction (`store.Do`) included, not only the JavaScript. A turn's transaction therefore stays on the loop goroutine; only activation's setup crosses goroutines.
+- **D5, globals in `load`.** slop's globals are still installed in `load`, not by a runtime initializer. They close over the actor, which does not exist yet when the factory builds a runtime.
+- **D4/5.5, bridged modules.** `yaml`, `crypto` and `events` from go-go-goja and `buffer` from goja_nodejs are catalog modules of class data (`pkg/actor/bridge.go`).
+  - `crypto` returns Buffers, which goja_nodejs finds through `require('buffer')`, so slop's `require` answers `buffer`. There is still no global `Buffer`.
+  - A new `Module.Plain` flag hands `events` and `buffer` to the app unwrapped, so their constructors work. Their calls are therefore not metered. Only modules that need no grant may be plain.
+  - The four names are reserved: they resolve before an app's own files.
+- **Turn owner, as designed (D2).** A settlement from a module's own goroutine is refused and logged. Asynchronous go-go-goja modules stay unbridged until the owner can tell which event a settlement belongs to.
+- **Pre-existing race fixed on the way.** `kernel.activate` calls `OnActivated` after its turn, outside the store's serialization. A request that raced a background activation could build the actor, and the late `OnActivated` then stopped it. `onActivated` now stops only an actor of an older version (`pkg/actor/manager.go`). It had made `TestActorCrashPath` flaky in both modes.
+- **Dependency.** Until #107 is merged and tagged, `go.mod` replaces go-go-goja with the wesen fork at the PR's head. The release binary grows 1.8%.
+- **Measurements (phase 3):**
+  - per-entry overhead: 2.3 ns direct, 6.4 µs engine;
+  - empty action: 118–131 µs direct, 100–126 µs engine;
+  - action with one write: 310–331 µs direct, 338–409 µs engine;
+  - per live actor: 1 goroutine and ~30 KiB direct, 2 goroutines and ~48 KiB engine;
+  - an endless loop is interrupted at the turn limit in both modes.
+- **Phase 5 (jsverbs in actors) is not done.** App verbs run on the server through `app.verb` in a fresh runtime outside the actor (SLOP3-016 phase 5b), which MCP needed. Running them inside an actor turn remains optional.
+- **Phase 6 (engine by default) is blocked on:**
+  1. #107 merged and tagged;
+  2. the engine-mode CI job seen green;
+  3. a staging soak with `actors.runtime: engine`.

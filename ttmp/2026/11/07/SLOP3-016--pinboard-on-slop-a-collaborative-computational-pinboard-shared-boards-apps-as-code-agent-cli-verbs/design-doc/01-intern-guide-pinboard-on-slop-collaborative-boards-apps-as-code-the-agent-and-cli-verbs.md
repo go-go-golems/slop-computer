@@ -768,3 +768,41 @@ Phase 0 is deliberately small: it proves the app runs on slop and gives a baseli
 - `apps/upstream/pinup/src/02-store.js`, `09-collab.js`, `14-log.js` — the closest prior art.
 - `scripts/deploy-apps.sh` — how Pinup and Blocks are mounted with `createApp`.
 - SLOP3-014 (PR #34) — what a page learns about its visitors; SLOP3-015 — the catalog apps, the local-server testing method.
+
+## 13. As built (phases 0–5): where the implementation differs
+
+This guide was written before the implementation. The code is in PR #36 (phases 0–4) and PR #37 (phase 5), and the diary (`reference/01-diary.md`, steps 5–11) records each step. Where the two disagree, the code is right, and these are the differences:
+
+**Data model (6.3)**
+- **Records are flat:** `records/<id>` with a `coll` field, not `colls/<name>/rows/<id>`. A query over one collection is then a `docs.query` on `records` with `coll` in the `where`, and one subscription covers every collection's rows.
+- **Collection names are encoded as one path segment:** `colls/<seg(name)>`.
+- **Trust decisions are one document per person,** `data/users/<id>/trust`, rather than one per app.
+- **There is no `inbox/`.** The CLI and MCP reach the board through actor actions (`addClip`, `insert`, …), which write the clips and the log in one turn.
+- **The manifest has rules only for `board` and `apps`.** `log` takes the defaults, and `room` has no topic levels. `slop.verbs` is `{"alias": "pb", "include": ["verbs/*.js"], "title": "board/meta"}`. `title` is new: it names the document whose `title` field names a store, so the CLI can resolve `slop pb Kitchen` and a page can list boards by name.
+
+**Undo (6.4)**
+- **Collaborative undo** undoes my latest transaction, skipping each document that someone else changed after it (the page tracks when each document last changed remotely). The strict rule in 6.4 ("the document still holds the value the operation wrote") is applied by the Board log app's **revert**, which may undo anyone's step.
+- **Equality is canonical** (sorted keys), because the server returns documents with sorted keys.
+
+**"My boards" (6.9)**
+- **The runtime call** is `slop.stores.list({type, title})`, the view RPC `slop.stores`. Titles are read as the viewer, under the store's rules.
+- **The home page** is the `pinboard-home` app at `/boards`.
+
+**App verbs (6.12)**
+- **The CLI command is `slop on <store> …`,** because `slop app` is already the app-management group. `slop <alias> <id or title> …` is added once the CLI has seen the alias.
+- **The board is the command's second word, so verbs take no board argument.** `require("slop").board()` with no argument is that store, and naming another store throws.
+- **Each `__verb__` declares `parents` explicitly** (`parents: ["clip"]`). jsverbs would otherwise derive the parent from the file's directory, giving `verbs clip add`.
+- **The module is smaller than the contract in 6.12.** It has `id`, `title`, `type`, `app`, `via`, `call(action, args)`, `me()`, `meta()` and `docs.get/query/set/update/rm`. It does not have `level`, `docs.batch`, `assets` or `storage()`.
+- **`board().via`** is `cli`, `mcp` or `http`. Pinboard passes it to the actor, so the log says `bob (mcp)`.
+- **Field types are limited to plain values** (string, bool, int, float, the list types, choice, date). Types that make Glazed read files (`file`, `stringFromFile`, `objectFromFile`, `keyValue` with `@…`) are refused when the verbs are scanned, in the CLI and on the server alike. Otherwise:
+  - an app's verb could read one of the person's files in the CLI (as a default) and write it to the board;
+  - an MCP caller could name a server path.
+- **The remote invoker is `app.verb {store, verb, values, alias?}`.** It runs the verb in a fresh goja runtime on the server, not inside the actor's turn. Each module call goes through the verb table as the caller. It is limited to 30 s, and console output comes back as `logs`.
+- **MCP:**
+  - `app.tools` lists one tool per verb and app among the caller's visible stores (`pb_clip_add`, `store` required).
+  - tools/call routes only names that list contains, through `app.verb`.
+  - An alias equal to a verb group (`store`, `docs`, …) gets no tools.
+- **Not built:** the CLI does not show the app and snapshot the first time it runs verbs from it (6.12, Security).
+- **Dependency cost:** glazed's CLI glue adds about 9.5 MB to the release binary (vault API client, go-openapi/strfmt, mongo bson through go-pretty). tree-sitter is not linked.
+
+**Open:** M8 sharing options (board admins sharing, inviting a named person, link expiry), which need a decision. Phase 6.
