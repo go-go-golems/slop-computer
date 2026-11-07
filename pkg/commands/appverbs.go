@@ -39,8 +39,10 @@ const (
 	maxToolStores = 200 // stores app.tools looks at
 )
 
-// AppVerbTimeout bounds one app.verb.
-var AppVerbTimeout = 30 * time.Second
+// AppVerbTimeout bounds one app.verb, wall time: the verb's own JavaScript
+// and the calls it waits on. A verb that asks the board's agent waits for
+// the model (actor sample: up to 3 minutes), so this is longer than that.
+var AppVerbTimeout = 4 * time.Minute
 
 // AppVerbsIn is app.verbs's input.
 type AppVerbsIn struct {
