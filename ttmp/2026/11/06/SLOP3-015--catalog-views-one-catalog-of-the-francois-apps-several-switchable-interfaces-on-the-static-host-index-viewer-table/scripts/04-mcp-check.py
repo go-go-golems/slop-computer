@@ -5,7 +5,6 @@ from mcp import ClientSession
 from mcp.client.streamable_http import streamable_http_client
 
 async def main(url):
- 
     async with streamable_http_client(url) as (r, w):
         async with ClientSession(r, w) as s:
             init = await s.initialize()
