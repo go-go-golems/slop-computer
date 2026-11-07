@@ -306,7 +306,25 @@ func jsError(vm *goja.Runtime, err error) goja.Value {
 // unwrap turns a goja exception into its message, without the stack; an
 // error that carries a code (a server refusal the verb let escape, or one
 // it threw itself with .code) keeps it.
+//
+// Reading a thrown object (its code, message or toString) runs the verb's own
+// code again, outside any JavaScript frame: what that throws, or an interrupt
+// while it runs, would panic in the host. Such a value is reported as
+// unreadable instead.
 func unwrap(err error) error {
+	var out error
+	func() {
+		defer func() {
+			if r := recover(); r != nil {
+				out = errors.New("the verb threw a value that cannot be read")
+			}
+		}()
+		out = unwrapException(err)
+	}()
+	return out
+}
+
+func unwrapException(err error) error {
 	var ex *goja.Exception
 	if errors.As(err, &ex) {
 		if obj, ok := ex.Value().(*goja.Object); ok {

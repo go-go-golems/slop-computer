@@ -119,4 +119,4 @@ require (
 	gopkg.in/yaml.v2 v2.4.0 // indirect
 )
 
-replace github.com/go-go-golems/go-go-goja => github.com/wesen/go-go-goja v0.0.4-0.20261107193645-822e67c611a8
+replace github.com/go-go-golems/go-go-goja => github.com/wesen/go-go-goja v0.0.4-0.20261107231049-0d995b4b7706
