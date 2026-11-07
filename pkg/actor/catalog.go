@@ -65,6 +65,11 @@ type Module struct {
 	// Load builds the module's object for one actor with its decoded
 	// configuration (a pointer to a Config copy; nil when Config is nil).
 	Load func(s Setup) goja.Value
+	// Plain modules are given to the app as Load built them: their
+	// functions are not wrapped (and so not counted), which keeps
+	// constructors constructible. Only modules that need no grant may be
+	// plain: wrapping is also where a withdrawn grant takes effect.
+	Plain bool
 }
 
 // Setup is what a module's Load gets.
@@ -242,7 +247,7 @@ func (a *Actor) catalogModule(mod Module) goja.Value {
 	if v == nil {
 		v = goja.Null()
 	}
-	if obj, ok := v.(*goja.Object); ok {
+	if obj, ok := v.(*goja.Object); ok && (!mod.Plain || !mod.Class.Default()) {
 		a.intercept(mod, obj, map[*goja.Object]bool{})
 	}
 	if a.loaded == nil {
