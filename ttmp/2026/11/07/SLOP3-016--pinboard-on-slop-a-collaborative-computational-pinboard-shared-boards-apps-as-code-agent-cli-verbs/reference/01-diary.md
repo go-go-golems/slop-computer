@@ -433,3 +433,56 @@ Phase 1 makes a board shared in real time. The operations moved into `apps/pinbo
 ### Technical details
 - Log document: `{id, by, uid, at, label, ops: [{store, id, before, after, label}], undone, revertOf?, trimmed?, undoneBy?, undoneAt?}`.
 - Render keys: `clips`, `clips:<id>`, `records`, `records:<id>`, `coll:<name>`, `apps`, `apps:<name>`, `collections`, `log`.
+
+## Step 7: Phase 2, presence and per-viewer state
+
+Phase 2 shows who else is on a board and what they are doing, and separates per-viewer UI state from shared state. Images were already assets since phase 0.
+
+### Prompt Context
+**User prompt (verbatim):** (same as step 5)
+**Assistant interpretation:** Pinboard phase 2: presence, cursors, follow; `c.local`.
+**Inferred user intent:** Working together on a board should feel live: see others' cursors and selections, follow someone, and not fight over search boxes.
+**Commit (code):** `02737bc`
+
+### What I did
+- `js/presence.js`:
+  - presence object `{cursor, sel, view, drag}`, patched and flushed every 66 ms at most;
+  - cursors drawn in a layer inside the transformed canvas, scaled by `1/zoom` to keep their size;
+  - others' selections drawn as a `box-shadow` outline in their colour (survives `renderClip`, which resets `className` but not that style);
+  - others' drags move their clips on my screen with a short transition; when the drag ends the clip is re-rendered from `PB.S` (the drop's db write follows);
+  - names from `user.profiles(ids)` (cached), colour from the profile or a hash of the id;
+  - `#people` strip in the header; clicking a person follows their `view`; wheel or a click on the empty canvas stops following.
+- `board.js`: `applyView` emits `view`; a clip drag emits `drag` with world deltas while moving and `null` on release; `B.dragIds()`; notes are `contentEditable=false` below `interact`.
+- `c.local`: `ctx.local` (tracked as `local:<id>:<key>`), `ctx.setLocal`, `PB.local`/`PB.setLocal` in the store, `.local()` in the grammar (common to all builders), `keyGet`/`keySet` honour it. The built-in Collections, Moodboard and Reading apps keep `q`, `sel`, `tag` and `caption` there (36 replacements in their sources); the reference text explains shared versus local state.
+- `store.js`: `reread(path)` after a failed write, so `PB.S` shows what the board holds.
+- A wrapper `scratchpad/lslop` that always targets the local server (see "What didn't work").
+- Two-person check (Ada, Bob): Bob saw Ada's cursor at the right world position with her name, her selection outlined in her colour, her drag in progress (`left: 880px` for `x: 760, dx: 120`) and the clip back at 760 after the drag ended; Bob followed Ada to `{x: -300, y: -120, z: 0.75}`; Ada's moodboard search `red` stayed in `PB.local` on Ada's tab (`state: {}` shared, Bob's input empty). Screenshot `various/03-phase2-bob-follows-ada.png`.
+
+### Why
+- **Drags through presence, drops through the db.** A drag produces dozens of positions a second; writing them would churn the clip document and the log. Presence carries them, the drop writes once (risk 1 in the guide).
+- **`c.local` in memory only.** Persisting it would need a write per keystroke into the person's view document; a search box does not need to survive a reload.
+
+### What worked
+- `room.onPeers` delivers the full peer list on every change; drawing from the full list is simple and fast at board scale.
+
+### What didn't work
+- A push ran with the default login instead of the local one because `SLOP_CREDENTIALS` was set in an earlier shell, not this one: `Error: not_found: no store pinboard` came from the production server. Nothing was changed there (the store does not exist in production). Since then every local command goes through `scratchpad/lslop`, which sets the credentials and `--server http://slop.localhost:18300` itself.
+
+### What I learned
+- The runtime applies one's own presence locally at once and sends a patch; `null` deletes a key (`room.ts`), which is how `cursor` and `drag` are cleared.
+
+### What was tricky to build
+- **Outlines that survive re-rendering.** Windows are re-rendered on most changes and `renderClip` rewrites `className`. A style property that `renderClip` never touches (`box-shadow`) keeps the outline, and `draw()` runs again after every `change`/`mutation` to catch new windows.
+
+### What warrants a second pair of eyes
+- Presence is visible to everyone admitted to the board, guests included; it carries clip ids and coordinates, nothing else.
+- Built-in apps now behave differently for search and selection (local). An app written by someone else keeps using `c.state` unless its author switches.
+
+### What should be done in the future
+- Phase 3: apps by others, trust prompt, narrowed scope.
+
+### Code review instructions
+- `apps/pinboard/js/presence.js`; `git diff 2b4472f 02737bc -- apps/pinboard/js/{board,render,dsl,store}.js`.
+
+### Technical details
+- Presence patch example: `{"cursor":{"x":460,"y":308},"sel":["clip:…"],"view":{"x":-300,"y":-120,"z":0.75},"drag":{"ids":["clip:…"],"dx":120,"dy":40}}`.
