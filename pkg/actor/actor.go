@@ -449,7 +449,7 @@ func (a *Actor) turnFor(ctx context.Context, ev *event) {
 		} else if ev.parent == nil {
 			ctxObj = a.ctxObject(ev)
 		}
-		return a.limited("turn took longer than "+TurnLimit.String(), func() error {
+		return a.limited("turn took longer than "+a.m.turnLimit().String(), func() error {
 			v, err := ev.run(a, ctxObj)
 			if err != nil {
 				a.dropSavepoints()

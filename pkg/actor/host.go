@@ -64,10 +64,10 @@ func (a *Actor) enter(ctx context.Context, op string, fn func(vm *goja.Runtime) 
 	})
 }
 
-// limited runs fn under the turn limit: after TurnLimit the host interrupts
+// limited runs fn under the turn limit: after it the host interrupts
 // the JavaScript with reason. Call it inside enter.
 func (a *Actor) limited(reason string, fn func() error) error {
-	timer := time.AfterFunc(TurnLimit, func() { a.host.Interrupt(reason) })
+	timer := time.AfterFunc(a.m.turnLimit(), func() { a.host.Interrupt(reason) })
 	defer func() {
 		timer.Stop()
 		a.host.ClearInterrupt()

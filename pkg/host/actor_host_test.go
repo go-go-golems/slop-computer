@@ -11,8 +11,6 @@ import (
 	"sync"
 	"testing"
 	"time"
-
-	"github.com/go-go-golems/slop-computer/pkg/actor"
 )
 
 const hostActor = `
@@ -58,11 +56,8 @@ func (c *hostOps) get(op string) int {
 func TestActorHostEntries(t *testing.T) {
 	for _, handoff := range []bool{false, true} {
 		t.Run(fmt.Sprintf("handoff=%v", handoff), func(t *testing.T) {
-			old := actor.TurnLimit
-			actor.TurnLimit = 300 * time.Millisecond
-			t.Cleanup(func() { actor.TurnLimit = old })
-
 			h := newHarness(t)
+			h.a.TurnLimit = 300 * time.Millisecond
 			seen := &hostOps{ops: map[string]int{}}
 			h.a.Around = func(op string, run func() error) error {
 				seen.count(op)

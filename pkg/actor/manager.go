@@ -52,10 +52,22 @@ type Manager struct {
 	// "load", "setup" or "turn <kind>"); run does the work and must be
 	// called once. For tests and measurements; set it before actors start.
 	Around func(op string, run func() error) error
+	// TurnLimit, when set, replaces the package's TurnLimit for this
+	// manager's actors (tests: the package variable is read by every
+	// running actor, so changing it races). Set it before actors start.
+	TurnLimit time.Duration
 
 	provided map[string]func(*Actor) goja.Value // the door's capability bindings (Provide)
 	modules  map[string]Module                  // the catalog (Register; catalog.go)
 	calls    meters                             // module calls (catalog.go)
+}
+
+// turnLimit is how long one entry's JavaScript may run.
+func (m *Manager) turnLimit() time.Duration {
+	if m.TurnLimit > 0 {
+		return m.TurnLimit
+	}
+	return TurnLimit
 }
 
 // New makes the actor manager and hooks it into the kernel (activation,
