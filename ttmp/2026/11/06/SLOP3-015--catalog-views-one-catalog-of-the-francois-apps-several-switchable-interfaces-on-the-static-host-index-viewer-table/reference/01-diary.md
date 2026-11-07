@@ -260,3 +260,79 @@ views:  list (20/page) · table (50/page) · sheet (24/page desktop, 36 phone; M
 zine:   104 pages = cover + 3 contents (34/page) + 100 apps; 158×210 mm; 88.8 MB → 4.9 MB (gs /ebook, 150 dpi)
 caps:   sample 100 · downloads 18 · db 11 · user 7 · room 5; 9 combinations, sample-only 78
 ```
+
+## Step 4: Zine layouts to print and fold, and the second deploy
+
+The user asked for zine templates to print and fold: an 8-page zine from one sheet, and a 16-page booklet printed on both sides. Both are now layouts of the zine view. Each layout imposes the zine's pages onto landscape sheets, and the chosen apps are taken a part at a time. The user had merged the deploy PR #426, so once `sha-8e01dca` was running, the batch went to slop.yolo and was checked there. The source is in the repository on #35's branch, and the deploy only pushes those files.
+
+### Prompt Context
+**User prompt (verbatim):** "Add the ptions to output a 16 foldable zine or a 8 foldable zine template (you know to print out and fold, or print out two sided. for the zine version. Also, I merged #426 and closed al the rest." Then, during the deploy: "did you store the source in git as well?"
+**Assistant interpretation:** Two print layouts for the zine view (an 8-page single-sheet fold, a 16-page two-sided booklet), then deploy the batch now that the new image is out.
+**Inferred user intent:** Paper zines of the catalog to print at home, and the views live.
+**Commit (code):** `31295b9` — zine layouts; `f047016` — deploy log
+
+### What I did
+- **`apps/catalog-zine/index.html`, rewritten around a layout choice:**
+  - `pages`: as before.
+  - `fold8`: one landscape A4 or Letter side, a 4×2 grid. Pages 5 4 3 2 run across the top, turned 180°, and 6 7 8 1 across the bottom. Fold lines are dashed and the cut between the middle panels is a solid line marked ✂. Pages are drawn at twice their printed size, so A4's 74.25×105 mm panel holds a 148.5×210 mm page at `scale(.5)`. A `.mini` class sets larger type and drops the version, size and tags.
+  - `booklet16`: sheet *s* has pages n−2s | 2s+1 on the front and 2s+2 | n−2s−1 on the back, two half-sheet pages per landscape side, with a fold line and a "sheet k front/back" label.
+  - `zinePages()`: page 1 is a cover with "Part k of K", then the part's apps (6 or 14), then blank pages to fill a short part, then a back cover listing the apps by page number with the catalog URL.
+  - The screen shows the folding steps for the chosen layout. `?layout=`, `?part=` and `?size=` stay in the address, and the paper list shrinks to A4 and Letter for the folding layouts.
+- **Checked locally**, with PDFs through Playwright's `page.pdf({preferCSSPageSize: true})`:
+  - `fold8` for `#game` part 1: one A4 landscape page (841.92×594.96 pt). The cover says "6 of 7 … Part 1 of 2".
+  - `booklet16` part 2: 8 A4 landscape pages. Sheet 1 front is 16 | 1, back 2 | 15; sheet 2 front 14 | 3, back 4 | 13.
+- **Deploy:**
+  - `kubectl -n slop get pods` showed `sha-8e01dca` running.
+  - `01-build-catalog.py` (same counts) and `02-deploy.py`: the dry run, then `--apply` (`various/deploy-2026-11-07.txt`). `catalog`, `catalog-list` and `catalog-table` went to snapshot 4. `catalog-sheet`, `catalog-caps` and `catalog-zine` were created, granted `@guest view`, mounted and pushed to snapshot 1. A rerun printed `up to date` six times.
+- **Production checks in Playwright:**
+  - all six pages and `views.json` answer 200;
+  - the sheet shows "8 running" with 24 tiles;
+  - Ctrl K "latice" finds Lattice Deck, Lattice Rift, Lattice Arena and Lattice Arcade, and Enter opens `?open=lattice-deck`;
+  - `fold8` has 8 slots and 17 parts;
+  - the landing page has five view cards.
+- **PDFs from production**, compressed with Ghostscript `/ebook`, are in `scratchpad/zine-pdfs/`:
+  - `remarkable`, 104 pages, 4.9 MB;
+  - `fold8-part1`, 123 KB;
+  - `booklet16-part1`, 521 KB.
+
+  The reMarkable one is uploaded to `/ai/2026/11/07/slop-catalog-zine-remarkable`.
+
+### Why
+- **Imposition in the page rather than relying on the print dialog's booklet option:** browsers have no booklet printing, and the 8-page fold needs the upside-down top row, which no print dialog offers.
+- **Pages drawn at twice size in `fold8`:** the same `appPage` builder serves every layout, and only the type scale changes.
+- **Parts rather than an n-page booklet:** 8 and 16 are what the user asked for, a single sheet or four sheets, and a part is a page-sized slice anyone can pick with `?part=`.
+
+### What worked
+- **The 8-page order** (`11-zine-fold8-game-part1.png`): after folding along the long side, the cover leaf is panels 1/2, the end leaf 5/6, and the cut middle panels pair 3/4 (top) and 7/8 (bottom), so pages run 1–8.
+- **The booklet** (`12-zine-booklet16-part2-sheets1-2.png`) follows the saddle-stitch order above.
+- **Production** answered as listed in What I did. `go test ./pkg/host -run TestCatalogViews` → `ok`.
+
+### What didn't work
+- Nothing failed in this step. The fold has been checked only on screen and in the PDF, not on paper.
+
+### What I learned
+- Chromium's `page.pdf` honours `@page { size }` per document only, so each layout writes its own `@page` rule into `<style id="paper">` when it renders.
+
+### What was tricky to build
+- **The upside-down panels:** `transform: translate(w, h) rotate(180deg) scale(.5)` with `transform-origin: 0 0`. The transforms apply right to left: scaled at the origin, turned to occupy (−w, −h)…(0, 0), then moved back into the cell.
+
+### What warrants a second pair of eyes
+- **Duplex:** the booklet assumes "flip on the short edge" for landscape pages. A printer set to the long edge prints every back side upside down.
+- **Print scaling:** the folding layouts have no margins, so a printer that cannot print to the edge clips about 3–5 mm at the borders. The type sits inside 11–13 mm of padding (5.5–6.5 mm at the 8-page scale).
+
+### What should be done in the future
+- Print one of each on paper and fold it.
+- Thumbnails for covers would cut the PDF size before compression.
+
+### Code review instructions
+- `apps/catalog-zine/index.html`: `zinePages`, `slot`, `fold8`, `booklet`, `render`.
+- Open https://site.slop.yolo.scapegoat.dev/catalog/zine/?layout=fold8&tag=game and `?layout=booklet16`, and print to PDF (landscape, no margins).
+
+### Technical details
+```
+stores: catalog, catalog-list, catalog-table (snapshot 4); catalog-sheet, catalog-caps, catalog-zine (snapshot 1); all @guest view
+mounts: site.slop.yolo.scapegoat.dev /catalog{,/list,/table,/sheet,/caps,/zine}
+kit:    views.js?v=3b402fa0396f
+fold8:  A4 landscape, panel 74.25×105 mm, page 148.5×210 mm at 0.5; order 5 4 3 2 (180°) / 6 7 8 1
+book16: sheet s: front 16-2s | 2s+1, back 2s+2 | 15-2s
+```
