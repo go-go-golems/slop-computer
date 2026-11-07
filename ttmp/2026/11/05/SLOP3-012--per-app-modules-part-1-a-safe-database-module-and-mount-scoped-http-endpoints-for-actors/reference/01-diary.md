@@ -747,3 +747,60 @@ I wrote the vault report on part 2 myself instead of delegating it, because the 
   - the turn rule is in `slop-v3.md` §6.3, not §6.5;
   - the draft said `internal/archtest` forbids `pkg/actor` from importing `pkg/policy`. It does not: `policy` is a domain, which the runtime may import. The hook exists for decoupling, and the note now says that.
 - The mermaid diagrams were not rendered (no mermaid CLI here).
+
+## Step 11: Fixing the Codex review of #32
+
+Codex's automatic review of #32 left three findings. Each was real. For the first two I reproduced the failure with a new test before fixing it; the third test could only fail after the first fix let it run. All three fixes are small. The broken-cache finding is the one that changes behaviour beyond its module: `RestartApp` now also forgets the app's cached build failures.
+
+### Prompt Context
+**User prompt (verbatim):** "tackle comment on https://github.com/go-go-golems/slop-computer/pull/32"
+**Assistant interpretation:** Address the open Codex review comments on #32: fix them, test them, push, and reply.
+**Inferred user intent:** Clear #32's review so it can be merged.
+**Commit (code):** fcdc778 — "SLOP3-012 part 2: fixes for the Codex review of #32"
+
+### What I did
+- Read the PR's comments (`gh pr view 32`, `gh api …/pulls/32/comments`). There were three P2 inline findings:
+  1. `pkg/actor/memfs.go:261`: rename onto itself breaks the byte count;
+  2. `pkg/actor/catalog.go:239`: a cached build failure is not cleared when the grant is repaired;
+  3. `pkg/actor/memfs.go:499`: `o.Get("buffer").Export()` on nil.
+- **Tests first:**
+  - `fs_module_test.go` gained `selfRename` (three `renameSync('/big','/big')` with the 100-byte quota full, then a 1-byte write → must be `ENOSPC`) and `badData` (`writeFileSync` with a plain object, `appendFileSync` with an array, `await writeFile` with an object → each `invalid_argument`, caught; no `/bad` file).
+  - `module_catalog_test.go`, after the stale-config failure: `app.trust database {}`, then `count` must return 2 with no `h.a.Restart`.
+- **Fixes:**
+  - `memFS.rename`: `if from == to { return nil }`, after the existence and root checks.
+  - `dataOf`: read `buffer` only when the property exists. Clamp `byteOffset`/`byteLength` against the buffer, and refuse any other object with `invalid_argument` ("data must be a string, ArrayBuffer or typed array") instead of writing `[object Object]`.
+  - `Manager.RestartApp`: also delete `m.broken` entries whose value starts with `app + "@"`. This covers its callers `app.trust`, `app.untrust` and `policy.set`.
+
+### Why
+- **Refuse plain objects:** writing `"[object Object]"` would have hidden a bug in the app. Node throws `ERR_INVALID_ARG_TYPE` in the same case.
+- **Clear the cache in `RestartApp`** rather than only in `app.trust`: every governance change that restarts an app can change whether its build succeeds (a policy can make `use()` return a module). One rule covers all three callers.
+
+### What worked
+- Before the fixes:
+  - `badData`: `500 … turn panicked: runtime error: invalid memory address or nil pointer dereference`;
+  - repair: `the actor is broken: … database's configuration has no field "gone"; an admin must grant it again`.
+- After the fixes: `go test ./pkg/host -run 'TestFSModule|TestModuleCatalog$'` → `ok`; the full suite passes; `make lint` → `0 issues.`
+- **Undo-each-fix check** (backup and restore from the same `$B` path this time):
+  - M1 (no early return): fails at `selfRename`;
+  - M2 (no nil check): fails with `turn panicked`;
+  - M3 (no cache clearing): fails at the repaired `count`.
+
+  Afterwards `grep -c "false &&\|; true {"` → 0 in both files, and the tests pass.
+
+### What didn't work
+- The self-rename test could not show its own failure at first: `badData` ran earlier in the same test and failed with the panic. It was confirmed by the undo check once the panic was fixed.
+
+### What I learned
+- `goja.Object.Get` returns nil for a missing property, not `undefined`. Any `.Export()` or `.ToInteger()` on an optional property needs a nil check.
+
+### What was tricky to build
+- **`m.broken` holds two kinds of entry,** build failures and crash breakers (three crashes a minute), both keyed `app@n: why`. Clearing them on `RestartApp` resets both, which is what an admin's restart of an app means: the next request builds a fresh actor.
+
+### What warrants a second pair of eyes
+- A store broken by a route policy (`routes.go:70`) is also in `m.broken`. After `RestartApp` its next request rebuilds and, if the policy is still invalid, breaks again with the same message. That costs one extra build.
+
+### What should be done in the future
+- N/A
+
+### Code review instructions
+- `pkg/actor/memfs.go` `rename` and `dataOf`; `pkg/actor/manager.go` `RestartApp`; the new cases in `pkg/host/fs_module_test.go` and `module_catalog_test.go`.
