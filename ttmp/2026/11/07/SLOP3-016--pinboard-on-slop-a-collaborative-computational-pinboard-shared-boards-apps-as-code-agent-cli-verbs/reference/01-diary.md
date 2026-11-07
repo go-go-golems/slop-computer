@@ -918,3 +918,92 @@ Phase 6a adds tools to actor `sample` (platform change M7). With them, Pinboard 
   // r = {text, model, usage}
   ```
 - A failed tool reaches the model as `{"error": "<code>: <message>"}` with `isError: true`.
+
+## Step 13: Phase 6b, apps written by other people run in a sandboxed frame
+
+Phase 6b closes the gap phase 3 left open. Until now, a board app written by someone else ran in the page's realm with a narrowed scope ("prevents accidents, not a determined author"). Now every app that is not built in runs in an iframe of its own, with an opaque origin and no network, and talks to the page only through a message port.
+
+### Prompt Context
+**User prompt (verbatim):** (same as step 5)
+**Assistant interpretation:** Phase 6's "iframe isolation for app windows" (guide §6.8, risk 4: "the narrowed scope is not isolation").
+**Inferred user intent:** Accepting someone's app on a shared board should risk only that board, not the person's account, model allowance or other stores.
+**Commit (code):** `fca8fd2`
+
+### What I did
+- **`js/frames.js`** (page side):
+  - Builds the frame document once. It fetches `style.css`, `js/frame.js`, `js/dsl.js` and `js/render.js` and inlines them under the meta CSP `default-src 'none'; script-src 'unsafe-inline' 'unsafe-eval'; style-src 'unsafe-inline'; img-src blob: data:`.
+  - One `<iframe sandbox="allow-scripts">` per window. On load it opens a `MessageChannel` and sends `init` (the app's source, the clip, a board snapshot, local state, selection, the log's top 50, me, theme) with the port.
+  - Sends a `sync` per animation frame on `change`, on `selection` and on theme changes.
+  - Handles `meta`, `error`, `toast`, `set` (own window only), `open`, `blob` (the page fetches the asset and posts the `Blob`) and `mutate`. The last is checked against `STEPS`: content ops only, a taken or malformed `clip:` id dropped, `setAttr` without `id`/`kind`/`app`, at most 500 ops. It is applied with `PB.mutate(…, 'app:<name>')`.
+- **`js/frame.js`** (inside):
+  - A stand-in `PB`: board copy, `clone`, `setState`/`setLocal`, `blobURL` (a placeholder until the bytes arrive), and a recorder for `mutate`. The recorder makes new `clip:`/`rec:` ids so the app gets them back.
+  - A narrowed `boardAPI` (Proxy; anything missing is refused by name), and `apps.def`/`apps.narrow`.
+  - Evaluates the source with the same `new Function` parameters as the page (`PB` undefined) and reports `meta`. It draws as `A.view` does, and redraws on sync and on local changes.
+- **`js/apps.js`:**
+  - `A.def` returns `framedDef(a)` for any app that is not built in: data only (record plus reported meta). It no longer evaluates.
+  - `A.view` sends framed apps to `PB.frames.view`.
+  - `registerSource` stores `w`, `h`, `state` and `params` in the record, and no longer caches the def it evaluated (see "What didn't work").
+  - `framedMeta` takes the frame's report and redraws that app's windows.
+  - The trust prompt and the reference text describe the frame.
+- **`js/board.js`:** for a framed window whose key (`app@sha256`) is unchanged, `renderClip` redraws only the strip, the side panel and the foot.
+- **`js/dsl.js`:** the `app()` builder moved here from `apps.js`, so the frame has it.
+- **`core.js`:** `insert` takes a fresh `rec:` id from the caller.
+- **`style.css`:** `.appframe`.
+- **Browser check** (local server, two Playwright contexts, signed in through `/auth/local` and then the live host's "Sign in"):
+  - As Ada I registered a `probe` app that reports what it can reach and opened it. The window has a `sandbox="allow-scripts"` iframe. Inside it:
+    `parent:blocked cookie:blocked PB:undefined origin:null clips:14 net:?`
+  - After "try network", `net:blocked`.
+  - `+1` twice: state `n: 2` in the page.
+  - "add note": a new clip, logged `app:probe (Ada Lovelace) · place clip:…`.
+  - A retitle and a state change kept the frame: a `window.__marker` set before them was still there.
+  - As Bob: the trust prompt showed, with no iframe. After he accepted, the same restrictions applied, and his note was logged `app:probe (Bob Builder)`.
+  - **Hostile messages**, sent by patching `MessagePort.prototype.postMessage` inside Ada's frame (Ada is admin, so the page would have obeyed):
+    - a `register` was refused with the toast "probe may not register", and no app was added;
+    - a `place` reusing an existing clip id made a new clip, and the original was intact;
+    - a `setAttr {kind: 'app', app: 'probe', tags}` changed only the tags.
+  - Screenshots `various/06-phase6-framed-app-ada.png` and `07-phase6-framed-app-bob.png`. All contexts were closed afterwards.
+- **Tests:** the 11 core node tests and the Pinboard host tests pass; `node --check` passes on every app file.
+
+### Why
+- **A frame is the only isolation a page has.** A same-realm app can always reach `window`, the runtime's view secret and the DOM. With `sandbox="allow-scripts"` and no `allow-same-origin`, the frame has an opaque origin: no cookies, no storage, no access to the page.
+- **The DSL and renderer run unchanged inside.** App code is closures over `c`, called by the renderer, so the renderer has to run where the closures live. A copy of the board plus messages keeps the app API synchronous, as it was.
+- **The page is the boundary, not the frame's runtime.** App code can reach `window.PB` and patch `MessagePort`, so `frame.js`'s recorder is a convenience. `frames.js`'s `STEPS` decides what happens.
+- **No evaluation in the page.** If `A.def` evaluated the source in the page to learn its params, the frame would be decoration. Size, params and state are stored as data with each version, and the frame reports the rest.
+
+### What worked
+- `dsl.js` and `render.js` ran inside the frame with no change other than moving the `app()` builder. Their dependencies on `PB` were a short list: `S`, `clone`, `mutate`, `setState`, `setLocal`, `local`, `toast`, `blobURL`, `isAssetRef`, `keyStop`, `nodeMenus`, `boardAPI`, `apps`, `agent`.
+- `MessageChannel` with the port in the first message: after that, the frame talks only to its own port, and the page never has to trust a `window` message from an opaque origin.
+
+### What didn't work
+- **The first browser run rendered the probe in the page,** with `origin: http://…sbx…`. `registerSource` had cached its in-page evaluation (`defs[def.name] = def`), and `A.def` returned it. It now deletes the cached def.
+- **The frame then showed** `Refused to evaluate a string as JavaScript because 'unsafe-eval' is not an allowed source of script…`. The app's source is evaluated with `new Function`, so the frame policy allows `'unsafe-eval'`. The isolation comes from the sandbox and `default-src 'none'`.
+- **`/pb/s-5povfcfc` on the main host is a 404.** The mount is on the live host (`apps.localhost`), which needs its own "Sign in" click after `/auth/local`.
+- **Playwright's `locator.click` timed out:** "element is outside of the viewport" (the window was off-canvas). I dispatched clicks inside the frame instead.
+- **A script declared `const page`** inside `run_code_unsafe`, whose argument is already `page` (`SyntaxError`).
+
+### What I learned
+- In an `about:srcdoc` frame, `location.origin` is the string `null`, and Playwright lists the frame as `about:blank`. `elementHandle.contentFrame()` reaches it.
+- `renderClip` redraws a whole window with `innerHTML` on any change to the clip. An iframe in the body would reload each time, hence the framed-window path in `board.js`.
+
+### What was tricky to build
+- **Ids across the boundary.** The app expects `m.place`/`m.insert`/`m.open` to return ids synchronously, so the frame makes them. The page accepts only a fresh, well-formed id, which needed `core.insert` to accept a caller's `rec:` id. `group` and `promote` return `null` in a frame.
+- **What a framed window may redraw.** The key is the app and its sha256, so a new version, or a change of trust, rebuilds the body (a new frame). Anything else keeps it.
+
+### What warrants a second pair of eyes
+- **Self-navigation.** `sandbox="allow-scripts"` cannot stop the frame from navigating itself (`location = 'https://…?data'`), and CSP has no `navigate-to`. An app could carry the board copy out that way. It is not an escalation: only board admins register apps, and they can read the board anyway. The copy holds no `data/users/*`.
+- **Each sync posts the whole board.** That is fine for tens of clips, but a big board with several framed windows would want diffs.
+- **`registerSource` still evaluates the source in the registering person's page,** to validate it (the editor and the page agent use its return value). That is the author's own code, or code they chose to paste.
+- **App menus and `agentDescribe`** of framed apps are not carried over: they are closures. A framed app's window has no app menu items, and the agent's `describe` shows it without a description.
+- **Local state (`c.local`) lives in the frame** and is lost when the frame reloads: on a new version, or when the window is pinned or unpinned, which re-parents it.
+
+### What should be done in the future
+- Diffs instead of whole snapshots; menus and `agentDescribe` over the port.
+- Ticket bookkeeping: phase 6 done; PR for this branch (stacked on #37).
+
+### Code review instructions
+- Start with `apps/pinboard/js/frames.js` (`STEPS`, `handle`, `connect`, `frameDoc`), then `js/frame.js`, the `A.def`/`A.view`/`registerSource` changes in `js/apps.js`, and `renderClip`/`frameKey` in `js/board.js`.
+- To try it: on a local server, register an app as one person, open it as another, check the trust prompt, then from the frame's console try `parent.document`, `fetch('/')` and `document.cookie`.
+
+### Technical details
+- Frame policy: `default-src 'none'; script-src 'unsafe-inline' 'unsafe-eval'; style-src 'unsafe-inline'; img-src blob: data:`.
+- Steps an app may send: `place, open, setAttr, insert, promote, move, resize, retitle, tag, untag, remove, group, ungroup, pin, close, setParam, setState, collection, update, removeRecord, demote`.
