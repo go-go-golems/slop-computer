@@ -3,43 +3,26 @@
   'use strict';
   const ui = PB.ui, el = PB.el;
 
-  // ---------- app builder ----------
-  const APP_METHODS = ['icon', 'title', 'about', 'shortcut', 'size', 'state', 'toolbar', 'view', 'side', 'menu', 'register', 'build', 'param', 'agent', 'hidden', 'order'];
-  function mkApp(def) {
-    const t = { _isApp: true, def: Object.freeze(Object.assign({}, def)) };
-    const next = (patch) => mkApp(Object.assign({}, def, patch));
-    const fns = {
-      icon: (v) => next({ icon: String(v) }), title: (v) => next({ title: String(v) }), about: (v) => next({ about: String(v) }), shortcut: (v) => next({ shortcut: String(v) }),
-      size: (w, h) => next({ w, h }), hidden: (v = true) => next({ hidden: v }), order: (n) => next({ order: n }),
-      state: (o) => { if (!o || typeof o !== 'object') throw new TypeError('app.state(object): initial state must be an object.'); return next({ state: Object.assign({}, def.state, o) }); },
-      toolbar: (b) => { need(b, 'toolbar'); return next({ toolbar: b }); }, view: (b) => { need(b, 'view'); return next({ view: b }); }, side: (b) => { need(b, 'side'); return next({ side: b }); },
-      menu: (items) => { if (!Array.isArray(items)) throw new TypeError('app.menu(items): an array of { label, run(c), when?, hint? } or "-"'); return next({ menu: [...(def.menu || []), ...items] }); },
-      build: () => def,
-      register: () => { if (PB.apps._capture) { PB.apps._capture.push(def); return def; } throw new Error('register() runs inside app source evaluated by the editor or the agent (apps.registerSource(src)).'); },
-    };
-    function need(b, what) { if (typeof b === 'function') throw new TypeError('app.' + what + '(builder): pass a builder, not a lambda. Build-time shaping goes through .map(b => …); runtime values through .bind(c => …) or lambdas in props.'); if (!b || !b._isBuilder) throw new TypeError('app.' + what + '(builder) wants a ui.* builder; got ' + typeof b + '.'); }
-    const paramAdd = (type) => (name, defv, opts = {}) => { if (!name) throw new Error('param needs a name'); const params = (def.params || []).filter(p => p.name !== name); params.push(Object.assign({ name: String(name), type, def: defv }, opts)); return next({ params }); };
-    const param = { slider: (n, d, o) => paramAdd('slider')(n, d, o), toggle: (n, d) => paramAdd('toggle')(n, !!d), select: (n, d, options) => paramAdd('select')(n, d, { options }), text: (n, d, o) => paramAdd('text')(n, d, o), number: (n, d, o) => paramAdd('number')(n, d, o) };
-    const agent = { describe: (fn) => next({ agentDescribe: fn }), allow: (arr) => next({ agentAllow: arr }), suggest: (arr) => next({ agentSuggest: arr }) };
-    return new Proxy(t, {
-      get(_, k) {
-        if (typeof k !== 'string') return undefined; if (k in t) return t[k]; if (fns[k]) return fns[k]; if (k === 'param') return param; if (k === 'agent') return agent;
-        if (['then', 'toJSON', 'constructor', 'valueOf', 'inspect', '$$typeof', 'nodeType', 'asymmetricMatch', 'length', 'toYAML'].includes(k)) return k === 'toYAML' ? () => PB.toYAML(def) : undefined;
-        const near = PB.nearest(k, APP_METHODS); throw new Error('app has no method "' + k + '".' + (near && near[0] <= 3 ? ' Did you mean "' + near[1] + '"?' : ' Methods: ' + APP_METHODS.join(', ') + '. Params: .param.slider/toggle/select/text/number. Agent: .agent.describe/allow/suggest.'));
-      }
-    });
-  }
-  PB.app = function (name) { if (!/^[a-z][a-z0-9_-]*$/i.test(String(name))) throw new Error('app(name): a name is one word of letters, digits, - or _; got ' + JSON.stringify(name)); return mkApp({ name: String(name), state: {}, params: [] }); };
+  // The app() builder is in dsl.js (the grammar), shared with app frames.
+
 
   // ---------- registry ----------
   const defs = {};
+  const framedMetas = {}; // name@sha256 → what the app's frame reported
+  // An app that runs in a frame, as this page knows it: data from its record
+  // (and from its frame once it reported), no code.
+  function framedDef(a) {
+    const m = framedMetas[a.name + '@' + (a.sha256 || a.version || 0)] || {};
+    const d = { name: a.name, framed: true, _narrow: true, record: a, icon: a.icon, title: a.title, about: a.about, w: a.w || 420, h: a.h || 320, params: a.params || [], state: a.state || {} };
+    Object.keys(m).forEach(k => { if (m[k] !== undefined) d[k] = m[k]; });
+    return d;
+  }
   const A = PB.apps = {
     _capture: null,
-    // App source is evaluated with the grammar and the board API. Apps that
-    // are not built in get a narrower scope: no PB (the page's internals),
-    // and at run time no agent and only open/list of apps (render.js). This
-    // prevents accidents, not a determined author: the code still runs in the
-    // page's realm. Isolation in a frame is a later phase.
+    // App source is evaluated with the grammar and the board API. Built-in
+    // apps run in this page. Every other app runs in a sandboxed frame of its
+    // own (frames.js, frame.js) and its source is never evaluated here, except
+    // by registerSource, which checks what the person registering wrote.
     evalSource(src, opts = {}) {
       const cap = []; const prev = A._capture; A._capture = cap;
       try {
@@ -58,10 +41,15 @@
       const old = PB.S.apps[def.name];
       const version = ((old && old !== PB.builtins[def.name] && old.version) || 0) + 1;
       const sha256 = PinboardCore.sha256(src), at = Date.now();
-      const rec = Object.assign({ name: def.name, source: src, icon: def.icon || '△', title: def.title || def.name, about: def.about || '', shortcut: def.shortcut || '', hidden: !!def.hidden, order: def.order, version, by: PB.myName(), uid: PB.myId(), at, sha256 }, extra);
+      // What the page needs without running the app (it runs in a frame):
+      // its size, params and initial state, as data.
+      const data = (v) => JSON.parse(JSON.stringify(v === undefined ? null : v));
+      const rec = Object.assign({ name: def.name, source: src, icon: def.icon || '△', title: def.title || def.name, about: def.about || '', shortcut: def.shortcut || '', hidden: !!def.hidden, order: def.order, version, by: PB.myName(), uid: PB.myId(), at, sha256,
+        w: def.w || 420, h: def.h || 320, state: data(def.state || {}), params: data((def.params || []).map(p => ({ name: p.name, type: p.type, def: p.def, options: p.options, min: p.min, max: p.max, step: p.step }))) }, extra);
       PB.mutate(m => m.register(rec), PB.actor);
       PB.saveVersion(def.name, version, { source: src, by: rec.by, uid: rec.uid, at, sha256, note: extra.note || '' });
-      defs[def.name] = def; return def;
+      // Not kept: the app runs from its record, in a frame (A.def).
+      delete defs[def.name]; return def;
     },
     // Built-in apps, and apps this person wrote, run without asking; any
     // other app runs only after this person accepted that exact source.
@@ -81,9 +69,18 @@
       if (defs[name]) return defs[name];
       const a = PB.S.apps[name]; if (!a) return null;
       if (!A.trusted(a)) return { name, untrusted: true, record: a, params: [], state: {}, icon: a.icon, title: a.title, w: 420, h: 320 };
-      const narrow = a !== PB.builtins[name];
-      try { defs[name] = A.evalSource(a.source, { narrow }); } catch (e) { defs[name] = { name, error: e, params: [], state: {}, icon: a.icon, title: a.title }; }
+      if (a !== PB.builtins[name]) return (defs[name] = framedDef(a));
+      try { defs[name] = A.evalSource(a.source); } catch (e) { defs[name] = { name, error: e, params: [], state: {}, icon: a.icon, title: a.title }; }
       return defs[name];
+    },
+    // What an app's frame reports once it has evaluated the source.
+    framedMeta(name, m) {
+      const a = PB.S.apps[name]; if (!a || !m || typeof m !== 'object') return;
+      const key = name + '@' + (a.sha256 || a.version || 0);
+      const clean = { w: Number(m.w) || undefined, h: Number(m.h) || undefined, state: m.state && typeof m.state === 'object' ? m.state : undefined, params: Array.isArray(m.params) ? m.params.slice(0, 40) : undefined };
+      if (JSON.stringify(framedMetas[key]) === JSON.stringify(clean)) return;
+      framedMetas[key] = clean; delete defs[name];
+      Object.values(PB.S.clips).filter(c => c.kind === 'app' && c.app === name).forEach(c => PB.board.renderClip(c.id));
     },
     narrow: Object.freeze({ open: (name, opts) => A.open(name, opts), list: () => A.list().map(a => ({ name: a.name, title: a.title, icon: a.icon, by: a.by, version: a.version })) }),
     invalidate(name) { if (name) delete defs[name]; else Object.keys(defs).forEach(k => delete defs[k]); },
@@ -108,6 +105,7 @@
       const root = el('div', 'appview');
       if (!def) { root.append(el('div', 'rerr', 'app "' + clip.app + '" is not registered. Open the editor to write it, or ⌘Z.')); return root; }
       if (def.untrusted) return trustPrompt(def.record, root);
+      if (def.framed) return PB.frames.view(clip, def);
       if (def.error) { root.append(el('div', 'fail', 'app ' + clip.app + ' failed to load: ' + def.error.message)); const b = el('button', 'btn sm', 'edit source'); b.addEventListener('click', () => A.edit(clip.app)); root.append(b); return root; }
       if (def.toolbar) { const tb = el('div', 'toolbar'); tb.append(PB.render(def.toolbar, ctx)); root.append(tb); }
       const main = el('div', 'appmain'); const body = el('div', 'scroll'); body.append(def.view ? PB.render(def.view, ctx) : el('div', 'empty padded', 'this app has no view')); main.append(body);
@@ -124,7 +122,7 @@
     const box = el('div', 'trust padded');
     box.append(
       el('p', '', (a.title || a.name) + (a.version ? ' v' + a.version : '') + ' was written by ' + (a.by || 'someone') + (a.at ? ', ' + PB.ago(a.at) : '') + '.'),
-      el('p', 'small muted', 'Apps run in your page as you: they can change this board and use your model allowance. Run it only if you trust ' + (a.by || 'its author') + '. You are asked again when it changes.'));
+      el('p', 'small muted', 'It runs in a frame of its own: it sees this board and can change it as you, but not your account, your model allowance or anything outside this board. Run it only if you trust ' + (a.by || 'its author') + ' with this board. You are asked again when it changes.'));
     const row = el('div', 'row');
     const run = el('button', 'btn primary sm', 'Run it'); run.addEventListener('click', () => A.trust(a.name));
     const src = el('button', 'btn sm', 'View source');
@@ -349,7 +347,7 @@
     "  .agent.describe(c => '…').agent.allow(['insert']).agent.suggest(['…'])",
     "  .register()",
     "```",
-    "Apps are kept as source on the board (apps/<name>, every version in apps/<name>/versions/<n> with its author and sha256) and re-evaluated at load. Only board admins register apps. Everyone else's app runs for a person only after they accept that version (a prompt in its window); built-in apps and your own run at once. Board apps get a narrower scope than built-ins: no `PB`, and in `c` no `agent()` and only `apps.open`/`apps.list`. `apps.open(name, { state, params })`, `apps.edit(name)`, `apps.registerSource(src)`, `apps.source(name)`, `apps.unregister(name)`, `apps.list()`.",
+    "Apps are kept as source on the board (apps/<name>, every version in apps/<name>/versions/<n> with its author and sha256) and re-evaluated at load. Only board admins register apps. Everyone else's app runs for a person only after they accept that version (a prompt in its window); built-in apps and your own run at once. Board apps run in a sandboxed frame of their own (no network, no access to this page): they get a copy of the board, kept current, and their changes are applied as `app:<name>` with your level on the board; `c` has no `agent()`, only `apps.open`/`apps.list`, and `board` only reads, `clip`, `open`, `mutate`, `toast` and `log`. `apps.open(name, { state, params })`, `apps.edit(name)`, `apps.registerSource(src)`, `apps.source(name)`, `apps.unregister(name)`, `apps.list()`.",
     "",
     "## Fragments",
     "`fragment('taggable').attr('tags', []).method('tag', (b, ...t) => b.set('tags', x => [...x, ...t])).query('hasTag', (node, t) => …).decorate(b => b.footer(…)).on('paste', (b, data) => …)`; use with `.use(taggable)`; `.global()` adds its methods to every builder. Every clip carries taggable, sourced, bound and annotated.",

@@ -186,7 +186,9 @@
       m.collection = (name, schema) => m.set('collections', name, old => Object.assign(old || { name, fields: [], indexes: [], store: 'db', version: 1 }, schema), 'collection ' + name);
       m.insert = function (coll, data) {
         if (!S.get('collections', coll)) m.collection(coll, { name: coll, fields: Object.keys(data || {}).map(k => ({ name: k, type: 'text' })) });
-        const id = mkId('rec'); const rec = Object.assign({}, data, { id, coll, added: (data && data.added) || now() });
+        // A caller may name a fresh id (an app frame, which needs it back at once).
+        const want = data && data.id, id = (typeof want === 'string' && /^rec:[a-z0-9]{10}$/.test(want) && !S.get('records', want)) ? want : mkId('rec');
+        const rec = Object.assign({}, data, { id, coll, added: (data && data.added) || now() });
         m.set('records', id, () => rec, 'insert ' + coll); return id;
       };
       m.update = (coll, id, patch) => m.set('records', id, r => { if (!r) throw new Error('no record ' + id); return Object.assign(r, typeof patch === 'function' ? patch(r) : patch); }, 'update ' + coll + '/' + id);

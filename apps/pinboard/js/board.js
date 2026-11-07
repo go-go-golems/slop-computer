@@ -87,9 +87,27 @@
     else if (drag && drag.kind === 'clips' && drag.moved && drag.ids.includes(id)) { e.style.width = c.w + 'px'; e.style.height = c.h + 'px'; e.style.zIndex = c.z || 1; if (e.parentNode !== $canvas) $canvas.append(e); }
     else { e.style.left = c.x + 'px'; e.style.top = c.y + 'px'; e.style.width = c.w + 'px'; e.style.height = c.h + 'px'; e.style.zIndex = c.z || 1; if (e.parentNode !== $canvas) $canvas.append(e); }
     const ctx = w.ctx = PB.makeCtx(c);
-    PB.rerender(e, () => { e.innerHTML = ''; e.append(strip(c, ctx), bodyWrap(c, ctx), foot(c, ctx), el('div', 'rz')); });
+    const fk = frameKey(c);
+    const bw = fk && w.fk === fk ? e.querySelector(':scope > .bodywrap') : null;
+    if (bw && bw.querySelector('.appframe')) {
+      // An app in a frame: drawing the body again would reload the frame, so
+      // only the strip, the side panel and the foot are drawn again.
+      e.querySelector(':scope > .strip').replaceWith(strip(c, ctx));
+      const f = e.querySelector(':scope > .foot'); if (f) f.replaceWith(foot(c, ctx));
+      [...bw.children].forEach(ch => { if (!ch.classList.contains('body')) ch.remove(); });
+      if (c.side) bw.append(sidePanel(c, ctx));
+    } else {
+      PB.rerender(e, () => { e.innerHTML = ''; e.append(strip(c, ctx), bodyWrap(c, ctx), foot(c, ctx), el('div', 'rz')); });
+      w.fk = fk;
+    }
     w.deps = ctx.deps;
   };
+  // The frame an app window shows: its app and version (null for anything else).
+  function frameKey(c) {
+    if (c.kind !== 'app') return null;
+    const d = PB.apps.def(c.app); if (!d || !d.framed) return null;
+    const a = PB.S.apps[c.app]; return c.app + '@' + (a && (a.sha256 || a.version));
+  }
   function strip(c, ctx) {
     const s = el('div', 'strip');
     const g = el('span', 'glyph', GLYPH[c.kind] || '▢'); if (c.kind === 'app' && PB.apps.def(c.app)) g.textContent = PB.apps.def(c.app).icon || '△';

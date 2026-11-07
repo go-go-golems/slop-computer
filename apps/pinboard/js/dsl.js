@@ -296,4 +296,32 @@
     }
   });
   PB.actor = 'you';
+
+  // ---------- app builder (shared by the page and app frames) ----------
+  const APP_METHODS = ['icon', 'title', 'about', 'shortcut', 'size', 'state', 'toolbar', 'view', 'side', 'menu', 'register', 'build', 'param', 'agent', 'hidden', 'order'];
+  function mkApp(def) {
+    const t = { _isApp: true, def: Object.freeze(Object.assign({}, def)) };
+    const next = (patch) => mkApp(Object.assign({}, def, patch));
+    const fns = {
+      icon: (v) => next({ icon: String(v) }), title: (v) => next({ title: String(v) }), about: (v) => next({ about: String(v) }), shortcut: (v) => next({ shortcut: String(v) }),
+      size: (w, h) => next({ w, h }), hidden: (v = true) => next({ hidden: v }), order: (n) => next({ order: n }),
+      state: (o) => { if (!o || typeof o !== 'object') throw new TypeError('app.state(object): initial state must be an object.'); return next({ state: Object.assign({}, def.state, o) }); },
+      toolbar: (b) => { need(b, 'toolbar'); return next({ toolbar: b }); }, view: (b) => { need(b, 'view'); return next({ view: b }); }, side: (b) => { need(b, 'side'); return next({ side: b }); },
+      menu: (items) => { if (!Array.isArray(items)) throw new TypeError('app.menu(items): an array of { label, run(c), when?, hint? } or "-"'); return next({ menu: [...(def.menu || []), ...items] }); },
+      build: () => def,
+      register: () => { if (PB.apps._capture) { PB.apps._capture.push(def); return def; } throw new Error('register() runs inside app source evaluated by the editor or the agent (apps.registerSource(src)).'); },
+    };
+    function need(b, what) { if (typeof b === 'function') throw new TypeError('app.' + what + '(builder): pass a builder, not a lambda. Build-time shaping goes through .map(b => …); runtime values through .bind(c => …) or lambdas in props.'); if (!b || !b._isBuilder) throw new TypeError('app.' + what + '(builder) wants a ui.* builder; got ' + typeof b + '.'); }
+    const paramAdd = (type) => (name, defv, opts = {}) => { if (!name) throw new Error('param needs a name'); const params = (def.params || []).filter(p => p.name !== name); params.push(Object.assign({ name: String(name), type, def: defv }, opts)); return next({ params }); };
+    const param = { slider: (n, d, o) => paramAdd('slider')(n, d, o), toggle: (n, d) => paramAdd('toggle')(n, !!d), select: (n, d, options) => paramAdd('select')(n, d, { options }), text: (n, d, o) => paramAdd('text')(n, d, o), number: (n, d, o) => paramAdd('number')(n, d, o) };
+    const agent = { describe: (fn) => next({ agentDescribe: fn }), allow: (arr) => next({ agentAllow: arr }), suggest: (arr) => next({ agentSuggest: arr }) };
+    return new Proxy(t, {
+      get(_, k) {
+        if (typeof k !== 'string') return undefined; if (k in t) return t[k]; if (fns[k]) return fns[k]; if (k === 'param') return param; if (k === 'agent') return agent;
+        if (['then', 'toJSON', 'constructor', 'valueOf', 'inspect', '$$typeof', 'nodeType', 'asymmetricMatch', 'length', 'toYAML'].includes(k)) return k === 'toYAML' ? () => PB.toYAML(def) : undefined;
+        const near = PB.nearest(k, APP_METHODS); throw new Error('app has no method "' + k + '".' + (near && near[0] <= 3 ? ' Did you mean "' + near[1] + '"?' : ' Methods: ' + APP_METHODS.join(', ') + '. Params: .param.slider/toggle/select/text/number. Agent: .agent.describe/allow/suggest.'));
+      }
+    });
+  }
+  PB.app = function (name) { if (!/^[a-z][a-z0-9_-]*$/i.test(String(name))) throw new Error('app(name): a name is one word of letters, digits, - or _; got ' + JSON.stringify(name)); return mkApp({ name: String(name), state: {}, params: [] }); };
 })(window.PB);
