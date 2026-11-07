@@ -336,3 +336,90 @@ kit:    views.js?v=3b402fa0396f
 fold8:  A4 landscape, panel 74.25×105 mm, page 148.5×210 mm at 0.5; order 5 4 3 2 (180°) / 6 7 8 1
 book16: sheet s: front 16-2s | 2s+1, back 2s+2 | 15-2s
 ```
+
+## Step 5: Production checks after #31–#34, and the remaining static views
+
+This step starts the batch the user approved: all the remaining static views, then views 4 (agents), 14 (shelf) and 15 (curator). First came the production checks promised once `sha-8e01dca` was running. The SLOP3-013 verifier passes again. The module and privacy checks are covered by the live apps of this batch rather than by throwaway probe stores. Then five static views: timeline with an Atom feed, a size treemap, roulette, a text terminal and a desktop. All five are deployed and checked on slop.yolo.
+
+### Prompt Context
+**User prompt (verbatim):** "go ahead.  all the static pages, and then also 4. 14. 15. commit at appropriate intervals and keep a detailed diary as you work (using the diary format from the skill)."
+**Assistant interpretation:** Build views 8, 9, 10, 11 and 13 as static pages, then 4, 14 and 15 on the live host; run the post-deploy checks first.
+**Inferred user intent:** The whole list from the moldandyeast study, live on slop.yolo.
+**Commit (code):** `37b95ef` (merge of main into the branch, for #31's modules); `4fe3ea9` — timeline + feed, sizes, roulette, terminal, desktop
+
+### What I did
+- **Merged `origin/main` into the branch** (a plain merge, no force push), so the branch has #31's `database`, `express` and `fs` modules and their tests.
+- **SLOP3-013 verifier on `sha-8e01dca`:** `04-verify.py inventory-2026-11-06.json https://apps.slop.yolo.scapegoat.dev` → `103 stores, 0 failing; anonymous view status: {('free', 200): 95, ('paid', 401): 8}`.
+- **Builder:**
+  - `--history <inventory.json>` reads SLOP3-013's francois inventory, a file in the repository, and adds `releases` (published only, newest first, with changelog) to each item.
+  - `atom()` writes `feed.xml`: one entry per release, `tag:` ids, links to the viewer and to the app, the changelog or else the description as summary, tags as categories.
+  - Result: 96 apps with one release, 3 with three, 1 with two; 107 entries; `xmllint --noout` passes.
+  - Production has no `francois/<ver>` refs (SLOP3-013 skipped history), which is why the inventory file is the source.
+- **Kit:**
+  - `live(box, item, device)`: a scaled sandboxed preview in any box, the cover for paid apps, and a `stop()`.
+  - `related(item, items)`: tag Jaccard plus a quarter of capability Jaccard.
+  - The view switcher scrolls sideways, since there are now ten views.
+- **`catalog-timeline`:** a stacked bar per day (new app in ink, update in accent) linking to the day, then days with releases by time, changelogs as quotes, a "Subscribe · Atom feed" button and `<link rel="alternate" type="application/atom+xml">`.
+- **`catalog-treemap`:** a squarified layout (Bruls, Huizing and van Wijk). Area is HTML bytes; shade is the number of capabilities; hatching marks subscriber apps. It can group by capabilities, first tag or access, and shows a tooltip, a legend, and the largest and smallest app.
+- **`catalog-roulette`:** one or two random apps running (`live`), a "Like X" row (the 4 most related apps) and "…but different" (the 3 least related). The picks stay in `?a=&b=`. Space spins. "Free only" is on by default. Frames stop while the viewer is open.
+- **`catalog-term`:** the commands `help ls grep find cat open run tags caps du new random cd whoami history clear`. Tab completes commands, ids, tags, capabilities and views; ↑↓ walk the history; Ctrl L clears; links in the output are clickable; `?cmd=` runs a command on load.
+- **`catalog-desktop`:**
+  - Icons (All apps, Games, Studios, Read me, and the 10 newest free apps).
+  - Explorer windows with a filter.
+  - Windows that drag by the title bar, resize from the corner, and minimize, maximize and close; a double click maximizes.
+  - A Start menu with fuzzy search, a taskbar with a clock, and `?w=` remembering the open windows.
+  - At most 5 app windows run. Older ones pause with "click to run", and minimized ones stop.
+  - While dragging, `.busy` turns off pointer events on the iframes.
+- Registered all five in `VIEWS`, `STORES`, `03-devserve.py` and `TestCatalogViewsOnStaticHost`.
+- **Deploy** (`various/deploy-2026-11-07b.txt`): the six existing stores were pushed again (kit and data changed). Five new stores were created, granted and mounted; a rerun planned nothing.
+
+### Why
+- **The inventory as the history source, not new refs on production:** SLOP3-013 decided not to import history into the stores. The inventory is a read-only file already in the repository.
+- **The feed built at build time:** the static host can serve it, and it changes only when the catalog does.
+- **One `live()` helper:** roulette and the desktop need the same scaled frame the sheet and the viewer use. Keeping it in the kit keeps the storage shim and the sandbox flags in one place.
+
+### What worked
+- **Local** (`03-devserve.py`, Playwright, no page errors):
+  - the timeline shows "100 apps, 7 updates, over 7 days" with 10 bars and 5 changelogs;
+  - the flat treemap has 100 cells covering 100 % of the area, and grouped by capabilities it has 9 groups;
+  - roulette started at `?a=weft` with one frame and 7 picks, and "Two" gave `?a=weft&b=thought-machines`;
+  - the terminal ran `ls game` (7), `caps`, `cat lattice-deck` with its changelog, and `du 3`, and Tab turned `cat lat` into `cat lattice-`;
+  - on the desktop, two icons opened two running windows, a title-bar drag moved one, and Start → "tabula" → Enter opened Tabula Workbench as a fourth window; the address became `?w=claude-computer,shop-next,tabula-workbench`.
+- **Production** (Playwright):
+  - all five pages answer 200 and render (7 days, 100 cells, a card, the terminal, a window), with no page errors;
+  - `term/?cmd=caps` prints the capability bars;
+  - `/catalog/data/feed.xml` answers 200 as `text/xml`.
+- `go test ./pkg/host` → `ok`; `make lint` → `0 issues.`
+
+### What didn't work
+- **The terminal printed its class names** ("hiweftdim sample"): `print` flattened its parts with `.flat()`, which also flattened the `[class, text]` pairs. Fixed by making styled spans objects (`S(c, t, f)`) and flattening with `flat(Infinity)`. A small script rewrote each `["dim", …]` to `S("dim", …)`, closing each call with a parenthesis instead of a bracket, and `node --check` passed on the extracted script.
+- **One `make lint` run** failed with `cmd/slop/main.go:1: error obtaining VCS status: exit status 128`. `git status` was clean, and the next two runs reported `0 issues`. Not investigated further.
+
+### What I learned
+- **Béton Brut Studio is the smallest app at 20 KB.** That fits Step 3's finding that its HTML loads four scripts its store does not hold.
+- Release activity peaks on Oct 23–24 (the import days on slop.boutique), and only 7 of the 107 releases are updates.
+
+### What was tricky to build
+- **Pointer capture over iframes on the desktop:** an iframe under the pointer swallows `pointermove`, so the desktop takes the `busy` class during a drag, and also while the viewer is open.
+- **The squarified layout's row flush:** a row becomes a column on the left when the remaining rectangle is wider than tall, and a row on top otherwise. Each flush shrinks the rectangle on that side.
+
+### What warrants a second pair of eyes
+- **The desktop can run five previews at once.** Heavy apps (several MB) can still load a laptop.
+- **The feed is served as `text/xml`** by the static host's type table rather than `application/atom+xml`. Feed readers accept it.
+
+### What should be done in the future
+- The header switcher holds ten views now and scrolls; a "More" menu may read better.
+- Views 4, 14 and 15 next (Step 6 on).
+
+### Code review instructions
+- `scripts/01-build-catalog.py`: `history`, `atom`.
+- `apps/catalog/kit/views.js`: `live`, `related`.
+- The five `apps/catalog-*/index.html`; in the treemap, `squarify`; on the desktop, `win`, `drag` and `budget`.
+- Check: https://site.slop.yolo.scapegoat.dev/catalog/timeline/, `…/treemap/?group=caps`, `…/roulette/`, `…/term/?cmd=cat%20weft`, `…/desktop/`, and `…/data/feed.xml` in a feed reader.
+
+### Technical details
+```
+verify (SLOP3-013): 103 stores, 0 failing; free 200 ×95, paid 401 ×8 (sha-8e01dca)
+stores: catalog (5), list (5), table (5), sheet (2), caps (2), zine (2), timeline/treemap/roulette/term/desktop (1); all @guest view
+feed:   107 entries; text/xml; history for tabula-workbench, lattice-deck, lattice-rift (3), lattice-phantasmagoria (2)
+```
