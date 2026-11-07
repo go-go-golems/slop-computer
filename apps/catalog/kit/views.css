@@ -42,6 +42,30 @@ button, input, select { font: inherit; color: inherit; }
 .cv-search { margin-left: auto; width: min(320px, 40vw); border: 1px solid var(--line); background: var(--panel); border-radius: 8px; padding: 6px 10px; font-size: 14px; }
 .cv-search:focus { outline: 2px solid var(--accent); outline-offset: -1px; }
 
+.cv-kbd { border: 1px solid var(--line); background: var(--panel); border-radius: 6px; padding: 3px 8px; font: 12px var(--mono); color: var(--muted); cursor: pointer; white-space: nowrap; }
+.cv-kbd:hover { border-color: var(--ink); color: var(--ink); }
+
+/* the command palette */
+.cv-palette { position: fixed; inset: 0; z-index: 30; background: rgba(0, 0, 0, .35); display: grid; justify-items: center; align-items: start; padding: 12vh 16px 16px; }
+.cv-pbox { width: min(640px, 100%); background: var(--panel); border: 1px solid var(--line); border-radius: 12px; box-shadow: var(--shadow); overflow: hidden; display: flex; flex-direction: column; max-height: 70vh; }
+.cv-pinput { border: 0; border-bottom: 1px solid var(--line); background: transparent; padding: 14px 16px; font-size: 17px; outline: none; }
+.cv-plist { list-style: none; margin: 0; padding: 6px; overflow: auto; }
+.cv-plist li { display: flex; align-items: baseline; gap: 10px; padding: 7px 10px; border-radius: 8px; cursor: pointer; min-width: 0; }
+.cv-plist li[aria-selected="true"] { background: var(--chip); }
+.cv-plist .k { font: 11px var(--mono); color: var(--muted); width: 74px; flex: none; text-transform: uppercase; letter-spacing: .04em; }
+.cv-plist b { font-weight: 600; white-space: nowrap; }
+.cv-plist .h { color: var(--muted); font-size: 14px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; min-width: 0; }
+.cv-pfoot { padding: 8px 16px; border-top: 1px solid var(--line); }
+
+/* the pager */
+.cv-pager { display: flex; flex-wrap: wrap; align-items: center; gap: 4px; margin: 14px 0; }
+.cv-pager button { min-width: 34px; border: 1px solid var(--line); background: var(--panel); border-radius: 6px; padding: 3px 9px; font-size: 14px; cursor: pointer; }
+.cv-pager button:hover:not(:disabled) { border-color: var(--ink); }
+.cv-pager button:disabled { opacity: .4; cursor: default; }
+.cv-pager button[aria-current="page"] { background: var(--ink); color: var(--bg); border-color: var(--ink); }
+.cv-pager .gap { color: var(--muted); padding: 0 4px; }
+.cv-pager .cv-meta { margin-left: 8px; }
+
 /* shared bits */
 .cv-hero { padding: 48px 0 20px; }
 .cv-hero h1 { font-size: clamp(28px, 4.4vw, 52px); line-height: 1.05; letter-spacing: -.02em; margin: 0 0 12px; font-weight: 650; max-width: 22ch; }
@@ -84,4 +108,5 @@ button, input, select { font: inherit; color: inherit; }
   .cv-info { border-left: 0; border-top: 1px solid var(--line); max-height: 45vh; }
   .cv-head .wrap { gap: 10px; }
   .cv-brand small { display: none; }
+  .cv-kbd { display: none; }
 }

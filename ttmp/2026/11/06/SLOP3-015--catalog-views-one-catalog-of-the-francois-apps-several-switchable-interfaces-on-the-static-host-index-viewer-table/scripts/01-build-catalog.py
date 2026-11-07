@@ -28,6 +28,12 @@ VIEWS = [
     {"id": "list", "title": "Index", "path": "/catalog/list/", "blurb": "Rows with covers, sort, tag filter and search."},
     {"id": "table", "title": "Table", "path": "/catalog/table/",
      "blurb": "Every app as a row: capabilities, access, version, date and size, sortable."},
+    {"id": "sheet", "title": "Sheet", "path": "/catalog/sheet/",
+     "blurb": "A contact sheet of live previews: the free apps run while they are on screen."},
+    {"id": "caps", "title": "Capabilities", "path": "/catalog/caps/",
+     "blurb": "The apps by what they ask of slop's runtime: model, documents, rooms, identity, downloads."},
+    {"id": "zine", "title": "Zine", "path": "/catalog/zine/",
+     "blurb": "One printed page per app, sized for the reMarkable, A5, A4 or Letter."},
 ]
 
 

@@ -1,0 +1,160 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Zine — slop catalog</title>
+<link rel="stylesheet" href="/catalog/kit/views.css">
+<style id="paper"></style>
+<style>
+  /* Pages are sized in millimetres (--pw × --ph, set from the paper choice)
+     so the screen shows what the printer gets. */
+  :root { --pw: 158mm; --ph: 210mm; }
+  .bar { display: flex; flex-wrap: wrap; gap: 10px 16px; align-items: center; margin: 24px 0 18px; }
+  .bar h1 { font-size: 24px; margin: 0; letter-spacing: -.01em; }
+  .bar .sp { flex: 1; }
+  .bar select { border: 1px solid var(--line); background: var(--panel); border-radius: 8px; padding: 4px 8px; font-size: 14px; }
+  .pages { display: flex; flex-direction: column; align-items: center; gap: 24px; padding-bottom: 24px; }
+  .page { width: var(--pw); height: var(--ph); background: #fff; color: #111; box-shadow: var(--shadow); position: relative; overflow: hidden;
+          padding: 14mm 13mm 16mm; display: flex; flex-direction: column; font: 10.5pt/1.45 Georgia, "Times New Roman", serif; }
+  .page .folio { position: absolute; left: 13mm; right: 13mm; bottom: 7mm; display: flex; justify-content: space-between; font: 7.5pt var(--mono); color: #666; }
+  .page h2 { font: 700 21pt/1.08 var(--sans); letter-spacing: -.02em; margin: 0 0 3mm; }
+  .page .desc { margin: 0 0 4mm; font-size: 11pt; }
+  .page .art { flex: 1 1 auto; min-height: 0; margin: 0 0 4mm; border: .3mm solid #ccc; display: flex; align-items: center; justify-content: center; overflow: hidden; background: #f3f3f0; }
+  .page .art img { width: 100%; height: 100%; object-fit: contain; display: block; }
+  .page .art .cv-mono { width: 100%; height: 100%; font: 700 54pt var(--sans); background: #f3f3f0; color: #999; }
+  .page dl { display: grid; grid-template-columns: auto 1fr; gap: 1mm 5mm; margin: 0 0 3mm; font: 8.5pt/1.4 var(--sans); }
+  .page dt { color: #666; }
+  .page dd { margin: 0; }
+  .page .url { font: 8.5pt var(--mono); word-break: break-all; }
+  .page .tags { font: 8pt var(--mono); color: #555; }
+  .page .paid { font: 700 7.5pt var(--mono); letter-spacing: .08em; text-transform: uppercase; border: .3mm solid #111; padding: 0 1.5mm; vertical-align: middle; margin-left: 2mm; }
+  .cover { justify-content: flex-end; padding-bottom: 24mm; }
+  .cover .kicker { font: 9pt var(--mono); letter-spacing: .08em; text-transform: uppercase; color: #666; }
+  .cover h2 { font-size: 40pt; margin: 3mm 0 5mm; }
+  .cover p { font-size: 12pt; max-width: 110mm; margin: 0 0 3mm; }
+  .toc h2 { font-size: 15pt; }
+  .toc ol { list-style: none; margin: 0; padding: 0; font: 9pt/1.5 var(--sans); }
+  .toc li { display: flex; gap: 2mm; }
+  .toc li span.t { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  .toc li i { flex: 1; border-bottom: .3mm dotted #aaa; margin-bottom: 1.2mm; }
+  .toc li b { font-family: var(--mono); font-weight: 400; }
+  @media screen and (max-width: 640px) { .pages { zoom: .55; } }
+  @media print {
+    body { background: #fff; }
+    #head, .bar, .cv-foot { display: none !important; }
+    .wrap { max-width: none; padding: 0; }
+    .pages { display: block; padding: 0; }
+    .page { box-shadow: none; break-after: page; margin: 0; }
+  }
+</style>
+</head>
+<body>
+<div id="head"></div>
+<main class="wrap">
+  <div class="bar">
+    <h1 id="count">Zine</h1>
+    <span class="cv-meta" id="status"></span>
+    <span class="sp"></span>
+    <label class="cv-meta">Paper
+      <select id="size" aria-label="Paper">
+        <option value="remarkable">reMarkable (158 × 210 mm)</option>
+        <option value="a5">A5</option>
+        <option value="a4">A4</option>
+        <option value="letter">Letter</option>
+      </select>
+    </label>
+    <button class="cv-btn primary" type="button" id="print">Print or save as PDF</button>
+  </div>
+  <section class="pages" id="pages" aria-label="Pages"><p class="cv-empty">Loading the catalog…</p></section>
+</main>
+<footer class="cv-foot"><div class="wrap">One page per app, in the order of the index. Search or <code>?tag=</code> narrows the zine before printing; <code>?size=a4</code> picks the paper.</div></footer>
+<script src="/catalog/kit/views.js"></script>
+<script>
+(async () => {
+  const { el, bytes, date, monogram, matches } = SlopCatalog;
+  await SlopCatalog.header(document.querySelector("#head"), "zine");
+  const { catalog } = await SlopCatalog.load();
+  const PAPER = { remarkable: ["158mm", "210mm"], a5: ["148mm", "210mm"], a4: ["210mm", "297mm"], letter: ["8.5in", "11in"] };
+  const PER_TOC = 34; // contents lines per page
+  const params = new URLSearchParams(location.search);
+  const state = { size: PAPER[params.get("size")] ? params.get("size") : "remarkable", q: params.get("q") || "", tag: params.get("tag") || "" };
+
+  function keep(k, v) {
+    const u = new URL(location.href);
+    if (v) u.searchParams.set(k, v); else u.searchParams.delete(k);
+    history.replaceState(history.state, "", u);
+  }
+  function paper() {
+    const [w, h] = PAPER[state.size];
+    document.documentElement.style.setProperty("--pw", w);
+    document.documentElement.style.setProperty("--ph", h);
+    document.querySelector("#paper").textContent = `@page { size: ${w} ${h}; margin: 0; }`;
+  }
+  const size = document.querySelector("#size");
+  size.value = state.size;
+  size.onchange = () => { state.size = size.value; keep("size", state.size === "remarkable" ? "" : state.size); paper(); };
+  window.addEventListener("catalog:search", (e) => { state.q = e.detail.query; render(); });
+
+  const host = (u) => u.replace(/^https?:\/\//, "");
+  const folio = (n, label) => el("div", { class: "folio" }, el("span", {}, label), el("span", {}, n));
+
+  function appPage(item, n) {
+    return el("article", { class: "page", id: "p-" + item.id },
+      el("h2", {}, item.title, item.free ? null : el("span", { class: "paid" }, "subscribers")),
+      el("p", { class: "desc" }, item.description),
+      el("div", { class: "art" }, item.cover ? el("img", { src: item.cover.src, alt: "", loading: "lazy", decoding: "async" }) : monogram(item)),
+      el("dl", {},
+        el("dt", {}, "Open"), el("dd", { class: "url" }, host(item.open)),
+        el("dt", {}, "Runtime"), el("dd", {}, item.capabilities.join(", ") || "none"),
+        el("dt", {}, "Version"), el("dd", {}, (item.version || "") + (item.publishedAt ? " · " + date(item.publishedAt) : "")),
+        el("dt", {}, "Size"), el("dd", {}, bytes(item.bytes) + " of HTML" +
+          (item.attachments.length ? " · " + item.attachments.length + " attachment" + (item.attachments.length > 1 ? "s" : "") : "")),
+        el("dt", {}, "Access"), el("dd", {}, item.free ? "free; preview and download on the catalog" : "for subscribers")),
+      el("div", { class: "tags" }, item.tags.map((t) => "#" + t).join("  ")),
+      folio(n, "slop catalog"));
+  }
+
+  function render() {
+    const items = catalog.items.filter((i) => (!state.tag || i.tags.includes(state.tag)) && matches(i, state.q));
+    const tocPages = Math.max(1, Math.ceil(items.length / PER_TOC));
+    const first = 2 + tocPages; // page number of the first app
+    const title = state.tag ? "#" + state.tag : state.q ? "“" + state.q + "”" : "Every app";
+    document.querySelector("#count").textContent = `Zine · ${items.length} apps · ${items.length + 1 + tocPages} pages`;
+    const pages = [el("article", { class: "page cover" },
+      el("div", { class: "kicker" }, "slop catalog · " + date(catalog.generated)),
+      el("h2", {}, title),
+      el("p", {}, `${items.length} single-file HTML apps from slop.boutique, running on slop at ${host(catalog.appsOrigin)}.`),
+      el("p", {}, "One page per app: what it is, what it asks of the runtime, and where to open it."),
+      folio(1, host(location.origin) + location.pathname))];
+    for (let t = 0; t < tocPages; t++) {
+      const part = items.slice(t * PER_TOC, (t + 1) * PER_TOC);
+      pages.push(el("article", { class: "page toc" },
+        t === 0 ? el("h2", {}, "Contents") : null,
+        el("ol", {}, part.map((item, i) => el("li", {},
+          el("span", { class: "t" }, item.title), el("i"), el("b", {}, first + t * PER_TOC + i)))),
+        folio(2 + t, "contents")));
+    }
+    items.forEach((item, i) => pages.push(appPage(item, first + i)));
+    document.querySelector("#pages").replaceChildren(...(items.length ? pages : [el("p", { class: "cv-empty" }, "Nothing matches.")]));
+  }
+
+  // Covers load lazily on screen; printing needs all of them first.
+  async function ready() {
+    const imgs = [...document.querySelectorAll(".page img")];
+    imgs.forEach((i) => { i.loading = "eager"; });
+    const st = document.querySelector("#status");
+    let done = 0;
+    await Promise.all(imgs.map((i) => (i.complete ? Promise.resolve() : new Promise((r) => { i.onload = i.onerror = r; }))
+      .then(() => { st.textContent = `covers ${++done}/${imgs.length}`; })));
+    st.textContent = "";
+    document.documentElement.dataset.zineReady = "1";
+  }
+  document.querySelector("#print").onclick = async () => { await ready(); window.print(); };
+  window.SlopZine = { ready };
+  paper();
+  render();
+})();
+</script>
+</body>
+</html>

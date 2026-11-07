@@ -22,6 +22,9 @@ STORES = [  # store, source dir in the repo, mount path, extra files from the da
     ("catalog", "apps/catalog", "/catalog", {"data/catalog.json": "catalog.json", "data/views.json": "views.json"}),
     ("catalog-list", "apps/catalog-list", "/catalog/list", {}),
     ("catalog-table", "apps/catalog-table", "/catalog/table", {}),
+    ("catalog-sheet", "apps/catalog-sheet", "/catalog/sheet", {}),
+    ("catalog-caps", "apps/catalog-caps", "/catalog/caps", {}),
+    ("catalog-zine", "apps/catalog-zine", "/catalog/zine", {}),
 ]
 
 

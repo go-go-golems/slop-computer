@@ -43,13 +43,16 @@
     </label>
     <div class="tagbar" id="tags" role="group" aria-label="Filter by tag"></div>
   </div>
+  <div id="pgt"></div>
   <section class="rows" id="rows" aria-label="Apps"><p class="cv-empty">Loading the catalog…</p></section>
+  <div id="pgb"></div>
 </main>
 <footer class="cv-foot"><div class="wrap">Views over <a href="/catalog/data/catalog.json">one catalog</a>. Press / to search.</div></footer>
 <script src="/catalog/kit/views.js"></script>
 <script>
 (async () => {
-  const { el, bytes, monogram, matches } = SlopCatalog;
+  const { el, bytes, monogram, matches, paged } = SlopCatalog;
+  const PER_PAGE = 20;
   await SlopCatalog.header(document.querySelector("#head"), "list");
   const { catalog } = await SlopCatalog.load();
   SlopCatalog.viewer.bind(catalog);
@@ -63,8 +66,8 @@
   };
   const sort = document.querySelector("#sort");
   sort.value = state.sort;
-  sort.onchange = () => { state.sort = sort.value; keep("sort", state.sort === "new" ? "" : state.sort); render(); };
-  window.addEventListener("catalog:search", (e) => { state.q = e.detail.query; render(); });
+  sort.onchange = () => { state.sort = sort.value; keep("sort", state.sort === "new" ? "" : state.sort); paged.reset(); render(); };
+  window.addEventListener("catalog:search", (e) => { state.q = e.detail.query; paged.reset(); render(); });
 
   function keep(k, v) {
     const u = new URL(location.href);
@@ -76,7 +79,7 @@
     const top = state.allTags ? catalog.tags : catalog.tags.slice(0, 14);
     const btn = (tag, label, n) => el("button", {
       type: "button", "aria-pressed": state.tag === tag ? "true" : "false",
-      onclick: () => { state.tag = state.tag === tag ? "" : tag; keep("tag", state.tag); render(); },
+      onclick: () => { state.tag = state.tag === tag ? "" : tag; keep("tag", state.tag); paged.reset(); render(); },
     }, label, n != null ? el("small", {}, n) : null);
     const list = [btn("", "All", catalog.count), ...top.map((t) => btn(t.tag, t.tag, t.count))];
     if (state.tag && !top.some((t) => t.tag === state.tag)) list.push(btn(state.tag, state.tag, null));
@@ -107,7 +110,8 @@
       .filter((i) => matches(i, state.q))
       .sort(sorters[state.sort] || sorters.new);
     const rows = document.querySelector("#rows");
-    rows.replaceChildren(...(items.length ? items.map(row) : [el("p", { class: "cv-empty" }, "Nothing matches.")]));
+    const page = paged(items, PER_PAGE, [document.querySelector("#pgt"), document.querySelector("#pgb")], render);
+    rows.replaceChildren(...(items.length ? page.map(row) : [el("p", { class: "cv-empty" }, "Nothing matches.")]));
   }
   render();
 })();

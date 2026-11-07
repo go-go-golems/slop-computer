@@ -1,10 +1,11 @@
-"""Local preview of the catalog views: /catalog/list/ and /catalog/table/ from
-their app dirs, /catalog/ from apps/catalog plus the built data dir, and
+"""Local preview of the catalog views: /catalog/<view>/ from
+apps/catalog-<view>, /catalog/ from apps/catalog plus the built data dir, and
 /_d/ and /_s/ proxied (GET) to the production static host."""
 import http.server, sys, os, urllib.request, mimetypes
 REPO, DATA, PORT = sys.argv[1], sys.argv[2], int(sys.argv[3])
 UP = "https://site.slop.yolo.scapegoat.dev"
-MOUNTS = [("/catalog/list", os.path.join(REPO, "apps/catalog-list")), ("/catalog/table", os.path.join(REPO, "apps/catalog-table")),
+VIEWS = ["list", "table", "sheet", "caps", "zine"]
+MOUNTS = [("/catalog/" + v, os.path.join(REPO, "apps/catalog-" + v)) for v in VIEWS] + [
           ("/catalog/data", DATA), ("/catalog", os.path.join(REPO, "apps/catalog"))]
 class H(http.server.BaseHTTPRequestHandler):
     def do_GET(self):
