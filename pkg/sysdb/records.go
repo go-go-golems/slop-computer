@@ -5,6 +5,8 @@ package sysdb
 // nesting of audiences. Each domain owns its queries; these are the shapes
 // they share.
 
+import "strings"
+
 const (
 	RolePending  = "pending"
 	RoleMember   = "member"
@@ -109,6 +111,12 @@ func GroupsOf(audience string) []string {
 		return []string{"store"}
 	}
 	return nil
+}
+
+// ValidGroup reports whether group (with or without its "@") is a person
+// group or "store".
+func ValidGroup(group string) bool {
+	return GroupsOf(strings.TrimPrefix(group, "@")) != nil
 }
 
 // InGroup reports whether an audience's groups include group (with or

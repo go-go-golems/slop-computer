@@ -61,6 +61,8 @@ type Door struct {
 	follow  sysFollower
 	samples samples
 	rooms   *caproom.Rooms
+	// limiter holds the rate-limit buckets of API mounts (ratelimit.go).
+	limiter rateLimiter
 }
 
 // New fills in d's state, follows the system log and the kernel's commits,
@@ -121,6 +123,7 @@ func (s *Door) ServeSandbox(w http.ResponseWriter, r *http.Request) { s.serveSan
 // view is checked again (comps and subscription periods that ended).
 func (s *Door) Tick(ctx context.Context, now time.Time) {
 	s.rt.views.Sweep(now)
+	s.limiter.sweep(now)
 	s.ReviewAll(ctx)
 }
 

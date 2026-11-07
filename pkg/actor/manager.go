@@ -21,6 +21,7 @@ import (
 	"github.com/go-go-golems/slop-computer/pkg/kernel"
 	"github.com/go-go-golems/slop-computer/pkg/llm"
 	"github.com/go-go-golems/slop-computer/pkg/policy"
+	"github.com/go-go-golems/slop-computer/pkg/registry"
 	"github.com/go-go-golems/slop-computer/pkg/rt"
 	"github.com/go-go-golems/slop-computer/pkg/store"
 )
@@ -42,14 +43,15 @@ type Manager struct {
 	logs   map[string][]LogLine
 
 	// Hooks provided by the host.
-	Policy  func(app, capability, audience string) bool
-	LLM     llm.Backend // the sample backend (nil: no LLM)
-	Secret  func(ctx context.Context, app, name string) (string, error)
-	Paths   Paths                                              // the db paths outside the store (aliases, _stores); nil: the store's own only
-	Trusted func(ctx context.Context, app, module string) bool // app.trust
+	Policy func(app, capability, audience string) bool
+	LLM    llm.Backend // the sample backend (nil: no LLM)
+	Secret func(ctx context.Context, app, name string) (string, error)
+	Paths  Paths                                                       // the db paths outside the store (aliases, _stores); nil: the store's own only
+	Grant  func(ctx context.Context, app, module string) (Grant, bool) // app.trust: an app's grant of a catalog module
 
 	provided map[string]func(*Actor) goja.Value // the door's capability bindings (Provide)
-	modules  map[string]Module                  // the registry (Register)
+	modules  map[string]Module                  // the catalog (Register; catalog.go)
+	calls    meters                             // module calls (catalog.go)
 }
 
 // New makes the actor manager and hooks it into the kernel (activation,
@@ -60,6 +62,7 @@ func New(k *kernel.Kernel) *Manager {
 	k.OnActivated = m.onActivated
 	k.Subscribe(m.onCommit)
 	m.followSystem()
+	m.registerBuiltins()
 	return m
 }
 
@@ -182,7 +185,7 @@ func (m *Manager) get(ctx context.Context, id string) (*Actor, bool, error) {
 	if err != nil {
 		return nil, false, err
 	}
-	a, err := build(m, st, r, files)
+	a, err := build(ctx, m, st, r, files, true)
 	m.mu.Lock()
 	if m.gen != gen {
 		m.mu.Unlock()
@@ -254,6 +257,14 @@ func (m *Manager) RestartApp(app string) {
 		if a.run.App == app {
 			delete(m.actors, id)
 			close(a.stop)
+		}
+	}
+	// A failed build is cached per store (m.broken, keyed app@n). The
+	// changes that restart an app (a grant, its configuration, a policy)
+	// can make that build succeed, so the next request builds again.
+	for id, why := range m.broken {
+		if strings.HasPrefix(why, app+"@") {
+			delete(m.broken, id)
 		}
 	}
 }
@@ -388,7 +399,7 @@ func (m *Manager) activate(ctx context.Context, t *store.Turn, r kernel.Running)
 	if err != nil {
 		return err
 	}
-	a, err := build(m, st, r, files)
+	a, err := build(ctx, m, st, r, files, true)
 	if err != nil {
 		return err
 	}
@@ -398,6 +409,8 @@ func (m *Manager) activate(ctx context.Context, t *store.Turn, r kernel.Running)
 	ev := &event{kind: "setup", visitor: m.storeVisitor(ctx, r.Store), via: "activate"}
 	a.cur = &turn{t: t, ev: ev, rev: t.Rev - 1}
 	defer func() { a.cur = nil }()
+	defer a.dropSavepoints() // after a failed hook; closeSavepoints ran otherwise
+	defer a.fs.end(false)    // likewise for the fs module (a no-op after end(true))
 	cx := a.ctxObject(ev)
 	for _, name := range []string{"setup", "smoke"} {
 		f := a.fn(name, "")
@@ -421,6 +434,8 @@ func (m *Manager) activate(ctx context.Context, t *store.Turn, r kernel.Running)
 			}
 		}
 	}
+	a.closeSavepoints() // a handle setup or smoke left open rolls back
+	a.fs.end(true)
 	// Recurring alarms from every: add new ones, update changed specs,
 	// drop those the version no longer declares.
 	declared := map[string]bool{}
@@ -569,7 +584,9 @@ type Route struct {
 
 // MatchRoute finds the actor route for a method and path (below the
 // mount). ok is false when the store has no actor or no route matches.
-func (m *Manager) MatchRoute(ctx context.Context, storeID, method, p string) (*Actor, Route, bool) {
+// With a mount's API policy, only the route keys its allowlist covers are
+// candidates (SLOP3-012): a request can never reach any other key.
+func (m *Manager) MatchRoute(ctx context.Context, storeID, method, p string, api *registry.MountAPI) (*Actor, Route, bool) {
 	a, err := m.Get(ctx, storeID)
 	if err != nil || a == nil {
 		return nil, Route{}, false
@@ -581,7 +598,10 @@ func (m *Manager) MatchRoute(ctx context.Context, storeID, method, p string) (*A
 		if !ok || (meth != method && meth != "*" && (meth != "GET" || method != "HEAD")) {
 			continue
 		}
-		params, score, ok := matchPattern(pat, p)
+		if api != nil && !api.AllowsKey(key) {
+			continue
+		}
+		params, score, ok := registry.MatchPattern(pat, p)
 		if !ok || score <= bestScore {
 			continue
 		}
@@ -590,42 +610,6 @@ func (m *Manager) MatchRoute(ctx context.Context, storeID, method, p string) (*A
 		best, bestScore = r, score
 	}
 	return a, best, bestScore >= 0
-}
-
-// matchPattern matches /a/:b/* against a path; literal segments score more.
-func matchPattern(pat, p string) (map[string]string, int, bool) {
-	ps := strings.Split(strings.Trim(pat, "/"), "/")
-	xs := strings.Split(strings.Trim(p, "/"), "/")
-	if strings.Trim(pat, "/") == "" {
-		ps = nil
-	}
-	if strings.Trim(p, "/") == "" {
-		xs = nil
-	}
-	params := map[string]string{}
-	score := 0
-	for i, s := range ps {
-		if s == "*" {
-			params["*"] = strings.Join(xs[i:], "/")
-			return params, score, true
-		}
-		if i >= len(xs) {
-			return nil, 0, false
-		}
-		switch {
-		case strings.HasPrefix(s, ":"):
-			params[s[1:]] = xs[i]
-			score++
-		case s == xs[i]:
-			score += 2
-		default:
-			return nil, 0, false
-		}
-	}
-	if len(xs) != len(ps) {
-		return nil, 0, false
-	}
-	return params, score, true
 }
 
 // Serve runs a matched route as an event and returns its response.

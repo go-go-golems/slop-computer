@@ -126,7 +126,20 @@ type Actor struct {
 	requires   map[string]rt.Level
 	undeclared []string
 
-	storage goja.Value // use('storage'), built on first use (storage.go)
+	storage  goja.Value            // use('storage'), built on first use (storage.go)
+	database goja.Value            // use('database'), built on first use (database.go)
+	express  goja.Value            // use('express'), built on first use (express.go)
+	loaded   map[string]goja.Value // catalog modules built for this actor (catalog.go)
+	fs       *memFS                // use('fs')'s tree (memfs.go)
+	// loading is true while actor.js (and what it requires) runs: the only
+	// time express routes may register; pending holds them until build
+	// merges them into def.http.
+	loading bool
+	pending []pendingRoute
+	// savepoints are the open database.begin() handles of the current
+	// turn, outermost first; seq names them.
+	savepoints []*savepoint
+	seq        int
 
 	wake  chan struct{} // capacity 1: the store's inbox has something
 	stop  chan struct{}
@@ -154,7 +167,7 @@ func (a *Actor) log(level, text string) {
 
 // build makes the runtime: it runs the app's actor.js, which must call
 // defineActor once.
-func build(m *Manager, st *store.Store, run kernel.Running, files map[string][]byte) (*Actor, error) {
+func build(ctx context.Context, m *Manager, st *store.Store, run kernel.Running, files map[string][]byte, checkPolicy bool) (*Actor, error) {
 	a := &Actor{m: m, st: st, run: run, key: run.App + "@" + strconv.FormatInt(run.N, 10),
 		vm: goja.New(), wake: make(chan struct{}, 1), stop: make(chan struct{})}
 	a.vm.SetFieldNameMapper(goja.TagFieldNameMapper("json", true))
@@ -193,7 +206,9 @@ func build(m *Manager, st *store.Store, run kernel.Running, files map[string][]b
 		return nil, err
 	}
 	timer := time.AfterFunc(TurnLimit, func() { a.vm.Interrupt("actor.js took too long to load") })
+	a.loading = true
 	_, err := a.vm.RunScript(entry, string(src))
+	a.loading = false
 	timer.Stop()
 	a.vm.ClearInterrupt()
 	if err != nil {
@@ -202,8 +217,16 @@ func build(m *Manager, st *store.Store, run kernel.Running, files map[string][]b
 	if a.def == nil {
 		return nil, fail("actor_error", "%s did not call defineActor", entry)
 	}
+	if err := a.mergeRoutes(); err != nil {
+		return nil, fail("actor_error", "%s: %v", entry, err)
+	}
 	if err := a.readShape(); err != nil {
 		return nil, fail("actor_error", "%s: %v", entry, err)
+	}
+	if checkPolicy {
+		if err := a.checkRoutePolicies(ctx); err != nil {
+			return nil, fail("actor_error", "%v", err)
+		}
 	}
 	return a, nil
 }
@@ -260,6 +283,14 @@ func (a *Actor) requirer(files map[string][]byte, entry string) func(string) goj
 	cache := map[string]goja.Value{}
 	var req func(from, name string) goja.Value
 	req = func(from, name string) goja.Value {
+		// Module names resolve before tree files, as native modules do
+		// in goja_nodejs: require('database') is use('database').
+		if reservedModules[name] {
+			if v := a.module(name); v != nil && !goja.IsNull(v) {
+				return v
+			}
+			panic(a.vm.NewGoError(fail("not_found", "%s is not available to %s", name, a.run.App)))
+		}
 		p := name
 		if strings.HasPrefix(name, "./") || strings.HasPrefix(name, "../") {
 			dir := from[:strings.LastIndex(from, "/")+1]
@@ -388,8 +419,12 @@ func (a *Actor) handle(ev *event) {
 		}()
 		v, err := ev.run(a, ctxObj)
 		if err != nil {
+			a.dropSavepoints()
 			return err
 		}
+		// A database handle never outlives its turn: one still open
+		// (the handler returned, or awaited I/O) rolls back here.
+		a.closeSavepoints()
 		val = v
 		// A handler that threw after an await of something already
 		// resolved: its promise is rejected now, so this turn rolls back.
@@ -399,6 +434,7 @@ func (a *Actor) handle(ev *event) {
 		}
 		return nil
 	})
+	a.fs.end(err == nil) // the fs module's writes follow the turn
 	if err != nil {
 		var ie *goja.InterruptedError
 		if errors.As(err, &ie) || strings.Contains(err.Error(), "turn panicked") {
