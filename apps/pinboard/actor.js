@@ -7,6 +7,7 @@
 // page rules, so nothing here may write what the caller could not.
 const C = require('./core.js');
 const db = use('db');
+const sample = use('sample'); // null unless an admin allows it for this app (policy)
 
 const MAX_LIST = 500;
 
@@ -34,7 +35,8 @@ function coreFor(ctx) {
 }
 function who(ctx, via) {
   const v = ctx.visitor || {};
-  return (v.name || v.email || v.id || 'someone') + ' (' + (via || 'actor') + ')';
+  const name = v.name || v.email || v.id || 'someone';
+  return via === 'agent' ? 'agent (for ' + name + ')' : name + ' (' + (via || 'actor') + ')';
 }
 // One transaction, written to the board and to the shared log.
 function commit(ctx, args, fn) {
@@ -55,8 +57,7 @@ function freeSpot() {
 const str = (v, max) => String(v == null ? '' : v).slice(0, max || 2000);
 const tagsOf = (t) => (Array.isArray(t) ? t : t ? String(t).split(',') : []).map(x => str(x, 60).trim()).filter(Boolean).slice(0, 20);
 
-defineActor({
-  actions: {
+const actions = {
     // What is on the board: title, counts, clips (newest first), collections.
     describe: {
       requires: 'view',
@@ -141,5 +142,80 @@ defineActor({
         return db.collection('log').orderBy('at', 'desc').limit(n).get().docs.map(d => { const e = d.data(); return { id: e.id, at: e.at, by: e.by, label: e.label, undone: !!e.undone }; });
       },
     },
+};
+
+// --- The board's agent on the server (phase 6) ---------------------------
+// ask runs a model with the board's actions as tools, as the person asking:
+// the read tools for anyone who can view the board, the write tools only for
+// interact and above. Each tool call is its own turn (actor sample tools);
+// its writes are logged as "agent (for <name>)". The person's model access
+// and budget pay for it.
+
+const RANK = { none: 0, view: 1, interact: 2, admin: 3, owner: 4 };
+const obj = (props, required) => ({ type: 'object', properties: props, required: required || [] });
+const S = { type: 'string' }, N = { type: 'number' }, SL = { type: 'array', items: S };
+const AGENT_TOOLS = [
+  { name: 'describe', write: false, description: 'What is on the board: title, counts, the newest clips, the collections.', schema: obj({ max: N }) },
+  { name: 'clips', write: false, description: 'Clips, filtered by kind (note, link, image, doc, app, group), tag or text (q).', schema: obj({ kind: S, tag: S, q: S, limit: N }) },
+  { name: 'collections', write: false, description: 'The collections, with their fields and row counts.', schema: obj({}) },
+  { name: 'query', write: false, description: 'Records of a collection. where is a list of [field, op, value] with op one of = != < <= > >= contains.', schema: obj({ coll: S, where: { type: 'array', items: { type: 'array' } }, orderBy: S, desc: { type: 'boolean' }, limit: N }, ['coll']) },
+  { name: 'log', write: false, description: 'The newest steps of the shared log.', schema: obj({ limit: N }) },
+  { name: 'addClip', write: true, description: 'Add a note (text) or a link (url), with an optional title, tags and note.', schema: obj({ text: S, url: S, title: S, tags: SL, note: S }) },
+  { name: 'tagClip', write: true, description: 'Add tags to a clip (tags) or remove some (untag).', schema: obj({ id: S, tags: SL, untag: SL }, ['id']) },
+  { name: 'removeClip', write: true, description: 'Remove a clip.', schema: obj({ id: S }, ['id']) },
+  { name: 'insert', write: true, description: 'Add a record to a collection (made if new).', schema: obj({ coll: S, data: { type: 'object' } }, ['coll', 'data']) },
+  { name: 'update', write: true, description: 'Change fields of a record.', schema: obj({ coll: S, id: S, patch: { type: 'object' } }, ['coll', 'id', 'patch']) },
+];
+
+actions.ask = {
+  requires: 'view',
+  async run(ctx, args) {
+    if (!sample) ctx.fail('unavailable', "this board's agent is off: an admin must allow sample for the pinboard app");
+    const q = str(args && args.question, 4000).trim();
+    if (!q) ctx.fail('invalid_argument', 'ask what? (question)');
+    const canWrite = (RANK[ctx.visitor.level] || 0) >= RANK.interact;
+    const tools = AGENT_TOOLS.filter(t => canWrite || !t.write).map(t => ({
+      name: t.name, description: t.description, inputSchema: t.schema,
+      execute: (input) => actions[t.name].run(ctx, Object.assign({}, input || {}, { via: 'agent' })),
+    }));
+    const meta = db.doc('board/meta').get().data() || {};
+    const prompt = 'You are the agent of a shared pinboard called "' + (meta.title || 'Untitled board') + '", working for ' +
+      (ctx.visitor.name || 'a person') + ', who can ' + (canWrite ? 'view and change' : 'only view') + ' it. ' +
+      'Use the tools to look at the board' + (canWrite ? ' and to change it when asked' : '') + '. Answer briefly, in plain text.\n\n' +
+      'Request: ' + q;
+    const r = await sample(prompt, { tools });
+    return { answer: r.text, model: r.model };
+  },
+};
+
+// --- Log pruning (phase 6) -------------------------------------------------
+// The shared log grows with every step. Every six hours the board keeps the
+// newest LOG_KEEP steps and anything newer than board/meta.logDays (30 by
+// default, 1-365), and deletes older ones, LOG_BATCH at a time. Undo and
+// revert reach only what is still in the log.
+
+const DAY = 86400000, LOG_KEEP = 500, LOG_BATCH = 1000;
+
+function pruneLog(now, keep) {
+  const meta = db.doc('board/meta').get().data() || {};
+  const days = Math.min(Math.max(Number(meta.logDays) || 30, 1), 365);
+  const newest = db.collection('log').orderBy('at', 'desc').limit(keep).get().docs;
+  if (newest.length < keep) return { removed: 0, kept: newest.length, days };
+  const floor = newest[newest.length - 1].data().at; // the oldest step that is always kept
+  const cutoff = Math.min(now - days * DAY, floor);
+  const old = db.collection('log').where('at', '<', cutoff).orderBy('at').limit(LOG_BATCH).get().docs;
+  old.forEach(d => db.doc('log/' + d.id).delete());
+  return { removed: old.length, days, before: cutoff };
+}
+
+actions.pruneLog = {
+  requires: 'admin',
+  run(ctx, args) { return pruneLog(ctx.now, Math.max(Number(args && args.keep) || LOG_KEEP, 1)); },
+};
+
+defineActor({
+  actions,
+  every: {
+    pruneLog: { every: '6h', run(ctx) { pruneLog(ctx.now, LOG_KEEP); } },
   },
 });

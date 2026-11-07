@@ -86,6 +86,9 @@ type event struct {
 	parent *event      // a continuation resumes this event's handler
 	owner  *Actor      // a continuation's runtime: no other actor can resume it
 	gone   atomic.Bool // its caller stopped waiting: do not run it
+	// failed, on a turn posted through Later, takes that turn's error
+	// (it rolled back); the handler it continues stays parked.
+	failed func(error)
 }
 
 // park is an event whose handler awaits real I/O: its root promise settles
@@ -376,7 +379,9 @@ func (a *Actor) loop() {
 		case ev.gone.Load():
 		case ev.owner != nil && ev.owner != a:
 			// the rest of a handler that awaited I/O in a runtime that stopped
-			if ev.parent != nil && ev.parent.reply != nil {
+			if ev.failed != nil {
+				ev.failed(fail("actor_error", "lost: the actor stopped"))
+			} else if ev.parent != nil && ev.parent.reply != nil {
 				ev.parent.reply <- result{err: fail("actor_error", "lost: the actor stopped")}
 			}
 		default:
@@ -440,6 +445,11 @@ func (a *Actor) handle(ev *event) {
 		if errors.As(err, &ie) || strings.Contains(err.Error(), "turn panicked") {
 			a.crashed()
 		}
+		if ev.failed != nil { // a Later turn: its own failure, not its handler's
+			ev.failed(a.asError(err))
+			a.m.afterTurn(a, cur)
+			return
+		}
 		target := ev
 		if pk != nil {
 			target = pk.ev
@@ -463,6 +473,11 @@ func (a *Actor) handle(ev *event) {
 		f()
 	}
 	a.m.afterTurn(a, cur)
+	if ev.failed != nil {
+		// A Later turn runs while its I/O is in flight; that I/O's own
+		// continuation, which always follows, settles or keeps the park.
+		return
+	}
 	// Settle, or park.
 	root := pk.rootOr(val)
 	target := ev

@@ -92,6 +92,24 @@ func (a *Actor) IO(work func() (any, error), settle func(v any) (goja.Value, err
 	return a.io(work, settle)
 }
 
+// Later is for a module whose work, on its own goroutine, must come back to
+// JavaScript more than once (actor sample's tools). Called inside a turn, it
+// returns run, which posts fn as a new turn of the event in progress, a
+// continuation as an awaited I/O's is: fn's writes commit with that turn.
+// If fn fails (an error, a throw, a panic, the turn limit) the turn rolls
+// back and failed gets the error, while the handler stays parked. run may
+// be called from any goroutine, any number of times.
+func (a *Actor) Later() func(fn func() error, failed func(error)) {
+	ev := a.turn().ev
+	if ev.parent != nil {
+		ev = ev.parent
+	}
+	return func(fn func() error, failed func(error)) {
+		_ = a.m.push(a.st.ID, &event{kind: "cont", visitor: ev.visitor, via: ev.via, parent: ev, owner: a, failed: failed,
+			run: func(*Actor, *goja.Object) (goja.Value, error) { return nil, fn() }})
+	}
+}
+
 // Visitor is the visitor of the event in progress.
 func (a *Actor) Visitor() Visitor {
 	t := a.turn()
@@ -377,7 +395,7 @@ func (a *Actor) query(q rt.Query) goja.Value {
 	})
 	_ = o.Set("orderBy", func(field string, dir goja.Value) goja.Value {
 		n := q
-		n.Order, n.Desc = field, !goja.IsUndefined(dir) && dir.String() == "desc"
+		n.Order, n.Desc = field, !absent(dir) && dir.String() == "desc"
 		return a.query(n)
 	})
 	_ = o.Set("limit", func(k int) goja.Value {
@@ -462,7 +480,7 @@ func (a *Actor) filesModule() goja.Value {
 	})
 	_ = o.Set("list", func(prefix goja.Value, opts goja.Value) goja.Value {
 		p := ""
-		if !goja.IsUndefined(prefix) && !goja.IsNull(prefix) {
+		if !absent(prefix) {
 			p = prefix.String()
 		}
 		zone := "tree"
@@ -800,3 +818,7 @@ func (a *Actor) secretsModule() goja.Value {
 	})
 	return o
 }
+
+// absent reports a missing optional argument: goja passes nil for an
+// argument the caller left out, which IsUndefined does not catch.
+func absent(v goja.Value) bool { return v == nil || goja.IsUndefined(v) || goja.IsNull(v) }

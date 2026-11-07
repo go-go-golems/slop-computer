@@ -12,9 +12,11 @@ import (
 	"os"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/go-go-golems/slop-computer/pkg/appverbs"
 	"github.com/go-go-golems/slop-computer/pkg/client"
+	"github.com/go-go-golems/slop-computer/pkg/llm"
 )
 
 // harnessCaller calls verbs on the test server with a token.
@@ -149,7 +151,7 @@ func TestPinboardVerbsRemote(t *testing.T) {
 	for _, x := range tools {
 		names = append(names, x.(map[string]any)["name"].(string))
 	}
-	if !strings.Contains(strings.Join(names, ","), "pb_clip_add") || len(names) != 9 {
+	if !strings.Contains(strings.Join(names, ","), "pb_clip_add") || len(names) != 10 {
 		t.Fatalf("app.tools: %v", names)
 	}
 	if got := h.call(dave, "app.tools", nil).(map[string]any)["tools"].([]any); len(got) != 0 {
@@ -182,3 +184,52 @@ func TestPinboardVerbsRemote(t *testing.T) {
 		t.Fatalf("log: %s", s)
 	}
 }
+
+// Phase 6: the board's agent on the server (ask: the actions as the model's
+// tools, through actor sample tools) and log pruning.
+func TestPinboardAgentAndPrune(t *testing.T) {
+	h, ada, bob, carol := kitchen(t)
+	h.a.LLM = &llm.Fake{}
+	admin := h.tokenFor("admin@example.com", "read", "write", "admin")
+	ask := map[string]any{"store": "kitchen", "action": "ask", "args": map[string]any{"question": "what is on this board?"}}
+	// Off until an admin allows sample for the app.
+	h.fail(bob, "actor.call", ask, "unavailable")
+	h.call(admin, "policy.set", map[string]any{"app": "pinboard", "capability": "sample", "audience": "@member", "value": "on"})
+	h.call(admin, "llm.set", map[string]any{"subject": "@member", "value": "on", "budget": 1000000})
+	// The fake model calls the first tool (describe) and reports.
+	for _, tok := range []string{bob, carol} {
+		if r := h.call(tok, "actor.call", ask).(map[string]any); r["answer"] != "The browser tool completed successfully." {
+			t.Fatalf("ask: %v", r)
+		}
+	}
+	h.fail(bob, "actor.call", map[string]any{"store": "kitchen", "action": "ask", "args": map[string]any{}}, "invalid_argument")
+	verb := h.call(carol, "app.verb", map[string]any{"store": "kitchen", "verb": "board ask", "values": map[string]any{"question": "hi"}}).(map[string]any)
+	if verb["result"] != "The browser tool completed successfully." || verb["output"] != "text" {
+		t.Fatalf("board ask: %v", verb)
+	}
+
+	// Pruning keeps the newest steps and anything newer than logDays.
+	day := int64(86400000)
+	ms := func(daysAgo int64) int64 { return nowMillis() - daysAgo*day }
+	h.call(bob, "actor.call", map[string]any{"store": "kitchen", "action": "addClip", "args": map[string]any{"text": "one"}})
+	h.call(bob, "actor.call", map[string]any{"store": "kitchen", "action": "addClip", "args": map[string]any{"text": "two"}})
+	h.call(ada, "docs.set", map[string]any{"store": "kitchen", "path": "log/tx:old40", "data": map[string]any{"id": "tx:old40", "at": ms(40), "by": "x", "label": "old", "ops": []any{}}})
+	h.call(ada, "docs.set", map[string]any{"store": "kitchen", "path": "log/tx:old2", "data": map[string]any{"id": "tx:old2", "at": ms(2), "by": "x", "label": "old", "ops": []any{}}})
+	prune := map[string]any{"store": "kitchen", "action": "pruneLog", "args": map[string]any{"keep": 2}}
+	h.fail(bob, "actor.call", prune, "permission_denied") // admins only
+	if r := h.call(ada, "actor.call", prune).(map[string]any); r["removed"] != 1.0 {
+		t.Fatalf("prune at 30 days: %v", r)
+	}
+	h.fail(ada, "docs.get", map[string]any{"store": "kitchen", "path": "log/tx:old40"}, "not_found")
+	h.call(ada, "docs.get", map[string]any{"store": "kitchen", "path": "log/tx:old2"})
+	h.call(ada, "docs.update", map[string]any{"store": "kitchen", "path": "board/meta", "data": map[string]any{"logDays": 1}})
+	if r := h.call(ada, "actor.call", prune).(map[string]any); r["removed"] != 1.0 || r["days"] != 1.0 {
+		t.Fatalf("prune at 1 day: %v", r)
+	}
+	// The newest two always stay, whatever their age.
+	if r := h.call(ada, "actor.call", map[string]any{"store": "kitchen", "action": "log", "args": map[string]any{"limit": 50}}).([]any); len(r) < 2 {
+		t.Fatalf("log after pruning: %v", r)
+	}
+}
+
+func nowMillis() int64 { return time.Now().UnixMilli() }

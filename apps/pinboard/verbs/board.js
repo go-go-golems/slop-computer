@@ -20,3 +20,14 @@ __verb__("log", {
   short: "The newest steps of the board's shared log",
   fields: { limit: { type: "int", default: 20, help: "How many" } },
 });
+
+function ask(question) {
+  const b = require("slop").board();
+  return b.call("ask", { question, via: b.via || "cli" }).answer;
+}
+__verb__("ask", {
+  parents: ["board"],
+  short: "Ask the board's agent; it changes the board only if you may",
+  output: "text",
+  fields: { question: { argument: true, help: "What to ask or do, in quotes" } },
+});

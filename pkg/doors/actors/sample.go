@@ -4,6 +4,8 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
+	"strconv"
 	"time"
 
 	"github.com/dop251/goja"
@@ -62,6 +64,8 @@ func (s *Door) sampleModule(m *actor.Manager, a *actor.Actor) goja.Value {
 			a.ThrowError(sampleFail(err))
 		}
 		in := llm.In{Input: raw}
+		tools, fns := sampleTools(a, opts)
+		in.Tools = tools
 		if o, ok := a.FromJS(opts).(map[string]any); ok {
 			in.ModelTier, _ = o["modelTier"].(string)
 			in.Model, _ = o["model"].(string)
@@ -76,10 +80,14 @@ func (s *Door) sampleModule(m *actor.Manager, a *actor.Actor) goja.Value {
 			a.ThrowError(sampleFail(err))
 		}
 		sp := s.sampler(m)
+		var execute llm.ExecuteTool
+		if len(fns) > 0 {
+			execute = toolRunner(a, fns)
+		}
 		return a.IO(func() (any, error) {
 			ctx, cancel := context.WithTimeout(context.Background(), SampleTimeout)
 			defer cancel()
-			ans, err := sp.Run(ctx, payer, l, req, nil, nil)
+			ans, err := sp.Run(ctx, payer, l, req, nil, execute)
 			if err != nil {
 				return nil, sampleFail(err)
 			}
@@ -124,4 +132,157 @@ func (s *Door) sampleModule(m *actor.Manager, a *actor.Actor) goja.Value {
 		return a.ToJS(map[string]any{"allowed": l.Allowed, "remaining": l.Remaining})
 	})
 	return fn
+}
+
+// ToolTimeout bounds one tool call of an actor's sample: the turn that runs
+// it, and the promise it returns.
+var ToolTimeout = 60 * time.Second
+
+// sampleTools reads opts.tools: [{name, description, inputSchema, execute}].
+// The model sees the first three; execute is the actor's own function.
+func sampleTools(a *actor.Actor, opts goja.Value) ([]llm.Tool, map[string]goja.Callable) {
+	o, ok := opts.(*goja.Object)
+	if !ok || opts == nil {
+		return nil, nil
+	}
+	tv := o.Get("tools")
+	if tv == nil || goja.IsUndefined(tv) || goja.IsNull(tv) {
+		return nil, nil
+	}
+	list, ok := a.FromJS(tv).([]any)
+	if !ok {
+		a.Throw("invalid_argument", "tools is a list of {name, description, inputSchema, execute}")
+	}
+	arr := tv.ToObject(a.VM())
+	var tools []llm.Tool
+	fns := map[string]goja.Callable{}
+	for i := range list {
+		t := arr.Get(strconv.Itoa(i)).ToObject(a.VM())
+		name := t.Get("name")
+		if name == nil || goja.IsUndefined(name) || name.String() == "" {
+			a.Throw("invalid_argument", "a tool needs a name")
+		}
+		n := name.String()
+		if fns[n] != nil {
+			a.Throw("invalid_argument", "two tools are called "+n)
+		}
+		fn, ok := goja.AssertFunction(t.Get("execute"))
+		if !ok {
+			a.Throw("invalid_argument", "tool "+n+" needs an execute function")
+		}
+		desc := ""
+		if d := t.Get("description"); d != nil && !goja.IsUndefined(d) {
+			desc = d.String()
+		}
+		schema := json.RawMessage(`{"type":"object","properties":{}}`)
+		if sv := t.Get("inputSchema"); sv != nil && !goja.IsUndefined(sv) && !goja.IsNull(sv) {
+			b, err := json.Marshal(a.FromJS(sv))
+			if err != nil {
+				a.Throw("invalid_argument", "tool "+n+": inputSchema is not JSON")
+			}
+			schema = b
+		}
+		tools = append(tools, llm.Tool{Name: n, Description: desc, InputSchema: schema})
+		fns[n] = fn
+	}
+	return tools, fns
+}
+
+// toolRunner runs the model's tool calls in the actor: each is a new turn
+// of the event that called sample (actor.Later), whose writes commit with
+// it; one that throws rolls back and the model reads the error. A tool may
+// return a promise (it awaited I/O); its result is what the promise
+// settles to.
+func toolRunner(a *actor.Actor, fns map[string]goja.Callable) llm.ExecuteTool {
+	later := a.Later()
+	vm := a.VM()
+	return func(ctx context.Context, e llm.Event) (llm.ToolResult, error) {
+		fn := fns[e.Name]
+		if fn == nil {
+			return toolError("there is no tool " + e.Name), nil
+		}
+		done := make(chan llm.ToolResult, 1)
+		send := func(r llm.ToolResult) {
+			select {
+			case done <- r:
+			default:
+			}
+		}
+		value := func(v goja.Value) llm.ToolResult {
+			if v == nil || goja.IsUndefined(v) {
+				return llm.ToolResult{Value: json.RawMessage("null")}
+			}
+			b, err := json.Marshal(a.FromJS(v))
+			if err != nil {
+				return toolError("the tool's result is not JSON")
+			}
+			return llm.ToolResult{Value: b}
+		}
+		later(func() error {
+			args := goja.Value(vm.NewObject())
+			if len(e.Input) > 0 {
+				var x any
+				if err := json.Unmarshal(e.Input, &x); err != nil {
+					return fmt.Errorf("the tool's input is not JSON: %w", err)
+				}
+				args = a.ToJS(x)
+			}
+			v, err := fn(goja.Undefined(), args)
+			if err != nil {
+				return err // the turn rolls back; failed sends the error
+			}
+			p, ok := v.Export().(*goja.Promise)
+			if !ok {
+				send(value(v))
+				return nil
+			}
+			switch p.State() {
+			case goja.PromiseStateFulfilled:
+				send(value(p.Result()))
+			case goja.PromiseStateRejected:
+				return errors.New(errorText(p.Result())) // it failed in this turn: roll it back
+			case goja.PromiseStatePending: // it awaits I/O: its result comes in a later turn
+				then, _ := goja.AssertFunction(v.ToObject(vm).Get("then"))
+				_, _ = then(v, vm.ToValue(func(c goja.FunctionCall) goja.Value {
+					send(value(c.Argument(0)))
+					return goja.Undefined()
+				}), vm.ToValue(func(c goja.FunctionCall) goja.Value {
+					send(toolError(errorText(c.Argument(0))))
+					return goja.Undefined()
+				}))
+			}
+			return nil
+		}, func(err error) { send(toolError(err.Error())) })
+		timer := time.NewTimer(ToolTimeout)
+		defer timer.Stop()
+		select {
+		case r := <-done:
+			return r, nil
+		case <-ctx.Done():
+			return llm.ToolResult{}, ctx.Err()
+		case <-timer.C:
+			return toolError("the tool did not answer within " + ToolTimeout.String()), nil
+		}
+	}
+}
+
+func toolError(msg string) llm.ToolResult {
+	b, _ := json.Marshal(map[string]string{"error": msg})
+	return llm.ToolResult{Value: b, IsError: true}
+}
+
+// errorText is a thrown value's message.
+func errorText(v goja.Value) string {
+	if v == nil {
+		return "failed"
+	}
+	if o, ok := v.(*goja.Object); ok {
+		if m := o.Get("message"); m != nil && !goja.IsUndefined(m) {
+			if c := o.Get("code"); c != nil && !goja.IsUndefined(c) {
+				return c.String() + ": " + m.String()
+			}
+			return m.String()
+		}
+	}
+	return v.String()
 }

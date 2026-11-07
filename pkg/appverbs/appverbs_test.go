@@ -60,7 +60,7 @@ func TestPinboardVerbsScan(t *testing.T) {
 		got = append(got, v.FullPath())
 	}
 	sort.Strings(got)
-	want := "board describe,board log,clip add,clip ls,clip rm,clip tag,coll insert,coll ls,coll query"
+	want := "board ask,board describe,board log,clip add,clip ls,clip rm,clip tag,coll insert,coll ls,coll query"
 	if strings.Join(got, ",") != want {
 		t.Fatalf("verbs: %v", got)
 	}
