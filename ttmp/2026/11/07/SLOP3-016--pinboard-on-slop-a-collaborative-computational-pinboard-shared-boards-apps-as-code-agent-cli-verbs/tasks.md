@@ -9,3 +9,8 @@
 - [ ] Phase 5: app commands (manifest, app.commands verb, CLI dynamic commands + alias, MCP tools) <!-- t:842z -->
 - [ ] Phase 6: server agent (actor sample tools), log pruning, iframe isolation for app windows <!-- t:rx3v -->
 - [x] Analysis/design guide written and uploaded to reMarkable <!-- t:o85w -->
+- [ ] Actor VM migration phase 0: upstream go-go-goja U1 (runtimebridge owner option) and U2 (skip default globals) <!-- t:4qot -->
+- [ ] Actor VM migration phase 1: vmHost interface + directHost, all VM entry points through host.Run (no behaviour change) <!-- t:cfik -->
+- [ ] Actor VM migration phase 2: engineHost, empty engine factory, slop globals initializer, turnOwner, actors.runtime flag <!-- t:gnlu -->
+- [ ] Actor VM migration phase 3: measurements (turn latency, goroutines, memory, interrupts, crash path) <!-- t:ukbq -->
+- [ ] Actor VM migration phases 4-6: bridge data modules, jsverbs in actors, switch default <!-- t:6k5w -->

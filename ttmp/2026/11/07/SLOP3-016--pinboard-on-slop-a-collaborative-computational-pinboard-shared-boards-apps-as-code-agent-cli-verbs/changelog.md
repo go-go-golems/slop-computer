@@ -23,3 +23,7 @@ sources/: added the original HTML design document and a provenance README (check
 ## 2026-11-07
 
 Guide §6.12 rewritten: app CLI verbs use go-go-goja jsverbs (verbs/*.js with __verb__ metadata; app.verbs/app.verb; lazy slop app / slop pb commands; store-scoped slop module; local and server invokers; MCP tools); JSON commands design superseded
+
+## 2026-11-07
+
+Design doc 02: migrating the actor VM to a go-go-goja engine runtime (difference table, six decisions, upstream U1-U4, phases, parity tests)

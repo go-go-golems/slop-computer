@@ -219,3 +219,72 @@ discovery:   app.verbs {store} → {app, snapshot, alias, files}
 CLI:         slop app <board> … | slop pb <board> … → jsverbs.ScanSources → CommandsWithInvoker(local)
 MCP:         pb_<group>_<verb> {store, …} → app.verb (server invoker)
 ```
+
+## Step 4: Design for migrating the actor VM to a go-go-goja engine runtime
+
+The user asked whether moving the actor VM to a go-go-goja runtime would be hard, then asked for a second design document for it. I also answered a side question on making tree-sitter optional in go-go-goja; the findings are in the conversation and in design-doc 02 §7 (U4).
+
+The result is `design-doc/02-design-migrating-the-actor-vm-to-a-go-go-goja-engine-runtime.md`. It covers:
+- the two runtimes;
+- a table of the twelve points where they differ;
+- six decisions: the turn as one `Owner.Call`, async settlement as a continuation turn, no timers, slop's `require`, slop's globals, and empty engine runtimes;
+- the host interface with a flag;
+- the upstream changes U1–U4;
+- seven phases and a parity test plan.
+
+### Prompt Context
+**User prompt (verbatim):** "would updating the actor VM to be a go-go-goja runtime be hard?" then "can tree-sitter be made optional in go-go-goja (see ~/code/wesen/go-go-golems/go-go-goja)" then "Ok, create a second design doc to migrate the actor VM to go-go-goja runtime."
+**Assistant interpretation:** Assess the migration, then write it up as a design in the same ticket.
+**Inferred user intent:** Decide whether to adopt go-go-goja's runtime in slop, with jsverbs inside actors as the motivating use.
+**Commit (code):** none (documents only)
+
+### What I did
+- **slop's actor:**
+  - `pkg/actor/actor.go`: limits `:32-34`, `Actor` `:110-153`, `build` `:170-233`, `requirer` `:281-334`, `loop` `:354-394`, `handle` `:396-494`, `rootOr` `:496-507`, `continueWith` `:509-516`, `io` `:518-541`, `crashed` `:543-557`;
+  - `modules.go:27-129`, `catalog.go:1-80`, `registry.go`;
+  - the outlines of `database.go`, `memfs.go` and `express.go`.
+- **go-go-goja at `e9bc789`:**
+  - `pkg/engine/factory.go` (`NewRuntime` `:184-292`: loop start `:209-212`, `runtimebridge.Store` `:232`, require registry `:238`, globals `:260-270`, initializers `:274-290`);
+  - `runtime.go:20-47`, `options.go:59-90`, `module_middleware.go`, `module_specs.go:164`, `performance.go`;
+  - `pkg/runtimeowner/runner.go:90-230`, `pkg/runtimebridge/runtimebridge.go`, `modules/express/express.go:69-87`;
+  - `pkg/jsverbs/runtime.go:48-70`.
+- **For the tree-sitter question:**
+  - listed every tree-sitter importer (12 files; only `pkg/jsverbs/scan.go` matters as a library);
+  - `go list -deps ./pkg/jsverbs` (300 packages, including tree-sitter, the `exec`/`os`/`fs`/`database` modules and `mattn/go-sqlite3`);
+  - confirmed jsverbs ignores comments;
+  - checked that goja's `parser`/`ast` have the needed node types (`TemplateLiteral`, `ParameterList`, `Binding`, `ObjectLiteral`, `PropertyKeyed`, `CallExpression`, `LexicalDeclaration`).
+
+### Why
+- **Keep slop's semantics by construction.** The design keeps slop's inbox, turns, `require` and globals, and uses go-go-goja only as the VM host. Apps then see no change, and the existing actor suites are the parity test.
+
+### What worked
+- go-go-goja already has most of the hooks: runtime initializers, options to turn default modules off, and an owner-adapter precedent in express.
+
+### What didn't work
+- Nothing failed. Two upstream gaps were found:
+  - `NewRuntime` stores its own runtimebridge owner before modules register, so slop cannot substitute one (U1);
+  - it always installs console, console timers, `performance`, `Buffer` and `URL` (U2).
+- Even go-go-goja's "data-only" default module set includes `timer`, so actors need all defaults off.
+
+### What I learned
+- **Settlement is where the runtimes really differ.** In slop the code after an `await` runs in a new transaction; go-go-goja modules settle on the event loop. Everything else is configuration.
+
+### What was tricky to build
+- **Decision D2** (an owner whose `Post` becomes a continuation turn) needs the waiting event to be known when a module starts its work, not when it settles. The doc limits phase 4 to synchronous modules until each asynchronous one is reviewed.
+
+### What warrants a second pair of eyes
+- **D1:** the store transaction is opened on the actor goroutine and used from the loop goroutine while the actor goroutine waits. `pkg/store` has no `LockOSThread`, but goroutine assumptions should be checked under `-race`.
+- **Is it worth it at all** (risk 6)? U3 alone would give jsverbs on slop's existing VM.
+
+### What should be done in the future
+- Phase 1, the host interface, is cheap and useful on its own; decide on the rest after it.
+
+### Code review instructions
+- Read design-doc 02 §4 (the difference table) against `actor.go:170-541` and `go-go-goja/pkg/engine/factory.go:184-292`.
+
+### Technical details
+```
+turn:   actor goroutine ─store.Do→ host.Run(Owner.Call) ─loop goroutine→ handler JS (interrupt armed)
+settle: module Post → turnOwner → continueWith(ev) → inbox → new turn
+engine: WithImplicitDefaultRegistryModules(false), WithDataOnlyDefaultRegistryModules(false), U1 owner, U2 no globals, slop initializer
+```
