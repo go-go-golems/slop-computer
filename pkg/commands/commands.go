@@ -47,7 +47,7 @@ func Verbs(e *Env) []*verbs.Verb {
 		accessVerbs(k), actorVerbs(actorEnv{k, a}), billingVerbs(billingEnv{k, cfg, service}),
 		confirmVerbs(confirmEnv{confirm}), dataVerbs(k), docsVerbs(k), evalVerbs(evalEnv{table}),
 		filesVerbs(k), mountVerbs(mountEnv{k, cfg, a}), peopleVerbs(people),
-		policyVerbs(policyEnv{k, cfg, a}), previewVerbs(previewEnv{k, cfg}), storeVerbs(k),
+		policyVerbs(policyEnv{k, cfg, a}), previewVerbs(previewEnv{k, cfg}), storeVerbs(k), appVerbs(k),
 	}
 	var vs []*verbs.Verb
 	for _, g := range groups {

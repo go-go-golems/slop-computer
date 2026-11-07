@@ -13,5 +13,6 @@
     "assets": {},
     "downloads": true,
     "sample": {}
-  }
+  },
+  "slop": { "verbs": { "alias": "pb", "include": ["verbs/*.js"], "title": "board/meta" } }
 }
