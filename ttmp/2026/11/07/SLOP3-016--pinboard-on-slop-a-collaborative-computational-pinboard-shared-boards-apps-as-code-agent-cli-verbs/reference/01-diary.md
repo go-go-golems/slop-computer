@@ -720,3 +720,113 @@ Phase 5a lets an app ship command-line verbs, as JavaScript files in its own tre
 - `app.verbs` request: `{"store":"s-…","have":"pinboard@3"}`. Response when cached: `{"store":"s-…","app":"pinboard","snapshot":3,"unchanged":true,"files":[]}`.
 - A verb's call to the actor: `actor.call {"store":"s-1","action":"addClip","args":{"tags":["a","b"],"url":"…","via":"cli"}}`.
 - Limits: 200 files and 2 MB per `app.verbs`.
+
+## Step 11: Phase 5b, app verbs on the server and as MCP tools
+
+Phase 5b runs an app's verbs on the server (`app.verb`), for callers that cannot run JavaScript themselves, and lists them as MCP tools named `<alias>_<group>_<verb>`. On the way it closes a file-reading hole that also existed in phase 5a's CLI.
+
+### Prompt Context
+**User prompt (verbatim):** (same as step 5)
+**Assistant interpretation:** Guide §6.12 "Running a verb: two invokers, one module" (the remote invoker) and "MCP" (tools per app with a `store` argument).
+**Inferred user intent:** An agent connected over MCP can work on a board with the board's own vocabulary, as the person whose token it holds.
+**Commit (code):** `f4499a3`
+
+### What I did
+- **`pkg/appverbs/remote.go`:**
+  - `Values(reg, verb, map)`:
+    - finds each field's section in the verb's glazed description (`CommandDescriptionForVerb`);
+    - converts JSON values to the field's type: float64 to int when integral, `[]any` to `[]string`/`[]int`/`[]float64`, choices checked;
+    - applies `sources.FromMap` and `sources.FromDefaults`;
+    - checks required fields.
+  - `InputSchema(reg, verb, extra, required…)`: JSON Schema built from the fields (types, `enum`, `default`, `description`, `additionalProperties: false`).
+  - `Run(ctx, reg, path, values, caller, board, logs, limit)`: the remote invoker. It is the same `Invoker` as the CLI's, with a timeout. The result goes through JSON. A missing verb is `not_found`; bad values are `invalid_argument`.
+  - `Cache`: registries per `app@snapshot`, at most n, oldest out first. `ToolName`.
+  - `plainTypes` and `checkTypes`, called from `Scan`.
+- **`pkg/appverbs/appverbs.go`:**
+  - `Board.Via`, exposed to verbs as `board().via`.
+  - The invoker interrupts the VM when ctx ends (`context.AfterFunc`).
+  - `jsError` also understands `*verbs.Error`.
+  - `unwrap` keeps an escaped error's `code` (as `*verbs.Error`), so a nested refusal reaches the MCP client as `permission_denied`, not as an internal error.
+- **`pkg/commands/appverbs.go`:**
+  - `app.verbs` now shares `verbSources`/`verbFiles` with the new verbs.
+  - **`app.verb {store, verb, values, alias?}`**: Read scope, write effect, StoreRead at view.
+    - Builds the board, with its title read as the caller.
+    - Runs with a `tableCaller`: each module call is `Table.Call` as the caller (`Via` kept: `mcp`, `http`, `cli`), and the result is decoded with `UseNumber` as the CLI client decodes it.
+    - Output is capped at 64 KB of logs; the timeout is 30 s (`AppVerbTimeout`).
+  - **`app.tools`** (Account action):
+    - looks at up to 200 visible stores, keeping only those where the caller has view or more;
+    - takes each app with an alias, at the newest snapshot any of those stores runs;
+    - skips aliases that equal a verb group (`store`, `docs`, …);
+    - lists one tool per verb.
+  - `appVerbsEnv{kernelEnv, Table, Cache}` in `env.go`; `commands.go` builds it with `appverbs.NewCache(64)`.
+- **MCP door (`pkg/doors/mcp/mcp.go`):**
+  - tools/list appends the app tools, except names a verb tool already has.
+  - tools/call of a name that isn't a verb tool looks it up among the caller's app tools and calls `app.verb` with the listed verb path and alias. An unknown name is still JSON-RPC `-32602 no tool …`.
+- **Pinboard verbs:** `via: b.via || "cli"`.
+- **Tests:**
+  - `pkg/appverbs/remote_test.go`:
+    - value conversion and defaults;
+    - `via`;
+    - five refusals with their codes;
+    - codes kept from `verbs.Error` and `client.APIError`;
+    - an endless verb interrupted at 100 ms with its console output kept;
+    - six file-reading field types refused at scan;
+    - the input schema;
+    - the cache bound.
+  - `pkg/host` `TestPinboardVerbsRemote`:
+    - Bob adds and inserts through `app.verb`; Carol queries and describes (the text output);
+    - refusals (`permission_denied`, `invalid_argument` ×2, `not_found` ×2);
+    - `app.tools` lists 9 tools for Carol and none for Dave;
+    - MCP: `pb_clip_add` is listed with `"required":["store"]`; Bob's call succeeds; Carol's comes back as a tool error with `permission_denied`;
+    - the log says `bob (mcp)`.
+- **Validation:**
+  - `go test ./...` passes and golangci-lint reports 0 issues.
+  - On the local server (rebuilt, restarted, app pushed), the official MCP Python SDK run (`scripts/05-mcp-app-verbs-check.py`, `uvx --with mcp --with httpx`) listed the nine `pb_*` tools. `pb_clip_add` (`store` required) added a note, `pb_board_describe` showed it, `pb_clip_ls --tag mcp` found 1 row, a bad field came back as a tool error, and the log said `(mcp)`.
+  - `lslop app verb s-5povfcfc "board log" --values '{"limit":2}'` showed `Ada Admin (mcp)` and `Ada Admin (cli)`.
+
+### Why
+- **The same invoker on both sides.** Only the `Caller` changes: HTTP with the token in the CLI, `Table.Call` as the principal on the server. A verb therefore behaves the same from a terminal and from an agent, and every nested call passes the same scope and level checks as a direct call.
+- **Tools per app, not per store** (guide §10 risk 3). A person with 50 boards gets 9 Pinboard tools, not 450.
+- **tools/call only routes names it lists.** The first version split any unknown name at its first `_`, so `no_such_tool` became `app.verb` with alias `no` and returned "which store?". `TestMCPDoor` caught that. Looking the name up among the listed tools also uses the exact verb path rather than guessing words from `_`.
+- **Plain types only.** See "What was tricky to build".
+
+### What worked
+- `sources.FromMap` and `FromDefaults` produce the same `values.Values` the cobra parser does, so jsverbs' `buildArguments` didn't need to know the values came from JSON.
+- `TestMCPDoor`, which predates this work, caught the routing regression at once.
+
+### What didn't work
+- `TestInputSchema` assumed `coll query`'s `limit` default was 50; it is 100 (`clip ls`'s is 50).
+- The first MCP SDK script used camelCase attributes (`init.serverInfo`). This SDK version uses snake_case (`server_info`, `structured_content`, `is_error`, `input_schema`).
+- `lslop pb Kitchen clip ls --fields id,kind` gave `unknown flag: --fields`. Glazed's column flags are `--filter`/`--select`; I used `--format json` instead.
+- My first sed for `via: b.via` turned three one-line verbs into `require("slop").board().call(… b.via …)` with no `b` in scope. I caught it before running, and rewrote them as `const b = …; return b.call(…)`.
+
+### What I learned
+- Glazed reads files while parsing for `stringFromFile`, `objectFromFile`, the `…FromFiles` types, `file`/`fileList`, and `keyValue` when the value starts with `@` (`fields.Type.NeedsFileContent`, `parse.go:289`).
+- jsverbs' description of a verb has only the verb's own sections, with no glazed output section, and field names are kebab-cased (`order-by`).
+- `Table.Call` from inside a verb's `Run` is the established pattern (`eval` does it). The nested call carries the principal, so its scope, admin and store checks all apply.
+
+### What was tricky to build
+- **The file-reading types.** A verb field declared `{type: "stringFromFile", default: "/home/me/.ssh/id_ed25519"}` would make the CLI's parser read that file when the person runs the verb. The verb's JavaScript could then write the contents to the board through `docs.set`. On the server, an MCP caller could name a server path. `Scan` now refuses any field outside `plainTypes`, so both invokers are covered and the test uses that exact default. Phase 5a had the hole for the CLI.
+- **Codes through JavaScript.** A nested refusal becomes a JS Error with `.code` (`jsError`). If the verb lets it escape, `unwrap` rebuilds a `verbs.Error` from `.code`/`.message`; otherwise the HTTP status and the MCP error text would say `internal`.
+
+### What warrants a second pair of eyes
+- **tools/list and tools/call each run `app.tools`.** That means `VisibleStores` plus `Running` for up to 200 stores, with the scan cached per snapshot, on every MCP list or call. Fine for tens of stores. For many, a per-principal cache or a cheaper "which apps" query is needed. `Running` can also activate a store as a side effect, as other listing paths already do.
+- **A verb runs synchronously on the server for up to 30 s, with no memory bound** (goja has none). An app admin could ship a verb that allocates without limit. Verbs are admin-installed code (D9), as actors are, but actors run under a turn limit in their own goroutine. Consider a lower limit, or a concurrency cap per principal.
+- **The verb's title lookup** (`docs.get` of `board/meta` as the caller) adds one call per `app.verb`.
+- **`app.tools` picks the newest snapshot any visible store runs.** A store on an older snapshot may have fewer or different verbs; `app.verb` then answers `not_found` for a missing one.
+
+### What should be done in the future
+- Phase 6: server agent (actor `sample` tools), log pruning, iframe isolation.
+- Cache `app.tools` per principal for a short time if MCP listing gets slow.
+
+### Code review instructions
+- `pkg/appverbs/remote.go` (`plainTypes`, `Values`, `coerce`, `Run`).
+- `pkg/commands/appverbs.go` (`runVerb`, `tools`, `tableCaller`).
+- `pkg/doors/mcp/mcp.go` (`appTools`, the tools/call branch).
+- Run `go test -buildvcs=false ./pkg/appverbs ./pkg/host -run 'Pinboard|MCP|Run|Values|Input|Cache|File'`.
+- MCP by hand: `uvx --with mcp --with httpx python -I scripts/05-mcp-app-verbs-check.py http://slop.localhost:18300/mcp <creds.json> <store>`.
+
+### Technical details
+- `app.verb` request: `{"store":"kitchen","verb":"coll query","values":{"coll":"recipes","where":["minutes<30"],"limit":10}}`. Response: `{"result":[…rows…],"output":"glaze","logs":[…]}`. Text verbs return `"output":"text"` and a string result.
+- MCP: `tools/call {"name":"pb_clip_add","arguments":{"store":"kitchen","url":"…"}}` becomes `app.verb {"store":"kitchen","verb":"clip add","alias":"pb","values":{"url":"…"}}`.
+- Allowed field types: `string`, `bool`, `int`, `float`, `stringList`, `intList`, `floatList`, `choice`, `choiceList`, `date`.
