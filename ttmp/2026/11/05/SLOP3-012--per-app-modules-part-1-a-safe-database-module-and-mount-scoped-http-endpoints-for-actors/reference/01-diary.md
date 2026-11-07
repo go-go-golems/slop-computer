@@ -804,3 +804,47 @@ Codex's automatic review of #32 left three findings. Each was real. For the firs
 
 ### Code review instructions
 - `pkg/actor/memfs.go` `rename` and `dataOf`; `pkg/actor/manager.go` `RestartApp`; the new cases in `pkg/host/fs_module_test.go` and `module_catalog_test.go`.
+
+## Step 12: Rate-limit buckets were forgotten before they refilled (Codex, #31)
+
+Codex's review of #31 found that the rate limiter on mount APIs forgot idle buckets too early, and that this let a client get around the limit. The sweep assumed that a bucket idle for two windows is full again. That holds only while the burst is at most twice the limit. Forgetting a bucket that is not yet full gives the next request a fresh full burst. The sweep now waits until the bucket would really be full.
+
+### Prompt Context
+**User prompt (verbatim):** "Address" followed by the pasted Codex comment on `pkg/doors/pages/ratelimit.go` lines 61–62 ("Wait for burst capacity to refill before evicting buckets … with `limit: 1`, `window: "1h"`, and `burst: 100`, a depleted bucket should regain only about two tokens after two hours, but this sweep deletes it and the next request recreates it with 100 tokens …")
+**Assistant interpretation:** Fix the eviction rule on #31's branch, with a test for the reported case, and reply.
+**Inferred user intent:** The configured rate must hold, and #31 should be clear to merge.
+**Commit (code):** d85245d — "SLOP3-012: sweep rate-limit buckets only once they would be full"
+
+### What I did
+- Fast-forwarded #31's worktree to `origin/task/slop3-012-modules` (`d80e953`, which now includes #32).
+- **New test, `TestRateLimiterSweepWaitsForRefill`:**
+  - a rule of `limit 1, window 1h, burst 100`, drained with 100 takes;
+  - `sweep` at two windows plus a minute must keep the bucket, and exactly 2 takes must then succeed;
+  - the bucket must still be kept 99 h later and gone after 100 h and a second.
+- **Fix, `rateLimiter.sweep`:** it computes `refill = (capacity − tokens) / rate` and deletes the bucket when `now − last ≥ refill`. Forgetting a bucket that would be full changes nothing, because a new bucket starts full. A rule with no positive rate is kept; validation already forbids one (`limit ≥ 1`, `window ≥ 1s`, `pkg/registry/api.go`).
+
+### Why
+- **The refill time is the exact condition.** No fixed multiple of the window works, because the burst can be up to a million times the limit.
+
+### What worked
+- Before the fix: `ratelimit_test.go:69: a drained bucket was swept after two windows (size 0)`. After it: `ok`.
+- `TestRateLimiter`, the existing test, still passes: its three buckets refill within 30 s, so they are all swept at 3 minutes.
+- Full suite: no failures. `make lint` → `0 issues.`
+
+### What didn't work
+- **The first version of the test swept at exactly two windows,** where the old code (`>`) still kept the bucket. It failed only later, at the 99 h check. I moved the first sweep to two windows plus a minute, so the reported case fails directly.
+
+### What I learned
+- An eviction rule for a token bucket must depend on the bucket's state (tokens and rate), not only on the time since it was last used.
+
+### What was tricky to build
+- N/A
+
+### What warrants a second pair of eyes
+- **Memory:** buckets now stay in memory for as long as they take to refill. A rule with a large burst and a slow limit, for example `burst 1000000, limit 1/24h`, keeps a drained bucket for a very long time, one per IP or visitor. That is the price of enforcing the rate. If it ever matters, a cap on the number of buckets per rule, evicting the fullest first, would bound it.
+
+### What should be done in the future
+- N/A
+
+### Code review instructions
+- `pkg/doors/pages/ratelimit.go` `sweep`; `pkg/doors/pages/ratelimit_test.go` `TestRateLimiterSweepWaitsForRefill`.
