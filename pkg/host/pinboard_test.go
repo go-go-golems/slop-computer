@@ -73,7 +73,7 @@ func TestPinboardApp(t *testing.T) {
 	sb, sc := signIn("bob@example.com", "/pb/"+kitchen), signIn("carol@example.com", "/pb/"+kitchen)
 	vb, vc := view(sb, "/pb/"+kitchen, "interact"), view(sc, "/pb/"+kitchen, "view")
 
-	// The rules: clips, records and the log for editors; the title and apps for admins.
+	// The rules: clips, records and the log for editors; the title for admins.
 	if out := write(sb, vb, "clips/clip:b1", map[string]any{"id": "clip:b1", "kind": "note", "text": "hi"}); out["error"] != nil {
 		t.Fatalf("bob adds a clip: %v", out)
 	}
@@ -88,8 +88,10 @@ func TestPinboardApp(t *testing.T) {
 	if out := write(sc, vc, "clips/clip:c1", map[string]any{"kind": "note"}); out["error"] == nil {
 		t.Fatalf("carol (view) wrote a clip")
 	}
-	if out := write(sa, va, "apps/greeter", map[string]any{"name": "greeter", "source": "app('greeter').register()", "version": 1}); out["error"] != nil {
-		t.Fatalf("ada (owner) registers an app: %v", out)
+	// Nobody's page writes apps/, the owner's included: the actor registers
+	// apps (registerApp, SLOP3-017; TestPinboardAppRegistration).
+	if out := write(sa, va, "apps/greeter", map[string]any{"name": "greeter", "source": "app('greeter').register()", "version": 1}); out["error"] == nil {
+		t.Fatalf("ada (owner) wrote apps/greeter from her page")
 	}
 	// Each person's view, trust and threads are private.
 	ada := va["user"].(string)

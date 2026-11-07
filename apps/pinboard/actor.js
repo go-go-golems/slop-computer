@@ -208,6 +208,60 @@ function pruneLog(now, keep) {
   return { removed: old.length, days, before: cutoff };
 }
 
+// ---------- apps (SLOP3-017) ----------
+// No page or client writes under apps/: the manifest's rule there is
+// "self", a level nobody holds. Apps are registered here, and this code
+// stamps who registered (uid, from the authenticated visitor) and the
+// source's sha256. A viewer's page relies on both to decide whether an app
+// runs without asking (apps.js trusted()); it also hashes the source itself.
+const APP_NAME = /^[a-z][a-z0-9_-]{0,59}$/i;
+const MAX_SOURCE = 160 * 1024; // the record and its version both hold it: 256 KiB documents
+const plainObject = (v) => (v && typeof v === 'object' && !Array.isArray(v) ? JSON.parse(JSON.stringify(v)) : {});
+const plainList = (v, max) => (Array.isArray(v) ? JSON.parse(JSON.stringify(v.slice(0, max))) : []);
+const size = (v, def, lo, hi) => { const n = Number(v); return Number.isFinite(n) ? Math.min(Math.max(Math.round(n), lo), hi) : def; };
+
+actions.registerApp = {
+  requires: 'admin',
+  // args: the source and what the registering page read from it (it is
+  // their own code: name, title, icon, about, shortcut, hidden, order, w, h,
+  // state, params), and a note for the version.
+  run(ctx, args) {
+    const a = args || {};
+    const source = typeof a.source === 'string' ? a.source : '';
+    if (!source.trim()) throw new Error('registerApp needs the source');
+    if (C.byteLength(source) > MAX_SOURCE) throw new Error('the source is larger than ' + MAX_SOURCE + ' bytes');
+    const name = String(a.name || '');
+    if (!APP_NAME.test(name)) throw new Error('an app name is one word of letters, digits, - or _; got ' + JSON.stringify(name));
+    const v = ctx.visitor || {};
+    const old = db.doc(C.pathOf('apps', name)).get().data();
+    const version = ((old && old.version) || 0) + 1;
+    const sha256 = C.sha256(source);
+    const rec = {
+      name, source, version, sha256, uid: v.id, by: v.name || v.email || v.id, at: ctx.now,
+      icon: str(a.icon, 8) || '△', title: str(a.title, 120) || name, about: str(a.about, 2000), shortcut: str(a.shortcut, 20),
+      hidden: !!a.hidden, w: size(a.w, 420, 160, 4000), h: size(a.h, 320, 120, 4000),
+      state: plainObject(a.state), params: plainList(a.params, 50),
+    };
+    if (Number.isFinite(Number(a.order)) && a.order !== null && a.order !== '') rec.order = Number(a.order);
+    commit(ctx, args, m => m.register(rec));
+    db.doc(C.pathOf('apps', name) + '/versions/' + version).set({ source, by: rec.by, uid: rec.uid, at: ctx.now, sha256, note: str(a.note, 500) });
+    return { name, version, sha256 };
+  },
+};
+
+actions.unregisterApp = {
+  requires: 'admin',
+  run(ctx, args) {
+    const name = String((args && args.name) || '');
+    if (!db.doc(C.pathOf('apps', name)).get().exists) throw new Error('no app ' + JSON.stringify(name));
+    commit(ctx, args, m => {
+      readAll('clips').filter(c => c.kind === 'app' && c.app === name).forEach(c => m.close(c.id));
+      m.unregister(name);
+    });
+    return { name };
+  },
+};
+
 actions.pruneLog = {
   requires: 'admin',
   run(ctx, args) { return pruneLog(ctx.now, Math.max(Number(args && args.keep) || LOG_KEEP, 1)); },

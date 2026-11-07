@@ -74,7 +74,7 @@
     try {
       const fn = new AsyncFunction(...Object.keys(scope), '"use strict";\n' + code);
       value = await Promise.race([fn(...Object.values(scope)), new Promise((_, rej) => setTimeout(() => rej(new Error('step timed out after 25 s (code may still be running)')), 25000))]);
-      if (cap.length && !PB.readonly) { cap.forEach(def => { PB.apps.registerSource(code); }); logs.push('registered app ' + cap.map(d => d.name).join(', ') + ' with this step\'s code as its source' + (/\bm\(|\.insert\(|board\.clip\(/.test(code) ? ' · warning: the step also mutates; those mutations will run again when the board loads. Keep app steps to the app chain.' : '')); }
+      if (cap.length && !PB.readonly) { await PB.apps.registerSource(code); logs.push('registered app ' + cap.map(d => d.name).join(', ') + ' with this step\'s code as its source' + (/\bm\(|\.insert\(|board\.clip\(/.test(code) ? ' · warning: the step also mutates; those mutations will run again when the board loads. Keep app steps to the app chain.' : '')); }
     } catch (e) { error = e; }
     finally { PB.apps._capture = prevCap; PB.actor = prevActor; PB.readonly = false; }
     const ms = Math.round(performance.now() - started);

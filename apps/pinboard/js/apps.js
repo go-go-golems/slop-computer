@@ -8,6 +8,15 @@
 
   // ---------- registry ----------
   const defs = {};
+  // sha256 of an app's source, remembered per source text (trust is checked
+  // on every draw of an app window).
+  const hashes = new Map();
+  function sourceHash(src) {
+    src = typeof src === 'string' ? src : '';
+    let h = hashes.get(src);
+    if (!h) { if (hashes.size >= 64) hashes.clear(); h = PinboardCore.sha256(src); hashes.set(src, h); }
+    return h;
+  }
   const framedMetas = {}; // name@sha256 → what the app's frame reported
   // An app that runs in a frame, as this page knows it: data from its record
   // (and from its frame once it reported), no code.
@@ -34,34 +43,40 @@
       return opts.narrow ? Object.assign({}, def, { _narrow: true }) : def;
     },
     // Registering writes a new version: apps/<name> (replaced whole) and
-    // apps/<name>/versions/<n>, with the author and the source's sha256.
-    registerSource(src, extra = {}) {
+    // apps/<name>/versions/<n>, with the author and the source's sha256. On a
+    // board, the actor writes them (registerApp): pages cannot write apps/,
+    // so the author (uid) and the hash in a record are the actor's, not a
+    // page's claim. Offline, this page is the board and writes them itself.
+    // The source is evaluated here only to read what the page needs without
+    // running the app (it runs in a frame): name, size, params, initial state.
+    async registerSource(src, extra = {}) {
       const def = A.evalSource(src, { narrow: true });
       delete defs[def.name];
-      const old = PB.S.apps[def.name];
-      const version = ((old && old !== PB.builtins[def.name] && old.version) || 0) + 1;
-      const sha256 = PinboardCore.sha256(src), at = Date.now();
-      // What the page needs without running the app (it runs in a frame):
-      // its size, params and initial state, as data.
       const data = (v) => JSON.parse(JSON.stringify(v === undefined ? null : v));
-      const rec = Object.assign({ name: def.name, source: src, icon: def.icon || '△', title: def.title || def.name, about: def.about || '', shortcut: def.shortcut || '', hidden: !!def.hidden, order: def.order, version, by: PB.myName(), uid: PB.myId(), at, sha256,
-        w: def.w || 420, h: def.h || 320, state: data(def.state || {}), params: data((def.params || []).map(p => ({ name: p.name, type: p.type, def: p.def, options: p.options, min: p.min, max: p.max, step: p.step }))) }, extra);
-      PB.mutate(m => m.register(rec), PB.actor);
-      PB.saveVersion(def.name, version, { source: src, by: rec.by, uid: rec.uid, at, sha256, note: extra.note || '' });
+      const meta = { name: def.name, icon: def.icon || '△', title: def.title || def.name, about: def.about || '', shortcut: def.shortcut || '', hidden: !!def.hidden, order: def.order,
+        w: def.w || 420, h: def.h || 320, state: data(def.state || {}), params: data((def.params || []).map(p => ({ name: p.name, type: p.type, def: p.def, options: p.options, min: p.min, max: p.max, step: p.step }))) };
+      if (PB.rt.db && PB.rt.slop) {
+        await PB.rt.slop.call('registerApp', Object.assign({ source: src, note: extra.note || '', via: 'page' }, meta));
+      } else {
+        const old = PB.S.apps[def.name];
+        const version = ((old && old !== PB.builtins[def.name] && old.version) || 0) + 1;
+        PB.mutate(m => m.register(Object.assign({ source: src, version, by: PB.myName(), uid: PB.myId(), at: Date.now(), sha256: sourceHash(src) }, meta)), PB.actor);
+      }
       // Not kept: the app runs from its record, in a frame (A.def).
       delete defs[def.name]; return def;
     },
-    // Built-in apps, and apps this person wrote, run without asking; any
-    // other app runs only after this person accepted that exact source.
+    // Built-in apps, and apps this person registered, run without asking;
+    // any other app runs only after this person accepted that exact source.
+    // The hash is always of the source that would run, never the record's.
     trusted(a) {
       if (!a) return false;
       if (a === PB.builtins[a.name]) return true;
       if (a.uid && a.uid === PB.myId()) return true;
-      return PB.trust.has(a.name, a.sha256 || PinboardCore.sha256(a.source || ''));
+      return PB.trust.has(a.name, sourceHash(a.source));
     },
     trust(name) {
       const a = PB.S.apps[name]; if (!a) return;
-      PB.trust.set(name, a.sha256 || PinboardCore.sha256(a.source || ''));
+      PB.trust.set(name, sourceHash(a.source));
       delete defs[name];
       PB.emit('change', new Set(['apps:' + name]));
     },
@@ -86,7 +101,11 @@
     invalidate(name) { if (name) delete defs[name]; else Object.keys(defs).forEach(k => delete defs[k]); },
     source: (name) => (PB.S.apps[name] || {}).source || '',
     list: () => Object.values(PB.S.apps),
-    unregister(name) { delete defs[name]; PB.mutate(m => { Object.values(PB.S.clips).filter(c => c.kind === 'app' && c.app === name).forEach(c => m.close(c.id)); m.unregister(name); }, PB.actor); },
+    async unregister(name) {
+      delete defs[name];
+      if (PB.rt.db && PB.rt.slop) return PB.rt.slop.call('unregisterApp', { name, via: 'page' });
+      PB.mutate(m => { Object.values(PB.S.clips).filter(c => c.kind === 'app' && c.app === name).forEach(c => m.close(c.id)); m.unregister(name); }, PB.actor);
+    },
     open(name, opts = {}) {
       const def = A.def(name); if (!def) throw new Error('no app "' + name + '". Registered: ' + Object.keys(PB.S.apps).join(', '));
       const go = (pos) => { const id = PB.mutate(m => m.open(name, Object.assign({ x: pos.x, y: pos.y }, opts.state ? { state: Object.assign({}, def.state, opts.state) } : {}, opts.params ? { params: opts.params } : {}, opts.pinned ? { pinned: true } : {})), PB.actor); PB.board.front(id); PB.board.select([id]); return id; };
@@ -209,8 +228,8 @@
     "  .agent.describe(c => 'app editor' + (c.state.name ? ' on ' + c.state.name : '') + (c.state.err ? ' · error: ' + c.state.err : ''))",
     "  .register()",
   ].join('\n');
-  A.registerFromEditor = function (c) {
-    try { const def = A.registerSource(c.state.src); c.set({ err: '', ok: 'registered ' + def.name + ' · ' + PB.clock(Date.now()), name: def.name }); PB.toast('registered ' + def.name, 'ok'); const open = Object.values(PB.S.clips).find(x => x.kind === 'app' && x.app === def.name); if (open) Object.values(PB.S.clips).filter(x => x.kind === 'app' && x.app === def.name).forEach(x => PB.board.renderClip(x.id)); else A.open(def.name); }
+  A.registerFromEditor = async function (c) {
+    try { const def = await A.registerSource(c.state.src); c.set({ err: '', ok: 'registered ' + def.name + ' · ' + PB.clock(Date.now()), name: def.name }); PB.toast('registered ' + def.name, 'ok'); const open = Object.values(PB.S.clips).find(x => x.kind === 'app' && x.app === def.name); if (open) Object.values(PB.S.clips).filter(x => x.kind === 'app' && x.app === def.name).forEach(x => PB.board.renderClip(x.id)); else A.open(def.name); }
     catch (e) { c.set({ err: e.message, ok: '' }); }
   };
 
@@ -347,7 +366,7 @@
     "  .agent.describe(c => '…').agent.allow(['insert']).agent.suggest(['…'])",
     "  .register()",
     "```",
-    "Apps are kept as source on the board (apps/<name>, every version in apps/<name>/versions/<n> with its author and sha256) and re-evaluated at load. Only board admins register apps. Everyone else's app runs for a person only after they accept that version (a prompt in its window); built-in apps and your own run at once. Board apps run in a sandboxed frame of their own (no network, no access to this page): they get a copy of the board, kept current, and their changes are applied as `app:<name>` with your level on the board; `c` has no `agent()`, only `apps.open`/`apps.list`, and `board` only reads, `clip`, `open`, `mutate`, `toast` and `log`. `apps.open(name, { state, params })`, `apps.edit(name)`, `apps.registerSource(src)`, `apps.source(name)`, `apps.unregister(name)`, `apps.list()`.",
+    "Apps are kept as source on the board (apps/<name>, every version in apps/<name>/versions/<n> with its author and sha256, written by the board's actor: `await apps.registerSource(src)`) and re-evaluated at load. Only board admins register apps. Everyone else's app runs for a person only after they accept that version (a prompt in its window); built-in apps and your own run at once. Board apps run in a sandboxed frame of their own (no network, no access to this page): they get a copy of the board, kept current, and their changes are applied as `app:<name>` with your level on the board; `c` has no `agent()`, only `apps.open`/`apps.list`, and `board` only reads, `clip`, `open`, `mutate`, `toast` and `log`. `apps.open(name, { state, params })`, `apps.edit(name)`, `apps.registerSource(src)`, `apps.source(name)`, `apps.unregister(name)`, `apps.list()`.",
     "",
     "## Fragments",
     "`fragment('taggable').attr('tags', []).method('tag', (b, ...t) => b.set('tags', x => [...x, ...t])).query('hasTag', (node, t) => …).decorate(b => b.footer(…)).on('paste', (b, data) => …)`; use with `.use(taggable)`; `.global()` adds its methods to every builder. Every clip carries taggable, sourced, bound and annotated.",

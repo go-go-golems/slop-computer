@@ -101,7 +101,9 @@ window.PB = window.PB || {};
   PB.flush = function () { Object.keys(timers).forEach(fire); };
   window.addEventListener('pagehide', () => PB.flush());
 
-  const writable = (store) => PB.can(store === 'apps' ? 'admin' : 'interact');
+  // apps/ is written by the board's actor only (registerApp); a page writes
+  // app records only offline, when it is the board.
+  const writable = (store) => (store === 'apps' ? !PB.rt.db && PB.can('admin') : PB.can('interact'));
   PB.save = function (store, id, delay = 40) {
     if (store === 'meta') return saveMeta(id);
     if (store === 'apps' && PB.builtins[id] && PB.S.apps[id] === PB.builtins[id]) return;
@@ -324,6 +326,9 @@ window.PB = window.PB || {};
     const e = PB.log.find(x => x.id === id); if (!e) throw new Error('no log entry ' + id);
     if (e.undone) throw new Error('already reverted');
     if (e.trimmed) throw new Error('this step was too large to keep its values; it cannot be reverted');
+    // Pages cannot write apps/ (the actor registers apps): an app goes back
+    // by registering the version wanted again (apps/<name>/versions).
+    if (PB.rt.db && e.ops.some(o => o.store === 'apps')) throw new Error('app changes are not reverted from the log: register the version you want again');
     const r = PB.core.revert(e.ops);
     if (r.applied.length) {
       record(r.applied, r.keys, 'you', { label: 'revert: ' + e.label, revertOf: e.id });
@@ -342,14 +347,10 @@ window.PB = window.PB || {};
     const ks = new Set(keys || [store + ':' + id]); PB.emit('change', ks);
   };
   // ---------- app versions and trust ----------
-  // Every registered version is kept at apps/<name>/versions/<n> (admins
-  // write apps/). Running an app written by someone else needs this viewer's
+  // Every registered version is kept at apps/<name>/versions/<n> (the actor
+  // writes apps/: registerApp). Running an app written by someone else needs this viewer's
   // consent for that exact source (its sha256), kept in data/users/<me>/trust,
   // or in this browser for viewers.
-  PB.saveVersion = function (name, n, doc) {
-    if (!PB.rt.db || !PB.can('admin')) return;
-    schedule('apps/' + PB.seg(name) + '/versions/' + n, () => doc, 40);
-  };
   PB.versions = async function (name) {
     if (!PB.rt.db) return [];
     const s = await PB.rt.db.collection('apps/' + PB.seg(name) + '/versions').get();

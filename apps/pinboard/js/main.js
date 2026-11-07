@@ -36,7 +36,7 @@
     try { await PB.connect(); } catch (e) { console.error(e); }
     try { await PB.load(); } catch (e) { console.error(e); PB.toast('⚠ the board could not be loaded: ' + (e.message || e), 'long'); }
     PB.apps.seed();
-    if (!PB.meta('seeded') && PB.can('admin') && !PB.S.apps.counter) { try { PB.apps.registerSource(PB.apps.TEMPLATE); } catch (e) { console.error(e); } }
+    if (!PB.meta('seeded') && PB.can('admin') && !PB.S.apps.counter) { try { await PB.apps.registerSource(PB.apps.TEMPLATE); } catch (e) { console.error(e); } }
     await seed();
     document.body.classList.toggle('readonly', !PB.can('interact'));
     PB.history.txs.length = 0; PB.history.idx = 0;

@@ -6,7 +6,7 @@
   "capabilities": {
     "db": { "rules": [
       { "path": "board", "read": "view", "write": "admin" },
-      { "path": "apps", "read": "view", "write": "admin" }
+      { "path": "apps", "read": "view", "write": "self" }
     ] },
     "user": { "scopes": ["profile"] },
     "room": {},
