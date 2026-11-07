@@ -56,6 +56,14 @@ type Config struct {
 	SecretKey     string `yaml:"secret_key_file"` // HMAC key for sandbox labels and secrets
 	LLM           string `yaml:"llm"`             // "" (off), "pi" (Pi's models through Geppetto) or "fake"
 	Pi            Pi     `yaml:"pi"`
+	Actors        Actors `yaml:"actors"`
+}
+
+// Actors configures the actors' JavaScript runtime.
+type Actors struct {
+	// Runtime is direct (default: a bare goja runtime) or engine (a
+	// go-go-goja engine runtime; SLOP3-016 design doc 02).
+	Runtime string `yaml:"runtime"`
 }
 
 // Pi configures the sample capability's models: Pi's agent directory, read
@@ -78,6 +86,9 @@ func Load(path string) (*Config, error) {
 		}
 	}
 	c.Defaults()
+	if r := c.Actors.Runtime; r != "direct" && r != "engine" {
+		return nil, fmt.Errorf("%s: actors.runtime is %q: use direct or engine", path, r)
+	}
 	return c, nil
 }
 
@@ -111,6 +122,9 @@ func (c *Config) Defaults() {
 	}
 	if c.Signup == "" {
 		c.Signup = "open"
+	}
+	if c.Actors.Runtime == "" {
+		c.Actors.Runtime = "direct"
 	}
 }
 

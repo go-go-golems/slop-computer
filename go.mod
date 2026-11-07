@@ -8,7 +8,7 @@ require (
 	github.com/dop251/goja_nodejs v0.0.0-20260918173711-b481721df8a2
 	github.com/go-go-golems/geppetto v0.13.13
 	github.com/go-go-golems/glazed v1.4.3
-	github.com/go-go-golems/go-go-goja v0.10.6
+	github.com/go-go-golems/go-go-goja v0.10.8-0.20261107193645-822e67c611a8
 	github.com/go-jose/go-jose/v4 v4.1.8
 	github.com/invopop/jsonschema v0.14.0
 	github.com/mattn/go-sqlite3 v1.14.52
@@ -22,6 +22,8 @@ require (
 	golang.org/x/sync v0.24.0
 	gopkg.in/yaml.v3 v3.0.1
 )
+
+require github.com/dop251/base64dec v0.0.0-20231022112746-c6c9f9a96217 // indirect
 
 require (
 	cloud.google.com/go v0.121.1 // indirect
@@ -43,7 +45,6 @@ require (
 	github.com/clipperhouse/stringish v0.1.1 // indirect
 	github.com/clipperhouse/uax29/v2 v2.5.0 // indirect
 	github.com/dlclark/regexp2/v2 v2.11.0 // indirect
-	github.com/dop251/base64dec v0.0.0-20231022112746-c6c9f9a96217 // indirect
 	github.com/felixge/httpsnoop v1.0.4 // indirect
 	github.com/go-go-golems/logcopter v0.1.1 // indirect
 	github.com/go-logr/logr v1.4.4 // indirect

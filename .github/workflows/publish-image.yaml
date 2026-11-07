@@ -37,7 +37,7 @@ jobs:
     with:
       dockerfile: ./Dockerfile
       build_context: .
-      test_command: go test ./... -count=1
+      test_command: go test ./... -count=1 && SLOP_TEST_ACTORS_RUNTIME=engine go test ./pkg/host/ -count=1
       go_version_file: go.mod
       image_name: ghcr.io/go-go-golems/slop-computer
       platforms: linux/amd64

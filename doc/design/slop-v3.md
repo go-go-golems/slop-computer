@@ -590,6 +590,10 @@ There is one list of capabilities, and each has the same name and the same rules
 | `express` | none | `use('express')`, also `require('express')` | `mount.routes` | always on | go-go-goja's express route builder, compiled into the actor's `http` routes (SLOP3-012); no `static`, `listen` or `mount` |
 | `fs` | none | `use('fs')`, also `require('fs')` | none | on; a grant configures it (`maxBytes`, `maxFiles`) | go-go-goja's fs API over an in-memory tree the actor owns; follows the turn, empties on restart |
 | `path` | none | `use('path')`, also `require('path')` | none | always on | go-go-goja's path API, POSIX |
+| `yaml` | none | `use('yaml')`, also `require('yaml')` | none | always on | go-go-goja's yaml module (bridged, SLOP3-016): `parse`, `stringify`, `validate` |
+| `crypto` | none | `use('crypto')`, also `require('crypto')` | none | always on | go-go-goja's crypto module (bridged): `randomUUID`, `randomBytes`, `createHash` (md5, sha1, sha256, sha512); bytes are Buffers |
+| `events` | none | `use('events')`, also `require('events')` | none | always on | go-go-goja's `EventEmitter` (bridged); `emit` calls listeners synchronously |
+| `buffer` | none | `use('buffer')`, also `require('buffer')` | none | always on | goja_nodejs's `Buffer`; no global `Buffer` |
 | `fetch` | none | `use('fetch')` | none | yes, approval per origin | outbound HTTP to allowed origins; every redirect is checked against them too |
 | `secrets` | none | `use('secrets')` | `secret.set` (admin) | yes, approval per name | values admins set for this app |
 | `platform` | `slop.platform` | `use('platform')` | the management verbs | yes, approval per permission | mounts, grants, refs, stores, questions |
