@@ -1,0 +1,10 @@
+{
+  "title": "Curator — slop catalog",
+  "page": "index.html",
+  "actor": "actor.js",
+  "capabilities": {
+    "sample": {},
+    "db": { "rules": [{ "path": "picks", "read": "view", "write": "admin" }] },
+    "user": {}
+  }
+}

@@ -1,0 +1,31 @@
+catalog          files.push (3 changed: data/catalog.json, data/search-index.json, data/views.json)
+                 snapshot 7
+catalog-list     up to date
+catalog-table    up to date
+catalog-sheet    up to date
+catalog-caps     up to date
+catalog-zine     up to date
+catalog-timeline up to date
+catalog-treemap  up to date
+catalog-roulette up to date
+catalog-term     up to date
+catalog-desktop  up to date
+catalog-agents   up to date
+catalog-mcp      files.push (1 changed: data/catalog.json)
+                 snapshot 2
+catalog-shelf    store.new, files.push (3 changed: app.json, data/catalog.json, index.html), grant.set @guest view, grant.set @member interact, mount.set apps.slop.yolo.scapegoat.dev/catalog/shelf
+                 snapshot 1
+https://site.slop.yolo.scapegoat.dev/catalog/
+https://site.slop.yolo.scapegoat.dev/catalog/list/
+https://site.slop.yolo.scapegoat.dev/catalog/table/
+https://site.slop.yolo.scapegoat.dev/catalog/sheet/
+https://site.slop.yolo.scapegoat.dev/catalog/caps/
+https://site.slop.yolo.scapegoat.dev/catalog/zine/
+https://site.slop.yolo.scapegoat.dev/catalog/timeline/
+https://site.slop.yolo.scapegoat.dev/catalog/treemap/
+https://site.slop.yolo.scapegoat.dev/catalog/roulette/
+https://site.slop.yolo.scapegoat.dev/catalog/term/
+https://site.slop.yolo.scapegoat.dev/catalog/desktop/
+https://site.slop.yolo.scapegoat.dev/catalog/agents/
+https://apps.slop.yolo.scapegoat.dev/catalog/mcp
+https://apps.slop.yolo.scapegoat.dev/catalog/shelf

@@ -59,6 +59,8 @@ VIEWS = [
 LIVE_VIEWS = [
     {"id": "shelf", "title": "Shelf", "path": "/catalog/shelf/",
      "blurb": "Sign in and keep a shelf of apps; share it if you like, and see what people here are looking at."},
+    {"id": "curator", "title": "Curator", "path": "/catalog/curator/",
+     "blurb": "Ask slop's model for apps that fit what you are after, and see today's three picks."},
 ]
 
 

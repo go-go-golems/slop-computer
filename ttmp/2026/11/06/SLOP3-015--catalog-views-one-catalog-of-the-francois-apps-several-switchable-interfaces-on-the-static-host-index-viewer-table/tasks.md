@@ -22,3 +22,4 @@
 - [x] View: text terminal (ls, grep, find, cat, open, run, tags, caps, du, cd) <!-- t:3cpc -->
 - [x] View: desktop (windows, start menu, taskbar, live previews, at most 5 running) <!-- t:9phe -->
 - [x] View 14: shelf (live host): private stars, opt-in shared shelves, presence; tested with two people locally <!-- t:d57a -->
+- [x] View 15: curator (live host): ask the model (page sample, member pays), apps of the day (actor action, stored per day) <!-- t:9en0 -->

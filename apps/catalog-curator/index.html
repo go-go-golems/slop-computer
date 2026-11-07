@@ -1,0 +1,162 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Curator — slop catalog</title>
+<style>
+  :root { --bg: #f6f5f1; --panel: #fff; --ink: #16161a; --muted: #6b6a66; --line: #dcdad3; --accent: #c2410c; --chip: #ecebe5;
+          --mono: ui-monospace, "SF Mono", Menlo, Consolas, monospace; --sans: system-ui, -apple-system, "Segoe UI", Roboto, sans-serif; color-scheme: light dark; }
+  @media (prefers-color-scheme: dark) { :root { --bg: #141414; --panel: #1c1c1e; --ink: #ecebe6; --muted: #9a9892; --line: #2f2f31; --accent: #fb923c; --chip: #262628; } }
+  * { box-sizing: border-box; }
+  body { margin: 0; background: var(--bg); color: var(--ink); font: 15px/1.5 var(--sans); }
+  a { color: inherit; }
+  button, input, textarea { font: inherit; color: inherit; }
+  .wrap { max-width: 1080px; margin: 0 auto; padding: 0 20px; }
+  header { display: flex; align-items: center; gap: 14px; padding: 12px 0; border-bottom: 1px solid var(--line); flex-wrap: wrap; }
+  header h1 { font-size: 18px; margin: 0; }
+  header .sp { flex: 1; }
+  .meta { font: 12px var(--mono); color: var(--muted); }
+  .btn { border: 1px solid var(--line); background: var(--panel); border-radius: 8px; padding: 5px 12px; cursor: pointer; text-decoration: none; font-size: 14px; display: inline-block; }
+  .btn:hover { border-color: var(--ink); }
+  .btn.primary { background: var(--ink); color: var(--bg); border-color: var(--ink); }
+  .btn:disabled { opacity: .5; cursor: default; }
+  h2 { font-size: 22px; margin: 28px 0 4px; letter-spacing: -.01em; }
+  .lead { color: var(--muted); margin: 0 0 14px; }
+  .cards { display: grid; gap: 14px; grid-template-columns: repeat(auto-fill, minmax(300px, 1fr)); }
+  .card { background: var(--panel); border: 1px solid var(--line); border-radius: 12px; overflow: hidden; display: flex; flex-direction: column; }
+  .card .pic { aspect-ratio: 16 / 9; background: var(--chip); display: grid; place-items: center; font: 700 34px var(--sans); color: var(--muted); }
+  .card .pic img { width: 100%; height: 100%; object-fit: cover; }
+  .card .body { padding: 12px 14px; display: flex; flex-direction: column; gap: 6px; flex: 1; }
+  .card h3 { margin: 0; font-size: 17px; }
+  .card .why { margin: 0; }
+  .card .desc { margin: 0; color: var(--muted); font-size: 13px; }
+  .card .acts { margin-top: auto; display: flex; gap: 8px; padding-top: 6px; }
+  .ask { display: flex; gap: 8px; flex-wrap: wrap; }
+  .ask textarea { flex: 1 1 420px; min-height: 64px; border: 1px solid var(--line); border-radius: 10px; padding: 8px 10px; background: var(--panel); resize: vertical; }
+  .chips { display: flex; flex-wrap: wrap; gap: 6px; margin: 8px 0 14px; }
+  .chips button { border: 1px solid var(--line); background: transparent; border-radius: 999px; padding: 2px 10px; font-size: 13px; cursor: pointer; color: var(--muted); }
+  .chips button:hover { border-color: var(--ink); color: var(--ink); }
+  .note { border-left: 2px solid var(--accent); padding-left: 10px; margin: 10px 0; }
+  .empty { color: var(--muted); padding: 20px 0; }
+  footer { color: var(--muted); font-size: 13px; border-top: 1px solid var(--line); margin-top: 40px; padding: 16px 0 30px; }
+</style>
+</head>
+<body>
+<div class="wrap">
+  <header>
+    <h1>Curator</h1>
+    <span class="meta" id="who"></span>
+    <span class="sp"></span>
+    <a class="btn" id="back" href="#" target="_top">← Catalog</a>
+  </header>
+
+  <h2>Apps of the day</h2>
+  <p class="lead" id="daylead">Three apps, chosen once a day.</p>
+  <div class="cards" id="today"><p class="empty">Loading…</p></div>
+
+  <h2>Ask the curator</h2>
+  <p class="lead">Say what you are after; the model reads the whole catalog and picks up to five apps, each with a reason.</p>
+  <form class="ask" id="form">
+    <textarea id="q" placeholder="e.g. a playful game to start from" aria-label="Your request"></textarea>
+    <button class="btn primary" id="go">Ask</button>
+  </form>
+  <div class="chips" id="chips"></div>
+  <p class="meta" id="status"></p>
+  <div id="answer"></div>
+
+  <footer>The curator runs on slop's model backend, on your account: each question counts against your monthly allowance. It only knows the catalog's titles, descriptions and tags, not the apps themselves.</footer>
+</div>
+<script src="curate.js"></script>
+<script>
+(async () => {
+  "use strict";
+  const $ = (id) => document.getElementById(id);
+  function el(tag, attrs, ...kids) {
+    const n = document.createElement(tag);
+    for (const [k, v] of Object.entries(attrs || {})) {
+      if (v == null || v === false) continue;
+      if (k.startsWith("on")) n.addEventListener(k.slice(2), v);
+      else if (k === "class") n.className = v;
+      else n.setAttribute(k, v === true ? "" : v);
+    }
+    for (const k of kids.flat()) if (k != null && k !== false) n.append(k.nodeType ? k : String(k));
+    return n;
+  }
+  const initials = (t) => (t || "").replace(/[^\p{L}\p{N} ]/gu, "").split(/\s+/).filter(Boolean).slice(0, 2).map((w) => w[0].toUpperCase()).join("") || "·";
+
+  const catalog = await fetch("data/catalog.json").then((r) => r.json());
+  const site = catalog.siteOrigin || "https://site.slop.yolo.scapegoat.dev";
+  $("back").href = site + "/catalog/";
+  const byId = new Map(catalog.items.map((i) => [i.id, i]));
+
+  function card(p) {
+    const i = byId.get(p.id);
+    if (!i) return null;
+    return el("article", { class: "card" },
+      el("div", { class: "pic" }, i.cover ? el("img", { src: site + i.cover.src, alt: "", loading: "lazy" }) : initials(i.title)),
+      el("div", { class: "body" },
+        el("h3", {}, i.title, i.free ? "" : " · subscribers"),
+        p.why ? el("p", { class: "why" }, p.why) : null,
+        el("p", { class: "desc" }, i.description),
+        el("div", { class: "acts" },
+          el("a", { class: "btn primary", href: i.open, target: "_blank", rel: "noopener" }, "Open ↗"),
+          el("a", { class: "btn", href: site + "/catalog/list/?open=" + encodeURIComponent(i.id), target: "_blank", rel: "noopener" }, "Preview ↗"))));
+  }
+
+  const [db, sample, slop] = await Promise.all(["db", "sample", "slop"].map((n) => claude.use(n).catch(() => null)));
+  const visitor = slop && slop.visitor ? await slop.visitor().catch(() => null) : null;
+  const member = !!visitor && !visitor.guest && ["interact", "admin", "owner"].includes(visitor.level);
+  const llm = visitor && visitor.llm;
+  $("who").textContent = !visitor ? "" : visitor.guest ? "guest" : `${visitor.audience}${llm ? (llm.allowed ? ` · model allowance left: ${llm.remaining ?? "?"}` : " · no model allowance") : ""}`;
+
+  // --- apps of the day ---------------------------------------------------------
+  const day = new Date().toISOString().slice(0, 10);
+  function showToday(d, how) {
+    $("daylead").textContent = how;
+    $("today").replaceChildren(...d.picks.map(card).filter(Boolean));
+    if (d.note) $("today").after(el("p", { class: "note" }, d.note));
+  }
+  const seeded = () => showToday({ picks: Curate.seeded(catalog, day, 3) }, `Three free apps for ${day}, picked by the date. ` + (member ? "" : "Members get the curator's picks."));
+  let stored = null;
+  if (db) {
+    try { const s = await db.doc("picks/" + day).get(); if (s.exists) stored = s.data(); } catch (e) { /* no data for this visitor */ }
+  }
+  if (stored) showToday(stored, stored.by === "model" ? `Chosen by the curator for ${day}.` : `Picked by the date for ${day}.`);
+  else if (member && slop && slop.actions && slop.actions.today) {
+    $("today").replaceChildren(el("p", { class: "empty" }, "The curator is choosing today's apps…"));
+    slop.actions.today({}).then((d) => showToday(d, d.by === "model" ? `Chosen by the curator for ${day}.` : `Picked by the date for ${day} (the curator's answer was not usable).`))
+      .catch(() => seeded());
+  } else seeded();
+
+  // --- ask -------------------------------------------------------------------
+  const EXAMPLES = ["a playful game to start from", "something to make music or sound", "apps that people use together, live", "a tool for writing or slides", "something beautiful with shaders", "the smallest app that still does a lot"];
+  $("chips").replaceChildren(...EXAMPLES.map((t) => el("button", { type: "button", onclick: () => { $("q").value = t; ask(); } }, t)));
+  if (!sample) {
+    $("go").disabled = true;
+    $("status").textContent = member ? "The model is not available here (the curator needs the sample policy for your audience)." : "Sign in as a member to ask the curator.";
+    if (!member && slop && slop.signIn) $("status").append(" ", el("button", { class: "btn", type: "button", onclick: () => slop.signIn() }, "Sign in"));
+  }
+  $("form").onsubmit = (e) => { e.preventDefault(); ask(); };
+  let busy = false;
+  async function ask() {
+    const q = $("q").value.trim();
+    if (!q || busy || !sample) return;
+    busy = true; $("go").disabled = true;
+    $("status").textContent = "Reading the catalog…";
+    $("answer").replaceChildren();
+    const t0 = performance.now();
+    try {
+      const r = await sample(Curate.prompt(catalog, q, 5), { modelTier: "default" });
+      const got = Curate.parse(r.text, catalog);
+      $("status").textContent = `${got ? got.picks.length + " picks" : "an answer"} in ${((performance.now() - t0) / 1000).toFixed(1)} s` + (r.model ? ` · ${r.model}` : "");
+      if (got) $("answer").replaceChildren(...(got.note ? [el("p", { class: "note" }, got.note)] : []), el("div", { class: "cards" }, got.picks.map(card).filter(Boolean)));
+      else $("answer").replaceChildren(el("p", { class: "note" }, "The curator answered, but not with apps from the catalog:"), el("p", {}, r.text.slice(0, 1000)));
+    } catch (e) {
+      $("status").textContent = (e.code === "quota_exceeded" ? "Your model allowance for this month is used up." : `The curator could not answer: ${e.code || ""} ${e.message || e}`);
+    } finally { busy = false; $("go").disabled = false; }
+  }
+})();
+</script>
+</body>
+</html>

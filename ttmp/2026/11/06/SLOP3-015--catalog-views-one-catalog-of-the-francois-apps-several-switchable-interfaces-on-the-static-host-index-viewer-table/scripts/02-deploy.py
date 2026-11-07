@@ -47,6 +47,12 @@ STORES = [
     # Guests see the page; signed-in members keep a shelf.
     {"store": "catalog-shelf", "src": "apps/catalog-shelf", "host": "live", "path": "/catalog/shelf",
      "extra": {"data/catalog.json": "catalog.json"}, "grants": {"@guest": "view", "@member": "interact"}},
+    # View 15: the curator asks slop's model, on the member's own allowance
+    # (the page's sample, and the actor's "today" action run as the member
+    # who opens the page first that day). Policy: sample for members only.
+    {"store": "catalog-curator", "src": "apps/catalog-curator", "host": "live", "path": "/catalog/curator",
+     "extra": {"data/catalog.json": "catalog.json"}, "grants": {"@guest": "view", "@member": "interact"},
+     "policy": [("sample", "member", True)]},
 ]
 GUEST_VIEW = {"@guest": "view"}
 
