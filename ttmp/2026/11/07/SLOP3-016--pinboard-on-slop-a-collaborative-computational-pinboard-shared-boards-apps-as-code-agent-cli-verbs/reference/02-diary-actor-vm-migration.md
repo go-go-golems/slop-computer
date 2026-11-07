@@ -285,3 +285,84 @@ Results (three runs of the turn benchmarks; `ns/op` ranges):
 
 ### Technical details
 - Raw outputs were kept in the scratchpad during the session (`slopvm-bench1.txt`, `-bench2`, `-bench3`, `-bench-host`); the table above has every number from them.
+
+## Step 4: Phase 4, go-go-goja's data modules in the catalog
+
+This step bridges three go-go-goja modules, `yaml`, `crypto` and `events`, into slop's module catalog as data-class modules, plus goja_nodejs's `buffer`, which `crypto` needs. They work with `use()` and `require()` on both runtimes: the bridge only calls a module's `Loader` on the actor's VM, so it does not depend on the engine.
+
+### Prompt Context
+**User prompt (verbatim):** (the coordinator) "Phase 4: bridge synchronous data modules from go-go-goja (yaml if present, crypto, events — check each for globals and event-loop use) into slop's catalog with their TypeScript/docs, classes data; tests that apps can require/use them in both modes."
+**Assistant interpretation:** Doc 02 §5.5's `bridged()` for the three modules, after reading each for side effects.
+**Inferred user intent:** The first concrete gain of the migration: go-go-goja's library available to app actors.
+**Commit (code):** `15db2e2` — "actor: go-go-goja's yaml, crypto and events in the module catalog (SLOP3-016 actor VM phase 4)"
+
+### What I did
+- Read the three modules at `822e67c` (`modules/yaml/yaml.go`, `modules/crypto/crypto.go`, `modules/events/events.go`) and goja_nodejs's `buffer` (`buffer.go` `mod`, `WrapBytes`, `Require`) and `require.Require`.
+- `pkg/actor/bridge.go`:
+  - `bridged(mod, class, plain, extraTS...)`: `Name`/`Doc` from the module; `Load` makes `{exports: {}}`, calls `mod.Loader(vm, obj)` and returns `obj.exports` (read after the call, because `events` replaces `exports` with its constructor).
+  - `typeScriptOf`: renders the module's `TypeScriptModule()` descriptor with go-go-goja's `tsgen/render.Bundle` and strips the header; crypto gets an `import { Buffer } from "buffer";` line, since its descriptor names `Buffer`.
+  - `registerBridged`: `yaml`, `crypto`, `events` from `modules.DefaultRegistry` (their packages are blank-imported), and `buffer` loaded with `buffer.Require(vm, obj)`, with a hand-written declaration of the methods goja_nodejs actually has.
+- `Module.Plain` (`pkg/actor/catalog.go`): a default-class module whose object is given to the app unwrapped. `events` and `buffer` are plain.
+- `reservedModules` gains `yaml`, `crypto`, `events`, `buffer`.
+- `doc/design/slop-v3.md` §7's capability table lists the four modules. This is the repository's platform reference, not a SLOP3-016 design doc.
+- Test `pkg/host/bridged_modules_test.go`, `TestBridgedModules`, on both runtimes:
+  - `yaml` parse, stringify and validate;
+  - `EventEmitter` `on`, `once`, `emit`, and the named export;
+  - `crypto.randomUUID`, `randomBytes(8)` (a `Buffer`), `createHash('sha256')` with `digest('hex')` and `digest()`;
+  - `require('buffer').Buffer.from('hi').toString('base64')`;
+  - `require('yaml') === use('yaml')`, and `typeof Buffer` is still `undefined`;
+  - `app.modules` lists all four as class `data`, on by default, with a `declare module` block each.
+
+### Why
+- **`buffer` as a module, not a global:** goja_nodejs's `WrapBytes` looks for a global `Buffer` and, failing that, calls the global `require('buffer')` (`buffer.go` `mod`). In an actor the global `require` is slop's, so answering `buffer` there is enough. Adding a global `Buffer` would change what every existing actor sees, and `TestActorRuntimeGuarantees` checks that it does not.
+- **`Plain`:** `intercept` replaces every function of a module object with a Go wrapper, to count calls and to re-check grants per call. A wrapper is not a constructor, so `new EventEmitter()` and `Buffer`'s prototype chain would break. Only default-class modules may be plain, because the wrapper is also where a withdrawn grant takes effect for scoped and trusted modules.
+- **Reserved names:** scripts written for go-go-goja `require('yaml')` and the others by bare name. No app or example in the repository has a file with those names (`find apps examples -name …` found none).
+
+### What worked
+- `TestBridgedModules` passes on both runtimes.
+- `go test -buildvcs=false ./... -count=1`: all pass.
+- `SLOP_TEST_ACTORS_RUNTIME=engine go test -buildvcs=false ./pkg/host/ -count=1`: `ok … 17.971s`.
+- `SLOP_TEST_ACTORS_RUNTIME=engine go test -buildvcs=false -race ./pkg/host/ -count=1`: `ok … 32.407s`.
+- `golangci-lint`: 0 issues after one fix (below). No tree-sitter: `go list -deps ./cmd/slop | grep -c tree-sitter` → `0`.
+- Binary after this step: 60,878,808 bytes plain, 43,108,344 with `-trimpath -ldflags "-s -w"`. Against phase 1 (59,786,440 and 42,326,392): +1,092,368 (+1.8 %) and +781,952 (+1.8 %).
+
+### What didn't work
+- `TypeError: Object has no member 'isBuffer'`: goja_nodejs's `Buffer` has only `from`, `alloc` and `concat` as statics. The test now uses `instanceof`, and the declaration lists only what exists. Its codecs are `utf8`/`utf-8`, `hex` and `base64`, so the declared `Encoding` has only those.
+- `yaml.stringify({…, n: 42})` gave `"n": 42`: yaml.v3 quotes `n`, a YAML 1.1 boolean. The keys also come out sorted, because the value passes through a Go map. The test uses `count` and expects sorted keys.
+- Lint: `QF1001: could apply De Morgan's law` on `!(mod.Plain && mod.Class.Default())`, rewritten as `!mod.Plain || !mod.Class.Default()`.
+
+### What I learned
+- go-go-goja's modules depend on goja_nodejs through the global `require` in places one does not see from their own code (`crypto` → `buffer.WrapBytes` → `require('buffer')`). Bridging a module means reading its dependencies too.
+- `yaml.stringify` is not order-preserving (maps), which matters for apps that diff YAML.
+
+### What was tricky to build
+- Making `crypto`'s `Buffer` path work without the global: the chain is `WrapBytes` → `mod(r)` → `r.Get("Buffer")` (nil) → `require.Require(r, "buffer")` → global `require` (slop's) → `reservedModules["buffer"]` → `a.module("buffer")` → the catalog module, which carries goja_nodejs's API symbol, so `WrapBytes` finds its fast path.
+
+### What warrants a second pair of eyes
+- `Module.Plain` and the changed condition in `catalogModule` (`pkg/actor/catalog.go`): plain modules skip call counting, so `app.modules` shows no calls for `events` and `buffer`.
+- The reserved names: an app that ships its own `events.js` and requires it by bare name would now get the module. Relative requires (`./events`) are unaffected.
+
+### What should be done in the future
+- **Phase 5:** jsverbs inside actors (`InvokeInVM`).
+- **Phase 6 (the default switch) is blocked or pending on:**
+  1. go-go-goja #107 merged and tagged, and the fork replace removed from `go.mod`;
+  2. CI running `pkg/host` in both modes (the workflow's `test_command` now has `&& SLOP_TEST_ACTORS_RUNTIME=engine go test ./pkg/host/`, not yet seen running in CI);
+  3. a run on a staging or production-like server with `actors.runtime: engine`: two goroutines and about 48 KiB of heap per live actor instead of one and about 30 KiB;
+  4. the doc 02 updates (one run per event; globals in `load`; the fork replace);
+  5. optionally, the write-turn benchmark on a quiet machine (`put`: 310–331 µs direct, 338–409 µs engine).
+- Asynchronous go-go-goja modules (`fetch`, `timer`, `database` with its own handle) stay unbridged. Any of them needs a way to tell the turn owner which event it belongs to before it can be offered (a `Post` from a goroutine is refused today).
+
+### Code review instructions
+- `pkg/actor/bridge.go`, then the `Plain` field and its use in `pkg/actor/catalog.go`, `reservedModules` in `pkg/actor/database.go`, `pkg/host/bridged_modules_test.go`.
+  ```sh
+  go test -buildvcs=false ./pkg/host/ -run 'TestBridgedModules|TestModuleCatalog' -count=1 -v
+  ```
+
+### Technical details
+- In an actor:
+  ```js
+  const yaml = require('yaml'), crypto = require('crypto'), EventEmitter = require('events');
+  const { Buffer } = require('buffer');
+  crypto.createHash('sha256').update('slop').digest('hex');   // 64 hex characters
+  crypto.randomBytes(8) instanceof Buffer;                    // true
+  ```
