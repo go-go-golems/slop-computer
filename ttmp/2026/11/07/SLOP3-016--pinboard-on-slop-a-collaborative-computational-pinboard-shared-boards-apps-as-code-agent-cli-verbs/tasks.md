@@ -8,4 +8,4 @@
 - [ ] Phase 4: actor actions over the core; share dialog via platform; my boards (slop.stores runtime call) <!-- t:82uq -->
 - [ ] Phase 5: app commands (manifest, app.commands verb, CLI dynamic commands + alias, MCP tools) <!-- t:842z -->
 - [ ] Phase 6: server agent (actor sample tools), log pruning, iframe isolation for app windows <!-- t:rx3v -->
-- [ ] Analysis/design guide written and uploaded to reMarkable <!-- t:o85w -->
+- [x] Analysis/design guide written and uploaded to reMarkable <!-- t:o85w -->
