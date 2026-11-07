@@ -288,3 +288,76 @@ turn:   actor goroutine ─store.Do→ host.Run(Owner.Call) ─loop goroutine→
 settle: module Post → turnOwner → continueWith(ev) → inbox → new turn
 engine: WithImplicitDefaultRegistryModules(false), WithDataOnlyDefaultRegistryModules(false), U1 owner, U2 no globals, slop initializer
 ```
+
+## Step 5: Implementation starts; phase 0, the prototype on slop
+
+The user asked to implement the ticket. I split the work three ways:
+- **go-go-goja upstream** (U1–U4 and a verbs-only scan option): a background agent with its own worktree (`scratchpad/gogoja-up`, branch `task/host-runtime-options`) and its own diary in a go-go-goja ticket.
+- **Actor VM migration phase 1** (the `vmHost` interface): a background agent with its own worktree (`scratchpad/slopvm`, branch `task/slop3-016-actor-host`) and its own diary, `reference/02-diary-actor-vm-migration.md`.
+- **The Pinboard app**, phases 0–4: me, in `scratchpad/slop016` on `task/slop3-016-pinboard`. This diary covers that.
+
+Phase 0 puts the prototype on slop for one person per board. The UI files stay the prototype's; `js/store.js` is rewritten so that `PB.S` is filled from and written to the board's `db`.
+
+### Prompt Context
+**User prompt (verbatim):** "Ok, do the tickets, commit at appropriate intervals and keep a detailed diary as you work (using the diary format from the skill)". Later, mid-turn: "it's ok, you can PR into go-go-goja", "what worktree / dirrectory are you working on?", "use diaries for subagents and such as well, diary format according to skill is mandatory".
+**Assistant interpretation:** Implement SLOP3-016's tasks (Pinboard phases 0–6, actor VM migration phases 0–6), in parallel where independent, with every agent keeping a diary in the mandatory format.
+**Inferred user intent:** Get the collaborative Pinboard and the runtime work built, reviewable as PRs, with a record of how.
+**Commit (code):** `4a29c45` (prototype copied unchanged, as a baseline), `d154cd6` (phase 0)
+
+### What I did
+- Copied `sources/pinboard-prototype` to `apps/pinboard/` unchanged and committed it alone (`4a29c45`), so the port's diff shows only slop changes.
+- `apps/pinboard/app.json`: `type: pinboard`; rules `board` and `apps` written by `admin`; `user` with `profile`, `room`, `assets`, `downloads`, `sample`.
+- Rewrote `apps/pinboard/js/store.js`:
+  - `PB.connect()` gets `db user assets slop room` with `claude.use`, the person (`user.me()`) and the level (`slop.visitor().level`);
+  - `PB.load()` reads `clips`, `apps`, `colls`, `records` and `board/meta` once; this viewer's keys from `data/users/<me>/view`, or browser storage for viewers;
+  - writes: `PB.save(store, id, delay)` debounces per document path (40 ms for mutations, 300 ms for typing and app state) and then calls `ref.set`/`ref.delete`; the runtime itself already serialises writes per document (`web/runtime/src/db.ts`, `serial`);
+  - `PB.meta`: `title`, `seeded`, `about` go to `board/meta` (admins only); `view`, `minimap`, agent `threads` and modes go to the viewer's document, trimmed below 200 KB;
+  - images: `PB.putBlob` uploads with `assets.upload` and returns `blob:<asset id>`; `PB.blobURL` maps that to `/_blob/<id>`; `PB.fetchBlob` fetches bytes when copy or the agent needs them;
+  - ids: `PB.id(p)` gives ten base-36 characters from `crypto.getRandomValues`;
+  - `PB.seg`/`PB.unseg` escape free-text collection names into db path segments (`~xx` per byte);
+  - level checks in the recorder (`interact` for clips and records, `admin` for apps) so a refused write fails before the screen changes.
+- `apps.js`: built-in apps are evaluated into memory (`PB.builtins`) instead of being registered into each board.
+- `board.js`, `render.js`, `agent.js`: asset references in `resolveSrc`; selected image clips fetched ahead of copy and agent use (`B.cacheBlobs(ids)` on `selection`, event `blobs`); the clip id pattern `clip:[a-z0-9]{5,10}`.
+- `main.js`: boot connects, loads, seeds only as an admin, makes the title editable only for admins, and shows `saving…`/`saved`/`view only` in the status line.
+- Local server: `go build -buildvcs=false -o scratchpad/pbslop ./cmd/slop`; `pbslop serve --local --llm fake --data scratchpad/localdata --admin-email admin@example.com`; with `SLOP_CREDENTIALS=scratchpad/local-creds.json`: `store new pinboard`, `push apps/pinboard --store pinboard`, `mount set apps.localhost:18300 /pb/:id --storeParam id --type pinboard --createApp pinboard`, `policy set pinboard sample @member on`, `llm set ada@example.com on --budget 2000000`.
+- Browser check (Playwright, a separate context): signed in as Ada, opened `/pb/new-ada1`, pressed "Create a new one" → board `s-5povfcfc`, owner Ada, three welcome clips. Added a note, a record in `recipes`, a PNG image and the title "Kitchen", reloaded: all five clips, the record, the collection, the title and the image (`/_blob/a770…`, 64 px wide) came back. Screenshot `various/01-phase0-board-on-slop.png`. The agent ran one step with the fake model in Ask mode after "Run this step".
+
+### Why
+- **Keep the prototype's split.** The prototype already separates state (`PB.S`) from persistence (`write`, `PB.save`, `PB.load`). Replacing only those keeps the 200 KB of UI code unchanged, so later phases can be reviewed as store-layer diffs.
+- **Built-ins in memory.** Writing seven built-in apps into every board would need an admin on first visit, fill the board's `apps/` and freeze old versions of the code in old boards.
+- **Flat `records/<id>`** instead of the guide's `colls/<name>/rows/<id>`: the prototype keeps all records in memory and queries them there, so one subscription for all records is simpler. The guide's per-collection layout only helps when collections are not loaded, which nothing does yet.
+
+### What worked
+- The runtime's `db` needed no adapter beyond `set`/`delete`: snapshots are frozen, so `PB.clone` on load is enough.
+- `/_blob/<id>` resolves inside the sandbox frame; an `<img>` with that path loads without any extra call.
+- The shell already shows Share (owner) and the createApp flow; nothing in the app had to do that.
+
+### What didn't work
+- The first agent message answered `token budget used up for this month`: `llm set … --budget 1000` is in tokens and the prompt (reference text plus board description) is larger. `--budget 2000000` worked.
+- `globalThis` in Playwright's `browser_run_code_unsafe` does not survive between calls (`TypeError: Cannot read properties of undefined (reading 'pages')`); I find the context again by a page URL each time.
+- `PB.agent.send()` in Ask mode waits for the person, so an evaluation that awaits it hangs until the step is approved (the tool call went to the background; stopped it and clicked "Run this step").
+
+### What I learned
+- db path segments allow `:` (`letters, digits and _ - . ~ : @ +`, `doc/claude-apis/state-storage.md`), so `clips/clip:k3x…` is valid and ids need no change.
+- Asset ids look like `a770510a7c37117824e9b1f94fb16234c` (`ids.New("a", 16)`, `pkg/doors/pages/rtassets.go:64`).
+- A guest or viewer cannot write `data/users/<id>/` by default (root write is `interact`), so per-viewer settings for viewers must stay in the browser.
+
+### What was tricky to build
+- **Who may write what, before writing.** The recorder changes `PB.S` and the screen at once, and the store refuses later. Checking the level in `m.set` turns a refused write into a thrown error inside the mutation, which the prototype already shows as a toast, instead of a screen that silently diverges from the board.
+- **Debounce and order.** The runtime orders writes per document, but a debounced write that has not been sent is invisible to it. `PB.isDirty(path)` exposes that window for phase 1, where remote snapshots must not overwrite a local edit that is still waiting to be sent.
+
+### What warrants a second pair of eyes
+- `PB.save` drops writes silently for viewers (z-order, typing). The UI still lets a viewer type into a note and the change stays local. Phase 1 should make editors read-only for viewers.
+- `viewDoc()` trims agent threads by dropping the oldest until the JSON is under 200 KB; a single huge thread could still exceed it.
+
+### What should be done in the future
+- Phase 1: subscriptions and remote apply, the shared log, collaborative undo, `core.js`.
+- Update the guide's data model table for `records/<id>`, built-in apps and `blob:<asset id>`.
+
+### Code review instructions
+- Start with `apps/pinboard/js/store.js`, then `git diff 4a29c45 d154cd6 -- apps/pinboard/js/{apps,board,render,agent,main}.js` (small).
+- Run: build slop, `serve --local`, deploy as above, open `http://apps.localhost:18300/pb/new-x`, create, add clips, reload.
+
+### Technical details
+- Board store created by the shell: `s-5povfcfc` (`POST /_site/create`), app `pinboard`, type `pinboard`.
+- Status line format: `<n> clips · <n> collections[ · <n> changes] · saved|saving…[ · view only]`.
