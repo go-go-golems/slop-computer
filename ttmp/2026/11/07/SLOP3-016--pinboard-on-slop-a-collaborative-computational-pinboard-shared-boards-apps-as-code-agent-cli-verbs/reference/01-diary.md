@@ -153,3 +153,69 @@ link:   links(id lnk_…, store, level view|interact, token_hash, created_by, ex
 redeem: grants(store, subject, level, via=lnk_…)   revoke: DELETE grants WHERE store=? AND via=?
 create: POST /_site/create {path} → store s-xxxxxxxx (owner = creator) → 201 {store, path}
 ```
+
+## Step 3: App CLI verbs with go-go-goja's jsverbs
+
+The user asked whether the guide had considered go-go-goja's jsverbs pattern for CLI verbs. It had not: section 6.12 proposed a JSON `commands.json` mapping command names to actor actions. After reading jsverbs, I rewrote 6.12 around it. App verbs are plain JavaScript functions with `__verb__` metadata in the app's tree. The CLI scans them, builds Glazed commands, and runs them with a `slop` module scoped to one board. A server-side invoker serves MCP. The JSON design is recorded as superseded.
+
+### Prompt Context
+**User prompt (verbatim):** "look at using the go-go-goja jsverbs pattern to register CLI verbs for apps in the codebase or so, or is that what you considered??" then "continue"
+**Assistant interpretation:** Evaluate jsverbs for app CLI verbs and revise the design if it fits.
+**Inferred user intent:** Reuse the existing go-go-golems verb machinery instead of inventing a new format.
+**Commit (code):** none (documents only)
+
+### What I did
+- Read go-go-goja at `e9bc789`:
+  - `pkg/doc/08-jsverbs-example-overview.md` and `10-…developer-guide.md`;
+  - `examples/jsverbs/basic/basics.js` and `packaged.js`;
+  - `pkg/jsverbs/model.go`: `ScanOptions` `:76-83`, `SourceFile`, `Registry`, `FieldSpec`, `VerbSpec`;
+  - `command.go`: `VerbInvoker` `:22`, `CommandsWithInvoker` `:49`;
+  - `runtime.go`: `InvokeInRuntime` `:48`;
+  - `scan.go`: `ScanFS` `:86`, `ScanSources` `:158`;
+  - `pkg/jsverbscli/command.go`: `NewLazyCommand`, `InvokerFactory`;
+  - `pkg/jsverbscli/runtime.go:24-70`;
+  - `pkg/jsverbrepos/bootstrap.go`.
+- Compared dependencies. slop's `go.mod` has `github.com/dop251/goja v0.0.0-20261103151521-97b96e1e55f5` and glazed v1.4.3 as an indirect dependency, and no go-go-goja. go-go-goja requires the same goja revision, glazed v1.3.5 and tree-sitter v0.25.0.
+- Rewrote guide §6.12. Updated:
+  - the executive summary;
+  - the R5 gap row and the overview diagram;
+  - the manifest (`slop.verbs`);
+  - M6, flow 7.4, phase 5 (5a local and 5b server and MCP);
+  - the tests and risk 8 (the new dependency);
+  - the API rows (`app.verbs`, `app.verb`, the `slop` module, MCP tool names);
+  - the references (go-go-goja files).
+- Fixed my first example's `__package__("clip", {…})`: the real form is `__package__({name, short, …})`.
+
+### Why
+- **jsverbs keeps a verb and its metadata in one place,** and already gives flags, help, Glazed output and pluggable invokers. The JSON design needed a parallel schema and a server round trip even for help.
+- **A store-scoped module is what makes local execution safe enough:** the CLI's token can call any verb the person may call, and the module narrows that to one board.
+
+### What worked
+- jsverbs' `VerbInvoker` and `jsverbscli.NewLazyCommand` match the two needs exactly: commands discovered at run time, and execution either local (the CLI) or remote (the server, for MCP).
+
+### What didn't work
+- Nothing failed. One limit found: jsverbs makes every public top-level function a command. Helper files such as `lib/core.js` would then expose commands, so the guide asks for an upstream "only functions with `__verb__`" option and gives a workaround meanwhile.
+
+### What I learned
+- slop deliberately avoided importing go-go-goja for actor modules (SLOP3-012 §17). Using jsverbs would be its first go-go-goja import. The goja revisions already match.
+
+### What was tricky to build
+- **Where the verbs run.** Locally (no server code, the person's token, but MCP cannot use it) or on the server (MCP works, more server code). The answer is both behind one `slop` module contract, so a verb behaves the same either way.
+
+### What warrants a second pair of eyes
+- The `slop` module's surface (§6.12, API table): it becomes an API that app verbs depend on.
+- The binary-size and build cost of go-go-goja and tree-sitter in the slop CLI (risk 8).
+
+### What should be done in the future
+- Upstream in go-go-goja: a scan option to take only functions with `__verb__` metadata.
+
+### Code review instructions
+- Read guide §6.12 next to `go-go-goja/pkg/jsverbs/command.go`, `runtime.go` and `pkg/jsverbscli/command.go`.
+
+### Technical details
+```
+declaration: verbs/**/*.js in the app tree; app.json "slop": {"verbs": {"alias": "pb", "include": [...]}}
+discovery:   app.verbs {store} → {app, snapshot, alias, files}
+CLI:         slop app <board> … | slop pb <board> … → jsverbs.ScanSources → CommandsWithInvoker(local)
+MCP:         pb_<group>_<verb> {store, …} → app.verb (server invoker)
+```

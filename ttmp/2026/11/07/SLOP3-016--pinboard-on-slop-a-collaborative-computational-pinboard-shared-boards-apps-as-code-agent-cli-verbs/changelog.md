@@ -19,3 +19,7 @@ Guide corrected: share links and the shell's Share dialog already exist (owners)
 ## 2026-11-07
 
 sources/: added the original HTML design document and a provenance README (checksums); the prototype's 9 files verified byte-identical to Pinboard.zip
+
+## 2026-11-07
+
+Guide §6.12 rewritten: app CLI verbs use go-go-goja jsverbs (verbs/*.js with __verb__ metadata; app.verbs/app.verb; lazy slop app / slop pb commands; store-scoped slop module; local and server invokers; MCP tools); JSON commands design superseded

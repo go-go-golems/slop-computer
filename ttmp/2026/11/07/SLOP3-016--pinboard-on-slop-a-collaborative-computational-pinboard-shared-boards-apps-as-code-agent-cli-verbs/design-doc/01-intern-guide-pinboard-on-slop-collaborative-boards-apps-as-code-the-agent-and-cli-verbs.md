@@ -19,19 +19,19 @@ RelatedFiles:
     - Path: repo://apps/upstream/pinup/src/14-log.js
       Note: 'prior art: shared revertible log'
     - Path: repo://cmd/slop/cmds/root.go
-      Note: CLI commands generated from the verb table (app commands extend this)
+      Note: CLI commands generated from the verb table (app verbs are mounted beside it)
     - Path: repo://pkg/apps/manifest.go
       Note: platform module list (links.new, grants.rm missing)
     - Path: repo://pkg/doors/actors/sample.go
       Note: actor sample without tools (server agent needs them)
     - Path: repo://pkg/doors/mcp/mcp.go
-      Note: MCP door (app commands as tools)
+      Note: MCP door (app verbs as tools)
     - Path: repo://pkg/doors/pages/live.go
       Note: 'createApp mounts: a member creates a board by visiting /pb/:id'
     - Path: repo://web/runtime/src/sample.ts
       Note: page sample with up to 16 tools (the page agent)
 ExternalSources: []
-Summary: 'How to turn the single-user Pinboard prototype into a slop app: one store per board, documents instead of IndexedDB, presence, shared apps-as-code with a trust model, the page agent, sharing through grants and links, and CLI access through app commands and the device login. Includes the new platform machinery this needs.'
+Summary: 'How to turn the single-user Pinboard prototype into a slop app: one store per board, documents instead of IndexedDB, presence, shared apps-as-code with a trust model, the page agent, sharing through grants and links, and CLI access through app verbs written in the go-go-goja jsverbs format, with the device login. Includes the new platform machinery this needs.'
 LastUpdated: 2026-11-07T12:30:00-05:00
 WhatFor: Designing and implementing the slop Pinboard app and the platform pieces it needs
 WhenToUse: Before writing any Pinboard-on-slop code, or when changing the CLI, actor sample tools or the page runtime for it
@@ -56,7 +56,7 @@ Three things are missing, and they are the new machinery this guide designs:
 
 1. **A collaborative store layer for Pinboard itself.** The prototype's in-memory state, transactions and undo must be rebuilt over slop documents, with remote changes flowing into the same reactivity system, undo limited to one's own changes, and a split between state everyone shares and state that belongs to one viewer.
 2. **A trust model for apps written by other people.** On a shared board, app source written by one collaborator runs in every other collaborator's browser, with that viewer's identity and model budget. Shared code needs authorship, review and a narrower capability bridge than the board page itself.
-3. **App commands in the CLI and over MCP.** Today the CLI's commands are compiled from the server's verb table (`cmd/slop/cmds/root.go:49-64`). A Pinboard board needs commands defined by the app (`slop pb clip add …`), discovered at run time, executed as actor actions, and offered to agents over MCP with the same schemas. A server-side agent additionally needs tools in the actor's `sample` (`pkg/doors/actors/sample.go:42-106` accepts none today).
+3. **App verbs in the CLI and over MCP.** Today the CLI's commands are compiled from the server's verb table (`cmd/slop/cmds/root.go:49-64`). A Pinboard board needs commands defined by the app (`slop pb clip add …`), discovered at run time and offered to agents over MCP with the same schemas. The proposal uses go-go-goja's **jsverbs**: the app ships plain JavaScript functions with `__verb__` metadata in its tree; the CLI scans them and mounts them as Glazed commands, and runs them with a module that can reach only the one board, as the signed-in person (section 6.12). A server-side agent additionally needs tools in the actor's `sample` (`pkg/doors/actors/sample.go:42-106` accepts none today).
 
 The guide explains the prototype, the slop pieces, the gaps, a proposed architecture with decision records, the key flows in pseudocode, an implementation plan in seven phases, and a test strategy.
 
@@ -204,7 +204,7 @@ So a board is already reachable from the terminal at the level of raw documents.
 | R2 many boards | stores; `createApp` mounts create a new store with a generated id per click, owned by its creator; `store.ls` lists stores you own or hold a grant on | a "my boards" page in the app (the page cannot list stores today); a title per board (`board/meta`) |
 | R3 sharing | `grant.set`, `link.new`, levels, audiences, and the live shell's **Share** dialog for owners (audiences, people, links, revoke; `pkg/doors/pages/assets/shell.js:150-198`) | nothing for owners; board admins who are not owners cannot share; links from the dialog always last 30 days; inviting a named person needs the CLI (`grant.set`) |
 | R4 CLI with device login | device login; `docs.*`, `call`, `eval` verbs | nothing for raw access; the board vocabulary is missing |
-| R5 JS verbs in the CLI | `eval` runs JS on the server; actor actions | app-defined commands: declared, discovered, offered as CLI subcommands and MCP tools |
+| R5 JS verbs in the CLI | `eval` runs JS on the server; actor actions; go-go-goja's `jsverbs` turns JavaScript functions into Glazed commands (not used by slop yet) | app verbs: shipped in the app's tree, discovered per store, mounted in the CLI, run with a store-scoped module, offered as MCP tools |
 | R6 apps built together | page `sample` with tools; apps as source | shared app storage with versions and authors; a trust model and isolation for others' code; server-side agent needs actor `sample` tools |
 | — images | assets capability | uploads from the page and from the CLI (`import files --zone assets` exists for files); clips that reference asset ids |
 
@@ -221,8 +221,9 @@ So a board is already reachable from the terminal at the level of raw documents.
                                         │  db user room ├─▶room:   presence {cursor, sel, view}, topic "ops"
                                         │  assets sample│  actor:  pinboard core (actions = commands)
                                         └───────────────┘
-   terminal ── slop CLI (device login token) ──▶ /api/v1: docs.*, actor.call, app.commands (new), eval
-   agents  ── MCP door ─────────────────────────▶ verbs + app commands as tools (new)
+   terminal ── slop CLI (device login token) ──▶ /api/v1: docs.*, actor.call, app.verbs (new), eval
+               └ runs the app's jsverbs locally, with a `slop` module scoped to one board
+   agents  ── MCP door ─────────────────────────▶ verbs + app verbs as tools, run server-side (new)
                            app store "pinboard": app.json, index.html, js/*, core.js, actor.js
                            home: /boards → the "my boards" page (store "pinboard-home")
 ```
@@ -291,11 +292,11 @@ The manifest:
     "room": { "topics": { "ops": "interact", "agent": "interact" } },
     "assets": {}, "downloads": true, "sample": {}
   },
-  "slop": { "commands": "commands.json" }
+  "slop": { "verbs": { "alias": "pb", "include": ["verbs/**/*.js", "lib/**/*.js"] } }
 }
 ```
 
-`clips`, `colls` and `inbox` take the defaults (read `view`, write `interact`); `data/users/{self}` is private by default. The `slop.commands` field is new (6.12).
+`clips`, `colls` and `inbox` take the defaults (read `view`, write `interact`); `data/users/{self}` is private by default. The `slop.verbs` field is new (6.12).
 
 **Ids.** Clip, record and transaction ids become `<kind>:<10 base-36 characters>` (about 3.6 × 10¹⁵ values), generated in the page or the actor. Collisions between concurrent writers are then negligible without coordination.
 
@@ -446,45 +447,144 @@ function createCore(storage) {           // storage: { get(path), set(path, valu
 }
 ```
 
-### 6.12 CLI and MCP: app commands
+### 6.12 CLI and MCP: app verbs with go-go-goja's jsverbs
 
-### Decision: app commands are declared actor actions, discovered at run time
+#### What jsverbs is
 
-- **Context:** R4 and R5 ask for board access from the CLI through JavaScript verbs. The CLI compiles its commands from the verb table (`root.go:49-64`). Board operations are app logic, not platform verbs, and they differ per app.
-- **Options considered:** (a) document `slop docs …` and `slop call …` only; (b) a separate `pb` binary; (c) app-defined commands: the app declares commands with argument schemas, the server lists them through a new verb, and the CLI mounts them as subcommands at run time; the MCP door offers them as tools; (d) local JavaScript scripts run by the CLI against the remote verbs.
-- **Decision:** (c) now, (d) as a later convenience.
-- **Rationale:** (a) works today but makes people learn the board's document layout. (b) duplicates authentication and distribution. (c) reuses actor actions (already authorised per level), the device login and the MCP door, and it works for any app, not only Pinboard.
-- **Consequences:** New manifest field, new verb, CLI and MCP changes (below). Commands run in the board's actor with the caller's identity, so levels and budgets apply as in the page.
-- **Status:** proposed
+go-go-goja (`~/code/wesen/go-go-golems/go-go-goja`) has a package that turns JavaScript functions into command-line verbs:
 
-**Declaration.** `commands.json` in the app store (referenced from `app.json` as `slop.commands`):
+- `pkg/jsverbs` scans JavaScript sources with tree-sitter and finds top-level functions, plus three kinds of metadata written as plain calls: `__package__` (a command group), `__section__` (a group of flags) and `__verb__` (one command: help, fields, argument or flag, type, default, choices, output mode). Template blocks written `` doc`…` `` supply long help (`pkg/doc/08-jsverbs-example-overview.md`). Metadata must be literal values, so discovery never runs the code.
+- It builds a **Glazed** command per verb (`Registry.Commands()`, `CommandsWithInvoker(invoker)`, `pkg/jsverbs/command.go:41-77`). Glazed gives flags from the field schema, help, and output as rows (`-o table|json|yaml|csv`) or plain text (`output: "text"`).
+- It scans a directory, any `fs.FS`, or in-memory sources (`ScanFS`, `ScanSources`, `pkg/jsverbs/scan.go:86, 158`), with `Include`/`Exclude` filters (`model.go:76-83`).
+- It invokes a verb in a goja runtime it builds, or in one the caller supplies (`InvokeInRuntime`, `runtime.go:48`); the caller decides which native modules exist (`Registry.ModuleMiddleware`).
+- **The invoker is pluggable** (`type VerbInvoker`, `command.go:22`): the same command can run locally or be sent somewhere else.
+- `pkg/jsverbscli` mounts scanned repositories as a cobra command tree, including a **lazy** command that discovers repositories when it runs (`NewLazyCommand`, `pkg/jsverbscli/command.go`), and builds runtimes with host modules (`runtime.go:24-70`, which adds a guarded `database` module).
 
-```json
-{
-  "alias": "pb",
-  "commands": {
-    "clip add":   { "action": "clip.add",   "doc": "Add a note, link, image or doc to a board",
-                    "args": { "text": {"type": "string"}, "url": {"type": "string", "format": "uri"},
-                              "image": {"type": "string", "format": "file"}, "title": {"type": "string"},
-                              "tags": {"type": "array", "items": {"type": "string"}} } },
-    "clip ls":    { "action": "clip.ls",    "doc": "List clips", "args": { "tag": {"type": "string"}, "kind": {"type": "string"} } },
-    "coll query": { "action": "coll.query", "doc": "Query a collection", "args": { "name": {"type": "string", "required": true}, "where": {"type": "array"} } },
-    "describe":   { "action": "describe",   "doc": "Summarise the board" },
-    "app open":   { "action": "app.open",   "doc": "Open an app window on the board", "args": { "name": {"type": "string", "required": true} } },
-    "ask":        { "action": "agent.ask",  "doc": "Ask the board's agent (needs actor sample tools)", "args": { "prompt": {"type": "string", "required": true} } }
-  }
+A jsverbs file looks like this (from `examples/jsverbs/basic/basics.js`):
+
+```js
+function greet(name, excited) {
+  return { greeting: excited ? `Hello, ${name}!` : `Hello, ${name}` };
 }
+__verb__("greet", {
+  short: "Greet one person",
+  fields: { name: { argument: true, help: "Person name" }, excited: { type: "bool", short: "e" } },
+});
 ```
 
-**Discovery.** A new verb `app.commands {store}` returns the declaration of the app the store runs (read level on the store). The CLI caches the answer per server and app for a day in `~/.config/slop/commands/`.
+This is what the request meant by "JS verbs mounted in the slop CLI", and it is a better declaration format than a JSON command list: the author writes functions, the metadata sits next to them, and the CLI shape (flags, help, output) comes from a library the go-go-golems tools already share.
 
-**Mounting in the CLI.** `slop app <store> <command> [flags]` always works. A declared alias adds a top-level group: `slop pb <store> clip add --url https://… --tags inspo`. Flags are generated from the JSON Schema (string, number, boolean, array as repeated flags; `format: file` reads a local file and sends it as base64 so the actor can upload it as an asset). Unknown aliases prompt `slop app alias pb pinboard` once. Output uses the CLI's existing `-o yaml|json|table`.
+### Decision: app CLI verbs are jsverbs files in the app's tree
 
-**Execution.** The CLI calls `actor.call {store, action, args}` with the device-login token. The actor's action uses the core, so a clip added from the terminal appears on everyone's open board through the db subscription, with `by: <the person>` in the log.
+- **Context:** R4 and R5 ask for board access from the CLI through JavaScript verbs with the device login. The CLI's commands are compiled from the verb table (`root.go:49-64`); board operations are app logic and differ per app. The first version of this guide proposed a JSON `commands.json` mapping command names to actor actions.
+- **Options considered:** (a) `slop docs …` and `slop call …` only; (b) a separate `pb` binary; (c) a JSON command list mapped to actor actions (this guide's first version); (d) jsverbs files in the app's tree, scanned and mounted by the CLI, run with a store-scoped `slop` module, locally in the CLI or on the server.
+- **Decision:** (d). The JSON command list of the first version is superseded.
+- **Rationale:** (a) makes people learn the board's document layout. (b) duplicates login and distribution. (c) splits every command into a JSON entry and an actor action, invents a schema format, and needs a server round trip even to print help. (d) keeps one function per verb with its metadata, reuses go-go-goja's scanner, Glazed command building and pluggable invokers, and works for any slop app.
+- **Consequences:** slop imports go-go-goja for the first time (it has avoided it so far, SLOP3-012 §17); the goja revisions already match (both `v0.0.0-20261103151521-97b96e1e55f5`). The CLI gains Glazed (already an indirect dependency, `go.mod:36`) and tree-sitter (cgo; the slop binary is already built with cgo for SQLite). The `slop` module contract (below) becomes an API to keep stable.
+- **Status:** proposed (supersedes "app commands are declared actor actions")
 
-**MCP.** The MCP door adds, for each store the token's person can open that runs an app with commands, tools named `<alias>_<command>` (`pb_clip_add`), with the same schemas, routed to `actor.call`. To keep the tool list bounded, MCP lists commands per store only when asked for that store (a `store` argument), or for stores the person pins (open question 3).
+#### Declaration in the app
 
-**Local JS verbs (later).** `slop run script.js` executes a local script in the CLI's own goja runtime, with `slop.*` verbs as remote calls and `pb(store)` returning a client whose methods are the board's commands. This answers "JS verbs" for people who want to script several calls without writing an actor.
+```text
+apps/pinboard/
+  app.json          "slop": { "verbs": { "alias": "pb", "include": ["verbs/**/*.js", "lib/**/*.js"] } }
+  core.js           the shared core (6.11), used by the page and the actor
+  lib/core.js       the same core, required by verbs (or a copy made at build time)
+  verbs/clip.js     __package__({name: "clip"}) · add, ls, rm, tag
+  verbs/coll.js     __package__({name: "coll"}) · ls, query, insert
+  verbs/board.js    describe, export, import
+  verbs/app.js      __package__({name: "app"}) · ls, source, open
+```
+
+```js
+// verbs/clip.js
+__package__({ name: "clip", short: "Clips on a board" });
+
+const { createCore } = require("../lib/core.js");
+
+doc`---
+verb: add
+---
+Adds a note, a link or an image to the board. With --image the file is
+uploaded as an asset first. The clip appears on every open board at once.`;
+
+async function add(board, url, text, image, title, tags) {
+  const b = require("slop").board(board);              // scoped to this one store, as you
+  const core = createCore(b.storage({ by: "cli" }));
+  const spec = image ? { kind: "image", asset: await b.assets.upload(image) }
+             : url   ? { kind: "link", url }
+             :         { kind: "note", text: text || "" };
+  const id = await core.mutate(m => m.place({ ...spec, title, tags }), "add from the CLI");
+  return { id, kind: spec.kind, title: title || "" };
+}
+
+__verb__("add", {
+  short: "Add a clip",
+  fields: {
+    board: { argument: true, help: "Board id or title" },
+    url:   { help: "A link" },
+    text:  { help: "A note" },
+    image: { help: "An image file to upload" },
+    title: { help: "Title" },
+    tags:  { type: "stringList", help: "Tags" },
+  },
+});
+```
+
+Helper files are scanned too, and jsverbs turns every public top-level function into a command unless metadata says otherwise. Until go-go-goja has an option to take only functions with `__verb__` metadata, helpers keep their top-level functions private (`_name`) or export through `module.exports`. That option is a small upstream change worth making.
+
+#### Discovery
+
+A new verb, `app.verbs {store}`, returns the verb sources of the app the store runs, at the snapshot it runs: `{app, snapshot, alias, files: [{path, source}]}`. It needs only `view` on the store. The app's own store (`pinboard`) need not be readable by the person, so the sources are served through the board. The CLI caches them per app snapshot in `~/.config/slop/verbs/<server>/<app>@<snapshot>/` and scans them with `jsverbs.ScanSources(files, ScanOptions{Include: …})`.
+
+#### Mounting in the CLI
+
+```text
+slop app <board> <group> <verb> [args] [flags]       always available (lazy, like jsverbscli.NewLazyCommand)
+slop pb <board> <group> <verb> …                       the app's alias, once the person has opened a pinboard board
+slop app <board> --help                                 lists the app's verbs (scanned, cached)
+```
+
+`slop app` is a cobra command with flag parsing disabled. When it runs it resolves `<board>` (an id, or a title among the person's boards via `store.ls` and `board/meta`), fetches or reuses the app's verb sources, scans them, builds Glazed commands with `CommandsWithInvoker`, and executes the rest of the arguments against that tree, as `jsverbscli.NewLazyCommand` does with repositories. Output uses Glazed (`-o table|json|yaml`), which suits verbs that return rows (`clip ls`, `coll query`).
+
+#### Running a verb: two invokers, one module
+
+Both invokers give the verb the same native module, `slop`, with a contract kept deliberately small:
+
+```js
+const b = require("slop").board(idOrTitle);  // resolves and checks the board; throws if you cannot open it
+b.id; b.level; await b.me();                   // the store, your level on it, who you are
+await b.docs.get(path); await b.docs.query(coll, { where, orderBy, desc, limit });
+await b.docs.set(path, data, { ifVersion }); await b.docs.update(path, data); await b.docs.rm(path);
+await b.docs.batch([{ path, data, ifVersion }]);                 // one commit
+await b.call(action, args);                                       // the board's actor actions
+await b.assets.upload(pathOrBytes, { type }); await b.assets.list();
+b.storage({ by })                                                 // a core.js storage adapter over the calls above
+```
+
+1. **Local invoker (the CLI's default).** The verb runs in a goja runtime inside the CLI process, built as `jsverbscli` builds its runtimes, but with a module allowlist: `slop` and nothing that reaches the file system, processes or the network directly (the one exception: `assets.upload` may read the file named on the command line). Each `slop` call becomes an HTTP verb call with the device-login token, restricted to the one store the verb was invoked on (`docs.*`, `actor.call`, assets). Execution needs no new server code beyond `app.verbs`.
+2. **Remote invoker (MCP, agents, `--remote`).** A new verb `app.verb {store, verb, values}` runs the same function on the server, in a go-go-goja runtime the server builds, with the same `slop` module backed by the kernel as the caller (the caller's level on the store, the caller's budget). MCP needs this path, because an MCP client cannot run JavaScript locally.
+
+```text
+local:   slop pb Kitchen clip add --url …  ──▶ CLI: scan (cached) → Glazed parse → goja runtime
+                                                 require('slop').board('Kitchen') ─HTTP verbs, token─▶ server
+remote:  MCP tools/call pb_clip_add {store, url}  ──▶ server: app.verb → scan (cached per snapshot) → goja runtime
+                                                 require('slop').board(store) ─kernel, as the caller─▶ store
+```
+
+#### Security
+
+- **Whose code.** Verb sources come from the app's snapshot. Only admins can push a tree that holds `app.json` (decision D9 in `doc/design/slop-v3.md`), so verbs are code an admin installed, the same trust as the app's page and actor. The CLI shows the app and snapshot the first time it runs verbs from it, and when the snapshot changes.
+- **What it can reach.** A verb reaches only the store it was invoked on, through `slop`, with the person's level there. It cannot see the token itself, other stores, the file system or the network. The CLI's token can do more (any verb the person may call); the module is what narrows it.
+- **Writes are attributed.** Every write is made as the person (`by` in the log says `cli`), and the store's rules apply as for the page.
+
+#### MCP
+
+For each app with verbs, the MCP door lists one tool per verb, named `<alias>_<group>_<verb>` (`pb_clip_add`), with a required `store` argument and an input schema derived from the verb's fields (`string`, `bool`, `int`, `float`, `stringList` → array of strings, `choice` → enum). Tools are listed per app, not per store, which keeps the list short for a person with many boards. A call goes through the remote invoker.
+
+#### Plain JavaScript scripts
+
+The same machinery answers one-off scripting: `slop app <board> run script.js` (later) runs a local script with the same `slop` module, without declaring a verb.
 
 ### 6.13 New machinery, summarised
 
@@ -495,7 +595,7 @@ function createCore(storage) {           // storage: { get(path), set(path, valu
 | M3 | app (frontend) | trust prompt and narrowed scope for others' app code; later iframe isolation with a bridge |
 | M4 | app (both) | `core.js` shared by page and actor; actor actions for commands; share actions through `platform` |
 | M5 | platform runtime | `slop.stores({type})` in the page runtime and a view RPC |
-| M6 | platform | `slop.commands` in manifests; verb `app.commands`; CLI dynamic commands and aliases; MCP tools from app commands |
+| M6 | platform | `slop.verbs` in manifests; verbs `app.verbs` (sources) and `app.verb` (run server-side); the CLI's lazy `slop app` / alias commands built with go-go-goja jsverbs, a local invoker and the store-scoped `slop` module; MCP tools from app verbs; upstream: a jsverbs option to take only functions with `__verb__` metadata |
 | M7 | platform | tools in actor `sample` (server agent) |
 | M8 | platform | optional: sharing by board admins (not only owners), invite-by-name and expiry choice in the shell's Share dialog; `links.new`/`grants.rm` in the platform module only if the app gets its own dialog; optional `title` in `store.meta` |
 
@@ -545,13 +645,15 @@ Bob's page: onSnapshot(apps) → new version by Ada (not Bob)
 
 ```text
 $ slop auth login                          # once: device code, approve in the browser
-$ slop pb kitchen clip add --url https://are.na/... --tags inspo
-  CLI: commands for app "pinboard" cached? else app.commands {store: kitchen}
-  CLI: flags → args {url, tags} → actor.call {store: kitchen, action: clip.add, args}
-  actor (as Ada, interact checked): core.mutate(m => m.place({kind: 'link', url, tags, source: {from: 'cli'}}))
-     → clips/<id>, log/<tx> written in the actor's turn
+$ slop pb Kitchen clip add --url https://are.na/... --tags inspo
+  CLI: resolve "Kitchen" → store s-7k2m9xq4 (store.ls + board/meta titles)
+  CLI: verb sources for app pinboard@<snapshot> cached? else app.verbs {store: s-7k2m9xq4}
+  CLI: jsverbs.ScanSources → Glazed command "clip add" → parse flags → values {board, url, tags}
+  CLI: local invoker: goja runtime with the scoped `slop` module → add(board, url, …)
+         core.mutate(m => m.place({kind: 'link', url, tags, source: {from: 'cli'}}))
+           → docs.batch [clips/<id>, log/<tx>] on s-7k2m9xq4, as Ada (interact checked by the store)
   every open board page: onSnapshot → the link clip appears, log says "Ada (cli): place clip:…"
-  CLI prints {id, kind: link, at: [x, y]}
+  CLI prints the returned row: id, kind, title (Glazed table; -o json for scripts)
 ```
 
 ### 7.5 The page agent on a shared board
@@ -574,7 +676,7 @@ Ada selects 14 clips, asks "make these a recipes collection and a browser app"
 | 2 | Presence, cursors, follow; assets for images; `c.local` | none | two contexts: cursors, drags, image paste |
 | 3 | Apps as admin-written versions; trust prompt; narrowed scope | none | Bob's page refuses Ada's new version until accepted |
 | 4 | Actor actions over the core; "my boards"; sharing through the shell's dialog (and M8 if admins must share) | M5 (M8) | host tests for levels; share by link, revoke, link expiry |
-| 5 | App commands: manifest, `app.commands`, CLI dynamic commands and alias, MCP tools | M6 | CLI test against a local server; MCP SDK check |
+| 5 | App verbs: `slop.verbs` in the manifest, `app.verbs`, the CLI's `slop app` / `slop pb` with jsverbs and a local invoker (5a); `app.verb` and MCP tools (5b) | M6 | jsverbs fixtures for the Pinboard verbs; CLI test against a local server; MCP SDK check |
 | 6 | Server agent (`slop pb ask`), log pruning alarm, iframe isolation for app windows | M7 | actor sample tools test; isolation test |
 
 Phase 0 is deliberately small: it proves the app runs on slop and gives a baseline to measure against.
@@ -582,16 +684,17 @@ Phase 0 is deliberately small: it proves the app runs on slop and gives a baseli
 ## 9. Test strategy
 
 - **Core, in Node.** `core.js` with an in-memory adapter: each operation, transactions, log entries, collaborative undo with and without conflicts, id format.
-- **Host tests** (`pkg/host/*_test.go`, as in `catalog_shelf_test.go`): the manifest's rules (a viewer cannot write clips; an `interact` person cannot write `apps/*`; private `data/users/<id>` stays private); actor actions per level; `app.commands` returns the declaration; `actor.call` of `clip.add` writes `clips/*` and `log/*`.
+- **Host tests** (`pkg/host/*_test.go`, as in `catalog_shelf_test.go`): the manifest's rules (a viewer cannot write clips; an `interact` person cannot write `apps/*`; private `data/users/<id>` stays private); actor actions per level; `app.verbs` returns the verb sources of the running snapshot to a viewer; `app.verb` of `clip add` writes `clips/*` and `log/*` as the caller and is refused below `interact`.
 - **Two-person browser tests** on a local server (`slop serve --local --llm fake`, two Playwright contexts), as done for the SLOP3-015 shelf: concurrent moves, an undo that conflicts, presence, trust prompt. Known pitfall from SLOP3-015: mouse input into a cross-origin frame of a background window is unreliable; bring the page to the front or dispatch events.
-- **CLI test:** a Go test that runs the CLI's command builder against a fake `app.commands` answer and checks generated flags; an end-to-end check with a local server and a device-login token in a separate `SLOP_CREDENTIALS` file.
+- **CLI test:** the Pinboard verbs as jsverbs fixtures (scan, flags, help, output modes), as go-go-goja tests its own (`pkg/jsverbs/jsverbs_test.go`); a Go test that the store-scoped `slop` module refuses a second store; an end-to-end check with a local server and a device-login token in a separate `SLOP_CREDENTIALS` file.
 - **MCP:** the official Python SDK (`uvx --with mcp`), as in SLOP3-015's `04-mcp-check.py`.
 
 ## 10. Risks and open questions
 
 1. **Document churn.** Coalesce typing (300 ms), drags (presence until drop) and log writes, or a busy board will write hundreds of documents a minute. Measure in phase 1.
 2. **Large boards.** Subscriptions cap at 64 per view; one per collection's rows is fine for tens of collections, not hundreds. Rows of closed collections need not be subscribed.
-3. **MCP tool explosion.** One tool set per store is too many for a person with 50 boards. Proposal: tools take a `store` argument and are listed once per app.
+3. **MCP tool explosion.** One tool set per store is too many for a person with 50 boards. Proposal (6.12): tools take a `store` argument and are listed once per app.
+8. **A new dependency.** go-go-goja (engine, jsverbs) and tree-sitter enter the slop binary. Measure the binary size and build time in phase 5; the scanner could run only in the CLI if the server side is not wanted.
 4. **Same-realm app code (phase 3).** The narrowed scope is not isolation. Until phase 6, only accept code from people you trust; the prompt says so.
 5. **Model access.** On production only `@admin` has model access (`slop llm ls`, SLOP3-015). The agent needs `llm set @member on --budget …`, a platform decision.
 6. **Concurrent edits of one note.** Last writer wins per document. Two people typing in one note at once will overwrite each other; a per-field merge or a CRDT is deferred.
@@ -623,10 +726,12 @@ Phase 0 is deliberately small: it proves the app runs on slop and gives a baseli
 | Name | Kind | Shape |
 |---|---|---|
 | `slop.stores({type})` | page runtime | `→ [{id, title, level, owner, updatedAt}]` |
-| `slop.commands` | manifest field | path to `commands.json`: `{alias, commands: {"<words>": {action, doc, args: JSONSchema-properties}}}` |
-| `app.commands {store}` | verb (read) | `→ {app, alias, commands}` |
-| `slop app <store> <cmd…>`, `slop <alias> <store> <cmd…>` | CLI | dynamic commands; `slop app alias <alias> <app>` |
-| `<alias>_<cmd>` | MCP tools | same schemas, with a `store` argument |
+| `slop.verbs` | manifest field | `{alias, include: [globs]}`: where the app's jsverbs files are |
+| `app.verbs {store}` | verb (read, `view`) | `→ {app, snapshot, alias, files: [{path, source}]}` |
+| `app.verb {store, verb, values}` | verb (as the caller) | runs one app verb server-side; `→` the verb's result |
+| `slop app <board> <group> <verb> …`, `slop <alias> <board> …` | CLI | lazy commands built with go-go-goja jsverbs; Glazed flags, help and output |
+| `require("slop").board(idOrTitle)` | module for app verbs | `{id, level, me(), docs.{get,query,set,update,rm,batch}, call(action, args), assets.{upload,list}, storage({by})}`, one store only |
+| `<alias>_<group>_<verb>` | MCP tools | input schema from the verb's fields, plus `store` |
 | actor `sample(input, {tools})` | actor module | tools `{name, description, inputSchema, execute(input)}`, ≤ 16 |
 | `platform.links.new`, `platform.grants.rm` | actor module | as the verbs, on the actor's own store |
 
@@ -644,6 +749,12 @@ Phase 0 is deliberately small: it proves the app runs on slop and gives a baseli
 - `js/apps.js` — app builder (`:7-32`), registry and evaluation (`:34-87`), built-in apps (`:89-264`), reference (`:266-312`).
 - `js/agent.js` — instructions (`:5-17`), running code (`:67-85`), the `eval` tool and `sample` call (`:113-158`), init (`:164-199`).
 - `sources/pinboard-api-examples-code.txt` — the 14 examples of the design document; `sources/pinboard-api-examples-and-wireframes.md` — the sheet descriptions.
+
+**go-go-goja** (`~/code/wesen/go-go-golems/go-go-goja`):
+- `pkg/jsverbs/` — `scan.go` (discovery, `ScanFS` `:86`, `ScanSources` `:158`), `model.go` (`ScanOptions` `:76-83`, `VerbSpec`, `FieldSpec`), `command.go` (`VerbInvoker` `:22`, `CommandsWithInvoker` `:49`), `runtime.go` (`InvokeInRuntime` `:48`).
+- `pkg/jsverbscli/` — `command.go` (`NewLazyCommand`, `InvokerFactory`), `runtime.go` (runtimes with host modules).
+- `pkg/jsverbrepos/bootstrap.go` — repositories of verbs (directories, embedded).
+- `pkg/doc/08-11-jsverbs-example-*.md` — overview, fixture format, developer guide, reference; `examples/jsverbs/basic/` — fixtures.
 
 **slop**:
 - `doc/claude-apis/README.md`, `state-storage.md`, `people-and-collaboration.md`, `sample-spec.md`.
