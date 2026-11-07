@@ -251,9 +251,12 @@
 
   SRC.log = [
     "app('log')",
-    "  .icon('≡').title('Mutations').about('every change on the board; click one to undo back to it').size(520, 300).order(7)",
-    "  .view(ui.each(c => { c.board.clips(); return c.board.history().slice().reverse(); }, (line, i) => ui.text(line).mono().small().class('rowline')).id('lines').hint('no changes yet'))",
-    "  .toolbar(ui.row(ui.button('undo').small().on('click', (ev, c) => c.board.undo()), ui.button('redo').small().on('click', (ev, c) => c.board.redo()), ui.text(c => { c.board.clips(); return PB.history.idx + ' of ' + PB.history.txs.length; }).small().muted()).gap(6))",
+    "  .icon('≡').title('Board log').about('every change on this board, by everyone; revert puts a step back where nobody has changed those things since').size(560, 320).order(7)",
+    "  .view(ui.each(c => { c.board.clips(); return c.board.log(80); }, (e) => ui.row(",
+    "      ui.text(e.line).mono().small().grow(1).muted(e.undone),",
+    "      e.undone ? ui.text('reverted').small().muted() : ui.button('revert').small().on('click', (ev, c) => { const r = c.board.revert(e.id); c.toast(r.reverted ? 'reverted ' + r.reverted + (r.kept ? ' · kept ' + r.kept + ' changed since' : '') : 'nothing to revert: changed since'); })",
+    "    ).gap(6).class('rowline')).id('lines').hint('no changes yet'))",
+    "  .toolbar(ui.row(ui.button('undo mine').small().on('click', (ev, c) => c.board.undo()), ui.button('redo').small().on('click', (ev, c) => c.board.redo()), ui.text(c => { c.board.clips(); return PB.history.idx + ' of my ' + PB.history.txs.length + ' in this tab'; }).small().muted()).gap(6))",
     "  .register()",
   ].join('\n');
 

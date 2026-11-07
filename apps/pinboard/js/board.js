@@ -84,6 +84,7 @@
     if (!w) { w = wins[id] = { el: el('div', 'clip'), ctx: null }; w.el.dataset.id = id; bindClip(w.el, id); }
     const e = w.el; e.className = 'clip k-' + c.kind + (B.sel.has(id) ? ' sel' : '') + (c.pinned ? ' pinned' : '') + (c.kind === 'app' ? ' app' : '');
     if (c.pinned) { e.style.cssText = ''; if (e.parentNode !== $pins) $pins.append(e); }
+    else if (drag && drag.kind === 'clips' && drag.moved && drag.ids.includes(id)) { e.style.width = c.w + 'px'; e.style.height = c.h + 'px'; e.style.zIndex = c.z || 1; if (e.parentNode !== $canvas) $canvas.append(e); }
     else { e.style.left = c.x + 'px'; e.style.top = c.y + 'px'; e.style.width = c.w + 'px'; e.style.height = c.h + 'px'; e.style.zIndex = c.z || 1; if (e.parentNode !== $canvas) $canvas.append(e); }
     const ctx = w.ctx = PB.makeCtx(c);
     PB.rerender(e, () => { e.innerHTML = ''; e.append(strip(c, ctx), bodyWrap(c, ctx), foot(c, ctx), el('div', 'rz')); });
@@ -602,6 +603,8 @@
     mutate: (fn) => PB.mutate(fn, PB.actor),
     undo: () => PB.undo(), redo: () => PB.redo(),
     history: () => PB.history.txs.slice(Math.max(0, PB.history.idx - 20), PB.history.idx).map(t => PB.clock(t.at) + ' ' + t.by + ' ' + t.label),
+    log: (n = 50) => { PB.track && PB.track('log'); return PB.log.slice(0, n).map(e => ({ id: e.id, at: e.at, by: e.by, label: e.label, undone: !!e.undone, mine: e.uid === PB.myId(), line: PB.clock(e.at) + ' ' + e.by + ' · ' + e.label })); },
+    revert: (id) => PB.revertLogEntry(id),
     describe: (o) => PB.describe(o),
     view: () => B.view,
     quicklaunch: (q) => B.quicklaunch(q),
