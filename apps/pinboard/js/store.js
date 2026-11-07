@@ -67,8 +67,19 @@ window.PB = window.PB || {};
     inflight++; status();
     const ref = db.doc(path);
     (value == null ? ref.delete() : ref.set(PB.clone(value)))
-      .catch(e => { failed++; writeFailed(path, e); })
+      .catch(e => { failed++; writeFailed(path, e); reread(path); })
       .finally(() => { inflight--; status(); });
+  }
+  // A refused or failed write leaves PB.S ahead of the board: read the
+  // document again and show what the board holds.
+  function reread(path) {
+    const t = C.parsePath(path); if (!t || !PB.rt.db) return;
+    PB.rt.db.doc(path).get().then(snap => {
+      const data = snap.exists ? PB.clone(snap.data()) : null, cur = PB.S[t.store][t.id];
+      if (PB.same(cur, data)) return;
+      if (data == null) delete PB.S[t.store][t.id]; else PB.S[t.store][t.id] = data;
+      PB.emit('change', C.keysFor(t.store, t.id, cur, data));
+    }).catch(() => { });
   }
   function writeFailed(path, e) {
     console.warn('write failed', path, e);
@@ -322,6 +333,13 @@ window.PB = window.PB || {};
     Object.assign(v, typeof patch === 'function' ? patch(v) || {} : patch);
     PB.save(store, id, 300);
     const ks = new Set(keys || [store + ':' + id]); PB.emit('change', ks);
+  };
+  // c.local: per viewer and per window, kept in this tab only (a search box,
+  // a selected row), so one person's typing does not change everyone's view.
+  PB.local = {};
+  PB.setLocal = function (clipId, patch) {
+    PB.local[clipId] = Object.assign(PB.local[clipId] || {}, patch);
+    PB.emit('change', new Set(Object.keys(patch).map(k => 'local:' + clipId + ':' + k)));
   };
   PB.setState = function (clipId, patch) {
     const c = PB.S.clips[clipId]; if (!c) return;

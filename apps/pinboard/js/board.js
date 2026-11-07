@@ -26,7 +26,7 @@
   // ---------- geometry ----------
   const snap = v => Math.round(v / 8) * 8;
   B.toWorld = (sx, sy) => { const r = $wrap.getBoundingClientRect(); return { x: (sx - r.left - B.view.x) / B.view.z, y: (sy - r.top - B.view.y) / B.view.z }; };
-  B.applyView = () => { B.minimap && B.minimap.on && requestAnimationFrame(B.drawMinimap); $canvas.style.transform = 'translate(' + B.view.x + 'px,' + B.view.y + 'px) scale(' + B.view.z + ')'; $wrap.style.backgroundPosition = B.view.x + 'px ' + B.view.y + 'px'; $wrap.style.backgroundSize = (24 * B.view.z) + 'px ' + (24 * B.view.z) + 'px'; clearTimeout(B._vt); B._vt = setTimeout(() => PB.meta('view', B.view), 300); };
+  B.applyView = () => { B.minimap && B.minimap.on && requestAnimationFrame(B.drawMinimap); $canvas.style.transform = 'translate(' + B.view.x + 'px,' + B.view.y + 'px) scale(' + B.view.z + ')'; $wrap.style.backgroundPosition = B.view.x + 'px ' + B.view.y + 'px'; $wrap.style.backgroundSize = (24 * B.view.z) + 'px ' + (24 * B.view.z) + 'px'; clearTimeout(B._vt); B._vt = setTimeout(() => PB.meta('view', B.view), 300); PB.emit('view', B.view); };
   B.center = () => { const r = $wrap.getBoundingClientRect(); return B.toWorld(r.left + r.width / 2 - 120, r.top + r.height / 2 - 80); };
   let cascade = 0;
   B.nextPos = (near) => { const base = near ? { x: near.x + near.w + 24, y: near.y } : { x: B.cursor.x, y: B.cursor.y }; cascade = (cascade + 1) % 8; return { x: snap(base.x + cascade * 16), y: snap(base.y + cascade * 16) }; };
@@ -112,7 +112,7 @@
   const editing = new Set();
   function body(c, ctx) {
     switch (c.kind) {
-      case 'note': { const d = el('div', 'notetext'); d.contentEditable = 'plaintext-only'; d.textContent = c.text || ''; d.dataset.key = '_note'; d.addEventListener('input', () => PB.quiet('clips', c.id, { text: d.textContent }, [])); d.addEventListener('keydown', ev => PB.keyStop(ev)); d.addEventListener('paste', ev => ev.stopPropagation()); if (!c.text) d.dataset.placeholder = 'type here'; return d; }
+      case 'note': { const d = el('div', 'notetext'); d.contentEditable = PB.can('interact') ? 'plaintext-only' : 'false'; d.textContent = c.text || ''; d.dataset.key = '_note'; d.addEventListener('input', () => PB.quiet('clips', c.id, { text: d.textContent }, [])); d.addEventListener('keydown', ev => PB.keyStop(ev)); d.addEventListener('paste', ev => ev.stopPropagation()); if (!c.text) d.dataset.placeholder = 'type here'; return d; }
       case 'link': { const a = PB.render(ui.link(c.url).title(c.title || undefined), ctx); const d = el('div', 'linkbody', a); if (c.desc) d.append(el('p', 'small', c.desc)); if (c.note) d.append(el('p', 'small muted', c.note)); return d; }
       case 'image': { const d = el('div', 'imgbody'); const im = el('img'); im.src = c.blobId ? PB.blobURL(c.blobId) : (c.url || ''); im.alt = c.title || ''; im.draggable = false; im.addEventListener('dblclick', () => openLightbox(c)); d.append(im); if (c.caption) d.append(el('div', 'caption small', c.caption)); return d; }
       case 'doc': {
@@ -207,6 +207,7 @@
     e.addEventListener('drop', async ev => { e.classList.remove('dropstrip'); if (ev.target.closest('.dz')) return; ev.preventDefault(); ev.stopPropagation(); const item = await PB.itemFromDataTransfer(ev.dataTransfer); if (!item) return; const c = PB.S.clips[id]; const ids = await PB.clipFromItem(Object.assign(item, { origin: 'drop' }), { x: c.x + c.w + 16, y: c.y }); if (ev.target.closest('.strip') && ids.length) PB.mutate(m => c.kind === 'group' ? ids.forEach(k => m.set('clips', k, x => (x.group = id, x), 'into group')) && m.set('clips', id, g => (g.children.push(...ids), g), 'group') : m.group([id, ...ids])); });
   }
   let drag = null;
+  B.dragIds = () => (drag && drag.kind === 'clips' && drag.moved ? drag.ids : []);
   function startClipDrag(ev, id) {
     const ids = [...B.sel].filter(i => PB.S.clips[i]); if (!ids.includes(id)) ids.push(id);
     const start = { x: ev.clientX, y: ev.clientY }; const orig = Object.fromEntries(ids.map(i => [i, { x: PB.S.clips[i].x, y: PB.S.clips[i].y, pinned: PB.S.clips[i].pinned }]));
@@ -250,12 +251,12 @@
     const dx = ev.clientX - drag.start.x, dy = ev.clientY - drag.start.y;
     if (drag.kind === 'resize') { const c = PB.S.clips[drag.id]; let w = Math.max(120, drag.ow + dx / B.view.z), h = Math.max(60, drag.oh + dy / B.view.z); if (drag.ratio && !drag.shift) h = (w / drag.ratio) + 28; const e = wins[drag.id].el; e.style.width = w + 'px'; e.style.height = h + 'px'; drag.w = w; drag.h = h; return; }
     if (!drag.moved && Math.hypot(dx, dy) < 4) return; drag.moved = true;
-    if (drag.kind === 'clips') { drag.ids.forEach(i => { const o = drag.orig[i]; const e = wins[i] && wins[i].el; if (!e) return; if (o.pinned) { if (!drag.ghost) { drag.ghost = el('div', 'dragghost', PB.S.clips[i].title || PB.S.clips[i].kind); document.body.append(drag.ghost); } } else { e.style.left = (o.x + dx / B.view.z) + 'px'; e.style.top = (o.y + dy / B.view.z) + 'px'; } }); }
+    if (drag.kind === 'clips') { PB.emit('drag', { ids: drag.ids.filter(i => !drag.orig[i].pinned), dx: dx / B.view.z, dy: dy / B.view.z }); drag.ids.forEach(i => { const o = drag.orig[i]; const e = wins[i] && wins[i].el; if (!e) return; if (o.pinned) { if (!drag.ghost) { drag.ghost = el('div', 'dragghost', PB.S.clips[i].title || PB.S.clips[i].kind); document.body.append(drag.ghost); } } else { e.style.left = (o.x + dx / B.view.z) + 'px'; e.style.top = (o.y + dy / B.view.z) + 'px'; } }); }
     if (drag.ghost) { drag.ghost.style.left = ev.clientX + 12 + 'px'; drag.ghost.style.top = ev.clientY + 12 + 'px'; }
     setTarget(hitTarget(ev));
   });
   document.addEventListener('pointerup', async ev => {
-    if (!drag) return; const d = drag; drag = null; document.body.classList.remove('dragging'); $wrap.classList.remove('pinhint');
+    if (!drag) return; const d = drag; drag = null; document.body.classList.remove('dragging'); if (d.kind === 'clips' && d.moved) PB.emit('drag', null); $wrap.classList.remove('pinhint');
     if (d.ghost) d.ghost.remove(); if (d.target) d.target.el.classList.remove('droptarget', 'dropstrip');
     if (d.kind === 'resize') { if (d.w) PB.mutate(m => m.resize(d.id, { w: d.w, h: d.h })); return; }
     if (!d.moved) return;

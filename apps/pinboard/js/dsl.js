@@ -83,6 +83,7 @@
     class: (b, v) => b._p({ cls: v }), style: (b, v) => b._p({ style: v }),
     when: (b, fn) => b._p({ when: fn }),
     hint: (b, v) => b._p({ hint: v }),
+    local: (b, v = true) => b._p({ local: v }),
     small: (b, v = true) => b._p({ small: v }), bold: (b, v = true) => b._p({ bold: v }), mono: (b, v = true) => b._p({ mono: v }), muted: (b, v = true) => b._p({ muted: v }),
     draggable: (b, o = {}) => b._p({ draggable: Object.assign({ kind: 'item' }, o) }),
     selected: (b, v) => b._p({ selected: v }),

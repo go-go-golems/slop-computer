@@ -18,6 +18,8 @@
       clip, window: clip, id, deps, def,
       state: new Proxy({}, { get: (_, k) => { if (typeof k !== 'string') return undefined; track('state:' + id + ':' + k); return (PB.S.clips[id] && PB.S.clips[id].state || {})[k]; }, has: (_, k) => k in ((PB.S.clips[id] || {}).state || {}), ownKeys: () => Object.keys((PB.S.clips[id] || {}).state || {}), getOwnPropertyDescriptor: (_, k) => ({ enumerable: true, configurable: true, value: ((PB.S.clips[id] || {}).state || {})[k] }) }),
       set: (k, v) => PB.setState(id, typeof k === 'object' ? k : { [k]: v }),
+      local: new Proxy({}, { get: (_, k) => { if (typeof k !== 'string') return undefined; track('local:' + id + ':' + k); return (PB.local[id] || {})[k]; }, has: (_, k) => k in (PB.local[id] || {}), ownKeys: () => Object.keys(PB.local[id] || {}), getOwnPropertyDescriptor: (_, k) => ({ enumerable: true, configurable: true, value: (PB.local[id] || {})[k] }) }),
+      setLocal: (k, v) => PB.setLocal(id, typeof k === 'object' ? k : { [k]: v }),
       param: (name) => { track('param:' + id + ':' + name); const c = PB.S.clips[id] || clip; if (c.params && name in c.params) return c.params[name]; const pd = def && (def.params || []).find(p => p.name === name); if (!pd) throw new Error('no param "' + name + '" in app ' + (clip.app || id) + '. Declared: ' + ((def && def.params) || []).map(p => p.name).join(', ')); return pd.def; },
       setParam: (name, v) => PB.mutate(m => m.setParam(id, name, v), PB.actor),
       attr: (name) => { track('clip:' + id); const c = PB.S.clips[id] || clip; return c[name]; },
@@ -64,8 +66,8 @@
     if (!o && ctx.def) { const pd = (ctx.def.params || []).find(p => p.name === b.props.key); if (pd) o = pd.options; }
     return (o || []).map(x => typeof x === 'object' ? x : { value: x, label: String(x) });
   }
-  function keyGet(b, ctx) { const k = b.props.key; const c = PB.S.clips[ctx.id] || ctx.clip; if (c.params && k in c.params) return ctx.param(k); if (ctx.def && (ctx.def.params || []).some(p => p.name === k)) return ctx.param(k); return ctx.state[k]; }
-  function keySet(b, ctx, v) { const k = b.props.key; const c = PB.S.clips[ctx.id] || ctx.clip; if ((c.params && k in c.params) || (ctx.def && (ctx.def.params || []).some(p => p.name === k))) ctx.setParam(k, v); else ctx.set(k, v); }
+  function keyGet(b, ctx) { const k = b.props.key; if (b.props.local) return ctx.local[k]; const c = PB.S.clips[ctx.id] || ctx.clip; if (c.params && k in c.params) return ctx.param(k); if (ctx.def && (ctx.def.params || []).some(p => p.name === k)) return ctx.param(k); return ctx.state[k]; }
+  function keySet(b, ctx, v) { const k = b.props.key; if (b.props.local) return ctx.setLocal(k, v); const c = PB.S.clips[ctx.id] || ctx.clip; if ((c.params && k in c.params) || (ctx.def && (ctx.def.params || []).some(p => p.name === k))) ctx.setParam(k, v); else ctx.set(k, v); }
 
   // ---------- render ----------
   PB.render = function render(b, ctx) {

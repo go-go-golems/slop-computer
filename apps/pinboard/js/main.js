@@ -46,6 +46,7 @@
     document.getElementById('qlbtn').addEventListener('click', () => PB.board.quicklaunch());
     document.getElementById('logbtn').addEventListener('click', () => PB.apps.open('log'));
     PB.subscribe();
+    PB.presence.init();
     PB.on('meta', (m) => { if (document.activeElement !== title) title.textContent = m.title || 'My board'; document.title = (m.title || 'Board') + ' · Pinboard'; });
     await PB.agent.init();
     PB.on('selection', (ids) => PB.board.cacheBlobs(ids));
