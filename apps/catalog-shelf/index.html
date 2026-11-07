@@ -117,11 +117,18 @@
 
   const [db, user, room, slop] = await Promise.all(["db", "user", "room", "slop"].map((n) => claude.use(n).catch(() => null)));
   const me = user ? await user.me() : null;
-  const uid = me && me.id;
+  // A shelf needs an id and at least interact (members, by this store's
+  // grants). Guests have an id on slop but only view: they are offered
+  // sign-in instead of stars that the store would refuse.
+  const visitor = slop && slop.visitor ? await slop.visitor().catch(() => null) : null;
+  const canKeep = !!(me && me.id) && !!visitor && !visitor.guest && ["interact", "admin", "owner"].includes(visitor.level);
+  const uid = canKeep ? me.id : null;
 
   // --- who am I --------------------------------------------------------------
   if (uid) {
     $("me").replaceChildren(avatar(me, "you"), me.name || "you");
+  } else if (visitor && !visitor.guest) {
+    $("me").replaceChildren(avatar(me, "you"), (me.name || "you") + " · this shelf is read-only for you");
   } else {
     $("me").replaceChildren(slop && slop.signIn ? el("button", { class: "btn primary", type: "button", onclick: () => slop.signIn() }, "Sign in to keep a shelf") : el("span", { class: "dim" }, "Signed out"));
   }
@@ -166,6 +173,7 @@
     $("share").checked = state.share;
     $("sharel").hidden = false;
   }
+  if (!uid) $("mine").replaceChildren(el("li", { class: "dim" }, "Sign in to keep a shelf."));
   if (db) {
     db.collection("shelves").orderBy("at", "desc").limit(500).onSnapshot((s) => {
       state.shelves = s.docs.map((d) => ({ by: d.id, apps: (d.data().apps || []).filter((id) => byId.has(id)) }));
@@ -236,7 +244,7 @@
         thumb(i),
         el("div", {}, el("b", {}, i.title), el("small", {}, i.description)),
         el("div", { class: "side" }, el("div", { class: "faces" }, faces),
-          el("button", { class: "star", type: "button", "aria-pressed": state.stars[i.id] ? "true" : "false", disabled: !db,
+          el("button", { class: "star", type: "button", "aria-pressed": state.stars[i.id] ? "true" : "false", disabled: !db || (!uid && !(slop && slop.signIn)),
             title: uid ? (state.stars[i.id] ? "Remove from your shelf" : "Add to your shelf") : "Sign in to keep a shelf",
             onclick: (e) => { e.stopPropagation(); toggle(i.id); } }, state.stars[i.id] ? "★" : "☆")));
     }));
