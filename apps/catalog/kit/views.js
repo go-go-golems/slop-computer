@@ -66,22 +66,42 @@
   }
 
   // header renders the site bar: name, count, the view switcher and the
-  // search box. Typing dispatches "catalog:search" on window with {query}.
+  // search box. Typing dispatches "catalog:search" on window with {query},
+  // and the links to the other views on this host carry the query along. A
+  // page without a view of its own (current null: the landing page) lists
+  // the matches in the first view when Enter is pressed.
   async function header(host, current) {
     const { catalog, views } = await load();
+    const sw = el("nav", { class: "cv-switch", "aria-label": "Views" },
+      views.map((v) => el("a", { href: v.path, "aria-current": v.id === current ? "page" : null, title: v.blurb }, v.title)));
+    const carry = (q) => {
+      for (const a of sw.querySelectorAll("a")) {
+        const u = new URL(a.getAttribute("href"), location.href);
+        if (u.origin !== location.origin) continue;
+        if (q) u.searchParams.set("q", q); else u.searchParams.delete("q");
+        a.setAttribute("href", u.pathname + u.search);
+      }
+    };
+    const own = views.find((v) => v.id === current);
     const search = el("input", {
-      class: "cv-search", type: "search", placeholder: "Search " + catalog.count + " apps", "aria-label": "Search",
+      class: "cv-search", type: "search", "aria-label": "Search",
+      placeholder: own ? "Search " + catalog.count + " apps" : "Search " + catalog.count + " apps, then Enter",
       value: new URLSearchParams(location.search).get("q") || "",
       oninput: (e) => {
         const q = e.target.value;
         const u = new URL(location.href);
         if (q) u.searchParams.set("q", q); else u.searchParams.delete("q");
         history.replaceState(history.state, "", u);
+        carry(q);
         window.dispatchEvent(new CustomEvent("catalog:search", { detail: { query: q } }));
       },
+      onkeydown: (e) => {
+        if (e.key !== "Enter" || own || !views.length) return;
+        const q = e.target.value.trim();
+        location.href = views[0].path + (q ? "?q=" + encodeURIComponent(q) : "");
+      },
     });
-    const sw = el("nav", { class: "cv-switch", "aria-label": "Views" },
-      views.map((v) => el("a", { href: v.path, "aria-current": v.id === current ? "page" : null, title: v.blurb }, v.title)));
+    carry(search.value);
     host.replaceChildren(el("header", { class: "cv-head" },
       el("div", { class: "wrap" },
         el("a", { class: "cv-brand", href: ROOT }, "slop catalog", el("small", {}, catalog.count + " apps")),
@@ -445,7 +465,7 @@
           el("strong", {}, item.title),
           item.free ? null : el("span", { class: "cv-paid" }, "subscribers"),
           el("span", { class: "sp" }), devs, dims,
-          el("button", { class: "cv-btn", type: "button", onclick: () => this.close() }, "Close · Esc")),
+          el("button", { class: "cv-btn cv-close", type: "button", onclick: () => this.close() }, "Close · Esc")),
         el("div", { class: "cv-vbody" }, el("div", { class: "cv-stage" }, device), info),
         el("div", { class: "cv-vfoot cv-meta" }, item.open));
       document.body.append(this.node);

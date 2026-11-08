@@ -7,13 +7,32 @@
 <meta name="description" content="The apps imported from slop.boutique, in several views over one catalog.">
 <link rel="stylesheet" href="/catalog/kit/views.css">
 <style>
-  .views { display: grid; grid-template-columns: repeat(auto-fill, minmax(280px, 1fr)); gap: 16px; margin: 28px 0; }
-  .view { display: block; text-decoration: none; background: var(--panel); border: 1px solid var(--line); border-radius: 12px; padding: 18px; }
-  .view:hover { border-color: var(--ink); }
-  .view strong { display: block; font-size: 20px; margin-bottom: 4px; }
-  .view span { color: var(--muted); }
-  .facts { display: flex; gap: 24px; flex-wrap: wrap; margin-top: 8px; }
-  .facts b { display: block; font-size: 28px; font-weight: 650; }
+  .facts { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); border-top: 1px solid var(--ink); border-bottom: 1px solid var(--hair); margin: 40px 0 0; }
+  .facts div { padding: 12px 16px 14px; border-left: 1px solid var(--hair); }
+  .facts div:first-child { border-left: 0; padding-left: 0; }
+  .facts b { display: block; font-size: clamp(26px, 3.2vw, 38px); font-weight: 500; letter-spacing: -.03em; line-height: 1.1; }
+  .facts span { font: 12px var(--mono); color: var(--ink-2); }
+  @media (max-width: 640px) { .facts { grid-template-columns: 1fr 1fr; } .facts div:nth-child(3) { border-left: 0; padding-left: 0; } .facts div:nth-child(n+3) { border-top: 1px solid var(--rule); } }
+
+  .sec { display: flex; align-items: baseline; gap: 12px; margin: 56px 0 0; padding-bottom: 8px; border-bottom: 1px solid var(--ink); }
+  .sec h2 { margin: 0; font-size: 13px; font-weight: 700; }
+  .sec .cv-meta { margin-left: auto; }
+  .views { list-style: none; margin: 0; padding: 0; counter-reset: v; }
+  .views a { display: grid; grid-template-columns: 44px minmax(140px, 220px) 1fr auto; gap: 4px 20px; align-items: baseline; padding: 14px 0; border-bottom: 1px solid var(--rule); text-decoration: none; }
+  .views a::before { counter-increment: v; content: counter(v, decimal-leading-zero); font: 12px var(--mono); color: var(--ink-2); }
+  .views a:hover { background: var(--fill); }
+  .views a:hover b { text-decoration: underline; }
+  .views b { font-size: 22px; font-weight: 500; letter-spacing: -.02em; line-height: 1.2; }
+  .views span { color: var(--ink-2); }
+  .views i { font: normal 11px var(--mono); color: var(--ink-2); text-transform: uppercase; letter-spacing: .05em; white-space: nowrap; }
+  .views i::after { content: " →"; color: var(--ink); }
+  @media (max-width: 720px) { .views a { grid-template-columns: 34px 1fr auto; } .views span { grid-column: 2 / -1; } }
+
+  .tags { display: flex; flex-wrap: wrap; margin: 14px 0 0; line-height: 1.9; font-size: 15px; }
+  .tags a { text-decoration: none; white-space: nowrap; }
+  .tags a:hover { text-decoration: underline; }
+  .tags small { font: 11px var(--mono); color: var(--ink-2); margin-left: 3px; }
+  .tags a:not(:last-child)::after { content: "·"; color: var(--hair); margin: 0 8px 0 6px; }
 </style>
 </head>
 <body>
@@ -21,10 +40,13 @@
 <main class="wrap">
   <section class="cv-hero">
     <h1>One catalog, several ways to look at it.</h1>
-    <p>Every app imported from slop.boutique, generated from the stores that hold them. Each view below is its own small store on this host, reading the same <a href="/catalog/data/catalog.json">catalog.json</a>.</p>
-    <div class="facts cv-meta" id="facts"></div>
+    <p>Every app imported from slop.boutique, generated from the stores that hold them. Each view is its own small store on this host, reading the same <a href="/catalog/data/catalog.json">catalog.json</a>.</p>
+    <div class="facts" id="facts"></div>
   </section>
-  <section class="views" id="views" aria-label="Views"><p class="cv-empty">Loading the catalog…</p></section>
+  <div class="sec"><h2>Views</h2><span class="cv-meta" id="nviews"></span></div>
+  <ol class="views" id="views" aria-label="Views"><li class="cv-empty">Loading the catalog…</li></ol>
+  <div class="sec"><h2>Tags</h2><span class="cv-meta">each opens the index</span></div>
+  <p class="tags" id="tags"></p>
 </main>
 <footer class="cv-foot"><div class="wrap">Data: <a href="/catalog/data/catalog.json">catalog.json</a> · <a href="/catalog/data/views.json">views.json</a> · apps run on <span id="origin"></span></div></footer>
 <script src="/catalog/kit/views.js"></script>
@@ -34,17 +56,19 @@
   await SlopCatalog.header(document.querySelector("#head"), null);
   const { catalog, views } = await SlopCatalog.load();
   const paid = catalog.items.filter((i) => !i.free).length;
+  const fact = (n, label) => el("div", {}, el("b", {}, n), el("span", {}, label));
   document.querySelector("#facts").replaceChildren(
-    el("div", {}, el("b", {}, catalog.count), "apps"),
-    el("div", {}, el("b", {}, paid), "for subscribers"),
-    el("div", {}, el("b", {}, catalog.tags.length), "tags"),
-    el("div", {}, el("b", {}, bytes(catalog.totalBytes)), "of HTML"));
-  document.querySelector("#views").replaceChildren(...views.map((v) =>
-    el("a", { class: "view", href: v.path }, el("strong", {}, v.title), el("span", {}, v.blurb))));
+    fact(catalog.count, "apps"), fact(paid, "for subscribers"), fact(catalog.tags.length, "tags"), fact(bytes(catalog.totalBytes), "of HTML"));
+  document.querySelector("#nviews").textContent = views.length + " views";
+  document.querySelector("#views").replaceChildren(...views.map((v) => el("li", {},
+    el("a", { href: v.path }, el("b", {}, v.title), el("span", {}, v.blurb), el("i", {}, v.live ? "live · sign in" : "static")))));
+  const index = views[0] ? views[0].path : "/catalog/list/";
+  document.querySelector("#tags").replaceChildren(...catalog.tags.map((t) =>
+    el("a", { href: index + "?tag=" + encodeURIComponent(t.tag) }, t.tag, el("small", {}, t.count))));
   document.querySelector("#origin").textContent = catalog.appsOrigin.replace(/^https?:\/\//, "");
   // A viewer link on the landing page goes to the index.
   const open = new URLSearchParams(location.search).get("open");
-  if (open) location.replace(views[0].path + "?open=" + encodeURIComponent(open));
+  if (open) location.replace(index + "?open=" + encodeURIComponent(open));
 })();
 </script>
 </body>
