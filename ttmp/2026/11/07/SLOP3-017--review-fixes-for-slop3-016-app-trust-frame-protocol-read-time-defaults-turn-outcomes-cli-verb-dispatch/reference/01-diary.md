@@ -749,3 +749,53 @@ The third review found two more frame gaps: one that step 11 left open, and one 
 
 ### Technical details
 - The test apps `schema`, `tasks2` and `counts2` remain on the local Kitchen board.
+
+## Step 14: Codex's fourth review of #39: version numbering after unregistering
+
+The fourth review found one problem, in F1's `registerApp`. Four rounds have found 2, 2, 2 and 1 findings, each in a narrower corner; this step pauses the loop for the user.
+
+### Prompt Context
+**User prompt (verbatim):** (see step 10)
+**Assistant interpretation:** Assess the fourth review, fix it, and report back instead of looping further on my own.
+**Inferred user intent:** As step 11.
+**Commit (code):** `158341f`, "Pinboard: a re-registered app continues its version history (Codex on #39)".
+
+### What I did
+- **The review:** completed at `3ddb939` with one P2 finding, at `actor.js:237`. `registerApp` numbered versions from the current record, and `unregisterApp` keeps the versions, so registering the name again restarted at 1 and overwrote the kept history.
+- **The fix:** `version = max(record.version, highest kept versions/<n>) + 1`, reading `apps/<name>/versions` in the actor.
+- **The test:** `TestPinboardAppRegistration` re-registers after unregistering and expects version 3, with `versions/1` still Ada's. On the previous `actor.js` it fails: version 1.
+- `go test ./pkg/host/` passes (17.0 s). Lint: 0 issues. Pushed and replied on the thread.
+
+### Why
+- The kept versions are the history that design §3.5 relies on: an app goes back by registering an earlier version again. Overwriting them would lose that history.
+
+### What worked
+- Every check above.
+
+### What didn't work
+- Nothing.
+
+### What I learned
+- The review rounds kept finding narrower corners of the same new code paths: the frame protocol and the actor-owned registry.
+
+### What was tricky to build
+- Nothing.
+
+### What warrants a second pair of eyes
+- `registerApp` now reads the app's whole version list on every registration. The list is small (one document per registration) and the reads stay inside the board's store.
+
+### What should be done in the future
+- A fifth `@codex review` of `158341f` if wanted. The user decides.
+
+### Code review instructions
+- `git show 158341f`.
+
+### Technical details
+- **Review rounds on #39:**
+
+| Round | Head | Findings | Fixed in |
+|---|---|---|---|
+| 1 | `46207f0` | P1 (private meta to frames), P2 (optimistic copy) | `b31910f`, `8288aa7` |
+| 2 | `8288aa7` | P2 (guest prompt), P2 (drops into frames) | `4952b17`, `4572aee` |
+| 3 | `4572aee` | P2 (collections in the copy), P2 (sync on mutation) | `6db52e7`, `3ddb939` |
+| 4 | `3ddb939` | P2 (version numbering) | `158341f` |

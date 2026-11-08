@@ -31,3 +31,7 @@ Codex second review of #39: Boards page guest prompt (4952b17) and board drags i
 ## 2026-11-07
 
 Codex third review of #39: collection steps in the frame's optimistic copy (6db52e7) and frame sync on the page's own mutations (3ddb939); fourth review requested. Diary step 13.
+
+## 2026-11-07
+
+Codex fourth review of #39: version numbering after unregister fixed (158341f). Review rounds 1-4 summarized in diary step 14.
