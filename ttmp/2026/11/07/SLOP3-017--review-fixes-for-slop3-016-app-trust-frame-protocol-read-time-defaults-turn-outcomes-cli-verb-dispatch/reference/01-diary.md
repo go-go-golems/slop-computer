@@ -577,3 +577,66 @@ The four SLOP3-016 PRs are now one, with the review fixes on top, and Codex has 
 
 ### Technical details
 - The body is in the session scratchpad (`pr-consolidated-body.md`).
+
+## Step 11: Codex on the consolidated #39: two findings, both fixed
+
+Codex's first review of the whole of #39 found two problems. Both were in the frame code: one from phase 6b, and one that F6 created.
+
+### Prompt Context
+**User prompt (verbatim):** "once everything is consolidated in a PR, restart a code review, btw"
+**Assistant interpretation:** Assess Codex's review of #39, fix what is real, and ask for another review.
+**Inferred user intent:** Converge on a PR the reviewer has nothing left to say about.
+**Commits (code):** `b31910f` (P1) and `8288aa7` (P2).
+
+### What I did
+- **The review:** Codex reviewed #39 at `46207f0`. CI `release / publish` passed.
+  - **P1, `frames.js:35`:** the frame snapshot sent `PB.S.meta`, into which `store.js:167` merges the viewer's `data/users/<id>/view` document: agent threads (messages, code, results), view and panel settings. Any board app could read them from `window.PB.S.meta.threads` and publish them.
+  - **P2, `frame.js:59`:** each `c.db` call is its own `mutate`, and the frame's copy changed only on the page's sync. Two consecutive functional increments therefore both sent `n: 1`, and `insert` followed by an `update` of its id threw "no record". F6 introduced this: function patches read the frame's copy.
+- **P1 fix:** `store.js` exports `PB.sharedMeta` (`SHARED_META`: title, seeded, about), and `snapshot()` uses it. New test `test/frames.test.js` loads `frames.js` in a `vm` context with stubs and asserts the snapshot has no thread text and no app sources. `snapshot` is now exported on `PB.frames`.
+- **P2 fix:**
+  - `steps.js`:
+    - `applyLocal(step, read, put)` covers placed and removed clips, and inserted, updated, promoted and removed records.
+    - `recorder` uses it for its per-transaction overlay.
+    - `optimistic(S)` keeps pending batches (`seq`), applies each at once, re-applies the ones not yet acknowledged over each adopted copy, and drops those with `seq <= ack`.
+  - `frame.js` sends `{t: 'mutate', seq, ops}`, adopts syncs through `board.adopt(m.S, m.ack)`, and redraws right after a mutate.
+  - `frames.js` sets `f.ack` at the start of handling a batch and calls `sync()` in a `finally`, so a refused batch is acknowledged too. Syncs carry `ack`.
+  - Two new tests in `steps.test.js`:
+    - consecutive increments; insert then update across calls; a stale copy (ack 0) keeps the writes on top; the page, applying the batches in order, ends equal to the frame; acks drop the pending batches;
+    - a refused batch disappears once acknowledged.
+- **Checks:**
+  - `node --test apps/pinboard/test/*.test.js`: 31 pass. The frames test fails when `meta: PB.S.meta` is put back.
+  - Browser, on the local server at snapshot 17 (`lslop push`):
+    - the page's meta keys were `seeded, title, agentMode, agentTier, minimap, threads, view`, and the frame's were `title, seeded`; "threads" appears nowhere in the frame's `PB.S`;
+    - the `twice` app (insert, then two `update(id, r => ({n: r.n + 1}))`) showed `n=2` in the frame, and the page's record has `n: 2`.
+  - `go test ./pkg/host -run Pinboard` passes. `golangci-lint`: 0 issues.
+- Pushed. I replied on both threads and commented `@codex review` again at 00:25:03Z (background wait `bhdp9ebfw`).
+
+### Why
+- **P1:** the frame's purpose (design §6, phase 6b) is that an app sees the board and nothing of the person. The viewer's view document is the person's.
+- **P2:** an acknowledgement is the only correct way to drop optimistic writes. Replacing the copy on every sync would lose writes that a sync already in flight does not contain.
+
+### What worked
+- Every check above.
+
+### What didn't work
+- The P1 commit picked up all of `frames.js` with `git add`, including the `ack` half of P2. At `b31910f` alone, the page sends an `ack` the frame ignores, which is harmless, and both commits were pushed together.
+
+### What I learned
+- `PB.S.meta` is a merged object, shared board keys plus the viewer's own. Anything that sends board state out of the page has to pick the shared part (`PB.sharedMeta`), as `saveMeta` already does when it writes.
+
+### What was tricky to build
+- **The ordering of ack and snapshot.** The page computes the snapshot and reads `f.ack` in the same `requestAnimationFrame` callback, after handling the batch. The copy therefore always contains exactly the batches it acknowledges.
+
+### What warrants a second pair of eyes
+- `applyLocal` covers only what later steps read: clips placed or removed, and records. Other changes, such as a move or `setAttr`, still show in the frame only after the sync, as before.
+- Window state has its own optimistic path (`PB.setState` in the frame). It is not acknowledged, so a stale sync can briefly show an old state. That is pre-existing and was not reported.
+
+### What should be done in the future
+- Assess Codex's second review (step 12).
+
+### Code review instructions
+- `git show b31910f 8288aa7`.
+- `node --test apps/pinboard/test/steps.test.js apps/pinboard/test/frames.test.js`.
+
+### Technical details
+- The test apps `twice` and `counts` remain on the local Kitchen board.

@@ -19,3 +19,7 @@ F7 read-time defaults (b7d7316); F6 steps.js step table with differential test (
 ## 2026-11-07
 
 Browser pass on a local server (F1, F2, F6, F7 confirmed in page and frames; screenshot in various/). #39 retargeted to main and rewritten; #36, #37, #38 closed; @codex review requested on #39. Design doc §13 As built. Diary steps 9-10.
+
+## 2026-11-07
+
+Codex review of consolidated #39: P1 (frames got the viewer's private meta) fixed in b31910f; P2 (framed writes not visible to the next call) fixed in 8288aa7 with an acknowledged optimistic copy; second review requested. Diary step 11.
