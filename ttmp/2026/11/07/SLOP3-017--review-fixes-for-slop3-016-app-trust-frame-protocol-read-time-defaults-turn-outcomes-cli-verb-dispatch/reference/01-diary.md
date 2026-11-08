@@ -256,3 +256,216 @@ The consent prompt depended on two fields that any board admin could write. Now 
 
 ### Technical details
 - The level `self` is never met (`meets` in `pkg/rt/rules.go`), so `write: "self"` with no `{self}` rule below it blocks every caller, the owner included.
+
+## Step 5: F7, defaults are read-time
+
+A window's state now falls back to the app's declared defaults when it is read, so no record needs a migration.
+
+### Prompt Context
+**User prompt (verbatim):** (see step 1)
+**Assistant interpretation:** Design §7.
+**Inferred user intent:** Fix the missing-state class, not only old records.
+**Commit (code):** `b7d7316`, "Pinboard: window state defaults are read-time (SLOP3-017 F7)".
+
+### What I did
+- `render.js` `makeCtx`:
+  - `ctx.state[k]` is the stored value when the window has the key, else `def.state[k]`.
+  - `has` and `ownKeys` include the defaults; `getOwnPropertyDescriptor` reads through the same `stateGet`.
+  - An object default is copied (JSON) once per context and cached.
+- New `apps/pinboard/test/render.test.js`. It loads `render.js` in a `vm` context with a stub `window.PB` and no DOM: `makeCtx` touches only `PB` until something renders.
+
+### Why
+- The frame's `def` is the evaluated source, so it has the real defaults whatever the record holds. Applying them on read fixes old records, missing fields and defaults added in later versions, all in one place.
+
+### What worked
+- 2 tests pass. On the previous `render.js` the defaults test fails.
+
+### What didn't work
+- My first assertion compared an array from the `vm` context with `deepStrictEqual`, which failed: values made in another realm have that realm's prototypes. I compare them as JSON now.
+
+### What I learned
+- `render.js` can be unit-tested in node without a DOM shim, which is useful for later work.
+
+### What was tricky to build
+- Copying object defaults. Without the copy, `c.state.items.push(x)` in a window that never stored `items` would change the app's definition for every window. With a copy per get, `push` followed by `set('items', c.state.items)` would lose the push. One copy per context avoids both.
+
+### What warrants a second pair of eyes
+- `m.open` still copies defaults into new windows (readers of stored state: describe, verbs). The stored and read-time values agree unless an app changes a default and an old window never stored that key, which is exactly the case this fixes.
+
+### What should be done in the future
+- Nothing.
+
+### Code review instructions
+- `git show b7d7316`; `node --test apps/pinboard/test/render.test.js`.
+
+### Technical details
+- The cache is per context: `makeCtx` builds a new one per render, and handlers receive the context of the render that drew them.
+
+## Step 6: F6, one step table for the frame protocol
+
+The frame and the page each had their own idea of what a step looked like. Now both read one table, `js/steps.js`.
+
+### Prompt Context
+**User prompt (verbatim):** (see step 1)
+**Assistant interpretation:** Design §6.
+**Inferred user intent:** Make the frame protocol a contract, so this kind of silent no-op cannot come back.
+**Commit (code):** `15911c4`, "Pinboard: one step table for the frame protocol (SLOP3-017 F6)".
+
+### What I did
+- **New `apps/pinboard/js/steps.js`**, a UMD module (`window.PinboardSteps`, or `module.exports` in node).
+  - `OPS` maps 21 steps to argument kinds (`id`, `str`, `obj`, `bool`, `point`, `size`, `ids`, `data`, `patch`, `nullable`; `?` marks an optional argument and `...` takes the rest), with an optional `record` (frame side) and `check` (page side).
+  - **`update`:** `record` runs a function patch on a copy of the record. It mimics core's `Object.assign(r, fn(r))` and sends `diff(before, after)` as `{ set, unset }`. `check` builds the page's own function: delete `unset`, then return `set`.
+  - **`promote`:** `record` runs the mapping on a copy of the clip and sends `[clipId, coll, data|null, recId]`. `check` returns a function that uses `data`, or `page.fromClip(c)`, under `recId`. `promote` therefore now returns its record id in the frame.
+  - **`place`, `open`, `insert`** make fresh ids in the frame. `check` drops an id that is taken or malformed, refuses `kind: app` in `place`, and strips `id`, `kind` and `app` from `setAttr`.
+  - **`record`** refuses a function in any position other than `update`'s and `promote`'s third. **`check`** refuses unknown names (`hasOwnProperty`, so `__proto__` is refused too), wrong kinds, missing arguments and extra arguments.
+  - **`recorder(read)`** returns `{ m, steps }`. Within one transaction it keeps an overlay of what earlier calls placed, inserted or updated, so `insert` followed by `update` works.
+- **`frame.js`**: `PB.mutate` uses `PinboardSteps.recorder` over the frame's copy of the board. The old list of step names and the old recorder are gone.
+- **`frames.js`**: `handle` checks each step with `PinboardSteps.check(op, args, { has, fromClip })`. The old `STEPS` table and `freshClip` are gone. The frame document includes `steps.js` before `frame.js`.
+- **`index.html`** loads `js/steps.js` before `frames.js`.
+- **New `apps/pinboard/test/steps.test.js`**: eight differential cases, the wire form of function patches, `promote` without a mapping, eleven refusals, the stripped fields, and the frame-side refusals.
+
+### Why
+- One table, read by both sides, is the contract: a new step either has a shape and a check, or it is refused.
+
+### What worked
+- 13 of 13 pass on the first run. Two deliberate breakages in `steps.js` show the test catches bugs:
+  - dropping `update`'s deletions fails 1 case;
+  - ignoring function patches, the reported bug, fails 3.
+- All Pinboard node tests pass (28), and so does `go test ./pkg/host -run Pinboard`.
+
+### What didn't work
+- Nothing.
+
+### What I learned
+- Comparing the two paths needs equal ids. The test cases give explicit fresh ids, and `record` keeps a valid provided id, so both paths create the same records. `promote` without a mapping is checked on its own, because its record id is random.
+
+### What was tricky to build
+- **`update`'s two styles:** a function may return a partial patch or the mutated record. Applying `Object.assign(copy, out || {})` and then diffing against the original covers both, and also a function that deletes and returns nothing.
+- **The `nullable` kind:** `promote`'s data argument is required in shape but may be `null`.
+
+### What warrants a second pair of eyes
+- **Stricter checks for apps already written:**
+  - `tag` now takes strings only; core used to coerce with `String`.
+  - `update` with a raw object patch is no longer accepted on the wire; the frame always sends `{ set, unset }`.
+  - An app that called `m.update` on a record id the frame does not know now gets "no record" in the frame. The page would have thrown the same error later.
+- **The frame's record copy may be one sync behind the page.** A function patch is computed on that copy, which is the race the design accepts.
+
+### What should be done in the future
+- A browser check that a framed app's `update(id, r => …)` changes the record (task "Browser pass").
+
+### Code review instructions
+- Read `apps/pinboard/js/steps.js` top to bottom; then `git show 15911c4 -- apps/pinboard/js/frame.js apps/pinboard/js/frames.js`.
+- `node --test apps/pinboard/test/steps.test.js`.
+
+### Technical details
+- Built-in apps run in the page and never use this path.
+
+## Step 7: F4 and F5, identifiers for dispatch
+
+The two CLI findings both came from deriving an identifier from something else: a display name in one case, part of a URL in the other.
+
+### Prompt Context
+**User prompt (verbatim):** (see step 1)
+**Assistant interpretation:** Design §5.
+**Inferred user intent:** `slop pb "<title with spaces>" …` works, and two servers never share cached code.
+**Commits (code):** `a1b2efe` (F4) and `71a0a72` (F5).
+
+### What I did
+- **F4:**
+  - `appverbs.Execute` calls `dispatchWords(use, b)`, which keeps a one-word store name and replaces one that is empty, contains whitespace or starts with `-` with `b.ID`.
+  - `TestExecuteStoreNameWithSpaces`: the verb runs (`actor.call clips`), `--help` reads `slop pb s-1 clip ls`, and a one-word name is kept.
+- **F5:**
+  - `serverKey(server)` lower-cases the scheme and host, drops the query, the fragment and trailing slashes, and returns `<host with : and / as _>-<hex of the first 6 bytes of the sha256>`. `verbsDir` uses it.
+  - `cmd/slop/cmds/appverbs_test.go` is the package's first test: five URLs that differ only in scheme, path or port get five keys; equivalent URLs get one key; the name is a readable directory name.
+
+### Why
+- **F4:** Cobra's `Name()` is the first word of `Use`, so a display name cannot double as a command name.
+- **F5:** the cache holds executable sources, so its key must identify the server as precisely as the trust decision that uses it.
+
+### What worked
+- Both tests pass. Making `dispatchWords` a no-op reproduces the Codex symptom: `calls []`, output "Usage: slop pb [command] … Kitchen".
+
+### What didn't work
+- Nothing.
+
+### What I learned
+- Glazed's help goes to Cobra's writer, while its rows go to `os.Stdout` (step 10 of SLOP3-016). The help assertion can therefore read the buffer.
+
+### What was tricky to build
+- Nothing.
+
+### What warrants a second pair of eyes
+- After this change, existing caches under `verbs/<host>/` are orphaned on disk. They are harmless and are not cleaned up.
+
+### What should be done in the future
+- Nothing.
+
+### Code review instructions
+- `git show a1b2efe 71a0a72`.
+
+### Technical details
+- `dispatchWords` changes only the last word of `use`: the store word in `["slop", "<alias or on>", "<store>"]`.
+
+## Step 8: F8, watched promises
+
+A turn's outcome used to be decided by one promise, the handler's. Now an event can watch more promises, and any of them rejecting rolls back the turn it rejected in.
+
+### Prompt Context
+**User prompt (verbatim):** (see step 1)
+**Assistant interpretation:** Design §8, on the merged code from step 2.
+**Inferred user intent:** A tool the model is told failed leaves no writes; the platform contract is consistent for synchronous and asynchronous tools.
+**Commit (code):** `46207f0`, "Actor: a turn rolls back when a promise its event watches rejects (SLOP3-017 F8)". It was amended for gofmt before the push.
+
+### What I did
+- **`pkg/actor/actor.go`:**
+  - `event.watches`, plus a `watch{p, done}` type.
+  - Helpers: `root()`, `rejectedWatch()`, `takeSettled()` and `dropWatches(err)`.
+  - Inside the transaction, after the handler's root check, a rejected watch returns `errWatchRejected`.
+  - After `store.Do` the settled watches are taken:
+    - on error, rejected watches get their own error and fulfilled ones get the turn's error; when the error is `errWatchRejected`, the turn ends there and the handler is unaffected;
+    - on success, `done(result, nil)` runs after `cur.out`.
+  - `handle`'s "could not run" path drops the root's watches as lost and calls a `Later` turn's `failed` instead of replying to the parked handler. That was the gap from step 2.
+  - The loop's lost-continuation branch drops the root's watches too.
+- **`pkg/actor/modules.go`:** `Actor.Watch(p, done)`.
+- **`pkg/doors/actors/sample.go`:**
+  - `toolRunner` watches every result; a plain value becomes a resolved promise. The `then` callbacks and the state switch are gone.
+  - `errorMessage` keeps a thrown error's own code (`permission_denied: …`) and drops the generic `actor_error`. `errorText` is removed.
+- **`TestActorSampleTools`**, new mode `late`: the tool awaits `sample`, writes `notes/after`, then throws. Expected: an error for the model, `written` true (the write before the await), `after` false.
+
+### Why
+- The rejection has to be seen inside the transaction of the turn it happened in. Only then can that turn roll back.
+- Reporting a fulfilment after the commit also fixes a smaller inconsistency: a synchronous tool's success used to be sent before its turn committed.
+
+### What worked
+- `go test ./pkg/...` passes (direct), as does `SLOP_TEST_ACTORS_RUNTIME=engine go test ./pkg/host/` (16.9 s) and `go test -race -run 'TestActorSampleTools|TestActorCrashPath' -count=3`.
+- With the old `toolRunner`, the new case fails: `after:true text:The browser tool reported an error.`, exactly the finding.
+- `golangci-lint run ./...`: 0 issues, after the gofmt fix.
+
+### What didn't work
+- The first lint run found `sample.go:285` not gofmt-formatted (a blank line left by removing `errorText`). I ran gofmt and amended the commit.
+- This repository has no commit hook. `make lint` and the tests have to be run by hand before pushing, as they were here.
+
+### What I learned
+- `store.Do` and `Actor.limited` both return the callback's error as is, so `errors.Is(err, errWatchRejected)` holds.
+
+### What was tricky to build
+- **Which turn a rejection belongs to.** A watched promise settles in a continuation turn of the same root event: `io` posts continuations for `ev.parent`, or `ev`. Checking after every turn of that event therefore sees the rejection in the turn that caused it.
+- **Settled watches in a turn that rolled back for another reason.** A fulfilled one would report a success whose writes are gone, so it gets the turn's error instead.
+
+### What warrants a second pair of eyes
+- A watched promise settled by a different event's turn would be noticed at its own event's next turn, and would roll back that turn. Tools cannot do this today: their continuations belong to the event that called `sample`.
+- A watch's `done` for a dropped (lost) runtime runs on another actor's goroutine, after the old loop stopped. `toolRunner`'s callback only sends on a channel.
+
+### What should be done in the future
+- Design open question 2 is now answered: a stopped actor reports its watches as "lost".
+
+### Code review instructions
+- `git show 46207f0 -- pkg/actor`; then `pkg/doors/actors/sample.go` (`toolRunner`).
+- `go test ./pkg/host -run TestActorSampleTools -v`.
+
+### Technical details
+```go
+if ev.root().rejectedWatch() {
+	return errWatchRejected // inside store.Do: this turn rolls back
+}
+```
