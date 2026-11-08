@@ -27,3 +27,7 @@ Codex review of consolidated #39: P1 (frames got the viewer's private meta) fixe
 ## 2026-11-07
 
 Codex second review of #39: Boards page guest prompt (4952b17) and board drags into framed apps' dropzones (4572aee) fixed and checked in the browser; third review requested. Diary step 12.
+
+## 2026-11-07
+
+Codex third review of #39: collection steps in the frame's optimistic copy (6db52e7) and frame sync on the page's own mutations (3ddb939); fourth review requested. Diary step 13.

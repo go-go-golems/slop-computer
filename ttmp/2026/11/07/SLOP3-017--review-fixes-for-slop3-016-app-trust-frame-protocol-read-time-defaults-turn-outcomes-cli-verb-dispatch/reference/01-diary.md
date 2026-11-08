@@ -697,3 +697,55 @@ The second review, of the head with the step 11 fixes, found two older gaps: one
 
 ### Technical details
 - The test apps `catcher` and the notes "drag me" and "zoomed drag" remain on the local Kitchen board.
+
+## Step 13: Codex's third review of #39: collection steps and page-side syncs
+
+The third review found two more frame gaps: one that step 11 left open, and one from phase 6b.
+
+### Prompt Context
+**User prompt (verbatim):** (see step 10)
+**Assistant interpretation:** As step 12.
+**Inferred user intent:** As step 11.
+**Commits (code):** `6db52e7` (collections) and `3ddb939` (sync on mutation).
+
+### What I did
+- **The review:** completed at `4572aee` with two P2 findings. CI passed.
+  - **`steps.js:195`:** `applyLocal` ignored `collection` steps. The schema builder (`dsl.js` `schemaBuilder`) reads `PB.S.collections[name]` back after each commit, so in a frame a new collection threw, and `.field().field()` lost the first field.
+  - **`frames.js:96`:** the page's `PB.mutate` emits `mutation`, and frames synced only on `change` and `selection`.
+- **Collections fix:** `applyLocal` handles `collection` (core's defaults `{name, fields: [], indexes: [], store: 'db', version: 1}`, with the patch merged over the existing collection) and makes the collection on a first `insert`, as core's `m.insert` does, with every data key as a text field, `id` included.
+- **Sync fix:** `PB.on('mutation', sync)` in `frames.js`.
+- **Tests:**
+  - A differential case, "schema builder in one transaction".
+  - An optimistic test: fields accumulate across calls, and after the page applies everything and a stale copy is adopted, the frame's collections equal the page's, and so do its records apart from `added`.
+  - `frames.test.js` records `PB.on` subscriptions and checks `change`, `mutation` and `selection`.
+  - 34 pass. On the previous `steps.js` and `frames.js`, the two new tests fail.
+- **Browser** (Pinboard n=19): a framed `schema` app's `c.db.collection('tasks2').field('title').field('done', 'bool')` gave the page `title:text, done:bool`. An update made in the page (`n: 41`) showed in the open frame within 600 ms.
+- Lint: 0 issues. Pushed, replied on both threads, and commented `@codex review` at 00:39:11Z (background wait `be49asimg`).
+
+### Why
+- **Collections:** the optimistic copy must cover everything an app reads back from its own changes, and the schema builder is such a reader.
+- **Sync on mutation:** the page's own writes produce no `change` event, because their echo matches local state. Without it, nothing told the frames.
+
+### What worked
+- Every check above.
+
+### What didn't work
+- My first comparison of records failed on `added`: the page's timestamp, which the frame cannot know. The next sync brings it, so the test compares records without it.
+
+### What I learned
+- The page has two event streams, `change` (remote or quiet) and `mutation` (its own transactions). Anything that mirrors the page has to follow both.
+
+### What was tricky to build
+- Matching core's collection made by a first insert exactly, `id` field included, so that the frame's copy and the page's agree.
+
+### What warrants a second pair of eyes
+- `applyLocal` still does not cover clip edits (`move`, `setAttr`, `setParam`) and `group`. Nothing reads those back synchronously today, and the page's sync corrects the display.
+
+### What should be done in the future
+- Assess the fourth review.
+
+### Code review instructions
+- `git show 6db52e7 3ddb939`.
+
+### Technical details
+- The test apps `schema`, `tasks2` and `counts2` remain on the local Kitchen board.
