@@ -19,10 +19,10 @@
   let docP = null;
   function frameDoc() {
     if (!docP) {
-      docP = Promise.all(['style.css', 'js/frame.js', 'js/dsl.js', 'js/render.js'].map(f => fetch(f).then(r => { if (!r.ok) throw new Error(f + ': ' + r.status); return r.text(); })))
-        .then(([css, frame, dsl, render]) => '<!doctype html><html><head><meta charset="utf-8"><meta http-equiv="Content-Security-Policy" content="' + POLICY + '">' +
+      docP = Promise.all(['style.css', 'js/steps.js', 'js/frame.js', 'js/dsl.js', 'js/render.js'].map(f => fetch(f).then(r => { if (!r.ok) throw new Error(f + ': ' + r.status); return r.text(); })))
+        .then(([css, steps, frame, dsl, render]) => '<!doctype html><html><head><meta charset="utf-8"><meta http-equiv="Content-Security-Policy" content="' + POLICY + '">' +
           '<style>' + css + FRAME_CSS + '</style></head><body><div id="root" class="appview"></div>' +
-          [frame, dsl, render].map(s => '<script>' + s.replace(/<\/script/gi, '<\\/script') + '</' + 'script>').join('') + '</body></html>');
+          [steps, frame, dsl, render].map(s => '<script>' + s.replace(/<\/script/gi, '<\\/script') + '</' + 'script>').join('') + '</body></html>');
       docP.catch(() => { docP = null; });
     }
     return docP;
@@ -38,17 +38,10 @@
   const selection = () => (PB.board && PB.board.sel ? [...PB.board.sel] : []);
   const theme = () => document.documentElement.dataset.theme || 'light';
 
-  // The steps an app may take, and how each is checked. Ids of new clips and
-  // records come from the frame; a taken or malformed one is dropped.
-  const freshClip = (id) => typeof id === 'string' && /^clip:[a-z0-9]{10}$/.test(id) && !PB.S.clips[id];
-  const STEPS = {
-    place: ([c]) => { c = Object.assign({}, c); if (!freshClip(c.id)) delete c.id; if (c.kind === 'app') throw new Error('open apps with m.open'); return [c]; },
-    open: ([name, o]) => { o = Object.assign({}, o); if (!freshClip(o.id)) delete o.id; return [String(name), o]; },
-    setAttr: ([id, patch]) => { const p = Object.assign({}, patch); delete p.id; delete p.kind; delete p.app; return [id, p]; },
-    insert: ([coll, data]) => [String(coll), data],
-    promote: ([id, coll]) => [id, String(coll)],
-  };
-  ['move', 'resize', 'retitle', 'tag', 'untag', 'remove', 'group', 'ungroup', 'pin', 'close', 'setParam', 'setState', 'collection', 'update', 'removeRecord', 'demote'].forEach(op => { STEPS[op] = (args) => args; });
+  // The steps an app may take are steps.js's table: each one is checked
+  // there (shape, fresh ids, what an app may not change) before core runs it
+  // as the app. An unknown or malformed step fails the whole transaction.
+  const page = { has: (store, id) => !!(PB.S[store] || {})[id], fromClip: (c) => PinboardCore.fromClip(c) };
 
   const live = new Map(); // clip id → { iframe, port, app }
   function handle(id, name, d) {
@@ -64,7 +57,7 @@
         case 'blob': if (PB.isAssetRef(d.ref)) PB.fetchBlob(d.ref).then(blob => f.port.postMessage({ t: 'blob', ref: d.ref, blob })).catch(() => {}); break;
         case 'mutate': {
           const ops = Array.isArray(d.ops) ? d.ops.slice(0, 500) : [];
-          const steps = ops.map(o => { const check = STEPS[o && o.op]; if (!check) throw new Error(name + ' may not ' + (o && o.op)); return [o.op, check(Array.isArray(o.args) ? o.args : [])]; });
+          const steps = ops.map(o => [o && o.op, PinboardSteps.check(o && o.op, o && o.args, page)]);
           PB.mutate(m => { steps.forEach(([op, args]) => m[op](...args)); }, by);
           break;
         }

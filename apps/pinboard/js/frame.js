@@ -11,7 +11,8 @@
    page → frame: init {app, clip, S, local, sel, log, me, theme}, sync {S, sel,
      log, theme}, blob {ref, blob}
    frame → page: meta {def}, error {message}, set {patch}, param {name, value},
-     mutate {ops}, toast {msg}, open {name, opts}, blob {ref} */
+     mutate {ops: steps of data, see steps.js}, toast {msg}, open {name, opts},
+     blob {ref} */
 (function () {
   'use strict';
   const PB = window.PB = { S: { clips: {}, apps: {}, collections: {}, records: {}, meta: {} }, local: {}, log: [], track: null };
@@ -46,22 +47,17 @@
   };
   PB.setLocal = (id, patch) => { PB.local[id] = Object.assign({}, PB.local[id], patch); redraw(); };
 
-  // c.mutate: the steps are recorded here and applied by the page, in one
-  // transaction. Ids of new clips and records are made here, so the app gets
-  // them back at once; the page refuses an id that is taken.
-  const newId = (kind) => { let s = ''; for (let i = 0; i < 10; i++) s += Math.floor(Math.random() * 36).toString(36); return kind + ':' + s; };
-  const STEPS = ['move', 'resize', 'retitle', 'tag', 'untag', 'setAttr', 'remove', 'ungroup', 'pin', 'close', 'setParam', 'setState', 'collection', 'update', 'removeRecord', 'demote'];
-  function recorder(ops) {
-    const m = {};
-    STEPS.forEach(op => { m[op] = (...args) => { ops.push({ op, args }); }; });
-    m.place = (c) => { const id = (c && c.id) || newId('clip'); ops.push({ op: 'place', args: [Object.assign({}, c, { id })] }); return id; };
-    m.open = (name, o) => { const id = newId('clip'); ops.push({ op: 'open', args: [name, Object.assign({}, o, { id })] }); return id; };
-    m.insert = (coll, data) => { const id = newId('rec'); ops.push({ op: 'insert', args: [coll, Object.assign({}, data, { id })] }); return id; };
-    m.group = (ids, o) => { ops.push({ op: 'group', args: [ids, o || {}] }); return null; };
-    m.promote = (clipId, coll) => { ops.push({ op: 'promote', args: [clipId, coll] }); return null; };
-    return new Proxy(m, { get(t, k) { if (k in t) return t[k]; if (typeof k !== 'string') return undefined; throw new Error('m.' + k + ' is not available to board apps'); } });
-  }
-  PB.mutate = (fn) => { const ops = []; const r = fn(recorder(ops)); if (ops.length) send({ t: 'mutate', ops: plain(ops) }); return r; };
+  // c.mutate: each step is recorded here as data (steps.js, the table the
+  // page checks against) and applied by the page, in one transaction. A
+  // function argument (update's patch, promote's mapping) runs here, on a
+  // copy. Ids of new clips and records are made here, so the app gets them
+  // back at once; the page refuses an id that is taken.
+  PB.mutate = (fn) => {
+    const rec = PinboardSteps.recorder((store, id) => (PB.S[store] || {})[id]);
+    const r = fn(rec.m);
+    if (rec.steps.length) send({ t: 'mutate', ops: plain(rec.steps) });
+    return r;
+  };
 
   // The board API, narrowed: reads from the copy, changes through mutate.
   const api = {
