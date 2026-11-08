@@ -8,7 +8,7 @@ require (
 	github.com/dop251/goja_nodejs v0.0.0-20260918173711-b481721df8a2
 	github.com/go-go-golems/geppetto v0.13.13
 	github.com/go-go-golems/glazed v1.4.3
-	github.com/go-go-golems/go-go-goja v0.10.8-0.20261107193645-822e67c611a8
+	github.com/go-go-golems/go-go-goja v0.10.8-0.20261108231830-9d7ede7027c7
 	github.com/go-jose/go-jose/v4 v4.1.8
 	github.com/invopop/jsonschema v0.14.0
 	github.com/mattn/go-sqlite3 v1.14.52
@@ -119,5 +119,3 @@ require (
 	google.golang.org/protobuf v1.36.12 // indirect
 	gopkg.in/yaml.v2 v2.4.0 // indirect
 )
-
-replace github.com/go-go-golems/go-go-goja => github.com/wesen/go-go-goja v0.0.4-0.20261107231049-0d995b4b7706

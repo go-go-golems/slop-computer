@@ -75,6 +75,8 @@ github.com/go-go-golems/geppetto v0.13.13 h1:7uUx9r5HWo5kESzRL6UTcw3M6eshR7hTstU
 github.com/go-go-golems/geppetto v0.13.13/go.mod h1:/aPbgwrNbo76pBWZi//iyALXAXGSwOPYX587ti/AR5A=
 github.com/go-go-golems/glazed v1.4.3 h1:Wzcr/xJkNawKoT6I1KmiNYdprSNgUAbRU6EhT9PeDvM=
 github.com/go-go-golems/glazed v1.4.3/go.mod h1:d/xwH6o5N4lGv7Mz3x00hp9EiMSBOm4SAI+250Mfcps=
+github.com/go-go-golems/go-go-goja v0.10.8-0.20261108231830-9d7ede7027c7 h1:wrT3i6P5NqpaftRqLH9EKG3XFDMMgm0ZM5CveAPGaIQ=
+github.com/go-go-golems/go-go-goja v0.10.8-0.20261108231830-9d7ede7027c7/go.mod h1:SzjO3fs74cZ3cDV3cmsGXY+P8UxP9WPx7oEWSn1E8bI=
 github.com/go-go-golems/logcopter v0.1.1 h1:/zrfmA7057hZyBoes+X9EpASP+aZQJx3kip89eRQqXM=
 github.com/go-go-golems/logcopter v0.1.1/go.mod h1:GUB5A7JwPVdYAu/8CKURcIaJb0h16nz8mKbkf5opzqo=
 github.com/go-jose/go-jose/v4 v4.1.8 h1:k38WifTutpGuqt6Imq9xW1OgCvnWFri0Nz7FnfiACM8=
@@ -241,8 +243,6 @@ github.com/tj/go-naturaldate v1.3.0 h1:OgJIPkR/Jk4bFMBLbxZ8w+QUxwjqSvzd9x+yXocY4
 github.com/tj/go-naturaldate v1.3.0/go.mod h1:rpUbjivDKiS1BlfMGc2qUKNZ/yxgthOfmytQs8d8hKk=
 github.com/ugorji/go/codec v1.3.0 h1:Qd2W2sQawAfG8XSvzwhBeoGq71zXOC/Q1E9y/wUcsUA=
 github.com/ugorji/go/codec v1.3.0/go.mod h1:pRBVtBSKl77K30Bv8R2P+cLSGaTtex6fsA2Wjqmfxj4=
-github.com/wesen/go-go-goja v0.0.4-0.20261107231049-0d995b4b7706 h1:KFk2NFLNy0CFLziTtjaHiKch7cMgEqKk3GqKhiUZBTA=
-github.com/wesen/go-go-goja v0.0.4-0.20261107231049-0d995b4b7706/go.mod h1:SzjO3fs74cZ3cDV3cmsGXY+P8UxP9WPx7oEWSn1E8bI=
 github.com/wk8/go-ordered-map/v2 v2.1.8 h1:5h/BUHu93oj4gIdvHHHGsScSTMijfx5PeYkE/fJgbpc=
 github.com/wk8/go-ordered-map/v2 v2.1.8/go.mod h1:5nJHM5DyteebpVlHnWMV0rPz6Zp7+xBAnxjb1X5vnTw=
 github.com/zenizh/go-capturer v0.0.0-20211219060012-52ea6c8fed04 h1:qXafrlZL1WsJW5OokjraLLRURHiw0OzKHD/RNdspp4w=
