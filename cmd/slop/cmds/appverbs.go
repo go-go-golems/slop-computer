@@ -9,6 +9,8 @@ package cmds
 // has seen it.
 
 import (
+	"crypto/sha256"
+	"encoding/hex"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -31,17 +33,31 @@ type aliasInfo struct {
 	Title string `json:"title,omitempty"` // the document whose "title" names a store
 }
 
-// verbsDir is where app verbs are cached for a server.
+// verbsDir is where app verbs are cached for a server: one directory per
+// server URL (scheme, host and path), not per host, so that two servers on
+// one host never share cached verbs (SLOP3-017 F5). The host prefix keeps
+// the name readable; the hash keeps it distinct.
 func verbsDir(server string) string {
 	base, err := os.UserConfigDir()
 	if err != nil {
 		return ""
 	}
-	host := server
-	if u, err := url.Parse(server); err == nil && u.Host != "" {
-		host = u.Host
+	return filepath.Join(base, "slop", "verbs", serverKey(server))
+}
+
+func serverKey(server string) string {
+	norm, host := strings.TrimRight(strings.TrimSpace(server), "/"), ""
+	if u, err := url.Parse(norm); err == nil && u.Host != "" {
+		u.Scheme, u.Host = strings.ToLower(u.Scheme), strings.ToLower(u.Host)
+		u.RawQuery, u.Fragment = "", ""
+		u.Path = strings.TrimRight(u.Path, "/")
+		norm, host = u.String(), u.Host
 	}
-	return filepath.Join(base, "slop", "verbs", strings.NewReplacer(":", "_", "/", "_").Replace(host))
+	if host == "" {
+		host = "server"
+	}
+	sum := sha256.Sum256([]byte(norm))
+	return strings.NewReplacer(":", "_", "/", "_").Replace(host) + "-" + hex.EncodeToString(sum[:6])
 }
 
 // knownAliases reads the aliases the CLI has seen, on every server it has
