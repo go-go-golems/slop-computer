@@ -6,27 +6,21 @@
 <title>Roulette — slop catalog</title>
 <link rel="stylesheet" href="/catalog/kit/views.css">
 <style>
-  .bar { display: flex; flex-wrap: wrap; gap: 10px 14px; align-items: center; margin: 22px 0 14px; }
-  .bar h1 { font-size: 24px; margin: 0; letter-spacing: -.01em; }
-  .bar .sp { flex: 1; }
-  .seg { display: flex; gap: 4px; background: var(--chip); padding: 3px; border-radius: 999px; }
-  .seg button { border: 0; background: transparent; padding: 3px 12px; border-radius: 999px; font-size: 14px; color: var(--muted); cursor: pointer; }
-  .seg button[aria-pressed="true"] { background: var(--panel); color: var(--ink); box-shadow: var(--shadow); }
-  .spin { font-size: 16px; padding: 7px 18px; }
-  .stage { display: grid; gap: 16px; grid-template-columns: 1fr; }
+  .spin { height: 36px; font-size: 15px; padding: 0 18px; }
+  .stage { display: grid; gap: 28px; grid-template-columns: 1fr; }
   .stage.two { grid-template-columns: 1fr 1fr; }
-  .card { background: var(--panel); border: 1px solid var(--line); border-radius: 14px; overflow: hidden; display: flex; flex-direction: column; min-width: 0; }
-  .screen { position: relative; overflow: hidden; aspect-ratio: 16 / 10; background: var(--chip); border-bottom: 1px solid var(--line); }
-  .about { padding: 16px 18px; display: flex; flex-direction: column; gap: 8px; }
-  .about h2 { margin: 0; font-size: 26px; letter-spacing: -.02em; display: flex; gap: 10px; align-items: center; flex-wrap: wrap; }
-  .about p { margin: 0; color: var(--muted); }
+  .card { border-top: 1px solid var(--ink); display: flex; flex-direction: column; min-width: 0; padding-top: 16px; }
+  .screen { position: relative; overflow: hidden; aspect-ratio: 16 / 10; background: var(--fill); border: 1px solid var(--hair); }
+  .about { padding: 16px 0 0; display: flex; flex-direction: column; gap: 10px; }
+  .about h2 { margin: 0; font-size: 34px; font-weight: 500; letter-spacing: -.035em; line-height: 1.05; display: flex; gap: 12px; align-items: center; flex-wrap: wrap; }
+  .about p { margin: 0; color: var(--ink-2); max-width: 62ch; }
   .acts { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 4px; }
-  .like { margin-top: 18px; }
-  .like h3 { font-size: 15px; margin: 0 0 8px; color: var(--muted); font-weight: 500; }
-  .like .row { display: flex; flex-wrap: wrap; gap: 8px; }
-  .pick { display: flex; flex-direction: column; text-align: left; gap: 2px; border: 1px solid var(--line); background: var(--panel); border-radius: 10px; padding: 8px 12px; cursor: pointer; max-width: 260px; }
-  .pick:hover { border-color: var(--ink); }
-  .pick b { font-size: 14px; }
+  .like { margin-top: 28px; border-top: 1px solid var(--hair); padding-top: 10px; }
+  .like h3 { font: 500 11px var(--mono); margin: 0 0 10px; color: var(--ink-2); text-transform: uppercase; letter-spacing: .05em; }
+  .like .row { display: flex; flex-wrap: wrap; gap: 0; }
+  .pick { display: flex; flex-direction: column; text-align: left; gap: 2px; border: 1px solid var(--hair); margin: 0 -1px -1px 0; background: var(--bg); padding: 8px 12px; cursor: pointer; max-width: 260px; }
+  .pick:hover { border-color: var(--ink); position: relative; }
+  .pick b { font-size: 14px; font-weight: 700; }
   .pick span { font: 11px var(--mono); color: var(--muted); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
   @media (max-width: 760px) { .stage.two { grid-template-columns: 1fr; } }
 </style>

@@ -6,25 +6,28 @@
 <title>Table — slop catalog</title>
 <link rel="stylesheet" href="/catalog/kit/views.css">
 <style>
-  .bar { display: flex; flex-wrap: wrap; gap: 8px 16px; align-items: center; margin: 24px 0 12px; }
-  .bar h1 { font-size: 24px; margin: 0; letter-spacing: -.01em; }
-  .capf { display: flex; gap: 4px; flex-wrap: wrap; }
-  .capf button { border: 1px solid var(--line); background: transparent; border-radius: 6px; padding: 1px 8px; font: 12px var(--mono); cursor: pointer; color: var(--muted); }
-  .capf button[aria-pressed="true"] { background: var(--ink); color: var(--bg); border-color: var(--ink); }
-  .scroll { overflow-x: auto; border: 1px solid var(--line); border-radius: 10px; background: var(--panel); }
+  .capf { display: flex; flex-wrap: wrap; border: 1px solid var(--hair); }
+  .capf button { height: calc(var(--control-h) - 2px); border: 0; border-left: 1px solid var(--hair); background: var(--bg); padding: 0 9px; font: 12px var(--mono); cursor: pointer; color: var(--ink-2); }
+  .capf button:first-child, .capf > :not(button) + button { border-left: 0; }
+  .capf > :not(button) { align-self: center; padding: 0 8px; font: 11px var(--mono); color: var(--ink-2); border-right: 1px solid var(--hair); line-height: calc(var(--control-h) - 2px); }
+  .capf button:hover { color: var(--ink); }
+  .capf button[aria-pressed="true"] { background: var(--ink); color: var(--bg); }
+  .scroll { overflow-x: auto; border-top: 1px solid var(--ink); }
   table { border-collapse: collapse; width: 100%; font-size: 14px; }
-  th, td { padding: 7px 10px; border-bottom: 1px solid var(--line); text-align: left; white-space: nowrap; }
-  th { position: sticky; top: 0; background: var(--panel); font-weight: 600; cursor: pointer; user-select: none; }
+  th, td { padding: 7px 12px 7px 0; border-bottom: 1px solid var(--rule); text-align: left; white-space: nowrap; }
+  th { position: sticky; top: 0; background: var(--bg); font: 500 11px var(--mono); color: var(--ink-2); text-transform: uppercase; letter-spacing: .04em; cursor: pointer; user-select: none; border-bottom: 1px solid var(--hair); }
+  th:hover { color: var(--ink); }
+  th[aria-sort] { color: var(--ink); }
   th[aria-sort="ascending"]::after { content: " ↑"; }
   th[aria-sort="descending"]::after { content: " ↓"; }
-  td.num, th.num { text-align: right; font-family: var(--mono); }
-  td.cap, th.cap { text-align: center; }
-  td.cap { font-family: var(--mono); color: var(--muted); }
+  td.num, th.num { text-align: right; font-family: var(--mono); font-size: 13px; }
+  td.cap, th.cap { text-align: center; padding-right: 0; }
+  td.cap { font-family: var(--mono); color: var(--hair); }
   td.cap.on { color: var(--ink); }
   tbody tr { cursor: pointer; }
-  tbody tr:hover { background: var(--chip); }
-  td.title { font-weight: 600; white-space: normal; min-width: 180px; }
-  td.title small { display: block; font-weight: 400; color: var(--muted); max-width: 46ch; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  tbody tr:hover { background: var(--fill); }
+  td.title { font-weight: 700; white-space: normal; min-width: 200px; }
+  td.title small { display: block; font-weight: 400; color: var(--ink-2); max-width: 46ch; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 </style>
 </head>
 <body>

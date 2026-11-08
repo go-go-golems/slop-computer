@@ -6,21 +6,24 @@
 <title>Index — slop catalog</title>
 <link rel="stylesheet" href="/catalog/kit/views.css">
 <style>
-  .controls { display: flex; flex-wrap: wrap; align-items: baseline; gap: 10px 18px; margin: 18px 0 10px; }
-  .controls select { border: 1px solid var(--line); background: var(--panel); border-radius: 8px; padding: 4px 8px; font-size: 14px; }
-  .tagbar { display: flex; flex-wrap: wrap; gap: 6px; }
-  .tagbar button { border: 1px solid var(--line); background: transparent; border-radius: 999px; padding: 1px 10px; font-size: 13px; cursor: pointer; color: var(--muted); }
-  .tagbar button[aria-pressed="true"] { background: var(--ink); color: var(--bg); border-color: var(--ink); }
-  .tagbar button small { font-family: var(--mono); opacity: .7; margin-left: 3px; }
-  .rows { border-top: 1px solid var(--ink); margin-top: 16px; }
-  .row { display: grid; grid-template-columns: minmax(0, 360px) 1fr; gap: 28px; padding: 22px 0; border-bottom: 1px solid var(--line); }
-  .thumb { aspect-ratio: 3 / 2; border-radius: 10px; overflow: hidden; background: var(--chip); border: 1px solid var(--line); cursor: pointer; padding: 0; display: block; width: 100%; }
+  .controls { display: flex; flex-wrap: wrap; align-items: baseline; gap: 10px 24px; margin: 0; padding: 12px 0 4px; border-top: 1px solid var(--ink); }
+  .controls select { height: var(--control-h); border: 1px solid var(--hair); background: var(--bg); padding: 0 6px; font: 14px var(--sans); margin-left: 6px; }
+  .tagbar { display: flex; flex-wrap: wrap; flex: 1; min-width: 0; }
+  .tagbar button { border: 0; background: none; padding: 2px 0; font-size: 14px; cursor: pointer; color: var(--ink-2); }
+  .tagbar button:hover { color: var(--ink); }
+  .tagbar button:not(:last-child)::after { content: "·"; display: inline-block; color: var(--hair); margin: 0 8px 0 6px; }
+  .tagbar button[aria-pressed="true"] { color: var(--ink); text-decoration: underline; text-underline-offset: 4px; }
+  .tagbar button small { font: 11px var(--mono); color: var(--ink-2); margin-left: 3px; }
+  .rows { border-top: 1px solid var(--ink); margin-top: 8px; }
+  .row { display: grid; grid-template-columns: minmax(0, 340px) 1fr; gap: 32px; padding: 24px 0; border-bottom: 1px solid var(--hair); }
+  .thumb { aspect-ratio: 3 / 2; overflow: hidden; background: var(--fill); border: 1px solid var(--hair); cursor: pointer; padding: 0; display: block; width: 100%; }
+  .thumb:hover { border-color: var(--ink); }
   .thumb img { width: 100%; height: 100%; object-fit: cover; display: block; }
   .thumb .cv-mono { width: 100%; height: 100%; font-size: 56px; }
   .body { display: flex; flex-direction: column; gap: 10px; min-width: 0; }
-  .body h2 { margin: 0; font-size: clamp(24px, 3vw, 34px); letter-spacing: -.02em; line-height: 1.1; font-weight: 650; display: flex; gap: 10px; align-items: center; flex-wrap: wrap; }
-  .body p { margin: 0; color: var(--muted); max-width: 64ch; }
-  .acts { margin-top: auto; display: flex; flex-wrap: wrap; gap: 14px; align-items: center; }
+  .body h2 { margin: 0; font-size: clamp(26px, 3vw, 36px); letter-spacing: -.035em; line-height: 1.05; font-weight: 500; display: flex; gap: 12px; align-items: center; flex-wrap: wrap; }
+  .body p { margin: 0; color: var(--ink-2); max-width: 62ch; }
+  .acts { margin-top: auto; display: flex; flex-wrap: wrap; gap: 16px; align-items: baseline; padding-top: 8px; }
   .acts a, .acts button { font-size: 15px; background: none; border: 0; padding: 0; cursor: pointer; text-decoration: underline; text-underline-offset: 4px; }
   @media (max-width: 720px) { .row { grid-template-columns: 1fr; gap: 14px; } }
 </style>

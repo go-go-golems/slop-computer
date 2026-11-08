@@ -7,30 +7,29 @@
 <link rel="alternate" type="application/atom+xml" title="slop catalog releases" href="/catalog/data/feed.xml">
 <link rel="stylesheet" href="/catalog/kit/views.css">
 <style>
-  .bar { display: flex; flex-wrap: wrap; gap: 10px 16px; align-items: center; margin: 22px 0 6px; }
-  .bar h1 { font-size: 24px; margin: 0; letter-spacing: -.01em; }
-  .bar .sp { flex: 1; }
-  .chart { display: flex; align-items: flex-end; gap: 3px; height: 120px; margin: 16px 0 4px; border-bottom: 1px solid var(--ink); }
+  .chart { display: flex; align-items: flex-end; gap: 3px; height: 140px; margin: 16px 0 4px; border-bottom: 1px solid var(--ink); }
   .chart a { flex: 1; display: flex; flex-direction: column-reverse; min-width: 6px; text-decoration: none; height: 100%; justify-content: flex-start; }
-  .chart a i { display: block; background: var(--ink); border-radius: 2px 2px 0 0; }
-  .chart a i.up { background: var(--accent); }
-  .chart a:hover i { opacity: .75; }
+  .chart a i { display: block; background: var(--ink); }
+  .chart a i.up { background: repeating-linear-gradient(45deg, var(--ink) 0 1px, transparent 1px 4px); box-shadow: inset 0 0 0 1px var(--ink); }
+  .chart a:hover i { background-color: var(--accent); }
   .axis { display: flex; justify-content: space-between; font: 11px var(--mono); color: var(--muted); margin-bottom: 8px; }
   .key { font: 12px var(--mono); color: var(--muted); display: flex; gap: 16px; }
-  .key i { display: inline-block; width: 10px; height: 10px; border-radius: 2px; background: var(--ink); margin-right: 5px; vertical-align: -1px; }
-  .key i.up { background: var(--accent); }
-  .day { display: grid; grid-template-columns: 150px 1fr; gap: 20px; padding: 18px 0; border-bottom: 1px solid var(--line); scroll-margin-top: 70px; }
-  .day h2 { margin: 0; font-size: 15px; font-weight: 600; position: sticky; top: 70px; align-self: start; }
+  .key i { display: inline-block; width: 10px; height: 10px; background: var(--ink); margin-right: 5px; vertical-align: -1px; }
+  .key i.up { background: repeating-linear-gradient(45deg, var(--ink) 0 1px, transparent 1px 4px); box-shadow: inset 0 0 0 1px var(--ink); }
+  .day { display: grid; grid-template-columns: 170px 1fr; gap: 24px; padding: 18px 0; border-bottom: 1px solid var(--rule); scroll-margin-top: 70px; }
+  .day h2 { margin: 0; font-size: 18px; font-weight: 500; letter-spacing: -.02em; position: sticky; top: 70px; align-self: start; }
   .day h2 small { display: block; font: 12px var(--mono); color: var(--muted); font-weight: 400; }
   .rels { display: flex; flex-direction: column; gap: 10px; }
-  .rel { display: grid; grid-template-columns: 52px 1fr; gap: 12px; align-items: start; cursor: pointer; border-radius: 8px; padding: 4px; margin: -4px; }
-  .rel:hover { background: var(--chip); }
-  .rel .t { font: 12px var(--mono); color: var(--muted); padding-top: 3px; }
-  .rel b { font-weight: 600; }
+  .rel { display: grid; grid-template-columns: 68px 1fr; gap: 12px; align-items: start; cursor: pointer; padding: 4px; margin: -4px; }
+  .rel:hover { background: var(--fill); }
+  .rel:hover b { text-decoration: underline; text-underline-offset: 3px; }
+  .rel .t { font: 12px var(--mono); color: var(--muted); padding-top: 3px; white-space: nowrap; }
+  .rel b { font-weight: 700; }
   .rel .v { font: 12px var(--mono); margin-left: 6px; color: var(--muted); }
-  .rel .v.up { color: var(--accent); }
+  .rel .v.up { color: var(--ink); }
+  .rel .v.up::before { content: "↑ "; }
   .rel p { margin: 2px 0 0; color: var(--muted); font-size: 14px; }
-  .rel blockquote { margin: 4px 0 0; padding-left: 10px; border-left: 2px solid var(--accent); font-size: 14px; }
+  .rel blockquote { margin: 4px 0 0; padding-left: 10px; border-left: 2px solid var(--ink); font-size: 14px; }
   @media (max-width: 640px) { .day { grid-template-columns: 1fr; gap: 8px; } .day h2 { position: static; } }
 </style>
 </head>

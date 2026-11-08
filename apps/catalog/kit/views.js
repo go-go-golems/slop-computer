@@ -72,8 +72,24 @@
   // the matches in the first view when Enter is pressed.
   async function header(host, current) {
     const { catalog, views } = await load();
-    const sw = el("nav", { class: "cv-switch", "aria-label": "Views" },
-      views.map((v) => el("a", { href: v.path, "aria-current": v.id === current ? "page" : null, title: v.blurb }, v.title)));
+    // The views are a menu behind one button, which names the current view.
+    const sw = el("nav", { class: "cv-menu", id: "cv-menu", "aria-label": "Views", hidden: true },
+      el("div", { class: "wrap" }, el("ol", {}, views.map((v) => el("li", {},
+        el("a", { href: v.path, "aria-current": v.id === current ? "page" : null },
+          el("b", {}, v.title), el("span", {}, v.blurb), v.live ? el("i", {}, "live · sign in") : null))))));
+    const own0 = views.find((v) => v.id === current);
+    const menuBtn = el("button", {
+      class: "cv-menubtn", type: "button", "aria-controls": "cv-menu", "aria-expanded": "false",
+      "aria-label": "Views" + (own0 ? ", now " + own0.title : ""),
+      onclick: () => menu(sw.hidden),
+    }, el("span", { class: "cv-burger", "aria-hidden": "true" }, el("i"), el("i"), el("i")), own0 ? own0.title : "Views");
+    const menu = (open) => {
+      sw.hidden = !open;
+      menuBtn.setAttribute("aria-expanded", String(open));
+      if (open) (sw.querySelector('[aria-current="page"]') || sw.querySelector("a"))?.focus();
+    };
+    document.addEventListener("mousedown", (e) => { if (!sw.hidden && !sw.contains(e.target) && !menuBtn.contains(e.target)) menu(false); });
+    document.addEventListener("keydown", (e) => { if (e.key === "Escape" && !sw.hidden) { menu(false); menuBtn.focus(); } });
     const carry = (q) => {
       for (const a of sw.querySelectorAll("a")) {
         const u = new URL(a.getAttribute("href"), location.href);
@@ -104,10 +120,12 @@
     carry(search.value);
     host.replaceChildren(el("header", { class: "cv-head" },
       el("div", { class: "wrap" },
+        menuBtn,
         el("a", { class: "cv-brand", href: ROOT }, "slop catalog", el("small", {}, catalog.count + " apps")),
-        sw, search,
+        search,
         el("button", { class: "cv-kbd", type: "button", title: "Command palette", "aria-label": "Command palette",
-          onclick: () => palette.open() }, /Mac|iP/.test(navigator.platform) ? "⌘K" : "Ctrl K"))));
+          onclick: () => palette.open() }, /Mac|iP/.test(navigator.platform) ? "⌘K" : "Ctrl K")),
+      sw));
     document.addEventListener("keydown", (e) => {
       if (e.key === "k" && (e.metaKey || e.ctrlKey)) {
         e.preventDefault();

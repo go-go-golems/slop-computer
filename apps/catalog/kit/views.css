@@ -58,25 +58,38 @@ button, input, select, textarea { font: inherit; color: inherit; border-radius: 
 
 /* header: the name, the views as text, the search */
 .cv-head { position: sticky; top: 0; z-index: 5; background: var(--bg); border-bottom: 1px solid var(--ink); }
-.cv-head .wrap { display: flex; align-items: center; gap: 24px; height: 52px; }
+.cv-head .wrap { display: flex; align-items: center; gap: 16px; height: 52px; }
+.cv-head .cv-menu .wrap { display: block; height: auto; }
 .cv-brand { font-weight: 700; text-decoration: none; white-space: nowrap; letter-spacing: -.01em; }
 .cv-brand small { color: var(--ink-2); font: 400 12px var(--mono); margin-left: 8px; letter-spacing: 0; }
-.cv-switch { display: flex; gap: 2px 16px; min-width: 0; overflow-x: auto; scrollbar-width: none; flex: 0 1 auto; }
-.cv-switch::-webkit-scrollbar { display: none; }
-.cv-switch a { white-space: nowrap; text-decoration: none; font-size: 14px; color: var(--ink-2); padding: 14px 0 13px; border-bottom: 2px solid transparent; }
-.cv-switch a:hover { color: var(--ink); }
-.cv-switch a[aria-current="page"] { color: var(--ink); border-bottom-color: var(--ink); }
+.cv-menubtn { display: inline-flex; align-items: center; gap: 10px; height: var(--control-h); border: 1px solid var(--hair); background: var(--bg); padding: 0 10px 0 8px; font-size: 14px; cursor: pointer; white-space: nowrap; flex: none; }
+.cv-menubtn:hover, .cv-menubtn[aria-expanded="true"] { border-color: var(--ink); }
+.cv-menubtn[aria-expanded="true"] { background: var(--ink); color: var(--bg); }
+.cv-burger { display: inline-flex; flex-direction: column; justify-content: space-between; width: 14px; height: 10px; }
+.cv-burger i { display: block; height: 1.5px; background: currentColor; }
+.cv-menu { position: absolute; left: 0; right: 0; top: 100%; background: var(--bg); border-top: 1px solid var(--ink); border-bottom: 1px solid var(--ink); max-height: calc(100vh - 52px); overflow: auto; }
+.cv-menu[hidden] { display: none; }
+.cv-menu ol { list-style: none; margin: 0; padding: 8px 0 20px; display: grid; grid-template-columns: repeat(auto-fill, minmax(340px, 1fr)); column-gap: 28px; counter-reset: cv-v; }
+.cv-menu a { display: grid; grid-template-columns: 30px 1fr auto; gap: 2px 8px; align-items: baseline; padding: 10px 8px 10px 0; border-bottom: 1px solid var(--rule); text-decoration: none; }
+.cv-menu a::before { counter-increment: cv-v; content: counter(cv-v, decimal-leading-zero); font: 11px var(--mono); color: var(--ink-2); grid-row: 1; }
+.cv-menu a b { font-size: 17px; font-weight: 500; letter-spacing: -.015em; }
+.cv-menu a span { grid-column: 2 / -1; color: var(--ink-2); font-size: 13px; }
+.cv-menu a i { grid-row: 1; grid-column: 3; font: normal 10.5px var(--mono); color: var(--ink-2); text-transform: uppercase; letter-spacing: .05em; }
+.cv-menu a:hover { background: var(--fill); }
+.cv-menu a:hover b { text-decoration: underline; text-underline-offset: 3px; }
+.cv-menu a[aria-current="page"] { background: var(--sel); box-shadow: inset 2px 0 0 var(--accent); padding-left: 8px; }
+.cv-menu a:focus-visible { outline-offset: -2px; }
 .cv-search { margin-left: auto; width: min(240px, 28vw); flex: none; height: var(--control-h); border: 1px solid var(--hair); background: var(--bg); padding: 0 8px; font-size: 14px; }
 .cv-search:focus { outline: none; border-color: var(--ink); }
 .cv-kbd { height: var(--control-h); border: 1px solid var(--hair); background: var(--bg); padding: 0 8px; font: 12px var(--mono); color: var(--ink-2); cursor: pointer; white-space: nowrap; }
 .cv-kbd:hover { border-color: var(--ink); color: var(--ink); }
 
 /* a view's title bar: the name, its controls, a spacer */
-.bar { display: flex; flex-wrap: wrap; gap: 10px 16px; align-items: center; margin: 28px 0 14px; }
-.bar h1 { font-size: 30px; font-weight: 500; letter-spacing: -.03em; line-height: 1.1; margin: 0 12px 0 0; }
-.bar .sp { flex: 1; }
-.bar select, .cv-select { height: var(--control-h); border: 1px solid var(--hair); background: var(--bg); padding: 0 6px; font-size: 14px; }
-.bar select:hover, .cv-select:hover { border-color: var(--ink); }
+.wrap > .bar { display: flex; flex-wrap: wrap; gap: 10px 16px; align-items: center; margin: 28px 0 14px; }
+.wrap > .bar h1 { font-size: 30px; font-weight: 500; letter-spacing: -.03em; line-height: 1.1; margin: 0 12px 0 0; }
+.wrap > .bar .sp { flex: 1; }
+.wrap > .bar select, .cv-select { height: var(--control-h); border: 1px solid var(--hair); background: var(--bg); padding: 0 6px; font-size: 14px; }
+.wrap > .bar select:hover, .cv-select:hover { border-color: var(--ink); }
 
 /* segmented choices: pressed inverts */
 .seg, .cv-devices { display: flex; border: 1px solid var(--hair); }
