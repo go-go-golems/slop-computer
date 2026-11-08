@@ -2,10 +2,10 @@
 
 ## TODO
 - [x] Ticket, design doc (01) and diary <!-- t:pex3 -->
-- [ ] Step 0: merge #38 (actor VM) into #39's branch; reconcile pkg/actor; tests in both runtime modes <!-- t:brbc -->
-- [ ] F1 (P1): apps rule write self; registerApp/unregisterApp actor actions; page calls them; trust hashes the source; log refuses reverting app changes <!-- t:jckq -->
-- [ ] F2: PB.isAssetRef is the only asset classifier (board clip, drops) <!-- t:ujjq -->
-- [ ] F3: UTF-8 byteLength in core.js; logEntry trims by bytes <!-- t:1fwn -->
+- [x] Step 0: merge #38 (actor VM) into #39's branch; reconcile pkg/actor; tests in both runtime modes <!-- t:brbc -->
+- [x] F1 (P1): apps rule write self; registerApp/unregisterApp actor actions; page calls them; trust hashes the source; log refuses reverting app changes <!-- t:jckq -->
+- [x] F2: PB.isAssetRef is the only asset classifier (board clip, drops) <!-- t:ujjq -->
+- [x] F3: UTF-8 byteLength in core.js; logEntry trims by bytes <!-- t:1fwn -->
 - [ ] F7: window state defaults applied at read time (makeCtx, page and frame) <!-- t:1x6d -->
 - [ ] F6: steps.js step table shared by frame and page; function args resolved in the frame; malformed steps refused; differential test <!-- t:7aqf -->
 - [ ] F4: CLI app-verb tree dispatches by a one-word token (typed word or store id) <!-- t:hpme -->

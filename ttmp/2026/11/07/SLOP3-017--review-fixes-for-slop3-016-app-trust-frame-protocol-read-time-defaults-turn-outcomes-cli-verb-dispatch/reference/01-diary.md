@@ -87,3 +87,172 @@ The Codex findings on #36, #37 and #39 had not been assessed when the go-go-goja
 
 ### Technical details
 - Ticket: `ttmp/2026/11/07/SLOP3-017--review-fixes-for-slop3-016-app-trust-frame-protocol-read-time-defaults-turn-outcomes-cli-verb-dispatch/`.
+
+## Step 2: #38 merged into #39's branch (step 0)
+
+The actor VM PR is folded into the Pinboard stack first, so that F8 changes the reconciled `handle`, not one of two diverging copies.
+
+### Prompt Context
+**User prompt (verbatim):** (see step 1)
+**Assistant interpretation:** Design §9.1: merge #38 into `task/slop3-016-phase6` before the fixes.
+**Inferred user intent:** One branch, one PR.
+**Commit (code):** `c61574c`, "Merge task/slop3-016-actor-host (#38) into the Pinboard stack (SLOP3-017 step 0)".
+
+### What I did
+- Ran `git merge --no-ff origin/task/slop3-016-actor-host` on the phase6 branch.
+- Resolved `go.mod` by keeping glazed 1.4.3 from #37, go-jose 4.1.8, and #38's go-go-goja require line. The replace to the wesen fork at 0d995b4 is the same on both sides.
+- Resolved `go.sum` by taking ours.
+- Ran `go mod tidy`.
+
+### Why
+- F8 changes `handle`, which #38 split into `handle` (the host run) and `turnFor` (the transaction).
+
+### What worked
+- `pkg/actor/actor.go` merged with no textual conflict. #39's `Later` and `ev.failed` branches landed inside #38's `turnFor`, under the host run.
+- `go build ./...` and `go vet ./pkg/actor/ ./pkg/doors/actors/` pass.
+- `go test ./pkg/...` passes (direct runtime), and so does `SLOP_TEST_ACTORS_RUNTIME=engine go test ./pkg/host/...` (16.4 s).
+
+### What didn't work
+- Nothing.
+
+### What I learned
+- The conflict predicted in SLOP3-016, "#39's `ev.failed` branches must move into `turnFor`", did not occur as text. Git placed them correctly because #38 moved the block without changing it.
+
+### What was tricky to build
+- Reading the merged `handle` for semantic gaps. I found one: when the host cannot run a turn at all (its runtime is closed), the new error path replies to the parked handler but not to a `Later` turn's `failed` callback. A tool would then wait out its 60 s timeout. It is left for F8, which changes that code.
+
+### What warrants a second pair of eyes
+- That gap, until F8 lands.
+
+### What should be done in the future
+- Nothing beyond F8.
+
+### Code review instructions
+- `git show c61574c --stat`; `git diff c61574c^1 c61574c -- pkg/actor/actor.go`.
+
+### Technical details
+- Codex finished its re-review of go-go-goja#107 at 0d995b4 with `has_any_findings: false`.
+
+## Step 3: F2 and F3, one definition per question
+
+Two small fixes with the same shape: an answer was computed two different ways in two places.
+
+### Prompt Context
+**User prompt (verbatim):** (see step 1)
+**Assistant interpretation:** Design §4.
+**Inferred user intent:** Fix the two #36 P2s and anything else with the same cause.
+**Commit (code):** `c5f5933`, "Pinboard: assets by reference, log sizes in bytes (SLOP3-017 F2, F3)".
+
+### What I did
+- **F2:** `board.js` `clip(ui.image(src))` and the drop of image items classify with `PB.isAssetRef`. A comment in `store.js` says `PB.blobs` is a byte cache only.
+  - **The agent had the same bug:** `imagesToSend` only attached image clips whose bytes were cached. It now selects image clips by reference, and `A.send` fetches the missing bytes with `PB.fetchBlob`, dropping any that fail.
+- **F3:**
+  - `core.byteLength(str)` is the UTF-8 length in plain JavaScript: surrogate pairs count 4 bytes and a lone surrogate counts 3, as Go's replacement character does.
+  - `logEntry` trims when the serialized entry is over `MAX_LOG_BYTES = 200 KiB`.
+  - `byteLength` is exported for the actor (F1 uses it).
+- Tests in `apps/pinboard/test/core.test.js`:
+  - `byteLength` against `Buffer.byteLength`, for ASCII, é, CJK, emoji and a lone surrogate.
+  - A log entry of 2 × 40,000 CJK characters is trimmed. That is 80,000 UTF-16 units but about 240 KB of UTF-8.
+
+### Why
+- **F2:** with the asset store, drawing images never fills `PB.blobs` (`blobURL` returns `/_blob/<id>`). Classifying by the cache was therefore wrong on every reload.
+- **F3:** the limit the store enforces is in bytes.
+
+### What worked
+- `node --test apps/pinboard/test/core.test.js`: 13 pass.
+- With the old check (`JSON.stringify(e).length > 200000`) the CJK test fails, so the test catches the bug.
+- `go test ./pkg/host -run Pinboard`: ok.
+
+### What didn't work
+- Nothing.
+
+### What I learned
+- Offline blob ids (`blob:mem…`) also match `isAssetRef`, so one classifier covers both modes.
+
+### What was tricky to build
+- Nothing.
+
+### What warrants a second pair of eyes
+- `A.send` now awaits image fetches before the message appears. A slow asset delays the send by that fetch.
+
+### What should be done in the future
+- Nothing.
+
+### Code review instructions
+- `git show c5f5933`.
+
+### Technical details
+- `node --test apps/pinboard/test/core.test.js` (the directory form `node --test test/` does not work here).
+
+## Step 4: F1 (P1), the actor registers apps
+
+The consent prompt depended on two fields that any board admin could write. Now only the actor writes them, and the page hashes the source it is about to run.
+
+### Prompt Context
+**User prompt (verbatim):** (see step 1)
+**Assistant interpretation:** Design §3.
+**Inferred user intent:** Close the P1 at its cause.
+**Commit (code):** `5ac4b14`, "Pinboard: the actor registers apps; trust hashes the source (SLOP3-017 F1, P1)". It was amended before the push to include the updated `pinboard_test.go`.
+
+### What I did
+- **`app.json`:** `{ "path": "apps", "read": "view", "write": "self" }`.
+- **`actor.js`:**
+  - `registerApp` (admin):
+    - checks the name with `/^[a-z][a-z0-9_-]{0,59}$/i`, and the source size with `byteLength` against 160 KiB (the source is held twice, in the record and in its version);
+    - computes `sha256 = C.sha256(source)`, and sets `uid = ctx.visitor.id` and `by` = the visitor's name, email or id;
+    - bounds the size fields and copies `state` and `params` as plain data;
+    - writes the record through `commit()`, so the log records it, and writes `apps/<name>/versions/<n>`.
+  - `unregisterApp` (admin): closes the app's windows and removes the record through `commit()`.
+- **`apps.js`:**
+  - `sourceHash` is memoized per source text, capped at 64 entries.
+  - `trusted` and `trust` hash `a.source` and never read `a.sha256`.
+  - `registerSource` is async: on a board it calls `PB.rt.slop.call('registerApp', …)`; offline it writes locally as before. `unregister` is the same.
+  - `registerFromEditor` awaits the registration.
+- **Callers:** first-load seeding in `main.js` awaits the registration. So does the agent's app-registering step, which now registers once instead of once per captured definition.
+- **`store.js`:**
+  - `writable('apps')` is false on a board, so the page never sends app writes.
+  - `revertLogEntry` refuses entries that touch `apps`.
+  - `PB.saveVersion` is removed.
+- **Tests:**
+  - New `pkg/host/pinboard_apps_test.go` `TestPinboardAppRegistration`.
+  - In `pinboard_test.go`, the assertion "ada (owner) registers an app" with a direct page write is now "the owner's page write is refused".
+
+### Why
+- The other way to make `uid` trustworthy is to show pages each document's server-stamped writer (`store.Doc.By`). That is a protocol change across the db stream, `DocSnap` and `claude.js`. The actor path uses only existing levels (design §3, alternatives).
+
+### What worked
+- `TestPinboardAppRegistration` covers:
+  - `uid` and `sha256` stamped by the actor;
+  - `docs.set` under `apps/` refused for Bob (admin) and Ada (owner), including `versions/9`;
+  - Bob's registerApp names Bob even when he sends `uid: <Ada>`, `sha256: <hers>`, `by: "Ada"`;
+  - Carol (view) refused;
+  - a bad name and an empty source refused;
+  - the log has `register hello v1` and `v2`;
+  - `unregisterApp` removes the record and keeps `versions/2`.
+- With the rule set back to `write: admin`, the test fails at the forged write (line 52), so it catches the hole.
+- `go test ./pkg/host/` passes (17.0 s), and so does `SLOP_TEST_ACTORS_RUNTIME=engine go test ./pkg/host/ -run 'Pinboard|Actor'`.
+
+### What didn't work
+- The first full host run failed `TestPinboardApp` (`pinboard_test.go:92`): "this viewer cannot write "apps/greeter"". The SLOP3-016 test asserted the old contract. The commit had already been made, because the pre-commit hook does not run `pkg/host`. I fixed the test and amended the unpushed commit.
+- My new test first panicked at `logs["docs"]`: `docs.query` returns a list, not an object.
+
+### What I learned
+- `docs.set` (the CLI's and a client's write) applies the app's db rules (`pkg/commands/docs.go:158`), as page writes do. The manifest rule therefore closes every non-actor path.
+- Everything under `data/users/<id>/` is private to that user at the platform level (`privateOwner` in `CanRead`/`CanWrite`). For a moment I thought each viewer's trust document was writable by other members; it is not.
+
+### What was tricky to build
+- Keeping offline mode working. Offline the page is the board, so local writes and local versions stay. The `PB.rt.db && PB.rt.slop` test separates the two modes.
+
+### What warrants a second pair of eyes
+- **Records written before this change** carry a page-written `uid`. An admin could have planted one with someone else's id beforehand. Pinboard is not deployed yet, so only dev data has such records.
+- **The display metadata** (title, icon, state, params) still comes from the registering page. It is the registering admin's own code, and none of it is security-relevant; the source and the hash are what the viewer checks.
+
+### What should be done in the future
+- A browser check of the editor flow, which now waits for a network call (task "Browser pass").
+
+### Code review instructions
+- Read `apps/pinboard/actor.js` (`registerApp`), `apps/pinboard/js/apps.js` (`registerSource`, `trusted`, `sourceHash`) and `apps/pinboard/app.json`.
+- `go test ./pkg/host -run 'TestPinboardApp' -v`.
+
+### Technical details
+- The level `self` is never met (`meets` in `pkg/rt/rules.go`), so `write: "self"` with no `{self}` rule below it blocks every caller, the owner included.
