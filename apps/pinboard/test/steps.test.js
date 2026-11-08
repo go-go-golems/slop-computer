@@ -157,3 +157,47 @@ test('the frame refuses functions where data is expected, and unknown steps', ()
   assert.throws(() => rec.m.update('recipes', 'rec:nothere000', { a: 1 }), /no record/);
   assert.strictEqual(rec.steps.length, 0);
 });
+
+// Codex on #39: each c.db call in a handler is its own mutate, and the
+// frame's copy only changes when the page syncs; consecutive calls must
+// still read the earlier ones, as in the page.
+test('the frame reads its own earlier writes across mutate calls until the page acknowledges them', () => {
+  const page = board();
+  const S0 = JSON.parse(JSON.stringify(page.S));
+  const frame = Steps.optimistic(JSON.parse(JSON.stringify(S0)));
+  page.S.records['rec:aaaaaaaaaa'].n = 0;
+  frame.S.records['rec:aaaaaaaaaa'].n = 0;
+  const inc = (m) => m.update('recipes', 'rec:aaaaaaaaaa', r => ({ n: r.n + 1 }));
+  const a = frame.mutate(inc), b = frame.mutate(inc);
+  assert.deepStrictEqual([a.seq, b.seq], [1, 2]);
+  assert.deepStrictEqual([a.steps[0].args[2].set, b.steps[0].args[2].set], [{ n: 1 }, { n: 2 }]);
+  // insert in one call, update the returned id in the next
+  const ins = frame.mutate(m => m.insert('books', { t: 'Dune', n: 1 }));
+  const up = frame.mutate(m => m.update('books', ins.result, r => ({ n: r.n + 1 })));
+  assert.deepStrictEqual(up.steps[0].args[2].set, { n: 2 });
+  assert.strictEqual(frame.S.records[ins.result].n, 2);
+  // The page applies the batches in order (as frames.js does).
+  const pg = { has: (s, id) => !!page.S[s][id], fromClip: C.fromClip };
+  const handle = (steps) => page.core.mutate(m => JSON.parse(JSON.stringify(steps)).forEach(s => m[s.op](...Steps.check(s.op, s.args, pg))));
+  // A copy sent before the page handled anything (ack 0) keeps the frame's writes on top.
+  frame.adopt(JSON.parse(JSON.stringify(page.S)), 0);
+  assert.strictEqual(frame.S.records['rec:aaaaaaaaaa'].n, 2);
+  assert.strictEqual(frame.pending, 4);
+  [a, b, ins, up].forEach(r => handle(r.steps));
+  assert.strictEqual(page.S.records['rec:aaaaaaaaaa'].n, 2, 'no increment lost');
+  assert.strictEqual(page.S.records[ins.result].n, 2);
+  // A copy after the page handled batches 1–2 keeps only 3–4 on top; after 4, none.
+  frame.adopt(JSON.parse(JSON.stringify(page.S)), 2);
+  assert.strictEqual(frame.pending, 2);
+  frame.adopt(JSON.parse(JSON.stringify(page.S)), 4);
+  assert.strictEqual(frame.pending, 0);
+  assert.deepStrictEqual(frame.S, page.S);
+});
+
+test('a refused batch is dropped from the frame\'s copy once acknowledged', () => {
+  const frame = Steps.optimistic({ clips: {}, records: {}, collections: {}, apps: {}, meta: {} });
+  const r = frame.mutate(m => m.place({ kind: 'note', text: 'x' }));
+  assert.ok(frame.S.clips[r.result]);
+  frame.adopt({ clips: {}, records: {}, collections: {}, apps: {}, meta: {} }, r.seq); // the page refused it
+  assert.ok(!frame.S.clips[r.result]);
+});

@@ -9,9 +9,9 @@
    changes as the app ("app:<name>"), with the person's level on the board.
 
    page → frame: init {app, clip, S, local, sel, log, me, theme}, sync {S, sel,
-     log, theme}, blob {ref, blob}
+     log, theme, ack: the last mutate batch handled}, blob {ref, blob}
    frame → page: meta {def}, error {message}, set {patch}, param {name, value},
-     mutate {ops: steps of data, see steps.js}, toast {msg}, open {name, opts},
+     mutate {seq, ops: steps of data, see steps.js}, toast {msg}, open {name, opts},
      blob {ref} */
 (function () {
   'use strict';
@@ -52,11 +52,14 @@
   // function argument (update's patch, promote's mapping) runs here, on a
   // copy. Ids of new clips and records are made here, so the app gets them
   // back at once; the page refuses an id that is taken.
+  // The frame's copy keeps the app's own steps until the page acknowledges
+  // them (steps.js optimistic), so consecutive handlers read their writes.
+  const board = PinboardSteps.optimistic(PB.S);
   PB.mutate = (fn) => {
-    const rec = PinboardSteps.recorder((store, id) => (PB.S[store] || {})[id]);
-    const r = fn(rec.m);
-    if (rec.steps.length) send({ t: 'mutate', ops: plain(rec.steps) });
-    return r;
+    const r = board.mutate(fn);
+    PB.S = board.S;
+    if (r.steps.length) { send({ t: 'mutate', seq: r.seq, ops: plain(r.steps) }); redraw(); }
+    return r.result;
   };
 
   // The board API, narrowed: reads from the copy, changes through mutate.
@@ -123,7 +126,7 @@
     });
   }
   function adopt(m) {
-    if (m.S) PB.S = m.S;
+    if (m.S) { board.adopt(m.S, m.ack); PB.S = board.S; }
     if (m.sel) sel = m.sel;
     if (m.log) PB.log = m.log;
     if (m.theme) document.documentElement.dataset.theme = m.theme;

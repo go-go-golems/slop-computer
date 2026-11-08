@@ -176,25 +176,40 @@
     return spec.check ? spec.check(args, page) : args;
   }
 
+  // What a step does to a copy of the board, as far as later steps read it
+  // (clips placed or removed, records inserted, updated, promoted, removed).
+  // put(store, id, null) removes. The page's sync corrects the rest.
+  function applyLocal(step, read, put) {
+    const a = step.args;
+    switch (step.op) {
+      case 'place': put('clips', a[0].id, Object.assign({}, a[0])); break;
+      case 'insert': put('records', a[1].id, Object.assign({}, a[1], { coll: a[0] })); break;
+      case 'update': {
+        const cur = read('records', a[1]);
+        if (cur) { const x = Object.assign({}, cur); a[2].unset.forEach((k) => { delete x[k]; }); put('records', a[1], Object.assign(x, a[2].set)); }
+        break;
+      }
+      case 'promote': if (a[2]) put('records', a[3], Object.assign({}, a[2], { id: a[3], coll: a[1], clipId: a[0] })); break;
+      case 'removeRecord': put('records', a[1], null); break;
+      case 'remove': case 'close': put('clips', a[0], null); break;
+      default:
+    }
+  }
+
   // Frame side: the m an app's c.mutate(m => …) gets. Each call becomes a
   // step; within one transaction, later calls read what earlier ones placed,
   // inserted or updated (read is the frame's copy of the board).
   function recorder(read) {
-    const local = { clips: {}, records: {} };
-    const view = (store, id) => (local[store] && local[store][id]) || read(store, id);
+    const local = {};
+    const view = (store, id) => (local[store] && id in local[store] ? local[store][id] || undefined : read(store, id));
+    const put = (store, id, v) => { (local[store] = local[store] || {})[id] = v; };
     const steps = [];
     const m = {};
     NAMES.forEach((op) => {
       m[op] = (...args) => {
         const r = record(op, args, view);
         steps.push(r.step);
-        const a = r.step.args;
-        if (op === 'place') local.clips[r.result] = Object.assign({}, a[0]);
-        if (op === 'insert') local.records[r.result] = Object.assign({}, a[1], { id: r.result, coll: a[0] });
-        if (op === 'update') {
-          const cur = view('records', a[1]);
-          if (cur) { const x = Object.assign({}, cur); a[2].unset.forEach((k) => { delete x[k]; }); local.records[a[1]] = Object.assign(x, a[2].set); }
-        }
+        applyLocal(r.step, view, put);
         return r.result;
       };
     });
@@ -208,5 +223,36 @@
     return { m: proxy, steps };
   }
 
-  return { NAMES, record, check, recorder };
+  // The frame's copy of the board between the page's syncs. What the app
+  // changed is applied to it at once, and laid again over every copy the
+  // page sends until the page acknowledges that batch (ack: the highest
+  // batch it handled, applied or refused). A handler therefore reads its own
+  // earlier writes, as it would in the page, also across mutate calls.
+  function optimistic(initial) {
+    let S = initial || { clips: {}, records: {}, collections: {}, apps: {}, meta: {} };
+    let seq = 0, pending = [];
+    const read = (store, id) => (S[store] || {})[id];
+    const put = (store, id, v) => { S[store] = S[store] || {}; if (v == null) delete S[store][id]; else S[store][id] = v; };
+    const apply = (steps) => steps.forEach((st) => applyLocal(st, read, put));
+    return {
+      get S() { return S; },
+      get pending() { return pending.length; },
+      adopt(next, ack) {
+        S = next;
+        pending = pending.filter((p) => p.seq > (Number(ack) || 0));
+        pending.forEach((p) => apply(p.steps));
+      },
+      mutate(fn) {
+        const rec = recorder(read);
+        const result = fn(rec.m);
+        if (!rec.steps.length) return { result, seq: 0, steps: [] };
+        seq += 1;
+        pending.push({ seq, steps: rec.steps });
+        apply(rec.steps);
+        return { result, seq, steps: rec.steps };
+      },
+    };
+  }
+
+  return { NAMES, record, check, recorder, optimistic };
 });
