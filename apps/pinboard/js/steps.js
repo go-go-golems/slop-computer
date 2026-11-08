@@ -176,14 +176,22 @@
     return spec.check ? spec.check(args, page) : args;
   }
 
-  // What a step does to a copy of the board, as far as later steps read it
-  // (clips placed or removed, records inserted, updated, promoted, removed).
-  // put(store, id, null) removes. The page's sync corrects the rest.
+  // What a step does to a copy of the board, as far as later steps and the
+  // app's own reads see it: clips placed or removed; records inserted,
+  // updated, promoted, removed; collections made or changed (the schema
+  // builder reads a collection back after each change). put(store, id, null)
+  // removes. The page's sync corrects the rest. Collections follow core:
+  // a new one starts from the same defaults, and a first insert makes it.
+  const newCollection = (name) => ({ name, fields: [], indexes: [], store: 'db', version: 1 });
   function applyLocal(step, read, put) {
     const a = step.args;
     switch (step.op) {
       case 'place': put('clips', a[0].id, Object.assign({}, a[0])); break;
-      case 'insert': put('records', a[1].id, Object.assign({}, a[1], { coll: a[0] })); break;
+      case 'collection': put('collections', a[0], Object.assign(copy(read('collections', a[0])) || newCollection(a[0]), copy(a[1]))); break;
+      case 'insert':
+        if (!read('collections', a[0])) put('collections', a[0], Object.assign(newCollection(a[0]), { fields: Object.keys(a[1]).map((k) => ({ name: k, type: 'text' })) }));
+        put('records', a[1].id, Object.assign({}, a[1], { coll: a[0] }));
+        break;
       case 'update': {
         const cur = read('records', a[1]);
         if (cur) { const x = Object.assign({}, cur); a[2].unset.forEach((k) => { delete x[k]; }); put('records', a[1], Object.assign(x, a[2].set)); }

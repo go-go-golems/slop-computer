@@ -95,6 +95,12 @@ const cases = {
     return id;
   },
   'remove a record': (m) => { m.removeRecord('recipes', 'rec:aaaaaaaaaa'); },
+  // the schema builder: each change reads the collection back
+  'schema builder in one transaction': (m) => {
+    m.collection('tasks', { name: 'tasks' });
+    m.collection('tasks', { fields: [{ name: 'title', type: 'text' }] });
+    m.insert('notes', { id: 'rec:ffffffffff', text: 'x' }); // makes the collection, as core does
+  },
 };
 
 for (const [name, calls] of Object.entries(cases)) {
@@ -200,4 +206,27 @@ test('a refused batch is dropped from the frame\'s copy once acknowledged', () =
   assert.ok(frame.S.clips[r.result]);
   frame.adopt({ clips: {}, records: {}, collections: {}, apps: {}, meta: {} }, r.seq); // the page refused it
   assert.ok(!frame.S.clips[r.result]);
+});
+
+// Codex on #39 (third review): the schema builder reads a collection back
+// after each change, in separate mutate calls.
+test('the frame\'s copy follows collection changes across calls, as core makes them', () => {
+  const page = board();
+  const frame = Steps.optimistic(JSON.parse(JSON.stringify(page.S)));
+  const field = (name) => frame.mutate(m => {
+    const s = frame.S.collections.tasks;
+    m.collection('tasks', { fields: [...(s.fields || []).filter(f => f.name !== name), { name, type: 'text' }] });
+  });
+  const steps = [frame.mutate(m => m.collection('tasks', { name: 'tasks' }))];
+  assert.ok(frame.S.collections.tasks, 'a new collection is there at once');
+  steps.push(field('title'), field('done'));
+  assert.deepStrictEqual(frame.S.collections.tasks.fields.map(f => f.name), ['title', 'done'], 'the second field keeps the first');
+  steps.push(frame.mutate(m => m.insert('notes', { text: 'x' })));
+  const pg = { has: (s, id) => !!page.S[s][id], fromClip: C.fromClip };
+  steps.forEach(r => page.core.mutate(m => JSON.parse(JSON.stringify(r.steps)).forEach(s => m[s.op](...Steps.check(s.op, s.args, pg)))));
+  frame.adopt(JSON.parse(JSON.stringify(page.S)), 0); // a stale copy: everything replayed on top
+  assert.deepStrictEqual(frame.S.collections, page.S.collections);
+  // records alike but for the page's own timestamp, which the next sync brings
+  const sansAdded = (rs) => Object.fromEntries(Object.entries(rs).map(([k, r]) => { const { added, ...rest } = r; return [k, rest]; }));
+  assert.deepStrictEqual(sansAdded(frame.S.records), sansAdded(page.S.records));
 });
