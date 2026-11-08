@@ -15,5 +15,6 @@
 - [x] Actor VM migration phase 3: measurements (turn latency, goroutines, memory, interrupts, crash path) (PR #38) <!-- t:ukbq -->
 - [x] Actor VM migration phase 4: bridge data modules (yaml, crypto, events, buffer) (PR #38) <!-- t:6k5w -->
 - [ ] Actor VM migration phase 5: jsverbs in actors (app verbs run inside the actor turn)
-- [ ] Actor VM migration phase 6: switch the default to engine (blocked: #107 merged and tagged, engine CI seen green, staging soak, doc 02 updates)
+- [x] Actor VM migration phase 6: switch the default to engine (blocked: #107 merged and tagged, engine CI seen green, staging soak, doc 02 updates)
 - [x] Consolidated: #36, #37 and #38 folded into #39 (now against main) with the SLOP3-017 review fixes on top; #36–#38 closed <!-- consolidated -->
+- [ ] Actor VM migration: remove directHost (and actors.runtime: direct) one release after PR #40 ships <!-- t:vgrz -->

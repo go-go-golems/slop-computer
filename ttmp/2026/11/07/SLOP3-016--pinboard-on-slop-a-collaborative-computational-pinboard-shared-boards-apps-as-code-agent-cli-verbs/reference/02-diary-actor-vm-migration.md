@@ -16,14 +16,18 @@ Owners: []
 RelatedFiles:
     - Path: repo://pkg/actor/actor.go
       Note: build/load and handle/turnFor through the host
+    - Path: repo://pkg/actor/enginehost.go
+      Note: newHost treats an empty runtime as engine (phase 6)
     - Path: repo://pkg/actor/host.go
       Note: vmHost, directHost, enter, limited, release (phase 1)
     - Path: repo://pkg/actor/manager.go
       Note: activate/setup through the host; Around and TurnLimit hooks
+    - Path: repo://pkg/config/config.go
+      Note: actors.runtime defaults to engine (phase 6)
     - Path: repo://pkg/host/actor_host_test.go
       Note: TestActorHostEntries (direct and hand-off)
 ExternalSources: []
-Summary: "Working record of the actor VM migration (design doc 02): phase 1, every VM entry through a host."
+Summary: 'Working record of the actor VM migration (design doc 02): phase 1, every VM entry through a host.'
 LastUpdated: 2026-11-07T14:18:02.172386856-05:00
 WhatFor: ""
 WhenToUse: ""
@@ -488,3 +492,82 @@ The review fixes to go-go-golems/go-go-goja#107 concern `InvokeInVM` and the jsv
 
 ### Technical details
 - `git diff 822e67c..0d995b4 --stat` in go-go-goja touches `pkg/jsverbs/runtime.go`, `goja_parser.go`, their tests, `pkg/doc/11-jsverbs-example-reference.md` and the GOJA-069 ticket.
+
+## Step 7: Phase 6, engine by default (PR #40)
+
+go-go-goja #107 and slop #39 are merged. Actors now run on the engine runtime unless `slop.yaml` says `actors.runtime: direct`. The race run on engine turned up one data race, and it was not the engine's: the manager's sample backend was an unsynchronized field.
+
+### Prompt Context
+**User prompt (verbatim):** "#107m merged. #39 merged. binary size fine. switch runtime as default. What about #35?"
+**Assistant interpretation:** Do phase 6 of design doc 02 now. The user has decided it, so the staging soak is waived. Drop the fork pin now that #107 is merged. Report on #35 separately.
+**Inferred user intent:** Finish the actor VM migration, with production on the new runtime and a way back.
+**Commit (code):**
+- `5688bca`, "go-go-goja from upstream at the #107 merge (9d7ede7), no fork replace";
+- `383376e`, "Actors run on the engine runtime by default (actor VM migration phase 6)";
+- `92ce6a4`, "actor: the sample backend behind a lock (SetLLM, LLM)".
+
+### What I did
+- **Pin:** `go mod edit -dropreplace github.com/go-go-golems/go-go-goja`, then `go get …@9d7ede7027c7` (`v0.10.8-0.20261108231830-9d7ede7027c7`) and `go mod tidy`.
+  - go-go-goja has no tag after v0.10.7, so this is a pseudo-version on upstream main.
+  - `gh api …/compare/0d995b4…9d7ede7` shows 0 changed files.
+- **Default:**
+  - `config.Defaults` sets `engine`;
+  - `newHost` treats `""` as engine;
+  - comments on the constants, `Manager.Runtime`, `Config.Actors.Runtime` and the harness updated;
+  - CI's second pass is now `SLOP_TEST_ACTORS_RUNTIME=direct go test ./pkg/host/`.
+- **Test:** `TestActorRuntimeDefault` checks that `Defaults()` gives engine. It then runs an actor in a harness with the environment override cleared and checks that the actor reports `engine`. I set the three code files aside with a uniquely tagged stash, ran it on the previous default (it fails: `default actors.runtime = "direct", want "engine"`), and applied the stash back by its SHA.
+- **Race:**
+  - `go test -race ./pkg/host/ -run 'Actor|Engine|Bridged|Pinboard|Tools'` failed in `TestPinboardAgentAndPrune`. The read was in `(*Door).sampler` (`m.LLM`) during an actor's `load` on the event-loop goroutine. The write was the test's `h.a.LLM = &llm.Fake{}` after `kitchen(t)` had started the board's actor.
+  - Fix: `Manager.SetLLM` and `Manager.LLM()` under an `RWMutex`. Changed the three readers (`commands.go`, `doors/actors/sample.go`, `doors/pages/sample.go`), the host's two writes and the five tests.
+- **Measurements:** reran `SLOP_BENCH=1 TestBenchActorRuntime` (Technical details).
+- **PR:** pushed `task/actor-engine-default` and opened #40.
+
+### Why
+- **The pin:** a fork `replace` in a merged `go.mod` points production builds at a personal fork. Upstream main at the merge commit is the same code.
+- **The lock instead of a test-only fix:** production has the same window. `actor.New(k)` starts the system follower, and `host.Build` then runs `auth.Setup`, `setupBilling` and `setupLLM`. An activation started by a system-log write during `Build` can read the field while `setupLLM` writes it.
+
+### What worked
+- `go test ./...` on engine: all packages pass.
+- `SLOP_TEST_ACTORS_RUNTIME=direct go test ./pkg/host/`: pass, 24.0 s.
+- `go test -race ./pkg/...` on engine passes with 0 races, and `go test -race ./pkg/host/` on direct passes with 0 races.
+- `TestPinboardAgentAndPrune -race -count=10`: 2 races on `383376e` (in a detached worktree), 0 on `92ce6a4`.
+- `golangci-lint run ./...`: 0 issues.
+
+### What didn't work
+- My first test command after the pin listed `./pkg/jsverbs/...`, which does not exist in slop. Its output went through `tail`, so the `&&` chain committed despite the FAIL line. The two packages that do exist passed, and the full suite ran afterwards.
+- The race failed the first race run, as described above.
+
+### What I learned
+- The engine runtime runs `load` on the event loop's goroutine, so it exposes races that direct mode hides by timing: 2 in 10 runs here.
+- The crash wiped the scratchpad worktrees, but every branch was on origin. `git worktree prune` cleared the stale entries.
+
+### What was tricky to build
+- **Whether the race was only in the test.** Every test except Pinboard's sets the backend before any actor exists, so the test alone looked at fault. The production window only shows up when you trace `serve.go`: `actor.New` runs before `host.Build`, and `followSystem` is already listening by then.
+
+### What warrants a second pair of eyes
+- No staging soak. After the deploy, watch:
+  - actor errors in `app.logs`;
+  - goroutine count, which is now 2 per active store;
+  - turn latency.
+  Roll back with `actors.runtime: direct`.
+- **Lock cost.** `Manager.LLM()` takes an RLock on every sample call and on every actor `load` that uses sample. The cost is small next to a model call.
+
+### What should be done in the future
+- Remove `directHost` one release after #40 ships (design §8).
+- When go-go-goja tags a release containing `9d7ede7`, move the pseudo-version to the tag.
+- Phase 5 (verbs inside the actor turn) stays optional.
+
+### Code review instructions
+- `git show 383376e 92ce6a4`. Start at `pkg/actor/enginehost.go` (`newHost`), `pkg/config/config.go` (`Defaults`) and `pkg/actor/manager.go` (`SetLLM`, `LLM`).
+- To reproduce the race on `383376e`: `go test -race ./pkg/host/ -run 'TestPinboardAgentAndPrune$' -count=10`.
+
+### Technical details
+- `SLOP_BENCH=1 go test ./pkg/host/ -run TestBenchActorRuntime -v` (same machine, not quiet):
+
+| | direct | engine |
+|---|---|---|
+| empty action | 186 007 ns, 516 allocs | 176 357 ns, 530 allocs |
+| one write | 534 100 ns, 920 allocs | 597 290 ns, 933 allocs |
+| `Later` continuation | 229 744 ns, 629 allocs | 258 326 ns, 657 allocs |
+| 200 live actors | 200 goroutines, 6.6 MiB (33.8 KiB each) | 400 goroutines, 10.5 MiB (53.7 KiB each) |
+| endless loop interrupted | 5.005 s | 5.005 s |

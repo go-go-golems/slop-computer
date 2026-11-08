@@ -368,3 +368,22 @@ The code is in go-go-golems/go-go-goja#107 (U1–U4) and PR #38 (phases 1–4). 
   1. #107 merged and tagged;
   2. the engine-mode CI job seen green;
   3. a staging soak with `actors.runtime: engine`.
+
+## 13. As built (phase 6): engine by default
+
+PR #40. Of the three blockers in §12, the first two are met, and the user waived the third:
+1. #107 is merged. slop takes go-go-goja from upstream at the merge commit (`9d7ede7`, a pseudo-version), with no fork `replace`. The merge commit's tree equals the fork commit 0d995b4. A tag can replace the pseudo-version whenever go-go-goja cuts one.
+2. The engine-mode CI job was green on #39.
+3. There is no staging environment. The user decided to switch anyway, so production is the soak, and `actors.runtime: direct` in `slop.yaml` is the way back without a new image.
+
+Changes:
+- `actors.runtime` defaults to `engine`, and an empty `Manager.Runtime` means engine. `direct` stays for one release.
+- CI runs `go test ./...` on engine, then `SLOP_TEST_ACTORS_RUNTIME=direct go test ./pkg/host/`, the reverse of before.
+- The race run in engine mode (§9) found a race that is not specific to the engine runtime. The manager's sample backend (`Manager.LLM`) was a plain field. The host sets it during `Build`, when actors can already run because the system follower starts them, and tests set it after their fixtures had started actors. It is now behind a lock (`SetLLM`, `LLM()`).
+- Measurements, repeated (busy machine), direct vs engine:
+  - empty action: 186 vs 176 µs;
+  - one write: 534 vs 597 µs;
+  - `Later` continuation: 230 vs 258 µs;
+  - per live actor: 1 goroutine and 33.8 KiB vs 2 goroutines and 53.7 KiB.
+
+Still open: phase 5 (jsverbs inside the actor turn, optional), and removing `directHost` one release after #40 ships.

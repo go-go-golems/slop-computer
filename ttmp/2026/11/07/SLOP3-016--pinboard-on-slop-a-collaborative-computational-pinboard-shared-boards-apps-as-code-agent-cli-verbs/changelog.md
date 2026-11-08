@@ -35,3 +35,7 @@ Implementation: Pinboard phases 0-4 in PR #36, app verbs (slop on / slop pb, app
 ## 2026-11-07
 
 Phase 6 in PR #39 (stacked on #37): actor sample tools (Actor.Later; a tool call per turn), Pinboard's server agent (ask, board ask, pb_board_ask), log pruning alarm, apps written by other people in sandboxed frames (frames.js/frame.js); actor db orderBy nil crash fixed. Guide §13 updated; phase 6 task checked.
+
+## 2026-11-08
+
+Actor VM phase 6 (PR #40): actors run on the engine runtime by default; go-go-goja from upstream at the #107 merge (no fork replace); the manager's sample backend behind a lock (race found in engine mode). Diary 02 step 7, design doc 02 §13.
