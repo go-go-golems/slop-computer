@@ -606,3 +606,103 @@ live: apps.slop.yolo.scapegoat.dev /catalog/shelf (catalog-shelf) · /catalog/cu
 grants: @guest view, @member interact; curator policy: sample @member on; production llm access: @admin only
 local: slopbin serve --local --llm fake --data scratchpad/localdata; SLOP_CREDENTIALS=scratchpad/local-creds.json
 ```
+
+## Step 8: The views restyled after slop.boutique and the Form Skate systems; the views behind a menu
+
+The user found the views "a bit ugly and slopvibe": cards, pills, soft shadows and an orange accent on beige. They now follow slop.boutique's type and the Form Skate workbench's Kiln rules. On the way, the header's list of views became a menu button, and #35's two open Codex findings were fixed.
+
+### Prompt Context
+**User prompt (verbatim):** "can you update the catalog pages to have the same aesthetic as the main page, or potentially inspired by form-skate*design-system* in ~/Downloads? It's currently a bit ugly and \"slopvibe\""; mid-turn: "make list of apps in the menu be hamburger menu, it's getting too wide"
+**Assistant interpretation:**
+- "The main page" is slop.boutique, where the apps come from. The slop main host only shows a sign-in.
+- The three Form Skate zips (agent, stage, workbench) agree with it on the essentials. Combine both instead of choosing one.
+- "The list of apps in the menu" is the header's view switcher.
+**Inferred user intent:** The catalog should look like part of the same lab as slop.boutique, quiet and typographic, not like a generated template.
+**Commits (code):**
+- `1322854`, "Catalog: the kit and landing page in the slop.boutique / Kiln look";
+- `d6f74c0`, "Catalog: the views behind a menu button; eight views restyled";
+- `3a1f900`, "Catalog: Terminal, Desktop, Agents, Shelf and Curator restyled; small fixes".
+
+### What I did
+- **References:**
+  - Read slop.boutique's computed styles in the browser: "ABC Areal" with Helvetica and Arial fallbacks, body 17/22, h1 60px at weight 500 with -0.035em tracking, ink `#2f2d2a`, and one pale-blue button `#cee5ff`.
+  - Unpacked the three Form Skate zips into scratch folders. Their duplicate copies in Downloads have equal checksums.
+  - Read the workbench README and `tokens.css` (Kiln) and the stage README (drafting sheet, IBM Plex Mono labels, hatching).
+- **Kit (`apps/catalog/kit/views.css`), rewritten:**
+  - Kiln tokens (`--bg`, `--ink`, `--ink-2`, `--hair`, `--rule`, `--fill`, `--accent`, `--sel`) in light and dark. The old names (`--panel`, `--line`, `--muted`, `--chip`, `--shadow`) remain as aliases, so the views' own CSS keeps working.
+  - Boutique's font stack and headline scale. IBM Plex Mono 400 and 500 for labels and numbers: the woff2 files and OFL.txt are copied from the stage system into `kit/fonts/`.
+  - Square controls, 1 px rules, no shadows, tabular numbers, focus as a 2 px ink outline.
+  - Segmented choices (`.seg`, `.cv-devices`) invert when pressed. `.wrap > .bar` is the views' shared title bar.
+  - The viewer's stage is a 24 px drafting grid, the device has a 1 px ink border, and the info list is ruled. The primary button ("Open ↗") uses boutique's blue.
+- **Menu (`views.js` `header`):** the switcher is now `.cv-menubtn`, three CSS bars plus the current view's name, which opens `.cv-menu`, a full-width panel of numbered views with blurbs. Escape or a click outside closes it. The current view is marked by `--sel` and a red bar.
+- **Landing page:**
+  - the facts are a ruled strip of large numbers;
+  - the views are a numbered contents list, each marked "static" or "live · sign in";
+  - the tags are boutique-style text with counts, each linking to `list/?tag=`.
+- **Views:**
+  - Index: the tag filter is text with counts, as on boutique.
+  - Table: monospaced uppercase headers, rule lines.
+  - Sheet: square shots; the live mark is a blinking ink square, the Kiln busy mark.
+  - Capabilities: ruled columns, 4 px meters, apps as text, 9 px squares in the combination table.
+  - Zine: pages in the grotesque, not Georgia; hairline outlines instead of shadows.
+  - Timeline and Sizes: a second series is hatched (stage style), not red.
+  - Roulette: ruled.
+  - Terminal: Kiln's dark colours in both schemes.
+  - Desktop: a white drafting grid with ink windows; the focused title bar inverts.
+  - Agents: ruled sections, Kiln code blocks.
+  - Shelf and Curator: the live host serves them without the kit, so each repeats the tokens inline.
+- **Codex findings on #35:**
+  - The viewer's bar wraps on a phone: the name and Close on line 1, the devices and size on line 2.
+  - On the landing page, Enter in search goes to `list/?q=`, and the view links carry `q`.
+- **Found on the way:**
+  - The kit's `el()` flattened child arrays one level only, so the Desktop's Read me printed its view links as `,http://…/list/,…`. Now `flat(Infinity)`, in the kit and in the copies in Shelf and Curator.
+  - `label.share { display: flex }` overrode `hidden`, so guests saw "show my shelf to others".
+  - `02-deploy.py` decoded every file as UTF-8, and the fonts would have failed. Non-text files now go as base64 `data`, which `files.push` accepts.
+  - `03-devserve.py` now also serves Shelf and Curator (layout only), with their data copies.
+
+### Why
+- **No cards and no shadows:** boutique and Kiln both separate regions with rules. Cards and pills were the "template" look the user objected to.
+- **No red as a data colour:** Kiln keeps red for selection and trouble, so a second series is told apart by hatching.
+- **Aliases instead of renaming every variable:** 17 pages of view CSS adapt at once, and each was then edited only where its own look differed.
+
+### What worked
+- Every view loaded on the local preview (`03-devserve.py` on port 18471, production's `catalog.json`).
+- The menu works, including focus going to the current view.
+- No sideways scroll at 390 px.
+- On a phone, Close stays visible in the viewer.
+- Dark mode is checked on the Table.
+- `entry()` encodes the two woff2 files as data and the three text files as text, and the font round-trips byte-identical.
+
+### What didn't work
+- **Tags on the landing page didn't wrap:** elements without whitespace between them have no line-break opportunity. The tag list is now a wrapping flex row.
+- **The kit's `.bar` matched the Capabilities table's `td.bar` cells** and made them flex. It is now `.wrap > .bar`.
+- **The menu's "live · sign in" marker** fell into the number column. It now has a fixed grid row and column.
+- **Selects inherited Plex Mono** from their `.cv-meta` labels. They now set the sans family.
+
+### What I learned
+- slop.boutique and the Kiln rules differ mainly in density (17 px vs 12 px body). For a catalog people browse, 15 px with boutique's headline scale reads better than Kiln's tool density.
+- `font-weight: 500` falls back to 400 with Arimo/Arial, so headlines look lighter here than with ABC Areal. They still read well tight-tracked.
+
+### What was tricky to build
+- **The viewer bar on a phone** has one row of mixed items, and Close must stay on line 1 whatever the title's length. A zero-height `::after` with `flex-basis: 100%` and `order: 2` breaks the row after Close (`order: 1`).
+
+### What warrants a second pair of eyes
+- ABC Areal is licensed to slop.boutique. The pages only name it in the stack and fall back to Helvetica or Arial; they do not load it.
+- **Desktop and Terminal changed character the most** (from the blue OS look and green-on-black). Worth a look by the user.
+- **Shelf and Curator were seen only as layout,** without the live runtime. Their signed-in states (avatars, stars, picks) were not seen after the change.
+
+### What should be done in the future
+- Deploy with `02-deploy.py --apply` after the user approves the look, then check production, especially the woff2 content type on the static host.
+- Run Shelf and Curator signed in on a local slop server.
+
+### Code review instructions
+- Start at `apps/catalog/kit/views.css` (tokens, aliases, menu, viewer) and `views.js` `header()`. Then `apps/catalog/index.html`, then any view's `<style>`.
+- Preview: `python3 -I ttmp/…SLOP3-015…/scripts/03-devserve.py <repo> <data> 18471` with `catalog.json` and `views.json` from `site.slop.yolo.scapegoat.dev/catalog/data/`.
+- Screenshots: `various/screenshots/25-…` to `34-restyle-*.png`.
+
+### Technical details
+- **Kiln light:** bg `#ffffff`, ink `#1a1a1a`, ink-2 `#737373`, hair `#d6d6d6`, rule `#ededed`, fill `#f6f6f6`, accent `#e2001a`.
+- **Kiln dark:** bg `#1a1a1a`, ink `#f2f2f2`, ink-2 `#9a9a9a`, hair `#3d3d3d`, accent `#ff3b4a`.
+- **Boutique CTA:** `#cee5ff`; `#2b4a6b` in dark.
+- **Fonts:** IBM Plex Mono latin 400 (14 812 B) and 500 (14 988 B), from @fontsource 5.2.5 via the Form Skate stage system, OFL 1.1.
+- **Font stack on this machine:** Helvetica Neue resolves to Noto Sans and Arial to Arimo.
