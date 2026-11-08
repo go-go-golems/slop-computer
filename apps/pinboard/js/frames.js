@@ -93,6 +93,7 @@
     });
   }
   PB.on('change', sync);
+  PB.on('mutation', sync); // this page's own changes (they emit mutation, not change)
   PB.on('selection', sync);
   new MutationObserver(sync).observe(document.documentElement, { attributes: true, attributeFilter: ['data-theme'] });
 

@@ -7,10 +7,12 @@ const fs = require('node:fs');
 const path = require('node:path');
 const vm = require('node:vm');
 
+const events = [];
+
 test('a frame\'s snapshot has the board\'s shared meta only', () => {
   const meta = { title: 'Kitchen', about: 'food', seeded: 1, threads: [{ title: 'private', msgs: [{ text: 'my secret' }] }], view: { x: 1 }, agentOpen: true };
   const PB = {
-    el: () => ({}), on: () => {},
+    el: () => ({}), on: (ev) => { events.push(ev); },
     S: { clips: { 'clip:1': { id: 'clip:1', kind: 'note' } }, records: {}, collections: {}, meta, apps: { x: { name: 'x', title: 'X', source: 'secret source' } } },
     // store.js's: the shared keys only
     sharedMeta: () => ({ title: meta.title, about: meta.about, seeded: meta.seeded }),
@@ -22,4 +24,10 @@ test('a frame\'s snapshot has the board\'s shared meta only', () => {
   assert.strictEqual(JSON.stringify(snap.meta), JSON.stringify({ title: 'Kitchen', about: 'food', seeded: 1 }));
   assert.ok(!JSON.stringify(snap).includes('my secret'), 'no agent thread text');
   assert.ok(!JSON.stringify(snap).includes('secret source'), 'no app sources');
+});
+
+// Codex on #39 (third review): this page's own changes emit "mutation",
+// not "change"; frames must sync on both.
+test('frames sync on this page\'s own mutations, remote changes and selection', () => {
+  for (const ev of ['change', 'mutation', 'selection']) assert.ok(events.includes(ev), ev);
 });
