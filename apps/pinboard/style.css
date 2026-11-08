@@ -225,3 +225,5 @@ body.readonly .rz { display: none; }
 
 /* app frames (phase 6): a board app in its own sandboxed frame */
 .appframe{flex:1;display:flex;min-height:0;height:100%}.appframe iframe{border:0;width:100%;height:100%;display:block;background:var(--fill)}
+/* during a board drag the page keeps the pointer over app frames (board.js hitTarget) */
+.dragging .appframe iframe{pointer-events:none}.appframe.droptarget{outline:2px dashed var(--accent);outline-offset:-2px}

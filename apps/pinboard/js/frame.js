@@ -9,10 +9,11 @@
    changes as the app ("app:<name>"), with the person's level on the board.
 
    page → frame: init {app, clip, S, local, sel, log, me, theme}, sync {S, sel,
-     log, theme, ack: the last mutate batch handled}, blob {ref, blob}
+     log, theme, ack: the last mutate batch handled}, blob {ref, blob},
+     drop {x, y, item: a board drag released over this frame}
    frame → page: meta {def}, error {message}, set {patch}, param {name, value},
      mutate {seq, ops: steps of data, see steps.js}, toast {msg}, open {name, opts},
-     blob {ref} */
+     blob {ref}, dropped {ok} */
 (function () {
   'use strict';
   const PB = window.PB = { S: { clips: {}, apps: {}, collections: {}, records: {}, meta: {} }, local: {}, log: [], track: null };
@@ -143,6 +144,12 @@
       const d = e.data || {};
       if (d.t === 'sync') { adopt(d); redraw(); }
       if (d.t === 'blob' && d.blob) { urls[d.ref] = URL.createObjectURL(d.blob); redraw(); }
+      if (d.t === 'drop') {
+        const at = document.elementFromPoint(d.x, d.y);
+        const dz = at && at.closest ? at.closest('.dz') : null;
+        const z = dz && PB.dropzones.get(dz);
+        send({ t: 'dropped', ok: !!(z && z.fire(d.item || {})) });
+      }
     };
     try {
       def = evaluate(m.app.source);

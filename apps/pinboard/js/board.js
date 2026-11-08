@@ -246,6 +246,9 @@
       if (drag.kind === 'clips' && u.closest && u.closest('.clip') && drag.ids.includes(u.closest('.clip').dataset.id)) continue;
       if (!u.closest) continue;
       const dz = u.closest('.dz'); if (dz) return { type: 'dz', el: dz };
+      // an app in its own frame (its iframe ignores the pointer during a
+      // drag, so the page keeps the drag): the frame finds its dropzone
+      const af = u.closest('.appframe'); if (af && af.querySelector('iframe')) return { type: 'frame', el: af, frame: af.querySelector('iframe') };
       const strip = u.closest('.strip'); if (strip && drag.kind === 'clips') return { type: 'strip', el: strip.parentElement };
       if (u.closest('#dock')) return { type: 'dock', el: $dock };
       if (u.closest('#agentpanel') && u.closest('.composer')) return { type: 'composer', el: u.closest('.composer') };
@@ -260,7 +263,7 @@
     drag.target = t; if (!t) { $wrap.classList.remove('pinhint'); return; }
     if (t.type === 'dz') { const z = PB.dropzones.get(t.el); const item = itemForDrag(); const ok = z && (z.accepts.includes('*') || z.accepts.some(a => item.kind === a || (a.endsWith(':*') && item.kind.startsWith(a.slice(0, -1))))); t.el.classList.toggle('droptarget', !!ok); if (!ok) drag.target = null; }
     else if (t.type === 'strip') t.el.classList.add('dropstrip');
-    else if (t.type === 'dock' || t.type === 'composer') t.el.classList.add('droptarget');
+    else if (t.type === 'dock' || t.type === 'composer' || t.type === 'frame') t.el.classList.add('droptarget');
     $wrap.classList.toggle('pinhint', t.type === 'pin');
   }
   function itemForDrag() { return drag.kind === 'item' ? drag.item : itemForDragFor(drag); }
@@ -282,6 +285,7 @@
     const restore = () => d.kind === 'clips' && d.ids.forEach(i => B.renderClip(i));
     if (d.kind === 'clips') {
       const anyPinned = d.ids.some(i => d.orig[i].pinned);
+      if (t && t.type === 'frame') { restore(); PB.frames.drop(t.frame, itemForDragFor(d), ev.clientX, ev.clientY); return; }
       if (t && t.type === 'dz') { const z = PB.dropzones.get(t.el); restore(); if (z) { const ok = z.fire(itemForDragFor(d)); if (ok) PB.toast('dropped into ' + (z.ctx.clip.title || z.ctx.clip.app || 'app'), 'ok'); } return; }
       if (t && t.type === 'strip') { const tid = t.el.dataset.id; const tc = PB.S.clips[tid]; restore(); PB.mutate(m => tc.kind === 'group' ? (d.ids.forEach(k => m.set('clips', k, x => (x.group = tid, x), 'into group')), m.set('clips', tid, g => (g.children.push(...d.ids.filter(k => !g.children.includes(k))), g), 'group')) : m.group([tid, ...d.ids.filter(k => k !== tid)])); PB.toast('grouped · ⊟ ungroups', 'ok'); return; }
       if (t && t.type === 'dock') { restore(); const c = PB.S.clips[d.ids[0]]; if (c.kind === 'app') PB.toast(c.app + ' is already in the quicklaunch'); else { B.select(d.ids); PB.agent.prefill('wrap ' + d.ids.join(', ') + ' as an app that '); PB.toast('tell the agent what the app should do'); } return; }
@@ -293,6 +297,7 @@
       return;
     }
     if (d.kind === 'item') {
+      if (t && t.type === 'frame') { PB.frames.drop(t.frame, d.item, ev.clientX, ev.clientY); return; }
       if (t && t.type === 'dz') { const z = PB.dropzones.get(t.el); if (z && z.fire(d.item)) PB.toast('dropped', 'ok'); return; }
       if (t && (t.type === 'canvas' || t.type === 'clipbody' || t.type === 'pin')) { const w = B.toWorld(ev.clientX, ev.clientY); const it = d.item; let spec = null; if (it.src || it.image) spec = { kind: 'image', blobId: PB.isAssetRef(it.src) ? it.src : null, title: it.title || it.caption || '', caption: it.caption, tags: it.tags || [], w: 260, h: 220 }; else if (it.url) spec = { kind: 'link', url: it.url, title: it.title || '', tags: it.tags || [], w: 260, h: 110 }; else if (it.text) spec = { kind: 'note', text: it.text, title: it.title || '', tags: it.tags || [], w: 200, h: 120 }; if (spec && (spec.kind !== 'image' || spec.blobId)) { const id = PB.mutate(m => m.place(Object.assign(spec, { x: snap(w.x), y: snap(w.y), source: { from: 'app ' + (PB.S.clips[it.fromWindow] || {}).app, at: Date.now() } }))); if (t.type === 'pin') PB.mutate(m => m.pin(id, true)); B.select([id]); } else PB.toast('nothing to place from ' + it.kind); return; }
       if (t && t.type === 'composer') { PB.agent.prefill(JSON.stringify(d.item).slice(0, 200) + ' '); return; }

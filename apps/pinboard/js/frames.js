@@ -54,6 +54,7 @@
         case 'meta': PB.apps.framedMeta(name, d.def); break;
         case 'error': console.warn('app ' + name + ': ' + d.message); break;
         case 'toast': PB.toast(name + ' · ' + String(d.msg).slice(0, 300)); break;
+        case 'dropped': PB.toast(d.ok ? 'dropped into ' + name : name + ' takes nothing dropped there', d.ok ? 'ok' : undefined); break;
         case 'set': if (d.patch && typeof d.patch === 'object') PB.setState(id, d.patch); break;
         case 'open': PB.apps.narrow.open(String(d.name), d.opts || {}); break;
         case 'blob': if (PB.isAssetRef(d.ref)) PB.fetchBlob(d.ref).then(blob => f.port.postMessage({ t: 'blob', ref: d.ref, blob })).catch(() => {}); break;
@@ -111,5 +112,16 @@
     },
     live: () => live.size,
     snapshot,
+    // A board drag released over an app's frame (board.js): the page cannot
+    // see the frame's dropzones, so the frame finds the one at that point,
+    // in its own coordinates (the board may be zoomed), and fires it.
+    drop(iframe, item, clientX, clientY) {
+      const f = [...live.values()].find(x => x.iframe === iframe);
+      if (!f) return false;
+      const r = iframe.getBoundingClientRect(), k = iframe.offsetWidth / (r.width || 1);
+      const at = { t: 'drop', x: (clientX - r.left) * k, y: (clientY - r.top) * k };
+      try { f.port.postMessage(Object.assign(at, { item })); } catch (e) { f.port.postMessage(Object.assign(at, { item: JSON.parse(JSON.stringify(Object.assign({}, item, { image: null }))) })); }
+      return true;
+    },
   };
 })(window.PB);
