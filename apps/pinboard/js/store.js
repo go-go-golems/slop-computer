@@ -124,6 +124,9 @@ window.PB = window.PB || {};
     set(k, v) { try { localStorage.setItem('pinboard.' + k, JSON.stringify(v)); } catch (e) { } },
   };
   function sharedMeta() { const o = {}; SHARED_META.forEach(x => { if (PB.S.meta[x] !== undefined) o[x] = PB.S.meta[x]; }); return o; }
+  // The board's own meta, without this viewer's (view, threads…): what may
+  // leave this page, to an app's frame for one.
+  PB.sharedMeta = sharedMeta;
   function saveMeta(k) {
     if (SHARED_META.has(k)) { if (PB.can('admin')) schedule('board/meta', sharedMeta, 40); return; }
     // Per viewer: in the db when this person may write their own subtree,

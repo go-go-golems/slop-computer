@@ -28,11 +28,13 @@
     return docP;
   }
 
-  // What a frame sees of the board: everything but the apps' sources.
+  // What a frame sees of the board: everything but the apps' sources, and
+  // only the board's shared meta. PB.S.meta also holds this viewer's own
+  // keys (their view document: agent threads, view), which no app may read.
   function snapshot() {
     const apps = {};
     Object.values(PB.S.apps).forEach(a => { apps[a.name] = { name: a.name, title: a.title, icon: a.icon, about: a.about, by: a.by, version: a.version }; });
-    return JSON.parse(JSON.stringify({ clips: PB.S.clips, records: PB.S.records, collections: PB.S.collections, meta: PB.S.meta, apps }));
+    return JSON.parse(JSON.stringify({ clips: PB.S.clips, records: PB.S.records, collections: PB.S.collections, meta: PB.sharedMeta(), apps }));
   }
   const logLines = () => (PB.log || []).slice(0, 50).map(e => ({ id: e.id, at: e.at, by: e.by, label: e.label, undone: !!e.undone }));
   const selection = () => (PB.board && PB.board.sel ? [...PB.board.sel] : []);
@@ -56,9 +58,14 @@
         case 'open': PB.apps.narrow.open(String(d.name), d.opts || {}); break;
         case 'blob': if (PB.isAssetRef(d.ref)) PB.fetchBlob(d.ref).then(blob => f.port.postMessage({ t: 'blob', ref: d.ref, blob })).catch(() => {}); break;
         case 'mutate': {
-          const ops = Array.isArray(d.ops) ? d.ops.slice(0, 500) : [];
-          const steps = ops.map(o => [o && o.op, PinboardSteps.check(o && o.op, o && o.args, page)]);
-          PB.mutate(m => { steps.forEach(([op, args]) => m[op](...args)); }, by);
+          // The frame keeps this batch over its copy until a sync says the
+          // page handled it (applied or refused): ack.
+          f.ack = Math.max(f.ack || 0, Number(d.seq) || 0);
+          try {
+            const ops = Array.isArray(d.ops) ? d.ops.slice(0, 500) : [];
+            const steps = ops.map(o => [o && o.op, PinboardSteps.check(o && o.op, o && o.args, page)]);
+            PB.mutate(m => { steps.forEach(([op, args]) => m[op](...args)); }, by);
+          } finally { sync(); }
           break;
         }
       }
@@ -67,7 +74,7 @@
 
   function connect(clip, iframe, name) {
     const ch = new MessageChannel();
-    live.set(clip.id, { iframe, port: ch.port1, app: name });
+    live.set(clip.id, { iframe, port: ch.port1, app: name, ack: 0 });
     ch.port1.onmessage = (ev) => handle(clip.id, name, ev.data || {});
     const a = PB.S.apps[name] || {};
     iframe.contentWindow.postMessage({ t: 'init', app: { name, source: a.source || '', version: a.version }, clip: JSON.parse(JSON.stringify(PB.S.clips[clip.id] || clip)),
@@ -81,7 +88,7 @@
     requestAnimationFrame(() => {
       pending = false;
       const S = snapshot(), sel = selection(), log = logLines(), th = theme();
-      live.forEach((f, id) => { if (!f.iframe.isConnected) { live.delete(id); return; } f.port.postMessage({ t: 'sync', S, sel, log, theme: th }); });
+      live.forEach((f, id) => { if (!f.iframe.isConnected) { live.delete(id); return; } f.port.postMessage({ t: 'sync', S, sel, log, theme: th, ack: f.ack || 0 }); });
     });
   }
   PB.on('change', sync);
@@ -103,5 +110,6 @@
       return wrap;
     },
     live: () => live.size,
+    snapshot,
   };
 })(window.PB);
