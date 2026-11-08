@@ -130,7 +130,7 @@
     const big = [...items].sort((a, b) => b.bytes - a.bytes);
     document.querySelector("#legend").replaceChildren(
       ...[1, 2, 3, 4].map((n) => el("span", {}, el("i", { style: `background:color-mix(in srgb, var(--ink) ${8 + 14 * n}%, var(--panel))` }), n === 4 ? "4+ capabilities" : n + (n > 1 ? " capabilities" : " capability"))),
-      el("span", {}, el("i", { style: "background-image:repeating-linear-gradient(45deg, transparent 0 4px, var(--accent) 4px 5px)" }), "subscribers"),
+      el("span", {}, el("i", { style: "background-image:repeating-linear-gradient(45deg, transparent 0 4px, var(--ink) 4px 5px)" }), "subscribers"),
       big.length ? el("span", {}, `largest ${big[0].title} ${bytes(big[0].bytes)} · smallest ${big[big.length - 1].title} ${bytes(big[big.length - 1].bytes)}`) : null);
   }
 

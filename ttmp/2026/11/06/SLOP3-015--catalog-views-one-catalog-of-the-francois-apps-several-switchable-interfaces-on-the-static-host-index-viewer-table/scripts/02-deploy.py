@@ -15,6 +15,7 @@ Dry run by default. Refuses to replace a mount that serves another store.
 Uses the slop CLI's default login; the token is read, never printed.
 """
 import argparse
+import base64
 import hashlib
 import json
 import os
@@ -108,6 +109,15 @@ def tree(repo, src, data, extra):
     return out
 
 
+def entry(path, b):
+    """A files.push manifest entry: text as text, anything else (the kit's
+    fonts) as base64 data."""
+    try:
+        return {"path": path, "text": b.decode("utf-8")}
+    except UnicodeDecodeError:
+        return {"path": path, "data": base64.b64encode(b).decode()}
+
+
 def covers(want, have):
     """have includes every key and value of want (the server may add defaults)."""
     if isinstance(want, dict):
@@ -165,7 +175,7 @@ def main():
         if not exists:
             slop("store.new", {"id": sid})
         if diff:
-            files = [{"path": p, "text": b.decode()} for p, b in want.items()]
+            files = [entry(p, b) for p, b in want.items()]
             r = slop("files.push", {"store": sid, "files": files, "message": "SLOP3-015 catalog views"})
             print(f"{'':16} snapshot {r.get('n')}")
         for sub, lvl in grants:

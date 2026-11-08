@@ -7,22 +7,24 @@
 <link rel="alternate" type="text/markdown" title="llms.txt" href="/catalog/llms.txt">
 <link rel="stylesheet" href="/catalog/kit/views.css">
 <style>
-  .grid { display: grid; gap: 14px; grid-template-columns: repeat(auto-fill, minmax(320px, 1fr)); margin: 8px 0 28px; }
-  .box { background: var(--panel); border: 1px solid var(--line); border-radius: 12px; padding: 16px; display: flex; flex-direction: column; gap: 8px; min-width: 0; }
-  .box h2 { margin: 0; font-size: 18px; }
-  .box p { margin: 0; color: var(--muted); font-size: 14px; }
+  .grid { display: grid; gap: 0 28px; grid-template-columns: repeat(auto-fill, minmax(320px, 1fr)); margin: 8px 0 28px; }
+  .box { border-top: 1px solid var(--ink); padding: 12px 0 24px; display: flex; flex-direction: column; gap: 8px; min-width: 0; }
+  .box h2 { margin: 0; font-size: 20px; font-weight: 500; letter-spacing: -.02em; }
+  .box p { margin: 0; color: var(--ink-2); font-size: 14px; }
   .url { display: flex; gap: 6px; align-items: center; }
-  .url code { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-  code, pre { font: 13px var(--mono); }
-  code { background: var(--chip); border-radius: 4px; padding: 1px 5px; }
-  pre { background: var(--chip); border-radius: 8px; padding: 10px 12px; margin: 0; overflow-x: auto; white-space: pre; }
-  h2.sec { font-size: 20px; margin: 30px 0 8px; }
-  .console { display: grid; grid-template-columns: 300px 1fr; gap: 14px; }
+  .url code { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; line-height: calc(var(--control-h) - 2px); border: 1px solid var(--hair); padding: 0 8px; background: var(--fill); }
+  code, pre { font: 12.5px var(--mono); }
+  code { background: var(--fill); padding: 0 4px; }
+  pre { background: var(--fill); border-left: 2px solid var(--ink); padding: 10px 12px; margin: 0; overflow-x: auto; white-space: pre; }
+  h2.sec { font-size: 13px; font-weight: 700; margin: 48px 0 12px; padding-bottom: 8px; border-bottom: 1px solid var(--ink); }
+  .console { display: grid; grid-template-columns: 300px 1fr; gap: 20px; }
   .console .ctl { display: flex; flex-direction: column; gap: 8px; }
-  .console select, .console textarea { border: 1px solid var(--line); background: var(--panel); border-radius: 8px; padding: 6px 8px; font: 13px var(--mono); }
+  .console select, .console textarea { border: 1px solid var(--hair); background: var(--bg); padding: 6px 8px; font: 13px var(--mono); }
+  .console select { height: var(--control-h); padding: 0 6px; }
+  .console select:focus, .console textarea:focus { outline: none; border-color: var(--ink); }
   .console textarea { min-height: 120px; resize: vertical; }
-  .console .tdesc { font-size: 13px; color: var(--muted); }
-  .console pre.out { min-height: 300px; max-height: 60vh; overflow: auto; white-space: pre-wrap; word-break: break-word; }
+  .console .tdesc { font-size: 13px; color: var(--ink-2); }
+  .console pre.out { min-height: 300px; max-height: 60vh; overflow: auto; white-space: pre-wrap; word-break: break-word; border-left: 0; border: 1px solid var(--hair); background: var(--bg); }
   @media (max-width: 760px) { .console { grid-template-columns: 1fr; } }
 </style>
 </head>

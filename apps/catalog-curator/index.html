@@ -5,41 +5,51 @@
 <meta name="viewport" content="width=device-width,initial-scale=1">
 <title>Curator — slop catalog</title>
 <style>
-  :root { --bg: #f6f5f1; --panel: #fff; --ink: #16161a; --muted: #6b6a66; --line: #dcdad3; --accent: #c2410c; --chip: #ecebe5;
-          --mono: ui-monospace, "SF Mono", Menlo, Consolas, monospace; --sans: system-ui, -apple-system, "Segoe UI", Roboto, sans-serif; color-scheme: light dark; }
-  @media (prefers-color-scheme: dark) { :root { --bg: #141414; --panel: #1c1c1e; --ink: #ecebe6; --muted: #9a9892; --line: #2f2f31; --accent: #fb923c; --chip: #262628; } }
+  /* The catalog kit's look (apps/catalog/kit/views.css), repeated here: this
+     page is served from the live host and does not load the kit. */
+  :root { --bg: #fff; --ink: #1a1a1a; --ink-2: #737373; --hair: #d6d6d6; --rule: #ededed; --fill: #f6f6f6; --accent: #e2001a; --sel: rgba(226, 0, 26, .08);
+          --cta: #cee5ff; --cta-ink: #1a1a1a; --control-h: 30px;
+          --sans: "ABC Areal", "Helvetica Neue", Helvetica, Arial, sans-serif; --mono: "IBM Plex Mono", ui-monospace, Menlo, Consolas, monospace;
+          --panel: var(--bg); --line: var(--hair); --muted: var(--ink-2); --chip: var(--fill); color-scheme: light dark; }
+  @media (prefers-color-scheme: dark) { :root { --bg: #1a1a1a; --ink: #f2f2f2; --ink-2: #9a9a9a; --hair: #3d3d3d; --rule: #2a2a2a; --fill: #222; --accent: #ff3b4a; --sel: rgba(255, 59, 74, .16); --cta: #2b4a6b; --cta-ink: #f2f2f2; } }
   * { box-sizing: border-box; }
-  body { margin: 0; background: var(--bg); color: var(--ink); font: 15px/1.5 var(--sans); }
-  a { color: inherit; }
-  button, input, textarea { font: inherit; color: inherit; }
-  .wrap { max-width: 1080px; margin: 0 auto; padding: 0 20px; }
-  header { display: flex; align-items: center; gap: 14px; padding: 12px 0; border-bottom: 1px solid var(--line); flex-wrap: wrap; }
-  header h1 { font-size: 18px; margin: 0; }
-  header .sp { flex: 1; }
-  .meta { font: 12px var(--mono); color: var(--muted); }
-  .btn { border: 1px solid var(--line); background: var(--panel); border-radius: 8px; padding: 5px 12px; cursor: pointer; text-decoration: none; font-size: 14px; display: inline-block; }
+  body { margin: 0; background: var(--bg); color: var(--ink); font: 15px/1.45 var(--sans); font-variant-numeric: tabular-nums; }
+  a { color: inherit; text-underline-offset: 3px; }
+  button, input, textarea { font: inherit; color: inherit; border-radius: 0; }
+  :focus-visible { outline: 2px solid var(--ink); outline-offset: 1px; }
+  input[type="checkbox"] { accent-color: var(--ink); }
+  .btn { display: inline-flex; align-items: center; height: var(--control-h); border: 1px solid var(--hair); background: var(--bg); padding: 0 12px; cursor: pointer; text-decoration: none; font-size: 14px; white-space: nowrap; }
   .btn:hover { border-color: var(--ink); }
-  .btn.primary { background: var(--ink); color: var(--bg); border-color: var(--ink); }
+  .btn.primary { background: var(--cta); color: var(--cta-ink); border-color: var(--cta); font-weight: 700; }
+  .btn.primary:hover { border-color: var(--ink); }
   .btn:disabled { opacity: .5; cursor: default; }
-  h2 { font-size: 22px; margin: 28px 0 4px; letter-spacing: -.01em; }
-  .lead { color: var(--muted); margin: 0 0 14px; }
-  .cards { display: grid; gap: 14px; grid-template-columns: repeat(auto-fill, minmax(300px, 1fr)); }
-  .card { background: var(--panel); border: 1px solid var(--line); border-radius: 12px; overflow: hidden; display: flex; flex-direction: column; }
-  .card .pic { aspect-ratio: 16 / 9; background: var(--chip); display: grid; place-items: center; font: 700 34px var(--sans); color: var(--muted); }
+  .wrap { max-width: 1232px; margin: 0 auto; padding: 0 24px; }
+  header { display: flex; align-items: center; gap: 14px; height: 52px; border-bottom: 1px solid var(--ink); flex-wrap: wrap; }
+  header h1 { font-size: 15px; font-weight: 700; margin: 0; }
+  header .sp { flex: 1; }
+  .meta { font: 12px var(--mono); color: var(--ink-2); }
+  h2 { font-size: 30px; font-weight: 500; letter-spacing: -.03em; line-height: 1.1; margin: 40px 0 6px; }
+  .lead { color: var(--ink-2); margin: 0 0 16px; max-width: 62ch; }
+  .cards { display: grid; gap: 0 28px; grid-template-columns: repeat(auto-fill, minmax(300px, 1fr)); }
+  .card { border-top: 1px solid var(--ink); padding-top: 14px; display: flex; flex-direction: column; }
+  .card .pic { aspect-ratio: 16 / 9; background: var(--fill); border: 1px solid var(--hair); display: grid; place-items: center; font: 700 34px var(--sans); color: var(--ink-2); overflow: hidden; }
   .card .pic img { width: 100%; height: 100%; object-fit: cover; }
-  .card .body { padding: 12px 14px; display: flex; flex-direction: column; gap: 6px; flex: 1; }
-  .card h3 { margin: 0; font-size: 17px; }
+  .card .body { padding: 12px 0 24px; display: flex; flex-direction: column; gap: 6px; flex: 1; }
+  .card h3 { margin: 0; font-size: 22px; font-weight: 500; letter-spacing: -.02em; }
   .card .why { margin: 0; }
-  .card .desc { margin: 0; color: var(--muted); font-size: 13px; }
-  .card .acts { margin-top: auto; display: flex; gap: 8px; padding-top: 6px; }
-  .ask { display: flex; gap: 8px; flex-wrap: wrap; }
-  .ask textarea { flex: 1 1 420px; min-height: 64px; border: 1px solid var(--line); border-radius: 10px; padding: 8px 10px; background: var(--panel); resize: vertical; }
-  .chips { display: flex; flex-wrap: wrap; gap: 6px; margin: 8px 0 14px; }
-  .chips button { border: 1px solid var(--line); background: transparent; border-radius: 999px; padding: 2px 10px; font-size: 13px; cursor: pointer; color: var(--muted); }
-  .chips button:hover { border-color: var(--ink); color: var(--ink); }
-  .note { border-left: 2px solid var(--accent); padding-left: 10px; margin: 10px 0; }
-  .empty { color: var(--muted); padding: 20px 0; }
-  footer { color: var(--muted); font-size: 13px; border-top: 1px solid var(--line); margin-top: 40px; padding: 16px 0 30px; }
+  .card .desc { margin: 0; color: var(--ink-2); font-size: 13px; }
+  .card .acts { margin-top: auto; display: flex; gap: 8px; padding-top: 8px; }
+  .ask { display: flex; gap: 8px; flex-wrap: wrap; align-items: flex-start; }
+  .ask textarea { flex: 1 1 420px; min-height: 64px; border: 1px solid var(--hair); padding: 8px 10px; background: var(--bg); resize: vertical; }
+  .ask textarea:focus { outline: none; border-color: var(--ink); }
+  .chips { display: flex; flex-wrap: wrap; margin: 10px 0 14px; }
+  .chips button { border: 0; background: none; padding: 2px 0; font-size: 14px; cursor: pointer; color: var(--ink-2); }
+  .chips button:hover { color: var(--ink); text-decoration: underline; text-underline-offset: 3px; }
+  .chips button:not(:last-child)::after { content: "·"; display: inline-block; color: var(--hair); margin: 0 8px 0 6px; }
+  .note { border-left: 2px solid var(--ink); padding-left: 10px; margin: 10px 0; }
+  .empty { color: var(--ink-2); padding: 20px 0; }
+  footer { color: var(--ink-2); font-size: 13px; border-top: 1px solid var(--ink); margin-top: 56px; padding: 16px 0 40px; }
+  @media (max-width: 640px) { .wrap { padding: 0 16px; } header { height: auto; padding: 10px 0; } }
 </style>
 </head>
 <body>
@@ -80,7 +90,7 @@
       else if (k === "class") n.className = v;
       else n.setAttribute(k, v === true ? "" : v);
     }
-    for (const k of kids.flat()) if (k != null && k !== false) n.append(k.nodeType ? k : String(k));
+    for (const k of kids.flat(Infinity)) if (k != null && k !== false) n.append(k.nodeType ? k : String(k));
     return n;
   }
   const initials = (t) => (t || "").replace(/[^\p{L}\p{N} ]/gu, "").split(/\s+/).filter(Boolean).slice(0, 2).map((w) => w[0].toUpperCase()).join("") || "·";

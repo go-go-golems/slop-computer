@@ -53,6 +53,7 @@ body { margin: 0; background: var(--bg); color: var(--ink); font: 15px/1.45 var(
 a { color: inherit; text-underline-offset: 3px; text-decoration-thickness: 1px; }
 button, input, select, textarea { font: inherit; color: inherit; border-radius: 0; }
 :focus-visible { outline: 2px solid var(--ink); outline-offset: 1px; }
+input[type="checkbox"], input[type="radio"] { accent-color: var(--ink); }
 .wrap { max-width: 1232px; margin: 0 auto; padding: 0 24px; }
 @media (max-width: 640px) { .wrap { padding: 0 16px; } }
 
@@ -88,7 +89,7 @@ button, input, select, textarea { font: inherit; color: inherit; border-radius: 
 .wrap > .bar { display: flex; flex-wrap: wrap; gap: 10px 16px; align-items: center; margin: 28px 0 14px; }
 .wrap > .bar h1 { font-size: 30px; font-weight: 500; letter-spacing: -.03em; line-height: 1.1; margin: 0 12px 0 0; }
 .wrap > .bar .sp { flex: 1; }
-.wrap > .bar select, .cv-select { height: var(--control-h); border: 1px solid var(--hair); background: var(--bg); padding: 0 6px; font-size: 14px; }
+.wrap > .bar select, .cv-select { height: var(--control-h); border: 1px solid var(--hair); background: var(--bg); padding: 0 6px; font: 14px var(--sans); margin-left: 4px; }
 .wrap > .bar select:hover, .cv-select:hover { border-color: var(--ink); }
 
 /* segmented choices: pressed inverts */
