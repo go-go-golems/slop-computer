@@ -169,3 +169,21 @@ The go-go-goja replace stays until go-go-golems/go-go-goja#107 is merged and tag
 - Codex review threads on go-go-golems/slop-computer #36, #37 and #39. go-go-golems/go-go-goja#107 holds the go-go-goja half, already addressed (GOJA-069 step 6).
 - SLOP3-016 diary, steps 10–14. The actor VM diary, steps 5–6.
 - `pkg/rt/rules.go` (levels, `self`), `pkg/actor/actor.go` (`handle`), `pkg/actor/modules.go` (`Later`), `pkg/doors/actors/sample.go` (`toolRunner`), `apps/pinboard/js/{apps,frame,frames,render,board}.js`, `apps/pinboard/core.js`.
+
+## 13. As built
+
+All eight are fixed on `task/slop3-016-phase6`, which is now #39 against `main`. Diary steps 2–10 have the evidence. Where the implementation differs from §3–§9:
+
+- **F2 also fixes the agent.** It attached image clips only when their bytes happened to be cached. It now selects them by reference and fetches the bytes when sending.
+- **F1:**
+  - Writes from the page under `apps` are switched off at the persistence layer too (`writable('apps')` is false on a board).
+  - `PB.saveVersion` is removed; the actor writes versions.
+  - The agent's app step registers once, not once per captured definition.
+  - A SLOP3-016 host test asserted the old contract (the owner's page writes `apps/`) and now asserts the refusal.
+- **F6:** the recorder, with an overlay for later calls in one transaction, lives in `steps.js` as `recorder(read)`, so the frame and the differential test run the same code. `promote` now returns its record id in the frame. `tag` takes strings only.
+- **F8:**
+  - A tool's success is reported only after its turn commits, including a synchronous result, which used to be sent before the commit.
+  - When the host cannot run a turn, a `Later` turn gets its own `failed` callback. That was a gap from merging #38.
+  - Watches are reported as "lost" when the actor stops. That answers open question 2.
+- **The PRs:** #36, #37 and #38 were closed in favour of #39 (§9). A new Codex review was requested on #39.
+

@@ -11,5 +11,5 @@
 - [x] F4: CLI app-verb tree dispatches by a one-word token (typed word or store id) <!-- t:hpme -->
 - [x] F5: verb cache directory keyed by the full normalized server URL <!-- t:ousy -->
 - [x] F8: Actor.Watch; a turn rolls back when a watched promise rejects in it; toolRunner watches tool promises <!-- t:11ju -->
-- [ ] Browser pass: trust prompt, Moodboard pop-out after reload, framed update(id, fn), counter defaults on an old record <!-- t:ekq7 -->
+- [x] Browser pass: trust prompt, Moodboard pop-out after reload, framed update(id, fn), counter defaults on an old record <!-- t:ekq7 -->
 - [ ] Consolidate: #39 retargeted to main and rewritten; #36, #37, #38 closed pointing to #39; CI green <!-- t:nc5e -->

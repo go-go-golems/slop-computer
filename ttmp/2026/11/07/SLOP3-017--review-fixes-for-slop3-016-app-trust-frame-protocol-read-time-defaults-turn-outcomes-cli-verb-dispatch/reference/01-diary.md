@@ -469,3 +469,111 @@ if ev.root().rejectedWatch() {
 	return errWatchRejected // inside store.Do: this turn rolls back
 }
 ```
+
+## Step 9: Browser pass on a local server running the branch
+
+The unit and host tests cover each fix's logic. This pass checks the parts that only exist in a browser: the frame protocol, the frame's redraw, and the asset cache after a reload.
+
+### Prompt Context
+**User prompt (verbatim):** (see step 1)
+**Assistant interpretation:** Task "Browser pass": the trust prompt, the Moodboard pop-out after a reload, a framed `update(id, fn)`, and counter defaults on an old record.
+**Inferred user intent:** Evidence that the fixes work in the real page and frames, not only in tests.
+**Commit (code):** none (verification only).
+
+### What I did
+- **Setup:**
+  - Built `pbslop` from `46207f0` and restarted the local server (`serve --local --llm fake`, background task `bxhifj0wq`).
+  - Pushed `apps/pinboard` with `lslop push apps/pinboard --store pinboard`: snapshot 16, `files: 22`. The Kitchen board (`s-5povfcfc`) runs n=16 on `main`.
+  - In Playwright as Ada (the board's admin), working in the Pinboard frame (`*.sbx.localhost/v/16/`).
+- **Registration (F1):** `await PB.apps.registerSource(tally)` took 23 ms. The record arrived with `uid` = Ada's id, `sha256` = `PinboardCore.sha256(src)`, `version` 1 and `state {n:0}`. The log's newest entry is "Ada Admin (page) · register tally v1".
+- **Direct write (F1):** `PB.rt.db.doc('apps/forged').set(…)` was refused with `invalid_argument this viewer cannot write "apps/forged"`.
+- **Trust hash (F1):**
+  - `PB.trust.set('zz-trust', sha(srcA))`;
+  - `trusted({source: srcB, sha256: sha(srcA), uid: other})` is false;
+  - `trusted({source: srcA, sha256: 'not-the-hash', uid: other})` is true.
+- **Framed functional update (F6):** opened `tally`, framed with origin `null`, and clicked inside its frame:
+  - **seed** inserted `rec:push85bky8` with `{title: 'Soup', minutes: 20, old: 'x'}`;
+  - **fix** ran `update(rid, r => { r.name = r.title; delete r.title; delete r.old; r.minutes += 5; return r; })`, giving `{minutes: 25, name: 'Soup'}` with `title` and `old` gone, the same in the page's `PB.S.records`;
+  - **bump** gave `n=1`.
+- **Old record (F7):**
+  - Registered `oldcount` through `registerApp` without `state` (record `state {}`), then opened it (window `state {}`).
+  - The frame showed `n=0` from the declared default. Clicks stored `{n: 1}`, then `{n: 2}`, and the frame showed `n=2`.
+- **Asset after a reload (F2):**
+  - Made a 40×30 PNG with `PB.putBlob` (`blob:aca9…`) and reloaded; `PB.blobs` was empty.
+  - `PB.boardAPI.clip(PB.ui.image(ref))` stored `blobId` = the reference and `url: null`. The `<img>` loaded `/_blob/aca9…` at 40×30.
+- **Screenshot:** `various/01-browser-pass-framed-apps-and-image.png` shows Tally (n=1, the renamed record), Old counter (n=2) and the popped-out image.
+- Closed the browser.
+
+### Why
+- The frame protocol runs only across a real `MessageChannel` and a sandboxed `srcdoc` frame, and the reload behaviour of `PB.blobs` only shows in a page.
+
+### What worked
+- Every check above, on the first attempt, except the redraw below.
+
+### What didn't work
+- **The redraw scare:**
+  - After the first click, Old counter's frame still showed `n=0` although its state was `{n: 1}`. `makeCtx` in the frame returned `n: 2` after the second click, so the state and the context were right.
+  - There was one frame and it was attached, which ruled out a stale frame.
+  - The window was at x 600 in a 714 px wide page, mostly off screen. Chromium throttles `requestAnimationFrame` in off-screen cross-origin frames, and the frame redraws on rAF. After moving the window to x 80, it showed `n=2`.
+- **The screenshot path:** Playwright refuses paths outside the main checkout and `.playwright-mcp`, so I saved the screenshot there and moved it into the ticket.
+
+### What I learned
+- An app frame that is off screen does not redraw until it is visible. For a board that is harmless, but a browser check of a framed app must keep its window in view.
+
+### What was tricky to build
+- Telling F7's behaviour (the default read) apart from the rAF throttling. Comparing the frame's `makeCtx(c).state.n` with its DOM separated the two.
+
+### What warrants a second pair of eyes
+- The log labels a page registration "Ada Admin (page)", because `registerApp` goes through `commit(ctx, args)` with `via: 'page'`. Other page edits are labelled with the bare name. This is cosmetic.
+
+### What should be done in the future
+- A Bob-side check of the trust prompt in a second browser context. Phase 6b covered it with the old flow; the hash logic is checked above.
+
+### Code review instructions
+- The screenshot; this step's numbers.
+
+### Technical details
+- The test apps `tally`, `oldcount` and the trust key `zz-trust` remain on the local Kitchen board (local data only).
+
+## Step 10: One PR (#39); #36, #37 and #38 closed; a new Codex review
+
+The four SLOP3-016 PRs are now one, with the review fixes on top, and Codex has been asked to review the whole of it.
+
+### Prompt Context
+**User prompt (verbatim):** (see step 1), and during the work: "once everything is consolidated in a PR, restart a code review, btw"
+**Assistant interpretation:** Retarget #39 to `main` with a description of everything in it, close the others pointing to it, and comment `@codex review`.
+**Inferred user intent:** Review the merged whole once, with fresh eyes.
+**Commit (code):** none. #39's head is `46207f0`.
+
+### What I did
+- `git merge-tree --write-tree origin/main origin/task/slop3-016-phase6` merges cleanly: 42 commits, 77 files, +10,015/−94.
+- `gh api -X PATCH …/pulls/39 -f base=main -f title=… -F body=@pr-consolidated-body.md`. The new title is "Pinboard on slop, actor VM on go-go-goja, and the review fixes (SLOP3-016, SLOP3-017)". The body has the parts, the F1–F8 table with commits, the before-merging list (go-go-goja tag, binary size, engine default), the tests and a review guide.
+- `gh pr close 36|37|38 --comment "Folded into #39 …"`.
+- Commented `@codex review` on #39 at 00:18:14Z and started a background wait (`bbav2cfcc`) for its result and CI.
+
+### Why
+- Merging, not rebasing, keeps the commits that the earlier reviews saw, so their threads still point at real commits.
+
+### What worked
+- #39 is the only SLOP3-016 PR open; #35 (SLOP3-015) is unrelated.
+
+### What didn't work
+- `gh pr edit` still fails (Projects classic deprecation), so I used `gh api -X PATCH` as before.
+
+### What I learned
+- Nothing new.
+
+### What was tricky to build
+- Nothing.
+
+### What warrants a second pair of eyes
+- The PR description's claim that every regression test fails on the code before its fix. Each case is recorded in steps 3–8.
+
+### What should be done in the future
+- Assess Codex's review of #39 (step 11).
+
+### Code review instructions
+- https://github.com/go-go-golems/slop-computer/pull/39
+
+### Technical details
+- The body is in the session scratchpad (`pr-consolidated-body.md`).

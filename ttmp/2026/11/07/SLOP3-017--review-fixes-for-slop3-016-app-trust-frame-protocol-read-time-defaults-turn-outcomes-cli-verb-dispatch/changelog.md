@@ -15,3 +15,7 @@ Step 0 (#38 merged into #39's branch, c61574c); F2+F3 (c5f5933); F1 P1 actor-own
 ## 2026-11-07
 
 F7 read-time defaults (b7d7316); F6 steps.js step table with differential test (15911c4); F4 dispatch token (a1b2efe); F5 verb cache per server URL (71a0a72); F8 watched promises in actor turns (46207f0). Diary steps 5-8.
+
+## 2026-11-07
+
+Browser pass on a local server (F1, F2, F6, F7 confirmed in page and frames; screenshot in various/). #39 retargeted to main and rewritten; #36, #37, #38 closed; @codex review requested on #39. Design doc §13 As built. Diary steps 9-10.
