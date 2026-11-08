@@ -21,11 +21,14 @@ defineActor({ actions: {
         execute(input) {
           db.doc('notes/' + mode).set({ by: ctx.visitor.id, mode });
           if (mode === 'throw') throw new Error('nope');
+          // awaits I/O, writes in the continuation turn, then throws: that
+          // turn rolls back (SLOP3-017 F8)
+          if (mode === 'late') return (async () => { await sample('hi'); db.doc('notes/after').set({ after: true }); throw new Error('after the await'); })();
           if (mode === 'nested') return (async () => { const inner = await sample('hi'); return { inner: inner.text }; })();
           return { ok: true };
         } },
     ] });
-    return { text: r.text, written: db.doc('notes/' + mode).get().exists };
+    return { text: r.text, written: db.doc('notes/' + mode).get().exists, after: db.doc('notes/after').get().exists };
   } },
   optional: { requires: 'interact', run() {
     db.doc('x/1').set({ at: 2 }); db.doc('x/2').set({ at: 1 });
@@ -62,6 +65,12 @@ func TestActorSampleTools(t *testing.T) {
 	// A tool that awaits I/O (another sample) answers when it settles.
 	if r := agent("nested"); r["text"] != "The browser tool completed successfully." || r["written"] != true {
 		t.Fatalf("nested: %v", r)
+	}
+	// A tool that awaited I/O, wrote, then threw: the turn it threw in rolled
+	// back (its write is gone), the model read the error, the handler went
+	// on. The write before the await had committed with its own turn.
+	if r := agent("late"); r["text"] != "The browser tool reported an error." || r["written"] != true || r["after"] != false {
+		t.Fatalf("late throw: %v", r)
 	}
 	h.fail(admin, "actor.call", map[string]any{"store": "tools", "action": "bad"}, "invalid_argument")
 	// Optional arguments left out (orderBy without a direction, files.list

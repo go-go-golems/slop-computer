@@ -110,6 +110,18 @@ func (a *Actor) Later() func(fn func() error, failed func(error)) {
 	}
 }
 
+// Watch makes the event in progress wait on p besides its handler. After
+// each turn of the event, a p that rejected in that turn rolls the turn
+// back (its writes are undone) and done gets the rejection; a p that
+// fulfilled gets done(value, nil) once the turn has committed. The handler
+// is neither settled nor failed by p. If the actor stops first, done gets
+// a "lost" error. Call it inside a turn; done runs on the actor's
+// goroutine (a rejection's, after the rollback).
+func (a *Actor) Watch(p *goja.Promise, done func(v goja.Value, err error)) {
+	ev := a.turn().ev.root()
+	ev.watches = append(ev.watches, &watch{p: p, done: done})
+}
+
 // Visitor is the visitor of the event in progress.
 func (a *Actor) Visitor() Visitor {
 	t := a.turn()

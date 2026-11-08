@@ -231,28 +231,27 @@ func toolRunner(a *actor.Actor, fns map[string]goja.Callable) llm.ExecuteTool {
 			if err != nil {
 				return err // the turn rolls back; failed sends the error
 			}
+			// The tool's outcome is reported by the actor (SLOP3-017 F8): a
+			// result once the turn it settled in has committed, a rejection
+			// after that turn rolled back, whether it settles now or after
+			// I/O, in a continuation turn. A plain value is a settled promise.
 			p, ok := v.Export().(*goja.Promise)
 			if !ok {
-				send(value(v))
-				return nil
+				var resolve func(any) error
+				p, resolve, _ = vm.NewPromise()
+				if err := resolve(v); err != nil {
+					return err
+				}
 			}
-			switch p.State() {
-			case goja.PromiseStateFulfilled:
-				send(value(p.Result()))
-			case goja.PromiseStateRejected:
-				return errors.New(errorText(p.Result())) // it failed in this turn: roll it back
-			case goja.PromiseStatePending: // it awaits I/O: its result comes in a later turn
-				then, _ := goja.AssertFunction(v.ToObject(vm).Get("then"))
-				_, _ = then(v, vm.ToValue(func(c goja.FunctionCall) goja.Value {
-					send(value(c.Argument(0)))
-					return goja.Undefined()
-				}), vm.ToValue(func(c goja.FunctionCall) goja.Value {
-					send(toolError(errorText(c.Argument(0))))
-					return goja.Undefined()
-				}))
-			}
+			a.Watch(p, func(r goja.Value, err error) {
+				if err != nil {
+					send(toolError(errorMessage(err)))
+					return
+				}
+				send(value(r))
+			})
 			return nil
-		}, func(err error) { send(toolError(err.Error())) })
+		}, func(err error) { send(toolError(errorMessage(err))) })
 		timer := time.NewTimer(ToolTimeout)
 		defer timer.Stop()
 		select {
@@ -266,23 +265,20 @@ func toolRunner(a *actor.Actor, fns map[string]goja.Callable) llm.ExecuteTool {
 	}
 }
 
+// errorMessage is what the model reads of a tool's error: its message, after
+// its code when the thrown value had one of its own (permission_denied: …).
+func errorMessage(err error) string {
+	var ae *actor.Error
+	if errors.As(err, &ae) {
+		if ae.Code != "" && ae.Code != "actor_error" {
+			return ae.Code + ": " + ae.Message
+		}
+		return ae.Message
+	}
+	return err.Error()
+}
+
 func toolError(msg string) llm.ToolResult {
 	b, _ := json.Marshal(map[string]string{"error": msg})
 	return llm.ToolResult{Value: b, IsError: true}
-}
-
-// errorText is a thrown value's message.
-func errorText(v goja.Value) string {
-	if v == nil {
-		return "failed"
-	}
-	if o, ok := v.(*goja.Object); ok {
-		if m := o.Get("message"); m != nil && !goja.IsUndefined(m) {
-			if c := o.Get("code"); c != nil && !goja.IsUndefined(c) {
-				return c.String() + ": " + m.String()
-			}
-			return m.String()
-		}
-	}
-	return v.String()
 }

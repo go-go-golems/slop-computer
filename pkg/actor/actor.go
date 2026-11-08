@@ -89,6 +89,62 @@ type event struct {
 	// failed, on a turn posted through Later, takes that turn's error
 	// (it rolled back); the handler it continues stays parked.
 	failed func(error)
+	// watches, on an event's root, are promises it waits on besides its
+	// handler's (Actor.Watch). Only the actor's goroutine touches them.
+	watches []*watch
+}
+
+// watch is a promise an event waits on besides its handler's, such as a
+// tool call that awaits I/O (SLOP3-017): a turn of the event in which it
+// rejects rolls back, as one in which the handler's own promise rejects.
+type watch struct {
+	p    *goja.Promise
+	done func(v goja.Value, err error)
+}
+
+// errWatchRejected rolls back a turn in which a watched promise rejected.
+var errWatchRejected = errors.New("a promise this event watches rejected")
+
+// root is the event a continuation resumes, or the event itself.
+func (ev *event) root() *event {
+	if ev.parent != nil {
+		return ev.parent
+	}
+	return ev
+}
+
+// rejectedWatch reports whether a promise the event watches has rejected.
+func (ev *event) rejectedWatch() bool {
+	for _, w := range ev.watches {
+		if w.p.State() == goja.PromiseStateRejected {
+			return true
+		}
+	}
+	return false
+}
+
+// takeSettled removes and returns the watches whose promise has settled.
+func (ev *event) takeSettled() []*watch {
+	var settled, pending []*watch
+	for _, w := range ev.watches {
+		if w.p.State() == goja.PromiseStatePending {
+			pending = append(pending, w)
+		} else {
+			settled = append(settled, w)
+		}
+	}
+	ev.watches = pending
+	return settled
+}
+
+// dropWatches reports err to every watch of the event: its runtime will not
+// run again.
+func (ev *event) dropWatches(err error) {
+	ws := ev.watches
+	ev.watches = nil
+	for _, w := range ws {
+		w.done(nil, err)
+	}
 }
 
 // park is an event whose handler awaits real I/O: its root promise settles
@@ -400,6 +456,7 @@ func (a *Actor) loop() {
 		case ev.gone.Load():
 		case ev.owner != nil && ev.owner != a:
 			// the rest of a handler that awaited I/O in a runtime that stopped
+			ev.root().dropWatches(fail("actor_error", "lost: the actor stopped"))
 			if ev.failed != nil {
 				ev.failed(fail("actor_error", "lost: the actor stopped"))
 			} else if ev.parent != nil && ev.parent.reply != nil {
@@ -428,14 +485,20 @@ func (a *Actor) handle(ev *event) {
 	})
 	if err != nil {
 		// The host could not run the turn at all (its runtime is closed).
+		lost := fail("actor_error", "the actor could not run: %v", err)
+		ev.root().dropWatches(lost)
+		a.log("error", ev.kind+" not run: "+err.Error())
+		if ev.failed != nil { // a Later turn's failure is its own
+			ev.failed(lost)
+			return
+		}
 		target := ev
 		if ev.parent != nil && ev.parent.park != nil {
 			target = ev.parent.park.ev
 		}
 		if target.reply != nil {
-			target.reply <- result{err: fail("actor_error", "the actor could not run: %v", err)}
+			target.reply <- result{err: lost}
 		}
-		a.log("error", ev.kind+" not run: "+err.Error())
 	}
 }
 
@@ -474,11 +537,32 @@ func (a *Actor) turnFor(ctx context.Context, ev *event) {
 			if root != nil && root.State() == goja.PromiseStateRejected {
 				return a.jsError(root.Result())
 			}
+			// So does one the event watches (a tool call that awaited
+			// I/O, wrote, then threw): its writes in this turn are undone.
+			if ev.root().rejectedWatch() {
+				return errWatchRejected
+			}
 			return nil
 		})
 	})
 	a.fs.end(err == nil) // the fs module's writes follow the turn
+	settled := ev.root().takeSettled()
 	if err != nil {
+		// Watched promises that settled in a turn that rolled back: a
+		// rejection reports its own error, a fulfilment the turn's.
+		for _, w := range settled {
+			if w.p.State() == goja.PromiseStateRejected {
+				w.done(nil, a.jsError(w.p.Result()))
+			} else {
+				w.done(nil, a.asError(err))
+			}
+		}
+		if errors.Is(err, errWatchRejected) {
+			// Only a watched promise failed: the handler, parked or not,
+			// is unaffected, and this turn's error has been reported.
+			a.m.afterTurn(a, cur)
+			return
+		}
 		var ie *goja.InterruptedError
 		if errors.As(err, &ie) || strings.Contains(err.Error(), "turn panicked") {
 			a.crashed()
@@ -509,6 +593,10 @@ func (a *Actor) turnFor(ctx context.Context, ev *event) {
 	}
 	for _, f := range cur.out {
 		f()
+	}
+	// A watched promise that fulfilled is reported once its turn committed.
+	for _, w := range settled {
+		w.done(w.p.Result(), nil)
 	}
 	a.m.afterTurn(a, cur)
 	if ev.failed != nil {
