@@ -31,8 +31,8 @@ import (
 
 // Runtimes an actor can run on (slop.yaml actors.runtime).
 const (
-	RuntimeDirect = "direct" // a bare goja runtime (default)
-	RuntimeEngine = "engine" // a go-go-goja engine runtime
+	RuntimeEngine = "engine" // a go-go-goja engine runtime (default)
+	RuntimeDirect = "direct" // a bare goja runtime
 )
 
 // engineFactory builds the actor runtimes of one manager.
@@ -56,9 +56,9 @@ func (ef *engineFactory) get() (*engine.RuntimeFactory, error) {
 // newHost makes the host of a new actor, on the manager's runtime.
 func (m *Manager) newHost(a *Actor) (vmHost, error) {
 	switch m.Runtime {
-	case "", RuntimeDirect:
+	case RuntimeDirect:
 		return newDirectHost(), nil
-	case RuntimeEngine:
+	case "", RuntimeEngine:
 		f, err := m.engines.get()
 		if err != nil {
 			return nil, err

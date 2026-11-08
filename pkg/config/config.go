@@ -61,8 +61,9 @@ type Config struct {
 
 // Actors configures the actors' JavaScript runtime.
 type Actors struct {
-	// Runtime is direct (default: a bare goja runtime) or engine (a
-	// go-go-goja engine runtime; SLOP3-016 design doc 02).
+	// Runtime is engine (default: a go-go-goja engine runtime; SLOP3-016
+	// design doc 02) or direct (a bare goja runtime, kept for one release
+	// as the way back).
 	Runtime string `yaml:"runtime"`
 }
 
@@ -124,7 +125,7 @@ func (c *Config) Defaults() {
 		c.Signup = "open"
 	}
 	if c.Actors.Runtime == "" {
-		c.Actors.Runtime = "direct"
+		c.Actors.Runtime = "engine"
 	}
 }
 

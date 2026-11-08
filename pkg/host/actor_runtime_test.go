@@ -95,6 +95,28 @@ defineActor({
 });
 `
 
+// Actor VM migration phase 6: with actors.runtime unset, actors run on the
+// engine runtime.
+func TestActorRuntimeDefault(t *testing.T) {
+	c := &config.Config{}
+	c.Defaults()
+	if c.Actors.Runtime != actor.RuntimeEngine {
+		t.Fatalf("default actors.runtime = %q, want %q", c.Actors.Runtime, actor.RuntimeEngine)
+	}
+	t.Setenv("SLOP_TEST_ACTORS_RUNTIME", "")
+	h := newHarness(t)
+	admin := h.tokenFor("admin@example.com", "read", "write", "admin")
+	h.call(admin, "store.new", map[string]any{"id": "rt"})
+	h.call(admin, "files.push", map[string]any{"store": "rt", "files": files(map[string]string{
+		"app.json": `{"title":"Runtime","actor":"actor.js"}`,
+		"actor.js": runtimeActor,
+	})})
+	h.call(admin, "actor.call", map[string]any{"store": "rt", "action": "globals"})
+	if a := h.a.Running("rt"); a == nil || a.Runtime() != actor.RuntimeEngine {
+		t.Fatalf("actor runtime = %v, want %s", a, actor.RuntimeEngine)
+	}
+}
+
 func TestEngineModulePostIsATurn(t *testing.T) {
 	h := newHarnessWith(t, func(c *config.Config) { c.Actors.Runtime = actor.RuntimeEngine })
 	refused := make(chan error, 1)

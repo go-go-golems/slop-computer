@@ -56,8 +56,8 @@ type Manager struct {
 	// manager's actors (tests: the package variable is read by every
 	// running actor, so changing it races). Set it before actors start.
 	TurnLimit time.Duration
-	// Runtime is what actors run on: RuntimeDirect ("" too) or
-	// RuntimeEngine (slop.yaml actors.runtime). Set it before actors start.
+	// Runtime is what actors run on: RuntimeEngine ("" too) or
+	// RuntimeDirect (slop.yaml actors.runtime). Set it before actors start.
 	Runtime string
 
 	engines engineFactory // the engine runtimes' factory, built on first use
