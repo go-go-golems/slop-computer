@@ -140,8 +140,9 @@ func Scan(src *Source) (*jsverbs.Registry, error) {
 
 // Execute runs one command line (the words after the store) against a
 // source's verbs on b. use is the command path shown in help, such as
-// ["slop", "pb", "Kitchen"].
+// ["slop", "pb", "Kitchen"]; its last word is how the person named the store.
 func Execute(ctx context.Context, src *Source, c Caller, b Board, use []string, short string, args []string, stdout, stderr io.Writer) error {
+	use = dispatchWords(use, b)
 	reg, err := Scan(src)
 	if err != nil {
 		return fmt.Errorf("%s's verbs: %w", src.Key(), err)
@@ -169,6 +170,24 @@ func Execute(ctx context.Context, src *Source, c Caller, b Board, use []string, 
 	top.SetOut(stdout)
 	top.SetErr(stderr)
 	return top.ExecuteContext(ctx)
+}
+
+// dispatchWords returns the command path with a store word Cobra can
+// dispatch on. Cobra names a command after the first word of its Use line,
+// so a title with spaces ("Kitchen Board") would register as "Kitchen" and
+// the command line would never reach the verbs (SLOP3-017 F4). Such a name
+// is replaced by the store's id: help then shows a command that runs, and
+// the title stays in the description.
+func dispatchWords(use []string, b Board) []string {
+	if len(use) == 0 {
+		return use
+	}
+	out := append([]string{}, use...)
+	last := out[len(out)-1]
+	if last == "" || strings.ContainsAny(last, " \t\r\n") || strings.HasPrefix(last, "-") {
+		out[len(out)-1] = b.ID
+	}
+	return out
 }
 
 // Board is the store a command runs on.

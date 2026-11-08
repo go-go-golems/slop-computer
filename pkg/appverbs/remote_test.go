@@ -219,3 +219,30 @@ func TestCache(t *testing.T) {
 		t.Fatalf("not bounded: %d", len(c.regs))
 	}
 }
+
+// SLOP3-017 F4: a board named with spaces still reaches its verbs. Cobra
+// names a command after the first word of its Use line, so the store word
+// in the command tree is the store's id when the name has spaces.
+func TestExecuteStoreNameWithSpaces(t *testing.T) {
+	src := pinboard(t)
+	b := Board{ID: "s-1", Title: "Kitchen Board", Type: "pinboard", App: "pinboard", Via: "cli"}
+	f := &fake{}
+	var out, errb bytes.Buffer
+	if err := Execute(context.Background(), src, f, b, []string{"slop", "pb", "Kitchen Board"}, "x", []string{"clip", "ls"}, &out, &errb); err != nil {
+		t.Fatal(err)
+	}
+	if len(f.calls) != 1 || !strings.Contains(f.calls[0], `"action":"clips"`) {
+		t.Fatalf("the verb did not run: calls %v, out %q", f.calls, out.String())
+	}
+	out.Reset()
+	if err := Execute(context.Background(), src, &fake{}, b, []string{"slop", "pb", "Kitchen Board"}, "x", []string{"clip", "ls", "--help"}, &out, &errb); err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(out.String(), "slop pb s-1 clip ls") {
+		t.Fatalf("help: %q", out.String())
+	}
+	// A one-word name stays as typed.
+	if w := dispatchWords([]string{"slop", "pb", "Kitchen"}, b); w[2] != "Kitchen" {
+		t.Fatalf("one word: %v", w)
+	}
+}
