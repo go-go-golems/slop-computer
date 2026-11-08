@@ -640,3 +640,60 @@ Codex's first review of the whole of #39 found two problems. Both were in the fr
 
 ### Technical details
 - The test apps `twice` and `counts` remain on the local Kitchen board.
+
+## Step 12: Codex's second review of #39: two more findings, both fixed
+
+The second review, of the head with the step 11 fixes, found two older gaps: one on the Boards page from phase 4 and one in the frames from phase 6b.
+
+### Prompt Context
+**User prompt (verbatim):** (see step 10)
+**Assistant interpretation:** Assess the second review, fix, and ask again.
+**Inferred user intent:** As in step 11.
+**Commits (code):** `4952b17` (Boards page) and `4572aee` (drops into frames).
+
+### What I did
+- **The review:** completed at `8288aa7` with two P2 findings. CI passed.
+  - **`apps/pinboard-home/index.html:58`:** after building a guest's sign-in prompt, the code fell through to `stores.list()` and `render()`, which replaced the prompt with empty sections.
+  - **`frames.js:107`:** a board drag could not reach a `ui.dropzone` inside an app's frame. `hitTarget` uses the page's `elementsFromPoint`, and the frame protocol had no drop message.
+- **Boards page:** `return` after the guest prompt.
+- **Drops into frames:**
+  - `style.css`: `.dragging .appframe iframe { pointer-events: none }` and `.appframe.droptarget` (outline).
+  - `board.js`: `hitTarget` returns `{type: 'frame', el: .appframe, frame: iframe}`; `setTarget` outlines it; both drop paths (clips and items) call `PB.frames.drop`.
+  - `frames.js`: `drop(iframe, item, clientX, clientY)` scales the point by `offsetWidth / rect.width`, posts `{t: 'drop', x, y, item}`, and retries without the image if cloning fails. `'dropped'` toasts the answer.
+  - `frame.js`: on `drop`, `elementFromPoint(x, y).closest('.dz')` and `PB.dropzones.get(dz).fire(item)`, then answers `{t: 'dropped', ok}`.
+- **Browser checks:** local server, Pinboard n=18 and the Boards page n=2.
+  - **Real mouse events:** dragging a note's title bar onto a framed `catcher` app outlined the window during the drag. The app's state became `got: "clip:note clip:iwglk9o2oc"`, the note stayed at (560, 60), and the page showed "dropped into catcher".
+  - **At zoom 0.6:** aimed at the small text inside the dropzone, the drop still arrived (`clip:kvp9gj8vz2`), so the scaling is right.
+  - **The Boards page in a fresh, signed-out browser context:** the prompt and its Sign in button stay, and New board is hidden.
+- **Other checks:** `node --test`: 31 pass. `go test ./pkg/host -run Pinboard`: ok. Lint: 0 issues.
+- Pushed, replied on both threads, and commented `@codex review` at 00:32:46Z (background wait `bwjnhougr`, which this time waits for "completed" on the new head).
+
+### Why
+- **Pointer events:** without `pointer-events: none` on the iframes, the page loses `pointermove` and `pointerup` the moment the pointer enters a frame (the board does not capture the pointer). The drop would never end in the page.
+- **The point:** it is converted with the iframe's own `offsetWidth`, which a transform does not change, against its rendered rectangle. That holds at any zoom.
+
+### What worked
+- Every check above.
+
+### What didn't work
+- **Playwright and the opaque frame:** `boundingBox()` returned null for a locator inside the opaque-origin app frame. I computed the page coordinates from the board frame's box, the iframe's rectangle and the element's rectangle in the frame.
+- **The first wait loop** stopped as soon as a review was posted while its status still read "running". The review turned out to be complete with those two findings; the new loop waits for "completed" on the head commit.
+
+### What I learned
+- Each review of the whole diff surfaces different older gaps: phase 4's Boards page and phase 6b's drops were in #36 and #39 all along.
+
+### What was tricky to build
+- **Hit testing with `pointer-events: none`.** With the iframes ignoring the pointer, `elementsFromPoint` returns the `.appframe` wrapper, not the iframe, so `hitTarget` matches the wrapper.
+
+### What warrants a second pair of eyes
+- **Over a framed window, any drop goes to the frame.** Where the frame has no dropzone at that point, the page shows "<app> takes nothing dropped there" and the clip goes back. Before, dropping a clip on a window moved it on the board under the window.
+- **Hover feedback inside the frame:** the dropzone's own highlight while hovering is not bridged; the whole window is outlined instead.
+
+### What should be done in the future
+- Assess the third review (step 13).
+
+### Code review instructions
+- `git show 4952b17 4572aee`.
+
+### Technical details
+- The test apps `catcher` and the notes "drag me" and "zoomed drag" remain on the local Kitchen board.

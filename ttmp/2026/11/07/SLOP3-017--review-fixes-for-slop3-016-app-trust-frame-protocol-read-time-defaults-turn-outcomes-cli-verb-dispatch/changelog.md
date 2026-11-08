@@ -23,3 +23,7 @@ Browser pass on a local server (F1, F2, F6, F7 confirmed in page and frames; scr
 ## 2026-11-07
 
 Codex review of consolidated #39: P1 (frames got the viewer's private meta) fixed in b31910f; P2 (framed writes not visible to the next call) fixed in 8288aa7 with an acknowledged optimistic copy; second review requested. Diary step 11.
+
+## 2026-11-07
+
+Codex second review of #39: Boards page guest prompt (4952b17) and board drags into framed apps' dropzones (4572aee) fixed and checked in the browser; third review requested. Diary step 12.
