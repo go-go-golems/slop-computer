@@ -233,8 +233,11 @@ actions.registerApp = {
     const name = String(a.name || '');
     if (!APP_NAME.test(name)) throw new Error('an app name is one word of letters, digits, - or _; got ' + JSON.stringify(name));
     const v = ctx.visitor || {};
+    // The next version follows the record and the kept history: an app
+    // unregistered and registered again does not overwrite its versions.
     const old = db.doc(C.pathOf('apps', name)).get().data();
-    const version = ((old && old.version) || 0) + 1;
+    const kept = db.collection(C.pathOf('apps', name) + '/versions').get().docs.reduce((n, d) => Math.max(n, Number(d.id) || 0), 0);
+    const version = Math.max((old && old.version) || 0, kept) + 1;
     const sha256 = C.sha256(source);
     const rec = {
       name, source, version, sha256, uid: v.id, by: v.name || v.email || v.id, at: ctx.now,

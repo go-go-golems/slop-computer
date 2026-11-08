@@ -86,4 +86,12 @@ func TestPinboardAppRegistration(t *testing.T) {
 	if v := doc("apps/hello/versions/2"); v["uid"] != bobID {
 		t.Fatalf("versions after unregister: %v", v)
 	}
+	// Registering the name again continues the history (Codex on #39): it
+	// does not start at 1 and overwrite Ada's first version.
+	if r := register(ada, "hello", "app('hello').register() // again"); r["version"] != 3.0 {
+		t.Fatalf("re-registration: %v", r)
+	}
+	if v := doc("apps/hello/versions/1"); v["sha256"] != hash(src) || v["uid"] != adaID {
+		t.Fatalf("versions/1 after re-registration: %v", v)
+	}
 }
