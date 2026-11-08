@@ -88,7 +88,7 @@ func sampleDeps(e *Env) capsample.Deps {
 		if e.A == nil {
 			return nil
 		}
-		return e.A.LLM
+		return e.A.LLM()
 	}}
 	if e.K != nil {
 		d.Access, d.Ledger = e.K.Access, e.K.Ledger

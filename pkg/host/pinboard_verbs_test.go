@@ -189,7 +189,7 @@ func TestPinboardVerbsRemote(t *testing.T) {
 // tools, through actor sample tools) and log pruning.
 func TestPinboardAgentAndPrune(t *testing.T) {
 	h, ada, bob, carol := kitchen(t)
-	h.a.LLM = &llm.Fake{}
+	h.a.SetLLM(&llm.Fake{})
 	admin := h.tokenFor("admin@example.com", "read", "write", "admin")
 	ask := map[string]any{"store": "kitchen", "action": "ask", "args": map[string]any{"question": "what is on this board?"}}
 	// Off until an admin allows sample for the app.

@@ -54,7 +54,7 @@ func mcpResult(t *testing.T, resp *http.Response) map[string]any {
 // a call runs the verb as the token's person; a stream verb sends progress.
 func TestMCPDoor(t *testing.T) {
 	h := newHarness(t)
-	h.a.LLM = &llm.Fake{}
+	h.a.SetLLM(&llm.Fake{})
 	admin := h.tokenFor("admin@example.com", "read", "write", "admin")
 	reader := h.tokenFor("mia@example.com", "read")
 	h.call(admin, "store.new", map[string]any{"id": "crm"})

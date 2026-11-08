@@ -84,7 +84,7 @@ func (ss *samples) takeTool(c *sampleCall, use string) chan llm.ToolResult {
 func (s *Door) sampler() *capsample.Sampler {
 	sp := &capsample.Sampler{Ledger: s.Ledger}
 	if s.A != nil {
-		sp.Backend = s.A.LLM
+		sp.Backend = s.A.LLM()
 	}
 	return sp
 }

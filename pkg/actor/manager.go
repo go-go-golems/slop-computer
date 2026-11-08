@@ -44,7 +44,6 @@ type Manager struct {
 
 	// Hooks provided by the host.
 	Policy func(app, capability, audience string) bool
-	LLM    llm.Backend // the sample backend (nil: no LLM)
 	Secret func(ctx context.Context, app, name string) (string, error)
 	Paths  Paths                                                       // the db paths outside the store (aliases, _stores); nil: the store's own only
 	Grant  func(ctx context.Context, app, module string) (Grant, bool) // app.trust: an app's grant of a catalog module
@@ -62,9 +61,28 @@ type Manager struct {
 
 	engines engineFactory // the engine runtimes' factory, built on first use
 
+	llmMu sync.RWMutex
+	llmB  llm.Backend // the sample backend (SetLLM, LLM)
+
 	provided map[string]func(*Actor) goja.Value // the door's capability bindings (Provide)
 	modules  map[string]Module                  // the catalog (Register; catalog.go)
 	calls    meters                             // module calls (catalog.go)
+}
+
+// SetLLM sets the sample backend (nil: no LLM). The host sets it while it
+// is built, when actors may already run (the system follower starts them),
+// so it is read under a lock.
+func (m *Manager) SetLLM(b llm.Backend) {
+	m.llmMu.Lock()
+	defer m.llmMu.Unlock()
+	m.llmB = b
+}
+
+// LLM is the sample backend, nil without one.
+func (m *Manager) LLM() llm.Backend {
+	m.llmMu.RLock()
+	defer m.llmMu.RUnlock()
+	return m.llmB
 }
 
 // turnLimit is how long one entry's JavaScript may run.
