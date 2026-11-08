@@ -14,9 +14,25 @@
     const id = clip.id; const deps = new Set();
     const track = k => deps.add(k);
     const def = clip.kind === 'app' && PB.apps ? PB.apps.def(clip.app) : null;
+    // A window's state is what it stored over the app's declared defaults,
+    // applied when read, never written (SLOP3-017): a window opened before
+    // a default existed, or from a record without one, still reads it. An
+    // object default is copied once per context, so changing it in a
+    // handler changes this window's copy, not the app's definition.
+    const defaults = (def && def.state) || {};
+    const stored = () => (PB.S.clips[id] || {}).state || {};
+    const copies = {};
+    const stateGet = (k) => {
+      const s = stored();
+      if (k in s) return s[k];
+      if (!(k in defaults)) return undefined;
+      const v = defaults[k];
+      if (v === null || typeof v !== 'object') return v;
+      return k in copies ? copies[k] : (copies[k] = JSON.parse(JSON.stringify(v)));
+    };
     const ctx = {
       clip, window: clip, id, deps, def,
-      state: new Proxy({}, { get: (_, k) => { if (typeof k !== 'string') return undefined; track('state:' + id + ':' + k); return (PB.S.clips[id] && PB.S.clips[id].state || {})[k]; }, has: (_, k) => k in ((PB.S.clips[id] || {}).state || {}), ownKeys: () => Object.keys((PB.S.clips[id] || {}).state || {}), getOwnPropertyDescriptor: (_, k) => ({ enumerable: true, configurable: true, value: ((PB.S.clips[id] || {}).state || {})[k] }) }),
+      state: new Proxy({}, { get: (_, k) => { if (typeof k !== 'string') return undefined; track('state:' + id + ':' + k); return stateGet(k); }, has: (_, k) => k in stored() || k in defaults, ownKeys: () => [...new Set([...Object.keys(defaults), ...Object.keys(stored())])], getOwnPropertyDescriptor: (_, k) => ({ enumerable: true, configurable: true, value: stateGet(k) }) }),
       set: (k, v) => PB.setState(id, typeof k === 'object' ? k : { [k]: v }),
       local: new Proxy({}, { get: (_, k) => { if (typeof k !== 'string') return undefined; track('local:' + id + ':' + k); return (PB.local[id] || {})[k]; }, has: (_, k) => k in (PB.local[id] || {}), ownKeys: () => Object.keys(PB.local[id] || {}), getOwnPropertyDescriptor: (_, k) => ({ enumerable: true, configurable: true, value: (PB.local[id] || {})[k] }) }),
       setLocal: (k, v) => PB.setLocal(id, typeof k === 'object' ? k : { [k]: v }),
