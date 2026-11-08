@@ -55,6 +55,7 @@
     $('new').style.display = 'none';
     const b = el('button', 'btn', 'Sign in'); b.onclick = () => slop.signIn();
     $('out').replaceChildren(el('p', 'empty', 'Sign in to see your boards and make new ones. Boards shared with you by a link open from that link.'), b);
+    return; // nothing to list for a guest: keep the prompt
   }
   let boards = [];
   try { boards = await slop.stores.list({ type: 'pinboard', title: 'board/meta' }); }
