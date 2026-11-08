@@ -1,0 +1,7 @@
+{
+  "title": "Boards",
+  "page": "index.html",
+  "capabilities": {
+    "user": { "scopes": ["profile"] }
+  }
+}

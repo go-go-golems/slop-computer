@@ -33,6 +33,7 @@ func (m *Manager) registerBuiltins() {
 	m.Register(Module{Name: "path", Class: ClassData, TypeScript: pathTS,
 		Doc:  "go-go-goja's path API (POSIX): join, resolve, normalize, dirname, basename, extname, isAbsolute, relative.",
 		Load: func(s Setup) goja.Value { return s.Actor.pathModule() }})
+	m.registerBridged()
 }
 
 const databaseTS = `declare module "database" {

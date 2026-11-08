@@ -134,11 +134,14 @@ func (s *Door) mcpPost(w http.ResponseWriter, r *http.Request) {
 	case "ping":
 		mcpReply(w, req.ID, map[string]any{}, nil)
 	case "tools/list":
-		tools := []verbs.Tool{}
+		tools := []any{}
 		for _, v := range s.Verbs.All() {
 			if s.Verbs.Callable(p, v) {
 				tools = append(tools, v.Tool())
 			}
+		}
+		for _, t := range s.appTools(web.WithPrincipal(r.Context(), p), p) {
+			tools = append(tools, t.listed())
 		}
 		mcpReply(w, req.ID, map[string]any{"tools": tools}, nil)
 	case "tools/call":
@@ -175,6 +178,23 @@ func (s *Door) mcpCall(w http.ResponseWriter, r *http.Request, p *access.Princip
 	}
 	v, ok := s.mcpVerb(in.Name)
 	if !ok {
+		// An app's verb (pb_clip_add), if p's apps list it: app.verb on
+		// the store the call names.
+		ctx := web.WithPrincipal(r.Context(), p)
+		for _, t := range s.appTools(ctx, p) {
+			if t.Name != in.Name {
+				continue
+			}
+			values := map[string]any{}
+			for k, a := range in.Arguments {
+				if k != "store" {
+					values[k] = a
+				}
+			}
+			mcpReply(w, req.ID, toolResult(s.callTool(ctx, p, "app.verb", map[string]any{
+				"store": in.Arguments["store"], "verb": t.Verb, "alias": t.Alias, "values": values})), nil)
+			return
+		}
 		mcpReply(w, req.ID, nil, &mcpError{rpcInvalidParams, "no tool " + in.Name})
 		return
 	}
@@ -218,6 +238,47 @@ func (s *Door) mcpCall(w http.ResponseWriter, r *http.Request, p *access.Princip
 		return
 	}
 	mcpReply(w, req.ID, res, nil)
+}
+
+// appTool is an app's verb as an MCP tool (app.tools).
+type appTool struct {
+	Name        string         `json:"name"`
+	Description string         `json:"description"`
+	InputSchema map[string]any `json:"inputSchema"`
+	Alias       string         `json:"alias"`
+	Verb        string         `json:"verb"`
+}
+
+// listed is t as tools/list shows it.
+func (t appTool) listed() map[string]any {
+	return map[string]any{"name": t.Name, "description": t.Description, "inputSchema": t.InputSchema,
+		"annotations": map[string]bool{"readOnlyHint": false}}
+}
+
+// appTools are the verbs of the apps p's stores run (app.tools), except
+// any whose name a verb's tool has; none when p may not list them.
+func (s *Door) appTools(ctx context.Context, p *access.Principal) []appTool {
+	res, err := s.Verbs.Call(ctx, p, "app.tools", nil)
+	if err != nil {
+		return nil
+	}
+	var out struct {
+		Tools []appTool `json:"tools"`
+	}
+	if b, err := json.Marshal(res); err != nil || json.Unmarshal(b, &out) != nil {
+		return nil
+	}
+	taken := map[string]bool{}
+	for _, v := range s.Verbs.All() {
+		taken[strings.ReplaceAll(v.Name, ".", "_")] = true
+	}
+	tools := make([]appTool, 0, len(out.Tools))
+	for _, t := range out.Tools {
+		if !taken[t.Name] {
+			tools = append(tools, t)
+		}
+	}
+	return tools
 }
 
 func (s *Door) callTool(ctx context.Context, p *access.Principal, verb string, args map[string]any) (any, error) {

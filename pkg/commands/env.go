@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"github.com/go-go-golems/slop-computer/pkg/appverbs"
 	"strings"
 
 	"github.com/go-go-golems/slop-computer/pkg/access"
@@ -59,7 +60,14 @@ type (
 	}
 	confirmEnv struct{ Confirm *verbs.Confirmations }
 	evalEnv    struct{ Verbs *verbs.Table }
-	mountEnv   struct {
+	// appVerbsEnv runs apps' verbs (app.verb): their calls go to Table as
+	// the caller; Cache keeps their scans per app@snapshot.
+	appVerbsEnv struct {
+		kernelEnv
+		Table *verbs.Table
+		Cache *appverbs.Cache
+	}
+	mountEnv struct {
 		kernelEnv
 		Cfg *config.Config
 		A   *actor.Manager // restarts actors when a mount's API policy changes (nil in tests without actors)
