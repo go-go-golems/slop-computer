@@ -799,3 +799,86 @@ The fourth review found one problem, in F1's `registerApp`. Four rounds have fou
 | 2 | `8288aa7` | P2 (guest prompt), P2 (drops into frames) | `4952b17`, `4572aee` |
 | 3 | `4572aee` | P2 (collections in the copy), P2 (sync on mutation) | `6db52e7`, `3ddb939` |
 | 4 | `3ddb939` | P2 (version numbering) | `158341f` |
+
+## Step 15: Describe IR and Register evaluated the editor's source in the page; now a probe frame does
+
+A spec written on 2026-11-09 (SLOP3-019, later removed as a mistyped request) found that Pinboard's App editor evaluated its source in the page. The Describe IR button and Register both did it. That source is shared window state, so it may not be the viewer's own. The source is now evaluated in a throwaway sandboxed frame, the same kind app windows use. The page now refuses to evaluate anything but the built-in apps. Unit tests and a browser run on a local server confirm it.
+
+### Prompt Context
+**User prompts (verbatim):**
+- "fix the security bug, yes"
+- Earlier: "k in fact i think I mistyped the request, so we can just in fact delete the whole spec ticket work, it was a mistake . What woud be next?"
+**Assistant interpretation:** Fix the in-page evaluation found by the dropped spec (task hkef in this ticket), with tests and a real check.
+**Inferred user intent:** Close the hole in SLOP3-016's sandbox: other people's app source should never run with the viewer's page authority.
+**Commit (code):** 183217e — "Pinboard: the editor describes and registers source in a probe frame, never in the page"
+
+### What I did
+- **Read** `js/apps.js` (`evalSource`, `registerSource`, `registerFromEditor`, the editor's source `SRC.editor`, `seed`), `js/frames.js` and `js/frame.js`.
+- **Found the full extent of the hole:**
+  - **Describe IR** called `c.apps.evalSource(c.state.src)`, with full `PB`.
+  - **`registerSource`**, behind Register (⌘↩), the agent (`js/agent.js:77`) and first-run seeding (`js/main.js:39`), called `evalSource(src, {narrow: true})`. "narrow" only withholds the `PB` argument. Code made by `new Function` still reaches `window.PB` and `window.claude`.
+  - **What stays in the page:** the only other `evalSource` callers (`def()` for built-ins, and `seed()`) evaluate the page's own `SRC`.
+- **`frame.js`:** a probe mode.
+  - The first message may be `{t: 'probe', source, S, me}` instead of `init`.
+  - `probe()` evaluates once and draws nothing. It answers `{t: 'probed', def: registers(def), describe, describeError}`, or `{t: 'error'}`.
+  - `registers()` is `meta()` plus `name`, `shortcut`, `hidden` and `order`.
+- **`frames.js`:** `PB.frames.probe(src, {timeout})`.
+  - It builds a hidden, sandboxed (`allow-scripts` only) frame from the same `frameDoc()` as app windows.
+  - It sends the probe over a MessageChannel and hears only `probed` or `error`, so a schema's `mutate` or a toast from the frame is dropped.
+  - It removes the frame and closes the port. The timeout is 5 s.
+- **`apps.js`:**
+  - `evalSource` throws unless `Object.values(SRC).includes(src)`;
+  - `registerSource` uses `(await PB.frames.probe(src)).def` and refuses a nameless result;
+  - a new `describeSource(src)`;
+  - the editor's Describe IR button calls `c.apps.describeSource(c.state.src)`;
+  - the comments state the rule.
+- **Tests:** `test/harness.js` (a vm context with a DOM stub, scripts by list: `PAGE`, `FRAME`) and `test/source.test.js` (6 tests):
+  - **The probe frame:** it reports a source's name, title, size, state, params and described view; it answers an error for a throwing source or one that registers nothing; the source ran in the frame.
+  - **The page:** it evaluates built-ins only; Describe and Register go through `PB.frames.probe` (stubbed) and never run the source in the page; it refuses a probe with a describe error or no name.
+- **Browser, on the local server:**
+  - Setup: rebuilt from `$S/lslop`, `store new pinboard`, `push apps/pinboard`, mount `/pb/:id`, `store new pb-test --app pinboard --type pinboard`, signed in as the local admin.
+  - **Attack:** I planted a hostile source in the editor's state with `PB.setState`. It sets `window.__ran` and records `typeof window.PB`.
+  - **Describe IR** showed the IR YAML; `window.__ran` stayed undefined; no probe frame was left behind.
+  - **Register** was done by the actor (`by: admin`, version 1, sha256 recorded, title, size and params from the probe), and `window.__ran` was still undefined.
+  - **The registered app** opens in its frame ("n is 1 +").
+  - **A throwing source** shows "boom from the source" for both buttons.
+  - **Seeding:** the board's first-run seeding of `counter` (`main.js`, through `registerSource`) also went through a probe.
+
+### Why
+- **The frame is the boundary that already exists** for running other people's apps: opaque origin, a CSP without network, the page applies only checked steps. Reusing it adds no new trust machinery.
+- **The refusal in `evalSource`** turns the invariant into a check, so a future caller can't reintroduce the hole by accident.
+
+### What worked
+- `node --test apps/pinboard/test/*.test.js`: 40 pass (34 old, 6 new).
+- `GOWORK=off go test ./pkg/host/ -run Pinboard -count=1`: ok.
+- **The new page tests fail on the old code:** with `git show origin/main:apps/pinboard/js/apps.js` swapped in, the three page tests fail ("the page evaluates built-in sources only", and the next two). The copy was backed up in `$S/bakpb` and restored.
+
+### What didn't work
+- **`source.test.js`'s first run:** two frame tests failed with `'error' !== 'probed'`. The frame's message was `app(...)...state(...).param is not a function`: my sample source used `.param()`, but the grammar is `.param.slider(name, def, opts)`, as `A.TEMPLATE` shows. I fixed the sample.
+- **`lslop mount set … --store-param id`** gave `unknown flag: --store-param`. The flags are camel case: `--storeParam`, `--createApp`.
+
+### What I learned
+- **`registerSource`'s "narrow" evaluation was never a boundary.** The comment said it "checks what the person registering wrote", but the editor's source isn't necessarily theirs.
+- Probing per registration costs one frame build. `frameDoc()` is cached after the first, so each probe costs one frame load.
+
+### What was tricky to build
+- **The probe frame must not apply anything.** A source may declare a schema at the top, which sends `mutate` while it is evaluated. The page side listens only for `probed` and `error`, so that `mutate` never reaches `PB.mutate`. Otherwise describing a source could have written to the board.
+- **A hostile source with an endless loop** hangs its probe frame; the page gives up after 5 s and removes it. Whether the browser runs a sandboxed `srcdoc` frame on its own thread decides whether the page stalls meanwhile. App windows already carry the same risk.
+
+### What warrants a second pair of eyes
+- **Seeding and the agent now probe as well.** The agent's step code still runs in the page by design (it is the person's own agent); only its re-evaluation for registration moved. The double evaluation is unchanged.
+- **`registerSource` now needs `document`, `fetch` and iframes:** fine in the page, where it runs. Node tests stub `PB.frames.probe`.
+
+### What should be done in the future
+- N/A beyond review; task hkef is done.
+
+### Code review instructions
+- Read `git show 183217e`: `js/frames.js` `probe`, `js/frame.js` `probe`/`registers`, and `js/apps.js` (`evalSource`'s guard, `registerSource`, `describeSource`, `SRC.editor`).
+- Validate with `node --test apps/pinboard/test/*.test.js` and `GOWORK=off go test ./pkg/host/ -run Pinboard -count=1`.
+
+### Technical details
+- **The probe's messages:**
+  ```
+  page → frame:  {t:'probe', source, S, me}
+  frame → page:  {t:'probed', def, describe, describeError}  or  {t:'error', message}
+  ```

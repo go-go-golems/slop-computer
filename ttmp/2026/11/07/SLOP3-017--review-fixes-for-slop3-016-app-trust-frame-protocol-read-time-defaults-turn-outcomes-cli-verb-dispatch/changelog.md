@@ -35,3 +35,7 @@ Codex third review of #39: collection steps in the frame's optimistic copy (6db5
 ## 2026-11-07
 
 Codex fourth review of #39: version numbering after unregister fixed (158341f). Review rounds 1-4 summarized in diary step 14.
+
+## 2026-11-08
+
+Security: Pinboard's editor describes and registers source in a probe frame, never in the page; evalSource runs built-in apps only (183217e, diary step 15)

@@ -113,6 +113,37 @@
     },
     live: () => live.size,
     snapshot,
+    // probe: evaluate a source in a throwaway sandboxed frame and resolve to
+    // what it registers ({def, describe, describeError}); the source never
+    // runs in this page. The editor's Describe IR and every registration use
+    // it: the editor's source is shared window state, so whoever presses the
+    // button may not have written it. Only the answer is heard; anything else
+    // the frame sends (a schema's mutate, a toast) is dropped.
+    probe(src, opts = {}) {
+      return frameDoc().then(doc => new Promise((resolve, reject) => {
+        const iframe = document.createElement('iframe');
+        iframe.setAttribute('sandbox', 'allow-scripts');
+        iframe.setAttribute('referrerpolicy', 'no-referrer');
+        iframe.setAttribute('aria-hidden', 'true');
+        iframe.tabIndex = -1;
+        iframe.style.cssText = 'position:fixed;left:-10000px;top:0;width:1px;height:1px;border:0;visibility:hidden';
+        const ch = new MessageChannel();
+        let over = false;
+        const done = (fn, v) => { if (over) return; over = true; clearTimeout(timer); ch.port1.onmessage = null; ch.port1.close(); iframe.remove(); fn(v); };
+        const timer = setTimeout(() => done(reject, new Error('the source did not finish evaluating in ' + ((opts.timeout || 5000) / 1000) + ' s')), opts.timeout || 5000);
+        ch.port1.onmessage = (ev) => {
+          const d = ev.data || {};
+          if (d.t === 'probed') done(resolve, { def: d.def || {}, describe: d.describe == null ? null : String(d.describe), describeError: String(d.describeError || '') });
+          else if (d.t === 'error') done(reject, new Error(String(d.message || 'the source failed')));
+        };
+        iframe.addEventListener('load', () => {
+          if (!iframe.srcdoc || over) return;
+          iframe.contentWindow.postMessage({ t: 'probe', source: String(src == null ? '' : src), S: snapshot(), me: { id: PB.myId(), name: PB.myName() } }, '*', [ch.port2]);
+        });
+        iframe.srcdoc = doc;
+        document.body.append(iframe);
+      }));
+    },
     // A board drag released over an app's frame (board.js): the page cannot
     // see the frame's dropzones, so the frame finds the one at that point,
     // in its own coordinates (the board may be zoomed), and fires it.
