@@ -148,7 +148,7 @@ function setMeta(args) {
   for (const k of META) {
     if (args[k] === undefined) continue;
     const v = args[k] === null ? '' : String(args[k]);
-    if (v && !/^https:\/\/[^\s"'<>\\]+$/.test(v)) C.bad(k + ' is an https URL');
+    if (v && !C.URL.test(v)) C.bad(k + ' is an https URL (http on a *.localhost server)');
     sql.run('INSERT INTO catalog_meta (key, value) VALUES (?, ?) ON CONFLICT(key) DO UPDATE SET value = excluded.value', k, v.replace(/\/+$/, ''));
   }
 }

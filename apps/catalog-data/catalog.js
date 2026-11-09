@@ -21,9 +21,12 @@ const FIELDS = ['id', 'title', 'description', 'tags', 'featured', 'version', 'pu
   'bytes', 'attachments', 'cover', 'open', 'preview', 'download', 'releases'];
 const ID = /^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$/;
 const ISO = /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(\.\d+)?Z$/;
-// A link in an item becomes an href or a src in the views: an https URL or
-// a path on the site host, never javascript: or data:.
-const LINK = /^(https:\/\/[^\s"'<>\\]+|\/[^\s"'<>\\]*)$/;
+// A link in an item becomes an href or a src in the views: an https URL
+// (http on a *.localhost development server) or a path on the site host,
+// never javascript: or data:.
+const URL_ = /^(https:\/\/[^\s"'<>\\]+|http:\/\/([a-z0-9-]+\.)*localhost(:\d+)?(\/[^\s"'<>\\]*)?)$/;
+const PATH = /^\/(?!\/)[^\s"'<>\\]*$/; // not //host: that is another host
+const isLink = (v) => URL_.test(v) || PATH.test(v);
 
 function str(v, what, max, opt) {
   if (v === undefined || v === null) {
@@ -38,7 +41,7 @@ function str(v, what, max, opt) {
 function link(v, what) {
   if (v === undefined || v === null) return null;
   str(v, what, 2048);
-  if (!LINK.test(v)) bad(what + ' is an https URL or a path on the site host');
+  if (!isLink(v)) bad(what + ' is an https URL or a path on the site host');
   return v;
 }
 
@@ -209,4 +212,4 @@ function llmsTxt(cat) {
   return lines.join('\n') + '\n';
 }
 
-module.exports = { FIELDS, normalize, haystack, words, matches, atom, searchIndex, llmsTxt, bad };
+module.exports = { URL: URL_, FIELDS, normalize, haystack, words, matches, atom, searchIndex, llmsTxt, bad };

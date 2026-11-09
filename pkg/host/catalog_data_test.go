@@ -174,6 +174,8 @@ func TestCatalogData(t *testing.T) {
 	// A bad item is refused whole, and nothing changes.
 	h.fail(admin, "actor.call", map[string]any{"store": "catalog-data", "action": "upsertApp", "args": map[string]any{
 		"id": "evil", "title": "Evil", "free": true, "open": "javascript:alert(1)"}}, "invalid_argument")
+	h.fail(admin, "actor.call", map[string]any{"store": "catalog-data", "action": "upsertApp", "args": map[string]any{
+		"id": "evil", "title": "Evil", "free": true, "cover": map[string]any{"src": "//evil.example/x.png"}}}, "invalid_argument")
 	h.fail(admin, "actor.call", map[string]any{"store": "catalog-data", "action": "importCatalog", "args": map[string]any{
 		"items": []any{map[string]any{"id": "ok", "title": "OK", "free": true}, map[string]any{"id": "ok2", "free": true}}}}, "invalid_argument")
 	if _, out, _ := getJSON("/catalog/api/apps", nil); out["total"] != 2.0 {
