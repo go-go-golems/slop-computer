@@ -181,6 +181,24 @@ func TestCatalogData(t *testing.T) {
 	if _, out, _ := getJSON("/catalog/api/apps", nil); out["total"] != 2.0 {
 		t.Fatalf("after refused writes: %v", out)
 	}
+	// Ids, tags and capabilities are data, even when they are the names of
+	// Object.prototype's properties (Codex on #41).
+	h.call(admin, "actor.call", map[string]any{"store": "catalog-data", "action": "upsertApp", "args": map[string]any{
+		"id": "constructor", "title": "Constructor", "free": true, "version": "1.0.0", "publishedAt": "2026-10-01T00:00:00Z",
+		"tags": []any{"constructor", "__proto__", "toString"}, "capabilities": []any{"hasOwnProperty"}}})
+	code, cat, _ = getJSON("/catalog/api/catalog.json", nil)
+	if tags := fmtAny(cat["tags"]); code != 200 || cat["count"] != 3.0 || !strings.Contains(tags, `{"count":1,"tag":"__proto__"}`) || !strings.Contains(tags, `{"count":1,"tag":"constructor"}`) {
+		t.Fatalf("prototype names: %d %v", code, cat["tags"])
+	}
+	if code, out, _ := getJSON("/catalog/api/apps/constructor", nil); code != 200 || len(out["releases"].([]any)) != 1 {
+		t.Fatalf("app constructor: %d %v", code, out)
+	}
+	r, body := h.raw("POST", live, "/catalog/api/", strings.NewReader(`{"jsonrpc":"2.0","id":1,"method":"tools/call","params":{"name":"list_capabilities","arguments":{}}}`),
+		map[string]string{"Content-Type": "application/json"})
+	if r.StatusCode != 200 || !strings.Contains(body, `"name":"hasOwnProperty"`) || !strings.Contains(body, `"meaning":""`) {
+		t.Fatalf("list_capabilities with hasOwnProperty: %d %s", r.StatusCode, body)
+	}
+	h.call(admin, "actor.call", map[string]any{"store": "catalog-data", "action": "removeApp", "args": map[string]any{"id": "constructor"}})
 	// Removing an app takes its tags and releases with it.
 	if out := h.call(admin, "actor.call", map[string]any{"store": "catalog-data", "action": "removeApp", "args": map[string]any{"id": "mimeo"}}).(map[string]any); out["removed"] != true {
 		t.Fatalf("removeApp: %v", out)

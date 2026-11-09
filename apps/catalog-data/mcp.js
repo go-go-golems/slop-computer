@@ -78,9 +78,10 @@ const TOOLS = [
     description: 'The slop runtime capabilities the apps declare, what each gives a page, and how many apps declare it.',
     inputSchema: { type: 'object', properties: {} },
     run: (a, lib) => {
-      const n = {};
-      lib.catalog().items.forEach((i) => i.capabilities.forEach((c) => { n[c] = (n[c] || 0) + 1; }));
-      return { capabilities: Object.keys(n).sort((a, b) => n[b] - n[a]).map((c) => ({ name: c, apps: n[c], meaning: CAPS[c] || '' })) };
+      const n = new Map(); // capability names are data: a Map, not an object's keys
+      lib.catalog().items.forEach((i) => i.capabilities.forEach((c) => n.set(c, (n.get(c) || 0) + 1)));
+      return { capabilities: [...n.keys()].sort((a, b) => n.get(b) - n.get(a)).map((c) => ({ name: c, apps: n.get(c),
+        meaning: Object.prototype.hasOwnProperty.call(CAPS, c) ? CAPS[c] : '' })) };
     } },
 ];
 

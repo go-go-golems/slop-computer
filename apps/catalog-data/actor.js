@@ -39,14 +39,17 @@ function rev() {
 // first; one made from the item's own version when it has none).
 function withReleases(rows) {
   if (!rows.length) return [];
-  const byApp = {};
+  const byApp = new Map(); // keyed by data: a Map, so an id like "constructor" is just a key
   const rels = rows.length === 1
     ? sql.all('SELECT app, version, published_at, changelog FROM releases WHERE app = ? ORDER BY published_at DESC, version DESC', rows[0].id)
     : sql.all('SELECT app, version, published_at, changelog FROM releases ORDER BY published_at DESC, version DESC');
-  for (const r of rels) (byApp[r.app] = byApp[r.app] || []).push({ version: r.version, publishedAt: r.published_at, changelog: r.changelog });
+  for (const r of rels) {
+    if (!byApp.has(r.app)) byApp.set(r.app, []);
+    byApp.get(r.app).push({ version: r.version, publishedAt: r.published_at, changelog: r.changelog });
+  }
   return rows.map((r) => {
     const i = JSON.parse(r.facts);
-    i.releases = byApp[r.id] || [{ version: i.version, publishedAt: i.publishedAt, changelog: '' }];
+    i.releases = byApp.get(r.id) || [{ version: i.version, publishedAt: i.publishedAt, changelog: '' }];
     return i;
   });
 }
@@ -75,8 +78,8 @@ function find(f) {
 function catalog() {
   const m = meta();
   const items = find({});
-  const n = {};
-  for (const i of items) for (const t of i.tags) n[t] = (n[t] || 0) + 1;
+  const n = new Map(); // tags are data ("__proto__" is a tag like any other)
+  for (const i of items) for (const t of i.tags) n.set(t, (n.get(t) || 0) + 1);
   return {
     generated: m.updated || null,
     source: m.source || null,
@@ -87,7 +90,7 @@ function catalog() {
     rev: Number(m.rev || 0),
     count: items.length,
     totalBytes: items.reduce((s, i) => s + (i.bytes || 0), 0),
-    tags: Object.keys(n).sort((a, b) => n[b] - n[a] || (a < b ? -1 : a > b ? 1 : 0)).map((t) => ({ tag: t, count: n[t] })),
+    tags: [...n.keys()].sort((a, b) => n.get(b) - n.get(a) || (a < b ? -1 : a > b ? 1 : 0)).map((t) => ({ tag: t, count: n.get(t) })),
     items,
   };
 }
