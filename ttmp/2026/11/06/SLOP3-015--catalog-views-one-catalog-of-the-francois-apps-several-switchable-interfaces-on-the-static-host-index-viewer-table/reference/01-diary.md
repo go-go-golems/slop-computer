@@ -765,3 +765,63 @@ The user asked for a Codex review of the whole of #35. Codex reviewed `ea52ff2` 
 
 ### Technical details
 - The review state comes from the bot's issue comment: `codex-review-state:v1 {"code_review":{"commit_sha":"ea52ff2…","status":"completed"}}`. The threads were answered at r4508423929 and r4508423933.
+
+## Step 10: Main with #40 merged into #35; #35 merged
+
+#40 (engine by default) is merged. #35 took main, changed one test line for #40's `SetLLM`, and was merged at `8b15c8b`, as the user authorized. The image built from main goes to slop.yolo, which the user calls "really a staging setup".
+
+### Prompt Context
+**User prompt (verbatim):** "#40merged."; mid-turn: "when you fix #35 then you can merge the PR, and we'll deploy the resulting image to test on slop.yolo (which is really a staging setup)"
+**Assistant interpretation:** Bring #35 up to main, fix the one test line #40 breaks, run the tests, merge #35, then prepare the slop.yolo deploy.
+**Inferred user intent:** Get everything onto main and test the result on staging.
+**Commits:**
+- `159867c`, the merge of origin/main into the branch;
+- `afedd18`, "catalog curator test: the sample backend through SetLLM (#40)";
+- `8b15c8b`, the merge of #35 into main.
+
+### What I did
+- `git merge origin/main` merged cleanly. Then `catalog_curator_test.go:17`: `h.a.LLM = &llm.Fake{}` became `h.a.SetLLM(&llm.Fake{})`.
+- Updated #35's description to its contents: 13 views, the restyle, the four Codex fixes, how to deploy.
+- `gh pr merge 35 --merge --match-head-commit afedd18…`.
+- Saved a memory: slop.yolo is the staging setup.
+
+### Why
+- With #40 on main, `Manager.LLM` is a method. Without the fix, `pkg/host` does not compile on #35.
+
+### What worked
+- `go test ./...` on engine (the default now): pass.
+- `SLOP_TEST_ACTORS_RUNTIME=direct go test ./pkg/host/`: pass, 19.8 s.
+- `go test -race ./pkg/host/ -run Catalog`: pass.
+- `golangci-lint`: 0 issues.
+- CI on `afedd18`: success; the PR showed MERGEABLE, CLEAN.
+
+### What didn't work
+- Nothing.
+
+### What I learned
+- The release workflow opens a GitOps PR in `wesen/2026-03-27--hetzner-k3s` (target `slop-yolo`, `gitops/kustomize/slop/deployment.yaml`) for every image built from main. #428 (sha-3624b3f, #39) was still open, and newer merges supersede it.
+
+### What was tricky to build
+- Nothing.
+
+### What warrants a second pair of eyes
+- **The first slop.yolo image with #39, #40 and #35 together** changes several things at once:
+  - the Pinboard app;
+  - the actor `sample` tools;
+  - actors on the engine runtime by default.
+- **Watch after the rollout:**
+  - actor errors;
+  - goroutines (2 per active store);
+  - turn latency.
+- **The way back:** `actors.runtime: direct`.
+
+### What should be done in the future
+- Merge the GitOps PR for `sha-8b15c8b` to roll out on slop.yolo.
+- Deploy the catalog content: `02-deploy.py`, a dry run and then `--apply`.
+- Check the views live: the woff2 content type, the menu, the viewer.
+
+### Code review instructions
+- `git show afedd18`.
+
+### Technical details
+- #35's merge commit is `8b15c8b`, merged 2026-11-09T00:42Z.
