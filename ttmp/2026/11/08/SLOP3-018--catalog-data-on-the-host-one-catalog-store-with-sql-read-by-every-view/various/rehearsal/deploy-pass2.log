@@ -1,0 +1,30 @@
+catalog-data     mount.set apps.localhost:18490/catalog/mcp (api policy) (from catalog-mcp)
+                 catalog-mcp is no longer mounted at apps.localhost:18490/catalog/mcp; store.rm catalog-mcp when you are done with it
+catalog          files.push (7 changed: data/catalog.json, data/feed.xml, data/search-index.json, data/views.json, index.html, kit/views.js…)
+                 snapshot 2
+catalog-list     files.push (1 changed: index.html)
+                 snapshot 2
+catalog-table    files.push (1 changed: index.html)
+                 snapshot 2
+catalog-sheet    files.push (1 changed: index.html)
+                 snapshot 2
+catalog-caps     files.push (1 changed: index.html)
+                 snapshot 2
+catalog-zine     files.push (1 changed: index.html)
+                 snapshot 2
+catalog-timeline files.push (1 changed: index.html)
+                 snapshot 2
+catalog-treemap  files.push (1 changed: index.html)
+                 snapshot 2
+catalog-roulette files.push (1 changed: index.html)
+                 snapshot 2
+catalog-term     files.push (1 changed: index.html)
+                 snapshot 2
+catalog-desktop  files.push (1 changed: index.html)
+                 snapshot 2
+catalog-agents   files.push (1 changed: index.html)
+                 snapshot 2
+catalog-shelf    files.push (4 changed: actor.js, app.json, data/catalog.json, index.html), bind.set catalog → catalog-data, grant.set catalog-data store:catalog-shelf view
+                 snapshot 2
+catalog-curator  files.push (3 changed: actor.js, data/catalog.json, index.html), bind.set catalog → catalog-data, grant.set catalog-data store:catalog-curator view
+                 snapshot 2

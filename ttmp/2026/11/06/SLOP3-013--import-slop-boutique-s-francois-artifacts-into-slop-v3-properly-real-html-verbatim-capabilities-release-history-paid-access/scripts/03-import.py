@@ -3,7 +3,7 @@
 
 usage: 03-import.py <inventory.json> [--apply] [--only id,id] [--history]
                     [--plan-out plan.json] [--log-out apply.jsonl]
-                    [--blob-cache DIR] [--blobs-from DIR]
+                    [--blob-cache DIR] [--blobs-from DIR] [--catalog]
 
 Dry run by default: reads the inventory (01-inventory.sh) and the server's
 release stores (store.ls, files.ls, grant.ls; reads only) and prints what an
@@ -22,6 +22,13 @@ their sha256, cached in --blob-cache, and uploaded with files.blobs.
 History (--history): older releases go to ref francois/<version>, oldest
 first, before the latest is pushed to main; only releases the store's
 grants allow (free ones, or paid ones in a paid store); never withdrawn ones.
+
+Catalog (--catalog, SLOP3-018): afterwards, bring catalog-data's tables up
+to date for the same stores, with each app's release history from the
+inventory: upsertApp for new or changed apps, removeApp for ones no longer
+listed (with --only), or one importCatalog (without). The item builder is
+SLOP3-018's scripts/01-import-catalog.py. In a dry run it shows the plan
+against the francois.json the stores have now.
 
 Uses the slop CLI's login ($SLOP_CREDENTIALS or
 ~/.config/slop/credentials.json, server $SLOP_SERVER or the default); the
@@ -345,6 +352,7 @@ def main():
     ap.add_argument("--blob-cache", default=os.path.join(os.environ.get("TMPDIR", "/tmp"), "slop3-013-blobs"))
     ap.add_argument("--blobs-from", help="a directory of <sha256> files to use before the francois pod")
     ap.add_argument("--emit-apps", help="write each store's generated app.json to DIR/<store>.json (for apps.Parse)")
+    ap.add_argument("--catalog", action="store_true", help="then bring catalog-data up to date for these stores (SLOP3-018)")
     a = ap.parse_args()
 
     inv = json.load(open(a.inventory))
@@ -375,11 +383,33 @@ def main():
         os.makedirs(a.emit_apps, exist_ok=True)
         for p in plans:
             pathlib.Path(a.emit_apps, p["store"] + ".json").write_text(p["_tree"]["app.json"]["text"])
-    if not a.apply:
-        return
-    with open(a.log_out or os.devnull, "a") as logf:
-        apply(slop, plans, Blobs(a.blob_cache, a.blobs_from), logf)
-    print("applied")
+    if a.apply:
+        with open(a.log_out or os.devnull, "a") as logf:
+            apply(slop, plans, Blobs(a.blob_cache, a.blobs_from), logf)
+        print("applied")
+    if a.catalog:
+        catalog_sync(slop, inv, sorted(only) if only else None, a.apply)
+
+
+def catalog_module():
+    """SLOP3-018's 01-import-catalog.py: the catalog item builder and the push."""
+    import importlib.util
+    ttmp = pathlib.Path(__file__).resolve().parents[5]
+    found = sorted(ttmp.glob("2026/*/*/SLOP3-018*/scripts/01-import-catalog.py"))
+    if not found:
+        raise SystemExit("--catalog: SLOP3-018's scripts/01-import-catalog.py is not in this checkout")
+    spec = importlib.util.spec_from_file_location("slop3_018_import_catalog", found[0])
+    mod = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(mod)
+    return mod
+
+
+def catalog_sync(slop, inv, only, apply_):
+    """catalog-data's tables for these stores (all, without --only)."""
+    cat = catalog_module()
+    cur = cat.current(slop, cat.STORE)
+    items, unlisted = cat.build(slop, cur.get("appsOrigin") or "https://apps.slop.yolo.scapegoat.dev", only, inv)
+    cat.sync(slop, items, unlisted, only, False, apply_)
 
 
 if __name__ == "__main__":

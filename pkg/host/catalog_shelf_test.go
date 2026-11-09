@@ -4,6 +4,8 @@ package host
 // Each person's stars are private (data/users/<id>/shelf); a person may
 // share theirs (shelves/<id>), which everyone admitted reads and only its
 // owner writes. The page sees ids (it declares user) and names (profile).
+// SLOP3-018: its actor's one action is the catalog, catalog-data's, read
+// through a binding and a grant to store:catalog-shelf.
 
 import (
 	"testing"
@@ -12,10 +14,11 @@ import (
 func TestCatalogShelfApp(t *testing.T) {
 	h := newHarness(t)
 	admin := h.tokenFor("admin@example.com", "read", "write", "admin")
-	live := h.cfg.Hosts.Live[0]
-	fs := append(appDir(t, "catalog-shelf"), map[string]any{"path": "data/catalog.json", "text": mcpCatalog})
+	live := deployCatalogData(t, h, admin)
 	h.call(admin, "store.new", map[string]any{"id": "catalog-shelf"})
-	h.call(admin, "files.push", map[string]any{"store": "catalog-shelf", "files": fs})
+	h.call(admin, "files.push", map[string]any{"store": "catalog-shelf", "files": appDir(t, "catalog-shelf")})
+	h.call(admin, "bind.set", map[string]any{"store": "catalog-shelf", "alias": "catalog", "target": "catalog-data"})
+	h.call(admin, "grant.set", map[string]any{"store": "catalog-data", "subject": "store:catalog-shelf", "level": "view"})
 	h.call(admin, "grant.set", map[string]any{"store": "catalog-shelf", "subject": "@guest", "level": "view"})
 	h.call(admin, "grant.set", map[string]any{"store": "catalog-shelf", "subject": "@member", "level": "interact"})
 	h.call(admin, "mount.set", map[string]any{"host": live, "path": "/catalog/shelf", "store": "catalog-shelf"})
@@ -70,6 +73,10 @@ func TestCatalogShelfApp(t *testing.T) {
 	st, vg := openView(g, live, "/catalog/shelf", "")
 	if st != 200 {
 		t.Fatalf("guest view: %d %v", st, vg)
+	}
+	// The page's catalog, through the actor, for everyone the page admits.
+	if c := result(t, rpc(g, vg, "slop.call", map[string]any{"action": "catalog", "args": map[string]any{}})); c["count"] != 2.0 || len(c["items"].([]any)) != 2 {
+		t.Fatalf("guest catalog: %v", c)
 	}
 	if out := rpc(g, vg, "db.write", map[string]any{"path": "shelves/x", "op": "set", "body": map[string]any{"apps": []any{}}}); out["error"] == nil {
 		t.Fatalf("a guest wrote a shelf")

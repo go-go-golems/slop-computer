@@ -1,6 +1,7 @@
 {
   "title": "Shelf — slop catalog",
   "page": "index.html",
+  "actor": "actor.js",
   "capabilities": {
     "db": { "rules": [
       { "path": "shelves", "read": "view", "write": "owner" },

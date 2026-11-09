@@ -4,7 +4,7 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width,initial-scale=1">
 <title>Agents — slop catalog</title>
-<link rel="alternate" type="text/markdown" title="llms.txt" href="/catalog/llms.txt">
+<link rel="alternate" type="text/markdown" title="llms.txt" href="https://apps.slop.yolo.scapegoat.dev/catalog/api/llms.txt">
 <link rel="stylesheet" href="/catalog/kit/views.css">
 <style>
   .grid { display: grid; gap: 0 28px; grid-template-columns: repeat(auto-fill, minmax(320px, 1fr)); margin: 8px 0 28px; }
@@ -50,7 +50,7 @@
     <pre class="out" id="out" aria-live="polite"></pre>
   </div>
 </main>
-<footer class="cv-foot"><div class="wrap">The MCP server is an actor on slop's live host: one public route with a per-IP rate limit, and CORS for this site only. It answers from the catalog it was deployed with.</div></footer>
+<footer class="cv-foot"><div class="wrap">The MCP server and the files above are routes of one actor on slop's live host (the catalog-data store), public, with a per-IP rate limit and CORS for this site only. They answer from the catalog's tables, so a new release shows up as soon as it is imported.</div></footer>
 <script src="/catalog/kit/views.js"></script>
 <script>
 (async () => {
@@ -58,7 +58,7 @@
   await SlopCatalog.header(document.querySelector("#head"), "agents");
   const { catalog } = await SlopCatalog.load();
   SlopCatalog.viewer.bind(catalog);
-  const site = location.origin, mcp = catalog.mcp || "https://apps.slop.yolo.scapegoat.dev/catalog/mcp";
+  const api = catalog.api || SlopCatalog.API, mcp = catalog.mcp || "https://apps.slop.yolo.scapegoat.dev/catalog/mcp";
 
   const copy = (text) => el("button", { class: "cv-btn", type: "button", onclick: (e) => navigator.clipboard?.writeText(text).then(() => { e.target.textContent = "Copied"; }) }, "Copy");
   const urlRow = (u) => el("div", { class: "url" }, el("code", { title: u }, u), copy(u));
@@ -66,10 +66,11 @@
 
   document.querySelector("#grid").replaceChildren(
     box("MCP server", "Streamable HTTP with JSON answers, no session. Tools: search_apps, get_app, list_tags, list_capabilities. Read-only.", mcp),
-    box("llms.txt", "What the catalog is, where its data lives, and one line per app, as Markdown.", site + "/catalog/llms.txt"),
-    box("search-index.json", `One flat record per app (${catalog.count}), with a lower-case text field to match against.`, site + "/catalog/data/search-index.json"),
-    box("catalog.json", "Everything the views read: items with covers, previews, attachments and release history.", site + "/catalog/data/catalog.json"),
-    box("feed.xml", "Atom, one entry per release, newest first.", site + "/catalog/data/feed.xml"));
+    box("llms.txt", "What the catalog is, where its data lives, and one line per app, as Markdown.", api + "/llms.txt"),
+    box("Search", "GET with q (every word), tag, cap, free, sort (new, old, title, size), limit and offset; JSON.", api + "/apps?q=shader"),
+    box("search-index.json", `One flat record per app (${catalog.count}), with a lower-case text field to match against.`, api + "/search-index.json"),
+    box("catalog.json", "Everything the views read: items with covers, previews, attachments and release history.", api + "/catalog.json"),
+    box("feed.xml", "Atom, one entry per release, newest first.", api + "/feed.xml"));
 
   const cc = `claude mcp add --transport http slop-catalog ${mcp}`;
   const json = JSON.stringify({ mcpServers: { "slop-catalog": { type: "http", url: mcp } } }, null, 2);

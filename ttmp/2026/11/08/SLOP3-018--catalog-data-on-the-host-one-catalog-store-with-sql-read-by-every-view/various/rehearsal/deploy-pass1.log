@@ -1,0 +1,18 @@
+catalog-data     apps.localhost:18490/catalog/mcp waits until catalog-data has apps
+catalog-data     store.new, files.push (5 changed: actor.js, app.json, catalog.js, mcp.js, sql/001_catalog.sql), grant.set @guest view, mount.set apps.localhost:18490/catalog/api (api policy), configure (origins)
+                 snapshot 1
+catalog          waits until catalog-data has apps
+catalog-list     waits until catalog-data has apps
+catalog-table    waits until catalog-data has apps
+catalog-sheet    waits until catalog-data has apps
+catalog-caps     waits until catalog-data has apps
+catalog-zine     waits until catalog-data has apps
+catalog-timeline waits until catalog-data has apps
+catalog-treemap  waits until catalog-data has apps
+catalog-roulette waits until catalog-data has apps
+catalog-term     waits until catalog-data has apps
+catalog-desktop  waits until catalog-data has apps
+catalog-agents   waits until catalog-data has apps
+catalog-shelf    waits until catalog-data has apps
+catalog-curator  waits until catalog-data has apps
+waiting: apps.localhost:18490/catalog/mcp, catalog, catalog-list, catalog-table, catalog-sheet, catalog-caps, catalog-zine, catalog-timeline, catalog-treemap, catalog-roulette, catalog-term, catalog-desktop, catalog-agents, catalog-shelf, catalog-curator. Import the catalog (SLOP3-018 scripts/01-import-catalog.py), then run this again.

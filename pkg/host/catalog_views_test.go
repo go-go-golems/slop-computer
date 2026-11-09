@@ -5,7 +5,9 @@ package host
 // /catalog/table, /catalog/sheet, /catalog/caps, /catalog/zine,
 // /catalog/timeline, /catalog/treemap, /catalog/roulette, /catalog/term and
 // /catalog/desktop and /catalog/agents (one view each). The most specific mount answers, every page reaches the shared kit
-// and data on the same origin, and no app runtime is involved.
+// and views.json on the same origin, and no app runtime is involved. The
+// catalog itself is catalog-data's (SLOP3-018), on the live host: the
+// static stores hold no copy of it.
 
 import (
 	"strings"
@@ -18,7 +20,6 @@ func TestCatalogViewsOnStaticHost(t *testing.T) {
 	static := h.cfg.Hosts.Static[0]
 	catalog := appDir(t, "catalog")
 	catalog = append(catalog,
-		map[string]any{"path": "data/catalog.json", "text": `{"count":1,"items":[{"id":"weft","title":"Weft"}],"tags":[]}`},
 		map[string]any{"path": "data/views.json", "text": `[{"id":"list","title":"Index","path":"/catalog/list/"}]`})
 	for _, s := range []struct {
 		id, mount string
@@ -44,21 +45,21 @@ func TestCatalogViewsOnStaticHost(t *testing.T) {
 	}
 
 	for path, want := range map[string]string{
-		"/catalog/":                  "One catalog, several ways to look at it.",
-		"/catalog/list/":             "<title>Index — slop catalog</title>",
-		"/catalog/table/":            "<title>Table — slop catalog</title>",
-		"/catalog/sheet/":            "<title>Contact sheet — slop catalog</title>",
-		"/catalog/caps/":             "<title>Capabilities — slop catalog</title>",
-		"/catalog/zine/":             "<title>Zine — slop catalog</title>",
-		"/catalog/timeline/":         "<title>Timeline — slop catalog</title>",
-		"/catalog/treemap/":          "<title>Sizes — slop catalog</title>",
-		"/catalog/roulette/":         "<title>Roulette — slop catalog</title>",
-		"/catalog/term/":             "<title>Terminal — slop catalog</title>",
-		"/catalog/desktop/":          "<title>Desktop — slop catalog</title>",
-		"/catalog/agents/":           "<title>Agents — slop catalog</title>",
-		"/catalog/kit/views.js":      "palette",
-		"/catalog/kit/views.css":     ".cv-viewer",
-		"/catalog/data/catalog.json": `"id":"weft"`,
+		"/catalog/":                "One catalog, several ways to look at it.",
+		"/catalog/list/":           "<title>Index — slop catalog</title>",
+		"/catalog/table/":          "<title>Table — slop catalog</title>",
+		"/catalog/sheet/":          "<title>Contact sheet — slop catalog</title>",
+		"/catalog/caps/":           "<title>Capabilities — slop catalog</title>",
+		"/catalog/zine/":           "<title>Zine — slop catalog</title>",
+		"/catalog/timeline/":       "<title>Timeline — slop catalog</title>",
+		"/catalog/treemap/":        "<title>Sizes — slop catalog</title>",
+		"/catalog/roulette/":       "<title>Roulette — slop catalog</title>",
+		"/catalog/term/":           "<title>Terminal — slop catalog</title>",
+		"/catalog/desktop/":        "<title>Desktop — slop catalog</title>",
+		"/catalog/agents/":         "<title>Agents — slop catalog</title>",
+		"/catalog/kit/views.js":    "palette",
+		"/catalog/kit/views.css":   ".cv-viewer",
+		"/catalog/data/views.json": `"id":"list"`,
 	} {
 		r, body := h.get(static, path)
 		if r.StatusCode != 200 || !strings.Contains(body, want) {
@@ -74,6 +75,16 @@ func TestCatalogViewsOnStaticHost(t *testing.T) {
 		"/catalog/timeline/", "/catalog/treemap/", "/catalog/roulette/", "/catalog/term/", "/catalog/desktop/", "/catalog/agents/"} {
 		if _, body := h.get(static, path); !strings.Contains(body, `src="/catalog/kit/views.js"`) {
 			t.Errorf("%s does not load the kit", path)
+		}
+	}
+	// The kit and the links read the catalog from catalog-data's routes.
+	for path, want := range map[string]string{
+		"/catalog/kit/views.js": `fetch(API + "/catalog.json")`,
+		"/catalog/timeline/":    `href="https://apps.slop.yolo.scapegoat.dev/catalog/api/feed.xml"`,
+		"/catalog/agents/":      `href="https://apps.slop.yolo.scapegoat.dev/catalog/api/llms.txt"`,
+	} {
+		if _, body := h.get(static, path); !strings.Contains(body, want) {
+			t.Errorf("%s: no %s", path, want)
 		}
 	}
 	// A mount root without its slash goes to the slash (relative URLs).

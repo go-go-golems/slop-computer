@@ -11,6 +11,10 @@ DocType: design-doc
 Intent: long-term
 Owners: []
 RelatedFiles:
+    - Path: abs:///home/manuel/workspaces/2026-10-28/slop-computer/slop-computer/apps/catalog-data/actor.js
+      Note: 'As built: the catalog''s tables, admin writes, public routes, MCP'
+    - Path: abs:///home/manuel/workspaces/2026-10-28/slop-computer/slop-computer/apps/catalog-data/catalog.js
+      Note: Item validation; feed, llms.txt and search index builders
     - Path: abs:///home/manuel/workspaces/2026-10-28/slop-computer/slop-computer/apps/catalog-mcp/actor.js
       Note: 'Today''s MCP actor: express routes over a bundled catalog.json copy'
     - Path: abs:///home/manuel/workspaces/2026-10-28/slop-computer/slop-computer/pkg/actor/modules.go
@@ -21,6 +25,10 @@ RelatedFiles:
       Note: 'platformOps: stores.create, mounts.set and grants.set only (no reads)'
     - Path: abs:///home/manuel/workspaces/2026-10-28/slop-computer/slop-computer/pkg/store/sqlpolicy.go
       Note: Migrations may create FTS5 tables
+    - Path: abs:///home/manuel/workspaces/2026-10-28/slop-computer/slop-computer/ttmp/2026/11/06/SLOP3-015--catalog-views-one-catalog-of-the-francois-apps-several-switchable-interfaces-on-the-static-host-index-viewer-table/scripts/02-deploy.py
+      Note: 'The deploy: catalog-data first, readers wait for data'
+    - Path: abs:///home/manuel/workspaces/2026-10-28/slop-computer/slop-computer/ttmp/2026/11/08/SLOP3-018--catalog-data-on-the-host-one-catalog-store-with-sql-read-by-every-view/scripts/01-import-catalog.py
+      Note: 'The import: backfill or built from the host'
 ExternalSources: []
 Summary: The francois catalog moves from a JSON file, built on a laptop and uploaded into four stores, to SQL tables in the catalog store. The release importer pushes into them, and every view reads them over HTTP or through a store binding.
 LastUpdated: 2026-11-08T21:05:00-05:00
@@ -40,6 +48,18 @@ This design moves the data onto the host. The `catalog` store gets an actor with
 - the Curator's actor reads through a store binding.
 
 After this, the deploy ships only code, nothing has to be built on a laptop, and the data is as fresh as the last release.
+
+## As built (2026-11-09)
+
+Phase 0 changed three things; the rest is as designed below. Diary steps 2–5 have the evidence.
+
+- **The store is `catalog-data`, not `catalog`.** `checkMount` refuses a store with an actor on the static host, so the data lives in a new live store, `apps/catalog-data` (it replaced `apps/catalog-mcp`). `catalog` stays pages only.
+- **Search is `instr()` on a lower-case column, not FTS5.** The server's SQLite is built without FTS5: go-sqlite3 needs `-tags sqlite_fts5`, and no build passes it. The views' and the old MCP's semantics, every word a substring, is what `instr()` gives.
+- **Shelf and Curator pages read through their actors.** Live pages run on per-store sandbox origins, which `catalog-data`'s routes do not serve. Each store's actor has a `catalog` action, which calls `catalog-data`'s through the binding `catalog` (and a view grant to `store:<store>`). The Shelf gained a one-action actor.
+
+Also:
+- **`catalog-data` has two mounts on the live host.** `/catalog/api` serves every route (the first mount must allow them all: a route-policy failure is cached until the next push). `/catalog/mcp` serves MCP's two routes, at SLOP3-015's URL.
+- **The deploy (`SLOP3-015 scripts/02-deploy.py`) goes `catalog-data` first.** Every reader waits until it has apps, so a first deploy is: deploy, import (`scripts/01-import-catalog.py`), deploy again.
 
 ## Problem Statement
 
@@ -171,8 +191,8 @@ The `catalog` store's pages stay on the static host at `/catalog`. Its actor's r
 
 ## Open Questions
 
-1. Can one store be mounted on both the static and the live host? (Phase 0. If not, use `catalog-data`.)
-2. Does `views.json` (the list of views) move into SQL as well, or stay a file in `catalog`? It is code-like (it changes with the views), so the proposal keeps it a file.
+1. Can one store be mounted on both the static and the live host? **No** (`checkMount`): `catalog-data` it is.
+2. Does `views.json` (the list of views) move into SQL as well, or stay a file in `catalog`? **It stays a file**, which the deploy writes from its own list.
 3. Should `upsertApp` also accept a release store id and read `francois.json` itself, through a binding the importer sets for that one store? (A later convenience. Not needed for push.)
 
 ## References

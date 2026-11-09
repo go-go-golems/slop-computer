@@ -122,13 +122,16 @@
   }
   const initials = (t) => (t || "").replace(/[^\p{L}\p{N} ]/gu, "").split(/\s+/).filter(Boolean).slice(0, 2).map((w) => w[0].toUpperCase()).join("") || "·";
 
-  const catalog = await fetch("data/catalog.json").then((r) => r.json());
+  const [db, user, room, slop] = await Promise.all(["db", "user", "room", "slop"].map((n) => claude.use(n).catch(() => null)));
+  // The catalog is catalog-data's, through this store's actor (SLOP3-018).
+  // Without slop's runtime (the local preview) it is the file next to the page.
+  const catalog = slop && slop.actions && slop.actions.catalog ? await slop.actions.catalog({})
+    : await fetch("data/catalog.json").then((r) => r.json());
   const site = catalog.siteOrigin || "https://site.slop.yolo.scapegoat.dev";
   $("back").href = site + "/catalog/";
   const byId = new Map(catalog.items.map((i) => [i.id, i]));
   const thumb = (i, cls) => el("div", { class: "thumb " + (cls || "") }, i.cover ? el("img", { src: site + i.cover.src, alt: "", loading: "lazy" }) : initials(i.title));
 
-  const [db, user, room, slop] = await Promise.all(["db", "user", "room", "slop"].map((n) => claude.use(n).catch(() => null)));
   const me = user ? await user.me() : null;
   // A shelf needs an id and at least interact (members, by this store's
   // grants). Guests have an id on slop but only view: they are offered
