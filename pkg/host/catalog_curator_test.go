@@ -4,6 +4,10 @@ package host
 // day, as the member who calls it (their allowance pays), and keeps the
 // picks in picks/<day> for everyone; an unusable answer falls back to
 // picks seeded by the date. Guests cannot trigger the call.
+//
+// SLOP3-018: the catalog is catalog-data's, read through a binding and a
+// grant to store:catalog-curator; the page gets it from the "catalog"
+// action, guests included.
 
 import (
 	"strings"
@@ -16,10 +20,13 @@ func TestCatalogCuratorApp(t *testing.T) {
 	h := newHarness(t)
 	h.a.SetLLM(&llm.Fake{})
 	admin := h.tokenFor("admin@example.com", "read", "write", "admin")
-	live := h.cfg.Hosts.Live[0]
-	fs := append(appDir(t, "catalog-curator"), map[string]any{"path": "data/catalog.json", "text": catalogFixture})
+	live := deployCatalogData(t, h, admin)
 	h.call(admin, "store.new", map[string]any{"id": "catalog-curator"})
-	h.call(admin, "files.push", map[string]any{"store": "catalog-curator", "files": fs})
+	h.call(admin, "files.push", map[string]any{"store": "catalog-curator", "files": appDir(t, "catalog-curator")})
+	h.call(admin, "bind.set", map[string]any{"store": "catalog-curator", "alias": "catalog", "target": "catalog-data"})
+	// Without the grant to store:catalog-curator, the binding reads nothing.
+	h.fail(admin, "actor.call", map[string]any{"store": "catalog-curator", "action": "catalog"}, "permission_denied")
+	h.call(admin, "grant.set", map[string]any{"store": "catalog-data", "subject": "store:catalog-curator", "level": "view"})
 	if st := h.call(admin, "app.status", map[string]any{"store": "catalog-curator"}).(map[string]any); st["broken"] != "" {
 		t.Fatalf("status = %v", st)
 	}
@@ -55,9 +62,12 @@ func TestCatalogCuratorApp(t *testing.T) {
 	if again := call(s, v)["result"].(map[string]any); again["at"] != res["at"] {
 		t.Fatalf("second call made new picks: %v vs %v", again, res)
 	}
-	// A guest reads the picks but cannot run the action.
+	// A guest reads the catalog and the picks, but cannot run "today".
 	g := h.site(live)
 	_, vg := openView(g, live, "/catalog/curator", "")
+	if c := result(t, rpc(g, vg, "slop.call", map[string]any{"action": "catalog", "args": map[string]any{}})); c["count"] != 2.0 {
+		t.Fatalf("guest catalog: %v", c)
+	}
 	if d := result(t, rpc(g, vg, "db.get", map[string]any{"path": "picks/" + day})); d["exists"] != true {
 		t.Fatalf("guest reads picks: %v", d)
 	}

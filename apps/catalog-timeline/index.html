@@ -4,7 +4,7 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width,initial-scale=1">
 <title>Timeline — slop catalog</title>
-<link rel="alternate" type="application/atom+xml" title="slop catalog releases" href="/catalog/data/feed.xml">
+<link rel="alternate" type="application/atom+xml" title="slop catalog releases" href="https://apps.slop.yolo.scapegoat.dev/catalog/api/feed.xml">
 <link rel="stylesheet" href="/catalog/kit/views.css">
 <style>
   .chart { display: flex; align-items: flex-end; gap: 3px; height: 140px; margin: 16px 0 4px; border-bottom: 1px solid var(--ink); }
@@ -39,14 +39,14 @@
   <div class="bar">
     <h1 id="count">Timeline</h1>
     <span class="sp"></span>
-    <a class="cv-btn" href="/catalog/data/feed.xml" type="application/atom+xml">Subscribe · Atom feed</a>
+    <a class="cv-btn" href="https://apps.slop.yolo.scapegoat.dev/catalog/api/feed.xml" type="application/atom+xml">Subscribe · Atom feed</a>
   </div>
   <div class="key"><span><i></i>new app</span><span><i class="up"></i>new version</span></div>
   <div class="chart" id="chart" aria-label="Releases per day"></div>
   <div class="axis" id="axis"></div>
   <section id="days" aria-label="Releases by day"><p class="cv-empty">Loading the catalog…</p></section>
 </main>
-<footer class="cv-foot"><div class="wrap">Release dates and changelogs come from slop.boutique's release history. The <a href="/catalog/data/feed.xml">Atom feed</a> has one entry per release, for any feed reader.</div></footer>
+<footer class="cv-foot"><div class="wrap">Release dates and changelogs come from slop.boutique's release history. The <a href="https://apps.slop.yolo.scapegoat.dev/catalog/api/feed.xml">Atom feed</a> has one entry per release, for any feed reader.</div></footer>
 <script src="/catalog/kit/views.js"></script>
 <script>
 (async () => {

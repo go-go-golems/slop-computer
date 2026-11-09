@@ -10,10 +10,15 @@
 //
 // The header also brings the command palette (⌘K / Ctrl K) to every view.
 //
-// Everything is read from /catalog/data/ on this (static) host.
+// The catalog itself comes from catalog-data's actor on the live host
+// (SLOP3-018), across origins: API is its address. The deploy writes the
+// live host it deploys to in place of slop.yolo's; a page may also name
+// another with <meta name="catalog-api" content="https://…/catalog/api">.
+// The list of views (views.json) is a file of this (static) host.
 (function () {
   "use strict";
   const ROOT = "/catalog/";
+  const API = ((document.querySelector('meta[name="catalog-api"]') || {}).content || "https://apps.slop.yolo.scapegoat.dev/catalog/api").replace(/\/+$/, "");
   let loaded = null;
 
   // el("a", {href: "/", class: "x", onclick: fn}, "text", child, …)
@@ -58,7 +63,7 @@
   async function load() {
     if (!loaded) {
       loaded = Promise.all([
-        fetch(ROOT + "data/catalog.json").then((r) => { if (!r.ok) throw new Error("catalog: " + r.status); return r.json(); }),
+        fetch(API + "/catalog.json").then((r) => { if (!r.ok) throw new Error("catalog: " + r.status); return r.json(); }),
         fetch(ROOT + "data/views.json").then((r) => (r.ok ? r.json() : [])),
       ]).then(([catalog, views]) => ({ catalog, views }));
     }
@@ -504,5 +509,5 @@
     },
   };
 
-  window.SlopCatalog = { load, header, viewer, palette, paged, live, related, previewDoc, DEVICES, fuzzy, el, bytes, date, monogram, matches };
+  window.SlopCatalog = { API, load, header, viewer, palette, paged, live, related, previewDoc, DEVICES, fuzzy, el, bytes, date, monogram, matches };
 })();
