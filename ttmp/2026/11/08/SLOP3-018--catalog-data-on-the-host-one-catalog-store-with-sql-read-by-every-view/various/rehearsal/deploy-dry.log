@@ -1,0 +1,31 @@
+catalog          files.push (7 changed: data/catalog.json, data/feed.xml, data/search-index.json, data/views.json, index.html, kit/views.js…)
+catalog-list     files.push (1 changed: index.html)
+catalog-table    files.push (1 changed: index.html)
+catalog-sheet    files.push (1 changed: index.html)
+catalog-caps     files.push (1 changed: index.html)
+catalog-zine     files.push (1 changed: index.html)
+catalog-timeline files.push (1 changed: index.html)
+catalog-treemap  files.push (1 changed: index.html)
+catalog-roulette files.push (1 changed: index.html)
+catalog-term     files.push (1 changed: index.html)
+catalog-desktop  files.push (1 changed: index.html)
+catalog-agents   files.push (1 changed: index.html)
+catalog-data     store.new, files.push (5 changed: actor.js, app.json, catalog.js, mcp.js, sql/001_catalog.sql), grant.set @guest view, mount.set apps.localhost:18490/catalog/api (api policy), mount.set apps.localhost:18490/catalog/mcp (api policy) (from catalog-mcp), configure (origins)
+catalog-shelf    files.push (4 changed: actor.js, app.json, data/catalog.json, index.html), bind.set catalog → catalog-data, grant.set catalog-data store:catalog-shelf view
+catalog-curator  files.push (3 changed: actor.js, data/catalog.json, index.html), bind.set catalog → catalog-data, grant.set catalog-data store:catalog-curator view
+http://site.localhost:18490/catalog/
+http://site.localhost:18490/catalog/list/
+http://site.localhost:18490/catalog/table/
+http://site.localhost:18490/catalog/sheet/
+http://site.localhost:18490/catalog/caps/
+http://site.localhost:18490/catalog/zine/
+http://site.localhost:18490/catalog/timeline/
+http://site.localhost:18490/catalog/treemap/
+http://site.localhost:18490/catalog/roulette/
+http://site.localhost:18490/catalog/term/
+http://site.localhost:18490/catalog/desktop/
+http://site.localhost:18490/catalog/agents/
+http://apps.localhost:18490/catalog/api
+http://apps.localhost:18490/catalog/mcp
+http://apps.localhost:18490/catalog/shelf
+http://apps.localhost:18490/catalog/curator
