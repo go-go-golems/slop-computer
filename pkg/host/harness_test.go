@@ -52,6 +52,11 @@ func newHarnessWith(t *testing.T, change func(*config.Config)) *harness {
 	if change != nil {
 		change(cfg)
 	}
+	// SLOP_TEST_ACTORS_RUNTIME=direct runs the suite's actors on the bare
+	// goja runtime, the way back while it is kept (SLOP3-016 design doc 02).
+	if r := os.Getenv("SLOP_TEST_ACTORS_RUNTIME"); r != "" && cfg.Actors.Runtime == "" {
+		cfg.Actors.Runtime = r
+	}
 	cfg.Defaults()
 	sys, err := sysdb.Open(context.Background(), filepath.Join(cfg.Data, "system.db"))
 	if err != nil {

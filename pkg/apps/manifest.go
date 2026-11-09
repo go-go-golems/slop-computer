@@ -7,6 +7,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"path"
+	"regexp"
 	"strings"
 
 	"github.com/go-go-golems/slop-computer/pkg/rt"
@@ -34,12 +35,24 @@ type Slop struct {
 	Secrets  []string        `json:"secrets,omitempty"`  // secret names the actor may read
 	Platform []string        `json:"platform,omitempty"` // stores.create, mounts.set, grants.set
 	Modules  []string        `json:"modules,omitempty"`  // Go modules the actor uses once an admin trusts the app with them
+	Verbs    *Verbs          `json:"verbs,omitempty"`    // command-line verbs (SLOP3-016)
+}
+
+// Verbs declares an app's command-line verbs: JavaScript files in its tree,
+// scanned by the CLI with go-go-goja's jsverbs and run as the person, on one
+// store that runs the app (slop on <store> …, slop <alias> <store> …).
+type Verbs struct {
+	Alias   string   `json:"alias,omitempty"` // a short command: slop <alias> <store> …
+	Include []string `json:"include"`         // globs of the verb files and the files they require
+	Title   string   `json:"title,omitempty"` // a document whose "title" field names a store (board/meta)
 }
 
 // Read is one read alias: the store type it expects.
 type Read struct {
 	Type string `json:"type"`
 }
+
+var aliasRe = regexp.MustCompile(`^[a-z][a-z0-9-]{0,15}$`)
 
 // Platform capabilities an app may ask for.
 var Platform = map[string]bool{"stores.create": true, "mounts.set": true, "grants.set": true}
@@ -72,6 +85,22 @@ func Parse(raw []byte) (*Manifest, error) {
 	for _, name := range m.Slop.Modules {
 		if !Modules[name] {
 			return nil, fmt.Errorf("app.json: slop.modules: unknown %q", name)
+		}
+	}
+	if v := m.Slop.Verbs; v != nil {
+		if v.Alias != "" && !aliasRe.MatchString(v.Alias) {
+			return nil, fmt.Errorf("app.json: slop.verbs.alias: a lowercase word of at most 16 letters, digits or -")
+		}
+		if len(v.Include) == 0 || len(v.Include) > 16 {
+			return nil, fmt.Errorf("app.json: slop.verbs.include: 1 to 16 globs")
+		}
+		for _, g := range v.Include {
+			if g == "" || strings.HasPrefix(g, "/") || strings.Contains(g, "..") {
+				return nil, fmt.Errorf("app.json: slop.verbs.include: %q is not a relative glob in the tree", g)
+			}
+		}
+		if v.Title != "" && !rt.ValidDocPath(v.Title) {
+			return nil, fmt.Errorf("app.json: slop.verbs.title: %q is not a document path", v.Title)
 		}
 	}
 	for alias, r := range m.Slop.Reads {

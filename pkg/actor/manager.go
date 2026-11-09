@@ -44,20 +44,62 @@ type Manager struct {
 
 	// Hooks provided by the host.
 	Policy func(app, capability, audience string) bool
-	LLM    llm.Backend // the sample backend (nil: no LLM)
 	Secret func(ctx context.Context, app, name string) (string, error)
 	Paths  Paths                                                       // the db paths outside the store (aliases, _stores); nil: the store's own only
 	Grant  func(ctx context.Context, app, module string) (Grant, bool) // app.trust: an app's grant of a catalog module
+	// Around, when set, wraps every entry into an actor's VM (op is
+	// "load", "setup" or "turn <kind>"); run does the work and must be
+	// called once. For tests and measurements; set it before actors start.
+	Around func(op string, run func() error) error
+	// TurnLimit, when set, replaces the package's TurnLimit for this
+	// manager's actors (tests: the package variable is read by every
+	// running actor, so changing it races). Set it before actors start.
+	TurnLimit time.Duration
+	// Runtime is what actors run on: RuntimeEngine ("" too) or
+	// RuntimeDirect (slop.yaml actors.runtime). Set it before actors start.
+	Runtime string
+
+	engines engineFactory // the engine runtimes' factory, built on first use
+
+	llmMu sync.RWMutex
+	llmB  llm.Backend // the sample backend (SetLLM, LLM)
 
 	provided map[string]func(*Actor) goja.Value // the door's capability bindings (Provide)
 	modules  map[string]Module                  // the catalog (Register; catalog.go)
 	calls    meters                             // module calls (catalog.go)
 }
 
+// SetLLM sets the sample backend (nil: no LLM). The host sets it while it
+// is built, when actors may already run (the system follower starts them),
+// so it is read under a lock.
+func (m *Manager) SetLLM(b llm.Backend) {
+	m.llmMu.Lock()
+	defer m.llmMu.Unlock()
+	m.llmB = b
+}
+
+// LLM is the sample backend, nil without one.
+func (m *Manager) LLM() llm.Backend {
+	m.llmMu.RLock()
+	defer m.llmMu.RUnlock()
+	return m.llmB
+}
+
+// turnLimit is how long one entry's JavaScript may run.
+func (m *Manager) turnLimit() time.Duration {
+	if m.TurnLimit > 0 {
+		return m.TurnLimit
+	}
+	return TurnLimit
+}
+
 // New makes the actor manager and hooks it into the kernel (activation,
 // commits for reactors).
 func New(k *kernel.Kernel) *Manager {
 	m := &Manager{K: k, actors: map[string]*Actor{}, inboxes: map[string]*inbox{}, broken: map[string]string{}, files: map[string]map[string][]byte{}, logs: map[string][]LogLine{}}
+	if k.Cfg != nil {
+		m.Runtime = k.Cfg.Actors.Runtime
+	}
 	k.Activate = m.activate
 	k.OnActivated = m.onActivated
 	k.Subscribe(m.onCommit)
@@ -189,6 +231,7 @@ func (m *Manager) get(ctx context.Context, id string) (*Actor, bool, error) {
 	m.mu.Lock()
 	if m.gen != gen {
 		m.mu.Unlock()
+		a.release()
 		return nil, true, nil // a restart happened during the build
 	}
 	if err != nil {
@@ -199,6 +242,7 @@ func (m *Manager) get(ctx context.Context, id string) (*Actor, bool, error) {
 	if old := m.actors[id]; old != nil {
 		if old.key == key {
 			m.mu.Unlock()
+			a.release()
 			return old, false, nil // someone else built it meanwhile
 		}
 		close(old.stop)
@@ -288,11 +332,22 @@ func (m *Manager) Broken(id string) string {
 	return m.broken[id]
 }
 
+// onActivated stops the store's actor of an older version; the next event
+// builds the new one. builds in flight are discarded (gen): they may have
+// read the version before the activation committed.
+//
+// An actor of the version just activated stays. get sees a version only once
+// its activation has committed, so such an actor was built after it: a
+// request that waited on the activating turn ("another request activated it
+// first") can build and install it before the activating goroutine gets
+// here. Stopping it would restart it for nothing and forget its recent
+// crashes.
 func (m *Manager) onActivated(id string, r kernel.Running) {
+	key := r.App + "@" + strconv.FormatInt(r.N, 10)
 	m.mu.Lock()
 	m.gen++
 	delete(m.broken, id)
-	if a := m.actors[id]; a != nil {
+	if a := m.actors[id]; a != nil && a.key != key {
 		delete(m.actors, id)
 		close(a.stop)
 	}
@@ -403,10 +458,19 @@ func (m *Manager) activate(ctx context.Context, t *store.Turn, r kernel.Running)
 	if err != nil {
 		return err
 	}
+	// This actor only runs setup: the store's actor is built on first use.
+	defer a.release()
+	return a.enter(ctx, "setup", func(*goja.Runtime) error { return m.setup(ctx, t, a) })
+}
+
+// setup runs setup and smoke inside the activation turn, then records the
+// version's recurring alarms and its reactors' cursors.
+func (m *Manager) setup(ctx context.Context, t *store.Turn, a *Actor) error {
+	st := a.st
 	for _, name := range a.undeclared {
 		a.log("warn", fmt.Sprintf("action %s declares no requires; callers need admin", name))
 	}
-	ev := &event{kind: "setup", visitor: m.storeVisitor(ctx, r.Store), via: "activate"}
+	ev := &event{kind: "setup", visitor: m.storeVisitor(ctx, st.ID), via: "activate"}
 	a.cur = &turn{t: t, ev: ev, rev: t.Rev - 1}
 	defer func() { a.cur = nil }()
 	defer a.dropSavepoints() // after a failed hook; closeSavepoints ran otherwise
@@ -417,10 +481,12 @@ func (m *Manager) activate(ctx context.Context, t *store.Turn, r kernel.Running)
 		if f == nil {
 			continue
 		}
-		timer := time.AfterFunc(TurnLimit, func() { a.vm.Interrupt(name + " took too long") })
-		v, err := f(goja.Undefined(), cx)
-		timer.Stop()
-		a.vm.ClearInterrupt()
+		var v goja.Value
+		err := a.limited(name+" took too long", func() error {
+			var err error
+			v, err = f(goja.Undefined(), cx)
+			return err
+		})
 		if err != nil {
 			return fmt.Errorf("%s: %v", name, a.asError(err).Message)
 		}

@@ -1,4 +1,4 @@
-.PHONY: lint fmt-check test build run-local runtime runtime-test admin conformance blocks blocks-push pinup pinup-push deploy-apps
+.PHONY: lint fmt-check test test-engine build run-local runtime runtime-test admin conformance blocks blocks-push pinup pinup-push deploy-apps
 
 SLOP ?= slop
 
@@ -10,6 +10,10 @@ fmt-check:
 
 test:
 	GOWORK=off go test ./...
+
+# The host suite with actors on the go-go-goja engine runtime (SLOP3-016).
+test-engine:
+	GOWORK=off SLOP_TEST_ACTORS_RUNTIME=engine go test ./pkg/host/
 
 # The slop binary (server and CLI). SQLite needs cgo.
 build:

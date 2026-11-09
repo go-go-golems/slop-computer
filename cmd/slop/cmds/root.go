@@ -42,6 +42,7 @@ func Root() *cobra.Command {
 	root.AddCommand(serveCmd(), authCmd(), verbsCmd(), verbCmd())
 	addVerbCommands(root)
 	addExtraCommands(root)
+	addAppCommands(root)
 	return root
 }
 

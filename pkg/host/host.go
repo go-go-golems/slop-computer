@@ -89,7 +89,7 @@ func (s *Server) setupLLM(ctx context.Context) error {
 	case "":
 		return nil
 	case "fake":
-		s.Env.A.LLM = &llm.Fake{}
+		s.Env.A.SetLLM(&llm.Fake{})
 	case "pi":
 		agent := s.Cfg.Pi.AgentDir
 		if agent == "" {
@@ -101,7 +101,7 @@ func (s *Server) setupLLM(ctx context.Context) error {
 			return fmt.Errorf("load Pi's models from %s: %w", agent, err)
 		}
 		log.Printf("Pi models ready (Geppetto): %d", len(b.Models()))
-		s.Env.A.LLM = b
+		s.Env.A.SetLLM(b)
 	default:
 		return fmt.Errorf("unknown llm %q (pi or fake)", s.Cfg.LLM)
 	}

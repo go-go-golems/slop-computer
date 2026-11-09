@@ -308,7 +308,10 @@ export function slop(h: Hello) {
   return freeze({
     actions,
     call,
-    stores: freeze({ open }),
+    // open(alias) reads a store bound to this app; list({type, title?}) lists
+    // the stores of a type the visitor can open (a "my boards" page), with
+    // each one's title read from the document at `title` (e.g. board/meta).
+    stores: freeze({ open, list: async (o: { type: string; title?: string }) => ((await rpc("slop.stores", o ?? {})) as any).stores }),
     visitor: async () => (h.me as Record<string, unknown>).visitor ?? null,
     signIn: () => post({ type: "signin" }),
     subscribeUrl: () => String(cfg.subscribeUrl ?? ""),

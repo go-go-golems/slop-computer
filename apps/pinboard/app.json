@@ -1,0 +1,18 @@
+{
+  "title": "Pinboard",
+  "type": "pinboard",
+  "page": "index.html",
+  "actor": "actor.js",
+  "capabilities": {
+    "db": { "rules": [
+      { "path": "board", "read": "view", "write": "admin" },
+      { "path": "apps", "read": "view", "write": "self" }
+    ] },
+    "user": { "scopes": ["profile"] },
+    "room": {},
+    "assets": {},
+    "downloads": true,
+    "sample": {}
+  },
+  "slop": { "verbs": { "alias": "pb", "include": ["verbs/*.js"], "title": "board/meta" } }
+}
