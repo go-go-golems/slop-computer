@@ -1,0 +1,24 @@
+app: pinboard
+id: pb-smoke-1109
+type: pinboard
+broken: ""
+  board       All commands for board
+  clip        All commands for clip
+  coll        All commands for coll
+--- clip add:
++-----------------+------+
+| clip:83pk335lyf | link |
++-----------------+------+
+--- clip ls:
+| id              | kind | tags | title      | url                 |
++-----------------+------+------+------------+---------------------+
+| clip:83pk335lyf | link |      | smoke test | https://example.com |
++-----------------+------+------+------------+---------------------+
+--- board describe:
+Untitled board  (pb-smoke-1109)
+1 clips · 0 collections · 0 records · 0 apps
+
+  clip:83pk335lyf  link   smoke test--- board log:
++---------------+-----------------------+---------------+------------------------------+--------+
+| 1794203143324 | Manuel Odendahl (cli) | tx:ry8cg85x6q | place clip:83pk335lyf (link) | false  |
++---------------+-----------------------+---------------+------------------------------+--------+

@@ -1,0 +1,27 @@
+server: https://slop.yolo.scapegoat.dev  source: 05961e9 Merge pull request #42 from go-go-golems/task/pinboard-describe-sandbox
+madeBy: usr_d4776d74fc06701c9248f578
+owner: usr_d4776d74fc06701c9248f578
+"n": 1
+removed: 0
+rev: 2
+broken: ""
+capability: sample
+capability: assets
+      capability: assets
+      capability: assets
+      capability: assets
+      capability: assets
+      capability: assets
+      capability: sample
+      capability: sample
+      capability: sample
+assets guest off 
+assets member allowed 
+assets subscriber allowed 
+assets admin allowed 
+assets store off 
+sample guest off 
+sample member allowed 
+sample subscriber off 
+sample admin off 
+sample store off 

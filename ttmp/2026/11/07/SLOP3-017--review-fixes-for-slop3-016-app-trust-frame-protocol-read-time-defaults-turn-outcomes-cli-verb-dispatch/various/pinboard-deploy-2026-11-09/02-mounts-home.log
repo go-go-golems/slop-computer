@@ -1,0 +1,9 @@
+    createApp: pinboard
+    type: pinboard
+url: https://apps.slop.yolo.scapegoat.dev/pb/:id
+owner: usr_d4776d74fc06701c9248f578
+"n": 1
+rev: 2
+via: direct
+url: https://apps.slop.yolo.scapegoat.dev/boards
+broken: ""

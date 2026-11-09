@@ -882,3 +882,71 @@ A spec written on 2026-11-09 (SLOP3-019, later removed as a mistyped request) fo
   page → frame:  {t:'probe', source, S, me}
   frame → page:  {t:'probed', def, describe, describeError}  or  {t:'error', message}
   ```
+
+## Step 16: #42 merged; Pinboard deployed on slop.yolo for the first time
+
+Pinboard had never been on slop.yolo (staging), so step 15's hole was never live there. I merged #42 (`05961e9`) and deployed Pinboard from that commit: the app store, its policy, the board mount and the "my boards" home page. A temporary board answered every CLI verb tried, and I deleted it afterwards. I can't sign in on slop.yolo, so I haven't tried the signed-in browser flow. Only `@admin` has LLM access there, so members can't use the board agent yet.
+
+### Prompt Context
+**User prompts (verbatim):**
+- "s the pinboard deployed?"
+- "ok, merge #42 and deploy"
+
+**Assistant interpretation:** Merge #42 (authorized explicitly for this PR), then put Pinboard on slop.yolo as SLOP3-016's design doc describes it: `/pb/:id` boards created on visit and `/boards` home.
+
+**Inferred user intent:** Have Pinboard, with the sandbox fix, running on staging to try.
+
+**Commit (code):** none; deploy only. Merge commit `05961e9`.
+
+### What I did
+- **Merged:** `gh pr merge 42 --merge` (OPEN, MERGEABLE, CLEAN at `fee411c`) → `05961e9`.
+- **Deployed from a worktree detached at `05961e9`**, with the default login (`https://slop.yolo.scapegoat.dev`) and `SLOP_CREDENTIALS`/`SLOP_SERVER` unset. Logs in `various/pinboard-deploy-2026-11-09/`.
+  - `store new pinboard`; `push apps/pinboard --store pinboard -m "Pinboard from main 05961e9 …"` → rev 2, `broken: ""`.
+  - `policy set pinboard sample @member on` and `policy set pinboard assets @member on`.
+  - `mount set --host apps.slop.yolo.scapegoat.dev --path /pb/:id --storeParam id --type pinboard --createApp pinboard`.
+  - `store new pinboard-home`; `push apps/pinboard-home`; `grant set pinboard-home @member view`; `mount set --host apps.slop.yolo.scapegoat.dev --path /boards --store pinboard-home` → `broken: ""`.
+- **Checked as a guest (curl):** `/boards`, `/pb/new-smoke1` (an unused id) and `/pb/pinboard` all answer 200 with the shell page (`<title>Boards`, `<title>Pinboard`).
+- **Smoke board:** `store new pb-smoke-1109 --app pinboard --type pinboard`, then:
+  - `app status` → `broken: ""`;
+  - `on pb-smoke-1109 --help` lists `board`, `clip`, `coll`;
+  - `clip add --url https://example.com --title "smoke test"` → `clip:83pk335lyf`, and it is in `clip ls`, `board describe` ("1 clips · 0 collections · 0 records · 0 apps") and `board log` ("place clip:83pk335lyf (link)").
+- **Cleanup:** `store rm --id pb-smoke-1109` → `deleted`; `store ls` now shows only `pinboard` and `pinboard-home`.
+- **LLM access:** `llm ls` has one row, `@admin` allowed. I didn't change it.
+
+### Why
+- **`sample` on for `@member`:** the board agent samples through the `pinboard` app. `Governance.Policy` (`pkg/policy/policy.go`) allows a capability when any of the audience's groups has it on, so the member cell covers subscribers and admins too. The policy listing still prints their own cells as "off".
+- **`assets` on for `@member`:** members already have it by default (`DefaultPolicy`). Setting it writes the row explicitly.
+- **A CLI smoke board:** the browser flow needs an OIDC sign-in I don't have on slop.yolo. The CLI verbs run the same actor, so they show the store type, the app binding and the actor all working.
+
+### What worked
+- All of it, on the first try (logs 01–05).
+
+### What didn't work
+- N/A. The one detour was `store rm`'s argument: it is `--id`, which I checked with `--help` first.
+
+### What I learned
+- **slop.yolo's LLM table has only `@admin`.** On staging, the board agent works only for admins until someone runs `llm set @member on --budget …`.
+- **`createApp` mounts serve the shell for an unused id to guests too.** The "Create a new one" offer is for signed-in members; a guest only sees the shell.
+
+### What was tricky to build
+- N/A: no code. The order mattered only so that the mount's `--createApp pinboard` names an app store that already has a release.
+
+### What warrants a second pair of eyes
+- **The policy rows**, `sample` and `assets` for `@member` on `pinboard`, are what make the agent and image clips reach members. Check that this is the audience wanted for staging.
+- **`pinboard-home` is visible to `@member`.** Guests get the shell at `/boards` but no list.
+
+### What should be done in the future
+- **The user's call:** whether to give `@member` LLM access with a budget on slop.yolo.
+- **The user's check:** sign in at `/boards`; create a board; add a clip; open the App editor; check that Describe IR and Register work through the probe frame; try the agent (as an admin).
+- **The image build:** `publish-image` on `05961e9` was still running at the time of writing. #42 changed only app JS, which reaches the server by `push`, not through the image, so any GitOps PR it opens carries nothing Pinboard needs.
+
+### Code review instructions
+- No code changed. To re-check the deploy, read the logs in `various/pinboard-deploy-2026-11-09/`, then run `slop app status pinboard`, `slop app status pinboard-home` and `curl -s -o /dev/null -w '%{http_code}' https://apps.slop.yolo.scapegoat.dev/boards`.
+
+### Technical details
+- **What's on slop.yolo:**
+  ```
+  store pinboard       app store, rev 2 from 05961e9; policy: sample @member on, assets @member on
+  mount /pb/:id        --storeParam id --type pinboard --createApp pinboard
+  store pinboard-home  rev 2; grant @member view; mount /boards
+  ```

@@ -39,3 +39,7 @@ Codex fourth review of #39: version numbering after unregister fixed (158341f). 
 ## 2026-11-08
 
 Security: Pinboard's editor describes and registers source in a probe frame, never in the page; evalSource runs built-in apps only (183217e, diary step 15)
+
+## 2026-11-09
+
+#42 merged (05961e9). Pinboard deployed on slop.yolo for the first time: the pinboard store (sample and assets on for @member), the /pb/:id createApp mount, and pinboard-home at /boards; a CLI smoke board passed and was removed (diary step 16, logs in various/pinboard-deploy-2026-11-09/)

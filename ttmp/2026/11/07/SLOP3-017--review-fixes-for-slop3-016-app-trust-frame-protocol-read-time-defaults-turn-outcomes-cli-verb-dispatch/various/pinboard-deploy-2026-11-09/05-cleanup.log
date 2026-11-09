@@ -1,0 +1,5 @@
+--- store rm pb-smoke-1109
+deleted: pb-smoke-1109
+--- store ls (pinboard stores)
+  id: pinboard
+  id: pinboard-home
