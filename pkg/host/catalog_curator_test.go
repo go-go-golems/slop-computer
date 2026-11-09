@@ -14,7 +14,7 @@ import (
 
 func TestCatalogCuratorApp(t *testing.T) {
 	h := newHarness(t)
-	h.a.LLM = &llm.Fake{}
+	h.a.SetLLM(&llm.Fake{})
 	admin := h.tokenFor("admin@example.com", "read", "write", "admin")
 	live := h.cfg.Hosts.Live[0]
 	fs := append(appDir(t, "catalog-curator"), map[string]any{"path": "data/catalog.json", "text": mcpCatalog})
