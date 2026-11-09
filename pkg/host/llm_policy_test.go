@@ -37,7 +37,7 @@ defineActor({
 // interact with it.
 func aiApp(t *testing.T, h *harness, admin string) {
 	t.Helper()
-	h.a.LLM = &llm.Fake{}
+	h.a.SetLLM(&llm.Fake{})
 	h.call(admin, "store.new", map[string]any{"id": "ai"})
 	h.call(admin, "files.push", map[string]any{"store": "ai", "files": files(map[string]string{
 		"app.json":   `{"title":"AI","actor":"actor.js","capabilities":{"sample":{},"db":{}},"slop":{"secrets":["TOKEN"],"platform":["stores.create"]}}`,

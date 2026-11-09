@@ -21,7 +21,7 @@ const SampleTimeout = 3 * time.Minute
 // sampler is the sample capability (pkg/caps/sample) on the manager's
 // backend, read per call: the host sets the backend after it is built.
 func (s *Door) sampler(m *actor.Manager) *capsample.Sampler {
-	return &capsample.Sampler{Ledger: s.Ledger, Backend: m.LLM}
+	return &capsample.Sampler{Ledger: s.Ledger, Backend: m.LLM()}
 }
 
 // sampleFail is a capability refusal as an actor error; a backend failure

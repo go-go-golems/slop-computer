@@ -22,7 +22,7 @@ func (t hostTransport) RoundTrip(r *http.Request) (*http.Response, error) {
 // without LLM access, and streamed to a client that accepts it.
 func TestSampleRunVerb(t *testing.T) {
 	h := newHarness(t)
-	h.a.LLM = &llm.Fake{}
+	h.a.SetLLM(&llm.Fake{})
 	admin := h.tokenFor("admin@example.com", "read", "write", "admin")
 	mia := h.tokenFor("mia@example.com")
 	c := &client.Client{Server: h.ts.URL, Token: admin, HTTP: &http.Client{Transport: hostTransport{h.cfg.Hosts.Main}}}
