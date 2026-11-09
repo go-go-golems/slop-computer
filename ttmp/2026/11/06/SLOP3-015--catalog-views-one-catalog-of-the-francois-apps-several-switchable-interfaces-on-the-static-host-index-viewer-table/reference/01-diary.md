@@ -706,3 +706,62 @@ The user found the views "a bit ugly and slopvibe": cards, pills, soft shadows a
 - **Boutique CTA:** `#cee5ff`; `#2b4a6b` in dark.
 - **Fonts:** IBM Plex Mono latin 400 (14 812 B) and 500 (14 988 B), from @fontsource 5.2.5 via the Form Skate stage system, OFL 1.1.
 - **Font stack on this machine:** Helvetica Neue resolves to Noto Sans and Arial to Arimo.
+
+## Step 9: Codex's review of #35's head: a retry loop on the sheet, a null pick in Roulette
+
+The user asked for a Codex review of the whole of #35. Codex reviewed `ea52ff2` and found two P2 problems, both in views from step 5. Both reproduced in the browser on the old code and are fixed.
+
+### Prompt Context
+**User prompt (verbatim):** "2. yes / 1. how? what needs merge first?" (2: a Codex review of #35; 1: how the deploy works and the merge order)
+**Assistant interpretation:** Request the review, assess and fix what it finds, and explain the deploy and the order of #40 and #35 without deploying.
+**Inferred user intent:** Get #35 reviewed and clean before it is deployed and merged.
+**Commit (code):** `3ac9e17`, "Catalog: a failed sheet preview leaves the schedule; Roulette's Another without a match (Codex on #35)".
+
+### What I did
+- Commented `@codex review` on #35. The review completed on `ea52ff2` with two findings:
+  - `catalog-sheet/index.html:118`: failed previews are retried in the scheduling loop;
+  - `catalog-roulette/index.html:85`: Another with an empty replacement pool.
+- **Sheet:**
+  - On a failed `previewDoc`, `start()` sets `t.failed`.
+  - `schedule()` leaves out failed tiles.
+  - The badge reads "no preview" (`.badge.fail`, red: trouble).
+  - `build()` makes new tiles, so a new page or search tries again.
+- **Roulette:**
+  - `set()` returns false and changes nothing without an item.
+  - Another reads "No other match" and is disabled. A `catalog:search` event re-enables every `[data-another]` button.
+  - Kit: `.cv-btn:disabled`.
+- **Reproduction:** a catalog copy whose first item's preview points at `/_s/no-such-store-xyz/…`. The dev server served it from the fixed tree (port 18472) and from a detached checkout of `ea52ff2` (port 18473).
+
+### Why
+- **No automatic retry:** a failed preview is almost always a missing or broken store, which retrying will not mend. The cover is still a useful tile.
+- **Keep the picks instead of re-rolling:** the visitor asked for "another" one, and there is none. Saying so is more honest than changing nothing silently.
+
+### What worked
+- **Sheet, old code, 5 s:** 17 console errors from repeated fetches of the failing preview; status "0 running".
+- **Sheet, fixed code, 8 s:** one fetch; status "4 running"; the badge reads "no preview".
+  - The other 404s on that page are one app's own sub-files (`beton-brut-studio/main/*.js`) inside its sandboxed preview, not the scheduler's.
+- **Roulette, old code** (`?q=Takt&a=takt&b=takt-workbench`, Another): `TypeError: Cannot read properties of null (reading 'preview')`, both previews stopped, `a` dropped from the address.
+- **Roulette, fixed code:** no error; the picks and both previews stay; the button reads "No other match" and is disabled. Clearing the search re-enables it.
+
+### What didn't work
+- My first Roulette check used `q=Takt` in One mode. "Takt" matches two apps, so Another found the second. Two mode with both picks shown exhausts the pool.
+- My first fixed-code check read the button only after clearing the search, which re-enables it. Re-checked right after the click.
+
+### What I learned
+- `previewDoc` removes rejected fetches from its cache, so the cache never stopped a retry. The schedule had to remember the failure itself.
+
+### What was tricky to build
+- Nothing beyond the reproductions.
+
+### What warrants a second pair of eyes
+- A tile that failed because of a transient network error stays a cover until the sheet is rebuilt. That is acceptable for a contact sheet.
+
+### What should be done in the future
+- After #40 merges: merge main into #35 and change `catalog_curator_test.go`'s `h.a.LLM =` to `h.a.SetLLM(…)`.
+- Deploy with `02-deploy.py` after the user approves (dry run, then `--apply`).
+
+### Code review instructions
+- `git show 3ac9e17`: `catalog-sheet/index.html` (`start`, `schedule`, `badge`) and `catalog-roulette/index.html` (`set`, `card`, the search listener).
+
+### Technical details
+- The review state comes from the bot's issue comment: `codex-review-state:v1 {"code_review":{"commit_sha":"ea52ff2…","status":"completed"}}`. The threads were answered at r4508423929 and r4508423933.
