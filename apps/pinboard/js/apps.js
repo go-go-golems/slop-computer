@@ -29,10 +29,14 @@
   const A = PB.apps = {
     _capture: null,
     // App source is evaluated with the grammar and the board API. Built-in
-    // apps run in this page. Every other app runs in a sandboxed frame of its
-    // own (frames.js, frame.js) and its source is never evaluated here, except
-    // by registerSource, which checks what the person registering wrote.
+    // apps (the sources shipped in this file, SRC) run in this page, and only
+    // they: every other source runs in a sandboxed frame (frames.js,
+    // frame.js), as an app window or as a probe (describeSource,
+    // registerSource). Code from new Function runs with the page's authority
+    // whatever its arguments (window.PB, window.claude), so "narrow" here
+    // would not be a boundary: a source that is not built in is refused.
     evalSource(src, opts = {}) {
+      if (!Object.values(SRC).includes(src)) throw new Error('only built-in apps run in this page; this source runs in a frame of its own');
       const cap = []; const prev = A._capture; A._capture = cap;
       try {
         const fn = new Function('ui', 'app', 'db', 'fragment', 'board', 'PB', 'helpers', '"use strict";\n' + src + '\n');
@@ -47,10 +51,13 @@
     // board, the actor writes them (registerApp): pages cannot write apps/,
     // so the author (uid) and the hash in a record are the actor's, not a
     // page's claim. Offline, this page is the board and writes them itself.
-    // The source is evaluated here only to read what the page needs without
-    // running the app (it runs in a frame): name, size, params, initial state.
+    // What the page needs to know without running the app (name, size,
+    // params, initial state) comes from a probe frame, never from evaluating
+    // the source here: the editor's source is shared window state, so the
+    // person pressing Register may not be the one who wrote it.
     async registerSource(src, extra = {}) {
-      const def = A.evalSource(src, { narrow: true });
+      const def = (await PB.frames.probe(src)).def;
+      if (!def.name || typeof def.name !== 'string') throw new Error('the source registers an app without a name');
       delete defs[def.name];
       const data = (v) => JSON.parse(JSON.stringify(v === undefined ? null : v));
       const meta = { name: def.name, icon: def.icon || '△', title: def.title || def.name, about: def.about || '', shortcut: def.shortcut || '', hidden: !!def.hidden, order: def.order,
@@ -64,6 +71,12 @@
       }
       // Not kept: the app runs from its record, in a frame (A.def).
       delete defs[def.name]; return def;
+    },
+    // The editor's Describe IR: the source's view as YAML, from a probe frame.
+    async describeSource(src) {
+      const r = await PB.frames.probe(src);
+      if (r.describeError) throw new Error('describe: ' + r.describeError);
+      return r.describe == null ? 'no view' : r.describe;
     },
     // Built-in apps, and apps this person registered, run without asking;
     // any other app runs only after this person accepted that exact source.
@@ -217,7 +230,7 @@
     "    ui.text(c => c.state.name ? 'editing ' + c.state.name : 'new app').bold(),",
     "    ui.spacer(),",
     "    ui.button('Reference').small().on('click', (ev, c) => c.board.open('reference')),",
-    "    ui.button('Describe IR').small().on('click', (ev, c) => { try { const d = c.apps.evalSource(c.state.src); c.set('ok', (d.view ? d.view.describe() : 'no view').slice(0, 4000)); c.set('err', ''); } catch (e) { c.set('err', e.message); } }),",
+    "    ui.button('Describe IR').small().on('click', (ev, c) => c.apps.describeSource(c.state.src).then(d => c.set({ ok: d.slice(0, 4000), err: '' }), e => c.set({ err: e.message, ok: '' }))),",
     "    ui.button('Register · ⌘↩').primary().on('click', (ev, c) => c.apps.registerFromEditor(c)),",
     "  ).gap(8).align('center'))",
     "  .view(ui.stack(",

@@ -13,7 +13,14 @@
      drop {x, y, item: a board drag released over this frame}
    frame → page: meta {def}, error {message}, set {patch}, param {name, value},
      mutate {seq, ops: steps of data, see steps.js}, toast {msg}, open {name, opts},
-     blob {ref}, dropped {ok} */
+     blob {ref}, dropped {ok}
+
+   A probe frame (frames.probe) gets one message instead of init:
+   page → frame: probe {source, S, me}
+   frame → page: probed {def: what the source registers, describe: its view as
+     YAML, describeError}, or error {message}; then the page removes the frame.
+   The editor describes and registers any source this way, so a source the
+   viewer did not write never runs in the page. */
 (function () {
   'use strict';
   const PB = window.PB = { S: { clips: {}, apps: {}, collections: {}, records: {}, meta: {} }, local: {}, log: [], track: null };
@@ -108,6 +115,20 @@
   }
   const meta = (d) => plain({ title: d.title, icon: d.icon, about: d.about, w: d.w, h: d.h, state: d.state || {},
     params: (d.params || []).map(p => ({ name: p.name, type: p.type, def: p.def, options: p.options, min: p.min, max: p.max, step: p.step })) });
+  // What registering needs to know of a source: its name and how to list it.
+  const registers = (d) => Object.assign(meta(d), plain({ name: d.name, shortcut: d.shortcut || '', hidden: !!d.hidden, order: d.order }));
+
+  // probe: evaluate a source once and report it; nothing is drawn, and the
+  // page applies nothing this frame sends but the answer (a schema declared
+  // in the source sends a mutate, which the probe's page side ignores).
+  function probe(m) {
+    me = m.me || me; adopt(m);
+    let d;
+    try { d = evaluate(String(m.source || '')); } catch (e) { send({ t: 'error', message: String(e && e.message || e) }); return; }
+    let describe = null, describeError = '';
+    try { describe = d.view && typeof d.view.describe === 'function' ? String(d.view.describe()).slice(0, 20000) : null; } catch (e) { describeError = String(e && e.message || e); }
+    send({ t: 'probed', def: registers(d), describe, describeError });
+  }
 
   let queued = false;
   function redraw() { if (queued) return; queued = true; requestAnimationFrame(() => { queued = false; draw(); }); }
@@ -135,10 +156,11 @@
 
   // The page hands over a port in its first message; nothing else is heard.
   window.addEventListener('message', function first(ev) {
-    if (port || !ev.data || ev.data.t !== 'init' || !ev.ports || !ev.ports[0]) return;
+    if (port || !ev.data || (ev.data.t !== 'init' && ev.data.t !== 'probe') || !ev.ports || !ev.ports[0]) return;
     window.removeEventListener('message', first);
     port = ev.ports[0];
     const m = ev.data;
+    if (m.t === 'probe') { probe(m); return; }
     clip = m.clip; me = m.me || me; PB.local[clip.id] = m.local || {}; adopt(m);
     port.onmessage = (e) => {
       const d = e.data || {};
