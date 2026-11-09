@@ -1,0 +1,123 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Agents — slop catalog</title>
+<link rel="alternate" type="text/markdown" title="llms.txt" href="/catalog/llms.txt">
+<link rel="stylesheet" href="/catalog/kit/views.css">
+<style>
+  .grid { display: grid; gap: 0 28px; grid-template-columns: repeat(auto-fill, minmax(320px, 1fr)); margin: 8px 0 28px; }
+  .box { border-top: 1px solid var(--ink); padding: 12px 0 24px; display: flex; flex-direction: column; gap: 8px; min-width: 0; }
+  .box h2 { margin: 0; font-size: 20px; font-weight: 500; letter-spacing: -.02em; }
+  .box p { margin: 0; color: var(--ink-2); font-size: 14px; }
+  .url { display: flex; gap: 6px; align-items: center; }
+  .url code { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; line-height: calc(var(--control-h) - 2px); border: 1px solid var(--hair); padding: 0 8px; background: var(--fill); }
+  code, pre { font: 12.5px var(--mono); }
+  code { background: var(--fill); padding: 0 4px; }
+  pre { background: var(--fill); border-left: 2px solid var(--ink); padding: 10px 12px; margin: 0; overflow-x: auto; white-space: pre; }
+  h2.sec { font-size: 13px; font-weight: 700; margin: 48px 0 12px; padding-bottom: 8px; border-bottom: 1px solid var(--ink); }
+  .console { display: grid; grid-template-columns: 300px 1fr; gap: 20px; }
+  .console .ctl { display: flex; flex-direction: column; gap: 8px; }
+  .console select, .console textarea { border: 1px solid var(--hair); background: var(--bg); padding: 6px 8px; font: 13px var(--mono); }
+  .console select { height: var(--control-h); padding: 0 6px; }
+  .console select:focus, .console textarea:focus { outline: none; border-color: var(--ink); }
+  .console textarea { min-height: 120px; resize: vertical; }
+  .console .tdesc { font-size: 13px; color: var(--ink-2); }
+  .console pre.out { min-height: 300px; max-height: 60vh; overflow: auto; white-space: pre-wrap; word-break: break-word; border-left: 0; border: 1px solid var(--hair); background: var(--bg); }
+  @media (max-width: 760px) { .console { grid-template-columns: 1fr; } }
+</style>
+</head>
+<body>
+<div id="head"></div>
+<main class="wrap">
+  <section class="cv-hero">
+    <h1>The catalog, for agents.</h1>
+    <p>The same catalog the views show, in forms a program reads: a read-only MCP server, an llms.txt, a flat search index, the full JSON and an Atom feed. Nothing here needs a key, and nothing here writes.</p>
+  </section>
+  <div class="grid" id="grid"><p class="cv-empty">Loading the catalog…</p></div>
+  <h2 class="sec">Connect an agent</h2>
+  <div class="grid" id="connect"></div>
+  <h2 class="sec">Try the MCP server</h2>
+  <p class="cv-meta" id="status">not connected</p>
+  <div class="console">
+    <div class="ctl">
+      <select id="tool" aria-label="Tool"></select>
+      <div class="tdesc" id="tdesc"></div>
+      <textarea id="args" aria-label="Arguments (JSON)" spellcheck="false"></textarea>
+      <button class="cv-btn primary" type="button" id="call">Call tool</button>
+    </div>
+    <pre class="out" id="out" aria-live="polite"></pre>
+  </div>
+</main>
+<footer class="cv-foot"><div class="wrap">The MCP server is an actor on slop's live host: one public route with a per-IP rate limit, and CORS for this site only. It answers from the catalog it was deployed with.</div></footer>
+<script src="/catalog/kit/views.js"></script>
+<script>
+(async () => {
+  const { el, bytes } = SlopCatalog;
+  await SlopCatalog.header(document.querySelector("#head"), "agents");
+  const { catalog } = await SlopCatalog.load();
+  SlopCatalog.viewer.bind(catalog);
+  const site = location.origin, mcp = catalog.mcp || "https://apps.slop.yolo.scapegoat.dev/catalog/mcp";
+
+  const copy = (text) => el("button", { class: "cv-btn", type: "button", onclick: (e) => navigator.clipboard?.writeText(text).then(() => { e.target.textContent = "Copied"; }) }, "Copy");
+  const urlRow = (u) => el("div", { class: "url" }, el("code", { title: u }, u), copy(u));
+  const box = (title, text, u, extra) => el("article", { class: "box" }, el("h2", {}, title), el("p", {}, text), u ? urlRow(u) : null, extra || null);
+
+  document.querySelector("#grid").replaceChildren(
+    box("MCP server", "Streamable HTTP with JSON answers, no session. Tools: search_apps, get_app, list_tags, list_capabilities. Read-only.", mcp),
+    box("llms.txt", "What the catalog is, where its data lives, and one line per app, as Markdown.", site + "/catalog/llms.txt"),
+    box("search-index.json", `One flat record per app (${catalog.count}), with a lower-case text field to match against.`, site + "/catalog/data/search-index.json"),
+    box("catalog.json", "Everything the views read: items with covers, previews, attachments and release history.", site + "/catalog/data/catalog.json"),
+    box("feed.xml", "Atom, one entry per release, newest first.", site + "/catalog/data/feed.xml"));
+
+  const cc = `claude mcp add --transport http slop-catalog ${mcp}`;
+  const json = JSON.stringify({ mcpServers: { "slop-catalog": { type: "http", url: mcp } } }, null, 2);
+  const curl = `curl -s ${mcp} \\\n  -H 'Content-Type: application/json' \\\n  -d '{"jsonrpc":"2.0","id":1,"method":"tools/call",\n       "params":{"name":"search_apps","arguments":{"query":"shader","limit":3}}}'`;
+  document.querySelector("#connect").replaceChildren(
+    box("Claude Code", "Add it as an HTTP server:", null, [el("pre", {}, cc), copy(cc)]),
+    box("A JSON config", "For clients configured with mcpServers:", null, [el("pre", {}, json), copy(json)]),
+    box("curl", "Or call it by hand:", null, [el("pre", {}, curl), copy(curl.replace(/\\\n\s*/g, ""))]));
+
+  // --- a tiny MCP client --------------------------------------------------------
+  let id = 0, tools = [];
+  const out = document.querySelector("#out"), st = document.querySelector("#status");
+  async function rpc(method, params) {
+    const r = await fetch(mcp, { method: "POST", headers: { "Content-Type": "application/json", Accept: "application/json, text/event-stream" },
+      body: JSON.stringify({ jsonrpc: "2.0", id: ++id, method, params }) });
+    if (!r.ok) throw new Error(r.status + " " + (await r.text()).slice(0, 200));
+    const j = await r.json();
+    if (j.error) throw new Error(j.error.message);
+    return j.result;
+  }
+  const sel = document.querySelector("#tool"), args = document.querySelector("#args");
+  const example = { search_apps: { query: "shader", limit: 3 }, get_app: { id: "weft" }, list_tags: { limit: 10 }, list_capabilities: {} };
+  sel.onchange = () => {
+    const t = tools.find((x) => x.name === sel.value);
+    document.querySelector("#tdesc").textContent = t ? t.description : "";
+    args.value = JSON.stringify(example[sel.value] || {}, null, 1);
+  };
+  document.querySelector("#call").onclick = async () => {
+    let a;
+    try { a = JSON.parse(args.value || "{}"); } catch (e) { out.textContent = "The arguments are not JSON: " + e.message; return; }
+    out.textContent = "…";
+    const t0 = performance.now();
+    try {
+      const r = await rpc("tools/call", { name: sel.value, arguments: a });
+      st.textContent = `${sel.value} answered in ${Math.round(performance.now() - t0)} ms`;
+      out.textContent = JSON.stringify(r.structuredContent ?? r, null, 1);
+    } catch (e) { out.textContent = String(e.message || e); }
+  };
+  try {
+    const init = await rpc("initialize", { protocolVersion: "2025-06-18", capabilities: {}, clientInfo: { name: "catalog-agents-page", version: "1" } });
+    tools = (await rpc("tools/list", {})).tools;
+    st.textContent = `connected: ${init.serverInfo.title || init.serverInfo.name}, protocol ${init.protocolVersion}, ${tools.length} tools`;
+    sel.replaceChildren(...tools.map((t) => el("option", { value: t.name }, t.title || t.name)));
+    sel.onchange();
+  } catch (e) {
+    st.textContent = "could not reach the MCP server from this page: " + e.message;
+  }
+})();
+</script>
+</body>
+</html>

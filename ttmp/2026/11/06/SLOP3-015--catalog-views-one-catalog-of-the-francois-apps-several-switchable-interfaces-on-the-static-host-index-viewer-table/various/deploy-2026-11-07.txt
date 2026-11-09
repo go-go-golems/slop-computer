@@ -1,0 +1,18 @@
+catalog        files.push (5 changed: data/catalog.json, data/views.json, index.html, kit/views.css, kit/views.js)
+               snapshot 4
+catalog-list   files.push (1 changed: index.html)
+               snapshot 4
+catalog-table  files.push (1 changed: index.html)
+               snapshot 4
+catalog-sheet  store.new, files.push (1 changed: index.html), grant.set @guest view, mount.set site.slop.yolo.scapegoat.dev/catalog/sheet
+               snapshot 1
+catalog-caps   store.new, files.push (1 changed: index.html), grant.set @guest view, mount.set site.slop.yolo.scapegoat.dev/catalog/caps
+               snapshot 1
+catalog-zine   store.new, files.push (1 changed: index.html), grant.set @guest view, mount.set site.slop.yolo.scapegoat.dev/catalog/zine
+               snapshot 1
+https://site.slop.yolo.scapegoat.dev/catalog/
+https://site.slop.yolo.scapegoat.dev/catalog/list/
+https://site.slop.yolo.scapegoat.dev/catalog/table/
+https://site.slop.yolo.scapegoat.dev/catalog/sheet/
+https://site.slop.yolo.scapegoat.dev/catalog/caps/
+https://site.slop.yolo.scapegoat.dev/catalog/zine/

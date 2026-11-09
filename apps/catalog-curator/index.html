@@ -1,0 +1,172 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Curator — slop catalog</title>
+<style>
+  /* The catalog kit's look (apps/catalog/kit/views.css), repeated here: this
+     page is served from the live host and does not load the kit. */
+  :root { --bg: #fff; --ink: #1a1a1a; --ink-2: #737373; --hair: #d6d6d6; --rule: #ededed; --fill: #f6f6f6; --accent: #e2001a; --sel: rgba(226, 0, 26, .08);
+          --cta: #cee5ff; --cta-ink: #1a1a1a; --control-h: 30px;
+          --sans: "ABC Areal", "Helvetica Neue", Helvetica, Arial, sans-serif; --mono: "IBM Plex Mono", ui-monospace, Menlo, Consolas, monospace;
+          --panel: var(--bg); --line: var(--hair); --muted: var(--ink-2); --chip: var(--fill); color-scheme: light dark; }
+  @media (prefers-color-scheme: dark) { :root { --bg: #1a1a1a; --ink: #f2f2f2; --ink-2: #9a9a9a; --hair: #3d3d3d; --rule: #2a2a2a; --fill: #222; --accent: #ff3b4a; --sel: rgba(255, 59, 74, .16); --cta: #2b4a6b; --cta-ink: #f2f2f2; } }
+  * { box-sizing: border-box; }
+  body { margin: 0; background: var(--bg); color: var(--ink); font: 15px/1.45 var(--sans); font-variant-numeric: tabular-nums; }
+  a { color: inherit; text-underline-offset: 3px; }
+  button, input, textarea { font: inherit; color: inherit; border-radius: 0; }
+  :focus-visible { outline: 2px solid var(--ink); outline-offset: 1px; }
+  input[type="checkbox"] { accent-color: var(--ink); }
+  .btn { display: inline-flex; align-items: center; height: var(--control-h); border: 1px solid var(--hair); background: var(--bg); padding: 0 12px; cursor: pointer; text-decoration: none; font-size: 14px; white-space: nowrap; }
+  .btn:hover { border-color: var(--ink); }
+  .btn.primary { background: var(--cta); color: var(--cta-ink); border-color: var(--cta); font-weight: 700; }
+  .btn.primary:hover { border-color: var(--ink); }
+  .btn:disabled { opacity: .5; cursor: default; }
+  .wrap { max-width: 1232px; margin: 0 auto; padding: 0 24px; }
+  header { display: flex; align-items: center; gap: 14px; height: 52px; border-bottom: 1px solid var(--ink); flex-wrap: wrap; }
+  header h1 { font-size: 15px; font-weight: 700; margin: 0; }
+  header .sp { flex: 1; }
+  .meta { font: 12px var(--mono); color: var(--ink-2); }
+  h2 { font-size: 30px; font-weight: 500; letter-spacing: -.03em; line-height: 1.1; margin: 40px 0 6px; }
+  .lead { color: var(--ink-2); margin: 0 0 16px; max-width: 62ch; }
+  .cards { display: grid; gap: 0 28px; grid-template-columns: repeat(auto-fill, minmax(300px, 1fr)); }
+  .card { border-top: 1px solid var(--ink); padding-top: 14px; display: flex; flex-direction: column; }
+  .card .pic { aspect-ratio: 16 / 9; background: var(--fill); border: 1px solid var(--hair); display: grid; place-items: center; font: 700 34px var(--sans); color: var(--ink-2); overflow: hidden; }
+  .card .pic img { width: 100%; height: 100%; object-fit: cover; }
+  .card .body { padding: 12px 0 24px; display: flex; flex-direction: column; gap: 6px; flex: 1; }
+  .card h3 { margin: 0; font-size: 22px; font-weight: 500; letter-spacing: -.02em; }
+  .card .why { margin: 0; }
+  .card .desc { margin: 0; color: var(--ink-2); font-size: 13px; }
+  .card .acts { margin-top: auto; display: flex; gap: 8px; padding-top: 8px; }
+  .ask { display: flex; gap: 8px; flex-wrap: wrap; align-items: flex-start; }
+  .ask textarea { flex: 1 1 420px; min-height: 64px; border: 1px solid var(--hair); padding: 8px 10px; background: var(--bg); resize: vertical; }
+  .ask textarea:focus { outline: none; border-color: var(--ink); }
+  .chips { display: flex; flex-wrap: wrap; margin: 10px 0 14px; }
+  .chips button { border: 0; background: none; padding: 2px 0; font-size: 14px; cursor: pointer; color: var(--ink-2); }
+  .chips button:hover { color: var(--ink); text-decoration: underline; text-underline-offset: 3px; }
+  .chips button:not(:last-child)::after { content: "·"; display: inline-block; color: var(--hair); margin: 0 8px 0 6px; }
+  .note { border-left: 2px solid var(--ink); padding-left: 10px; margin: 10px 0; }
+  .empty { color: var(--ink-2); padding: 20px 0; }
+  footer { color: var(--ink-2); font-size: 13px; border-top: 1px solid var(--ink); margin-top: 56px; padding: 16px 0 40px; }
+  @media (max-width: 640px) { .wrap { padding: 0 16px; } header { height: auto; padding: 10px 0; } }
+</style>
+</head>
+<body>
+<div class="wrap">
+  <header>
+    <h1>Curator</h1>
+    <span class="meta" id="who"></span>
+    <span class="sp"></span>
+    <a class="btn" id="back" href="#" target="_top">← Catalog</a>
+  </header>
+
+  <h2>Apps of the day</h2>
+  <p class="lead" id="daylead">Three apps, chosen once a day.</p>
+  <div class="cards" id="today"><p class="empty">Loading…</p></div>
+
+  <h2>Ask the curator</h2>
+  <p class="lead">Say what you are after; the model reads the whole catalog and picks up to five apps, each with a reason.</p>
+  <form class="ask" id="form">
+    <textarea id="q" placeholder="e.g. a playful game to start from" aria-label="Your request"></textarea>
+    <button class="btn primary" id="go">Ask</button>
+  </form>
+  <div class="chips" id="chips"></div>
+  <p class="meta" id="status"></p>
+  <div id="answer"></div>
+
+  <footer>The curator runs on slop's model backend, on your account: each question counts against your monthly allowance. It only knows the catalog's titles, descriptions and tags, not the apps themselves.</footer>
+</div>
+<script src="curate.js"></script>
+<script>
+(async () => {
+  "use strict";
+  const $ = (id) => document.getElementById(id);
+  function el(tag, attrs, ...kids) {
+    const n = document.createElement(tag);
+    for (const [k, v] of Object.entries(attrs || {})) {
+      if (v == null || v === false) continue;
+      if (k.startsWith("on")) n.addEventListener(k.slice(2), v);
+      else if (k === "class") n.className = v;
+      else n.setAttribute(k, v === true ? "" : v);
+    }
+    for (const k of kids.flat(Infinity)) if (k != null && k !== false) n.append(k.nodeType ? k : String(k));
+    return n;
+  }
+  const initials = (t) => (t || "").replace(/[^\p{L}\p{N} ]/gu, "").split(/\s+/).filter(Boolean).slice(0, 2).map((w) => w[0].toUpperCase()).join("") || "·";
+
+  const catalog = await fetch("data/catalog.json").then((r) => r.json());
+  const site = catalog.siteOrigin || "https://site.slop.yolo.scapegoat.dev";
+  $("back").href = site + "/catalog/";
+  const byId = new Map(catalog.items.map((i) => [i.id, i]));
+
+  function card(p) {
+    const i = byId.get(p.id);
+    if (!i) return null;
+    return el("article", { class: "card" },
+      el("div", { class: "pic" }, i.cover ? el("img", { src: site + i.cover.src, alt: "", loading: "lazy" }) : initials(i.title)),
+      el("div", { class: "body" },
+        el("h3", {}, i.title, i.free ? "" : " · subscribers"),
+        p.why ? el("p", { class: "why" }, p.why) : null,
+        el("p", { class: "desc" }, i.description),
+        el("div", { class: "acts" },
+          el("a", { class: "btn primary", href: i.open, target: "_blank", rel: "noopener" }, "Open ↗"),
+          el("a", { class: "btn", href: site + "/catalog/list/?open=" + encodeURIComponent(i.id), target: "_blank", rel: "noopener" }, "Preview ↗"))));
+  }
+
+  const [db, sample, slop] = await Promise.all(["db", "sample", "slop"].map((n) => claude.use(n).catch(() => null)));
+  const visitor = slop && slop.visitor ? await slop.visitor().catch(() => null) : null;
+  const member = !!visitor && !visitor.guest && ["interact", "admin", "owner"].includes(visitor.level);
+  const llm = visitor && visitor.llm;
+  $("who").textContent = !visitor ? "" : visitor.guest ? "guest" : `${visitor.audience}${llm ? (llm.allowed ? ` · model allowance left: ${llm.remaining ?? "?"}` : " · no model allowance") : ""}`;
+
+  // --- apps of the day ---------------------------------------------------------
+  const day = new Date().toISOString().slice(0, 10);
+  function showToday(d, how) {
+    $("daylead").textContent = how;
+    $("today").replaceChildren(...d.picks.map(card).filter(Boolean));
+    if (d.note) $("today").after(el("p", { class: "note" }, d.note));
+  }
+  const seeded = () => showToday({ picks: Curate.seeded(catalog, day, 3) }, `Three free apps for ${day}, picked by the date. ` + (member ? "" : "Members get the curator's picks."));
+  let stored = null;
+  if (db) {
+    try { const s = await db.doc("picks/" + day).get(); if (s.exists) stored = s.data(); } catch (e) { /* no data for this visitor */ }
+  }
+  if (stored) showToday(stored, stored.by === "model" ? `Chosen by the curator for ${day}.` : `Picked by the date for ${day}.`);
+  else if (member && slop && slop.actions && slop.actions.today) {
+    $("today").replaceChildren(el("p", { class: "empty" }, "The curator is choosing today's apps…"));
+    slop.actions.today({}).then((d) => showToday(d, d.by === "model" ? `Chosen by the curator for ${day}.` : `Picked by the date for ${day} (the curator's answer was not usable).`))
+      .catch(() => seeded());
+  } else seeded();
+
+  // --- ask -------------------------------------------------------------------
+  const EXAMPLES = ["a playful game to start from", "something to make music or sound", "apps that people use together, live", "a tool for writing or slides", "something beautiful with shaders", "the smallest app that still does a lot"];
+  $("chips").replaceChildren(...EXAMPLES.map((t) => el("button", { type: "button", onclick: () => { $("q").value = t; ask(); } }, t)));
+  if (!sample) {
+    $("go").disabled = true;
+    $("status").textContent = member ? "The model is not available here (the curator needs the sample policy for your audience)." : "Sign in as a member to ask the curator.";
+    if (!member && slop && slop.signIn) $("status").append(" ", el("button", { class: "btn", type: "button", onclick: () => slop.signIn() }, "Sign in"));
+  }
+  $("form").onsubmit = (e) => { e.preventDefault(); ask(); };
+  let busy = false;
+  async function ask() {
+    const q = $("q").value.trim();
+    if (!q || busy || !sample) return;
+    busy = true; $("go").disabled = true;
+    $("status").textContent = "Reading the catalog…";
+    $("answer").replaceChildren();
+    const t0 = performance.now();
+    try {
+      const r = await sample(Curate.prompt(catalog, q, 5), { modelTier: "default" });
+      const got = Curate.parse(r.text, catalog);
+      $("status").textContent = `${got ? got.picks.length + " picks" : "an answer"} in ${((performance.now() - t0) / 1000).toFixed(1)} s` + (r.model ? ` · ${r.model}` : "");
+      if (got) $("answer").replaceChildren(...(got.note ? [el("p", { class: "note" }, got.note)] : []), el("div", { class: "cards" }, got.picks.map(card).filter(Boolean)));
+      else $("answer").replaceChildren(el("p", { class: "note" }, "The curator answered, but not with apps from the catalog:"), el("p", {}, r.text.slice(0, 1000)));
+    } catch (e) {
+      $("status").textContent = (e.code === "quota_exceeded" ? "Your model allowance for this month is used up." : `The curator could not answer: ${e.code || ""} ${e.message || e}`);
+    } finally { busy = false; $("go").disabled = false; }
+  }
+})();
+</script>
+</body>
+</html>

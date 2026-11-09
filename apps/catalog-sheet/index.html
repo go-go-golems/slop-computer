@@ -1,0 +1,194 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Contact sheet — slop catalog</title>
+<link rel="stylesheet" href="/catalog/kit/views.css">
+<style>
+  .sheet { display: grid; gap: 22px 16px; grid-template-columns: repeat(auto-fill, minmax(var(--tile), 1fr)); --tile: 260px; border-top: 1px solid var(--ink); padding-top: 18px; }
+  .sheet.phone { --tile: 150px; }
+  .tile { display: flex; flex-direction: column; gap: 6px; min-width: 0; text-align: left; background: none; border: 0; padding: 0; cursor: pointer; }
+  .shot { position: relative; width: 100%; overflow: hidden; border: 1px solid var(--hair); background: var(--fill); }
+  .tile:hover .shot, .tile:focus-visible .shot { border-color: var(--ink); }
+  .tile:hover .name { text-decoration: underline; text-underline-offset: 3px; }
+  .shot > img, .shot > .cv-mono { position: absolute; inset: 0; width: 100%; height: 100%; object-fit: cover; object-position: top; }
+  .shot > .cv-mono { font-size: 40px; }
+  .shot > iframe { position: absolute; top: 0; left: 0; border: 0; background: #fff; transform-origin: 0 0; pointer-events: none; }
+  .badge { position: absolute; left: 0; bottom: 0; font: 10.5px var(--mono); background: var(--bg); border-top: 1px solid var(--hair); border-right: 1px solid var(--hair); padding: 1px 6px; color: var(--ink-2); text-transform: uppercase; letter-spacing: .04em; }
+  .badge.live { color: var(--ink); }
+  .badge.fail { color: var(--accent); }
+  .badge.live::before { content: "■ "; animation: cv-blink .8s steps(2) infinite; }
+  @keyframes cv-blink { 50% { opacity: 0; } }
+  @media (prefers-reduced-motion: reduce) { .badge.live::before { animation: none; } }
+  .name { font-weight: 700; font-size: 14px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; display: flex; gap: 6px; align-items: center; }
+  .name .cv-paid { flex: none; }
+  .tile .cv-meta { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+</style>
+</head>
+<body>
+<div id="head"></div>
+<main class="wrap">
+  <div class="bar">
+    <h1 id="count">Contact sheet</h1>
+    <span class="cv-meta" id="status"></span>
+    <span class="sp"></span>
+    <div class="seg" role="group" aria-label="Frame" id="frame"></div>
+    <div class="seg" role="group" aria-label="Previews" id="mode"></div>
+  </div>
+  <div id="pgt"></div>
+  <section class="sheet" id="sheet" aria-label="Apps"><p class="cv-empty">Loading the catalog…</p></section>
+  <div id="pgb"></div>
+</main>
+<footer class="cv-foot"><div class="wrap">Free apps run here, in sandboxed frames without slop's runtime, only while on screen and at most a few at a time. Subscriber apps and the largest ones show their cover. Click any to view it.</div></footer>
+<script src="/catalog/kit/views.js"></script>
+<script>
+(async () => {
+  const { el, bytes, monogram, matches, previewDoc, DEVICES, paged } = SlopCatalog;
+  const PER_PAGE = { desktop: 24, phone: 36 };
+  await SlopCatalog.header(document.querySelector("#head"), "sheet");
+  const { catalog } = await SlopCatalog.load();
+  SlopCatalog.viewer.bind(catalog);
+
+  // How many frames may run at once, and the largest app run automatically.
+  const MAX_LIVE = 8;
+  const MAX_BYTES = 1500000;
+  const reduce = matchMedia("(prefers-reduced-motion: reduce)").matches;
+  const params = new URLSearchParams(location.search);
+  const state = {
+    frame: params.get("frame") === "phone" ? "phone" : "desktop",
+    live: params.get("live") ? params.get("live") !== "off" : !reduce,
+    q: params.get("q") || "",
+    paused: false, // while the viewer is open
+  };
+  const sheet = document.querySelector("#sheet");
+  const tiles = new Map(); // id -> {item, node, shot, visible, frame, loading}
+
+  function keep(k, v) {
+    const u = new URL(location.href);
+    if (v) u.searchParams.set(k, v); else u.searchParams.delete(k);
+    history.replaceState(history.state, "", u);
+  }
+  function seg(host, opts, get, set) {
+    const draw = () => host.replaceChildren(...opts.map(([v, label]) => el("button", {
+      type: "button", "aria-pressed": get() === v ? "true" : "false", onclick: () => { set(v); draw(); },
+    }, label)));
+    draw();
+  }
+  seg(document.querySelector("#frame"), [["desktop", "Desktop"], ["phone", "Phone"]], () => state.frame,
+    (v) => { state.frame = v; keep("frame", v === "phone" ? "phone" : ""); paged.reset(); build(); });
+  seg(document.querySelector("#mode"), [[true, "Live"], [false, "Covers"]], () => state.live,
+    (v) => { state.live = v; keep("live", v ? (reduce ? "on" : "") : "off"); tiles.forEach(stop); schedule(); });
+
+  const runnable = (item) => item.preview && item.bytes <= MAX_BYTES;
+
+  function cover(item) {
+    return item.cover ? el("img", { src: item.cover.src, alt: "", loading: "lazy", decoding: "async" }) : monogram(item);
+  }
+  function badge(t) {
+    const item = t.item;
+    const text = t.failed ? "no preview" : t.frame && !t.loading ? "live" : t.loading ? "starting…" : !item.free ? null
+      : !item.preview ? null : item.bytes > MAX_BYTES ? bytes(item.bytes) + " · view to run" : null;
+    let b = t.shot.querySelector(".badge");
+    if (!text) { if (b) b.remove(); status(); return; }
+    if (!b) t.shot.append(b = el("span", { class: "badge" }));
+    b.textContent = text;
+    b.classList.toggle("live", text === "live");
+    b.classList.toggle("fail", !!t.failed);
+    status();
+  }
+
+  // scale fits the device-sized frame to the tile's width.
+  function scale(t) {
+    const [w, h] = DEVICES[state.frame];
+    const s = t.shot.clientWidth / w;
+    if (t.frame) Object.assign(t.frame.style, { width: w + "px", height: h + "px", transform: `scale(${s})` });
+  }
+
+  function stop(t) {
+    if (t.frame) t.frame.remove();
+    t.frame = null;
+    t.loading = false;
+    badge(t);
+  }
+
+  // start loads one tile's preview; resolves when it has loaded or given up.
+  async function start(t) {
+    t.loading = true;
+    badge(t);
+    let doc;
+    // A preview that fails to load keeps its cover and leaves the schedule;
+    // the tile is tried again when the sheet is built anew (a page, a search).
+    try { doc = await previewDoc(t.item); } catch (e) { t.loading = false; t.failed = true; badge(t); return; }
+    if (!t.loading) return; // stopped meanwhile
+    const f = el("iframe", { sandbox: "allow-scripts", referrerpolicy: "no-referrer", tabindex: "-1",
+      title: t.item.title + " (live preview)", "aria-hidden": "true" });
+    t.frame = f;
+    scale(t);
+    const done = new Promise((r) => { f.addEventListener("load", r, { once: true }); setTimeout(r, 4000); });
+    f.srcdoc = doc;
+    t.shot.append(f);
+    await done;
+    if (t.frame === f) { t.loading = false; badge(t); }
+  }
+
+  // schedule keeps the visible runnable tiles running, in page order, at most
+  // MAX_LIVE at once and starting one at a time; everything else is stopped.
+  let busy = false;
+  async function schedule() {
+    if (busy) return;
+    busy = true;
+    try {
+      for (;;) {
+        const want = state.live && !state.paused
+          ? [...tiles.values()].filter((t) => t.visible && !t.failed && runnable(t.item)).slice(0, MAX_LIVE) : [];
+        tiles.forEach((t) => { if ((t.frame || t.loading) && !want.includes(t)) stop(t); });
+        const next = want.find((t) => !t.frame && !t.loading);
+        if (!next) break;
+        await start(next);
+      }
+    } finally { busy = false; }
+    status();
+  }
+  function status() {
+    const live = [...tiles.values()].filter((t) => t.frame && !t.loading).length;
+    document.querySelector("#status").textContent = state.live ? (state.paused ? "paused while viewing" : live + " running") : "covers only";
+  }
+
+  const seen = new IntersectionObserver((es) => {
+    for (const e of es) { const t = tiles.get(e.target.dataset.id); if (t) t.visible = e.isIntersecting; }
+    clearTimeout(seen.t);
+    seen.t = setTimeout(schedule, 150); // let a fast scroll settle first
+  }, { rootMargin: "100px 0px" });
+  new ResizeObserver(() => tiles.forEach(scale)).observe(sheet);
+  window.addEventListener("catalog:viewer", (e) => { state.paused = e.detail.open; schedule(); });
+  window.addEventListener("catalog:search", (e) => { state.q = e.detail.query; paged.reset(); build(); });
+
+  function build() {
+    tiles.forEach((t) => { stop(t); seen.unobserve(t.node); });
+    tiles.clear();
+    sheet.classList.toggle("phone", state.frame === "phone");
+    const [w, h] = DEVICES[state.frame];
+    const items = catalog.items.filter((i) => matches(i, state.q));
+    document.querySelector("#count").textContent = items.length + " apps";
+    const page = paged(items, PER_PAGE[state.frame], [document.querySelector("#pgt"), document.querySelector("#pgb")], build);
+    sheet.replaceChildren(...(items.length ? page.map((item) => {
+      const shot = el("div", { class: "shot", style: `aspect-ratio:${w}/${h}` }, cover(item));
+      const node = el("button", { class: "tile", type: "button", "data-id": item.id, "aria-label": "View " + item.title,
+        onclick: () => SlopCatalog.viewer.open(item) },
+        shot,
+        el("span", { class: "name" }, item.title, item.free ? null : el("span", { class: "cv-paid" }, "subscribers")),
+        el("span", { class: "cv-meta" }, item.capabilities.join(" · ") || "no runtime"));
+      const t = { item, node, shot, visible: false, frame: null, loading: false };
+      tiles.set(item.id, t);
+      badge(t);
+      seen.observe(node);
+      return node;
+    }) : [el("p", { class: "cv-empty" }, "Nothing matches.")]));
+    schedule();
+  }
+  build();
+})();
+</script>
+</body>
+</html>

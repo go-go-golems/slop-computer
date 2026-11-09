@@ -1,0 +1,150 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Sizes — slop catalog</title>
+<link rel="stylesheet" href="/catalog/kit/views.css">
+<style>
+  .map { position: relative; height: max(460px, calc(100vh - 220px)); overflow: hidden; background: var(--bg); outline: 1px solid var(--ink); }
+  .cell { position: absolute; border: 1px solid var(--bg); overflow: hidden; cursor: pointer; padding: 4px 6px; display: flex; flex-direction: column; justify-content: space-between;
+          background: color-mix(in srgb, var(--ink) calc(var(--k) * 1%), var(--panel)); color: var(--ink); text-align: left; font: inherit; }
+  .cell.dark { color: var(--bg); }
+  .cell:hover, .cell:focus-visible { outline: 2px solid var(--accent); outline-offset: -2px; z-index: 2; }
+  .cell b { font-size: 13px; font-weight: 700; line-height: 1.2; overflow: hidden; }
+  .cell span { font: 11px var(--mono); opacity: .8; white-space: nowrap; }
+  .cell.paid { background-image: repeating-linear-gradient(45deg, transparent 0 5px, color-mix(in srgb, currentColor 30%, transparent) 5px 6px); }
+  .group { position: absolute; border: 2px solid var(--bg); pointer-events: none; }
+  .group > i { position: absolute; left: 0; top: 0; right: 0; height: 18px; padding: 1px 6px; font: 500 11px var(--mono); background: var(--bg); color: var(--ink); font-style: normal; text-transform: uppercase; letter-spacing: .04em; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; border-bottom: 1px solid var(--ink); }
+  .legend { display: flex; flex-wrap: wrap; gap: 6px 16px; align-items: center; margin: 10px 0 0; }
+  .legend i { display: inline-block; width: 14px; height: 12px; vertical-align: -1px; margin-right: 5px; border: 1px solid var(--ink); }
+  #tip { position: fixed; z-index: 10; pointer-events: none; background: var(--bg); border: 1px solid var(--ink); padding: 6px 10px; font-size: 13px; max-width: 320px; display: none; }
+</style>
+</head>
+<body>
+<div id="head"></div>
+<main class="wrap">
+  <div class="bar">
+    <h1 id="count">Sizes</h1>
+    <span class="sp"></span>
+    <label class="cv-meta">Group</label>
+    <div class="seg" role="group" aria-label="Group by" id="group"></div>
+  </div>
+  <div class="map" id="map" role="list" aria-label="Apps by size"><p class="cv-empty">Loading the catalog…</p></div>
+  <div class="legend cv-meta" id="legend"></div>
+</main>
+<div id="tip" role="tooltip"></div>
+<footer class="cv-foot"><div class="wrap">Each rectangle's area is the size of the app's HTML: everything an app is, in one file. Darker means more runtime capabilities declared; hatched means for subscribers. Click to view.</div></footer>
+<script src="/catalog/kit/views.js"></script>
+<script>
+(async () => {
+  const { el, bytes, matches } = SlopCatalog;
+  await SlopCatalog.header(document.querySelector("#head"), "treemap");
+  const { catalog } = await SlopCatalog.load();
+  SlopCatalog.viewer.bind(catalog);
+  const params = new URLSearchParams(location.search);
+  const GROUPS = { none: "None", caps: "Capabilities", tag: "First tag", access: "Access" };
+  const state = { group: GROUPS[params.get("group")] ? params.get("group") : "none", q: params.get("q") || "" };
+  const map = document.querySelector("#map"), tip = document.querySelector("#tip");
+
+  // squarify lays out nodes ({v}, any order) in the rectangle, returning
+  // [node, x, y, w, h]: rows of near-square cells (Bruls, Huizing, van Wijk).
+  function squarify(nodes, x, y, w, h) {
+    const out = [];
+    const total = nodes.reduce((s, n) => s + n.v, 0);
+    if (!total || w <= 0 || h <= 0) return out;
+    const area = nodes.map((n) => ({ n, a: (n.v / total) * w * h })).sort((p, q) => q.a - p.a);
+    const worst = (row, side) => {
+      const s = row.reduce((t, r) => t + r.a, 0), mx = row[0].a, mn = row[row.length - 1].a;
+      return Math.max((side * side * mx) / (s * s), (s * s) / (side * side * mn));
+    };
+    let row = [];
+    const flush = () => {
+      const s = row.reduce((t, r) => t + r.a, 0);
+      if (w >= h) { // a column on the left
+        const cw = s / h; let cy = y;
+        row.forEach((r) => { const ch = r.a / cw; out.push([r.n, x, cy, cw, ch]); cy += ch; });
+        x += cw; w -= cw;
+      } else { // a row on top
+        const rh = s / w; let cx = x;
+        row.forEach((r) => { const rw = r.a / rh; out.push([r.n, cx, y, rw, rh]); cx += rw; });
+        y += rh; h -= rh;
+      }
+      row = [];
+    };
+    for (const r of area) {
+      const side = Math.min(w, h);
+      if (row.length && worst(row.concat(r), side) > worst(row, side)) flush();
+      row.push(r);
+    }
+    if (row.length) flush();
+    return out;
+  }
+
+  function key(i) {
+    if (state.group === "caps") return i.capabilities.join(" + ") || "none";
+    if (state.group === "tag") return i.tags[0] || "untagged";
+    if (state.group === "access") return i.free ? "free" : "subscribers";
+    return "";
+  }
+
+  function cell(item, x, y, w, h) {
+    const k = 8 + 14 * item.capabilities.length; // ink share, 22..78 %
+    const big = w > 70 && h > 34;
+    const c = el("button", { class: "cell" + (k >= 50 ? " dark" : "") + (item.free ? "" : " paid"), type: "button", role: "listitem",
+      style: `left:${x}px;top:${y}px;width:${w}px;height:${h}px;--k:${k}`,
+      "aria-label": `${item.title}, ${bytes(item.bytes)}`,
+      onclick: () => SlopCatalog.viewer.open(item),
+      onmousemove: (e) => {
+        tip.style.display = "block";
+        tip.replaceChildren(el("b", {}, item.title), el("div", { class: "cv-meta" }, `${bytes(item.bytes)} · ${item.capabilities.join(", ") || "no runtime"}${item.free ? "" : " · subscribers"}`));
+        tip.style.left = Math.min(e.clientX + 14, innerWidth - tip.offsetWidth - 8) + "px";
+        tip.style.top = Math.min(e.clientY + 14, innerHeight - tip.offsetHeight - 8) + "px";
+      },
+      onmouseleave: () => { tip.style.display = "none"; } },
+    big ? el("b", {}, item.title) : null, big && h > 52 ? el("span", {}, bytes(item.bytes)) : null);
+    return c;
+  }
+
+  function render() {
+    const items = catalog.items.filter((i) => matches(i, state.q) && i.bytes > 0);
+    const total = items.reduce((s, i) => s + i.bytes, 0);
+    document.querySelector("#count").textContent = `${items.length} apps · ${bytes(total)} of HTML`;
+    const W = map.clientWidth, H = map.clientHeight;
+    const nodes = [];
+    if (state.group === "none") {
+      squarify(items.map((i) => ({ v: i.bytes, item: i })), 0, 0, W, H).forEach(([n, x, y, w, h]) => nodes.push(cell(n.item, x, y, w, h)));
+    } else {
+      const groups = new Map();
+      items.forEach((i) => { const k = key(i); groups.set(k, [...(groups.get(k) || []), i]); });
+      const gs = [...groups].map(([k, list]) => ({ k, list, v: list.reduce((s, i) => s + i.bytes, 0) }));
+      squarify(gs, 0, 0, W, H).forEach(([g, x, y, w, h]) => {
+        const head = h > 40 && w > 60 ? 18 : 0;
+        squarify(g.list.map((i) => ({ v: i.bytes, item: i })), x + 2, y + head + 2, w - 4, h - head - 4)
+          .forEach(([n, cx, cy, cw, ch]) => nodes.push(cell(n.item, cx, cy, cw, ch)));
+        nodes.push(el("div", { class: "group", style: `left:${x}px;top:${y}px;width:${w}px;height:${h}px` },
+          head ? el("i", {}, `${g.k} · ${g.list.length} · ${bytes(g.v)}`) : null));
+      });
+    }
+    map.replaceChildren(...(nodes.length ? nodes : [el("p", { class: "cv-empty" }, "Nothing matches.")]));
+    const big = [...items].sort((a, b) => b.bytes - a.bytes);
+    document.querySelector("#legend").replaceChildren(
+      ...[1, 2, 3, 4].map((n) => el("span", {}, el("i", { style: `background:color-mix(in srgb, var(--ink) ${8 + 14 * n}%, var(--panel))` }), n === 4 ? "4+ capabilities" : n + (n > 1 ? " capabilities" : " capability"))),
+      el("span", {}, el("i", { style: "background-image:repeating-linear-gradient(45deg, transparent 0 4px, var(--ink) 4px 5px)" }), "subscribers"),
+      big.length ? el("span", {}, `largest ${big[0].title} ${bytes(big[0].bytes)} · smallest ${big[big.length - 1].title} ${bytes(big[big.length - 1].bytes)}`) : null);
+  }
+
+  const seg = document.querySelector("#group");
+  const draw = () => seg.replaceChildren(...Object.entries(GROUPS).map(([k, l]) => el("button", {
+    type: "button", "aria-pressed": state.group === k ? "true" : "false",
+    onclick: () => { state.group = k; const u = new URL(location.href); if (k === "none") u.searchParams.delete("group"); else u.searchParams.set("group", k); history.replaceState(history.state, "", u); draw(); render(); },
+  }, l)));
+  draw();
+  window.addEventListener("catalog:search", (e) => { state.q = e.detail.query; render(); });
+  let t;
+  new ResizeObserver(() => { clearTimeout(t); t = setTimeout(render, 80); }).observe(map);
+  render();
+})();
+</script>
+</body>
+</html>

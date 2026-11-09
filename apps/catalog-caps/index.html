@@ -1,0 +1,135 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Capabilities — slop catalog</title>
+<link rel="stylesheet" href="/catalog/kit/views.css">
+<style>
+  h2.sec { font-size: 13px; font-weight: 700; margin: 56px 0 0; padding-bottom: 8px; border-bottom: 1px solid var(--ink); }
+  p.lead { color: var(--ink-2); margin: 10px 0 14px; max-width: 70ch; }
+  .caps { display: grid; gap: 0 28px; grid-template-columns: repeat(auto-fill, minmax(320px, 1fr)); }
+  .cap { border-top: 1px solid var(--ink); padding: 12px 0 28px; scroll-margin-top: 72px; }
+  .cap:target { box-shadow: inset 0 2px 0 var(--accent); }
+  .cap header { display: flex; align-items: baseline; gap: 10px; }
+  .cap h3 { margin: 0; font: 500 15px var(--mono); }
+  .cap .n { margin-left: auto; font-size: 30px; font-weight: 500; letter-spacing: -.03em; line-height: 1; }
+  .cap .n small { font: 12px var(--mono); color: var(--ink-2); letter-spacing: 0; }
+  .cap p { margin: 8px 0 10px; color: var(--ink-2); font-size: 14px; }
+  .meter { height: 4px; background: var(--rule); margin: 10px 0 12px; }
+  .meter i { display: block; height: 100%; background: var(--ink); }
+  .chips { display: flex; flex-wrap: wrap; max-height: 172px; overflow: auto; font-size: 14px; line-height: 1.75; }
+  .chip { border: 0; background: none; padding: 0; font-size: 14px; cursor: pointer; white-space: nowrap; }
+  .chip:hover { text-decoration: underline; text-underline-offset: 3px; }
+  .chip:not(:last-child)::after { content: "·"; display: inline-block; color: var(--hair); margin: 0 7px 0 6px; }
+  .chip.paid { color: var(--ink-2); }
+  .chip.paid::before { content: "◦ "; }
+  .combos { overflow-x: auto; }
+  .combos table { border-collapse: collapse; width: 100%; font-size: 14px; }
+  .combos th, .combos td { padding: 8px 12px 8px 0; border-bottom: 1px solid var(--rule); text-align: left; }
+  .combos th { font: 500 11px var(--mono); color: var(--ink-2); text-transform: uppercase; letter-spacing: .04em; border-bottom: 1px solid var(--hair); }
+  .combos th.c, .combos td.c { text-align: center; width: 64px; }
+  .dot { display: inline-block; width: 9px; height: 9px; border: 1px solid var(--ink-2); vertical-align: middle; }
+  .dot.on { background: var(--ink); border-color: var(--ink); }
+  .combos td.bar { width: 34%; min-width: 160px; }
+  .combos td.bar span { display: inline-block; height: 8px; background: var(--ink); vertical-align: middle; margin-right: 8px; }
+  .combos td.bar b { font: 500 13px var(--mono); }
+  .combos tr.row { cursor: pointer; }
+  .combos tr.row:hover { background: var(--fill); }
+  .combos tr.row[aria-expanded="true"] { background: var(--sel); box-shadow: inset 2px 0 0 var(--accent); }
+  .combos tr.more td { background: var(--bg); padding: 10px 0 14px 12px; }
+  .note { font-size: 13px; color: var(--ink-2); margin-top: 14px; border-left: 2px solid var(--ink); padding-left: 10px; max-width: 80ch; }
+  code { font: 12.5px var(--mono); background: var(--fill); padding: 0 4px; }
+</style>
+</head>
+<body>
+<div id="head"></div>
+<main class="wrap">
+  <section class="cv-hero">
+    <h1>What the apps ask of the runtime.</h1>
+    <p>Every app declares the slop capabilities it uses in its manifest. Each capability is a runtime service the page may call: a model, shared documents, a real-time room, the viewer's identity, file downloads. Below are the apps that declare each one, and the combinations they declare.</p>
+  </section>
+  <section class="caps" id="caps" aria-label="Capabilities"><p class="cv-empty">Loading the catalog…</p></section>
+  <h2 class="sec">Combinations</h2>
+  <p class="lead">Each row is one set of capabilities, and the apps that declare exactly that set. Click a row to list them.</p>
+  <div class="combos" id="combos"></div>
+  <p class="note">Declared is not the same as granted: the server grants each capability per store and per audience (policy cells such as <code>sample</code> or <code>user.email</code>), and a page's runtime calls fail when it is not granted.</p>
+</main>
+<footer class="cv-foot"><div class="wrap">From the manifests in <a href="/catalog/data/catalog.json">catalog.json</a>. Capabilities are described in slop's <code>doc/claude-apis</code>.</div></footer>
+<script src="/catalog/kit/views.js"></script>
+<script>
+(async () => {
+  const { el, matches } = SlopCatalog;
+  await SlopCatalog.header(document.querySelector("#head"), "caps");
+  const { catalog } = await SlopCatalog.load();
+  SlopCatalog.viewer.bind(catalog);
+
+  // What each capability opens for a page on slop (doc/claude-apis/README.md).
+  const ABOUT = {
+    sample: "Ask a model: window.claude.sample, on slop's model backend. The viewer needs an id and the policy's sample cell; each call counts against a monthly token budget.",
+    db: "Documents and collections shared by the app's viewers, with rules; data/users/<id>/ is private to each person. On the static host db is read-only.",
+    room: "Real-time presence and events between the people who have the app open; event topics are admin-only unless the manifest opens them.",
+    user: "Who is looking: owner and edit checks, and the person's id. Since SLOP3-014 a page sees a name only with the profile scope, and an email only when the policy allows it.",
+    downloads: "Save a file to the viewer's computer, behind the shell's confirmation; an extension allow-list and a 50 MiB cap.",
+    assets: "Upload images, video, PDFs and fonts, served back at /_blob/<id> to people the policy allows.",
+    files: "Read a project's files: the store's current tree, as the viewer.",
+    artifact: "Publish a new version of the app itself; only in its own store, only for a platform admin.",
+    permissions: "Ask the viewer for permissions through the shell's consent dialog.",
+  };
+  let q = new URLSearchParams(location.search).get("q") || "";
+  window.addEventListener("catalog:search", (e) => { q = e.detail.query; render(); });
+
+  function chip(item) {
+    return el("button", { class: "chip" + (item.free ? "" : " paid"), type: "button", title: item.description,
+      onclick: () => SlopCatalog.viewer.open(item) }, item.title);
+  }
+
+  function render() {
+    const items = catalog.items.filter((i) => matches(i, q));
+    const by = {};
+    items.forEach((i) => i.capabilities.forEach((c) => (by[c] = by[c] || []).push(i)));
+    const caps = Object.keys(by).sort((a, b) => by[b].length - by[a].length || a.localeCompare(b));
+    const none = items.filter((i) => !i.capabilities.length);
+    document.querySelector("#caps").replaceChildren(...(caps.length ? caps.map((c) => el("article", { class: "cap", id: c },
+      el("header", {}, el("h3", {}, c), el("span", { class: "n" }, by[c].length, el("small", {}, " of " + items.length))),
+      el("div", { class: "meter", "aria-hidden": "true" }, el("i", { style: `width:${(100 * by[c].length) / items.length}%` })),
+      el("p", {}, ABOUT[c] || "A capability this catalog's apps declare."),
+      el("div", { class: "chips" }, by[c].map(chip)))) : [el("p", { class: "cv-empty" }, "Nothing matches.")]),
+    ...(none.length ? [el("article", { class: "cap", id: "none" },
+      el("header", {}, el("h3", {}, "none"), el("span", { class: "n" }, none.length)),
+      el("p", {}, "Plain pages: they run the same with or without slop."),
+      el("div", { class: "chips" }, none.map(chip)))] : []));
+
+    // Combinations: group by the exact set, largest group first.
+    const groups = new Map();
+    items.forEach((i) => { const k = i.capabilities.join(" "); groups.set(k, [...(groups.get(k) || []), i]); });
+    const rows = [...groups].sort((a, b) => b[1].length - a[1].length || a[0].localeCompare(b[0]));
+    const max = rows.length ? rows[0][1].length : 1;
+    const tbody = el("tbody");
+    rows.forEach(([k, apps]) => {
+      const set = new Set(k.split(" ").filter(Boolean));
+      let open = null;
+      const tr = el("tr", { class: "row", tabindex: "0", "aria-expanded": "false",
+        onclick: () => toggle(), onkeydown: (e) => { if (e.key === "Enter" || e.key === " ") { e.preventDefault(); toggle(); } } },
+        caps.map((c) => el("td", { class: "c" }, el("span", { class: "dot" + (set.has(c) ? " on" : ""), "aria-label": set.has(c) ? c : "" }))),
+        el("td", { class: "bar" }, el("span", { style: `width:${Math.max(3, (100 * apps.length) / max) * 0.7}%` }), el("b", {}, apps.length)),
+        el("td", { class: "cv-meta" }, apps.slice(0, 4).map((a) => a.title).join(", ") + (apps.length > 4 ? ", …" : "")));
+      function toggle() {
+        if (open) { open.remove(); open = null; } else {
+          open = el("tr", { class: "more" }, el("td", { colspan: caps.length + 2 }, el("div", { class: "chips" }, apps.map(chip))));
+          tr.after(open);
+        }
+        tr.setAttribute("aria-expanded", open ? "true" : "false");
+      }
+      tbody.append(tr);
+    });
+    document.querySelector("#combos").replaceChildren(el("table", {},
+      el("thead", {}, el("tr", {}, caps.map((c) => el("th", { class: "c" }, c)), el("th", {}, "apps"), el("th", {}, "for example"))),
+      tbody));
+    if (location.hash) { const t = document.getElementById(location.hash.slice(1)); if (t) t.scrollIntoView(); }
+  }
+  render();
+})();
+</script>
+</body>
+</html>

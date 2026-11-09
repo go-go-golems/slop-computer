@@ -1,0 +1,108 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Timeline — slop catalog</title>
+<link rel="alternate" type="application/atom+xml" title="slop catalog releases" href="/catalog/data/feed.xml">
+<link rel="stylesheet" href="/catalog/kit/views.css">
+<style>
+  .chart { display: flex; align-items: flex-end; gap: 3px; height: 140px; margin: 16px 0 4px; border-bottom: 1px solid var(--ink); }
+  .chart a { flex: 1; display: flex; flex-direction: column-reverse; min-width: 6px; text-decoration: none; height: 100%; justify-content: flex-start; }
+  .chart a i { display: block; background: var(--ink); }
+  .chart a i.up { background: repeating-linear-gradient(45deg, var(--ink) 0 1px, transparent 1px 4px); box-shadow: inset 0 0 0 1px var(--ink); }
+  .chart a:hover i { background-color: var(--accent); }
+  .axis { display: flex; justify-content: space-between; font: 11px var(--mono); color: var(--muted); margin-bottom: 8px; }
+  .key { font: 12px var(--mono); color: var(--muted); display: flex; gap: 16px; }
+  .key i { display: inline-block; width: 10px; height: 10px; background: var(--ink); margin-right: 5px; vertical-align: -1px; }
+  .key i.up { background: repeating-linear-gradient(45deg, var(--ink) 0 1px, transparent 1px 4px); box-shadow: inset 0 0 0 1px var(--ink); }
+  .day { display: grid; grid-template-columns: 170px 1fr; gap: 24px; padding: 18px 0; border-bottom: 1px solid var(--rule); scroll-margin-top: 70px; }
+  .day h2 { margin: 0; font-size: 18px; font-weight: 500; letter-spacing: -.02em; position: sticky; top: 70px; align-self: start; }
+  .day h2 small { display: block; font: 12px var(--mono); color: var(--muted); font-weight: 400; }
+  .rels { display: flex; flex-direction: column; gap: 10px; }
+  .rel { display: grid; grid-template-columns: 68px 1fr; gap: 12px; align-items: start; cursor: pointer; padding: 4px; margin: -4px; }
+  .rel:hover { background: var(--fill); }
+  .rel:hover b { text-decoration: underline; text-underline-offset: 3px; }
+  .rel .t { font: 12px var(--mono); color: var(--muted); padding-top: 3px; white-space: nowrap; }
+  .rel b { font-weight: 700; }
+  .rel .v { font: 12px var(--mono); margin-left: 6px; color: var(--muted); }
+  .rel .v.up { color: var(--ink); }
+  .rel .v.up::before { content: "↑ "; }
+  .rel p { margin: 2px 0 0; color: var(--muted); font-size: 14px; }
+  .rel blockquote { margin: 4px 0 0; padding-left: 10px; border-left: 2px solid var(--ink); font-size: 14px; }
+  @media (max-width: 640px) { .day { grid-template-columns: 1fr; gap: 8px; } .day h2 { position: static; } }
+</style>
+</head>
+<body>
+<div id="head"></div>
+<main class="wrap">
+  <div class="bar">
+    <h1 id="count">Timeline</h1>
+    <span class="sp"></span>
+    <a class="cv-btn" href="/catalog/data/feed.xml" type="application/atom+xml">Subscribe · Atom feed</a>
+  </div>
+  <div class="key"><span><i></i>new app</span><span><i class="up"></i>new version</span></div>
+  <div class="chart" id="chart" aria-label="Releases per day"></div>
+  <div class="axis" id="axis"></div>
+  <section id="days" aria-label="Releases by day"><p class="cv-empty">Loading the catalog…</p></section>
+</main>
+<footer class="cv-foot"><div class="wrap">Release dates and changelogs come from slop.boutique's release history. The <a href="/catalog/data/feed.xml">Atom feed</a> has one entry per release, for any feed reader.</div></footer>
+<script src="/catalog/kit/views.js"></script>
+<script>
+(async () => {
+  const { el, matches } = SlopCatalog;
+  await SlopCatalog.header(document.querySelector("#head"), "timeline");
+  const { catalog } = await SlopCatalog.load();
+  SlopCatalog.viewer.bind(catalog);
+  let q = new URLSearchParams(location.search).get("q") || "";
+  window.addEventListener("catalog:search", (e) => { q = e.detail.query; render(); });
+
+  const dayOf = (iso) => iso.slice(0, 10);
+  const fmtDay = (d) => new Date(d + "T12:00:00Z").toLocaleDateString(undefined, { weekday: "short", month: "short", day: "numeric" });
+  const fmtTime = (iso) => new Date(iso).toLocaleTimeString(undefined, { hour: "2-digit", minute: "2-digit" });
+
+  // events: one per release; the oldest release of an app is its arrival.
+  function events(items) {
+    const out = [];
+    for (const i of items) {
+      const rels = i.releases || [{ version: i.version, publishedAt: i.publishedAt, changelog: "" }];
+      rels.forEach((r, k) => { if (r.publishedAt) out.push({ item: i, rel: r, first: k === rels.length - 1 }); });
+    }
+    return out.sort((a, b) => b.rel.publishedAt.localeCompare(a.rel.publishedAt));
+  }
+
+  function render() {
+    const ev = events(catalog.items.filter((i) => matches(i, q)));
+    const days = new Map();
+    ev.forEach((e) => { const d = dayOf(e.rel.publishedAt); days.set(d, [...(days.get(d) || []), e]); });
+    const ups = ev.filter((e) => !e.first).length;
+    document.querySelector("#count").textContent = `${ev.length - ups} apps, ${ups} updates, over ${days.size} days`;
+
+    // The chart covers every day from the first release to the last.
+    const keys = [...days.keys()].sort();
+    const all = [];
+    if (keys.length) for (let d = new Date(keys[0] + "T00:00:00Z"); dayOf(d.toISOString()) <= keys[keys.length - 1]; d.setUTCDate(d.getUTCDate() + 1)) all.push(dayOf(d.toISOString()));
+    const max = Math.max(1, ...[...days.values()].map((l) => l.length));
+    document.querySelector("#chart").replaceChildren(...all.map((d) => {
+      const l = days.get(d) || [], n = l.filter((e) => e.first).length, u = l.length - n;
+      return el("a", { href: "#d-" + d, title: `${fmtDay(d)}: ${n} new, ${u} updates` },
+        n ? el("i", { style: `height:${(100 * n) / max}%` }) : null, u ? el("i", { class: "up", style: `height:${(100 * u) / max}%` }) : null);
+    }));
+    document.querySelector("#axis").replaceChildren(...(all.length ? [el("span", {}, fmtDay(all[0])), el("span", {}, fmtDay(all[all.length - 1]))] : []));
+
+    document.querySelector("#days").replaceChildren(...(ev.length ? [...days].map(([d, list]) => el("section", { class: "day", id: "d-" + d },
+      el("h2", {}, fmtDay(d), el("small", {}, `${list.length} release${list.length > 1 ? "s" : ""}`)),
+      el("div", { class: "rels" }, list.map((e) => el("div", { class: "rel", role: "button", tabindex: "0",
+        onclick: () => SlopCatalog.viewer.open(e.item), onkeydown: (k) => { if (k.key === "Enter") SlopCatalog.viewer.open(e.item); } },
+        el("span", { class: "t" }, fmtTime(e.rel.publishedAt)),
+        el("div", {},
+          el("b", {}, e.item.title), el("span", { class: "v" + (e.first ? "" : " up") }, (e.first ? "new · v" : "update · v") + e.rel.version),
+          e.item.free ? null : el("span", { class: "cv-paid", style: "margin-left:6px" }, "subscribers"),
+          e.first ? el("p", {}, e.item.description) : null,
+          e.rel.changelog ? el("blockquote", {}, e.rel.changelog) : null)))))) : [el("p", { class: "cv-empty" }, "Nothing matches.")]));
+  }
+  render();
+})();
+</script>
+</body>
+</html>
