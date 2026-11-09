@@ -13,7 +13,7 @@ func TestCatalogShelfApp(t *testing.T) {
 	h := newHarness(t)
 	admin := h.tokenFor("admin@example.com", "read", "write", "admin")
 	live := h.cfg.Hosts.Live[0]
-	fs := append(appDir(t, "catalog-shelf"), map[string]any{"path": "data/catalog.json", "text": mcpCatalog})
+	fs := append(appDir(t, "catalog-shelf"), map[string]any{"path": "data/catalog.json", "text": catalogFixture})
 	h.call(admin, "store.new", map[string]any{"id": "catalog-shelf"})
 	h.call(admin, "files.push", map[string]any{"store": "catalog-shelf", "files": fs})
 	h.call(admin, "grant.set", map[string]any{"store": "catalog-shelf", "subject": "@guest", "level": "view"})

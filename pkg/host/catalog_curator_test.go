@@ -17,7 +17,7 @@ func TestCatalogCuratorApp(t *testing.T) {
 	h.a.SetLLM(&llm.Fake{})
 	admin := h.tokenFor("admin@example.com", "read", "write", "admin")
 	live := h.cfg.Hosts.Live[0]
-	fs := append(appDir(t, "catalog-curator"), map[string]any{"path": "data/catalog.json", "text": mcpCatalog})
+	fs := append(appDir(t, "catalog-curator"), map[string]any{"path": "data/catalog.json", "text": catalogFixture})
 	h.call(admin, "store.new", map[string]any{"id": "catalog-curator"})
 	h.call(admin, "files.push", map[string]any{"store": "catalog-curator", "files": fs})
 	if st := h.call(admin, "app.status", map[string]any{"store": "catalog-curator"}).(map[string]any); st["broken"] != "" {

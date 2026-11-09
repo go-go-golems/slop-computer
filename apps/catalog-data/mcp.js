@@ -1,12 +1,18 @@
-// SLOP3-015 view 4: a read-only MCP server over the catalog, for agents.
+// SLOP3-015 view 4, moved into catalog-data by SLOP3-018: a read-only MCP
+// server over the catalog, for agents.
 //
-// One public route, POST <mount>/, speaks JSON-RPC 2.0 as MCP's Streamable
-// HTTP transport allows for a stateless server: each POST gets one JSON
-// answer (no SSE, no session). The data is the catalog.json this store was
-// deployed with (data/catalog.json, loaded with the actor), so a new catalog
-// means a new snapshot and a fresh actor. Nothing is written anywhere.
-const app = require('express').app();
-const catalog = require('./data/catalog.json');
+// The actor routes POST / (and GET /, which says what this is) here. It
+// speaks JSON-RPC 2.0 as MCP's Streamable HTTP transport allows for a
+// stateless server: each POST gets one JSON answer (no SSE, no session).
+// The catalog comes from the store's tables on every message (lib), so
+// a new release shows up at once. Nothing is written anywhere.
+//
+//   mcp.answer(message, lib) -> the JSON-RPC answer, or null for a notification
+//   mcp.TOOLS                -> the tool names, for GET /
+//
+// lib is { catalog(), item(id), search({words, tag, cap, free}) }, the
+// actor's reads.
+const C = require('./catalog.js');
 
 const VERSIONS = ['2025-06-18', '2025-03-26', '2024-11-05'];
 const CAPS = {
@@ -22,8 +28,7 @@ function card(i) {
     access: i.free ? 'free' : 'subscribers', version: i.version, publishedAt: i.publishedAt, bytes: i.bytes, open: i.open };
 }
 
-function full(i) {
-  const site = 'https://site.slop.yolo.scapegoat.dev';
+function full(i, site) {
   return Object.assign(card(i), {
     html: i.download ? site + i.download : null,
     viewer: site + '/catalog/list/?open=' + encodeURIComponent(i.id),
@@ -35,16 +40,11 @@ function full(i) {
 
 // search: every word of the query in the title, description, id or tags;
 // title hits first, then newest.
-function search(a) {
-  const words = String(a.query || '').toLowerCase().split(/\s+/).filter(Boolean);
+function search(a, lib) {
+  const words = C.words(a.query);
   const limit = Math.max(1, Math.min(50, Number(a.limit) || 10));
-  const hits = catalog.items.filter((i) => {
-    if (a.tag && !i.tags.includes(a.tag)) return false;
-    if (a.capability && !i.capabilities.includes(a.capability)) return false;
-    if (a.free_only && !i.free) return false;
-    const hay = (i.title + ' ' + i.description + ' ' + i.id + ' ' + i.tags.join(' ')).toLowerCase();
-    return words.every((w) => hay.includes(w));
-  }).map((i) => [words.filter((w) => i.title.toLowerCase().includes(w)).length, i])
+  const hits = lib.search({ words, tag: a.tag, cap: a.capability, free: a.free_only ? true : undefined })
+    .map((i) => [words.filter((w) => i.title.toLowerCase().includes(w)).length, i])
     .sort((x, y) => y[0] - x[0] || String(y[1].publishedAt).localeCompare(String(x[1].publishedAt)));
   return { total: hits.length, apps: hits.slice(0, limit).map(([, i]) => card(i)) };
 }
@@ -62,21 +62,24 @@ const TOOLS = [
   { name: 'get_app', title: 'Get an app',
     description: 'Everything the catalog knows about one app: description, tags, runtime capabilities, access, size, release history, and links to open it, view it and (when free) download its HTML.',
     inputSchema: { type: 'object', properties: { id: { type: 'string', description: 'The app id, as search_apps returns it' } }, required: ['id'] },
-    run: (a) => {
-      const i = catalog.items.find((x) => x.id === a.id);
+    run: (a, lib) => {
+      const i = typeof a.id === 'string' ? lib.item(a.id) : null;
       if (!i) throw { code: -32602, message: 'no app with id ' + JSON.stringify(a.id) };
-      return full(i);
+      return full(i, lib.catalog().siteOrigin);
     } },
   { name: 'list_tags', title: 'List tags',
     description: 'The catalog\'s tags with how many apps carry each, most used first.',
     inputSchema: { type: 'object', properties: { limit: { type: 'integer', minimum: 1, maximum: 500, default: 50 } } },
-    run: (a) => ({ total: catalog.tags.length, tags: catalog.tags.slice(0, Math.max(1, Math.min(500, Number(a.limit) || 50))) }) },
+    run: (a, lib) => {
+      const tags = lib.catalog().tags;
+      return { total: tags.length, tags: tags.slice(0, Math.max(1, Math.min(500, Number(a.limit) || 50))) };
+    } },
   { name: 'list_capabilities', title: 'List runtime capabilities',
     description: 'The slop runtime capabilities the apps declare, what each gives a page, and how many apps declare it.',
     inputSchema: { type: 'object', properties: {} },
-    run: () => {
+    run: (a, lib) => {
       const n = {};
-      catalog.items.forEach((i) => i.capabilities.forEach((c) => { n[c] = (n[c] || 0) + 1; }));
+      lib.catalog().items.forEach((i) => i.capabilities.forEach((c) => { n[c] = (n[c] || 0) + 1; }));
       return { capabilities: Object.keys(n).sort((a, b) => n[b] - n[a]).map((c) => ({ name: c, apps: n[c], meaning: CAPS[c] || '' })) };
     } },
 ];
@@ -85,18 +88,20 @@ const ok = (id, result) => ({ jsonrpc: '2.0', id, result });
 const err = (id, code, message) => ({ jsonrpc: '2.0', id, error: { code, message } });
 
 // answer handles one JSON-RPC message; null for a notification.
-function answer(m) {
+function answer(m, lib) {
   if (!m || m.jsonrpc !== '2.0' || typeof m.method !== 'string') return err(m && m.id !== undefined ? m.id : null, -32600, 'not a JSON-RPC 2.0 request');
   if (m.id === undefined) return null; // notifications/initialized and friends
   const p = m.params || {};
   switch (m.method) {
-    case 'initialize':
+    case 'initialize': {
+      const catalog = lib.catalog();
       return ok(m.id, {
         protocolVersion: VERSIONS.includes(p.protocolVersion) ? p.protocolVersion : VERSIONS[0],
         capabilities: { tools: { listChanged: false } },
         serverInfo: { name: 'slop-catalog', title: 'slop catalog', version: catalog.generated },
         instructions: `Read-only search over the slop catalog: ${catalog.count} single-file HTML apps from slop.boutique, running on slop at ${catalog.appsOrigin}. Use search_apps to find apps and get_app for one app's details and links.`,
       });
+    }
     case 'ping':
       return ok(m.id, {});
     case 'tools/list':
@@ -106,7 +111,7 @@ function answer(m) {
       const t = TOOLS.find((x) => x.name === p.name);
       if (!t) return err(m.id, -32602, 'unknown tool ' + JSON.stringify(p.name));
       try {
-        const out = t.run(p.arguments || {});
+        const out = t.run(p.arguments || {}, lib);
         return ok(m.id, { content: [{ type: 'text', text: JSON.stringify(out, null, 1) }], structuredContent: out, isError: false });
       } catch (e) {
         if (e && e.code === -32602) return ok(m.id, { content: [{ type: 'text', text: e.message }], isError: true });
@@ -118,22 +123,4 @@ function answer(m) {
   }
 }
 
-app.post('/').public().handle((ctx, res) => {
-  const body = ctx.body;
-  if (body === null || body === undefined || typeof body !== 'object') {
-    return res.status(400).json(err(null, -32700, 'send a JSON-RPC message as application/json'));
-  }
-  const out = Array.isArray(body) ? body.map(answer).filter(Boolean) : answer(body);
-  if (out === null || (Array.isArray(out) && !out.length)) return res.status(202).end();
-  res.set('Cache-Control', 'no-store').json(out);
-});
-
-// A GET is a person or a probe: say what this is (no SSE stream here).
-app.get('/').public().handle((ctx, res) => {
-  res.status(405).set('Allow', 'POST').json({
-    name: 'slop catalog MCP', transport: 'streamable-http (JSON responses, stateless)',
-    usage: 'POST JSON-RPC 2.0 messages here; see /catalog/agents/', tools: TOOLS.map((t) => t.name),
-  });
-});
-
-defineActor({});
+module.exports = { answer, err, TOOLS: TOOLS.map((t) => t.name) };
