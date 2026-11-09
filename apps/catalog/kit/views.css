@@ -140,6 +140,7 @@ input[type="checkbox"], input[type="radio"] { accent-color: var(--ink); }
 .cv-btn.primary { background: var(--cta); color: var(--cta-ink); border-color: var(--cta); font-weight: 700; }
 .cv-btn.primary:hover { border-color: var(--ink); }
 .cv-btn.ink { background: var(--ink); color: var(--bg); border-color: var(--ink); }
+.cv-btn:disabled { color: var(--ink-2); border-color: var(--rule); cursor: default; }
 .cv-mono { display: grid; place-items: center; background: var(--fill); color: var(--ink-2); font-weight: 700; letter-spacing: -.03em; }
 .cv-empty { color: var(--ink-2); padding: 40px 0; text-align: center; }
 .cv-foot { border-top: 1px solid var(--ink); margin-top: 64px; padding: 16px 0 40px; color: var(--ink-2); font-size: 13px; }

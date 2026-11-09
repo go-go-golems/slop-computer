@@ -17,6 +17,7 @@
   .shot > iframe { position: absolute; top: 0; left: 0; border: 0; background: #fff; transform-origin: 0 0; pointer-events: none; }
   .badge { position: absolute; left: 0; bottom: 0; font: 10.5px var(--mono); background: var(--bg); border-top: 1px solid var(--hair); border-right: 1px solid var(--hair); padding: 1px 6px; color: var(--ink-2); text-transform: uppercase; letter-spacing: .04em; }
   .badge.live { color: var(--ink); }
+  .badge.fail { color: var(--accent); }
   .badge.live::before { content: "■ "; animation: cv-blink .8s steps(2) infinite; }
   @keyframes cv-blink { 50% { opacity: 0; } }
   @media (prefers-reduced-motion: reduce) { .badge.live::before { animation: none; } }
@@ -86,13 +87,14 @@
   }
   function badge(t) {
     const item = t.item;
-    const text = t.frame && !t.loading ? "live" : t.loading ? "starting…" : !item.free ? null
+    const text = t.failed ? "no preview" : t.frame && !t.loading ? "live" : t.loading ? "starting…" : !item.free ? null
       : !item.preview ? null : item.bytes > MAX_BYTES ? bytes(item.bytes) + " · view to run" : null;
     let b = t.shot.querySelector(".badge");
     if (!text) { if (b) b.remove(); status(); return; }
     if (!b) t.shot.append(b = el("span", { class: "badge" }));
     b.textContent = text;
     b.classList.toggle("live", text === "live");
+    b.classList.toggle("fail", !!t.failed);
     status();
   }
 
@@ -115,7 +117,9 @@
     t.loading = true;
     badge(t);
     let doc;
-    try { doc = await previewDoc(t.item); } catch (e) { t.loading = false; badge(t); return; }
+    // A preview that fails to load keeps its cover and leaves the schedule;
+    // the tile is tried again when the sheet is built anew (a page, a search).
+    try { doc = await previewDoc(t.item); } catch (e) { t.loading = false; t.failed = true; badge(t); return; }
     if (!t.loading) return; // stopped meanwhile
     const f = el("iframe", { sandbox: "allow-scripts", referrerpolicy: "no-referrer", tabindex: "-1",
       title: t.item.title + " (live preview)", "aria-hidden": "true" });
@@ -137,7 +141,7 @@
     try {
       for (;;) {
         const want = state.live && !state.paused
-          ? [...tiles.values()].filter((t) => t.visible && runnable(t.item)).slice(0, MAX_LIVE) : [];
+          ? [...tiles.values()].filter((t) => t.visible && !t.failed && runnable(t.item)).slice(0, MAX_LIVE) : [];
         tiles.forEach((t) => { if ((t.frame || t.loading) && !want.includes(t)) stop(t); });
         const next = want.find((t) => !t.frame && !t.loading);
         if (!next) break;

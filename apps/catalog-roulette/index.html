@@ -69,7 +69,14 @@
     state.picks = picks;
     show();
   }
-  function set(n, item) { state.picks[n] = item; show(); }
+  // set replaces pick n; without an item (nothing else matches) the picks
+  // stay as they are.
+  function set(n, item) {
+    if (!item) return false;
+    state.picks[n] = item;
+    show();
+    return true;
+  }
 
   function card(item, n) {
     const screen = el("div", { class: "screen" });
@@ -82,7 +89,8 @@
       el("div", { class: "acts" },
         el("a", { class: "cv-btn primary", href: item.open, target: "_blank", rel: "noopener" }, "Open ↗"),
         el("button", { class: "cv-btn", type: "button", onclick: () => SlopCatalog.viewer.open(item) }, "View"),
-        el("button", { class: "cv-btn", type: "button", onclick: () => set(n, rnd(state.picks)) }, "Another"))));
+        el("button", { class: "cv-btn", type: "button", "data-another": "",
+          onclick: (e) => { if (!set(n, rnd(state.picks))) { e.target.disabled = true; e.target.textContent = "No other match"; } } }, "Another"))));
   }
 
   function picks(label, list, n) {
@@ -119,7 +127,10 @@
   document.addEventListener("keydown", (e) => {
     if (e.key === " " && !SlopCatalog.viewer.item && !/^(INPUT|TEXTAREA|SELECT|BUTTON)$/.test(document.activeElement.tagName)) { e.preventDefault(); spin(); }
   });
-  window.addEventListener("catalog:search", (e) => { state.q = e.detail.query; });
+  window.addEventListener("catalog:search", (e) => {
+    state.q = e.detail.query;
+    for (const b of document.querySelectorAll("[data-another]")) { b.disabled = false; b.textContent = "Another"; }
+  });
   // While the viewer is open, the cards' frames rest.
   window.addEventListener("catalog:viewer", (e) => { if (e.detail.open) { stops.forEach((s) => s()); stops = []; } else show(); });
   if (state.picks.length < (state.two ? 2 : 1)) spin(); else show();
