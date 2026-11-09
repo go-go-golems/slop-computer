@@ -406,3 +406,48 @@ The kit's `load()` now fetches `<API>/catalog.json` from the live host, and ever
   ```
   The `catalog.json` can be `$S/catalog-data-prod/catalog.json`, or the host-built catalog: no `--from`, with `--history inventory.json`.
 - **Logs:** `$S/lslop/deploy-dry.log`, `deploy-pass1.log` and `deploy-pass2.log`.
+
+## Step 6: PR #41, and Codex's finding: names from Object.prototype as data
+
+I opened PR #41 (branch `task/slop3-018-catalog-data`). Codex's first review had one finding, and it was right: the actor grouped releases in a plain object keyed by app id, so an app named `constructor` broke every catalog read. Two more lookups had the same pattern. All three now use `Map`, and a test imports such an app: 500 before the fix, 200 after.
+
+### Prompt Context
+**User prompt (verbatim):** see Step 2.
+**Assistant interpretation:** Put the work up for review, as in earlier tickets, and answer the reviews.
+**Inferred user intent:** see Step 2.
+**Commit (code):** 6a3075a — "catalog-data: data-keyed lookups are Maps (Codex on #41)"
+
+### What I did
+- **Pushed and opened the PR:** pushed the branch (the pre-push hooks passed), and opened https://github.com/go-go-golems/slop-computer/pull/41. The body covers what changed, what phase 0 changed, the tests, and the deploy order, which is not done yet.
+- **Waited for Codex,** with a background loop on the bot comment's `codex-review-state:v1` for the head SHA: `status=completed after 5 checks` on 405dc93. One inline comment, 4509227757 (P2), on `apps/catalog-data/actor.js:46`: "Use a prototype-free map to group releases by app ID".
+- **Looked for the same pattern elsewhere** with `grep -n "byApp\|const n = {}\|CAPS\[c\]"`. The tag counts in `catalog()` and MCP's `list_capabilities` counts are plain objects keyed by data as well.
+- **Fixed all three:** `withReleases`'s `byApp`, `catalog()`'s tag counts and `list_capabilities`'s counts are now `Map`s, and `CAPS[c]` is read with `hasOwnProperty`.
+- **Test:** `TestCatalogData` upserts an app with id `constructor`, tags `constructor`, `__proto__` and `toString`, and capability `hasOwnProperty`. It checks `/catalog.json` (count, the tags counted once each), `/apps/constructor` (with its release), and MCP's `list_capabilities` at `/catalog/api/` (`"meaning":""`). Then it removes the app.
+- **Showed the test catches the bug:** with HEAD's `actor.js` and `mcp.js` swapped in (copies backed up in `$S/bak41`, then restored), it fails with `catalog_data_test.go:191: prototype names: 500 <nil>`.
+
+### Why
+- Ids and tags come from francois's artifacts: they are data, and `normalize` accepts `constructor` as an id and `__proto__` as a tag. A tag `__proto__` would have done worse than throw: `n['__proto__'] = …` sets the object's prototype.
+
+### What worked
+- `go test ./pkg/host/ -run TestCatalog -count=1` passes on engine and direct.
+
+### What didn't work
+- My own review missed this in step 3. Nothing failed while fixing it.
+
+### What I learned
+- In actor JS, any object keyed by an id, tag or name that comes from data should be a `Map` (or `Object.create(null)`).
+
+### What was tricky to build
+- **Checking the test against the old code without `git stash`:** the stash is shared with other sessions, so I swapped the files from `git show HEAD:…` and restored them from scratchpad copies.
+
+### What warrants a second pair of eyes
+- `catalog.js` builds no data-keyed objects (it uses `Set` and arrays), and `mcp.js`'s `TOOLS.find` compares names. Those are the only other places data meets property names.
+
+### What should be done in the future
+- A re-review by Codex on the fix.
+
+### Code review instructions
+- `git show 6a3075a`; validate with `GOWORK=off go test ./pkg/host/ -run TestCatalogData -count=1`.
+
+### Technical details
+- The finding: "If an imported app has the valid store ID `constructor` and a release, `byApp[r.app]` resolves to the inherited `Object` constructor rather than an empty entry, so `.push()` throws."
