@@ -1,0 +1,3 @@
+catalog-data     store.new, files.push (5 changed: actor.js, app.json, catalog.js, mcp.js, sql/001_catalog.sql), grant.set @guest view, mount.set apps.slop.yolo.scapegoat.dev/catalog/api (api policy), configure (origins)
+                 snapshot 1
+waiting: apps.slop.yolo.scapegoat.dev/catalog/mcp, catalog, catalog-list, catalog-table, catalog-sheet, catalog-caps, catalog-zine, catalog-timeline, catalog-treemap, catalog-roulette, catalog-term, catalog-desktop, catalog-agents, catalog-shelf, catalog-curator. Import the catalog (SLOP3-018 scripts/01-import-catalog.py), then run this again.

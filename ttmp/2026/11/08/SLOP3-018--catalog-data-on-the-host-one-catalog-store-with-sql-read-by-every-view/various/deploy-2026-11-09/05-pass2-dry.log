@@ -1,0 +1,15 @@
+catalog-data     mount.set apps.slop.yolo.scapegoat.dev/catalog/mcp (api policy) (from catalog-mcp)
+catalog          files.push (6 changed: data/catalog.json, data/feed.xml, data/search-index.json, index.html, kit/views.js, llms.txt)
+catalog-list     files.push (1 changed: index.html)
+catalog-table    files.push (1 changed: index.html)
+catalog-sheet    files.push (1 changed: index.html)
+catalog-caps     files.push (1 changed: index.html)
+catalog-zine     files.push (1 changed: index.html)
+catalog-timeline files.push (1 changed: index.html)
+catalog-treemap  files.push (1 changed: index.html)
+catalog-roulette files.push (1 changed: index.html)
+catalog-term     files.push (1 changed: index.html)
+catalog-desktop  files.push (1 changed: index.html)
+catalog-agents   files.push (1 changed: index.html)
+catalog-shelf    files.push (4 changed: actor.js, app.json, data/catalog.json, index.html), bind.set catalog → catalog-data, grant.set catalog-data store:catalog-shelf view
+catalog-curator  files.push (3 changed: actor.js, data/catalog.json, index.html), bind.set catalog → catalog-data, grant.set catalog-data store:catalog-curator view

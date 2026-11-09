@@ -1,0 +1,4 @@
+server: slop-catalog 2025-06-18
+tools: ['search_apps', 'get_app', 'list_tags', 'list_capabilities']
+get_app weft: Weft free https://site.slop.yolo.scapegoat.dev/_s/weft/main/index.html
+room apps: ['mimeo-studio', 'mimeo', 'hypercore-studio', 'living-comic-studio', 'lattice-deck']

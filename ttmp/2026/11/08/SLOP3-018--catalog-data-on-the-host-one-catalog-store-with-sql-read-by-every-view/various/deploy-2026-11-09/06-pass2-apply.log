@@ -1,0 +1,30 @@
+catalog-data     mount.set apps.slop.yolo.scapegoat.dev/catalog/mcp (api policy) (from catalog-mcp)
+                 catalog-mcp is no longer mounted at apps.slop.yolo.scapegoat.dev/catalog/mcp; store.rm catalog-mcp when you are done with it
+catalog          files.push (6 changed: data/catalog.json, data/feed.xml, data/search-index.json, index.html, kit/views.js, llms.txt)
+                 snapshot 10
+catalog-list     files.push (1 changed: index.html)
+                 snapshot 7
+catalog-table    files.push (1 changed: index.html)
+                 snapshot 7
+catalog-sheet    files.push (1 changed: index.html)
+                 snapshot 4
+catalog-caps     files.push (1 changed: index.html)
+                 snapshot 4
+catalog-zine     files.push (1 changed: index.html)
+                 snapshot 4
+catalog-timeline files.push (1 changed: index.html)
+                 snapshot 3
+catalog-treemap  files.push (1 changed: index.html)
+                 snapshot 3
+catalog-roulette files.push (1 changed: index.html)
+                 snapshot 3
+catalog-term     files.push (1 changed: index.html)
+                 snapshot 3
+catalog-desktop  files.push (1 changed: index.html)
+                 snapshot 3
+catalog-agents   files.push (1 changed: index.html)
+                 snapshot 3
+catalog-shelf    files.push (4 changed: actor.js, app.json, data/catalog.json, index.html), bind.set catalog → catalog-data, grant.set catalog-data store:catalog-shelf view
+                 snapshot 5
+catalog-curator  files.push (3 changed: actor.js, data/catalog.json, index.html), bind.set catalog → catalog-data, grant.set catalog-data store:catalog-curator view
+                 snapshot 3

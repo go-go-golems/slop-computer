@@ -15,3 +15,7 @@ Phases 0-4 built (branch task/slop3-018-catalog-data): catalog-data store (SQL, 
 ### Related Files
 
 - /home/manuel/workspaces/2026-10-28/slop-computer/slop-computer/apps/catalog-data/actor.js — the catalog's one copy
+
+## 2026-11-08
+
+Deployed on slop.yolo (deploy, backfill 100 apps, deploy): views, Shelf, Curator and MCP read catalog-data; old static data URLs 404; catalog-mcp unmounted

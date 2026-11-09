@@ -451,3 +451,74 @@ I opened PR #41 (branch `task/slop3-018-catalog-data`). Codex's first review had
 
 ### Technical details
 - The finding: "If an imported app has the valid store ID `constructor` and a release, `byApp[r.app]` resolves to the inherited `Object` constructor rather than an empty entry, so `.push()` throws."
+
+## Step 7: Deployed on slop.yolo: deploy, backfill, deploy, checks
+
+After the user merged #41 (f5bc6b2) and said yes to the deploy, I ran the three steps on slop.yolo from the merged tree. The result matches the local rehearsal. The served catalog equals the live file. Every view, the Shelf, the Curator and MCP read `catalog-data`, and the old static data URLs answer 404. `catalog-mcp` is unmounted but still exists.
+
+### Prompt Context
+**User prompts (verbatim):**
+- "I merged #41 btw."
+- The answer to "Should I deploy the new catalog layout to slop.yolo now …?" was "Yes, deploy now (Recommended)".
+**Assistant interpretation:** Run the first deploy (deploy, import, deploy) on slop.yolo and check it end to end.
+**Inferred user intent:** Have the new layout running on staging.
+**Commit (code):** none (deploy only); the code is f5bc6b2 on main.
+
+### What I did
+- **Preconditions:**
+  - `git diff --stat HEAD origin/main` was empty in the `slop018` worktree (its branch tip, 4111421, has the merge's tree);
+  - the default login is `https://slop.yolo.scapegoat.dev`, read from the credentials file without printing the token;
+  - a fresh `site…/catalog/data/catalog.json` (100 apps, generated 2026-11-07T02:03:54Z) equals the copy used in the rehearsal.
+- **The three steps.** Logs are in `various/deploy-2026-11-09/`, numbered 01–08.
+  1. **`02-deploy.py .` (dry run, then `--apply`):**
+     - `catalog-data`: store.new, files.push (5 files), grant `@guest view`, mount `/catalog/api`, configure (origins), giving snapshot 1;
+     - everything else waits.
+  2. **`01-import-catalog.py --from catalog.json --prune` (dry run, then `--apply`):** `importCatalog: 100 upserted (100 new), removed [], rev 2`. A second dry run gives "0 new, 0 changed, 100 the same".
+  3. **`02-deploy.py .` again (dry run, then `--apply`):**
+     - `/catalog/mcp` moves "(from catalog-mcp)";
+     - `catalog` pushed (6 changed: the four data files removed, plus `index.html` and `kit/views.js`), and each view's `index.html`;
+     - Shelf and Curator: files, bind.set and grant.
+     A third dry run: every store "up to date".
+- **HTTP checks** (`07-http-checks.log`):
+  - `site…/catalog/` 200 and `data/views.json` 200; `data/catalog.json` 404 and `llms.txt` 404;
+  - `apps…/catalog/api/` `catalog.json`, `/apps?q=shader`, `/apps/claude-computer` and `search-index.json` 200 `application/json`; `feed.xml` 200 `application/atom+xml`; `llms.txt` 200 `text/plain`;
+  - `/catalog/mcp` GET 405, as designed;
+  - CORS: allowed for `https://site.slop.yolo.scapegoat.dev`, none for `https://evil.example`;
+  - `If-None-Match: "c2"` gives 304.
+- **The served `catalog.json` against the file:** items equal, tags equal, count 100, extra keys `api` and `rev`, `ETag "c2"`, `Cache-Control: public, no-cache`.
+- **MCP:** `uvx --with mcp python -I 04-mcp-check.py https://apps.slop.yolo.scapegoat.dev/catalog/mcp` reports `server: slop-catalog 2025-06-18`, the four tools, `get_app weft`, and five room apps.
+- **Browser (Playwright):**
+  - the landing page and all 11 views report `SlopCatalog.API = https://apps.slop.yolo.scapegoat.dev/catalog/api`, `count 100`, and no response with status ≥ 400, covers included;
+  - the agents page's "Call tool" returns results;
+  - the Shelf's sandbox frame shows 100 apps, and the Curator, for a guest, three picks seeded by the date;
+  - screenshot: `various/screenshots/02-landing-yolo.png`.
+
+### Why
+- **The dry run before each apply,** to compare the plan with the rehearsal's before writing to staging. Each plan matched.
+
+### What worked
+- Everything above, on the first try.
+- `data/views.json` was not in pass 2's change list, so the deploy's own `VIEWS` list reproduces the file `01-build-catalog.py` wrote, byte for byte.
+
+### What didn't work
+- No failures. One check came back empty: the Playwright locator `text=connected`. The "Call tool" output was there, so the client was connected.
+
+### What I learned
+- On slop.yolo the covers load, because francois's media store exists there. Locally they were the only 404s.
+
+### What was tricky to build
+- N/A (the order and the waits were settled in the rehearsal, step 5).
+
+### What warrants a second pair of eyes
+- **Browsers that cached the old pages:** the static host lets them keep a page for up to 11 minutes (60 s, then stale for 600 s), so they may show the old views until then. The old pages fetch `data/catalog.json`, which is now 404.
+
+### What should be done in the future
+- `store.rm catalog-mcp`, when the user agrees. It is unmounted and holds only the old actor and a copy of the data.
+- The FTS5 build-tag task (`rkw0`).
+- Point 03-import.py's runbook at `--catalog`, so that the next release lands in the catalog.
+
+### Code review instructions
+- Read the logs in `various/deploy-2026-11-09/` in order. To check again: `curl -s https://apps.slop.yolo.scapegoat.dev/catalog/api/catalog.json | jq .count`, and `02-deploy.py .` should report everything up to date.
+
+### Technical details
+- `catalog-data` on slop.yolo: rev 2, 100 apps; mounts `apps.slop.yolo.scapegoat.dev/catalog/api` and `/catalog/mcp`.

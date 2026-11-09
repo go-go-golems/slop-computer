@@ -7,5 +7,6 @@
 - [x] Phase 3: MCP moves into the catalog actor; Curator reads through a binding; 02-deploy.py ships no data; catalog-mcp retired <!-- t:scop -->
 - [x] Phase 4: the SLOP3-013 importer pushes upsertApp/removeApp per release; 01-build-catalog.py retired <!-- t:u0d2 -->
 - [ ] Phase 5 (optional): visitor-aware items; a document mirror if a page wants live updates <!-- t:s2v8 -->
-- [ ] Deploy on slop.yolo: 02-deploy.py --apply; 01-import-catalog.py --from <live catalog.json> --prune --apply; 02-deploy.py --apply; browser checks; then store.rm catalog-mcp <!-- t:q3qu -->
+- [x] Deploy on slop.yolo: 02-deploy.py --apply; 01-import-catalog.py --from <live catalog.json> --prune --apply; 02-deploy.py --apply; browser checks (done 2026-11-09, diary step 7) <!-- t:q3qu -->
 - [ ] Platform: build with -tags sqlite_fts5 (Dockerfile, Makefile, CI test command), or narrow sqlpolicy to what is compiled in (FTS5 is allowed but not built) <!-- t:rkw0 -->
+- [ ] store.rm catalog-mcp on slop.yolo (unmounted since 2026-11-09), when the user agrees <!-- t:dypc -->

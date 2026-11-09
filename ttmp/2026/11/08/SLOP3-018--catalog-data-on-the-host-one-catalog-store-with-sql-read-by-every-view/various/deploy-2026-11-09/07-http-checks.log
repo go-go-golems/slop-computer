@@ -1,0 +1,18 @@
+200 text/html; charset=utf-8 https://site.slop.yolo.scapegoat.dev/catalog/
+200 application/json https://site.slop.yolo.scapegoat.dev/catalog/data/views.json
+404 text/html; charset=utf-8 https://site.slop.yolo.scapegoat.dev/catalog/data/catalog.json
+404 text/html; charset=utf-8 https://site.slop.yolo.scapegoat.dev/catalog/llms.txt
+200 application/json https://apps.slop.yolo.scapegoat.dev/catalog/api/catalog.json
+200 application/json https://apps.slop.yolo.scapegoat.dev/catalog/api/apps?q=shader&limit=2
+200 application/json https://apps.slop.yolo.scapegoat.dev/catalog/api/apps/claude-computer
+200 application/atom+xml; charset=utf-8 https://apps.slop.yolo.scapegoat.dev/catalog/api/feed.xml
+200 text/plain; charset=utf-8 https://apps.slop.yolo.scapegoat.dev/catalog/api/llms.txt
+200 application/json https://apps.slop.yolo.scapegoat.dev/catalog/api/search-index.json
+405 application/json https://apps.slop.yolo.scapegoat.dev/catalog/mcp
+200 text/html; charset=utf-8 https://apps.slop.yolo.scapegoat.dev/catalog/shelf/
+200 text/html; charset=utf-8 https://apps.slop.yolo.scapegoat.dev/catalog/curator/
+--- CORS:
+https://site.slop.yolo.scapegoat.dev -> [access-control-allow-origin: https://site.slop.yolo.scapegoat.dev]
+https://evil.example -> []
+--- 304:
+304
