@@ -825,3 +825,69 @@ The user asked for a Codex review of the whole of #35. Codex reviewed `ea52ff2` 
 
 ### Technical details
 - #35's merge commit is `8b15c8b`, merged 2026-11-09T00:42Z.
+
+## Step 11: slop.yolo on sha-8b15c8b; the restyled catalog deployed and checked
+
+The user said "yes" to merging GitOps PR #430, and then "also deploy catalog". slop.yolo now runs the image with #39, #40 and #35, so actors run on the engine runtime there. The catalog views are deployed and checked live.
+
+### Prompt Context
+**User prompt (verbatim):** "yes."; mid-turn: "also deploy catalog"
+**Assistant interpretation:**
+- Merge GitOps PR #430 and close #428 and #429, which it supersedes.
+- Watch the rollout.
+- Deploy the catalog content with `02-deploy.py`: a dry run, then `--apply`.
+- Check the result over HTTP, through MCP and in the browser.
+**Inferred user intent:** Test everything on the staging setup.
+**Commits:** hetzner-k3s `49e86f7` (the merge of #430). The content deploy has no commit; it took a new snapshot of each store.
+
+### What I did
+- **GitOps:** `gh pr merge 430 --merge`, then closed #428 and #429 with a note. #427, an unrelated goja-auth-host bump, stays open.
+- **Rollout:**
+  - polled `kubectl -n slop get deploy slop` until the image read `sha-8b15c8b` (16 checks at 15 s);
+  - `kubectl rollout status`: successfully rolled out;
+  - Argo app `slop`: Synced and Healthy at `49e86f7`;
+  - pod `slop-66dc65ffd7-phc8f`: ready, 0 restarts;
+  - the log shows "Pi models ready (Geppetto): 14", the serving banner, and no errors.
+- **Data:** downloaded the five current data files from `site.slop.yolo.scapegoat.dev/catalog/` (catalog.json, views.json, feed.xml, search-index.json, llms.txt) instead of rebuilding them, so the deploy changed only pages.
+- **Deploy:**
+  - the dry run planned `catalog` (6 files: index.html, the kit and fonts, OFL.txt) and each view's index.html; `catalog-mcp` was up to date;
+  - `--apply` took snapshots;
+  - a second dry run reports every store up to date.
+- **Checks:**
+  - all 12 static views and the two live views answer 200;
+  - the landing page references `views.css?v=9454c6d1a01a` and `views.js?v=423510251691`;
+  - the served `views.css` and the 500-weight font are byte-identical to the repo;
+  - MCP (`uvx --with mcp python -I 04-mcp-check.py …/catalog/mcp`): initialize, 4 tools, `get_app weft`, and a room search all work, on the engine runtime;
+  - browser: `list/?open=weft` shows the viewer with the app running in the preview, and Plex Mono 400 loaded;
+  - the Shelf as a guest lists apps with ☆ and "Sign in to keep a shelf", and the share option is hidden.
+
+### Why
+- **Downloading the data instead of rebuilding it:** a rebuild would have pulled in any catalog changes since the last deploy. The dry run confirmed the data files were unchanged.
+
+### What worked
+- Every check above.
+
+### What didn't work
+- `python3 -I 04-mcp-check.py` with the system Python failed: `cannot import name 'streamable_http_client'`, because the installed `mcp` package is old. The script's own usage line says `uvx --with mcp`, and that works.
+- On the live host the app runs inside the shell's frame, so `document.querySelector` from the page found nothing. A screenshot served instead.
+
+### What I learned
+- The release workflow skips docs-only pushes. The diary push to main (`3b1c369`) started no build, so `8b15c8b`'s build was not cancelled. (In step 10 I expected it would be.)
+- The static host serves `.woff2` as `application/octet-stream`. Browsers load it anyway, but the server's content-type table should know `font/woff2`.
+
+### What was tricky to build
+- Nothing.
+
+### What warrants a second pair of eyes
+- slop.yolo's first hours on the engine runtime. Watch actor errors, goroutines and latency. The way back is `actors: {runtime: direct}` in the configmap.
+
+### What should be done in the future
+- Add `.woff2 → font/woff2` to the static host's types.
+- Deploy improvements, as answered to the user: a `slop apply` verb, uploads by hash, one copy of the data, no `?v=` rewriting.
+- The user's question 3: catalog data on the host (SQL in the catalog's actor) instead of uploaded JSON.
+
+### Code review instructions
+- None (deploy only).
+
+### Technical details
+- Stores and snapshots after `--apply`: catalog 9, list 6, table 6, sheet 3, caps 3, zine 3, timeline 2, treemap 2, roulette 2, term 2, desktop 2, agents 2, shelf 4, curator 2.
