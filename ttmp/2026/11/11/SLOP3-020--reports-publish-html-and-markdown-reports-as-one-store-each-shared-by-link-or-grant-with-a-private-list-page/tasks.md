@@ -7,4 +7,5 @@
 - [x] apps/reports-home: the list of reports by title
 - [x] Local end-to-end: a Markdown report with images, a table and mermaid; the list page; a guest link
 - [x] Staging: mounts, reports-home, one test report, a link opened signed out, revoked
-- [x] PR (#43)
+- [x] PR (#43, merged); follow-up #44 (MathML)
+- [x] Four vault reports published privately on staging

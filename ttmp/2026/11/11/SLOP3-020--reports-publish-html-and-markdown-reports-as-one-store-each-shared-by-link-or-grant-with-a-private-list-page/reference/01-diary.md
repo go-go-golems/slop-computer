@@ -334,3 +334,62 @@ Codex's review of #43 at `6f913f5` found one P2. The Markdown preparation also r
 FENCE       ^((?:[ \t]*>)*[ \t]*)(`{3,}|~{3,})(.*)$     close: same char, length ≥ open, nothing after
 CODE_SPAN   (?<!`)(`+)(?!`)(.+?)(?<!`)\1(?!`)   (re.S; not across a blank line)
 order       front matter → set code aside → embeds → wikilinks → callouts → restore
+
+## Step 5: #43 merged; four vault reports published on staging; math as MathML (#44)
+
+The user merged #43 and asked to publish a few reports and where to see them. I published four slop v3 reports from the vault to slop.yolo, privately: Pinboard, The Catalog Apps, Catalog Views and One Object Model. They are listed at `/reports`. One report showed its two formulas as raw TeX, so the script now renders math as MathML. That commit came after the merge, so it went into a follow-up PR, #44, and the report was republished with it.
+
+### Prompt Context
+**User prompt (verbatim):** "publish a few reports. Is there a page to see "my reoprts" ?"
+**Assistant interpretation:** Publish some of the user's own reports on staging with the merged script, and point to the list page.
+**Inferred user intent:** Start using the setup on real content.
+**Commit (code):** `c3d5c7a` "Reports: render TeX math as MathML" (PR #44, branch `task/slop3-020-mathml`; first committed as `563b442` on the merged branch).
+
+### What I did
+- **Published four vault reports**, from `Projects/2026/11/` in the go-go-parc vault, with `publish.py publish <file>`: no `--link` and no `--grant`, so they are private to their owner. Logs are in `various/03-staging/05-publish-vault.log` and `06-ls.log`.
+
+  | Store | Report | Size | Mermaid |
+  |---|---|---|---|
+  | `s-ypd4lpdl` | Pinboard (11/09) | 837 KiB | 5 |
+  | `s-zurw6anh` | The Catalog Apps (11/06) | 62 KiB | 0 |
+  | `s-zhpavomc` | Catalog Views (11/06) | 48 KiB | 0 |
+  | `s-ufvr6npe` | One Object Model (11/02) | 169 KiB | 2 |
+
+- **The Catalog Apps report printed raw TeX.** pandoc warned "Could not convert TeX math \text{sim}(a, b) = … rendering as TeX" (and the same for the treemap's `\text{worst}(R, w)`). I added `--mathml` and a test, `test_math_is_mathml`, which fails without the flag. The README now mentions math.
+- **#44.** The commit landed on `task/slop3-020-reports` after #43 had been merged at `1ba342e`; the push answered "Create a pull request for 'task/slop3-020-reports'". I cherry-picked it onto `task/slop3-020-mathml` from `origin/main` and opened #44.
+- **Republished** The Catalog Apps in place: `--id s-zurw6anh` gave v2 with no warnings.
+- `publish.py ls` lists the four reports, each with no grants and no links.
+
+### Why
+- **Private by default.** The user asked to publish, not to share. Links or grants are one command each when wanted.
+- **MathML over MathJax or KaTeX from a CDN.** Browsers render MathML natively, and the page stays self-contained.
+
+### What worked
+- All four built and pushed on the first try; mermaid counts and sizes are as above.
+- 13 tests pass.
+
+### What didn't work
+- **Raw TeX** in the first publish of The Catalog Apps (see above).
+- **My first MathML test** asserted that `\frac` was absent from the page. MathML keeps the TeX source in a hidden `<annotation encoding="application/x-tex">`, so it is present. The test now checks that no `$$` is left.
+- **A `sed` meant to edit that assertion matched nothing** (escaping), and the `&&` chain stopped silently. I used the Edit tool instead.
+
+### What I learned
+- **pandoc's default HTML math** leaves TeX it cannot convert as text. Any report with real math needs `--mathml` (or a math library).
+- **The user merges while I work.** Before adding commits to a PR branch, check whether the PR is still open.
+
+### What was tricky to build
+- N/A.
+
+### What warrants a second pair of eyes
+- **The four reports are published from the vault as it is now.** Edits in the vault don't reach them until they are republished with `--id`.
+
+### What should be done in the future
+- #44: the user's review and merge.
+- Sharing any of the four is the user's call: `publish.py link <id> --days N`.
+
+### Code review instructions
+- `git show c3d5c7a`; `python3 scripts/reports/test_publish.py`.
+
+### Technical details
+```text
+/reports (owner only) lists: s-ufvr6npe, s-zhpavomc, s-zurw6anh (v2), s-ypd4lpdl

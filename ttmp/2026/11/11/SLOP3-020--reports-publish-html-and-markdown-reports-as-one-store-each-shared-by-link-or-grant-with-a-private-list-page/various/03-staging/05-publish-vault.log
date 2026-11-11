@@ -1,0 +1,21 @@
+built markdown (5 mermaid): 'slop v3: Pinboard — Shared Boards, Apps as Code in Sandboxed Frames, an Agent and CLI Verbs — A Technical Deep Dive', 837 KiB
+published s-ypd4lpdl (v1): slop v3: Pinboard — Shared Boards, Apps as Code in Sandboxed Frames, an Agent and CLI Verbs — A Technical Deep Dive
+  https://apps.slop.yolo.scapegoat.dev/r/s-ypd4lpdl
+
+pandoc: [WARNING] Could not convert TeX math \text{sim}(a, b) = J(\text{tags}_a, \text{tags}_b) + \tfrac14 \, J(\text{caps}_a, \text{caps}_b), \qquad J(A, B) = \frac{|A \cap B|}{|A \cup B|}, rendering as TeX
+pandoc: [WARNING] Could not convert TeX math \text{worst}(R, w) = \max\left(\frac{w^2 \max R}{s^2},\; \frac{s^2}{w^2 \min R}\right), \qquad s = \sum R, rendering as TeX
+built markdown: 'slop v3: The Catalog Apps — Static Views, an MCP Server, a Shelf and a Curator — A Technical Deep Dive', 59 KiB
+published s-zurw6anh (v1): slop v3: The Catalog Apps — Static Views, an MCP Server, a Shelf and a Curator — A Technical Deep Dive
+  https://apps.slop.yolo.scapegoat.dev/r/s-zurw6anh
+
+built markdown: 'slop v3: Catalog Views — Many Small Static Apps over One Catalog — A Technical Deep Dive', 48 KiB
+published s-zhpavomc (v1): slop v3: Catalog Views — Many Small Static Apps over One Catalog — A Technical Deep Dive
+  https://apps.slop.yolo.scapegoat.dev/r/s-zhpavomc
+
+built markdown (2 mermaid): 'slop v3: One Object Model — Paths Across Stores, Registry Documents and Durable-Object-Shaped Storage — A Technical Deep Dive', 169 KiB
+published s-ufvr6npe (v1): slop v3: One Object Model — Paths Across Stores, Registry Documents and Durable-Object-Shaped Storage — A Technical Deep Dive
+  https://apps.slop.yolo.scapegoat.dev/r/s-ufvr6npe
+
+built markdown: 'slop v3: The Catalog Apps — Static Views, an MCP Server, a Shelf and a Curator — A Technical Deep Dive', 62 KiB
+updated s-zurw6anh (v2): slop v3: The Catalog Apps — Static Views, an MCP Server, a Shelf and a Curator — A Technical Deep Dive
+  https://apps.slop.yolo.scapegoat.dev/r/s-zurw6anh
