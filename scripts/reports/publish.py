@@ -109,10 +109,59 @@ def prepare_markdown(text):
     if m:
         title = front_title(m.group(1))
         text = text[m.end():]
+    # Code keeps its exact text: `[[ -f x ]]` in a Bash example is not a
+    # wikilink. Fenced blocks and code spans are set aside, the rest is
+    # converted, and the code is put back.
+    text, kept = set_code_aside(text)
     text = EMBED.sub(lambda m: "![](" + m.group(1).strip().replace(" ", "%20") + ")", text)
     text = WIKILINK.sub(lambda m: (m.group(2) or m.group(1)).strip(), text)
     text = CALLOUT.sub(lambda m: m.group(1) + "**" + m.group(2).capitalize() + ".**" + (" " + m.group(3) if m.group(3) else ""), text)
-    return title, text
+    return title, PLACEHOLDER.sub(lambda m: kept[int(m.group(1))], text)
+
+
+# A fence line: blockquote markers and indentation, then ``` or ~~~ (three or
+# more). A fence closes with the same character, at least as many, and
+# nothing after it; an unclosed fence runs to the end (CommonMark).
+FENCE = re.compile(r"^((?:[ \t]*>)*[ \t]*)(`{3,}|~{3,})(.*)$")
+# A code span: a run of backticks, then text, then a run of the same length.
+CODE_SPAN = re.compile(r"(?<!`)(`+)(?!`)(.+?)(?<!`)\1(?!`)", re.S)
+PLACEHOLDER = re.compile("\x00(\\d+)\x00")
+
+
+def set_code_aside(text):
+    """Replace fenced code blocks and code spans with placeholders.
+
+    Returns (text with placeholders, the code they stand for)."""
+    kept = []
+
+    def keep(s):
+        kept.append(s)
+        return "\x00" + str(len(kept) - 1) + "\x00"
+
+    out, prose, fence, block = [], [], None, []
+    for line in text.splitlines(keepends=True):
+        if fence:
+            block.append(line)
+            m = FENCE.match(line.rstrip("\r\n"))
+            if m and m.group(2)[0] == fence[0] and len(m.group(2)) >= len(fence) and not m.group(3).strip():
+                out.append(keep("".join(block)))
+                fence, block = None, []
+            continue
+        m = FENCE.match(line.rstrip("\r\n"))
+        if m and not (m.group(2)[0] == "`" and "`" in m.group(3)):
+            out.append(spans_aside("".join(prose), keep))
+            prose, fence, block = [], m.group(2), [line]
+            continue
+        prose.append(line)
+    out.append(spans_aside("".join(prose), keep))
+    if block:
+        out.append(keep("".join(block)))
+    return "".join(out), kept
+
+
+def spans_aside(text, keep):
+    # A code span ends at a blank line (it belongs to one paragraph).
+    return CODE_SPAN.sub(lambda m: m.group(0) if re.search(r"\n[ \t]*\n", m.group(0)) else keep(m.group(0)), text)
 
 
 def first_heading(text):

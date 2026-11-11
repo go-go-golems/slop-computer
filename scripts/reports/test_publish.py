@@ -33,6 +33,27 @@ class PrepareMarkdown(unittest.TestCase):
         _, body = P.prepare_markdown("> [!summary]\n> - one\n\n> [!note]- Folded title\n> text\n")
         self.assertEqual(body, "> **Summary.**\n> - one\n\n> **Note.** Folded title\n> text\n")
 
+    def test_code_is_left_alone(self):
+        # Codex on #43: a Bash test in a fence is not a wikilink.
+        src = ("Run `[[ -f a ]]` first.\n\n"
+               "```bash\n[[ -f report.html ]] && echo exists\n![[x.png]]\n```\n\n"
+               "~~~~\n> [!note] literal\n~~~~\n\n"
+               "> ```\n> [[ -d dir ]]\n> ```\n\n"
+               "``a `[[b]]` c`` and [[Real link|real]]\n")
+        _, body = P.prepare_markdown(src)
+        self.assertIn("Run `[[ -f a ]]` first.", body)
+        self.assertIn("[[ -f report.html ]] && echo exists\n![[x.png]]\n```", body)
+        self.assertIn("> [!note] literal", body)
+        self.assertIn("> [[ -d dir ]]", body)
+        self.assertIn("``a `[[b]]` c``", body)
+        self.assertTrue(body.endswith("and real\n"), body)
+
+    def test_text_after_a_fence_is_converted(self):
+        _, body = P.prepare_markdown("```\n[[keep]]\n```\nafter [[a|b]]\n````\nno close [[c]]\n")
+        self.assertIn("[[keep]]", body)
+        self.assertIn("after b", body)
+        self.assertIn("no close [[c]]", body)  # an unclosed fence runs to the end, as in CommonMark
+
     def test_markdown_image_links_are_kept(self):
         _, body = P.prepare_markdown("![](_assets/x.png)\n")
         self.assertEqual(body, "![](_assets/x.png)\n")
