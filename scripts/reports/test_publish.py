@@ -97,6 +97,18 @@ class Build(unittest.TestCase):
             self.assertEqual(sorted(p.name for p in out.iterdir()), ["app.json", "index.html"])
             self.assertIn('"title": "Report"', (out / "app.json").read_text())
 
+    def test_math_is_mathml(self):
+        with tempfile.TemporaryDirectory() as d:
+            d = Path(d)
+            (d / "m.md").write_text("# M\n\n$$J(A, B) = \\frac{|A \\cap B|}{|A \\cup B|}$$ and $x^2$\n")
+            out = d / "out"
+            out.mkdir()
+            P.build(d / "m.md", "M", False, out)
+            page = (out / "index.html").read_text()
+            self.assertIn('<math display="block"', page)
+            self.assertIn("<mfrac>", page)
+            self.assertNotIn("$$", page)  # the TeX stays only in MathML's hidden <annotation>
+
     def test_html_title(self):
         with tempfile.TemporaryDirectory() as d:
             f = Path(d) / "x.html"
