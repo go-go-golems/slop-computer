@@ -1,0 +1,41 @@
+/* Reports rendered from Markdown (scripts/reports/publish.py). pandoc embeds
+   this file into each page, so a report needs nothing from elsewhere except
+   mermaid, when it has diagrams. */
+:root {
+  --bg: #fbfaf7; --ink: #1d1c1a; --ink-2: #5b5852; --rule: #e3dfd6; --fill: #f2efe8;
+  --accent: #2f5d8a; --code: #f2efe8;
+  color-scheme: light dark;
+}
+@media (prefers-color-scheme: dark) {
+  :root { --bg: #17171a; --ink: #e9e6df; --ink-2: #a8a49b; --rule: #34333a; --fill: #222228; --accent: #8db6e0; --code: #222228; }
+}
+html { background: var(--bg); }
+body {
+  margin: 0 auto; max-width: 46rem; padding: 3rem 1.25rem 5rem;
+  color: var(--ink); background: var(--bg);
+  font: 17px/1.62 "Iowan Old Style", "Charter", "Georgia", serif;
+  font-kerning: normal; text-rendering: optimizeLegibility;
+}
+h1, h2, h3, h4 { font-family: ui-sans-serif, system-ui, -apple-system, "Segoe UI", sans-serif; line-height: 1.25; letter-spacing: -0.01em; }
+h1 { font-size: 2rem; margin: 0 0 1.5rem; }
+h2 { font-size: 1.4rem; margin: 2.6rem 0 0.8rem; padding-top: 0.6rem; border-top: 1px solid var(--rule); }
+h3 { font-size: 1.12rem; margin: 2rem 0 0.6rem; }
+h4 { font-size: 1rem; margin: 1.6rem 0 0.5rem; }
+p, ul, ol, table, pre, blockquote, figure { margin: 0 0 1.05rem; }
+a { color: var(--accent); text-underline-offset: 2px; }
+hr { border: 0; border-top: 1px solid var(--rule); margin: 2rem 0; }
+img { max-width: 100%; height: auto; border-radius: 4px; }
+figure { margin-left: 0; margin-right: 0; }
+figcaption, p > em:only-child { color: var(--ink-2); font-size: 0.9rem; }
+blockquote { margin-left: 0; padding: 0.6rem 1rem; border-left: 3px solid var(--accent); background: var(--fill); border-radius: 0 4px 4px 0; }
+blockquote > :last-child { margin-bottom: 0; }
+code, pre { font: 0.86em/1.5 ui-monospace, "SF Mono", "JetBrains Mono", Menlo, Consolas, monospace; }
+:not(pre) > code { background: var(--code); padding: 0.1em 0.3em; border-radius: 3px; }
+pre { background: var(--code); padding: 0.85rem 1rem; border-radius: 6px; overflow-x: auto; }
+pre.mermaid { background: none; text-align: center; padding: 0.5rem 0; }
+table { border-collapse: collapse; width: 100%; font-size: 0.92rem; display: block; overflow-x: auto; }
+th, td { text-align: left; vertical-align: top; padding: 0.4rem 0.6rem; border-bottom: 1px solid var(--rule); }
+th { font-family: ui-sans-serif, system-ui, sans-serif; font-weight: 600; border-bottom: 2px solid var(--rule); }
+li > p { margin-bottom: 0.4rem; }
+.footnotes { font-size: 0.9rem; color: var(--ink-2); }
+@media print { body { max-width: none; padding: 0; } a { color: inherit; } }
