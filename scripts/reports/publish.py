@@ -189,7 +189,7 @@ def render_markdown(src, title, out):
     _, text = prepare_markdown(src.read_text(encoding="utf-8"))
     p = subprocess.run(
         ["pandoc", "--from", "markdown+autolink_bare_uris-yaml_metadata_block", "--to", "html5",
-         "--standalone", "--embed-resources", "--css", str(CSS),
+         "--standalone", "--embed-resources", "--mathml", "--css", str(CSS),
          "--resource-path", str(src.parent), "--metadata", "pagetitle=" + title,
          "--syntax-highlighting=pygments" if pandoc_version() >= (3, 8) else "--highlight-style=pygments"],
         input=text, capture_output=True, text=True, cwd=src.parent)
