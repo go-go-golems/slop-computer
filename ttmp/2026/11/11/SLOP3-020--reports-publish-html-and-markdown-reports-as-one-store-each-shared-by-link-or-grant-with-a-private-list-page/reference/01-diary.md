@@ -212,3 +212,64 @@ This step builds the guide's sections 4.3 and 4.4: `scripts/reports/publish.py` 
 publish:  build → (store new --type report | store meta check) → push DIR → docs set report/meta → grant set … → link new … → URL from mount ls
 meta:     {"title","source","publishedAt","updatedAt","version"}
 app.json: {"title": "Report", "type": "report", "page": "index.html"}
+
+## Step 3: Staging (slop.yolo): the mounts, the reports page, and a test report shared and revoked
+
+The setup now exists on slop.yolo: the `/r/:id` mount for reports and the `/reports` page. One throwaway report was published with a one-day link. A signed-out browser opened it through the link, kept access without the link, and lost access when the link was revoked. The test report was then deleted. PR #43 is open.
+
+### Prompt Context
+**User prompt (verbatim):** see step 1.
+**Assistant interpretation:** The guide's step 4 (staging) and step 5 (PR).
+**Inferred user intent:** The setup ready to use on the server the user's friends will reach, with evidence that sharing and revoking work there.
+**Commit (code):** none in this step. The PR is go-go-golems/slop-computer#43, from `task/slop3-020-reports` at `6f913f5`.
+
+### What I did
+- **PR #43:** pushed the branch and opened the PR.
+- **Staging**, with the default login (`https://slop.yolo.scapegoat.dev`, `wesen@ruinwesen.com`), with the CLI built from this branch. Logs are in `various/03-staging/`.
+  - **Before:** no `/r` or `/reports` mount, and no `reports-home` store.
+  - **The `/r/:id` mount:** `mount set --host apps.slop.yolo.scapegoat.dev --path /r/:id --storeParam id --type report`.
+  - **The reports page:** `store new --id reports-home`, `push apps/reports-home` (`n: 1`, `broken: ""`), `mount set … --path /reports --store reports-home`.
+  - **A throwaway report:** `publish.py publish staging-test.md --link 1`, from a Markdown file with front matter, a callout, a table, an SVG under `_assets/` and a mermaid diagram. It became `s-x3dqljfd` (4 KiB) with link `lnk_62b4…`. The URL went to the scratch file only, and the command's output was filtered before it was saved.
+  - **A fresh, signed-out browser context:**
+    - `/r/s-x3dqljfd` without the link showed "Report / Sign in to open this";
+    - through the link, the report rendered on `s4d4a0080d0b2d9da4e64.sbx.slop.yolo.scapegoat.dev` with 1 mermaid SVG, the image (120 px), the table and "Summary.";
+    - later, without the link, it still showed the report;
+    - `/reports` showed "Sign in to open this".
+  - **Revoke:** `link ls` showed `uses: 1` and `grant ls` showed `vis_489e… view via lnk_62b4…`. After `link rm --id lnk_62b4…`, `grant ls` gave `[]`. The same browser state, reloaded, showed "Report / Guest / Sign in to open this", and the report was not visible.
+  - **Cleanup:**
+    - `store rm --id s-x3dqljfd` → deleted. `reports-home` is the only report-related store left; the two mounts stay.
+    - The guest's saved browser state and the link file were deleted from the scratchpad.
+
+### Why
+- **A throwaway report, not a real one.** Publishing the user's own reports on the server is the user's call. The test needed only one report that exercises every rendering path.
+- **The same browser state after revoking**, saved with Playwright's `storageState`. A fresh context would prove nothing about the guest who held the grant.
+
+### What worked
+- Everything listed above, first time. The staging results match the local measurements.
+
+### What didn't work
+- N/A.
+
+### What I learned
+- On staging, the guest identity created by a link is `vis_…`, and a grant to it carries the link in `via`, exactly as on the local server.
+
+### What was tricky to build
+- Nothing new; the token handling is as in step 1.
+
+### What warrants a second pair of eyes
+- **The `/reports` page has no grants.** Only its owner (the user) can open it. Granting it `@member view` would let friends with accounts see what was shared with them; the README explains this.
+- **The `/r/:id` mount now exists on staging.** Any store whose type is `report` is served there to whoever holds a level on it. Store types are set only at creation (`store new --type`) or by an admin (`store type`).
+
+### What should be done in the future
+- The user's review and merge of #43.
+- Optional, later: groups, link labels and limits, and roles (the guide's section 6), when a real need appears.
+
+### Code review instructions
+- `various/03-staging/*.log` and `04-guest-through-link.png`.
+- To repeat: `scripts/reports/publish.py publish <file.md> --link 1`, open the link in a private window, then `slop link rm --id <lnk>` and reload.
+
+### Technical details
+```text
+staging mounts:  apps.slop.yolo.scapegoat.dev /r/:id (storeParam id, type report) · /reports → reports-home
+test report:     s-x3dqljfd, link lnk_62b44c981133e70859e449bc (1 day) → guest vis_489e1b7d3f5d5e10d983fb9a view via that link
+revoke:          link rm → grant ls [] → same guest: "Sign in to open this" → store rm s-x3dqljfd
