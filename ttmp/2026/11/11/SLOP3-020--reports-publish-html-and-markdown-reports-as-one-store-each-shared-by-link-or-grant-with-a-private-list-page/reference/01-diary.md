@@ -273,3 +273,64 @@ The setup now exists on slop.yolo: the `/r/:id` mount for reports and the `/repo
 staging mounts:  apps.slop.yolo.scapegoat.dev /r/:id (storeParam id, type report) · /reports → reports-home
 test report:     s-x3dqljfd, link lnk_62b44c981133e70859e449bc (1 day) → guest vis_489e1b7d3f5d5e10d983fb9a view via that link
 revoke:          link rm → grant ls [] → same guest: "Sign in to open this" → store rm s-x3dqljfd
+
+## Step 4: Codex on #43: code kept its Obsidian syntax converted; now it is left alone
+
+Codex's review of #43 at `6f913f5` found one P2. The Markdown preparation also rewrote text inside code spans and fenced code blocks, so a Bash example such as `[[ -f report.html ]] && echo exists` was published as `-f report.html && echo exists`. Code is now set aside before the conversions and restored afterwards, and two new tests fail on the previous code.
+
+### Prompt Context
+**User prompt (verbatim):** "Address code review on PR" (after "which worktree are we in ? what's next?" and "what's the PR?").
+**Assistant interpretation:** Fix the Codex finding on #43, show that a test catches it, reply on the thread, and ask for another review.
+**Inferred user intent:** A PR the reviewer has nothing left to say about, so it can be merged.
+**Commit (code):** `76a64f0`, "Reports: leave code spans and fenced code untouched when converting Obsidian syntax (Codex on #43)"
+
+### What I did
+- **Read the finding** (comment 4542761286, `scripts/reports/publish.py:114`). The conversions in `prepare_markdown` (embeds, wikilinks, callouts) ran over the whole text.
+- **Tests first**, in `test_publish.py`:
+  - **`test_code_is_left_alone`** covers:
+    - an inline span `` `[[ -f a ]]` ``;
+    - Codex's Bash line in a fenced block, together with a literal `![[x.png]]`;
+    - a `~~~~` fence holding a literal `> [!note]`;
+    - a fence inside a blockquote;
+    - a double-backtick span containing backticks;
+    - a real wikilink after all of these, which must still be converted.
+  - **`test_text_after_a_fence_is_converted`**: conversion resumes after a closed fence, and an unclosed fence protects everything to the end of the text.
+  - On the previous code both tests fail ("FAILED (failures=2)").
+- **The fix**: `set_code_aside(text)` runs before the conversions.
+  - **Fenced blocks** are found line by line. A fence line is `(?:[ \t]*>)*[ \t]*` followed by three or more `` ` `` or `~`. It closes with the same character, at least as many, and nothing after. A backtick fence whose info string contains a backtick is not a fence. An unclosed fence runs to the end.
+  - **Code spans** are a backtick run, text, and a run of the same length, not crossing a blank line.
+  - Each piece is replaced by a `\x00<n>\x00` placeholder and restored after the conversions.
+- **Checks:**
+  - 12 tests pass.
+  - The vault's Pinboard report converts as before: no placeholders left, no `[[` left, and all 5 `` ```mermaid `` fences kept.
+- **On the PR:** pushed, replied on the thread (`discussion_r4542880817`), and commented `@codex review`.
+
+### Why
+- **Placeholders, not a Markdown parser.** The conversions are regular expressions over text. Shielding code from them needs only to know where code is, which CommonMark defines with a few rules. A full parser (or a pandoc Lua filter) would also do it, but would move Obsidian handling into a second language for one finding.
+
+### What worked
+- Both new tests failed before the fix and pass after it, and the earlier ten still pass.
+
+### What didn't work
+- N/A.
+
+### What I learned
+- The finding applies beyond wikilinks. Any text rewrite before pandoc has to respect code: callouts and embeds had the same problem inside fences.
+
+### What was tricky to build
+- **Fences inside blockquotes.** Callouts are blockquotes, and Obsidian notes put code in them. The fence pattern therefore accepts any number of `>` markers before the fence characters. Otherwise the fence would not be recognized there, and the lines inside it would be converted.
+
+### What warrants a second pair of eyes
+- **Indented code blocks** (four spaces, no fence) are not set aside. A wikilink inside one would still be converted. Obsidian notes rarely use them, and a list item's continuation lines look the same, so telling them apart needs real parsing.
+
+### What should be done in the future
+- Assess Codex's next review of `76a64f0`.
+
+### Code review instructions
+- `git show 76a64f0`. Run `python3 scripts/reports/test_publish.py`.
+
+### Technical details
+```text
+FENCE       ^((?:[ \t]*>)*[ \t]*)(`{3,}|~{3,})(.*)$     close: same char, length ≥ open, nothing after
+CODE_SPAN   (?<!`)(`+)(?!`)(.+?)(?<!`)\1(?!`)   (re.S; not across a blank line)
+order       front matter → set code aside → embeds → wikilinks → callouts → restore
