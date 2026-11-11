@@ -116,3 +116,99 @@ meta:       docs set rep-test1 report/meta {"title":"Test report one","published
 guest:      grant vis_ee6e… view via lnk_acae…   (link uses 1) → link rm → grants []
 CSP:        sandbox page: frame-ancestors only
 ```
+
+## Step 2: The publish script and the reports page, checked end to end on the local server
+
+This step builds the guide's sections 4.3 and 4.4: `scripts/reports/publish.py` with its stylesheet and tests, and `apps/reports-home`. On the local server:
+- the vault's Pinboard report (front matter, a callout, eleven tables, six images, five mermaid diagrams) published as one 837 KiB page;
+- a signed-out guest opened it through a link and saw everything rendered;
+- an HTML report was published and then updated in place;
+- `/reports` listed the owner's reports by title.
+
+### Prompt Context
+**User prompt (verbatim):** see step 1.
+**Assistant interpretation:** Steps 2 and 3 of the guide's plan, then a local end-to-end run.
+**Inferred user intent:** One command to publish a report from the vault or from an HTML file, and a place to find the reports again.
+**Commit (code):** `f829777`, "Reports: publish HTML and Markdown reports as one store each, and a page that lists them (SLOP3-020)"
+
+### What I did
+- **`scripts/reports/publish.py`** (Python 3, standard library only; it shells out to `slop` and `pandoc`):
+  - **`publish SOURCE`** builds the site in a temporary directory, then makes the store or reuses it, pushes, writes `report/meta`, and makes grants and an optional link.
+    - The `report/meta` document is `{title, source, publishedAt, updatedAt, version}`; an update keeps `publishedAt` and increments `version`.
+    - An `--id` that names a store of another type is refused.
+    - A grant subject must look like `usr_…` or `vis_…`.
+    - `--dry-run` builds the site and prints the writes.
+  - **`link ID --days N`** and **`ls`**, which lists your reports with their versions, titles, grant counts and active links.
+  - **Markdown preparation** (`prepare_markdown`):
+    - front matter is removed and its `title` kept;
+    - `![[embeds]]` become `![](…)`;
+    - `[[target|text]]` becomes `text`;
+    - `> [!summary]` becomes `> **Summary.**`.
+  - **pandoc**: `--from markdown+autolink_bare_uris-yaml_metadata_block --standalone --embed-resources --css report.css --resource-path <source dir> --metadata pagetitle=…`.
+  - **`finish_html`** unwraps `<pre class="mermaid"><code>` and adds mermaid 11.4.1 from jsDelivr, with a light or dark theme, when there is a diagram.
+  - **The URL** comes from `mount ls`: the live mount whose type is `report`, with `http` for `localhost` hosts and `https` otherwise.
+- **`scripts/reports/report.css`**: a serif reading column, sans-serif headings, tables, code, callouts as tinted blockquotes, dark mode, print.
+- **`scripts/reports/test_publish.py`**: 10 tests, covering the preparation rules, mermaid finishing, a full Markdown build with an inlined image, a table and a diagram, and an HTML title. Run with `python3 scripts/reports/test_publish.py`.
+- **`apps/reports-home`**: modelled on `apps/pinboard-home`.
+  - It calls `slop.stores.list({type: 'report', title: 'report/meta'})` and shows "Yours", plus "Shared with you" when there is anything.
+  - It searches by title or id, and links to `/r/<id>` on the framing host with `target="_top"`.
+  - A guest gets a sign-in prompt.
+- **`scripts/reports/README.md`**: setup per server, publishing, sharing and revoking, tests.
+- **Local run** (`$S/rep/rslop`; evidence in `various/02-local-end-to-end/`):
+  - `publish "<vault Pinboard report>.md" --link 7` gave `s-j5qly7vb`: "built markdown (5 mermaid) … 837 KiB". The link URL went to the scratch file only.
+  - **A signed-out guest through the link:** the document title is correct; 5 of 5 mermaid blocks were drawn (`pre.mermaid svg`); 6 images loaded (`naturalWidth 1400`); 11 tables; no `[[` left; the callout reads "Summary."; the shell bar says "Report".
+  - **`publish q3.html --id q3-numbers`**, then an update with `--title "Q3, revised"`: v1, then v2. `report/meta` keeps `publishedAt`.
+  - **Refusals:**
+    - `--id catalog`: "catalog is a store of type '', not a report";
+    - `--grant someone@example.com`: "grant subjects are user ids (usr_…)";
+    - a missing file: "does not exist".
+  - `--dry-run`, `ls` and `link q3-numbers --days 0` all ran as expected.
+  - `store new reports-home`, `push apps/reports-home`, `mount set … /reports --store reports-home`:
+    - signed out, the shell shows "Sign in to open this" (no grants);
+    - signed in through the local login form as the admin, "Yours · 4" lists the titles, each linking to `http://apps.localhost:18490/r/<id>`.
+
+### Why
+- **Standard library and the CLI only.** The script runs where the person already has `slop` signed in, and the token stays in the CLI's credentials file.
+- **Embed everything pandoc can.** A Markdown report becomes one file, which is easy to push and keep; only mermaid comes from a CDN, because inlining it would add megabytes to every page.
+- **The URL from the mount.** The script does not have to be told the live host, and it notices a server without the `/r/:id` mount.
+
+### What worked
+- The 10 unit tests pass.
+- Mermaid accepted pandoc's HTML-escaped source (`--&gt;`) inside `<pre class="mermaid">`; all five diagrams of the vault report rendered.
+- `slop.stores.list` read titles from a store whose app declares no `db` capability. The default rules allow reads at `view`.
+
+### What didn't work
+- **Two test failures on the first run, both from `\s*` crossing a line end.**
+  - The callout pattern `^(\s*>\s*)\[!(\w+)\][+-]?\s*(.*)$` joined the callout line with the next one: `> **Summary.** > - one`.
+  - The front-matter pattern ate the blank line after `---`.
+  - Both now use `[ \t]*`.
+- `python3 -m unittest scripts/reports/test_publish.py` failed with `ModuleNotFoundError: No module named 'scripts.reports'`, because `scripts/` is not a package. The tests run as a script instead.
+- **zsh again.** `P="python3 scripts/reports/publish.py"; $P publish …` gave "no such file or directory: python3 scripts/reports/publish.py", because zsh does not split an unquoted variable into words. A shell function fixed it.
+- **The first dry run printed "published s-(new)".** It now prints "would publish".
+- **Clicking the guest's "Sign in" with Playwright timed out**: it is a link (`<a href="/_site/login?return=/reports">`), not a button. The local login form is at that address, with fields `email` and `name`.
+
+### What I learned
+- A store with no `db` capability still has documents, writable by its owner from the CLI and readable at `view` under the default rules. That is enough for `report/meta`.
+- `store meta --id X` reports the store's type under `meta.type`. The script checks it before reusing an id.
+
+### What was tricky to build
+- **The title.** It has to be visible to people with access (the page, the list) but not to anyone who opens `/r/<id>` (the shell shows `app.json`'s title). Hence two places: `report/meta` and the page's own `<title>` hold it, and `app.json` says "Report".
+
+### What warrants a second pair of eyes
+- **Updating a report replaces its files.** `push` sends the whole directory, so an asset that was removed from the source disappears from the report. That is intended, but there is no history beyond the store's snapshots.
+- **`ls` makes three CLI calls per report.** That is fine for dozens of reports.
+
+### What should be done in the future
+- Staging: the mounts, `reports-home`, one test report, and a link opened signed out and then revoked (step 3).
+- PR.
+
+### Code review instructions
+- `scripts/reports/publish.py`: read `prepare_markdown`, `finish_html`, `build` and `publish`.
+- `apps/reports-home/index.html`.
+- Run `python3 scripts/reports/test_publish.py`. With a local server, run `publish <a vault note> --link 7`, open the link signed out, then run `ls`.
+
+### Technical details
+```text
+publish:  build → (store new --type report | store meta check) → push DIR → docs set report/meta → grant set … → link new … → URL from mount ls
+meta:     {"title","source","publishedAt","updatedAt","version"}
+app.json: {"title": "Report", "type": "report", "page": "index.html"}

@@ -1,0 +1,46 @@
+--- publish html --id q3-numbers
+built html: 'Q3 numbers & notes', 0 KiB
+published q3-numbers (v1): Q3 numbers & notes
+  http://apps.localhost:18490/r/q3-numbers
+--- update with --title
+built html: 'Q3, revised', 0 KiB
+updated q3-numbers (v2): Q3, revised
+  http://apps.localhost:18490/r/q3-numbers
+--- --id of a non-report store
+built html: 'Q3 numbers & notes', 0 KiB
+error: catalog is a store of type '', not a report: choose another --id
+--- --grant with an email
+error: grant subjects are user ids (usr_…), not 'someone@example.com': see `slop whoami` on their side
+--- missing source
+error: $S/rep/missing.md does not exist
+--- dry run
+built html: 'Q3 numbers & notes', 0 KiB
+dry-run: slop store new --type report
+dry-run: slop push /tmp/report-eq9sbjoh --store s-(new) -m report: Q3 numbers & notes
+dry-run: slop docs set s-(new) report/meta --data {"title": "Q3 numbers & notes", "source": "q3.html", "publishedAt": 1794427522950, "updatedAt": 1794427522950, "version": 1}
+published s-(new) (v1): Q3 numbers & notes
+  http://apps.localhost:18490/r/s-(new)
+--- ls
+q3-numbers  v2  Q3, revised
+    0 grant(s); links: none active
+s-j5qly7vb  v1  slop v3: Pinboard — Shared Boards, Apps as Code in Sandboxed Frames, an Agent and CLI Verbs — A Technical Deep Dive
+    1 grant(s); links: lnk_dd3a4262cc74b97a5c28b167 uses 1 until 2026-11-18
+s-7i5n3cxq  v?  (no title)
+    0 grant(s); links: none active
+rep-test1  v?  Test report one
+    0 grant(s); links: none active
+--- link --days 0
+  link lnk_479017b9fe65a9b385b182e0 (view, until revoked):
+  http://apps.localhost:18490/r/q3-numbers?k=…
+--- report/meta
+at: 1794427522325
+body:
+    publishedAt: 1794427522050
+    source: q3.html
+    title: Q3, revised
+    updatedAt: 1794427522313
+    version: 2
+by: usr_2915ccd2ce1acd2af0adb942
+path: report/meta
+rev: 7
+version: 2
