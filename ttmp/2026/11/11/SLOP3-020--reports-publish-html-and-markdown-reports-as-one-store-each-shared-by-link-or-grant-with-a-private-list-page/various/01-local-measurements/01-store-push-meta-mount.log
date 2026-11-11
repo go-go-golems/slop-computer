@@ -1,0 +1,55 @@
++(eval):13> $S/rep/rslop store new --id rep-test1 --type report
+createdAt: 1794427095176
+id: rep-test1
+madeBy: usr_2915ccd2ce1acd2af0adb942
+owner: usr_2915ccd2ce1acd2af0adb942
+type: report
++(eval):13> $S/rep/rslop push . --store rep-test1 -m 'test report one'
+files: 3
+"n": 1
+removed: 0
+rev: 2
++(eval):13> $S/rep/rslop app status rep-test1
+app: rep-test1
+broken: ""
+manifest:
+    actor: ""
+    capabilities: []
+    live: false
+    page: index.html
+    slop: {}
+    title: Test report one
+    type: report
+"n": 1
+ref: main
+store: rep-test1
++(eval):13> $S/rep/rslop docs set rep-test1 report/meta --data '{"title":"T
+count: 1
+rev: 4
+versions:
+    report/meta: 1
++(eval):13> $S/rep/rslop docs get rep-test1 report/meta
+at: 1794427095256
+body:
+    publishedAt: 1
+    title: Test report one
+by: usr_2915ccd2ce1acd2af0adb942
+path: report/meta
+rev: 4
+version: 1
++(eval):13> $S/rep/rslop mount set --host apps.localhost:18490 --path /r/:i
+mount:
+    changedAt: 1794427095287
+    changedBy: usr_2915ccd2ce1acd2af0adb942
+    host: apps.localhost:18490
+    path: /r/:id
+    storeParam: id
+    type: report
+url: http://apps.localhost:18490/r/:id
+link:
+    createdAt: 1794427101500
+    createdBy: usr_2915ccd2ce1acd2af0adb942
+    expiresAt: 1795031901500
+    level: view
+    store: rep-test1
+    uses: 0
