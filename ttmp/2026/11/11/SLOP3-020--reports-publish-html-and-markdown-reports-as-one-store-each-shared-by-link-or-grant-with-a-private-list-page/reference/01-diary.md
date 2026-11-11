@@ -324,7 +324,7 @@ Codex's review of #43 at `6f913f5` found one P2. The Markdown preparation also r
 - **Indented code blocks** (four spaces, no fence) are not set aside. A wikilink inside one would still be converted. Obsidian notes rarely use them, and a list item's continuation lines look the same, so telling them apart needs real parsing.
 
 ### What should be done in the future
-- Assess Codex's next review of `76a64f0`.
+- Nothing for the review. Codex's re-review of `76a64f0` completed with no unresolved findings and a 👍 on the PR. #43 is the user's to merge.
 
 ### Code review instructions
 - `git show 76a64f0`. Run `python3 scripts/reports/test_publish.py`.
