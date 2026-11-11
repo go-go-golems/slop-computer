@@ -1,0 +1,15 @@
+--- before revoke
+  id: lnk_62b44c981133e70859e449bc
+  uses: 1
+  level: view
+  subject: vis_489e1b7d3f5d5e10d983fb9a
+  via: lnk_62b44c981133e70859e449bc
+--- link rm
+store: s-x3dqljfd
+--- grants after
+[]
+--- same guest after revoke: report not visible; shell: Report / Guest / Sign in to open this
+--- store rm s-x3dqljfd
+deleted: s-x3dqljfd
+--- remaining
+['reports-home']

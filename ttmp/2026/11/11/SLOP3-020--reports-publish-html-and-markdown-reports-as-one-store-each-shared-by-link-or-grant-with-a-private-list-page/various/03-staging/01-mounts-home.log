@@ -1,0 +1,7 @@
+source: 6f913f5 SLOP3-020 diary step 2: the publish script and the reports page, checked on a local server
+    type: report
+url: https://apps.slop.yolo.scapegoat.dev/r/:id
+id: reports-home
+"n": 1
+broken: ""
+url: https://apps.slop.yolo.scapegoat.dev/reports

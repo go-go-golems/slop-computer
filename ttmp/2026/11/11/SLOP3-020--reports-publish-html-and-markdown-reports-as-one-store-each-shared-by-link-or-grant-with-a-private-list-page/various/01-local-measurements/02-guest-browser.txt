@@ -1,0 +1,16 @@
+Local server (serve --local, 127.0.0.1:18490), a fresh Playwright context (signed out).
+
+1. /r/rep-test1 without the link
+   shell: "Test report one / Sign in / Sign in to open this."   (the title is app.json's)
+2. the link URL (?k=k_… , removed from the address bar by the shell)
+   report shown in the sandbox frame http://s06763034939784a91dee.sbx.localhost:18490
+   cdn: object        (mermaid@11.4.1 from cdn.jsdelivr.net loaded)
+   pre.mermaid svg:  true
+   img naturalWidth: 40 (pic.svg next to index.html)
+3. /r/rep-test1 again, without the link: report shown (the grant stays)
+4. grant ls rep-test1:  vis_ee6e7f283fe451302c6a6538 view via lnk_acaedbb1f5448cb64d27253b
+   link ls: uses 1
+5. link rm lnk_acaedbb1f5448cb64d27253b → grant ls: []
+6. a fresh context:
+   /r/rep-does-not-exist → "slop / Sign in / There is nothing here."
+   /r/rep-test1          → "Test report one / Sign in / Sign in to open this. / Sign in"
