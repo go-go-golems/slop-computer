@@ -1,0 +1,86 @@
+# sitebench-workspace.zip
+
+Unzipped from `~/Downloads/sitebench-workspace.zip` (sha256 `048f3d252df01cde48899bea54692e108dd7f34510c07b6d52d2821d012b8bdf`, 10211077 bytes, 429 entries) into `sitebench-workspace/`, which is git-ignored: this repository is public and the archive is private design material. Paths in the guide are relative to the archive root.
+
+```
+  21112 att/fs/formskate/app/bookexport.js
+  11716 att/fs/formskate/app/clips.js
+  29539 att/fs/formskate/app/draft.js
+   1782 att/fs/formskate/app/highlight.js
+  36024 att/fs/formskate/app/host.js
+  70792 att/fs/formskate/app/kiln.css
+   1013 att/fs/formskate/app/main.jsx
+   9912 att/fs/formskate/app/markdown.js
+  21539 att/fs/formskate/app/skate.css
+   9068 att/fs/formskate/app/truth.js
+  20643 att/fs/formskate/app/ui/agent.jsx
+  14198 att/fs/formskate/app/ui/app.jsx
+   8712 att/fs/formskate/app/ui/book.jsx
+  10393 att/fs/formskate/app/ui/code.jsx
+   5386 att/fs/formskate/app/ui/common.jsx
+  12338 att/fs/formskate/app/ui/dock.jsx
+   6018 att/fs/formskate/app/ui/notes.jsx
+  36412 att/fs/formskate/app/ui/panels.jsx
+  27564 att/fs/formskate/app/ui/stage.jsx
+  80076 att/fs/formskate/src/core.js
+   7740 att/fs/formskate/src/lib/depth-order.js
+   4289 att/fs/formskate/src/lib/experiments.js
+   4270 att/fs/formskate/src/lib/main.js
+  17707 att/fs/formskate/src/lib/rigid.js
+   4263 att/fs/formskate/src/lib/skate/assist.js
+  10887 att/fs/formskate/src/lib/skate/board.js
+   9680 att/fs/formskate/src/lib/skate/controls.js
+  16118 att/fs/formskate/src/lib/skate/figure.js
+    294 att/fs/formskate/src/lib/skate/index.js
+  24542 att/fs/formskate/src/lib/skate/motors.js
+  11942 att/fs/formskate/src/lib/skate/recognizer.js
+  15282 att/fs/formskate/src/lib/skate/rider.js
+   3499 att/fs/formskate/src/lib/skate/terrain.js
+2598839 att/shop/shop.html
+  55233 eval-agent-api-examples.md
+    529 sitebench/build.mjs
+    741 sitebench/build-worker.mjs
+   2644 sitebench/README.md
+  24451 sitebench/src/01-util.js
+  20850 sitebench/src/02-templates.js
+   6676 sitebench/src/03-store.js
+  26899 sitebench/src/04-project.js
+  11642 sitebench/src/05b-snapshots.js
+  12405 sitebench/src/05c-scenarios.js
+  50683 sitebench/src/05-site.js
+  87615 sitebench/src/06-agent.js
+  15594 sitebench/src/07-dock.js
+  26491 sitebench/src/08-canvas.js
+  41081 sitebench/src/09-views.js
+  44913 sitebench/src/10-agentviews.js
+  12552 sitebench/src/10b-archive.js
+   7280 sitebench/src/10c-scenarioview.js
+  35451 sitebench/src/10d-panels.js
+  23299 sitebench/src/11-app.js
+  23701 sitebench/src/core.js
+  43079 sitebench/src/index.html
+  27857 sitebench/src/worker.js
+   2034 sitebench/test/corner-coffee-fix-the-overflow.md
+   8954 sitebench/test/mock.js
+   5799 sitebench/test/run-app.mjs
+   5564 sitebench/test/run-blame.mjs
+   4555 sitebench/test/run-compact.mjs
+   1563 sitebench/test/run-deleg.mjs
+   1588 sitebench/test/run-hover.mjs
+   1405 sitebench/test/run-md.mjs
+   2187 sitebench/test/run-modes.mjs
+   8555 sitebench/test/run-more.mjs
+   9063 sitebench/test/run-new.mjs
+   4800 sitebench/test/run-panels2.mjs
+   6511 sitebench/test/run-panels.mjs
+   5467 sitebench/test/run-rec.mjs
+   8136 sitebench/test/run-scen.mjs
+   7076 sitebench/test/run-steps.mjs
+   7043 sitebench/test/run-terms.mjs
+    419 sitebench/test/run-w2.mjs
+    529 sitebench/test/run-worker.mjs
+   1288 sitebench/test/run-yaml.mjs
+ 195750 tb/textbook.txt
+```
+
+Also in the archive and not listed: sitebench/dist (built output), sitebench/test/*.png (test screenshots), att/fs/formskate/{dist,build,content,test} (built pages, data and the formskate book).
