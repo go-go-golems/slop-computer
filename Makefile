@@ -1,4 +1,4 @@
-.PHONY: lint fmt-check test test-engine build run-local runtime runtime-test admin conformance blocks blocks-push pinup pinup-push deploy-apps
+.PHONY: lint fmt-check test build run-local runtime runtime-test admin conformance blocks blocks-push pinup pinup-push deploy-apps
 
 SLOP ?= slop
 
@@ -8,21 +8,21 @@ lint:
 fmt-check:
 	GOWORK=off golangci-lint fmt --diff
 
-test:
-	GOWORK=off go test ./...
+# SQLite with FTS5 (go-sqlite3's sqlite_fts5 tag): apps may declare fts5
+# tables. Every build and test passes it; TestSQLiteHasFTS5 fails without it.
+TAGS := sqlite_fts5
 
-# The host suite with actors on the go-go-goja engine runtime (SLOP3-016).
-test-engine:
-	GOWORK=off SLOP_TEST_ACTORS_RUNTIME=engine go test ./pkg/host/
+test:
+	GOWORK=off go test -tags $(TAGS) ./...
 
 # The slop binary (server and CLI). SQLite needs cgo.
 build:
-	GOWORK=off CGO_ENABLED=1 go build -o slop ./cmd/slop
+	GOWORK=off CGO_ENABLED=1 go build -tags $(TAGS) -o slop ./cmd/slop
 
 # A development server on *.localhost:18300 with the sign-in form instead of
 # OIDC: slop.localhost (main), apps.localhost (live), site.localhost (static).
 run-local:
-	GOWORK=off go run ./cmd/slop serve --local
+	GOWORK=off go run -tags $(TAGS) ./cmd/slop serve --local
 
 # Committed build outputs. The server embeds them, so `go build` needs no
 # node; each output's first line stamps the hash of its sources, and

@@ -2,10 +2,11 @@
 
 ## Build Commands
 
-- Run a binary in ./cmd/slop: `go run ./cmd/slop` . Use this instead of build + ./slop.
-- Build: `go build ./...`
-- Test: `go test ./...`
-- Run single test: `go test ./pkg/path/to/package -run TestName`
+- Always pass `-tags sqlite_fts5` (SQLite with FTS5; `make test` and `make build` do). Without it `TestSQLiteHasFTS5` fails.
+- Run a binary in ./cmd/slop: `go run -tags sqlite_fts5 ./cmd/slop` . Use this instead of build + ./slop.
+- Build: `go build -tags sqlite_fts5 ./...`
+- Test: `go test -tags sqlite_fts5 ./...`
+- Run single test: `go test -tags sqlite_fts5 ./pkg/path/to/package -run TestName`
 - Generate: `go generate ./...`
 - Lint: `golangci-lint run -v` or `make lint`
 - Format: `go fmt ./...`

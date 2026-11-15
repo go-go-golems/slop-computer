@@ -213,7 +213,7 @@ The catalog previews 93 free apps inside its own pages. What works:
    `catalog_curator_test.go` (an actor action with the fake model).
 2. **A local server with real sign-in:**
    ```sh
-   go build -buildvcs=false -o /tmp/slop ./cmd/slop
+   go build -buildvcs=false -tags sqlite_fts5 -o /tmp/slop ./cmd/slop
    /tmp/slop serve --local --llm fake --data /tmp/slopdata --admin-email admin@example.com
    SLOP_CREDENTIALS=/tmp/local-creds.json /tmp/slop auth login --server http://slop.localhost:18300
    ```
