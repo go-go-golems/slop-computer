@@ -61,9 +61,9 @@ type Config struct {
 
 // Actors configures the actors' JavaScript runtime.
 type Actors struct {
-	// Runtime is engine (default: a go-go-goja engine runtime; SLOP3-016
-	// design doc 02) or direct (a bare goja runtime, kept for one release
-	// as the way back).
+	// Runtime is engine, the only one (a go-go-goja engine runtime;
+	// SLOP3-016 design doc 02). direct, the bare goja runtime kept for one
+	// release as the way back, was removed in SLOP3-021.
 	Runtime string `yaml:"runtime"`
 }
 
@@ -87,8 +87,12 @@ func Load(path string) (*Config, error) {
 		}
 	}
 	c.Defaults()
-	if r := c.Actors.Runtime; r != "direct" && r != "engine" {
-		return nil, fmt.Errorf("%s: actors.runtime is %q: use direct or engine", path, r)
+	switch r := c.Actors.Runtime; r {
+	case "engine":
+	case "direct":
+		return nil, fmt.Errorf("%s: actors.runtime: direct was removed (SLOP3-021): use engine, or leave it unset", path)
+	default:
+		return nil, fmt.Errorf("%s: actors.runtime is %q: the only runtime is engine", path, r)
 	}
 	return c, nil
 }

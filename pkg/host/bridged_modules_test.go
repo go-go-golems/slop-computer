@@ -7,9 +7,6 @@ package host
 import (
 	"strings"
 	"testing"
-
-	"github.com/go-go-golems/slop-computer/pkg/actor"
-	"github.com/go-go-golems/slop-computer/pkg/config"
 )
 
 const bridgedActor = `
@@ -45,55 +42,51 @@ defineActor({
 `
 
 func TestBridgedModules(t *testing.T) {
-	for _, rt := range []string{actor.RuntimeDirect, actor.RuntimeEngine} {
-		t.Run(rt, func(t *testing.T) {
-			h := newHarnessWith(t, func(c *config.Config) { c.Actors.Runtime = rt })
-			admin := h.tokenFor("admin@example.com", "read", "write", "admin")
-			h.call(admin, "store.new", map[string]any{"id": "br"})
-			h.call(admin, "files.push", map[string]any{"store": "br", "files": files(map[string]string{
-				"app.json": `{"title":"Bridged","actor":"actor.js"}`,
-				"actor.js": bridgedActor,
-			})})
-			out := h.call(admin, "actor.call", map[string]any{"store": "br", "action": "run",
-				"args": map[string]any{"text": "list: [a, b]\ncount: 41\n"}}).(map[string]any)
-			want := map[string]any{
-				"back": "count: 42\nlist:\n  - a\n  - b\n", "bad": false, "named": true, "uuid": 36.0,
-				"rawLength": 8.0, "rawIsBuffer": true, "b64": "aGk=", "sameYaml": true, "globalBuffer": "undefined",
-			}
-			for k, v := range want {
-				if out[k] != v {
-					t.Errorf("%s = %#v, want %#v", k, out[k], v)
-				}
-			}
-			if doc := out["doc"].(map[string]any); doc["count"] != 41.0 || len(doc["list"].([]any)) != 2 {
-				t.Errorf("yaml.parse = %v", doc)
-			}
-			if out["errors"].(float64) < 1 {
-				t.Errorf("yaml.validate found no errors")
-			}
-			if seen := out["seen"].([]any); len(seen) != 3 || seen[0] != 1.0 || seen[1] != "once:1" || seen[2] != 2.0 {
-				t.Errorf("events: %v", seen)
-			}
-			if hex := out["hex"].(string); len(hex) != 64 || hex != out["digestHex"] {
-				t.Errorf("sha256: hex %q, digest() %q", hex, out["digestHex"])
-			}
+	h := newHarness(t)
+	admin := h.tokenFor("admin@example.com", "read", "write", "admin")
+	h.call(admin, "store.new", map[string]any{"id": "br"})
+	h.call(admin, "files.push", map[string]any{"store": "br", "files": files(map[string]string{
+		"app.json": `{"title":"Bridged","actor":"actor.js"}`,
+		"actor.js": bridgedActor,
+	})})
+	out := h.call(admin, "actor.call", map[string]any{"store": "br", "action": "run",
+		"args": map[string]any{"text": "list: [a, b]\ncount: 41\n"}}).(map[string]any)
+	want := map[string]any{
+		"back": "count: 42\nlist:\n  - a\n  - b\n", "bad": false, "named": true, "uuid": 36.0,
+		"rawLength": 8.0, "rawIsBuffer": true, "b64": "aGk=", "sameYaml": true, "globalBuffer": "undefined",
+	}
+	for k, v := range want {
+		if out[k] != v {
+			t.Errorf("%s = %#v, want %#v", k, out[k], v)
+		}
+	}
+	if doc := out["doc"].(map[string]any); doc["count"] != 41.0 || len(doc["list"].([]any)) != 2 {
+		t.Errorf("yaml.parse = %v", doc)
+	}
+	if out["errors"].(float64) < 1 {
+		t.Errorf("yaml.validate found no errors")
+	}
+	if seen := out["seen"].([]any); len(seen) != 3 || seen[0] != 1.0 || seen[1] != "once:1" || seen[2] != 2.0 {
+		t.Errorf("events: %v", seen)
+	}
+	if hex := out["hex"].(string); len(hex) != 64 || hex != out["digestHex"] {
+		t.Errorf("sha256: hex %q, digest() %q", hex, out["digestHex"])
+	}
 
-			// The catalog lists them as data modules, with their TypeScript.
-			mods := h.call(admin, "app.modules", map[string]any{}).(map[string]any)
-			byName := map[string]map[string]any{}
-			for _, m := range mods["modules"].([]any) {
-				row := m.(map[string]any)
-				byName[row["name"].(string)] = row
-			}
-			for _, name := range []string{"yaml", "crypto", "events", "buffer"} {
-				row := byName[name]
-				if row == nil || row["class"] != "data" || row["default"] != true {
-					t.Fatalf("%s: %v", name, row)
-				}
-				if ts, _ := row["typescript"].(string); !strings.Contains(ts, `declare module "`+name+`"`) {
-					t.Errorf("%s typescript: %q", name, ts)
-				}
-			}
-		})
+	// The catalog lists them as data modules, with their TypeScript.
+	mods := h.call(admin, "app.modules", map[string]any{}).(map[string]any)
+	byName := map[string]map[string]any{}
+	for _, m := range mods["modules"].([]any) {
+		row := m.(map[string]any)
+		byName[row["name"].(string)] = row
+	}
+	for _, name := range []string{"yaml", "crypto", "events", "buffer"} {
+		row := byName[name]
+		if row == nil || row["class"] != "data" || row["default"] != true {
+			t.Fatalf("%s: %v", name, row)
+		}
+		if ts, _ := row["typescript"].(string); !strings.Contains(ts, `declare module "`+name+`"`) {
+			t.Errorf("%s typescript: %q", name, ts)
+		}
 	}
 }

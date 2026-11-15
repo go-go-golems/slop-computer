@@ -18,7 +18,6 @@ import (
 	"bytes"
 	"context"
 	"errors"
-	"fmt"
 	"runtime"
 	"strconv"
 	"sync"
@@ -29,11 +28,9 @@ import (
 	"github.com/go-go-golems/go-go-goja/pkg/runtimebridge"
 )
 
-// Runtimes an actor can run on (slop.yaml actors.runtime).
-const (
-	RuntimeEngine = "engine" // a go-go-goja engine runtime (default)
-	RuntimeDirect = "direct" // a bare goja runtime
-)
+// RuntimeEngine is what actors run on (slop.yaml actors.runtime): a
+// go-go-goja engine runtime, the only one since SLOP3-021 removed direct.
+const RuntimeEngine = "engine"
 
 // engineFactory builds the actor runtimes of one manager.
 type engineFactory struct {
@@ -53,27 +50,21 @@ func (ef *engineFactory) get() (*engine.RuntimeFactory, error) {
 	return ef.f, ef.err
 }
 
-// newHost makes the host of a new actor, on the manager's runtime.
+// newHost makes the host of a new actor: a go-go-goja engine runtime.
 func (m *Manager) newHost(a *Actor) (vmHost, error) {
-	switch m.Runtime {
-	case RuntimeDirect:
-		return newDirectHost(), nil
-	case "", RuntimeEngine:
-		f, err := m.engines.get()
-		if err != nil {
-			return nil, err
-		}
-		h := &engineHost{}
-		rt, err := f.NewRuntime(engine.WithRuntimeBridgeOwner(func(_ *goja.Runtime, base runtimebridge.RuntimeOwner) runtimebridge.RuntimeOwner {
-			return &turnOwner{a: a, h: h, base: base}
-		}))
-		if err != nil {
-			return nil, err
-		}
-		h.rt = rt
-		return h, nil
+	f, err := m.engines.get()
+	if err != nil {
+		return nil, err
 	}
-	return nil, fmt.Errorf("unknown actor runtime %q (direct or engine)", m.Runtime)
+	h := &engineHost{}
+	rt, err := f.NewRuntime(engine.WithRuntimeBridgeOwner(func(_ *goja.Runtime, base runtimebridge.RuntimeOwner) runtimebridge.RuntimeOwner {
+		return &turnOwner{a: a, h: h, base: base}
+	}))
+	if err != nil {
+		return nil, err
+	}
+	h.rt = rt
+	return h, nil
 }
 
 // engineHost is an engine runtime driven through its owner.
@@ -185,12 +176,4 @@ func goid() uint64 {
 	}
 	id, _ := strconv.ParseUint(string(f[1]), 10, 64)
 	return id
-}
-
-// Runtime names what the actor runs on: RuntimeDirect or RuntimeEngine.
-func (a *Actor) Runtime() string {
-	if _, ok := a.host.(*engineHost); ok {
-		return RuntimeEngine
-	}
-	return RuntimeDirect
 }
