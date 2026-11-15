@@ -29,7 +29,7 @@ scripts/reports/publish.py link s-k3x9q0d2 --days 0            # another link, u
 scripts/reports/publish.py ls                                  # your reports, links and grants
 ```
 
-- **Markdown** is rendered by pandoc into one page with `report.css`, and local images are inlined. Front matter's `title` becomes the title. Obsidian `[[wikilinks]]`, `![[embeds]]` and `> [!callouts]` are converted. Fenced `mermaid` blocks are drawn with mermaid from jsDelivr.
+- **Markdown** is rendered by pandoc into one page with `report.css`; local images are inlined, and TeX math (`$…$`, `$$…$$`) becomes MathML. Front matter's `title` becomes the title. Obsidian `[[wikilinks]]`, `![[embeds]]` and `> [!callouts]` are converted. Fenced `mermaid` blocks are drawn with mermaid from jsDelivr.
 - **HTML** is published as it is. A directory is published whole (it needs an `index.html`). Scripts and fonts from CDNs work.
 - **The title** comes from `--title`, the front matter, the first heading, `<title>`, or the file name, in that order. It is stored in `report/meta`, which only people with access can read. `app.json` says "Report", because slop's sign-in page shows the app title to anyone who opens `/r/<id>`, including people without access; `--show-title` puts the real title there instead.
 - **Ids** are generated (`s-xxxxxxxx`) unless you pass `--id`, so a report's address cannot be guessed.
