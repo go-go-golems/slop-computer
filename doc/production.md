@@ -175,10 +175,10 @@ database session and `kubectl exec … cat` of its blob volume.
 
 ```sh
 D=ttmp/2026/11/06/SLOP3-013--*/scripts
-$D/01-inventory.sh > inventory.json                  # francois's catalog, as JSON
-$D/03-import.py inventory.json --catalog             # dry run: what would change
-$D/03-import.py inventory.json --apply --catalog     # push the stores, then catalog-data
-$D/04-verify.py inventory.json https://apps.<domain> # trees, refs, grants, anonymous access
+bash $D/01-inventory.sh > inventory.json                     # francois's catalog, as JSON
+python3 $D/03-import.py inventory.json --catalog             # dry run: what would change
+python3 $D/03-import.py inventory.json --apply --catalog     # push the stores, then catalog-data
+python3 $D/04-verify.py inventory.json https://apps.<domain> # trees, refs, grants, anonymous access
 ```
 
 - **The dry run comes first.** It lists, store by store, the pushes and
