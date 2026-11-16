@@ -15,3 +15,7 @@ Notes §7: what the review of #51 showed about types and API shape (actor action
 ## 2026-11-16
 
 Notes §8: type checking in the bench is a browser worker (measured: 1.26 s cold, 30–90 ms warm, ~80 MB, ~2 MB gzipped); it also compiles TS evals. scripts/01-ts-check-latency.cjs. One task.
+
+## 2026-11-16
+
+The full design (design-doc/01): the server compiles .ts per file with esbuild (page/actor/eval profiles, cache by hash); declarations for the page runtime, the actor API, modules generated from verb schemas, and app actions (phase 2: args schemas, validated); checking in the bench worker and with tsc, none on the server for now. Probes: scripts/02 (transform ~2 ms/file), scripts/03 (goja runs the output; stack traces map to .ts). Tasks restructured by phase. Diary steps 1–2.
