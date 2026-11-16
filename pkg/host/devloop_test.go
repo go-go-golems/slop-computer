@@ -115,3 +115,70 @@ func TestPushActivates(t *testing.T) {
 		t.Fatalf("dev tables after a failed migration = %s", got)
 	}
 }
+
+const devBenchActor = `
+const ws = use('workshop');
+defineActor({
+  actions: {
+    async instance(ctx, { app, id, ref }) { await ws.newStore(id, { app, type: 'jot' }); return await ws.follow(id, ref); },
+    async seed(ctx, { id }) {
+      await ws.importTable(id, 'notes', [{ id: 'a' }, { id: 'b' }]);
+      await ws.importDocs(id, 'settings', [{ id: 'shop', open: '07:00' }], { id: 'id' });
+      return { rows: await ws.sql(id, 'SELECT count(*) AS n FROM notes'), doc: await ws.doc(id, 'settings/shop'), docs: await ws.docs(id, 'settings') };
+    },
+    async push(ctx, { app, files, activate }) { return await ws.push(app, files, { activate }); },
+    async publish(ctx, { app, n, ifAt }) { return await ws.publish(app, n, { ifAt }); },
+    async logs(ctx, { id }) { return await ws.logs(id); },
+    async drop(ctx, { id }) { return await ws.drop(id); },
+  },
+});
+`
+
+// C.4: the workshop module runs a dev loop as the visitor: an instance on
+// draft, seeded from a fixture, pushed with activation, published with a
+// compare-and-swap, and dropped; drop refuses app stores and instances on
+// main, which an admin could otherwise delete by mistake.
+func TestWorkshopDevInstances(t *testing.T) {
+	h := newHarness(t)
+	admin := h.tokenFor("admin@example.com", "read", "write", "admin")
+	toolApp(t, h, admin, "devbench", devBenchActor, "workshop")
+	h.call(admin, "app.trust", map[string]any{"app": "devbench", "module": "workshop"})
+	call := func(action string, args map[string]any) any {
+		return h.call(admin, "actor.call", map[string]any{"store": "devbench", "action": action, "args": args})
+	}
+	h.call(admin, "store.new", map[string]any{"id": "jot"})
+	app := devApp()
+	main := num(h.call(admin, "files.push", map[string]any{"store": "jot", "files": files(app)}).(map[string]any)["n"])
+	h.call(admin, "files.push", map[string]any{"store": "jot", "files": files(app), "ref": "draft"})
+
+	// A dev instance on draft, seeded from a fixture.
+	if f := call("instance", map[string]any{"app": "jot", "id": "jot-dev-a1", "ref": "draft"}).(map[string]any); f["ref"] != "draft" || f["broken"] != "" {
+		t.Fatalf("instance = %v", f)
+	}
+	seeded := fmtAny(call("seed", map[string]any{"id": "jot-dev-a1"}))
+	if !strings.Contains(seeded, `"n":2`) || !strings.Contains(seeded, `"open":"07:00"`) {
+		t.Fatalf("seed = %s", seeded)
+	}
+
+	// A push through the module reports the instance's activation.
+	app["sql/002_tags.sql"] = `CREATE TABLE tags (note TEXT, tag TEXT);`
+	out := call("push", map[string]any{"app": "jot", "files": files(app), "activate": []string{"jot-dev-a1"}}).(map[string]any)
+	draft := num(out["n"])
+	if a := fmtAny(out["activated"]); !strings.Contains(a, `"broken":""`) || !strings.Contains(a, `"ref":"draft"`) {
+		t.Fatalf("activated = %s", a)
+	}
+
+	// Publish with a stale ifAt is refused; with the right one it moves main.
+	h.fail(admin, "actor.call", map[string]any{"store": "devbench", "action": "publish", "args": map[string]any{"app": "jot", "n": draft, "ifAt": main + 100}}, "conflict")
+	if p := call("publish", map[string]any{"app": "jot", "n": draft, "ifAt": main}).(map[string]any); num(p["from"]) != main {
+		t.Fatalf("publish = %v", p)
+	}
+
+	// drop: a dev instance yes; a production instance and the app store no.
+	call("drop", map[string]any{"id": "jot-dev-a1"})
+	h.fail(admin, "app.status", map[string]any{"store": "jot-dev-a1"}, "not_found")
+	h.call(admin, "store.new", map[string]any{"id": "jot-shop", "app": "jot", "type": "jot"})
+	h.fail(admin, "actor.call", map[string]any{"store": "devbench", "action": "drop", "args": map[string]any{"id": "jot-shop"}}, "permission_denied")
+	h.fail(admin, "actor.call", map[string]any{"store": "devbench", "action": "drop", "args": map[string]any{"id": "jot"}}, "permission_denied")
+	h.call(admin, "app.status", map[string]any{"store": "jot-shop"})
+}
