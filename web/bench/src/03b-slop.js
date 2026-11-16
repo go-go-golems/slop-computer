@@ -175,6 +175,8 @@ const Embeds = {
     return this.ready.get(app)
   },
   async open(P) { await this.dev(P); return await Slop.call('embed', { app: P.meta.app }) },
+  // The view of a frame that reloaded or went away (best effort: it expires anyway).
+  close(e) { if (e && e.view) Slop.call('close', { view: e.view }).catch(() => { }) },
   // The page slop serves with the runtime: app.json's page (index.html).
   entry(P) { try { return JSON.parse(P.read('app.json') || '{}').page || 'index.html' } catch (e) { return 'index.html' } }
 }

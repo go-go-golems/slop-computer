@@ -1,4 +1,4 @@
-/* the bench, built from web/bench: do not edit. source sha256:fa921f009d36df1e57d57cf01b3abedf473a5b9323a0bf6778018d061d09ed88 */
+/* the bench, built from web/bench: do not edit. source sha256:1869e631047895bb955e0f0b62a975871a29e2945bb71e32880a6192906a9620 */
 // Sitebench: a live-site workbench. Built from src/*.js
 "use strict";
 (() => {
@@ -1195,6 +1195,8 @@ const Embeds = {
     return this.ready.get(app)
   },
   async open(P) { await this.dev(P); return await Slop.call('embed', { app: P.meta.app }) },
+  // The view of a frame that reloaded or went away (best effort: it expires anyway).
+  close(e) { if (e && e.view) Slop.call('close', { view: e.view }).catch(() => { }) },
   // The page slop serves with the runtime: app.json's page (index.html).
   entry(P) { try { return JSON.parse(P.read('app.json') || '{}').page || 'index.html' } catch (e) { return 'index.html' } }
 }
@@ -1875,7 +1877,7 @@ class FrameHost {
   setFixture(name) { this.fixture = name || null; this.fx = null; return this.load({ keepState: false }) }
   swap() {
     const n = this.next; if (!n) return
-    if (this.iframe && this.iframe !== n.ifr) { hostByNonce.delete(this.nonce); this.iframe.remove() }
+    if (this.iframe && this.iframe !== n.ifr) { hostByNonce.delete(this.nonce); this.iframe.remove(); if (this.embed && (!n.embed || n.embed.view !== this.embed.view)) Embeds.close(this.embed) }
     n.ifr.style.opacity = 1; this.iframe = n.ifr; this.nonce = n.nonce; this.next = null; this.loading = false; this.ready = true
     this.embed = n.embed || null; this.origin = n.origin || ''
     if (this.embed && this.headless) this.post({ push: 'mode', mode: 'play' })
@@ -1942,7 +1944,7 @@ class FrameHost {
     this.route = st.join('/') || 'index.html'
     this.saved = null; this.ev.emit('nav', this.route); this.load({ keepState: false })
   }
-  dispose() { FrameHosts.delete(this); hostByNonce.delete(this.nonce); if (this.next) hostByNonce.delete(this.next.nonce); this.el.remove() }
+  dispose() { FrameHosts.delete(this); hostByNonce.delete(this.nonce); if (this.next) hostByNonce.delete(this.next.nonce); this.el.remove(); if (this.embed) Embeds.close(this.embed); if (this.next && this.next.embed) Embeds.close(this.next.embed) }
 }
 
 // The bench is the shell of its embedded frames: it answers their slop

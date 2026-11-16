@@ -151,7 +151,7 @@ class FrameHost {
   setFixture(name) { this.fixture = name || null; this.fx = null; return this.load({ keepState: false }) }
   swap() {
     const n = this.next; if (!n) return
-    if (this.iframe && this.iframe !== n.ifr) { hostByNonce.delete(this.nonce); this.iframe.remove() }
+    if (this.iframe && this.iframe !== n.ifr) { hostByNonce.delete(this.nonce); this.iframe.remove(); if (this.embed && (!n.embed || n.embed.view !== this.embed.view)) Embeds.close(this.embed) }
     n.ifr.style.opacity = 1; this.iframe = n.ifr; this.nonce = n.nonce; this.next = null; this.loading = false; this.ready = true
     this.embed = n.embed || null; this.origin = n.origin || ''
     if (this.embed && this.headless) this.post({ push: 'mode', mode: 'play' })
@@ -218,7 +218,7 @@ class FrameHost {
     this.route = st.join('/') || 'index.html'
     this.saved = null; this.ev.emit('nav', this.route); this.load({ keepState: false })
   }
-  dispose() { FrameHosts.delete(this); hostByNonce.delete(this.nonce); if (this.next) hostByNonce.delete(this.next.nonce); this.el.remove() }
+  dispose() { FrameHosts.delete(this); hostByNonce.delete(this.nonce); if (this.next) hostByNonce.delete(this.next.nonce); this.el.remove(); if (this.embed) Embeds.close(this.embed); if (this.next && this.next.embed) Embeds.close(this.next.embed) }
 }
 
 // The bench is the shell of its embedded frames: it answers their slop

@@ -121,5 +121,22 @@ func (s *Door) workshopModule(a *actor.Actor) goja.Value {
 			return out, nil
 		}, toJS)
 	})
+	// closeEmbed(view) ends an embedded view this app opened for the
+	// visitor, when its frame goes away or reloads.
+	_ = o.Set("closeEmbed", func(view string) goja.Value {
+		trusted()
+		if s.CloseEmbed == nil {
+			a.Throw("unavailable", "this server opens no embedded views")
+		}
+		p := s.actAs(a, "workshop", true)
+		tool, app := a.Store().ID, a.App()
+		return a.IO(func() (any, error) {
+			out, err := s.CloseEmbed(context.Background(), p, view, tool, app)
+			if err != nil {
+				return nil, fail(err)
+			}
+			return out, nil
+		}, toJS)
+	})
 	return o
 }

@@ -7,6 +7,7 @@ import (
 	"encoding/base64"
 	"encoding/hex"
 	"encoding/json"
+	"net/url"
 	"strings"
 	"testing"
 )
@@ -184,6 +185,19 @@ func TestBenchDevInstance(t *testing.T) {
 		t.Fatalf("renew = %v", r)
 	}
 	h.fail(admin, "actor.call", map[string]any{"store": "bench", "action": "embed", "args": map[string]any{"app": "jot"}}, "not_granted")
+
+	// Closing: the view and its frame address end; a token closes nothing.
+	h.fail(admin, "actor.call", map[string]any{"store": "bench", "action": "close", "args": map[string]any{"view": e["view"]}}, "not_granted")
+	if c := result(t, rpc(page, v, "slop.call", map[string]any{"action": "close", "args": map[string]any{"view": e["view"]}})); c["closed"] != e["view"] {
+		t.Fatalf("close = %v", c)
+	}
+	if out := rpc(page, v, "slop.call", map[string]any{"action": "renew", "args": map[string]any{"view": e["view"]}}); errCode(out) != "not_found" {
+		t.Fatalf("renew after close = %v", out)
+	}
+	u, _ := url.Parse(e["src"].(string))
+	if r, _ := h.get(u.Host, u.RequestURI()); r.StatusCode != 404 {
+		t.Fatalf("the closed embed's address answers %d", r.StatusCode)
+	}
 }
 
 // Phase 3: a sync made from a draft that has moved since (a push from a

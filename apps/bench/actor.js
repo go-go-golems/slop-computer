@@ -209,6 +209,12 @@ defineActor({
         return await tool(ctx).renewEmbed(String(view || ''));
       },
     },
+    close: {
+      requires: 'view',
+      async run(ctx, { view }) {
+        return await tool(ctx).closeEmbed(String(view || ''));
+      },
+    },
 
     // The dev instance's data, for the agent and the Data view (Phase 4):
     // its documents, its SQL tables (read-only), and seeding them. These
