@@ -33,6 +33,10 @@ addEventListener('message', e => {
   fh.onMessage(m)
 })
 
+// The instance a workspace is shown on: draft on the dev instance, a
+// proposal on the prop instance.
+export const showing = ws => ws === 'draft' ? { kind: 'dev', ref: null } : { kind: 'prop', ref: ws }
+
 export class FrameHost {
   // o: {project, route, w, h, kind: dev | test | prop, ref (prop: the proposal), fid, headless}
   constructor(o) {
@@ -44,7 +48,7 @@ export class FrameHost {
     FrameHosts.add(this)
   }
   // the workspace this frame shows
-  get ws() { return this.kind === 'prop' ? this.ref : 'draft' }
+  get ws() { return this.kind !== 'dev' && this.ref ? this.ref : 'draft' }
   size(w, hh) {
     this.w = w; this.h = hh
     Object.assign(this.el.style, { width: w + 'px', height: hh + 'px' })

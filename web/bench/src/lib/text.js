@@ -244,3 +244,15 @@ export function hlYAML(src) {
     return sp + (dash ? '<span class="y-p">' + dash + '</span>' : '') + (k ? '<span class="y-k">' + escHtml(k) + '</span><span class="y-p">:</span> ' : '') + val(rest.trim())
   }).join('\n')
 }
+
+// A model's reply as JSON: the whole reply, or its last {…} / […] block
+// (models wrap JSON in prose or code fences). undefined when none parses.
+export function parseJSONReply(text) {
+  const t = String(text).replace(/^```(?:json)?\s*|\s*```$/g, '').trim()
+  try { return JSON.parse(t) } catch { }
+  for (const [o, c] of [['{', '}'], ['[', ']']]) {
+    const i = t.lastIndexOf('\n' + o), a = i >= 0 ? i + 1 : t.indexOf(o), b = t.lastIndexOf(c)
+    if (a >= 0 && b > a) { try { return JSON.parse(t.slice(a, b + 1)) } catch { } }
+  }
+  return undefined
+}

@@ -19,11 +19,13 @@ import { clamp, emitter, now, plural, sleep } from '../lib/util.js';
 
 export const Fixtures = {
   current: null, ev: emitter(),
-  // Reset the test instance of ws to a fixture's data (null: empty).
-  async apply(P, name, ws = 'draft') {
+  // Reset the test instance of ws to a fixture's data (null: empty). read:
+  // how to read the fixture file (default: the person's view of ws; an eval
+  // passes its transaction's, which has its own writes).
+  async apply(P, name, ws = 'draft', read = path => P.read(path, ws)) {
     let spec = null
     if (name) {
-      const text = P.read(fixturePath(name), ws)
+      const text = read(fixturePath(name))
       if (text === null) throw Object.assign(new Error('no fixture ' + fixturePath(name)), { kind: 'missing' })
       spec = JSON.parse(text)
       const bad = checkFixture(spec)
@@ -41,12 +43,12 @@ export const Fixtures = {
 
 // Run one scenario: reset and seed the test instance, a fresh frame of it,
 // the steps in order, a snapshot where it fails (and where asked).
-export async function runScenario(P, spec, { ws = 'draft', name = 'unsaved', onStep, signal, who = 'you', thread, keep = true } = {}) {
+export async function runScenario(P, spec, { ws = 'draft', name = 'unsaved', onStep, signal, who = 'you', thread, keep = true, read } = {}) {
   const bad = checkScenario(spec)
   if (bad) throw Object.assign(new Error(bad), { kind: 'invalid' })
   const [w, hgt] = spec.size || [375, 720], t0 = now()
   const res = { name, ws, ok: true, steps: [], snaps: [], page: spec.page || 'index.html', fixture: spec.fixture || null, t: t0 }
-  await Fixtures.apply(P, spec.fixture || null, ws)
+  await Fixtures.apply(P, spec.fixture || null, ws, read)
   const fh = await Headless.fresh(P, res.page, { kind: 'test', ref: ws === 'draft' ? null : ws, w, h: hgt })
   const timeout = s => clamp(+s.timeout || +spec.timeout || 2000, 100, 15000)
   // checks retry until they pass or time out: pages render after data arrives
@@ -80,8 +82,7 @@ export async function runScenario(P, spec, { ws = 'draft', name = 'unsaved', onS
           return s.count != null ? { ok: n === +s.count, got: n + ' rows' } : { ok: n > 0, got: '0 rows' }
         }))
         else if (s.docs) verify(s, await poll(s, async () => {
-          const all = await Slop.call('docs', { app: P.app, kind: 'test', coll: s.docs })
-          const docs = (Array.isArray(all) ? all : all.docs || []).map(d => d.data || d.body || d)
+          const docs = (await Slop.call('docs', { app: P.app, kind: 'test', coll: s.docs })).map(d => d.body || {})
           const hits = s.where ? docs.filter(d => Object.entries(s.where).every(([k, v]) => d[k] === v)) : docs
           return s.count != null ? { ok: hits.length === +s.count, got: hits.length + ' documents' } : { ok: hits.length > 0, got: '0 documents' }
         }))
@@ -126,9 +127,10 @@ async function expectStep(fh, s) {
   return { ok: els.some(e => e.rect.w && e.rect.h), got: 'not visible' }
 }
 
+// opts.files: where the scenarios are read ({list, read, meta}; default: the project)
 export async function runAllScenarios(P, opts = {}) {
   const ws = opts.ws || 'draft', out = []
-  for (const s of scenarioList(P, ws)) {
+  for (const s of scenarioList(opts.files || P, ws)) {
     if (opts.signal && opts.signal.aborted) break
     if (s.error) { out.push({ name: s.name, ok: false, error: s.error }); continue }
     const r = await runScenario(P, s.spec, { ...opts, ws, name: s.name })

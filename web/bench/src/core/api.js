@@ -5,24 +5,26 @@
 //   'files.write': {
 //     sig: 'path, text',                  // a parameter ending in ? is optional; ...x is the rest
 //     doc: 'creates or replaces the whole file',
-//     writes: 'files',                    // files | data | test | — (absent: reads, and views of the canvas)
-//     pathOf: args => args[0],            // for writes: 'files', the path a tests thread may write (default args[0])
-//     dry: 'refuse',                      // refused inside a dry run (it writes outside the transaction)
+//     writes: 'files',                    // what it changes: files (the eval's transaction) | dev (the dev
+//                                         // instance's data) | main (publishing); absent: reads and canvas views
+//     pathOf: (args, ctx) => args[0],     // writes: 'files': the path (or paths) it writes (default args[0])
 //     long: true,                         // may wait on a person or a model: pauses the eval's time budget
+//     internal: true,                     // called by the sandbox's own code (tx, dry, sleep): not in the reference
 //     run: (ctx, path, text) => …,
 //   }
 //
-// From the table come: argument checks and the usage line in errors, the
-// mode guards (a read-only thread writes nothing; a tests thread writes
-// only scenarios/ and fixtures/ and the test instance), the dry-run guard,
-// the worker's list of long calls, and the API reference in the agent's
+// From the table come: argument checks and the usage line in errors; the
+// mode guards (a read thread changes nothing; a tests thread writes only
+// scenarios/ and fixtures/); the dry-run guard (a dry run captures file
+// writes in its transaction, so every other write is refused in one); the
+// worker's list of long calls; the API reference in the agent's
 // instructions. Nothing checks these rules by hand.
 //
 // Public API: defineAPI, checkArgs, parseSig, policy. No DOM, no network.
 // Tested by test/api.test.mjs.
 
 export const policy = msg => Object.assign(new Error(msg), { kind: 'policy' })
-const WRITES = new Set(['files', 'data', 'test'])
+const WRITES = new Set(['files', 'dev', 'main'])
 const TEST_PATH = /^(scenarios|fixtures)\//
 
 // 'route, {w, h}?, ...rest' → [{name, optional, rest}] (commas inside {} do not split)
@@ -73,15 +75,17 @@ export function defineAPI(...tables) {
         throw err
       }
     },
-    // the reference the agent reads: one line per call, by namespace
-    reference() {
+    // the reference the agent reads: one line per call, by namespace, each
+    // namespace followed by its note (notes: {ns: text})
+    reference(notes = {}) {
       const groups = new Map()
       for (const [name, e] of entries) {
+        if (e.internal) continue
         const ns = name.includes('.') ? name.slice(0, name.indexOf('.')) : ''
         if (!groups.has(ns)) groups.set(ns, [])
         groups.get(ns).push(name + '(' + e.sig + ')' + (e.doc ? ' — ' + e.doc : ''))
       }
-      return [...groups.values()].map(lines => lines.join('\n')).join('\n')
+      return [...groups].map(([ns, lines]) => lines.join('\n') + (notes[ns] ? '\n  ' + notes[ns].trim().split('\n').join('\n  ') : '')).join('\n')
     },
   }
 }
@@ -90,11 +94,10 @@ function guard(ctx, name, e, args) {
   if (!e.writes) return
   if (ctx.mode === 'read') throw policy('read-only mode: this thread may read and check but not write (' + name + ')')
   if (ctx.mode === 'tests') {
-    if (e.writes === 'data') throw policy('this thread may write only scenarios/, fixtures/ and the test instance, not the dev instance\'s data (' + name + ')')
-    if (e.writes === 'files') {
-      const path = e.pathOf ? e.pathOf(args) : args[0]
-      if (!TEST_PATH.test(String(path || ''))) throw policy('this thread may write only scenarios/ and fixtures/ (tests), not ' + (path || 'code'))
-    }
+    if (e.writes !== 'files') throw policy('this thread may write only scenarios/ and fixtures/ (' + name + ' changes ' + (e.writes === 'dev' ? 'the dev instance' : 'main') + ')')
+    const paths = [].concat(e.pathOf ? e.pathOf(args, ctx) : args[0])
+    const bad = paths.find(p => !TEST_PATH.test(String(p || '')))
+    if (bad !== undefined) throw policy('this thread may write only scenarios/ and fixtures/ (tests), not ' + (bad || 'code'))
   }
-  if (e.dry === 'refuse' && ctx.tx && ctx.tx.dry) throw policy(name + ' is refused in a dry run: it writes outside the transaction')
+  if (e.writes !== 'files' && ctx.tx && ctx.tx.dry) throw policy(name + ' is refused in a dry run: a dry run captures file writes only')
 }

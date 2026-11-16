@@ -399,7 +399,8 @@ defineActor({
         const w = tool(ctx);
         storeId(ctx, app);
         if (!PROPOSAL.test(ref || '')) ctx.fail('invalid_argument', 'ref must be proposal/<id>');
-        if (status !== 'accepted' && status !== 'rejected') ctx.fail('invalid_argument', 'status is accepted or rejected');
+        // discarded: an agent's proposal that ended with no changes (no event)
+        if (status !== 'accepted' && status !== 'rejected' && status !== 'discarded') ctx.fail('invalid_argument', 'status is accepted, rejected or discarded');
         const p = sql.one('SELECT owner, status, title FROM proposals WHERE app = ? AND ref = ?', app, ref);
         if (!p || p.owner !== ctx.visitor.id) ctx.fail('not_found', 'no proposal ' + ref);
         if (p.status !== 'open') ctx.fail('conflict', ref + ' is already ' + p.status);
@@ -412,7 +413,7 @@ defineActor({
         if (ts && ts.ref === ref) await w.follow(test, 'draft');
         await w.dropRef(app, ref, { ifAt: snap(ctx, ifAt, 'ifAt') });
         sql.run('UPDATE proposals SET status = ?, closed = ? WHERE app = ? AND ref = ?', status, Date.now(), app, ref);
-        addEvent(ctx, app, { kind: status === 'accepted' ? 'accept' : 'reject', who: 'you', ref, n: ifAt, data: { title: p.title } });
+        if (status !== 'discarded') addEvent(ctx, app, { kind: status === 'accepted' ? 'accept' : 'reject', who: 'you', ref, n: ifAt, data: { title: p.title } });
         return { ref, status };
       },
     },

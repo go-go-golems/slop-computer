@@ -239,7 +239,6 @@ function cut(s, n) { s = String(s); return s.length > n ? s.slice(0, n) + `… [
 
 // ---------- engine 1: QuickJS, one context per session ----------
 const sessions = new Map()          // sid -> {vm, libHash}
-const LONG = new Set(['agents.delegate', 'llm', 'ui.approve', 'publish.check', 'publish.run'])
 const MAX_SESSIONS = 8
 function dropSession(sid) { const S = sessions.get(sid); if (S) { sessions.delete(sid); try { S.vm.dispose() } catch (e) { } } }
 function evalIn(vm, src, ms = 3000) {
@@ -261,7 +260,9 @@ function newSession(api, sigs, roles) {
 function hash(s) { let x = 2166136261; for (let i = 0; i < s.length; i++) { x ^= s.charCodeAt(i); x = Math.imul(x, 16777619) } return (x >>> 0).toString(36) }
 
 async function runQuick(m) {
-  const { id: eid, code, api, timeoutMs = 20000, sid, restore, lib, sigs = {}, roles = [] } = m
+  // long: the calls that may wait on a person or a model (the page's API table says which)
+  const { id: eid, code, api, timeoutMs = 20000, sid, restore, lib, sigs = {}, roles = [], long = [] } = m
+  const LONG = new Set(long)
   let S = sid ? sessions.get(sid) : null, fresh = false
   if (S && S.api !== api.join(',') + '|' + roles.join(',')) { dropSession(sid); S = null }
   if (!S) {

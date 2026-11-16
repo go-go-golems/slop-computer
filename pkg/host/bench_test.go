@@ -272,6 +272,14 @@ func TestBenchProposals(t *testing.T) {
 	if last := evs[len(evs)-1].(map[string]any); last["kind"] != "reject" || last["ref"] != ref {
 		t.Fatalf("the last event = %v", last)
 	}
+	// An agent's proposal that ended empty is discarded: the ref goes, the
+	// timeline does not mention it.
+	e := act("propose", map[string]any{"app": "jot", "title": "Nothing came of it"})
+	act("closeProposal", map[string]any{"app": "jot", "ref": e["ref"], "status": "discarded", "ifAt": draft})
+	if after := act("project", map[string]any{"app": "jot"})["events"].([]any); len(after) != len(evs) {
+		t.Fatalf("discarding logged %v", after[len(evs):])
+	}
+	h.fail(admin, "actor.call", map[string]any{"store": "bench", "action": "closeProposal", "args": map[string]any{"app": "jot", "ref": ref, "status": "closed", "ifAt": 0}}, "invalid_argument")
 }
 
 // An instance's data: seeding it (documents named by id, table rows),

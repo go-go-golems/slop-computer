@@ -22,7 +22,7 @@ export const Instances = {
   ensure(P, kind, ref) {
     const k = P.app + '|' + kind, cur = this.ready.get(k)
     if (cur && (!ref || cur.ref === ref)) return cur.p
-    const p = Slop.call('instance', { app: P.app, kind, ref: kind === 'prop' ? ref : undefined })
+    const p = Slop.call('instance', { app: P.app, kind, ref: kind === 'dev' ? undefined : ref })
     this.ready.set(k, { ref, p })
     p.catch(() => { if (this.ready.get(k) && this.ready.get(k).p === p) this.ready.delete(k) })
     return p

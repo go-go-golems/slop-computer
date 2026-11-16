@@ -9,8 +9,8 @@
 // through the bench actor (per person and app) and listed in Snaps.
 //
 // Public API: layoutDiff, diffSummary, diffBoxes, Snaps (open, list, take,
-// load, render, frozen), layoutIn, snapshotBoard.
-import { FrameHost, Headless } from './host.js';
+// load, render, frozen), layoutIn, hostIn, snapshotBoard.
+import { FrameHost, Headless, showing } from './host.js';
 import { Slop } from '../server/slop.js';
 import { clamp, hashStr, now, uid } from '../lib/util.js';
 import { h } from '../lib/dom.js';
@@ -140,7 +140,7 @@ export async function snapshotBoard(P, ws, opts = {}) {
   const out = []
   for (const f of P.board().frames) {
     try {
-      const fh = await settled(P, f, ws)
+      const fh = await hostIn(P, f, ws)
       const m = await Snaps.take(P, fh, opts)
       if (m) out.push(m)
     } catch (e) { /* a frame that will not snapshot is skipped */ }
@@ -151,12 +151,18 @@ export async function snapshotBoard(P, ws, opts = {}) {
 // renders off-screen in a pooled frame even when the canvas shows this
 // workspace, so two sides compare alike.
 export async function layoutIn(P, f, ws, { headless } = {}) {
-  const fh = await settled(P, f, ws, headless)
+  const fh = await hostIn(P, f, ws, { headless })
   return { fh, layout: await fh.call('layout', [], 5000) }
 }
-async function settled(P, f, ws, headless) {
+// A board frame's page in a workspace, loaded: the canvas's frame when it
+// shows that workspace (and headless is not asked), else a pooled headless
+// one at the page the canvas frame is on.
+export async function hostIn(P, f, ws, { headless } = {}) {
   let fh = headless ? null : FrameHost.ui.hostFor(f.id)
-  if (!fh || !fh.shown || fh.ws !== ws) fh = await Headless.get(P, fh ? fh.route : f.route, { kind: ws === 'draft' ? 'dev' : 'prop', ref: ws === 'draft' ? null : ws, w: f.w, h: f.h })
+  if (!fh || !fh.shown || fh.ws !== ws) {
+    const vis = FrameHost.ui.hostFor(f.id)
+    fh = await Headless.get(P, vis ? vis.route : f.route, { ...showing(ws), w: f.w, h: f.h })
+  }
   if (!fh.ready) await fh.readyP
   return fh
 }
