@@ -12,12 +12,26 @@ Topics:
 DocType: design-doc
 Intent: long-term
 Owners: []
-RelatedFiles: []
+RelatedFiles:
+    - Path: repo://pkg/doors/actors/modworkshop.go
+      Note: The workshop module the bench builds on (push to draft, publish, follow, status)
+    - Path: repo://pkg/doors/pages/sandbox.go
+      Note: The sandbox origin, frameOrigins, /v/<n>/; where embeds would be served
+    - Path: repo://pkg/doors/pages/views.go
+      Note: Views and reloadApp (reload on ref moves); where embeds would be opened
+    - Path: repo://pkg/host/workshop_module_test.go
+      Note: The draft/follow/publish loop proven as a test
+    - Path: repo://pkg/kernel/apps.go
+      Note: Running and lazy activation
+    - Path: repo://ttmp/2026/11/15/SLOP3-022--sitebench-on-slop-a-live-dev-environment-for-slop-apps-page-and-actor-with-instant-publish/scripts/01-stage0-sitebench-as-a-slop-app.sh
+      Note: 'Stage 0 experiment: Sitebench dist as a slop app'
+    - Path: repo://web/runtime/src/index.ts
+      Note: 'window.claude.use: the artifact contract slop implements'
 ExternalSources: []
-Summary: "What Sitebench is and how it works; how slop stores, apps, refs, views and actors work; and the design and plan for a bench where a slop app (page and actor) is a project with a live dev instance and a one-step publish."
+Summary: What Sitebench is and how it works; how slop stores, apps, refs, views and actors work; and the design and plan for a bench where a slop app (page and actor) is a project with a live dev instance and a one-step publish.
 LastUpdated: 2026-11-15T19:30:00-05:00
-WhatFor: "An intern who will build the bench, or review its design"
-WhenToUse: "Before working on SLOP3-022 or on slop's development tooling"
+WhatFor: An intern who will build the bench, or review its design
+WhenToUse: Before working on SLOP3-022 or on slop's development tooling
 ---
 
 # Sitebench on slop: a live development environment for slop apps
@@ -40,9 +54,11 @@ Read the guide in order. Parts 1 and 2 teach Sitebench. Part 3 teaches the slop 
 >   - its files become the app store's tree on the `draft` ref;
 >   - its live frames become embedded views of a dev instance;
 >   - its data becomes that instance's documents and SQL;
->   - "accept" and "publish" become ref moves.
+>   - accepting a proposal and publishing both move refs.
+>
+> Part 3 defines store, tree, snapshot, ref, instance and view.
 
-**Sources.** Sitebench paths are relative to the archive root: `sources/sitebench-workspace/` in this ticket, which is git-ignored. `sources/MANIFEST.md` lists the files. Slop paths are relative to the repository root at origin/main (`97c4458`, 2026-11-15).
+**Sources.** Sitebench paths are relative to the archive root: `sources/sitebench-workspace/` in this ticket, which is git-ignored. `sources/MANIFEST.md` lists the files. Slop paths are relative to the repository root. The code cited is that of origin/main at `97c4458` (2026-11-15).
 
 **Evidence.** Three reader diaries back this guide: `reference/02-…` (agent and sandbox), `03-…` (workbench UI) and `04-…` (slop surface). The main diary is `reference/01-diary.md`, and the experiment's screenshots are in `various/`.
 
@@ -68,7 +84,7 @@ The archive's tests replay a session with the Corner Coffee template (`sitebench
 
 4. **The write lands in a proposal.** The thread's target is "proposal", so the write goes to a new proposal: an overlay of files on top of the main version. Only frames that show this proposal reload.
 5. **The frames reload in place.** Each reloads double-buffered: a new hidden frame loads, the old one's scroll position and form inputs are copied into it, and then the two are swapped.
-6. **Claude hears what happened.** The tool result Claude receives includes:
+6. **Claude hears what happened.** The tool result includes the effects of the eval, which the UI summarises in one line (§2.4 shows the JSON the model actually receives):
 
    ```
    effects: styles.css +1 −1 · fixed 1 issue · layout changed on menu.html
@@ -242,7 +258,7 @@ The host runs the tool-use loop and calls `execute` once per tool call. A turn m
 - Top-level `const`/`let`/`function` declarations persist between evals: acorn rewrites them into globals (`worker.js:136-166`). They are also saved as JSON with the thread, so they survive a reload (`:113-116`).
 - An eval runs for at most 20 s. The page has a watchdog that restarts a stuck worker (`06-agent.js:52-65`).
 
-**The host API** is 84 verbs in 15 groups, listed in Appendix A (`API_SIGS`, `06-agent.js:75-94`). The page implements every verb in `hostAPI(ctx)` (`:114-419`). The sandbox only forwards calls, so authority lives on the page side.
+**The host API** is 84 verbs in 14 groups, listed in Appendix A (`API_SIGS`, `06-agent.js:75-94`). The page implements every verb in `hostAPI(ctx)` (`:114-419`). The sandbox only forwards calls, so authority lives on the page side.
 
 **Every eval is a transaction.**
 
@@ -250,7 +266,7 @@ The host runs the tool-use loop and calls `execute` once per tool call. A turn m
 - `tx.begin/commit/rollback` nests transactions inside an eval.
 - `dry.begin/end/apply` captures file writes as a changeset without applying them.
 
-**Effects.** After an eval that wrote something, `frameEffects` waits 260 ms, re-runs checks and layout on every frame of the board, and tells the model what changed (`06-agent.js:473-494`):
+**Effects.** After an eval that wrote something, `frameEffects` waits 260 ms, re-runs checks and layout on every frame of the board, and tells the model what changed (`06-agent.js:473-494`). The example below shows the shape; its values are illustrative:
 
 ```json
 { "files": [{"path":"styles.css","change":"edited","add":1,"del":1}],
@@ -351,7 +367,7 @@ corner/                      ← the app store's tree (snapshot on main)
 This gives two kinds of store:
 
 - **The app store** holds the code. It may also hold data, if it runs itself.
-- **Instances** are stores made with `store.new {id, app: "corner"}`. Each runs the app's code against its **own** documents and SQL (`pkg/commands/stores.go:48-63`).
+- **Instances** are stores made with `store.new {id, app: "corner"}`. "Instance" is this guide's word; the code speaks of a store whose `_meta.app` names another store. Each runs the app's code against its **own** documents and SQL (`pkg/commands/stores.go:48-63`).
 
 Pinboard and the reports work this way: one app store, one instance per board or report. `store.ls` returns `{id, type, app, owner, createdAt, level}` for every store you can see (`stores.go:24-47`). The `app` field is how a tool finds an app's instances.
 
@@ -385,7 +401,7 @@ Pinboard and the reports work this way: one app store, one instance per board or
 **Opening a page.** When a person opens a mounted path:
 
 1. The live host answers with the **shell**: a small page with a header and one `<iframe id="app">` (`pkg/doors/pages/live.go:670-703`).
-2. The shell POSTs `/_site/views {path}`. The server resolves the mount, checks the person's level, runs `Running` (which activates if needed) and creates a **view** (`views.go:147-191`).
+2. The shell POSTs `/_site/views {path}`. The server resolves the mount, checks the person's level, runs `Running` (which activates if needed) and creates a **view** (`views.go:147-191`). A view is the server's record of one open page: an id, the store it shows, the version `n` it runs, and a secret the page uses to call the server.
 3. The view's frame source is `https://s<label>.<sandbox host>/v/<n>/…`. The label is an HMAC of the store and the app, so each store gets its own origin (`views.go:76-87`). The sandbox serves any snapshot `n` of the app store at `/v/<n>/`, and injects a boot script and the runtime `/_slop/claude.js` (`pkg/doors/pages/sandbox.go:73-209`).
 4. The sandbox page's only Content-Security-Policy is `frame-ancestors` (the main and live hosts) (`sandbox.go:62-68, 114`). So the page may start Workers, compile wasm and create its own frames.
 
@@ -482,7 +498,7 @@ tables("jot-scratch") == ["notes","tags"];  tables("jot") == ["notes"]          
   "capabilities": { "db": {}, "user": {}, "sample": {}, "downloads": true } }
 ```
 
-**The commands:**
+**The commands.** `policy set` is needed because the policy matrix gates `sample` per app and audience.
 
 ```sh
 slop store new --id bench --type bench
@@ -553,6 +569,8 @@ The design rests on keeping three things apart: **draft**, **dev instance** and 
 - **Draft** is a ref on the app store. Its snapshot is the code being worked on. The bench pushes every edit there. Each push makes a snapshot, so every saved state of the code has a number.
 - **The dev instance** is an ordinary store with `_meta.app = corner` and `app_ref = draft`. It belongs to the developer, so nobody else can open it. Its data comes from a fixture, not from production.
 - **Main** is what every production instance follows. Publishing moves it to draft's snapshot. Production instances reload on their next view or event.
+
+The snapshot numbers (37, 40, 41) are illustrative, and the rest of Part 5 continues from them: the next edit makes snapshot 42.
 
 This is exactly the arrangement `workshop_module_test.go:84-129` already exercises. What is new is the speed of the loop, embedding real views in the canvas, and the bench around it.
 
@@ -650,7 +668,7 @@ This is the path of one keystroke, with the time each step is allowed. The budge
 
 That puts an edit on screen in about one second. Stylesheet edits can skip the round trip: the probe already supports a `preview` push of CSS (`05-site.js:230-237`). The bench sends the whole new stylesheet to the frames at once, and the push follows in the background.
 
-**Where the reload comes from.** The dev view's runtime receives `reload` from the server whenever draft moves. The cause does not matter: the bench's own sync, the agent, or a `slop push --ref draft` from a terminal. So edits made outside the bench also show up live. The bench, not the shell, owns these frames (5.5). It turns `reload` into Sitebench's double-buffered `FrameHost.load({keepState:true})` instead of a plain reload.
+**Where the reload comes from.** The dev view's runtime receives `reload` from the server whenever draft moves. `reloadApp` also checks the production views of the same app, but for them `Running` still returns main's unchanged `n`, so they do not reload. The cause does not matter: the bench's own sync, the agent, or a `slop push --ref draft` from a terminal. So edits made outside the bench also show up live. The bench, not the shell, owns these frames (5.5). It turns `reload` into Sitebench's double-buffered `FrameHost.load({keepState:true})` instead of a plain reload.
 
 **When activation fails.** A failed migration or a `setup` that throws leaves the dev instance on its previous version (§3.3). The bench shows this in four places:
 
@@ -686,7 +704,7 @@ workshop.embed(store, { dev: true }) → { src, view, secret, version, expires }
 1. **The bench's actor** calls `workshop.embed('corner-dev-d4776d', {dev:true})` as the visiting person.
 2. **The server** does what `/_site/views` does: checks the person's level on the store, runs `Running` and creates a view. It records the **calling app's sandbox origin** as the view's parent. The parent is not a parameter: the server knows which app's actor is calling.
 3. **The `src`** carries a token naming the embed, for example `https://s<label>.<sandbox>/e/<token>/v/<n>/menu.html`. When the sandbox serves it, it adds the parent origin to `frame-ancestors`. With `dev: true` it also injects `/_slop/probe.js` and instruments HTML responses with `data-src="file:line"`, a Go port of `instrument()` (`05-site.js:4-27`).
-4. **The bench page acts as the shell for its frames.** It answers the runtime's `hello` with `{type:"view", view, secret}` and handles `reload`, `reopen` and `renew` (renew through `workshop.embed` again). It forwards `download` and `confirm` to its own shell, so a confirmation inside a dev frame still reaches the person.
+4. **The bench page acts as the shell for its frames.** The sandbox's boot script tells the page its `parentOrigin`, which for an embed is the bench's origin, so the page's runtime sends its `hello` to the bench. The bench answers the runtime's `hello` with `{type:"view", view, secret}` and handles `reload`, `reopen` and `renew` (renew through `workshop.embed` again). It forwards `download` and `confirm` to its own shell, so a confirmation inside a dev frame still reaches the person.
 5. **The probe.** `/_slop/probe.js` is Sitebench's `PROBE` without `window.site`. Real apps use `window.claude`. It keeps the operations:
    - `check`, `layout`, `state` and `restore`, `snapshot`, `inspect`, `outline`, `trace`, pins and `preview`;
    - `click`, `type`, `text`, `query`, `waitFor` and `count`;
@@ -911,7 +929,7 @@ Each phase ends with something a person can use, and with the tests that prove i
   - Keep `Project` in memory.
   - Add `Sync`, a debounced full-tree push to `draft`: unchanged files by `{path, sha256, size}` computed with `crypto.subtle`, changed files inline as `{path, text}`.
   - Keep the event log and threads in the bench's documents under `p_<app>/`.
-- **Frames stay srcdoc** in this phase, so pages render without their backend. That is enough to edit static apps like reports.
+- **Frames stay srcdoc** in this phase. A srcdoc frame has no slop runtime, so only pages that need no backend render correctly: static apps such as reports. Pages that call `window.claude` show errors until Phase 2.
 - **Tests.** A Go test in `pkg/host` that pushes a minimal bench, calls `open` and `sync` through `actor.call`, and checks `ref.ls` (draft moved) and `files.cat` (the new text). A Playwright script like `test/run-app.mjs` against a local server.
 
 ### Phase 2: dev instances and embedded views (server)

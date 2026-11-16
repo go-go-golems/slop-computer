@@ -9,27 +9,7 @@ Topics:
 DocType: reference
 Intent: long-term
 Owners: []
-RelatedFiles:
-    - pkg/store/files.go
-    - pkg/kernel/apps.go
-    - pkg/actor/manager.go
-    - pkg/commands/files.go
-    - pkg/commands/actors.go
-    - pkg/commands/mounts.go
-    - pkg/commands/preview.go
-    - pkg/doors/pages/views.go
-    - pkg/doors/pages/sandbox.go
-    - pkg/doors/pages/site.go
-    - pkg/doors/pages/live.go
-    - pkg/doors/pages/assets/shell.js
-    - pkg/doors/actors/modworkshop.go
-    - pkg/doors/mcp/mcp.go
-    - pkg/commands/eval.go
-    - web/runtime/src/index.ts
-    - web/runtime/src/caps.ts
-    - web/runtime/src/transport.ts
-    - apps/workshop/actor.js
-    - pkg/host/workshop_module_test.go
+RelatedFiles: []
 ExternalSources: []
 Summary: "A subagent's record of mapping slop-computer's current surface (stores, refs, push, activation, serving, page runtime, live updates, actors, doors, access, Pinboard) for a Sitebench-style live dev environment, with file:line evidence and the gaps."
 LastUpdated: 2026-11-15T20:00:00-05:00
