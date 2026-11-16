@@ -504,3 +504,344 @@ slop mount set --host apps.localhost:18490 --path /bench --store bench
 
 **What it does not do.** It edits a Sitebench project kept in documents: a site with `window.site.db` tables, not a slop app. Nothing it builds has an actor, a migration, an instance or a publish step. The rest of this guide is about closing that distance.
 
+---
+
+## Part 5. The design: a bench for slop apps
+
+### 5.1 What we want
+
+**Goals:**
+
+1. **A project is a slop app**, with a page and an actor. Opening an existing app, or creating a new one, gives a project.
+2. **Every edit is live within about a second**, in a **dev instance** of the app with its own data. Every open frame reloads in place, keeping its state. This holds whether the edit came from the bench's editor, from the agent, or from `slop push` in a terminal.
+3. **The editor hears what the edit did:**
+   - the page's checks and layout, as in Sitebench;
+   - the actor's activation result, its errors and its log lines;
+   - a failed migration.
+4. **Publish is one step.** It moves `main` to the version under test, shows each instance coming up on it, and can be undone by moving `main` back.
+5. **Keep Sitebench's strengths:** proposals and review, the agent with one `eval` tool, the history with blame and why, scenarios and fixtures, panels.
+
+**Non-goals for the first version:**
+
+- several people editing one project at the same time;
+- a hot module swap of JavaScript inside a running page (a frame reload with state restore is enough);
+- a server-side agent (the page-side loop works, Part 4).
+
+### 5.2 Three versions of an app
+
+The design rests on keeping three things apart: **draft**, **dev instance** and **main**. Each has a slop object behind it.
+
+```
+                    app store "corner"  (code; its own data too if it runs itself)
+                    ┌──────────────────────────────────────────────────────────┐
+  bench / CLI ──────▶ working tree ── snapshot ──▶ ref draft = 41               │
+   files.push       │                              ref main  = 37  ◀── publish: ref.move main 41
+   {ref:"draft"}    │                              ref proposal/ov7 = 40        │
+                    └───────┬─────────────────────────────┬────────────────────┘
+                            │ follows draft               │ follows main
+                ┌───────────▼───────────┐     ┌───────────▼──────────────────────────┐
+                │ corner-dev-d4776d     │     │ corner (itself), corner-shop-1, …     │
+                │ dev instance:         │     │ production instances: real users,     │
+                │ fixture data, private │     │ real data, mounted at /corner, /c/:id │
+                └───────────┬───────────┘     └──────────────────────────────────────┘
+                            │ embedded views (5.5)
+                ┌───────────▼───────────┐
+                │ the bench's canvas    │
+                └───────────────────────┘
+```
+
+- **Draft** is a ref on the app store. Its snapshot is the code being worked on. The bench pushes every edit there. Each push makes a snapshot, so every saved state of the code has a number.
+- **The dev instance** is an ordinary store with `_meta.app = corner` and `app_ref = draft`. It belongs to the developer, so nobody else can open it. Its data comes from a fixture, not from production.
+- **Main** is what every production instance follows. Publishing moves it to draft's snapshot. Production instances reload on their next view or event.
+
+This is exactly the arrangement `workshop_module_test.go:84-129` already exercises. What is new is the speed of the loop, embedding real views in the canvas, and the bench around it.
+
+### 5.3 Projects are apps: mapping stores to projects
+
+In Sitebench, a project was a set of documents in the artifact's database. In the bench, **a project is an app store**, identified by its store id. Everything Sitebench kept about a project maps onto something slop already has, or onto the bench's own documents:
+
+| Sitebench | The bench on slop | Slop mechanism |
+|---|---|---|
+| project id | the app store id (`corner`) | `store.ls` row with `app == ""` whose tree holds `app.json` |
+| project list (`index`) | the app stores the person may administer, each with its instances | `store.ls` (or `stores({all:true})` for admins), grouped by the `app` field |
+| `files` of main | the app store's tree at `draft` (or at `main` before the first edit) | `files.ls {store, at:"draft"}`, `files.cat` |
+| a file write | a push of the whole tree to `draft` (changed files inline, the rest by hash) | `files.push {store, ref:"draft", files}` |
+| proposals (overlays) | a ref `proposal/<oid>` per proposal, plus the overlay document for review | `files.push {ref:"proposal/ov7"}`; `ref.ls` |
+| accept a proposal | push the merged tree to `draft` | `files.push {ref:"draft"}` |
+| the site's tables (`site.db`) | the dev instance's own documents and SQL tables | the page's `claude.use('db')`; actor `use('sql')`; `docs.*`, `sql.query` |
+| `meta.store` (key-value shared by pages) | documents in the instance | `db` |
+| fixtures (`fixtures/*.json`) | files in the app's tree, used to seed instances | `import.docs`, `import.table` (or a seeding action) |
+| frames (srcdoc) | embedded views of an instance (5.5) | proposed `workshop.embed` |
+| event log, threads, marks, pins, panels, snapshots, boards | the bench's own documents, keyed by the app store id | the bench store's `data/users/<id>/p_<app>/…` (today's layout, with `pid = app id`) |
+| "publish" (none in Sitebench) | move `main` to draft's snapshot | `ref.move {store, ref:"main", n}` |
+
+**Opening a project.** Opening an app such as `corner` runs this sequence. It is pseudocode for the bench's actor action `open`, which calls the `workshop` module as the visiting person:
+
+```js
+open(ctx, { app }) {
+  const w = use('workshop')
+  const refs = w.refs(app)                                 // ref.ls
+  if (!refs.draft) w.moveRef(app, 'draft', refs.main)      // draft starts as main
+  const files = w.files(app, 'draft')                      // [{path, sha256, size}]
+  const inst  = w.stores({}).filter(s => s.app === app)    // production and dev instances
+  const devId = app + '-dev-' + ctx.visitor.id.slice(4, 10)
+  if (!inst.some(s => s.id === devId)) {
+    w.newInstance(app, devId, { ref: 'draft' })            // proposed: store.new {app} + app.follow draft
+    w.seed(devId, 'fixtures/default.json')                 // proposed; see 5.6
+  }
+  return { files, refs: w.refs(app), instances: inst, dev: devId, status: w.status(devId) }
+}
+```
+
+The page then reads the file texts it needs (`files.cat`), builds its in-memory `Project`, and loads the bench's own documents for this project (threads, event log, boards). This takes the place of Sitebench's `Projects.open` (`04-project.js:394-411`).
+
+**Creating a project.** "New project" with a template or an imported zip works like this:
+
+1. Choose an id, which must match `^[a-z0-9][a-z0-9-]{0,62}$` (`pkg/registry/stores.go:12`).
+2. `store.new {id, type}` creates the app store.
+3. Push the template's tree to `draft`. Templates are folders such as `apps/bench/templates/<name>/`, with `app.json`, pages, `actor.js`, `sql/001_*.sql` and `fixtures/default.json`.
+4. Create the dev instance and seed it, as in `open`.
+
+`main` does not exist until the first publish, so nothing is visible to anyone else until then.
+
+**Opening a store that is not an app.** There are three cases:
+
+- **An instance** (`_meta.app` set): the bench opens its app, and lists this store among the instances.
+- **A store without `app.json`**, for example a plain data store: the bench offers "Make this an app", which pushes an `app.json` and an `index.html` to `draft`.
+- **A static app** without an actor, such as a report: it is still an app. The bench works the same way, with nothing for the actor parts to show.
+
+**Exporting.** The bench keeps Sitebench's `.sitebench.zip` layout (`10b-archive.js:86-102`), with `files/` taken from `draft`. `slop pull <store> <dir> --at draft` gives the same tree for use outside the bench.
+
+### 5.4 The live loop
+
+This is the path of one keystroke, with the time each step is allowed. The budgets are targets for the implementation, not measurements.
+
+```
+ person / agent      bench page                    bench actor          slop server                  dev view frame
+ ──────────────      ──────────                    ───────────          ───────────                  ──────────────
+ edit styles.css ──▶ Project.write (memory, log)
+                     debounce 300 ms
+                     [css fast path: push the new
+                      stylesheet into frames via the
+                      probe's preview op ─────────────────────────────────────────────────────────▶ repaint (≈50 ms)]
+                     sync() ──────────────────────▶ action sync
+                                                    workshop.push ───────▶ files.push draft
+                                                                           snapshot n=42, ref move
+                                                                           reloadApp: Running(dev)
+                                                                             migrations, setup, smoke
+                                                                           ◀── {n:42, activated:[…]} (proposed)
+                     ◀───────────────────────────── {n, activation}
+                                                                           reload {version:42} ─────────▶ runtime posts
+                     ◀─────────────────────────────────────────────────────────────────────────────── {type:"reload"}
+                     FrameHost.load({keepState}):
+                       state ← old frame; embed new view (n=42) hidden; restore; swap        ◀──── ready
+                     frameEffects: checks, layout diff, + actor status and new log lines
+ sees effects ◀───── "styles.css +1 −1 · fixed 1 issue · layout changed on menu.html · actor ok"
+```
+
+**Timing budget.**
+
+| Step | Target |
+|---|---|
+| Debounce | 300 ms |
+| Push and snapshot (small tree, mostly hashes) | 50–150 ms |
+| Activation with no new migration (actor rebuilt lazily) | 10–100 ms |
+| Frame reload | about 200–400 ms |
+
+That puts an edit on screen in about one second. Stylesheet edits can skip the round trip: the probe already supports a `preview` push of CSS (`05-site.js:230-237`). The bench sends the whole new stylesheet to the frames at once, and the push follows in the background.
+
+**Where the reload comes from.** The dev view's runtime receives `reload` from the server whenever draft moves. The cause does not matter: the bench's own sync, the agent, or a `slop push --ref draft` from a terminal. So edits made outside the bench also show up live. The bench, not the shell, owns these frames (5.5). It turns `reload` into Sitebench's double-buffered `FrameHost.load({keepState:true})` instead of a plain reload.
+
+**When activation fails.** A failed migration or a `setup` that throws leaves the dev instance on its previous version (§3.3). The bench shows this in four places:
+
+- the **health pill**, which counts actor failures next to page issues;
+- the **effects** the agent receives: `actor: {broken: "sql/002_tags.sql: near \"TABL\": syntax error", n: 41}`;
+- the **Console**, which merges `app.logs` lines with page logs;
+- the frames, which keep showing version 41 with a banner "draft 42 failed to activate".
+
+**Activation result from a push (gap 2).** Today `files.push` does not report activation. The bench can call `follow` or `status` on the dev instance after a push, because `Running` activates. The cleaner fix is a field on the push result (Appendix C, C.2).
+
+**Edits from outside the bench.** `log.wait {store: app, after}` wakes when the app store commits. The bench page polls it through its actor, or a `log.watch` stream verb could deliver the commits as they happen (Appendix C). On a commit whose author is not the bench, it reloads its files from `draft` and logs an event `who: "push"`.
+
+### 5.5 Frames: embedded views of an instance
+
+**The problem.** A Sitebench frame is an `<iframe srcdoc>` the workbench builds from text. A slop app page cannot be built that way, for three reasons:
+
+1. It needs its runtime.
+2. It needs a view with a secret.
+3. It needs its sandbox origin, for `localStorage`, for `/_rt/rpc` and for the event stream.
+
+The canvas must therefore frame the **real view**. Three things stand in the way today:
+
+- The sandbox origin allows framing only by the main and live hosts (`sandbox.go:62-68, 114`). The bench runs on its own sandbox origin, so it cannot frame another app's view.
+- Views are opened by the shell through `/_site/views` on the live host, with the person's session cookie (`live.go:256-315`). The bench page has no cookie on that host.
+- A view's runtime says `hello` to its parent and expects a shell to answer.
+
+**The proposal.** Add *embedded views*, opened by a trusted tool app for itself (Appendix C, C.1):
+
+```
+workshop.embed(store, { dev: true }) → { src, view, secret, version, expires }
+```
+
+1. **The bench's actor** calls `workshop.embed('corner-dev-d4776d', {dev:true})` as the visiting person.
+2. **The server** does what `/_site/views` does: checks the person's level on the store, runs `Running` and creates a view. It records the **calling app's sandbox origin** as the view's parent. The parent is not a parameter: the server knows which app's actor is calling.
+3. **The `src`** carries a token naming the embed, for example `https://s<label>.<sandbox>/e/<token>/v/<n>/menu.html`. When the sandbox serves it, it adds the parent origin to `frame-ancestors`. With `dev: true` it also injects `/_slop/probe.js` and instruments HTML responses with `data-src="file:line"`, a Go port of `instrument()` (`05-site.js:4-27`).
+4. **The bench page acts as the shell for its frames.** It answers the runtime's `hello` with `{type:"view", view, secret}` and handles `reload`, `reopen` and `renew` (renew through `workshop.embed` again). It forwards `download` and `confirm` to its own shell, so a confirmation inside a dev frame still reaches the person.
+5. **The probe.** `/_slop/probe.js` is Sitebench's `PROBE` without `window.site`. Real apps use `window.claude`. It keeps the operations:
+   - `check`, `layout`, `state` and `restore`, `snapshot`, `inspect`, `outline`, `trace`, pins and `preview`;
+   - `click`, `type`, `text`, `query`, `waitFor` and `count`;
+   - recording.
+
+   It talks to the bench with `postMessage`, using the bench's exact origin instead of `'*'`, and checks `event.origin`.
+
+**Security notes:**
+
+- Only apps trusted with `workshop` may embed. An admin decides that with `app.trust`.
+- Embeds are opened as the visiting person, so they never grant more than the person already has.
+- The probe and the instrumentation are injected only into `dev` embeds, never into production views.
+
+**The interim without server changes.** An admin mounts `/dev/:store` once (a `storeParam` mount). The bench then shows dev frames as new browser tabs, or uses `preview.url` for static pages, which has no runtime. This is enough to prove the sync loop of 5.4 before the embed work lands.
+
+### 5.6 Data: dev instances, fixtures, resets and scenarios
+
+**Instances are cheap.** An instance is one SQLite file: `store.new {app}` creates it, and `store.rm` deletes it. The bench uses that freely.
+
+| Instance | Id (example) | Follows | Data | Lifetime |
+|---|---|---|---|---|
+| dev | `corner-dev-d4776d` | `draft` | seeded from `fixtures/default.json`, then whatever the person does in it | kept; "Reset data" recreates it |
+| fixture frame | `corner-fx-3a9c1e2b` (hash of fixture and app) | `draft` | seeded from one fixture | kept while a frame uses it |
+| scenario run | `corner-run-<run id>` | `draft` or `proposal/<oid>` | seeded from the scenario's fixture | deleted after the run |
+| proposal | `corner-p-ov7` | `proposal/ov7` | seeded like dev | deleted on accept or reject |
+
+**The fixture format** extends Sitebench's (`05c-scenarios.js:2-3`) to slop's two kinds of data:
+
+```json
+{ "description": "two drinks on the menu, one order",
+  "docs":  { "settings/shop": { "open": "07:00", "close": "18:00" } },
+  "sql":   { "menu":   [ { "id": 1, "name": "Flat white", "price": 4.2 }, { "id": 2, "name": "Chai", "price": 4.5 } ],
+             "orders": [ { "id": 1, "name": "Ana", "items": "[1]", "status": "new" } ] },
+  "clock": "2026-05-01T09:30" }
+```
+
+**Seeding.** Seeding runs `import.docs` for `docs`, and `import.table` for each SQL table (`pkg/commands/data.go:133-176`). It must run *after* activation, because the tables come from the migrations. `clock` keeps Sitebench's meaning, a fixed time inside the page, which the probe applies (`05-site.js:66-69`). Actors use `ctx.now`. A per-instance clock offset for actors is a later addition (Appendix C, C.6).
+
+**Edited migrations.** Editing a migration that the dev instance already applied fails activation (§3.3). In development that is normal. The bench detects the error and offers **Reset dev data**: `store.rm` on the instance, then `store.new`, then follow `draft`, then seed. Production is protected by the publish check in 5.8, which refuses to publish a changed applied migration.
+
+**Production data in dev.** `store.export` followed by `import.folder` can copy a production instance into a dev instance (`data.go:53-131`). That copies real people's data into a developer's store. The bench must show this as an explicit admin action with a warning, never as a default.
+
+**Scenarios** keep Sitebench's format: `go, click, type, waitFor, wait, expect, snapshot` (`05c-scenarios.js:7`). Their data checks now query the instance:
+
+- `{"docs": "orders", "where": {...}, "count": 1}` on documents;
+- `{"sql": "SELECT count(*) AS n FROM orders WHERE name = 'Ana'", "expect": {"n": 1}}`;
+- `{"call": "orders", "expect": {...}}`, which runs an actor action and checks its result.
+
+**A scenario run:**
+
+1. Create a run instance from the scenario's fixture.
+2. Open an embedded dev view of it in a headless frame.
+3. Run the steps.
+4. Collect the page logs and the actor logs (`app.logs`).
+5. Snapshot on failure.
+6. Delete the instance.
+
+### 5.7 Proposals
+
+Proposals keep their Sitebench role: the agent's changes wait in one for review, unless the thread targets the draft directly. On slop, a proposal is three things:
+
+1. **The overlay document**, in the bench store as today. It holds `{files, base}`, which drive the review diff and conflict detection.
+2. **A ref** `proposal/<oid>` on the app store, pushed on every write in the proposal: the draft tree with the overlay's files applied.
+3. **An instance** `<app>-p-<oid>` following that ref, created when someone looks at the proposal's frames or runs its checks. That gives the proposal live frames with a backend.
+
+**Review checks** run the scenarios twice: on a fresh instance following `proposal/<oid>`, and on one following `draft`. The labels stay the same: "fixed by this proposal" and "regression: passes in draft". Layout checks compare the two in headless embedded frames.
+
+**Accept** applies the picked files to the draft tree and pushes it to `draft`. The proposal's ref and instance are then deleted, unless files remain open. **Reject** marks the overlay rejected and deletes the ref and the instance.
+
+### 5.8 Publish
+
+Publishing is `ref.move {store: app, ref: "main", n: <draft's n>}`. Everything around it exists to make that one move safe.
+
+**Preflight.** The bench checks four things and shows a card the person must approve:
+
+1. **The dev instance activated** draft's `n` and is not broken (`app.status`).
+2. **No applied migration changed or disappeared.** The bench compares the `sql/` files at `main` and at `draft` by name and sha256. A changed or deleted file would fail activation on every production instance. That failure is safe, because instances keep their old version, but it is useless.
+3. **Scenarios pass** on draft, or the person overrides.
+4. **The change summary:** files changed since `main` (`files.ls` at both, compared by sha), new migrations, and how many production instances will move. Those are the stores with `app == app` that follow `main`, plus the app store itself if it runs itself.
+
+**The move.** `ref.move` with a compare-and-swap: "move `main` to 42 only if it is still 37". Today `ref.move` has no such condition (Appendix C, C.3). Without it, two publishers can race. The Workshop's `publish` has the same gap.
+
+**After the move:**
+
+- Production views reload on their own (§3.5).
+- Instances that nobody is viewing activate on their next event or view.
+- The bench lists each production instance with `app.status`: "on 42", "broken: …", or "not yet activated". It offers **Activate now**, which runs `app.follow` with the same ref and so activates.
+
+**Rollback** is `ref.move main 37`. Instances follow back. A migration that already ran in an instance is not undone. Rolling back past a migration leaves tables the old code ignores, which is why migrations should only add. The preflight card says so when it lists new migrations.
+
+**Who may publish.** Today, pushing code and moving `main` on an app store need a platform admin (`guardCode`). That is acceptable for the first version. Gap 8 in the slop reader's report proposes a narrower developer right.
+
+### 5.9 The agent on slop
+
+The agent stays in the page. Part 4 showed that slop's `sample` drives Sitebench's tool loop, and the person's monthly LLM budget applies (`slop llm set`). Changes to the host API (Appendix A has the full list):
+
+| Group | Change |
+|---|---|
+| `files.*` | Same verbs, backed by the project (draft or a proposal). Each write is synced as in 5.4. |
+| `data.*` | Replaced by `app.*` on the current instance: `app.docs(coll, where?)`, `app.doc(path)`, `app.setDoc(path, body)`, `app.sql(query, args?)` (read-only), `app.call(action, args)` (the actor, as the person), `app.status()`, `app.logs({since})`, `app.reset(fixture?)`. Writes refused in `read` mode, as `writable()` does today (`06-agent.js:117-120`). |
+| `frames.*` | Same verbs. The probe answers them inside embedded views. |
+| `fixtures.*`, `scenarios.*` | Same, with the slop fixture and step formats of 5.6. |
+| new: `publish.check()` | The preflight of 5.8. |
+| new: `publish.run()` | Always behind `ui.approve`; refused in `read`, `ask` and `tests` modes, and to subagents. |
+
+**Effects** gain an `actor` part, so the agent hears about the backend the way it hears about the page:
+
+```json
+"actor": { "n": 42, "activated": true, "broken": "", "migrations": ["sql/002_tags.sql"],
+           "logs": ["warn: order without items", "error: TypeError: x is undefined (actor.js:31)"] }
+```
+
+**The API guide** (`06-agent.js:513-620`) is rewritten for slop apps. It describes pages that use `window.claude`, an actor with `defineActor`, migrations that only add, and fixtures for data. It keeps the rules that make the loop work: small evals, read the effects, prefer proposals.
+
+### 5.10 History
+
+The bench's event log keeps its Sitebench role: blame, why cards, marks and the timeline. Each write event gains one field, the snapshot number its sync produced:
+
+```json
+{ "i": 812, "kind": "write", "ws": "main", "who": "agent", "thread": "th3", "path": "styles.css", "after": "…", "snap": 42 }
+```
+
+**What the snapshot number enables:**
+
+- **The playhead** can show the past with a real runtime: an instance following snapshot 42, or `preview.url {at: 42}` for static pages.
+- **Restore** becomes `ref.move draft 42`.
+- **Edits from outside** (`slop push`) appear in the timeline as events with their snapshot number and `who: "push"`.
+
+**What it costs.** One snapshot per sync means many snapshots per day. Snapshots are small rows over shared blobs. Pruning old draft snapshots that no ref or event names is left for later (decision D4).
+
+### 5.11 Where the bench lives, and who may use it
+
+**The bench is a slop app**, pushed to a store `bench` and trusted with `workshop`:
+
+```json
+{ "title": "Bench", "type": "bench", "page": "index.html", "actor": "actor.js",
+  "capabilities": { "db": {}, "user": { "scopes": ["profile"] }, "sample": {}, "downloads": true },
+  "slop": { "modules": ["workshop"] } }
+```
+
+**Its actor is thin.** Its actions wrap `use('workshop')`: `open`, `sync`, `embed`, `instances`, `seed`, `reset`, `publish`. The page keeps Sitebench's structure.
+
+**Its documents** stay per person under `data/users/<id>/p_<app>/…`, as in Part 4.
+
+**Who can use it.** Everything it does runs as the visiting person through the module. Until a developer right exists, the people who can push code are platform admins, so in practice the bench is an admin tool. That matches the Workshop.
+
+### 5.12 The same loop from a terminal
+
+People who prefer their own editor need a loop too, and it shares the server pieces. `slop dev <dir> --app corner` (Appendix C, C.5) would:
+
+1. Create the dev instance if missing.
+2. Watch the folder, by polling, so no new dependency is needed.
+3. Push each change to `draft`.
+4. Print the activation result and new `app.logs` lines.
+5. Print the instance's URL (a `/dev/:store` mount, or a tab of the bench).
+
+The bench, if open, shows the same changes live through `log.wait` (5.4). So a person can edit in their editor and watch the bench's canvas, frames, effects and scenarios.
+
