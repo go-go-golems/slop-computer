@@ -1591,3 +1591,62 @@ Fixed in `3fbba56`. #48 merges it (`0114524`) and adds a clearer refusal for pub
 - `Sync.hold`/`release` in `03b-slop.js`;
 - the `try`/`finally` in `runEval` (`06-agent.js`);
 - `saveLog` in `04-project.js`.
+
+## Step 20: Codex round 5 on #47: Sync per project; rollback restores hash-only files
+
+Codex's fifth pass on #47 (`3fbba56`) found two consequences of the round-4 hold:
+- a rollback of an overwritten hash-only file did not bring it back, so a later push deleted it;
+- switching projects during a held eval detached the project before its writes were pushed.
+
+Fixed in `aa56b77`. #48 merges it (`651cec3`, one source conflict in `Sync.flush`).
+
+### Prompt Context
+
+**User prompt (verbatim):** see Step 16.
+
+**Assistant interpretation:** Keep fixing until Codex is clean.
+
+**Inferred user intent:** Mergeable PRs.
+
+### What I did
+
+- **`Sync` is per project:**
+  - `queue` holds app projects with edits not in draft; `schedule(P)` queues any app project, not only the attached one.
+  - `soon()` sets one debounce timer, and `runAll()` pushes the queued projects, the attached one first.
+  - `run(P)` and `flush(P)` take a project. Errors and the last activation live on the project (`P.syncError`, `P.lastAct`); `status`, `n` and `act` still describe the attached project for the header.
+  - `attach` no longer clears the timer, so an outgoing project's push still happens.
+  - `runEval` calls `Sync.flush(P)`; on #48, so does `Publish.preflight`.
+- **The hash-only rollback:** the `touchFile` snapshot gains `ext` (the `extern` entry on `main`), and `Project.revert` restores it when the path ends up without text.
+
+### Why
+
+- **I did not make the switch wait for the held eval:** an agent turn spans many evals and can take minutes, and the agent keeps writing to its own project between evals anyway. Pushing per project covers both cases.
+
+### What worked
+
+- **Browser (`bench-big`, `big.js` re-pushed at 250007 bytes):**
+  - writing `big.js` and throwing left `extern` at `["big.js"]`; the next edit (draft 4) kept `big.js` at 250007;
+  - an eval writing `switch2.txt`, with a switch to `bench-demo` at 0.7 s, gave draft 5 with `switch2.txt` (13 bytes), an empty queue, and `bench-demo` synced.
+- **The round-1 checks rerun:** "two", `""`, "local while reading", "before switching". `bench-demo`'s draft was back to its four files.
+- **#48 rechecked:** the failing-push refusal toast; `synced` after undoing the edit; the dialog with "draft 26 → main (now 1)".
+
+### What didn't work
+
+- **The #48 merge conflicted in `Sync.flush`'s return:** #48's stale-error clearing against #47's per-project version. I took #47's, which carries the same clearing per project.
+
+### What I learned
+
+- **Every hold needs an answer to "and if the context moves meanwhile?"** Codex found the switch case within one pass.
+
+### Second pair of eyes
+
+- **The queue holds project objects:** reopening a project creates a new object, so an old object with unpushed edits can still push after the new one opened. The new one then merges it as an outside push. Check that this ordering never loses an edit made in the new object in the meantime: its base is newer, so its own push conflicts and merges.
+
+### Code review
+
+- `Sync` in `web/bench/src/03b-slop.js`;
+- `touchFile` (`06-agent.js:132`) and `Project.revert`.
+
+### Technical details
+
+`bench-big` and `bench-cjk` are local test apps; `bench-big`'s draft keeps the test edits (`switch2.txt`, an HTML comment).
