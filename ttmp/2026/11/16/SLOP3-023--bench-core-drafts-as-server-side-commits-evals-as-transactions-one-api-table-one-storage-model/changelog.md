@@ -20,3 +20,7 @@ UI layer ported to ui/ modules with main.js and an esbuild bundle; merged main (
 
 - /tmp/claude-1000/-home-manuel-workspaces-2026-10-28-slop-computer-slop-computer/7fa934c5-45f7-43c5-9ffb-d734dcfbe139/scratchpad/t23/web/bench/build.mjs — bundles main.js after the import check
 - /tmp/claude-1000/-home-manuel-workspaces-2026-10-28-slop-computer-slop-computer/7fa934c5-45f7-43c5-9ffb-d734dcfbe139/scratchpad/t23/web/bench/src/main.js — entry point: views, panel API, boot
+
+## 2026-11-16
+
+Review of #51: commits pass files kept by hash through the actor (it had rebuilt them as text); events record their snapshot and an unknown one is refused (restoring to a bookmark made before any commit deleted every file). One strict stand-in actor for the Node tests. Diary step 10.

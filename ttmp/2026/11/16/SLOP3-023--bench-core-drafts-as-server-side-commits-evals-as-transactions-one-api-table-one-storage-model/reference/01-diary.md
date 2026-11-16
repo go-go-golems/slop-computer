@@ -727,3 +727,75 @@ The standing request is in Steps 2 and 5.
 - The local server: `$S/rep/slop023 serve --config $S/lslop23/config.yaml --local --admin-email admin@example.com`; the CLI with `SLOP_CREDENTIALS=$S/lslop/creds.json SLOP_SERVER=http://slop.localhost:18490`.
 - The push: `slop store new bench23 && slop push apps/bench --store bench23 && slop app trust bench23 workshop && slop policy set bench23 sample @admin on && slop mount set apps.localhost:18490 /bench23 bench23`.
 - Sizes: `apps/bench/app.js` 439,575 bytes (not minified); `src/ui/` 14 modules, 2,832 lines.
+
+## Step 10: Review of #51 — files kept by hash, and restoring to an unrecorded state
+
+Codex's review of #51 found two P1 bugs. Both are real, and both are fixed with tests that fail on the old code. The person asked whether they are systemic. They are, but not in the core. Each sits at an edge where a value changed meaning without anyone saying so, and each has its own pattern. Neither touches the Draft/Tx/`files.commit` semantics or the API table.
+
+### Prompt Context
+
+**User prompt (verbatim):** "Address code review comments: https://github.com/go-go-golems/slop-computer/pull/51 Are these systemic / sign of a problematic API or compositionality issue?"
+
+**Assistant interpretation:** Fix both findings at their cause, check where else the same patterns occur, and say whether they point at a flaw in the design.
+
+**Inferred user intent:** Know whether the new core composes, before merging it.
+
+**Commit (code):** 424191a — "Bench: commits pass files kept by hash through; events record their snapshot (review of #51)"
+
+### What I did
+- **Finding 1 (`apps/bench/actor.js:214`):**
+  - **The bug:** `commit` rebuilt every change as `{path, text: String(c.text)}` unless it was a delete. A file kept by hash (from `files.copy`, accepting a proposal with an image, or a restore) was committed as the text `undefined`.
+  - **Actor:** a `changeList` helper, used by `commit` and `create`, passes the kinds on as given and fails a change with no path. `files.commit` checks the rest strictly, and answers `missing_blobs` for an unknown hash.
+  - **Draft:** keeps `type` on hash entries.
+  - **`TestBenchFiles`:** commits `{path: img/copy.png, sha256, size, type}` through the real actor and refuses a change of no kind.
+- **The stand-in servers.** `draft.test.mjs` and `eval-api.test.mjs` each had one, and both accepted whatever the Draft sent. `test/fake-actor.mjs` now holds one stand-in, and `checkChanges` (exactly one of text/data/sha256/delete; a known blob) is applied by both servers. It at once caught `draft.test.mjs` copying a blob named `ab12`, which no server holds.
+- **Finding 2 (`web/bench/src/model/timeline.js:104`):**
+  - **The bug:** `snapshotAt` inferred an event's snapshot from the latest earlier event that had one, and `restore`/`since` read `null` as `?? 0`, the empty tree. On an app opened for the first time, a bookmark made before any commit therefore restored to nothing: every file deleted.
+  - **`stampEvent`:** every event records its ref and that ref's head when logged; `Project.log` uses it.
+  - **`knownAt`:** throws kind `missing` for an unknown state; `history.js` shows the message.
+  - **`create`** logs the first snapshot as a commit event.
+  - **`versions`:** marks a state that was only observed, not made by a commit or outside change. `blame` gives its lines to no one. History labels it "as it was at n, seen at …".
+  - **`test/timeline.test.mjs`:** 4 tests.
+- **Where else the patterns occur:**
+  - `?? 0` on snapshot numbers appears in `draft.js`, `publish.js` and `instances.js`. There it means "this ref doesn't exist", which is what 0 means to the server. Only the two in `timeline.js` meant "unknown".
+  - Of the actor's 35 actions, only `commit` and `create` rebuilt page input. `seed` passes rows through; the other maps shape answers for the page or clamp limits.
+
+### Why
+- **The actor forwards rather than validates:** `files.commit` already defines the change kinds and checks them. A second, partial definition in the middle hop can only drift; here it drifted by dropping a kind.
+- **Events carry their state rather than the timeline inferring it:** the inference assumed the timeline saw every move of the ref. It doesn't: the bench may have been closed, another tab may have committed, someone may have pushed. A stamped event is correct regardless.
+- **Unknown is refused, not defaulted:** 0 is a meaningful snapshot number (the ref doesn't exist). Using it for "unknown" made a destructive action plausible.
+
+### What worked
+- `npm test`: 21 pass (draft 6, api 6, eval-api 5, timeline 4).
+- `go test ./pkg/host`: ok.
+- **Run against the old code:**
+  - The old actor: `TestBenchFiles` fails ("a commit of a file kept by hash = …"), and so does `TestBenchCreate` ("the new app's timeline = []").
+  - The old `timeline.js`: 2 of the 4 timeline tests fail.
+- **In the browser** (local bench23), on `outside24`, an app pushed with the CLI:
+  1. The timeline was empty; the bookmark became event 1 with `n: 1`.
+  2. An edit made draft 2.
+  3. Restore, from the Timeline: "2 files go back…", then draft 3 with the three original files and `new.txt` gone.
+  4. History lists "as it was at 1, seen at mark · before my edit".
+- **On GitHub:** replies on both review threads.
+
+### What didn't work
+- **The first run of the stricter stand-in failed `draft.test.mjs`'s hash test:** `'failed' !== 'committed'`. The test copied `{sha256: 'ab12', size: 3}`. That was the test's fault, not the Draft's. It now copies a blob the server holds, and also checks that a missing one fails.
+- **My blame expectation in the new test was `[undefined, seq]`;** the right one is `[undefined, seq, undefined]`, because the final newline leaves an empty last line, which the editor's gutter counts too.
+
+### What I learned
+- **A stand-in server should encode the consumer's contract,** not the producer's assumptions. The stand-in here was written next to the Draft and agreed with it, so the Node tests could not catch a mismatch with the real actor. Only a test through the real hop (the Go test) or a stand-in held to the real rule could.
+- **TypeScript (SLOP3-024) would have caught finding 1** if the page and the actor shared a `Change` type: `{path, text: String(c.text)}` doesn't satisfy a union with a `sha256` variant. It would not have caught finding 2, since `?? 0` is an explicit choice. That needs a test.
+
+### What was tricky to build
+- **`versions` and `blame` with stamped events.** Once every event has an `n`, they would have counted a mark or a message as a version and made it the author of lines. "Observed" separates a state the timeline saw from one a commit made.
+
+### What warrants a second pair of eyes
+- **An event on a proposal still infers draft's state** from the latest earlier draft event. Every event the page logs is now stamped, so that is usually recent, but it is still an inference. Stamping draft's head on every event as well would remove it.
+
+### What should be done in the future
+- Staging deploy and the scripted smoke test (unchanged from Step 9).
+
+### Code review instructions
+- Start with `apps/bench/actor.js` `changeList`, then `web/bench/src/model/timeline.js` (`stampEvent`, `knownAt`, `versions`).
+- Then `web/bench/test/fake-actor.mjs` and `test/timeline.test.mjs`.
+- Run `cd web/bench && npm test`, then `go test ./pkg/host -run TestBench`.
