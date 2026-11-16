@@ -63,13 +63,14 @@ const Sync = {
     if (P === this.P && this.status !== 'error') this.set('dirty')
   },
   // While an eval runs on P, P is not pushed: its writes may still roll
-  // back. Releasing P's last hold pushes whatever then differs from its
+  // back. Each eval holds P with a token of its own (flush tells them
+  // apart); releasing P's last hold pushes whatever then differs from its
   // draft. Other projects push as usual.
-  hold(P) { P.syncHolds = (P.syncHolds || 0) + 1 },
-  held(P) { return !!(P && P.syncHolds) },
-  release(P) {
-    P.syncHolds = Math.max(0, (P.syncHolds || 0) - 1)
-    if (P.syncHolds) return
+  hold(P) { const tok = {}; (P.syncHolds || (P.syncHolds = new Set())).add(tok); return tok },
+  held(P) { return !!(P && P.syncHolds && P.syncHolds.size) },
+  release(P, tok) {
+    if (P.syncHolds) P.syncHolds.delete(tok)
+    if (this.held(P)) return
     if (!this.pending(P)) { this.queue.delete(P); if (P === this.P && this.status === 'dirty') this.set('synced') }
     this.soon()
   },
@@ -129,19 +130,25 @@ const Sync = {
   // that lacks the edits.
   //
   // Evals still running on P hold it (their writes may roll back), and
-  // nothing of P is pushed until the last one ends. A caller inside an eval
-  // passes own: 1, its own hold: that one is never waited for, and P stays
-  // queued for after it. Another eval's hold is waited for, up to
+  // nothing of P is pushed until the last hold ends. own lists the caller's
+  // holds: its own (app.publish inside an eval) and those of the evals that
+  // delegated to it, which cannot end before it does. While one of them
+  // holds P, waiting is pointless: P stays queued for after them and the
+  // result is deferred. Otherwise another eval's hold is waited for, up to
   // FLUSH_WAIT, and if it outlasts that the result says so: an eval that
   // ended while another still runs must not report the old draft as its
   // own. wait: false returns at once instead (switching projects does not
   // block on someone's eval; P stays queued).
-  async flush(P = this.P, { own = 0, wait = true } = {}) {
-    if (!P || !P.meta.app) return { n: null, act: null, error: '' }
-    const others = () => (P.syncHolds || 0) > own
+  async flush(P = this.P, { own = [], wait = true } = {}) {
+    if (!P || !P.meta.app) return { n: null, act: null, error: '', deferred: false }
+    const mine = new Set(own), holders = () => [...(P.syncHolds || [])]
+    const ours = () => holders().some(t => mine.has(t)), others = () => holders().some(t => !mine.has(t))
     let tries = 0, waited = ''
     for (const t0 = now(); ;) {
-      const blocked = this.busy || Outside.merging ? 'push' : wait && others() ? 'eval' : ''
+      // nothing to push: nothing to wait for (a push in flight still counts
+      // as pending until it lands)
+      if (!this.pending(P)) break
+      const blocked = this.busy || Outside.merging ? 'push' : wait && others() && !ours() ? 'eval' : ''
       if (blocked) {
         if (now() - t0 > FLUSH_WAIT) { waited = blocked; break }
         await sleep(30); continue
@@ -159,11 +166,13 @@ const Sync = {
       else if (waited) late = 'still waiting for another push after ' + secs + ' s: these edits are not in draft yet'
       else if (tries >= FLUSH_TRIES) late = 'draft kept moving: ' + tries + ' pushes did not get these edits in'
     }
+    // held by the caller or the evals it runs inside: pushed after they end
+    const deferred = !late && !P.syncError && this.pending(P) && ours()
     // an error is about edits still unpushed: with none left (undone, or
     // pushed since), draft has everything
     if (!this.pending(P)) { P.syncError = ''; if (P === this.P && this.status === 'error') this.set('synced') } else this.queue.add(P)
     this.soon()
-    return { n: P.refs ? P.refs.draft ?? null : null, act: late ? null : P.lastAct || (P === this.P ? this.act : null), error: late || P.syncError || '' }
+    return { n: P.refs ? P.refs.draft ?? null : null, act: late || deferred ? null : P.lastAct || (P === this.P ? this.act : null), error: late || P.syncError || '', deferred }
   },
   label() {
     const s = { idle: 'ready', dirty: 'unsaved', pushing: 'pushing…', synced: 'draft ' + (this.n ?? '–'), error: 'error' }[this.status] || this.status
@@ -274,7 +283,7 @@ const Publish = {
   async preflight(P, o = {}) {
     const f = await Sync.flush(P, o)
     if (f.error) throw new Error('your edits are not in draft (' + f.error + '); fix that before publishing')
-    if (Sync.pending(P)) throw new Error(Sync.held(P) ? 'files written in this eval reach draft when it ends: publish in a later eval' : 'your edits are still being pushed to draft; try again in a moment')
+    if (Sync.pending(P)) throw new Error(Sync.held(P) ? 'edits a running eval made are not in draft until it ends (this one included, when publishing from an eval): publish after that' : 'your edits are still being pushed to draft; try again in a moment')
     return await Slop.call('preflight', { app: P.meta.app })
   },
   async run(P, pf, who = 'you', note = '') {
