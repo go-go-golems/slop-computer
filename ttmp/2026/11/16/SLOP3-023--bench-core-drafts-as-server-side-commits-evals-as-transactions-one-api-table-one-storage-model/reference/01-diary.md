@@ -445,3 +445,65 @@ With the bottom layers in place, I wrote the project model and the frames layer 
 ### Technical details
 - An embed's URL for a page: `new URL(route, e.src)` with `sbn=<nonce>` and the route's hash.
 - The test instance follows `draft` or the proposal given (actor `instance`: dev → draft; test → ref or draft; prop → ref).
+
+## Step 7: The server half lands; the actor proven against a real server
+
+The server subagent finished (its diary is `reference/02-diary-server-phase-files-commit.md`, six steps) and I merged its branch. With `files.commit`, `ref.rm`, required preconditions and error extras in actor JS available, I replaced the old bench tests (written for `sync`, `dev`, `resetDev`) with tests of the new actions against a real server. All seven pass. One of them found a real bug in `closeProposal`, fixed in the same commit.
+
+### Prompt Context
+
+**User prompt (verbatim):** see Steps 2 and 5.
+
+**Assistant interpretation:** Integrate phase 1 and prove phase 4's actor before building the client on it.
+
+**Inferred user intent:** Each layer correct before the next depends on it.
+
+**Commit (code):** 9d40191 — "Merge branch 'task/slop3-023-server' into task/slop3-023-core"; ce066db — "Bench actor: tests against a real server; closing a proposal its test instance follows (SLOP3-023)"
+
+### What I did
+- **Merged** `task/slop3-023-server` (9aae6b8, d34c438, e8c6e9a, 81b64e6, cd9d93a) with no conflicts.
+- **Checked the merged tree:**
+  - `go build ./...`;
+  - `go test` over store, commands, client, doors, cmd, rt and actor: all ok;
+  - `pkg/host`: the four old bench tests and `TestBuildOutputsFresh` failed, as expected.
+- **Rewrote `pkg/host/bench_test.go`:** `TestBenchFiles`, `TestBenchCreate` (un-skipped), `TestBenchInstances`, `TestBenchProposals`, `TestBenchInstanceData`, `TestBenchRecords`; `TestBenchPublish` unchanged.
+- **Fixed the actor:** `closeProposal` moves the visitor's test instance back to draft before `dropRef`; `seed` names documents by `id`.
+
+### Why
+- **Test the actor through `actor.call` on the test harness:** it is the whole server surface the page uses, so the page code can then be debugged against known-good answers.
+
+### What worked
+- `go test -count=1 -v ./pkg/host -run TestBench`: `--- PASS` for all seven (0.13–0.17 s each). The two `SKIP`s are the pre-existing `SLOP_BENCH=1` benchmarks.
+
+### What didn't work
+- The first test run printed only `ok … 1.101s`. That was too fast to trust, so I reran with `-v`: the tests had run.
+- No failures in the new tests.
+- The bug was found while writing the proposal test, before running it. `ref.rm` (server) refuses a ref that a store follows (`extra.stores`). A reviewer's scenario runs make the test instance follow the proposal, so closing that proposal would have failed.
+
+### What I learned
+- From the subagent's report:
+  - a commit whose ref was removed since `base` (`at == 0`, `base > 0`) is a conflict, so it cannot silently recreate the ref;
+  - `rtFail` in the page door does not carry `extra` to a page, so actors must turn conflicts into values (as the bench actor does);
+  - `slop dev` reads `ifAt` just before each push, so it still overwrites commits made by others since its last push.
+
+### What was tricky to build
+- **Activation by commit.** The actor passes the instances that follow the committed ref (peeked) to `activate`.
+  - The test checks that the answer's `activated` names the dev instance at the new `n`.
+  - It also checks that `status` afterwards (a peek) reports the same `n`.
+
+### What warrants a second pair of eyes
+- **The subagent's decisions:**
+  - `apps/workshop/actor.js` file edits now commit with `base: n`, merging where they used to replace;
+  - tree-zone writes (`files.put`, `files.rm`, `import.files` into the tree) are replaced or reset by the next push or commit; the subagent suggests removing them;
+  - ticket scripts under `ttmp` for SLOP3-004/013/015/018 call `files.push` without `ifAt` and will fail now.
+
+### What should be done in the future
+- `TestBuildOutputsFresh` passes once the module build produces `apps/bench`.
+- Decide on the tree-zone verbs (follow-up).
+
+### Code review instructions
+- `pkg/host/bench_test.go` top to bottom, against `apps/bench/actor.js`.
+- `GOWORK=off go test -tags sqlite_fts5 -count=1 -v ./pkg/host -run TestBench`.
+
+### Technical details
+- A conflict from the actor: `{conflict: {at, paths}}`, e.g. `{"at":5,"paths":["README.md"]}`; `ref.ls` is unchanged afterwards.
