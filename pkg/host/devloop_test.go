@@ -1,9 +1,18 @@
 package host
 
 import (
+	"bytes"
+	"context"
+	"net/http"
 	"net/url"
+	"os"
+	"path/filepath"
 	"strings"
+	"sync"
 	"testing"
+	"time"
+
+	"github.com/go-go-golems/slop-computer/pkg/client"
 )
 
 // SLOP3-022: the server side of the bench's dev loop (draft, dev instances,
@@ -265,4 +274,88 @@ func TestEmbeddedViews(t *testing.T) {
 		t.Fatalf("renew = %v", r)
 	}
 	h.fail(bob, "actor.call", map[string]any{"store": "devbench", "action": "renew", "args": map[string]any{"view": e["view"]}}, "not_found")
+}
+
+// syncBuf is a bytes.Buffer two goroutines may use.
+type syncBuf struct {
+	mu sync.Mutex
+	b  bytes.Buffer
+}
+
+func (s *syncBuf) Write(p []byte) (int, error) { s.mu.Lock(); defer s.mu.Unlock(); return s.b.Write(p) }
+func (s *syncBuf) String() string              { s.mu.Lock(); defer s.mu.Unlock(); return s.b.String() }
+
+// C.5: slop dev pushes a folder to draft, makes the person's dev instance
+// on first use, and on each change reports where the instance is (or why
+// it broke) and its new log lines; main is never moved.
+func TestSlopDev(t *testing.T) {
+	h := newHarness(t)
+	admin := h.tokenFor("admin@example.com", "read", "write", "admin")
+	c := &client.Client{Server: h.ts.URL, Token: admin, HTTP: &http.Client{Transport: hostTransport{h.cfg.Hosts.Main}}}
+	h.call(admin, "store.new", map[string]any{"id": "jot"})
+	dir := t.TempDir()
+	write := func(path, text string) {
+		t.Helper()
+		p := filepath.Join(dir, path)
+		if err := os.MkdirAll(filepath.Dir(p), 0o755); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.WriteFile(p, []byte(text), 0o644); err != nil {
+			t.Fatal(err)
+		}
+	}
+	for p, text := range devApp() {
+		write(p, text)
+	}
+	write("actor.js", `defineActor({ setup(ctx) { console.log('setup ran'); }, actions: { ping() { return 'pong'; } } });`)
+	who := h.call(admin, "whoami", map[string]any{}).(map[string]any)["id"].(string)
+	inst := client.DevInstanceID("jot", who)
+
+	// --once: the instance is made, follows draft and runs it.
+	var once syncBuf
+	if err := c.Dev(context.Background(), dir, client.DevOptions{App: "jot", Once: true, Out: &once}); err != nil {
+		t.Fatal(err)
+	}
+	if out := once.String(); !strings.Contains(out, "made dev instance "+inst) || !strings.Contains(out, inst+" on ") || !strings.Contains(out, "· ok") {
+		t.Fatalf("once:\n%s", out)
+	}
+	if st := h.call(admin, "app.status", map[string]any{"store": inst}).(map[string]any); st["ref"] != "draft" || st["app"] != "jot" {
+		t.Fatalf("instance = %v", st)
+	}
+	if refs := h.call(admin, "ref.ls", map[string]any{"store": "jot"}).(map[string]any); refs["main"] != nil {
+		t.Fatalf("slop dev moved main: %v", refs)
+	}
+
+	// The loop: a change is pushed and reported, with the instance's log;
+	// a broken migration is reported and the instance stays on its version.
+	var out syncBuf
+	ctx, cancel := context.WithCancel(context.Background())
+	done := make(chan error, 1)
+	go func() {
+		done <- c.Dev(ctx, dir, client.DevOptions{App: "jot", Every: 30 * time.Millisecond, Out: &out})
+	}()
+	wait := func(what string) {
+		t.Helper()
+		for i := 0; i < 200 && !strings.Contains(out.String(), what); i++ {
+			time.Sleep(20 * time.Millisecond)
+		}
+		if !strings.Contains(out.String(), what) {
+			cancel()
+			t.Fatalf("waited for %q:\n%s", what, out.String())
+		}
+	}
+	wait("publish with")
+	time.Sleep(50 * time.Millisecond) // a new modification time
+	write("sql/002_tags.sql", `CREATE TABLE tags (note TEXT, tag TEXT);`)
+	wait("log log   setup ran")
+	write("sql/003_bad.sql", `CREATE TABL oops (x);`)
+	wait("broken: ")
+	cancel()
+	if err := <-done; err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(out.String(), "stays on") || !strings.Contains(out.String(), "003_bad") {
+		t.Fatalf("broken push:\n%s", out.String())
+	}
+	t.Logf("slop dev printed:\n%s%s", once.String(), out.String())
 }
