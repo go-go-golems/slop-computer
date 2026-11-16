@@ -1,0 +1,243 @@
+---
+Title: 'Diary: server phase (files.commit)'
+Ticket: SLOP3-023
+Status: active
+Topics:
+    - architecture
+    - apps
+    - agents
+    - tools
+    - publishing
+DocType: reference
+Intent: long-term
+Owners: []
+RelatedFiles: []
+ExternalSources: []
+Summary: "Implementation diary of SLOP3-023 phase 1 (server): files.commit, required ifAt on every ref write, ref.rm, ref-name validation, verb error details in actor JavaScript, removal of snap.new and the self capability alias."
+LastUpdated: 2026-11-16T13:40:03.41911302-05:00
+WhatFor: "Reviewing and continuing the server half of SLOP3-023 (branch task/slop3-023-server)."
+WhenToUse: "Before reviewing the server PR, or when the bench rewrite (phase 2) needs the exact server contract."
+---
+
+# Diary: server phase (files.commit)
+
+This diary belongs to the engineer who implemented the server half of
+SLOP3-023 in the worktree `t23s` (branch `task/slop3-023-server`). The lead
+engineer keeps `01-diary.md`; the bench rewrite (phase 2) is another
+engineer's, in parallel, against the contract recorded here.
+
+## Step 1: Reading the spec and the code, and a green baseline
+
+I read the guide's sections 2, 5.1, 6 (phase 1) and 7.1, then every file the
+brief named, to find out what the new verb could be built from and how far
+the "required ifAt" change would reach. The store already had everything a
+per-path merge needs except two turn-level helpers; the reach of the ifAt
+change was the surprise: about 140 `files.push` calls in `pkg/host` tests
+and three JavaScript callers outside the bench.
+
+Before changing anything I ran the packages the brief names and recorded a
+green baseline, so every later failure is mine.
+
+### Prompt Context
+
+**User prompt (verbatim):** the brief came from the lead engineer, not the
+user directly. It opens: "You are implementing the server half of SLOP3-023
+in the slop-computer Go repo (a self-hosted app server)." It asks for
+`files.commit` (a change list against a required `base`, merged per path in
+one store turn), a required `ifAt` on `files.push` / `ref.move` / `snap.new`
+(or the removal of `snap.new`), the removal of push's `prune`, `snapshot`
+and `zone`, every caller updated, `workshop.commit`, the removal of the
+`self` capability alias, Go tests, `make lint`, and this diary.
+
+**Assistant interpretation:** build phase 1 of the guide on the existing
+store primitives, make every ref write state where the ref is, and delete
+the knobs and aliases nothing needs; leave `apps/bench` and `web/bench`
+alone (another engineer rewrites them).
+
+**Inferred user intent:** "clean simple composable robust core APIs" with no
+legacy burden, so the bench rewrite has one write primitive whose answer
+means "committed".
+
+**Commit (code):** none in this step (reading only).
+
+### What I did
+
+- Read `pkg/store/files.go` and `pkg/store/turn.go`: the tree zone,
+  `Snapshot` (dedups when the ref already points at an identical tree),
+  `RefAt`, `MoveRef`, `Store.SnapshotFiles` (reads through `s.ro`, outside
+  any turn), `guardCode`.
+- Read `pkg/commands/files.go`: `push()` shared by `files.push` (full=true)
+  and `import.files` (full=false) through `pushArgs{prune, snapshot, ifAt}`;
+  `ref.move` with an optional `ifAt`; `snap.new`.
+- Read `pkg/verbs/def.go`: "A field without omitempty is required" and
+  `Table.Check` refuses a missing required argument with `invalid_argument`
+  before `Run`; `decodeArgs` uses `DisallowUnknownFields`.
+- `git grep` for callers: `pkg/client/folder.go` `Push`, `pkg/client/dev.go`
+  `devPush`, `cmd/slop/cmds/extra.go` (`slop push --no-prune`, `import
+  files`), `apps/blocks-site/actor.js` (`w.push`, `w.publish`),
+  `apps/workshop/actor.js` (`w.push`, `w.publish`; not in the brief's list),
+  `pkg/doors/actors/modworkshop.go`, `pkg/host/testdata/authz/cases.json`.
+- `git grep -n 'snap.new'`: only its own definition and a table row in
+  `doc/design/slop-v3.md`. Nothing calls it.
+- `git grep -n '"self"'` in apps: only `pinboard`'s rule level
+  (`"write": "self"`), no capability. The alias is dead.
+- Baseline:
+  `GOWORK=off go test -tags sqlite_fts5 ./pkg/store ./pkg/commands ./pkg/host ./pkg/client ./pkg/doors/... ./cmd/... ./pkg/rt`
+  → all `ok` (`pkg/host` 21.881s).
+
+### Why
+
+- A green baseline separates my failures from existing ones.
+- Counting callers first decided the test strategy (a harness helper rather
+  than editing 140 argument maps by hand).
+
+### What worked
+
+- The guide's claim holds: `RefAt` plus a write in the same `Store.Do` turn
+  is a compare-and-set, and `Snapshot`'s dedup gives "a no-op commit
+  returns at" for free.
+
+### What didn't work
+
+- No failures in this step.
+
+### What I learned
+
+- `Store.SnapshotFiles` reads through the read pool (`s.ro`); inside a turn
+  it would not see a snapshot the same turn made, hence `Turn.SnapshotFiles`
+  through the writer connection.
+- A `*int64` field without `omitempty` is reported as required by the verb
+  table, so "required ifAt" is a struct tag plus a nil check for an explicit
+  `null`.
+- `apps/bench/actor.js`'s `create` pushes without `ifAt`, and its `sync`
+  passes `ifAt` only when the page sends `base`: `pkg/host/bench_test.go`
+  will break on the required `ifAt`, and I may not edit `apps/bench`.
+
+### What was tricky to build
+
+- Nothing built yet. The trap identified: the tree zone is a scratch area
+  that `files.put`, `import.files` and the actor `files` module also write,
+  so `files.commit` must not trust it; it resets it from snapshot `at`.
+
+### What warrants a second pair of eyes
+
+- The decision to remove `snap.new` (Step 5) rests on `git grep` of this
+  repository only; scripts outside it are not visible to me.
+
+### What should be done in the future
+
+- N/A for this step.
+
+### Code review instructions
+
+- None (no code).
+
+### Technical details
+
+- Ref writers before this work: `Turn.Snapshot` (via `MoveRef`), `ref.move`,
+  `pkg/actor/modules.go:521` (an actor's own `files.snapshot`, main),
+  `pkg/commands/data.go:115` (import), `pkg/doors/pages/rtassets.go:205`
+  (artifact publish, with its own CAS against the view's version).
+
+## Step 2: Store helpers — SnapshotFiles and ResetTree in a turn, HasSnapshot, RemoveRef, ValidRefName
+
+I added the turn-level helpers `files.commit` and `ref.rm` need, next to
+`Snapshot` and `RefAt`, and made `MoveRef` the one place ref names are
+checked (every ref creation goes through it, as every tree write goes
+through `guardCode`). The artifact publish in the page door already did a
+hand-written "reset the tree to main, replace one file, snapshot"; it now
+uses `ResetTree`. Store tests pass.
+
+The ref-name rule and `RemoveRef` came from the lead's second message
+(below); I folded them into this store-layer commit because they live in
+the same file and the same test.
+
+### Prompt Context
+
+**User prompt (verbatim):** see Step 1. The lead engineer then sent
+(verbatim, abridged to the store part): "Ref-name validation. Today
+`_refs.name` accepts any string … Add `store.ValidRefName` (proposal:
+`^[a-z][a-z0-9._-]{0,62}(/[a-z0-9][a-z0-9._-]{0,62}){0,3}$` …), enforce it
+in every verb that creates or moves a ref … New verb `ref.rm` … A store Turn
+method `RemoveRef(name)` next to MoveRef, recorded as a change like MoveRef
+does. Tests for both." A third message withdrew a proposed `from` option for
+`files.commit` ("do NOT add the `from` option … A proposal ref is created
+with `ref.move {ref: "proposal/<id>", n: <draft's n>, ifAt: 0}`").
+
+**Assistant interpretation:** store primitives first, small and documented;
+validation at the single choke point (`MoveRef`).
+
+**Inferred user intent:** refs named `proposal/<id>` for the bench, and no
+ambiguity between a ref called `42` and snapshot 42 in `Store.Ref`.
+
+**Commit (code):** see Step 3 (hash recorded there).
+
+### What I did
+
+- `pkg/store/files.go`:
+  - `Turn.SnapshotFiles(n)` (through the writer; `n = 0` has no files),
+    sharing `snapshotFiles(ctx, querier, n)` with `Store.SnapshotFiles`.
+  - `Turn.ResetTree(n)`: tree zone := snapshot n; puts only paths whose
+    sha256 or type differ, removes paths n lacks, in path order.
+  - `Turn.HasSnapshot(n)`; `MoveRef` uses it.
+  - `ValidRefName` (the lead's regexp) and the check in `MoveRef`.
+  - `Turn.RemoveRef(ref)`: `guardCode`, delete, record
+    `Change{Kind: "ref", Op: "remove"}` when a row went.
+- `pkg/doors/pages/rtassets.go`: the artifact publish reads main with
+  `t.RefAt` inside its turn (it read `st.Ref` through the read pool before)
+  and uses `t.ResetTree(cur)` instead of 25 lines doing the same.
+- `pkg/store/store_test.go`: `TestTurnSnapshotsAndRefs`.
+
+### Why
+
+- `ResetTree` writes only differences so a commit on the snapshot the tree
+  already holds records no file changes, and the no-op commit can return
+  `at` with no rev.
+- Checking names in `MoveRef` means `Snapshot`, `ref.move` and any future
+  writer cannot create an invalid ref.
+
+### What worked
+
+- `GOWORK=off go test -tags sqlite_fts5 ./pkg/store -run 'TestTurnSnapshotsAndRefs|TestFilesAndSnapshots|TestStoreGuardsAppCode' -v -count=1`
+  → three `PASS`.
+- The artifact publish tests in `pkg/host` (whole package run, Step 5) pass
+  with the `ResetTree` version.
+
+### What didn't work
+
+- No failures in this step.
+
+### What I learned
+
+- `ResetTree` on a tree already equal to n makes `Store.Do` return a nil
+  commit (no changes): the test asserts exactly that.
+
+### What was tricky to build
+
+- Deterministic change order: iterating a Go map for removals would record
+  changes in random order; removals iterate the sorted `TreeFiles` list.
+
+### What warrants a second pair of eyes
+
+- `ResetTree` compares content type as well as sha256, so a type-only
+  difference is rewritten. `Snapshot`'s tree hash covers path and sha256
+  only, so a type-only change still dedups to the old snapshot (unchanged
+  behaviour, pre-existing).
+- `RemoveRef` is guarded like `MoveRef` (no code right: refused on an app
+  store), so a non-admin cannot drop refs of app code.
+
+### What should be done in the future
+
+- N/A.
+
+### Code review instructions
+
+- Start at `pkg/store/files.go` `ValidRefName`, `HasSnapshot`,
+  `SnapshotFiles`, `ResetTree`, `MoveRef`, `RemoveRef`.
+- `GOWORK=off go test -tags sqlite_fts5 ./pkg/store`.
+
+### Technical details
+
+- Ref names: `^[a-z][a-z0-9._-]{0,62}(/[a-z0-9][a-z0-9._-]{0,62}){0,3}$`.
+  Valid: `main`, `draft`, `proposal/p8k2x1`, `x/1/2/3`. Invalid: `""`, `1`,
+  `Main`, `x/`, `/x`, `x//y`, `x/.y`, `a/b/c/d/e`, 64 × `x`.
