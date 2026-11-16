@@ -305,3 +305,202 @@ These features are described in full in `reference/03-diary-sitebench-workbench-
 
 The first three are the Claude artifact contract. The last two are Sitebench's own design. They are what has to change for a site that is a real app with a real backend.
 
+---
+
+## Part 3. How slop runs an app
+
+This part teaches the slop machinery the design uses, and nothing else. The longer inventory, with every verb and the places where the design document and the code disagree, is `reference/04-diary-slop-surface-for-a-dev-loop.md`. Where the two disagree, this guide follows the code.
+
+### 3.1 Stores, trees, snapshots and refs
+
+**A store** is one SQLite file (`stores/<id>/store.db`, `pkg/kernel/kernel.go:87,112`). It holds four kinds of data:
+
+- **documents** (`_docs`): JSON at paths like `threads/th_1`;
+- a **tree** of files (`_files`), whose bytes live in a shared content-addressed blob store;
+- **SQL tables** created by an app's migrations;
+- a **log** of every change (`_log`, `_changes`).
+
+The kernel schema is in `pkg/store/store.go:20-49`.
+
+**A snapshot** freezes the tree. `Turn.Snapshot(message, ref)` hashes the sorted list of `path<TAB>sha256` lines, stores the list, and moves a **ref** to the new snapshot number (`pkg/store/files.go:180-228`). A ref is a name pointing at a snapshot number. Two refs matter here:
+
+- **`main`**: the published version. Everything that serves the app serves `main` unless told otherwise.
+- **`draft`**: the conventional name for unpublished work. The Workshop's `push` defaults to it (`pkg/doors/actors/modworkshop.go:12`), and so does `preview.url` (`pkg/commands/preview.go`).
+
+**Snapshot rules worth knowing:**
+
+- Snapshotting a tree identical to the one a ref already points at writes nothing and returns the existing snapshot (`files.go:203-206`).
+- Moving a ref records a change of kind `ref`, and that change is what makes open pages reload (§3.5).
+- **There is one working tree per store, shared by all refs.** A push to `draft` replaces the working tree, then snapshots it onto `draft`. Serving never reads the working tree; it reads snapshots. But a later `snap.new` *without* `--ref` would snapshot that draft tree onto `main`. Tools must always name the ref.
+
+### 3.2 Apps, app stores and instances
+
+**What makes an app.** A store becomes an **app** when the snapshot it runs contains `app.json`. The manifest names the page, the actor and the capabilities (`pkg/apps/manifest.go:20-48`, `pkg/rt/manifest.go:39-161`). A small app with a backend looks like this:
+
+```
+corner/                      ← the app store's tree (snapshot on main)
+  app.json                   {"title":"Corner Coffee","type":"corner","page":"index.html","actor":"actor.js",
+                              "capabilities":{"db":{"rules":[...]},"user":{"scopes":["profile"]}}}
+  index.html  menu.html  cart.html  orders.html  styles.css  app.js
+  actor.js                   defineActor({ actions: { menu: {...}, order: {...}, orders: {...} } })
+  sql/001_menu.sql           CREATE TABLE menu (...); CREATE TABLE orders (...);
+```
+
+**Code and data are separated by one meta key.** Each store has `_meta.app`, the store whose code it runs. When `_meta.app` is empty, the store runs its own tree. Each store also has `_meta.app_ref`, the ref of that app it follows, `main` by default. `kernel.Running(store)` resolves both to a snapshot number `n` (`pkg/kernel/apps.go:57-108`).
+
+This gives two kinds of store:
+
+- **The app store** holds the code. It may also hold data, if it runs itself.
+- **Instances** are stores made with `store.new {id, app: "corner"}`. Each runs the app's code against its **own** documents and SQL (`pkg/commands/stores.go:48-63`).
+
+Pinboard and the reports work this way: one app store, one instance per board or report. `store.ls` returns `{id, type, app, owner, createdAt, level}` for every store you can see (`stores.go:24-47`). The `app` field is how a tool finds an app's instances.
+
+**`app.follow {store, ref}`** sets an instance's `app_ref` and activates it at that ref (`pkg/commands/actors.go:132-163`). An instance that follows `draft` runs unpublished code against its own data, while every other instance keeps running `main`.
+
+### 3.3 Push and activation
+
+**A push.** `files.push {store, files, ref?, message?, prune?, blobs?}` replaces the tree and snapshots it onto `ref` (default `main`) (`pkg/commands/files.go:139-145, 300-396`).
+
+- A file entry is either `{path, sha256, size}` or inline `{path, text}`.
+- If the server lacks a blob, the call fails with `missing_blobs` and the list of missing hashes. The client uploads them with `files.blobs` and retries (`pkg/client/folder.go:64-120`).
+- `slop push <dir> --store <id> --ref <ref>` does all of this from a folder.
+
+**Pushing code needs a platform admin.** On a store whose tree holds `app.json`, writing the tree or a ref is allowed only to platform admins (`guardCode`, `files.go:430-453`; `pkg/authz/code.go:15-17`).
+
+**Activation** is what turns a snapshot into a running version. It is lazy: it happens the first time something needs the store to run, such as opening a view, resolving a mount, `app.follow`, `actor.call`, or an event. When `Running` finds that the snapshot `n` of the followed ref differs from the store's `app_version`, it activates in one turn (`pkg/kernel/apps.go:181-209`; `pkg/actor/manager.go:415-464`):
+
+1. It applies the new `sql/*.sql` files in name order and records each name and hash. **An edited migration that was already applied fails** with "add a new migration instead" (`manager.go:435-449`).
+2. It builds the actor and runs its `setup` and `smoke` functions.
+3. It reconciles recurring alarms and reactor cursors.
+4. It sets `app_version = n` and stops the old actor; the next event builds the new one.
+
+**When activation fails.** The store **keeps serving its previous version**. The failure shows in `app.status {store}` as `broken`, with the reason (`pkg/commands/mounts.go:101-129`). `app.logs {store}` returns the last 500 console and `ctx.log` lines. `app.restart` retries.
+
+### 3.4 Serving: mounts, the shell, views, the sandbox origin
+
+**Hosts.** A server has a main host (back office, sign-in, API), live hosts (apps in a shell), static hosts and a wildcard **sandbox** host (`doc/production.md:24-53`).
+
+**Mounts.** A **mount** maps a path on a live host to a store: `mount.set {host, path, store}`. A pattern mount can serve many stores, for example `/r/:id` with `storeParam`. Mounts are admin-only, and **a mount names a store, never a ref** (`mounts.go:36-66`). To serve a draft, you serve an instance that follows `draft`.
+
+**Opening a page.** When a person opens a mounted path:
+
+1. The live host answers with the **shell**: a small page with a header and one `<iframe id="app">` (`pkg/doors/pages/live.go:670-703`).
+2. The shell POSTs `/_site/views {path}`. The server resolves the mount, checks the person's level, runs `Running` (which activates if needed) and creates a **view** (`views.go:147-191`).
+3. The view's frame source is `https://s<label>.<sandbox host>/v/<n>/…`. The label is an HMAC of the store and the app, so each store gets its own origin (`views.go:76-87`). The sandbox serves any snapshot `n` of the app store at `/v/<n>/`, and injects a boot script and the runtime `/_slop/claude.js` (`pkg/doors/pages/sandbox.go:73-209`).
+4. The sandbox page's only Content-Security-Policy is `frame-ancestors` (the main and live hosts) (`sandbox.go:62-68, 114`). So the page may start Workers, compile wasm and create its own frames.
+
+**The shell handshake.** The page's runtime posts `{slop:1, type:"hello"}` to the shell. The shell answers with the view id and a per-view **secret** (`assets/shell.js:206-257`). The page then calls:
+
+- `POST /_rt/rpc {method, args}`;
+- `GET /_rt/events`, a stream, with `Authorization: Bearer <secret>` (`web/runtime/src/transport.ts:41-200`).
+
+The shell also handles `download`, `confirm` (a person approves a change an app asks for), `consent`, `reload`, `reopen`, `hash` and `signin`.
+
+### 3.5 The page runtime is the Claude artifact contract
+
+Slop's page runtime defines `window.claude = { use(name) }`, the same contract Claude artifacts use (`web/runtime/src/index.ts:15-71`). `use` returns `null` for a capability the manifest does not declare.
+
+| `use(…)` | What a page gets | Notes for this project |
+|---|---|---|
+| `db` | Firestore-like documents with `onSnapshot` listeners and rules, `data/users/<id>/` private per person | The same surface Sitebench's `Store` already uses |
+| `user` | `me()`, `isOwner`, `canEdit`, profiles | Gives the bench the person's id |
+| `sample` | the model, with page-side `tools` (`{name, description, inputSchema, execute}`, at most 16), tiers, `onText` streaming | `web/runtime/src/sample.ts:11-22, 70-87, 162`; slop's model backend, metered against the person's monthly budget |
+| `slop` | `actions.<name>(args)` (the app's own actor), `stores.open`, `stores.list({type})`, `visitor()` | How a page calls its actor (`caps.ts:281-319`) |
+| `room`, `assets`, `downloads`, `files`, `artifact`, `permissions` | presence and messages, uploads, file saves, read a store's tree, publish HTML | `files` lists and reads a tree; `artifact.publish` is admin-only |
+
+**There is no page SQL.** Pages read documents. SQL is reached through actor actions.
+
+**Live updates.** A commit fans its document changes out to every view that reaches the store (`views.go:493-519`). When a commit moves a ref, `reloadApp` finds the open views whose app is that store and activates their instance. If the version changed, it sends each one a `reload {version}` event (`views.go:521-539`). The runtime passes it to the shell as `{type:"reload"}`. The shell reopens the view, which means a new frame on the new version (`transport.ts:274-279`, `shell.js:243`). If no shell answers within 5 s, the page reloads itself.
+
+### 3.6 Actors
+
+An app's actor is one JavaScript file run by the go-go-goja engine on the server, one actor per store (`pkg/actor`). Here is the shape:
+
+```js
+defineActor({
+  actions: {                                  // callable from pages, the CLI and MCP
+    order: { requires: 'interact', run(ctx, { name, items }) {
+      const sql = use('sql')
+      sql.run('INSERT INTO orders (name, items, at) VALUES (?, ?, ?)', [name, JSON.stringify(items), ctx.now])
+      return { ok: true } } },
+  },
+  on: { 'doc:orders/*': (ctx, ev) => {} },    // reactors: documents, files, tables, refs
+  every: { tidy: { every: '1h', run(ctx) {} } },
+  setup(ctx) {}, smoke(ctx) {},               // run at activation
+})
+```
+
+**Modules.** Actors reach the store through `use(…)`: `sql`, `db`, `files`, `alarm`, `storage`, `time`, `log`, `stores.open`, and, when declared and allowed, `fetch`, `secrets`, `room`, `sample` and `platform` (`pkg/actor/modules.go:27-60`).
+
+**Trusted modules.** `system` and `workshop` are available only to apps an admin trusted with `app.trust` (`pkg/commands/actors.go:80-116`). Their functions call verbs **as the visiting person** (`pkg/doors/actors/modules.go:126-166`).
+
+**Limits.** A turn may run for 5 s (`pkg/actor/actor.go:31-35`). A page calls an action with `claude.use('slop').actions.order({...})`. The CLI calls it with `slop call <store> order '{...}'`.
+
+### 3.7 The Workshop: draft, follow and publish already exist
+
+SLOP3-002 built the **Workshop** (`apps/workshop/`): a review app trusted with the `workshop` module. That module is the closest existing piece to this project (`pkg/doors/actors/modworkshop.go:3-19`):
+
+| `use('workshop').…` | Verb | Note |
+|---|---|---|
+| `push(store, files)` | `files.push` | `ref: "draft"` by default: "mounts serve main, and only publish moves it" |
+| `publish(store, n)` | `ref.move` with `ref: "main"` | |
+| `follow(store, ref)` | `app.follow` | |
+| `status`, `files`, `read`, `snapshots`, `refs`, `log`, `preview`, `stores`, `moveRef` | `app.status`, `files.ls`, `files.cat`, `snap.ls`, `ref.ls`, `log.show`, `preview.url`, `store.ls`, `ref.move` | |
+
+A test proves the whole dev-copy loop on the server side (`pkg/host/workshop_module_test.go:84-129`):
+
+```go
+h.call(admin, "files.push", {"store": "jot", "files": app})                         // main: sql/001
+h.call(admin, "store.new", {"id": "jot-scratch", "app": "jot", "type": "jot"})      // an instance
+app["sql/002_tags.sql"] = `CREATE TABLE tags (note TEXT, tag TEXT);`
+h.call(admin, "files.push", {"store": "jot", "files": app, "ref": "draft"})         // draft: sql/002
+call("follow", {"store": "jot-scratch", "ref": "draft"})                            // the instance runs draft
+tables("jot-scratch") == ["notes","tags"];  tables("jot") == ["notes"]              // main is untouched
+```
+
+### 3.8 Doors for agents
+
+**Through the API.** An external agent with a token can call any verb it may use:
+
+- `POST /api/v1/<verb>` (`pkg/doors/api/api.go`);
+- MCP on the main host, which turns every verb into a tool named `<group>_<verb>` (`pkg/doors/mcp/mcp.go`).
+
+**The `eval` verb.** It runs a JavaScript program server-side with every verb as `slop.<group>.<verb>(args)`, as the caller (`pkg/commands/eval.go:23-112`).
+
+**Watching for changes.** `log.wait {store, after, timeout}` long-polls until the store commits. On an app store that means a file, snapshot or ref change (`stores.go:168-200`).
+
+---
+
+## Part 4. Stage 0: Sitebench's build already runs on slop
+
+**The question.** Since slop's runtime is the artifact contract, does Sitebench run on slop as it is? I tested it on a local server built from origin/main. The full record is diary step 3; the screenshots are in `various/`, and the script is `scripts/01-stage0-sitebench-as-a-slop-app.sh`.
+
+**The setup.** `sitebench/dist/` (`index.html`, `app.js`, `sandbox.js`) plus one file:
+
+```json
+{ "title": "Sitebench", "type": "bench", "page": "index.html",
+  "capabilities": { "db": {}, "user": {}, "sample": {}, "downloads": true } }
+```
+
+**The commands:**
+
+```sh
+slop store new --id bench --type bench
+slop push bench --store bench
+slop policy set bench sample @admin on
+slop mount set --host apps.localhost:18490 --path /bench --store bench
+```
+
+**Results:**
+
+| Check | Result |
+|---|---|
+| Boot | The shell frames Sitebench on its sandbox origin. The header shows "Corner Coffee 7 files", "1 issue", "Idle Claude", "saved · Account" (`Store.mode === 'db'`). |
+| Sandbox | "Sandbox: QuickJS (wasm) in a worker". The eval `files.replace('styles.css', '.cats {', '.cats { flex-wrap: wrap;')` returned `ok 26 ms · quickjs · main` with effects "styles.css +1 −1 · fixed 1 issue · layout changed on menu.html". The pill went to "0 issues", and `files0` persisted in the scope. |
+| Agent | With `--llm fake`, a turn ran "✓ eval 1 · return 1; · 17 ms", then the canned reply. Slop's `sample` drove Sitebench's page-side tool loop. |
+| Storage | The project is in store `bench` as documents `data/users/<usr>/p_<pid>/{files,tables,log,threads,snaps}/…`. |
+
+**What this proves.** The workbench needs no new runtime. Sitebench's page, worker, wasm sandbox, srcdoc frames, storage and agent loop all work inside slop's shell. The fake backend tested the tool-calling contract, not model quality.
+
+**What it does not do.** It edits a Sitebench project kept in documents: a site with `window.site.db` tables, not a slop app. Nothing it builds has an actor, a migration, an instance or a publish step. The rest of this guide is about closing that distance.
+
