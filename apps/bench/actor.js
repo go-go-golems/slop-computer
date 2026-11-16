@@ -245,8 +245,8 @@ defineActor({
       },
     },
     // The visitor's instance of a kind, made the first time: a store that
-    // runs the app at a ref (dev and test: draft; prop: the proposal ref
-    // given), with its own data, typed as the app's manifest says so the
+    // runs the app at a ref (dev: draft; test: draft or the proposal given;
+    // prop: the proposal given), with its own data, typed as the app's manifest says so the
     // app's typed mounts serve it. Asking brings it up on its ref.
     instance: {
       requires: 'view',
@@ -254,7 +254,8 @@ defineActor({
         const w = tool(ctx);
         storeId(ctx, app);
         kindOf(ctx, kind);
-        const follow = KINDS[kind] || ref;
+        // dev follows draft; test follows draft or the proposal given; prop a proposal
+        const follow = kind === 'dev' ? 'draft' : ref || KINDS[kind];
         if (!follow || !(follow === 'draft' || PROPOSAL.test(follow))) ctx.fail('invalid_argument', 'a prop instance follows a proposal ref: pass ref');
         const id = instanceId(app, ctx.visitor.id, kind);
         let status = await statusOf(ctx, id);
@@ -588,7 +589,8 @@ defineActor({
           app, ctx.visitor.id, Number(before) || 1e15, lim).map(eventOut);
       },
     },
-    // Layout snapshots: the list (meta only), one with its layout, saving one.
+    // Layout snapshots of frames: the list (meta only), one with its document
+    // ({html, css, layout, scroll}: a frozen page), saving one.
     snaps: {
       requires: 'view',
       async run(ctx, { app }) {
@@ -600,19 +602,19 @@ defineActor({
     snap: {
       requires: 'view',
       async run(ctx, { id }) {
-        const s = sql.one('SELECT id, at, meta, layout, owner FROM snaps WHERE id = ?', text(id, 80));
+        const s = sql.one('SELECT id, at, meta, doc, owner FROM snaps WHERE id = ?', text(id, 80));
         if (!s || s.owner !== ctx.visitor.id) ctx.fail('not_found', 'no snapshot ' + id);
-        return Object.assign(json(s.meta) || {}, { id: s.id, t: s.at, layout: json(s.layout) });
+        return Object.assign(json(s.meta) || {}, { id: s.id, t: s.at, doc: json(s.doc) });
       },
     },
     saveSnap: {
       requires: 'view',
-      async run(ctx, { id, app, meta, layout }) {
+      async run(ctx, { id, app, meta, doc }) {
         storeId(ctx, app);
         if (typeof id !== 'string' || !/^[\w-]{1,80}$/.test(id)) ctx.fail('invalid_argument', 'id is a snapshot id');
-        const l = JSON.stringify(layout || null);
-        if (l.length > 4 << 20) ctx.fail('invalid_argument', 'a layout is at most 4 MiB');
-        sql.run('INSERT INTO snaps (id, app, owner, at, meta, layout) VALUES (?, ?, ?, ?, ?, ?)', id, app, ctx.visitor.id, Date.now(), JSON.stringify(meta || {}), l);
+        const d = JSON.stringify(doc || null);
+        if (d.length > 4 << 20) ctx.fail('invalid_argument', 'a snapshot is at most 4 MiB');
+        sql.run('INSERT INTO snaps (id, app, owner, at, meta, doc) VALUES (?, ?, ?, ?, ?, ?)', id, app, ctx.visitor.id, Date.now(), JSON.stringify(meta || {}), d);
         return { id };
       },
     },

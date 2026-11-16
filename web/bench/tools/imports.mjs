@@ -163,6 +163,7 @@ for (const m of mods) if (layerOf(m.file) < 0) { console.error(`${relative(ROOT,
 const write = process.argv.includes('--write');
 let bad = 0;
 for (const m of mods) {
+  if (layerOf(m.file) < 0) continue;   // reported above; never rewritten
   const want = new Map();
   const unresolved = [];
   for (const x of m.used) {

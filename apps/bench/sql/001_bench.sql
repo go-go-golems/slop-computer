@@ -49,15 +49,15 @@ CREATE TABLE events (
   PRIMARY KEY (app, owner, seq)
 );
 
--- Layout snapshots of frames (frames.snapshot): the layout map is large, so
--- it is read only when a comparison needs it.
+-- Layout snapshots of frames (frames.snapshot): a frozen page is large, so
+-- it is read only when a comparison or a view needs it.
 CREATE TABLE snaps (
   id TEXT PRIMARY KEY,
   app TEXT NOT NULL,
   owner TEXT NOT NULL,
   at INTEGER NOT NULL,
-  meta TEXT NOT NULL,          -- JSON: route, w, ref, label, note, by
-  layout TEXT NOT NULL         -- JSON
+  meta TEXT NOT NULL,          -- JSON: route, w, h, ws, label, note, by, hash, seq
+  doc TEXT NOT NULL            -- JSON: {html, css: {file: text}, layout, scroll}
 );
 CREATE INDEX snaps_by_app ON snaps (app, owner, at);
 

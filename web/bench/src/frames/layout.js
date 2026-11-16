@@ -1,9 +1,22 @@
-// ---------- layout diffs: what an edit did to the page, as text ----------
-import { clamp, hashStr, now, uid } from './lib/util.js';
-import { h, modal, toast } from './lib/dom.js';
+// frames/layout.js — what a page looks like, as data: layout maps and their
+// differences, and frozen pages (layout snapshots).
+//
+// A layout map (the probe's 'layout' op) lists every rendered element keyed
+// by its source line or its path, with its box, text and a few styles.
+// layoutDiff compares two maps; diffSummary says it in lines; diffBoxes
+// gives what to outline on two frozen pages. A snapshot freezes a frame:
+// its HTML with the stylesheets inlined, its layout and scroll, saved
+// through the bench actor (per person and app) and listed in Snaps.
+//
+// Public API: layoutDiff, diffSummary, diffBoxes, Snaps (open, list, take,
+// load, render, frozen), layoutIn, snapshotBoard.
+import { FrameHost, Headless } from './host.js';
+import { Slop } from '../server/slop.js';
+import { clamp, hashStr, now, uid } from '../lib/util.js';
+import { h } from '../lib/dom.js';
 
 const STYLE_PARTS = ['color', 'background', 'font-size', 'font-weight']
-function layoutDiff(A, B) {
+export function layoutDiff(A, B) {
   const am = new Map((A && A.items || []).map(i => [i.k, i])), bm = new Map((B && B.items || []).map(i => [i.k, i]))
   const out = []
   for (const [k, b] of bm) {
@@ -29,7 +42,7 @@ function layoutDiff(A, B) {
   })
   return { changes: keep, heightFrom: A ? A.h : 0, heightTo: B ? B.h : 0 }
 }
-function diffSummary(diff, max = 12) {
+export function diffSummary(diff, max = 12) {
   const lines = [], label = it => it.t + (it.x ? ' "' + it.x.slice(0, 30) + '"' : '') + (it.s ? ' @' + it.s : '')
   const base = t => t.replace(/#[^.]*/, '')
   const fmt = x => x.what === 'move' ? 'moved ' + (x.dx >= 0 ? '+' : '') + x.dx + ',' + (x.dy >= 0 ? '+' : '') + x.dy : x.what === 'text' ? 'text "' + x.from.slice(0, 24) + '" → "' + x.to.slice(0, 24) + '"' : x.what + ' ' + x.from + ' → ' + x.to
@@ -53,7 +66,7 @@ function diffSummary(diff, max = 12) {
   return lines.length > max ? [...lines.slice(0, max), '… ' + (lines.length - max) + ' more'] : lines
 }
 // boxes to outline on frozen frames: red where something was (removed, or before a change), green where it is now
-function diffBoxes(diff) {
+export function diffBoxes(diff) {
   // a container that only grew or moved because something inside it changed adds no information: outline what changed inside
   const parent = new Map()
   for (const c of diff.changes) for (const it of [c.a, c.b]) if (it) parent.set(it.k, it.p)
@@ -68,45 +81,42 @@ function diffBoxes(diff) {
   return { before: before.slice(0, 120), after: after.slice(0, 120) }
 }
 
-// ---------- snapshots: frozen pages with their layout, stored per project; stylesheets stored once by hash ----------
-const Snaps = {
-  docs: new Map(), css: new Map(),
-  list(P) { return P.meta.snaps || (P.meta.snaps = []) },
+// ---------- snapshots: frozen pages, kept per person and app by the bench actor ----------
+export const Snaps = {
+  metas: [], app: null, docs: new Map(),
+  // the open project's snapshots (meta only)
+  async open(P) {
+    this.app = P.app; this.docs.clear()
+    this.metas = await Slop.call('snaps', { app: P.app }).catch(() => [])
+  },
+  list(P) { return P.app === this.app ? this.metas : [] },
   async capture(fh) {
-    const raw = await fh.call('snapshot', [], 6000), css = {}
-    for (const [file, text] of Object.entries(raw.css || {})) { const k = hashStr(text) + text.length.toString(36); css[file] = k; if (!this.css.has(k)) this.css.set(k, text) }
-    return { ...raw, cssRef: css, route: fh.route, w: fh.w, h: fh.h, ws: fh.ws, fixture: fh.fixture || null }
+    const raw = await fh.call('snapshot', [], 6000)
+    return { doc: { html: raw.html, css: raw.css || {}, layout: raw.layout, scroll: raw.scroll }, route: fh.route, w: fh.w, h: fh.h, ws: fh.ws }
   },
-  // take and keep one; returns its meta
-  async take(P, fh, { label, event, by = 'you', note } = {}) {
-    const s = await this.capture(fh)
-    const last = this.list(P).filter(x => x.route === s.route && x.w === s.w && x.ws === s.ws).slice(-1)[0], hash = hashStr(s.html)
-    if (last && last.hash === hash && !label) { if (event != null) this.attach(P, last.id, event); return last }
-    for (const [file, k] of Object.entries(s.cssRef)) if (!this.savedCss(P, k)) { Store.save(P.key('css/' + k), { file, text: this.css.get(k) }); (P.meta.cssKeys = P.meta.cssKeys || []).push(k) }
-    const id = 'sn' + uid(), doc = { id, html: s.html, layout: s.layout, scroll: s.scroll, cssRef: s.cssRef }
-    if (JSON.stringify(doc).length > 240000) { doc.layout = { w: s.layout.w, h: s.layout.h, items: s.layout.items.slice(0, 600) } }
-    if (JSON.stringify(doc).length > 250000) { toast('Snapshot of ' + s.route + ' is too large to keep'); return null }
-    Store.save(P.key('snaps/' + id), doc); this.docs.set(id, doc)
-    const meta = { id, t: now(), route: s.route, w: s.w, h: s.h, ws: s.ws, fixture: s.fixture, label: label || null, note: note || undefined, by, hash, events: event != null ? [event] : [] }
-    this.list(P).push(meta); this.prune(P); P.saveMeta()
-    return meta
+  // take and keep one; returns its meta (the newest of the same page, size
+  // and workspace when nothing changed and no label is given)
+  async take(P, fh, { label, by = 'you', note } = {}) {
+    const s = await this.capture(fh), hash = hashStr(s.doc.html)
+    const last = this.list(P).filter(x => x.route === s.route && x.w === s.w && x.ws === s.ws).slice(-1)[0]
+    if (last && last.hash === hash && !label) return last
+    const lastEvent = P.events.filter(e => e.seq != null).slice(-1)[0]
+    const meta = { route: s.route, w: s.w, h: s.h, ws: s.ws, label: label || null, note: note || undefined, by, hash, seq: lastEvent ? lastEvent.seq : null }
+    const id = 'sn' + uid()
+    await Slop.call('saveSnap', { id, app: P.app, meta, doc: s.doc })
+    const m = { ...meta, id, t: now() }
+    this.metas.push(m); this.docs.set(id, s.doc)
+    return m
   },
-  savedCss(P, k) { return (P.meta.cssKeys || []).includes(k) },
-  attach(P, id, event) { const m = this.list(P).find(x => x.id === id); if (m && !m.events.includes(event)) { m.events.push(event); P.saveMeta() } },
-  // keep the newest 80, plus any a mark points at
-  prune(P) {
-    const list = this.list(P), marked = new Set(P.marks().map(e => e.i))
-    while (list.length > 80) { const i = list.findIndex(m => !m.events.some(e => marked.has(e))); if (i < 0) break; const [gone] = list.splice(i, 1); Store.remove(P.key('snaps/' + gone.id)); this.docs.delete(gone.id) }
-  },
+  // a snapshot's frozen page {html, css, layout, scroll}
   async load(P, id) {
-    if (this.docs.has(id)) return this.docs.get(id)
-    const d = await Store.get(P.key('snaps/' + id)); if (d) this.docs.set(id, d); return d
+    if (!this.docs.has(id)) { const r = await Slop.call('snap', { id }); this.docs.set(id, r.doc) }
+    return this.docs.get(id)
   },
-  async cssText(P, k) { if (this.css.has(k)) return this.css.get(k); const d = await Store.get(P.key('css/' + k)); const t = d ? d.text : ''; this.css.set(k, t); return t },
   // a frozen page: its own scripts are gone; ours restores scroll and outlines boxes
-  async render(P, doc, { boxes = [], scroll } = {}) {
+  render(doc, { boxes = [], scroll } = {}) {
     let html = doc.html
-    for (const [file, k] of Object.entries(doc.cssRef || {})) { const t = this.css.has(k) ? this.css.get(k) : await this.cssText(P, k); html = html.split('/*@css ' + file + '*/').join(t.replace(/<\/style/gi, '<\\/style')) }
+    for (const [file, t] of Object.entries(doc.css || {})) html = html.split('/*@css ' + file + '*/').join(t.replace(/<\/style/gi, '<\\/style'))
     const sc = scroll || doc.scroll || [0, 0]
     const script = '<script>(' + function (sc, boxes) {
       const draw = () => { scrollTo(sc[0], sc[1]); for (const x of boxes) { const d = document.createElement('div'); const col = x.c === 'add' ? '30,138,90' : x.c === 'del' ? '226,0,26' : '31,111,196'; d.style.cssText = 'position:absolute;pointer-events:none;z-index:2147483647;box-sizing:border-box;left:' + x.b[0] + 'px;top:' + x.b[1] + 'px;width:' + Math.max(2, x.b[2]) + 'px;height:' + Math.max(2, x.b[3]) + 'px;outline:2px solid rgb(' + col + ');background:rgba(' + col + ',.10)'; document.documentElement.appendChild(d) } }
@@ -115,43 +125,38 @@ const Snaps = {
     return html.replace(/<\/body>/i, script + '</body>')
   },
   // an element showing a frozen page at a scale
-  async frozen(P, doc, meta, { scale = 0.25, boxes, title, full } = {}) {
+  frozen(doc, meta, { scale = 0.25, boxes, title, full } = {}) {
     // full: the whole page from the top, not just the viewport where it was scrolled
     const hh = full ? clamp(Math.max(meta.h, (doc.layout && doc.layout.h) || 0), 200, 3000) : meta.h
     const ifr = h('iframe', { sandbox: 'allow-scripts', title: title || meta.route, style: { width: meta.w + 'px', height: hh + 'px', border: 0, transform: 'scale(' + scale + ')', transformOrigin: '0 0', background: 'transparent', pointerEvents: scale < 0.9 ? 'none' : 'auto' } })
-    ifr.srcdoc = await this.render(P, doc, { boxes, scroll: full ? [0, 0] : undefined })
+    ifr.srcdoc = this.render(doc, { boxes, scroll: full ? [0, 0] : undefined })
     return h('div', { style: { width: meta.w * scale + 'px', height: hh * scale + 'px', overflow: 'hidden', outline: '1px solid var(--hair)', flex: 'none' } }, ifr)
   }
 }
-// snapshot every board frame as the given workspace shows it (visible frames, or headless ones)
-async function snapshotBoard(P, ws, opts = {}) {
+
+// Snapshot every board frame as the workspace shows it (the canvas frame
+// when it shows that workspace, else a headless one).
+export async function snapshotBoard(P, ws, opts = {}) {
   const out = []
   for (const f of P.board().frames) {
     try {
-      let fh = App.hostFor(f.id)
-      if (!fh || !fh.shown || fh.ws !== ws || fh.fixture !== (f.fixture || null)) fh = await Headless.get(P, fh ? fh.route : f.route, ws, f.w, f.h, f.fixture || null)
-      if (!fh.ready) await fh.readyP
-      const m = await Snaps.take(P, fh, opts); if (m) out.push(m)
+      const fh = await settled(P, f, ws)
+      const m = await Snaps.take(P, fh, opts)
+      if (m) out.push(m)
     } catch (e) { /* a frame that will not snapshot is skipped */ }
   }
   return out
 }
-// layout of a board frame in a workspace, settled
-// (headless: true renders off-screen in a pooled frame even when the canvas shows this workspace, so two sides compare alike)
-async function layoutIn(P, f, ws, { headless } = {}) {
-  let fh = headless ? null : App.hostFor(f.id)
-  if (!fh || !fh.shown || fh.ws !== ws || fh.fixture !== (f.fixture || null)) fh = await Headless.get(P, f.route, ws, f.w, f.h, f.fixture || null)
-  if (!fh.ready) await fh.readyP
+// The layout of a board frame in a workspace, settled. headless: true
+// renders off-screen in a pooled frame even when the canvas shows this
+// workspace, so two sides compare alike.
+export async function layoutIn(P, f, ws, { headless } = {}) {
+  const fh = await settled(P, f, ws, headless)
   return { fh, layout: await fh.call('layout', [], 5000) }
 }
-// a modal with two frozen frames side by side and the differences outlined
-async function compareModal(P, title, left, right, diff) {
-  const boxes = diffBoxes(diff), scale = Math.min(1, 400 / Math.max(left.meta.w, 1))
-  const lines = diffSummary(diff, 40)
-  const body = [
-    h('div', { style: { display: 'flex', gap: '16px', alignItems: 'flex-start', overflow: 'auto', maxHeight: '62vh' } },
-      h('div', h('div.note', left.label), await Snaps.frozen(P, left.doc, left.meta, { scale, boxes: boxes.before, full: true })),
-      h('div', h('div.note', right.label), await Snaps.frozen(P, right.doc, right.meta, { scale, boxes: boxes.after, full: true }))),
-    h('pre.mono', { style: { whiteSpace: 'pre-wrap', fontSize: '11.5px', margin: 0 } }, lines.length ? lines.join('\n') : 'No layout changes.')]
-  modal({ title, body, wide: true, actions: [{ label: 'Close' }] })
+async function settled(P, f, ws, headless) {
+  let fh = headless ? null : FrameHost.ui.hostFor(f.id)
+  if (!fh || !fh.shown || fh.ws !== ws) fh = await Headless.get(P, fh ? fh.route : f.route, { kind: ws === 'draft' ? 'dev' : 'prop', ref: ws === 'draft' ? null : ws, w: f.w, h: f.h })
+  if (!fh.ready) await fh.readyP
+  return fh
 }
