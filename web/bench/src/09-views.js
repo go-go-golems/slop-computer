@@ -399,16 +399,19 @@ registerView('evalrepl', {
       const code = ta.value, t0 = now()
       const card = h('div.block', h('header', h('h3', 'Running…'), h('span.sub', fmtTime(t0))))
       res.prepend(card)
-      const ctx = { project: App.P, ws: App.ws, who: 'you', mode: 'auto' }
-      const r = await runEval(ctx, code, hostAPI(ctx), { sid: 'repl:' + App.P.id, restore: App.P.meta.replScope && App.P.meta.replScope.vars })
-      if (r.scope) { App.P.meta.replScope = r.scope; App.P.saveMeta(); paintScope() }
+      // the project and workspace the eval started on keep its results, even
+      // if another project is opened while it runs
+      const P = App.P, ws = App.ws
+      const ctx = { project: P, ws, who: 'you', mode: 'auto' }
+      const r = await runEval(ctx, code, hostAPI(ctx), { sid: 'repl:' + P.id, restore: P.meta.replScope && P.meta.replScope.vars })
+      if (r.scope) { P.meta.replScope = r.scope; P.saveMeta(); if (App.P === P) paintScope() }
       clear(card)
       if (r.effects) card.appendChild(h('div.fx', effectsLine(r.effects)))
-      put(card, h('header', h('h3', { style: { color: r.ok ? '' : 'var(--accent)' } }, r.ok ? 'ok' : r.error.kind), h('span.sub', (r.ms ?? '?') + ' ms · ' + (r.engine || '') + ' · ' + (App.ws === 'main' ? 'main' : 'proposal')), h('span.sp'),
+      put(card, h('header', h('h3', { style: { color: r.ok ? '' : 'var(--accent)' } }, r.ok ? 'ok' : r.error.kind), h('span.sub', (r.ms ?? '?') + ' ms · ' + (r.engine || '') + ' · ' + (ws === 'main' ? 'main' : 'proposal') + (App.P !== P ? ' · ' + P.title : '')), h('span.sp'),
         h('button.btn.sm', { on: { click: () => { ta.value = code; ta.focus() } } }, 'Edit again')),
         r.ok ? h('pre.mono.yaml', { style: { margin: 0, whiteSpace: 'pre-wrap', fontSize: '11.5px', maxHeight: '420px', overflow: 'auto' }, html: hlYAML(toYAML(r.value)) }) : h('pre.mono', { style: { margin: 0, whiteSpace: 'pre-wrap', fontSize: '11.5px' } }, r.error.message + (r.error.line ? '\n(line ' + r.error.line + ')' : '')),
         r.logs && r.logs.length ? h('pre.mono.note', { style: { margin: 0, whiteSpace: 'pre-wrap' } }, r.logs.map(l => l.level + ': ' + l.text).join('\n')) : null)
-      App.P.log({ kind: 'eval', who: 'you', ws: App.ws, ok: r.ok, note: (code.split('\n').find(l => l.trim() && !l.trim().startsWith('//')) || '').trim().slice(0, 90), calls: [...new Set(r.calls || [])].slice(0, 12) })
+      P.log({ kind: 'eval', who: 'you', ws, ok: r.ok, note: (code.split('\n').find(l => l.trim() && !l.trim().startsWith('//')) || '').trim().slice(0, 90), calls: [...new Set(r.calls || [])].slice(0, 12) })
     }
     ta.addEventListener('keydown', e => { if (e.key === 'Enter' && (e.metaKey || e.ctrlKey)) { e.preventDefault(); run() } if (e.key === 'Tab') { e.preventDefault(); ta.setRangeText('  ', ta.selectionStart, ta.selectionEnd, 'end') } })
     const ref = h('details.block', h('summary', { style: { cursor: 'pointer', fontWeight: 700 } }, 'API reference (what the agent sees)'), h('pre.mono', { style: { whiteSpace: 'pre-wrap', fontSize: '11px', margin: 0 } }, API_GUIDE.split('\n\nWorking rules')[0].split('\n').slice(4).join('\n')))
