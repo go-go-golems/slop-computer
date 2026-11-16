@@ -233,6 +233,17 @@ func (t *Turn) Snapshot(message, ref string) (int64, error) {
 	return n, nil
 }
 
+// RefAt is the snapshot a ref points at inside this turn (0 if the ref does
+// not exist), for compare-and-swap moves.
+func (t *Turn) RefAt(ref string) (int64, error) {
+	var n int64
+	err := t.s.w.QueryRowContext(t.ctx, `SELECT n FROM _refs WHERE name = ?`, ref).Scan(&n)
+	if errors.Is(err, sql.ErrNoRows) {
+		return 0, nil
+	}
+	return n, err
+}
+
 // MoveRef points a ref at snapshot n.
 func (t *Turn) MoveRef(ref string, n int64) error {
 	var exists int

@@ -201,7 +201,7 @@ func filesVerbs(e kernelEnv) []*verbs.Verb {
 				}
 				return s.Refs(ctx)
 			}}.Verb(),
-		verbs.Def[RefMoveIn, RefMoveOut]{Name: "ref.move", Doc: "Point a ref at a snapshot (moving main back is a rollback).", Scope: verbs.Write, Action: authz.StoreAdmin,
+		verbs.Def[RefMoveIn, RefMoveOut]{Name: "ref.move", Doc: "Point a ref at a snapshot (moving main back is a rollback). With --ifAt it moves only if the ref still points there (0: only if it does not exist yet), so two publishers cannot overwrite each other.", Scope: verbs.Write, Action: authz.StoreAdmin,
 			Run: func(req verbs.Req, in RefMoveIn) (RefMoveOut, error) {
 				ctx := req.Context
 				p := req.Principal
@@ -209,11 +209,21 @@ func filesVerbs(e kernelEnv) []*verbs.Verb {
 				if err != nil {
 					return RefMoveOut{}, err
 				}
-				c, err := s.Do(ctx, who(p, d), func(t *store.Turn) error { return t.MoveRef(in.Ref, in.N) })
+				var from int64
+				c, err := s.Do(ctx, who(p, d), func(t *store.Turn) error {
+					var err error
+					if from, err = t.RefAt(in.Ref); err != nil {
+						return err
+					}
+					if in.IfAt != nil && *in.IfAt != from {
+						return verbs.Errf("conflict", "%s points at %d, not %d: it moved since you looked", in.Ref, from, *in.IfAt)
+					}
+					return t.MoveRef(in.Ref, in.N)
+				})
 				if err != nil {
 					return RefMoveOut{}, fileErr(err)
 				}
-				return RefMoveOut{Ref: in.Ref, N: in.N, Rev: c.Rev}, nil
+				return RefMoveOut{Ref: in.Ref, N: in.N, From: from, Rev: c.Rev}, nil
 			}}.Verb(),
 	}
 }
@@ -417,6 +427,7 @@ type RefMoveIn struct {
 	Store string `json:"store" slop:"pos=1"`
 	Ref   string `json:"ref" slop:"pos=2"`
 	N     int64  `json:"n" slop:"pos=3"`
+	IfAt  *int64 `json:"ifAt,omitempty" jsonschema_description:"move only if the ref points at this snapshot now (0: only if it does not exist yet)"`
 }
 
 // FilesLsIn is files.ls's input.
@@ -498,7 +509,8 @@ type SnapNewOut struct {
 
 // RefMoveOut is ref.move's result.
 type RefMoveOut struct {
-	N   int64  `json:"n"`
-	Ref string `json:"ref"`
-	Rev int64  `json:"rev"`
+	N    int64  `json:"n"`
+	From int64  `json:"from"` // where the ref pointed before (0: it did not exist)
+	Ref  string `json:"ref"`
+	Rev  int64  `json:"rev"`
 }
