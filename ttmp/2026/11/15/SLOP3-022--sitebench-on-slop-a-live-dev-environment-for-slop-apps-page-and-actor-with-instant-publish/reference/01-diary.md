@@ -1809,3 +1809,59 @@ pi:
   models: {quick: lunaroute/deepseek-4.1-flash, default: lunaroute/deepseek-4.1-flash, complex: lunaroute/deepseek-4.1-flash}
   agent_dir: <scratch>/pi-agent-chat
 ```
+
+## Step 24: Why Responses failed — two Geppetto bugs (geppetto#450)
+
+The user asked whether the Responses API was "bad" and whether we could fix it, then "how does pi handle the lunaroute deepseek <tool> thing?", then "ok, figure it out". Pi works with the same gateway and model over Responses, so I captured both request bodies and compared them. Both failures turned out to be in Geppetto's Responses engine, not lunaroute. The fix is go-go-golems/geppetto#450.
+
+### Prompt Context
+
+**User prompts (verbatim):**
+- "so the responses API is bad? is that something we can fix?"
+- "howdoes pi handle the lunaroute deepseek <tool> thing? is the lunaroute npm module for pi coding agent doing something special?"
+- "ok, figure it out"
+
+**Assistant interpretation:** Find the exact difference between Pi's working Responses requests and Geppetto's, fix it in Geppetto, and verify through slop.
+
+### What I did
+
+- **Read `@lunaroute/pi-extension` 0.18.0** (`~/.pi/agent/npm/node_modules/@lunaroute/pi-extension/src`):
+  - It handles login, model sync into `models-store.json` (default `api: openai-responses`, `LUNAROUTE_API=completions` switches), attribution headers and retries.
+  - Requests go through pi-ai's stock `openAIResponsesApi()`.
+  - Neither it nor pi-ai parses tool calls written as text.
+- **Ran Pi itself:** `pi -p --model lunaroute/deepseek-4.1-flash --tools read` on Responses. It made a real `read` call and answered from the result. Pi in print mode waits on stdin, so it needs `< /dev/null`.
+- **Captured Pi's request bodies** with a throwaway extension (`before_provider_request` → write `event.payload`, which holds no headers or keys).
+  - Assistant history went out as `{type: message, role: assistant, content: [{type: output_text, annotations: []}], status: completed, id: msg_…}`.
+  - The request carried `tools: [{type: function, …}]`, `store: false`, and the system prompt as `developer`.
+- **Captured Geppetto's** with a dump line in the scratch copy's `engine.go`, gated by `GEPPETTO_DUMP_DIR`. Same task through slop on Responses: **no `tools` field at all**, and the model answered "no file-reading tool is available".
+- **Cause 1:** `attachToolsToResponsesRequest` sends tools only when the turn's `KeyToolConfig` has `Enabled: true`. Slop never sets it, and the chat, Claude and Gemini engines don't check it. The bench's prompt describes `eval`, so the model wrote calls as text: that was the `<tool calls>` symptom.
+- **Cause 2:** assistant history is `output_text` without `type`, `id` or `status`, which is the 400 from step 23.
+- **The fix, in a Geppetto worktree from origin/main (v0.14.0, both bugs present):**
+  - Tools are sent unless a tool config explicitly sets `Enabled: false`.
+  - Assistant text without an item id is sent as `{role: assistant, content: "…"}` (`responsesInput.MarshalJSON`).
+  - With an id, the item carries `status: completed` and `annotations: []`.
+  - Five tests in `wire_shape_test.go`; four fail on main.
+- **Verified end to end:** the same patch on the scratch v0.13.13 copy, with slop on the user's real Pi dir (deepseek on Responses):
+  - read-tool probe: a `function_call` 3/3, correct answers;
+  - user/assistant/user history: "pong";
+  - a bench agent turn in a fresh thread ("remove a tag"): 9 tool rounds, actor action added, draft 14 activated, no provider error.
+- **Opened PR #450 on Geppetto** (commit `9915f0af`, branch `task/responses-tools-and-history`, worktree `<scratch>/gwt/geppetto`).
+- **Restored the local server** to the normal binary and the Chat Completions agent dir, and deleted every captured body (they held full prompts).
+
+### What didn't work
+
+- **The pre-commit lint** failed in `pkg/inference/engine/turnkeys_gen.go`, a file I hadn't touched. The `turnsdatalint` allowlist matches the path suffix `/geppetto/pkg/inference/engine/turnkeys_gen.go`, and my worktree was named `geppetto-wt`. Moving it to `<scratch>/gwt/geppetto` fixed it.
+- **The pre-push govulncheck:** `Vulnerability #1: GO-2026-6859 … Found in: net/http@go1.26.10 Fixed in: net/http@go1.26.11` (go.mod has `toolchain go1.26.10`). I pushed with `GOTOOLCHAIN=go1.26.11`, and all hooks passed. The PR notes the toolchain bump; it is not done there.
+- **`pkill -f "capture-server.py 18777"`** matched the shell running it (exit 144). The cleanup before it had already run.
+- **The agent turn stopped mid-task** after "Now the chip × in the page." Slop caps a `sample` call at 10 rounds (`pkg/llm/gepp/sample.go:120`), the last round has no tools, and the bench does not continue. Two `files.replace` calls also failed on whitespace. Neither is about Responses.
+
+### What I learned
+
+- **Capture both sides before theorising.** I blamed lunaroute's translation for the text tool calls until Geppetto's body showed no tools.
+- **Same `ToolConfig`, different meanings:** an unset config means "tools on" in three engines and "tools off" in the fourth.
+
+### Future
+
+- **Slop:** once #450 is released, bump Geppetto. v0.14.0 has the connection-only refactor, so `pkg/llm/gepp` will need changes. Also set `KeyToolConfig{Enabled: true}` when offering tools.
+- **Bench:** continue automatically when a reply ends at the round cap.
+- **Then** the lunaroute store can stay on `openai-responses`, and the Chat Completions agent dir is no longer needed.
