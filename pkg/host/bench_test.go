@@ -371,4 +371,21 @@ func TestBenchPublish(t *testing.T) {
 	if refs := h.call(admin, "ref.ls", map[string]any{"store": "jot"}).(map[string]any); num(refs["main"]) != d1 {
 		t.Fatalf("after the rollback, main = %v", refs)
 	}
+
+	// main no longer has sql/002.sql, but jot-1 ran it: a draft with another
+	// 002 is blocked, though main alone would call it new.
+	other := devApp()
+	other["sql/002.sql"] = "CREATE TABLE labels (note TEXT);"
+	h.call(admin, "files.push", map[string]any{"store": "jot", "files": files(other), "ref": "draft"})
+	if pf = act("preflight", map[string]any{"app": "jot"}); !strings.Contains(strs(pf["blockers"]), "sql/002.sql differs from the one that ran on") || !strings.Contains(strs(pf["blockers"]), "jot-1") || strs(pf["migrations"]) != `["sql/002.sql"]` {
+		t.Fatalf("a migration that ran before the rollback: %v", pf)
+	}
+	// The same 002 again is fine: jot-1 has it already.
+	h.call(admin, "files.push", map[string]any{"store": "jot", "files": files(good), "ref": "draft"})
+	if pf = act("preflight", map[string]any{"app": "jot"}); len(pf["blockers"].([]any)) != 0 {
+		t.Fatalf("the migration that ran, unchanged: %v", pf["blockers"])
+	}
+	if st := h.call(admin, "app.status", map[string]any{"store": "jot-1", "peek": true, "migrations": true}).(map[string]any); !strings.Contains(fmtJSON(st["applied"]), `"sql/002.sql"`) {
+		t.Fatalf("app.status migrations = %v", st)
+	}
 }

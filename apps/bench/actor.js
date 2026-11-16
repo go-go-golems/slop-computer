@@ -40,10 +40,11 @@ async function allStores(ctx) {
 
 // A store that does not exist, or that the visitor cannot read, has no
 // status; neither case is an error here. Asking activates a newer version
-// the store follows; with peek it only looks ({n: running now, next: the
-// version it activates on its next use}).
-async function statusOf(ctx, id, peek) {
-  try { return await tool(ctx).status(id, peek ? { peek: true } : {}); } catch (e) { return null; }
+// the store follows; with {peek: true} it only looks ({n: running now,
+// next: the version it activates on its next use}); with {migrations:
+// true} the answer has applied: {sql/… name: sha256} of what ran there.
+async function statusOf(ctx, id, opts) {
+  try { return await tool(ctx).status(id, opts || {}); } catch (e) { return null; }
 }
 
 defineActor({
@@ -286,12 +287,20 @@ defineActor({
           ...removed.filter(mig).map((path) => 'migration ' + path + ' was removed after it ran on main'),
         ];
         const instances = (await allStores(ctx)).filter((s) => s.app === app).map((s) => s.id);
-        const production = [];
+        const production = [], ranElsewhere = new Map(); // path → stores where another version of it ran
         for (const id of [app, ...instances]) {
-          const st = await statusOf(ctx, id, true);
-          if (st && (st.manifest || st.next) && (st.ref || 'main') === 'main') production.push({ store: id, n: st.n, next: st.next || 0, broken: st.broken || '' });
+          const st = await statusOf(ctx, id, { peek: true, migrations: true });
+          if (!st || !(st.manifest || st.next) || (st.ref || 'main') !== 'main') continue;
+          production.push({ store: id, n: st.n, next: st.next || 0, broken: st.broken || '' });
+          // what an instance ran is what counts: main may have been rolled
+          // back past a migration that it still has
+          for (const [path, sum] of Object.entries(st.applied || {})) {
+            const f = dm.get(path);
+            if (f && f.sha256 !== sum && !changed.includes(path)) ranElsewhere.set(path, [...(ranElsewhere.get(path) || []), id]);
+          }
         }
-        const dev = await statusOf(ctx, devId(app, ctx.visitor.id), true);
+        for (const [path, ids] of ranElsewhere) blockers.push('migration ' + path + ' differs from the one that ran on ' + ids.join(', ') + ': add a new migration instead');
+        const dev = await statusOf(ctx, devId(app, ctx.visitor.id), { peek: true });
         return { refs, added, changed, removed, migrations: added.filter(mig), blockers, production, dev: dev ? { n: dev.n, next: dev.next || 0, broken: dev.broken || '' } : null };
       },
     },

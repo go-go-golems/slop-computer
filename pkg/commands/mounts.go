@@ -3,6 +3,7 @@ package commands
 import (
 	"context"
 	"errors"
+	"fmt"
 	"slices"
 
 	"github.com/go-go-golems/slop-computer/pkg/access"
@@ -108,7 +109,19 @@ func mountVerbs(e mountEnv) []*verbs.Verb {
 				if err != nil {
 					return AppStatusOut{}, err
 				}
-				return statusOf(ctx, e.kernelEnv, e.A, st, in.Store, in.Peek)
+				out, err := statusOf(ctx, e.kernelEnv, e.A, st, in.Store, in.Peek)
+				if err != nil || !in.Migrations {
+					return out, err
+				}
+				rows, err := st.ReadQuery(ctx, `SELECT name, sha256 FROM _migrations`)
+				if err != nil {
+					return AppStatusOut{}, err
+				}
+				out.Applied = map[string]string{}
+				for _, r := range rows {
+					out.Applied[fmt.Sprint(r["name"])] = fmt.Sprint(r["sha256"])
+				}
+				return out, nil
 			}}.Verb(),
 		verbs.Def[AppLsIn, []map[string]any]{Name: "app.ls", Doc: "List the stores that are apps (their tree's main snapshot holds app.json).", Scope: verbs.Read, Action: authz.Platform,
 			Run: func(req verbs.Req, in AppLsIn) ([]map[string]any, error) {
@@ -312,8 +325,9 @@ type MountUndoIn struct {
 
 // AppStatusIn is app.status's input.
 type AppStatusIn struct {
-	Store string `json:"store" slop:"pos=1"`
-	Peek  bool   `json:"peek,omitempty" jsonschema_description:"do not activate: n is the version running now, next a newer one it activates on its next use"`
+	Store      string `json:"store" slop:"pos=1"`
+	Peek       bool   `json:"peek,omitempty" jsonschema_description:"do not activate: n is the version running now, next a newer one it activates on its next use"`
+	Migrations bool   `json:"migrations,omitempty" jsonschema_description:"also list the migrations the store has applied (name: sha256), which a new version must not change"`
 }
 
 // AppLsIn is app.ls's input.
@@ -340,13 +354,14 @@ type MountUndoOut struct {
 
 // AppStatusOut is app.status's result.
 type AppStatusOut struct {
-	App      string         `json:"app"`
-	Broken   string         `json:"broken"`
-	Manifest map[string]any `json:"manifest,omitempty"` // set only to a non-empty object
-	N        int64          `json:"n"`
-	Next     int64          `json:"next,omitempty"` // with peek: the version it activates on its next use
-	Ref      string         `json:"ref"`
-	Store    string         `json:"store"`
+	App      string            `json:"app"`
+	Broken   string            `json:"broken"`
+	Manifest map[string]any    `json:"manifest,omitempty"` // set only to a non-empty object
+	N        int64             `json:"n"`
+	Next     int64             `json:"next,omitempty"`    // with peek: the version it activates on its next use
+	Applied  map[string]string `json:"applied,omitempty"` // with migrations: sql/… name → sha256 of what ran
+	Ref      string            `json:"ref"`
+	Store    string            `json:"store"`
 }
 
 // statusOf is app.status for an opened store. Running activates a pending
