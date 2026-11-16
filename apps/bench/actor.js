@@ -210,6 +210,47 @@ defineActor({
       },
     },
 
+    // The dev instance's data, for the agent and the Data view (Phase 4):
+    // its documents, its SQL tables (read-only), and seeding them. These
+    // reach the visitor's own dev instance only, never a production one.
+    docs: {
+      requires: 'view',
+      async run(ctx, { app, coll }) {
+        storeId(ctx, app);
+        return await tool(ctx).docs(devId(app, ctx.visitor.id), String(coll || ''));
+      },
+    },
+    doc: {
+      requires: 'view',
+      async run(ctx, { app, path }) {
+        storeId(ctx, app);
+        return await tool(ctx).doc(devId(app, ctx.visitor.id), String(path || ''));
+      },
+    },
+    sql: {
+      requires: 'view',
+      async run(ctx, { app, sql, args }) {
+        storeId(ctx, app);
+        return await tool(ctx).sql(devId(app, ctx.visitor.id), String(sql || ''), Array.isArray(args) ? args : []);
+      },
+    },
+    seedDocs: {
+      requires: 'view',
+      async run(ctx, { app, coll, rows, id }) {
+        storeId(ctx, app);
+        if (!Array.isArray(rows)) ctx.fail('invalid_argument', 'rows must be a list of objects');
+        return await tool(ctx).importDocs(devId(app, ctx.visitor.id), String(coll || ''), rows, id ? { id: String(id) } : {});
+      },
+    },
+    seedTable: {
+      requires: 'view',
+      async run(ctx, { app, table, rows }) {
+        storeId(ctx, app);
+        if (!Array.isArray(rows)) ctx.fail('invalid_argument', 'rows must be a list of objects');
+        return await tool(ctx).importTable(devId(app, ctx.visitor.id), String(table || ''), rows);
+      },
+    },
+
     // A new app store, its first files pushed to draft (main does not exist
     // until the first publish).
     create: {

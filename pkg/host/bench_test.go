@@ -254,3 +254,39 @@ func TestBenchOutsidePushesAndReset(t *testing.T) {
 		t.Fatalf("the fresh dev instance = %v, want draft %d and not broken", st, draft)
 	}
 }
+
+// Phase 4: the agent's app.* verbs read and seed the visitor's dev
+// instance, never the app store or a production instance.
+func TestBenchDevData(t *testing.T) {
+	h := newHarness(t)
+	admin := h.tokenFor("admin@example.com", "read", "write", "admin")
+	installBench(t, h, admin)
+	act := func(action string, args map[string]any) any {
+		t.Helper()
+		return h.call(admin, "actor.call", map[string]any{"store": "bench", "action": action, "args": args})
+	}
+	h.call(admin, "store.new", map[string]any{"id": "jot"})
+	h.call(admin, "files.push", map[string]any{"store": "jot", "files": files(devApp()), "ref": "draft"})
+	dev := act("dev", map[string]any{"app": "jot"}).(map[string]any)["id"].(string)
+
+	act("seedDocs", map[string]any{"app": "jot", "coll": "pins", "id": "slug", "rows": []any{
+		map[string]any{"slug": "a", "title": "First"}, map[string]any{"slug": "b", "title": "Second"}}})
+	if docs := act("docs", map[string]any{"app": "jot", "coll": "pins"}).([]any); len(docs) != 2 {
+		t.Fatalf("docs = %v", docs)
+	}
+	if d := act("doc", map[string]any{"app": "jot", "path": "pins/b"}).(map[string]any); !strings.Contains(fmtJSON(d), "Second") {
+		t.Fatalf("doc = %v", d)
+	}
+	act("seedTable", map[string]any{"app": "jot", "table": "notes", "rows": []any{map[string]any{"id": "n1"}, map[string]any{"id": "n2"}}})
+	if rows := act("sql", map[string]any{"app": "jot", "sql": "SELECT count(*) AS n FROM notes"}); !strings.Contains(fmtJSON(rows), `"n":2`) {
+		t.Fatalf("sql = %v", rows)
+	}
+	// The data went to the dev instance only.
+	if docs := h.call(admin, "docs.ls", map[string]any{"store": "jot", "coll": "pins"}).([]any); len(docs) != 0 {
+		t.Fatalf("the app store got the seeded documents: %v", docs)
+	}
+	if docs := h.call(admin, "docs.ls", map[string]any{"store": dev, "coll": "pins"}).([]any); len(docs) != 2 {
+		t.Fatalf("the dev instance has %v", docs)
+	}
+	h.fail(admin, "actor.call", map[string]any{"store": "bench", "action": "sql", "args": map[string]any{"app": "jot", "sql": "DELETE FROM notes"}}, "invalid_argument") // read-only
+}
