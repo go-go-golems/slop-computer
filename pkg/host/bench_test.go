@@ -357,11 +357,21 @@ func TestBenchRecords(t *testing.T) {
 		t.Fatalf("thread = %v", th)
 	}
 	h.fail(admin, "actor.call", map[string]any{"store": "bench", "action": "saveThread", "args": map[string]any{"id": "th1", "app": "other"}}, "invalid_argument")
-	logged := act("logEvents", map[string]any{"app": "jot", "events": []any{map[string]any{"kind": "msg", "thread": "th1", "note": "hi"}, map[string]any{"kind": "mark", "label": "M"}}}).([]any)
-	if len(logged) != 2 || num(logged[1].(map[string]any)["seq"]) != 2 || logged[1].(map[string]any)["label"] != "M" {
+	logged := act("logEvents", map[string]any{"app": "jot", "events": []any{map[string]any{"kind": "msg", "ref": "draft", "n": 1, "thread": "th1", "note": "hi"}, map[string]any{"kind": "mark", "ref": "draft", "n": 1, "label": "M"}}}).([]any)
+	if len(logged) != 2 || num(logged[1].(map[string]any)["seq"]) != 2 || logged[1].(map[string]any)["label"] != "M" || logged[1].(map[string]any)["ref"] != "draft" || num(logged[1].(map[string]any)["n"]) != 1 {
 		t.Fatalf("logEvents = %v", logged)
 	}
-	h.fail(admin, "actor.call", map[string]any{"store": "bench", "action": "logEvents", "args": map[string]any{"app": "jot", "events": []any{map[string]any{"kind": "commit"}}}}, "invalid_argument")
+	logBad := func(events ...any) {
+		t.Helper()
+		h.fail(admin, "actor.call", map[string]any{"store": "bench", "action": "logEvents", "args": map[string]any{"app": "jot", "events": events}}, "invalid_argument")
+	}
+	logBad(map[string]any{"kind": "commit", "ref": "draft", "n": 1})
+	// Every event is on a ref with that ref's snapshot; 0 and null are not one.
+	logBad(map[string]any{"kind": "mark", "label": "no snapshot"})
+	logBad(map[string]any{"kind": "mark", "ref": "draft", "n": 0})
+	logBad(map[string]any{"kind": "mark", "n": 3})
+	// A batch with one bad event writes none of it.
+	logBad(map[string]any{"kind": "mark", "ref": "draft", "n": 2, "label": "fine"}, map[string]any{"kind": "mark", "ref": "draft"})
 	// Two tabs seeing the same outside change log it once: the second is
 	// answered with the event already there.
 	outside := map[string]any{"kind": "outside", "who": "push", "ref": "draft", "n": 7, "paths": []any{"a.txt"}}

@@ -1,4 +1,4 @@
-/* the bench, built from web/bench: do not edit. source sha256:970cd63cc5d14983cc258a493c02f6c40bad20c166ecb442c945b30965567465 */
+/* the bench, built from web/bench: do not edit. source sha256:da3d38d807d381ad24002642e7446cb003b25e75ab659629fb939c87e3077a19 */
 // The bench: a live dev environment for slop apps. Built from web/bench/src.
 (() => {
   // src/lib/util.js
@@ -1153,9 +1153,9 @@
       this.ev.emit("frameevent", e);
     },
     // project events and frame events in one list, oldest first
-    merged(P, { kind, frame, since: since2, limit = 50 } = {}) {
+    merged(P, { kind, frame, since, limit = 50 } = {}) {
       const kinds = kind ? [].concat(kind) : null;
-      const keep = (t, k) => (since2 == null || t > since2) && (!kinds || kinds.includes(k));
+      const keep = (t, k) => (since == null || t > since) && (!kinds || kinds.includes(k));
       const proj = frame ? [] : P.events.filter((e) => keep(e.at, e.kind)).map((e) => ({
         t: e.at,
         source: "project",
@@ -1725,27 +1725,15 @@
   // src/model/timeline.js
   function stampEvent(e, headOf) {
     const ref = e.ref || "draft";
-    let n = e.n;
-    if (n == null) {
-      try {
-        n = headOf(ref);
-      } catch (err) {
-        n = null;
-      }
-    }
-    return { ...e, ref, n: n ?? null };
+    return { ...e, ref, n: e.n ?? headOf(ref) ?? null };
   }
   function snapshotAt(P, seq, ref = "draft") {
-    let n = null;
-    for (const e of P.events) {
-      if (e.seq == null || e.seq > seq) break;
-      if (e.n != null && e.ref === ref) n = e.n;
-    }
-    return n;
+    const e = P.event(seq);
+    return e && e.ref === ref && isSnap(e.n) ? e.n : null;
   }
-  function knownAt(P, seq, ref) {
-    const n = snapshotAt(P, seq, ref);
-    if (n == null) throw Object.assign(new Error("the timeline does not know " + ref + "'s snapshot at event " + seq + ": nothing on " + ref + " was recorded by then"), { kind: "missing" });
+  var isSnap = (n) => Number.isInteger(n) && n > 0;
+  function checkSnap(n) {
+    if (!isSnap(n)) throw Object.assign(new Error("a snapshot number is a positive integer (got " + JSON.stringify(n) + ")"), { kind: "invalid" });
     return n;
   }
   var MADE = /* @__PURE__ */ new Set(["commit", "outside"]);
@@ -1812,8 +1800,9 @@
     out.marks = evs.slice(lo, hi + 1).filter((x) => x.kind === "mark" && x.thread === th.id).map((x) => ({ seq: x.seq, kind: x.mk, label: x.label, why: x.note || void 0 }));
     return out;
   }
-  async function since(P, seq, ref = "draft") {
-    const d = P.draftOf(ref), view = P.view(ref), then = knownAt(P, seq, ref);
+  async function changesSince(P, ref, then, view = P.view(ref)) {
+    checkSnap(then);
+    const d = P.draftOf(ref);
     const old = await d.listingOf(then), out = [];
     for (const path of /* @__PURE__ */ new Set([...old.keys(), ...view.list()])) {
       const a = old.get(path), b = view.entry(path);
@@ -1823,10 +1812,10 @@
     }
     return out.sort((x, y) => x.path.localeCompare(y.path));
   }
-  async function restore(P, seq, who = "you") {
-    const ref = "draft", then = knownAt(P, seq, ref), d = P.draftOf(ref);
+  async function restoreTo(P, ref, then, { who = "you", label: label2 = "snapshot " + then } = {}) {
+    checkSnap(then);
+    const d = P.draftOf(ref);
     await d.settle();
-    const e = P.event(seq), label2 = e ? e.label || e.note || "event " + seq : "the start";
     const tx = d.begin({ label: "restore", event: { who, note: "restored to " + label2 } });
     for (const path of /* @__PURE__ */ new Set([...(await d.listingOf(then)).keys(), ...d.list()])) {
       const a = (await d.listingOf(then)).get(path), b = d.entry(path);
@@ -2484,11 +2473,11 @@
       run: (ctx, label2, o) => {
         const opts = typeof o === "string" ? { why: o } : o || {};
         if (opts.kind && !MARK_KINDS.includes(opts.kind)) throw invalid2("mark kinds: " + MARK_KINDS.join(", "));
-        const e = ctx.project.mark({ label: label2, note: opts.why || opts.note, by: ctx.who, thread: ctx.thread, kind: opts.kind });
+        const e = ctx.project.mark({ label: label2, note: opts.why || opts.note, by: ctx.who, thread: ctx.thread, kind: opts.kind, ref: ctx.ws });
         return { kind: e.mk, label: e.label };
       }
     },
-    "session.marks": { sig: "", run: (ctx) => ctx.project.marks().map((e) => ({ seq: e.seq, label: e.label, kind: e.mk || "bookmark", by: e.who, why: e.note, when: iso(e.at) })) },
+    "session.marks": { sig: "", doc: "marks, each in the workspace it was made in (where: draft or a proposal)", run: (ctx) => ctx.project.marks().map((e) => ({ seq: e.seq, label: e.label, kind: e.mk || "bookmark", by: e.who, why: e.note, where: e.ref, when: iso(e.at) })) },
     "session.events": {
       sig: "{kind, path, since, limit}?",
       doc: "timeline events, oldest first (since: a seq)",
@@ -2496,12 +2485,15 @@
     },
     "session.diff": {
       sig: "markLabelOrSeq",
-      doc: "a unified diff of the workspace since then",
+      doc: "a unified diff of the workspace since then (an event or mark in this workspace)",
       run: async (ctx, at) => {
         const P = ctx.project;
-        const seq = typeof at === "number" ? at : (P.marks().reverse().find((m) => m.label === at) || {}).seq;
+        const marks = typeof at === "number" ? [] : P.marks().filter((m) => m.label === at).reverse();
+        const seq = typeof at === "number" ? at : (marks.find((m) => m.ref === ctx.ws) || marks[0] || {}).seq;
         if (seq == null) throw invalid2("pass an event seq or a mark label (session.marks())");
-        const ch = await since(P, seq, ctx.ws);
+        const then = snapshotAt(P, seq, ctx.ws), e = P.event(seq);
+        if (then == null) throw Object.assign(new Error(!e ? "no event " + seq : (e.kind === "mark" ? 'the mark "' + e.label + '"' : "event " + seq) + " is in " + e.ref + ", and this eval works in " + ctx.ws + ": a diff is within one workspace"), { kind: "missing" });
+        const ch = await changesSince(P, ctx.ws, then, ctx.tx);
         return ch.map((c) => c.after === null && c.entry ? "~ " + c.path + " (kept by hash)" : diffText(c.path, c.before ?? "", c.after ?? "")).join("\n\n") || "no changes in " + ctx.ws + " since then";
       }
     },
@@ -3346,7 +3338,7 @@ run then).
     // Run code with an API (core/api.js) and the eval's context.
     // o: sid (a session: its variables stay between evals), restore (its
     // saved variables), lib ([{name, source}]), roles (names for help()).
-    async run(code, { api, ctx, timeoutMs = 2e4, sid, restore: restore2, lib, roles = [] }) {
+    async run(code, { api, ctx, timeoutMs = 2e4, sid, restore, lib, roles = [] }) {
       if (!this.worker) await this.spawn();
       if (this.engine === "loading") await new Promise((r) => {
         const off = this.ev.on("engine", () => {
@@ -3379,7 +3371,7 @@ run then).
         }, 1e3);
         this.runs.set(id, run);
         const sigs = Object.fromEntries([...api.entries].map(([n, e]) => [n, e.sig]));
-        this.worker.postMessage({ type: "eval", id, code, api: api.names(), sigs, long: api.long(), roles, timeoutMs: clamp(timeoutMs, 1e3, 12e4), sid, restore: restore2 || null, lib: lib || [] });
+        this.worker.postMessage({ type: "eval", id, code, api: api.names(), sigs, long: api.long(), roles, timeoutMs: clamp(timeoutMs, 1e3, 12e4), sid, restore: restore || null, lib: lib || [] });
       });
     },
     drop(sid) {
@@ -3432,7 +3424,7 @@ run then).
     return ctx;
   }
   var firstLine = (code) => (code.split("\n").find((l) => l.trim() && !l.trim().startsWith("//")) || "").trim().slice(0, 90);
-  async function runEval(ctx, code, { sid, restore: restore2, timeoutMs } = {}) {
+  async function runEval(ctx, code, { sid, restore, timeoutMs } = {}) {
     const P = ctx.project, d = ctx.draft;
     if (d.head == null) await d.open();
     const parent = ctx.parentTx && ctx.parentTx.open && ctx.parentTx.draft === d ? ctx.parentTx : null;
@@ -3444,7 +3436,7 @@ run then).
     ctx.logs = [];
     let r;
     try {
-      r = await Sandbox.run(code, { api: ctx.api, ctx, sid, restore: restore2, timeoutMs, lib: libEntries(tx).map((l) => ({ name: l.name, source: l.source })), roles: Object.keys(ROLES) });
+      r = await Sandbox.run(code, { api: ctx.api, ctx, sid, restore, timeoutMs, lib: libEntries(tx).map((l) => ({ name: l.name, source: l.source })), roles: Object.keys(ROLES) });
     } finally {
       while (ctx.stack.length) {
         ctx.tx.abort();
@@ -5347,9 +5339,21 @@ Markdown files (README.md, notes, specs) render in the Docs panel. Keep README.m
     // An event from the page (a message, a mark, an eval, …): shown now,
     // numbered by the server when it is saved. Commits are logged by the
     // server itself (addEvent).
-    // An event records the snapshot of its ref when it is logged (stampEvent).
+    // A ref's snapshot as the page knows it: its Draft's head, or for a
+    // proposal not opened here yet, the snapshot the server last gave for it
+    // (its base when new). null: a ref the project does not have.
+    headOf(ref) {
+      if (ref === "draft") return this.draft.head;
+      const p = this.proposals.get(ref);
+      return p ? (p.draft && p.draft.head) ?? p.n ?? p.base ?? null : null;
+    }
+    // An event is on a ref and records that ref's snapshot (stampEvent). One
+    // the page cannot stamp is a bug, refused here rather than by the server
+    // after it was shown.
     log(e) {
-      const ev = { ...stampEvent(e, (ref) => this.draftOf(ref).head), seq: null, at: now(), who: e.who || "you" };
+      const st = stampEvent(e, (ref) => this.headOf(ref));
+      if (st.n == null) throw new Error("cannot log " + e.kind + " on " + st.ref + ": its snapshot is not known");
+      const ev = { ...st, seq: null, at: now(), who: e.who || "you" };
       this.events.push(ev);
       this.outbox.push(ev);
       this.ev.emit("events", ev);
@@ -5380,7 +5384,10 @@ Markdown files (README.md, notes, specs) render in the Docs panel. Keep README.m
       }).catch((e) => {
         Records.error = "the timeline: " + (e.message || e);
         Records.ev.emit("status");
-        this.outbox.unshift(...batch);
+        if (e && e.code === "invalid_argument") {
+          for (const x of batch) this.events.splice(this.events.indexOf(x), 1);
+          this.ev.emit("events", null);
+        } else this.outbox.unshift(...batch);
       }).finally(() => {
         this.sending = null;
         if (this.outbox.length) setTimeout(() => this.flushEvents(), 1e3);
@@ -5403,9 +5410,11 @@ Markdown files (README.md, notes, specs) render in the Docs panel. Keep README.m
     event(seq) {
       return this.bySeq.get(seq) || null;
     }
-    mark({ label: label2, note, by = "you", thread, kind }) {
+    // A mark is on the workspace it is made in (ref): a diff since it, or a
+    // restore to it, is of that workspace.
+    mark({ label: label2, note, by = "you", thread, kind, ref = "draft" }) {
       const mk = kind || (by === "agent" ? "milestone" : by === "ide" ? "auto" : "bookmark");
-      const e = this.log({ kind: "mark", mk, who: by, label: String(label2 || "Mark").slice(0, 80), note, thread });
+      const e = this.log({ kind: "mark", mk, who: by, ref, label: String(label2 || "Mark").slice(0, 80), note, thread });
       this.ev.emit("marks");
       return e;
     }
@@ -5843,7 +5852,7 @@ Markdown files (README.md, notes, specs) render in the Docs panel. Keep README.m
       if (!this.P) return;
       const label2 = await promptBox("Add a mark", "A label for this point in the session", "Checkpoint " + (this.P.marks().length + 1));
       if (label2) {
-        this.P.mark({ label: label2, by: "you" });
+        this.P.mark({ label: label2, by: "you", ref: this.ws });
         toast("Marked");
       }
     },
@@ -7275,21 +7284,18 @@ Markdown files (README.md, notes, specs) render in the Docs panel. Keep README.m
             App.viewVersion(e.paths[0], e.seq);
           } } }, "View this version"));
           if (e.thread && p.threads.get(e.thread)) acts.appendChild(h("button.btn.sm", { on: { click: () => App.showThread(e.thread) } }, "Open thread"));
-          if (e.seq != null) {
-            acts.appendChild(h("button.btn.sm", { on: { click: () => showSince(e) } }, "Diff since"));
+          const then = e.seq != null && open2 ? snapshotAt(p, e.seq, ref) : null;
+          if (then != null) {
+            const where = ref === "draft" ? "draft" : "the proposal";
+            acts.appendChild(h("button.btn.sm", { on: { click: () => showSince(e, ref, then) } }, "Diff since"));
             acts.appendChild(h("button.btn.sm.danger", {
               on: {
                 click: async () => {
-                  let n;
-                  try {
-                    n = (await since(p, e.seq, "draft")).length;
-                  } catch (err) {
-                    return toast(err.message, 6e3);
-                  }
-                  if (!n) return toast("Draft is already as it was then");
-                  if (!await confirmBox("Restore draft to this point?", plural(n, "file") + " go back to how they were just after this event, as one commit. That is on the timeline too, so you can return.", "Restore")) return;
-                  const r = await restore(p, e.seq, "you");
-                  toast(r.status === "committed" ? "Restored " + plural(r.paths.length, "file") + " (draft " + r.n + ")" : "Not restored: " + (r.status === "conflict" ? "draft changed meanwhile" : r.error));
+                  const n = (await changesSince(p, ref, then)).length;
+                  if (!n) return toast(where[0].toUpperCase() + where.slice(1) + " is already as it was then");
+                  if (!await confirmBox("Restore " + where + " to this point?", plural(n, "file") + " go back to how they were at this event (snapshot " + then + "), as one commit. That is on the timeline too, so you can return.", "Restore")) return;
+                  const r = await restoreTo(p, ref, then, { who: "you", label: e.label || e.note || "event " + e.seq });
+                  toast(r.status === "committed" ? "Restored " + plural(r.paths.length, "file") + " (" + ref + " " + r.n + ")" : "Not restored: " + (r.status === "conflict" ? ref + " changed meanwhile" : r.error));
                 }
               }
             }, "Restore"));
@@ -7338,19 +7344,13 @@ Markdown files (README.md, notes, specs) render in the Docs panel. Keep README.m
         });
         return box;
       }
-      async function showSince(e) {
-        const p = P();
-        let ch;
-        try {
-          ch = await since(p, e.seq, "draft");
-        } catch (err) {
-          return toast(err.message, 6e3);
-        }
+      async function showSince(e, ref, then) {
+        const ch = await changesSince(P(), ref, then), where = ref === "draft" ? "draft" : "the proposal";
         modal({
-          title: "Draft since " + fmtTime(e.at) + " \xB7 " + label(e).slice(0, 40),
+          title: (ref === "draft" ? "Draft" : "Proposal") + " since " + fmtTime(e.at) + " \xB7 " + label(e).slice(0, 40),
           wide: true,
           actions: [{ label: "Close" }],
-          body: ch.length ? ch.map((c) => h("div", h("b.mono", c.path), " ", h("span.note", c.before === null ? "new" : !c.entry ? "deleted" : ""), diffView(c.before ?? "", c.after ?? ""))) : h("p", "No changes in draft since then.")
+          body: ch.length ? ch.map((c) => h("div", h("b.mono", c.path), " ", h("span.note", c.before === null ? "new" : !c.entry ? "deleted" : ""), diffView(c.before ?? "", c.after ?? ""))) : h("p", "No changes in " + where + " since then.")
         });
       }
       function paint() {

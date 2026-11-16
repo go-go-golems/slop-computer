@@ -90,7 +90,7 @@ export const App = {
   async addMark() {
     if (!this.P) return
     const label = await promptBox('Add a mark', 'A label for this point in the session', 'Checkpoint ' + (this.P.marks().length + 1))
-    if (label) { this.P.mark({ label, by: 'you' }); toast('Marked') }
+    if (label) { this.P.mark({ label, by: 'you', ref: this.ws }); toast('Marked') }
   },
 
   // ---- workspace and mode ----

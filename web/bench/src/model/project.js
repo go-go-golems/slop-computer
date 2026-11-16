@@ -134,9 +134,21 @@ export class Project {
   // An event from the page (a message, a mark, an eval, …): shown now,
   // numbered by the server when it is saved. Commits are logged by the
   // server itself (addEvent).
-  // An event records the snapshot of its ref when it is logged (stampEvent).
+  // A ref's snapshot as the page knows it: its Draft's head, or for a
+  // proposal not opened here yet, the snapshot the server last gave for it
+  // (its base when new). null: a ref the project does not have.
+  headOf(ref) {
+    if (ref === 'draft') return this.draft.head
+    const p = this.proposals.get(ref)
+    return p ? ((p.draft && p.draft.head) ?? p.n ?? p.base ?? null) : null
+  }
+  // An event is on a ref and records that ref's snapshot (stampEvent). One
+  // the page cannot stamp is a bug, refused here rather than by the server
+  // after it was shown.
   log(e) {
-    const ev = { ...stampEvent(e, ref => this.draftOf(ref).head), seq: null, at: now(), who: e.who || 'you' }
+    const st = stampEvent(e, ref => this.headOf(ref))
+    if (st.n == null) throw new Error('cannot log ' + e.kind + ' on ' + st.ref + ': its snapshot is not known')
+    const ev = { ...st, seq: null, at: now(), who: e.who || 'you' }
     this.events.push(ev); this.outbox.push(ev)
     this.ev.emit('events', ev)
     this.flushEvents()
@@ -157,7 +169,13 @@ export class Project {
         })
         this.sortEvents(); this.ev.emit('events', null)
       })
-      .catch(e => { Records.error = 'the timeline: ' + (e.message || e); Records.ev.emit('status'); this.outbox.unshift(...batch) })
+      .catch(e => {
+        Records.error = 'the timeline: ' + (e.message || e); Records.ev.emit('status')
+        // refused (a bad event): sending it again cannot help, so it is dropped;
+        // anything else (the network, the server) is tried again
+        if (e && e.code === 'invalid_argument') { for (const x of batch) this.events.splice(this.events.indexOf(x), 1); this.ev.emit('events', null) }
+        else this.outbox.unshift(...batch)
+      })
       .finally(() => { this.sending = null; if (this.outbox.length) setTimeout(() => this.flushEvents(), 1000) })
   }
   addEvent(e) {
@@ -171,9 +189,11 @@ export class Project {
     for (const e of r.events) this.addEvent(e)
   }
   event(seq) { return this.bySeq.get(seq) || null }
-  mark({ label, note, by = 'you', thread, kind }) {
+  // A mark is on the workspace it is made in (ref): a diff since it, or a
+  // restore to it, is of that workspace.
+  mark({ label, note, by = 'you', thread, kind, ref = 'draft' }) {
     const mk = kind || (by === 'agent' ? 'milestone' : by === 'ide' ? 'auto' : 'bookmark')
-    const e = this.log({ kind: 'mark', mk, who: by, label: String(label || 'Mark').slice(0, 80), note, thread })
+    const e = this.log({ kind: 'mark', mk, who: by, ref, label: String(label || 'Mark').slice(0, 80), note, thread })
     this.ev.emit('marks')
     return e
   }

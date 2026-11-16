@@ -3,11 +3,11 @@
 //
 // Public API: SESSION (an API table).
 import { Streams } from '../../frames/streams.js';
+import { changesSince, snapshotAt } from '../../model/timeline.js';
 import { clamp, now, trunc } from '../../lib/util.js';
 import { diffText } from '../../lib/text.js';
 import { effectsLine } from '../effects.js';
 import { missing } from './files.js';
-import { since } from '../../model/timeline.js';
 
 const MARK_KINDS = ['bookmark', 'milestone', 'decision', 'question', 'checkpoint']
 const invalid = msg => Object.assign(new Error(msg), { kind: 'invalid' })
@@ -20,11 +20,11 @@ export const SESSION = {
     run: (ctx, label, o) => {
       const opts = typeof o === 'string' ? { why: o } : (o || {})
       if (opts.kind && !MARK_KINDS.includes(opts.kind)) throw invalid('mark kinds: ' + MARK_KINDS.join(', '))
-      const e = ctx.project.mark({ label, note: opts.why || opts.note, by: ctx.who, thread: ctx.thread, kind: opts.kind })
+      const e = ctx.project.mark({ label, note: opts.why || opts.note, by: ctx.who, thread: ctx.thread, kind: opts.kind, ref: ctx.ws })
       return { kind: e.mk, label: e.label }
     }
   },
-  'session.marks': { sig: '', run: ctx => ctx.project.marks().map(e => ({ seq: e.seq, label: e.label, kind: e.mk || 'bookmark', by: e.who, why: e.note, when: iso(e.at) })) },
+  'session.marks': { sig: '', doc: 'marks, each in the workspace it was made in (where: draft or a proposal)', run: ctx => ctx.project.marks().map(e => ({ seq: e.seq, label: e.label, kind: e.mk || 'bookmark', by: e.who, why: e.note, where: e.ref, when: iso(e.at) })) },
   'session.events': {
     sig: '{kind, path, since, limit}?', doc: 'timeline events, oldest first (since: a seq)',
     run: (ctx, o = {}) => ctx.project.events
@@ -32,12 +32,15 @@ export const SESSION = {
       .slice(-clamp(+o.limit || 40, 1, 300))
   },
   'session.diff': {
-    sig: 'markLabelOrSeq', doc: 'a unified diff of the workspace since then',
+    sig: 'markLabelOrSeq', doc: 'a unified diff of the workspace since then (an event or mark in this workspace)',
     run: async (ctx, at) => {
       const P = ctx.project
-      const seq = typeof at === 'number' ? at : (P.marks().reverse().find(m => m.label === at) || {}).seq
+      const marks = typeof at === 'number' ? [] : P.marks().filter(m => m.label === at).reverse()
+      const seq = typeof at === 'number' ? at : ((marks.find(m => m.ref === ctx.ws) || marks[0]) || {}).seq
       if (seq == null) throw invalid('pass an event seq or a mark label (session.marks())')
-      const ch = await since(P, seq, ctx.ws)
+      const then = snapshotAt(P, seq, ctx.ws), e = P.event(seq)
+      if (then == null) throw Object.assign(new Error(!e ? 'no event ' + seq : (e.kind === 'mark' ? 'the mark "' + e.label + '"' : 'event ' + seq) + ' is in ' + e.ref + ', and this eval works in ' + ctx.ws + ': a diff is within one workspace'), { kind: 'missing' })
+      const ch = await changesSince(P, ctx.ws, then, ctx.tx)
       return ch.map(c => c.after === null && c.entry ? '~ ' + c.path + ' (kept by hash)' : diffText(c.path, c.before ?? '', c.after ?? '')).join('\n\n') || 'no changes in ' + ctx.ws + ' since then'
     }
   },

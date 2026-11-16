@@ -92,18 +92,22 @@ function listing(files) {
   return files.map((f) => ({ path: f.path, sha256: f.sha256, size: f.size, type: f.type || '' }));
 }
 
-// The visitor's timeline: events are numbered per app and person.
+// The visitor's timeline: events are numbered per app and person. Every
+// event is on a ref and records that ref's snapshot (n) when it happened:
+// what restoring to it, or a diff since it, starts from.
+function isSnap(n) { return Number.isInteger(n) && n > 0; }
 function addEvent(ctx, app, e) {
+  if (typeof e.ref !== 'string' || !e.ref || !isSnap(e.n)) throw new Error('an event needs its ref and that ref\'s snapshot (' + e.kind + ' on ' + e.ref + ' at ' + e.n + ')');
   const row = sql.one('SELECT coalesce(max(seq), 0) + 1 AS seq FROM events WHERE app = ? AND owner = ?', app, ctx.visitor.id);
   const at = Date.now();
   const data = Object.assign({}, e.data || {});
   sql.run('INSERT INTO events (app, owner, seq, at, who, kind, thread, ref, n, data) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)',
     app, ctx.visitor.id, row.seq, at, text(e.who || 'you', 20), text(e.kind, 30), e.thread ? text(e.thread, 80) : null,
-    e.ref ? text(e.ref, 80) : null, typeof e.n === 'number' ? e.n : null, JSON.stringify(data));
-  return eventOut({ seq: row.seq, at, who: e.who || 'you', kind: e.kind, thread: e.thread || null, ref: e.ref || null, n: typeof e.n === 'number' ? e.n : null, data: JSON.stringify(data) });
+    text(e.ref, 80), e.n, JSON.stringify(data));
+  return eventOut({ seq: row.seq, at, who: e.who || 'you', kind: e.kind, thread: e.thread || null, ref: e.ref, n: e.n, data: JSON.stringify(data) });
 }
 function eventOut(r) {
-  return Object.assign(json(r.data) || {}, { seq: r.seq, at: r.at, who: r.who, kind: r.kind, thread: r.thread || null, ref: r.ref || null, n: r.n == null ? null : r.n });
+  return Object.assign(json(r.data) || {}, { seq: r.seq, at: r.at, who: r.who, kind: r.kind, thread: r.thread || null, ref: r.ref, n: r.n });
 }
 function ownThread(ctx, id) {
   const t = sql.one('SELECT id, app, owner FROM threads WHERE id = ?', text(id, 80));
@@ -589,20 +593,26 @@ defineActor({
       },
     },
     // Add events to the visitor's timeline ([{kind, who, thread, ref, n,
-    // …data}]); the answer has them numbered (an 'outside' change already
-    // on the timeline answers with the event there).
+    // …data}], each on a ref with that ref's snapshot); the answer has them
+    // numbered (an 'outside' change already on the timeline answers with the
+    // event there). A batch with a bad event is refused whole, before any is
+    // written: retrying it cannot help.
     logEvents: {
       requires: 'view',
       async run(ctx, { app, events }) {
         storeId(ctx, app);
-        if (!Array.isArray(events)) ctx.fail('invalid_argument', 'events is a list');
-        return events.slice(0, 200).map((e) => {
-          const { kind, who, thread, ref, n } = e || {};
-          if (typeof kind !== 'string' || !kind || kind === 'commit') ctx.fail('invalid_argument', 'an event has a kind (commits are logged by commit)');
+        if (!Array.isArray(events) || events.length > 200) ctx.fail('invalid_argument', 'events is a list of at most 200');
+        events.forEach((e, i) => {
+          const { kind, ref, n } = e || {};
+          if (typeof kind !== 'string' || !kind || kind === 'commit') ctx.fail('invalid_argument', 'events[' + i + '] has no kind, or is a commit (commits are logged by commit)');
+          if (typeof ref !== 'string' || !ref || !isSnap(n)) ctx.fail('invalid_argument', 'events[' + i + '] (' + kind + ') needs its ref and that ref\'s snapshot n');
+        });
+        return events.map((e) => {
+          const { kind, who, thread, ref, n } = e;
           // A change seen from outside may already be on this timeline: the
           // person's own commit from another tab, or another tab's report of
           // the same push. The answer is then the event already there.
-          if (kind === 'outside' && typeof ref === 'string' && typeof n === 'number') {
+          if (kind === 'outside') {
             const known = sql.one("SELECT * FROM events WHERE app = ? AND owner = ? AND ref = ? AND n = ? AND kind IN ('commit', 'outside') ORDER BY seq LIMIT 1", app, ctx.visitor.id, ref, n);
             if (known) return eventOut(known);
           }

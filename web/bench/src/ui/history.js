@@ -11,10 +11,10 @@
 import { App } from './app.js';
 import { Dock } from './dock.js';
 import { Snaps } from '../frames/layout.js';
+import { changesSince, restoreTo, snapshotAt, versions, why } from '../model/timeline.js';
 import { clear, confirmBox, h, modal, put, svgEl, toast } from '../lib/dom.js';
 import { debounce, fmtAgo, fmtTime, plural } from '../lib/util.js';
 import { diffView } from '../lib/text.js';
-import { restore, since, versions, why } from '../model/timeline.js';
 import { snapStrip } from './snaps.js';
 
 // mark kinds: who makes them and how they look
@@ -112,17 +112,19 @@ export const TIMELINE = {
         const acts = h('div', { style: { display: 'flex', gap: '6px', flexWrap: 'wrap' } })
         if (e.kind === 'commit' && e.paths && e.paths.length === 1 && open) acts.appendChild(h('button.btn.sm.primary', { title: 'Open the file as it was right after this commit', on: { click: () => { if (ref !== App.ws) App.setWs(ref); App.viewVersion(e.paths[0], e.seq) } } }, 'View this version'))
         if (e.thread && p.threads.get(e.thread)) acts.appendChild(h('button.btn.sm', { on: { click: () => App.showThread(e.thread) } }, 'Open thread'))
-        if (e.seq != null) {
-          acts.appendChild(h('button.btn.sm', { on: { click: () => showSince(e) } }, 'Diff since'))
+        // the event's workspace, as it was then: diff since it, restore to it
+        const then = e.seq != null && open ? snapshotAt(p, e.seq, ref) : null
+        if (then != null) {
+          const where = ref === 'draft' ? 'draft' : 'the proposal'
+          acts.appendChild(h('button.btn.sm', { on: { click: () => showSince(e, ref, then) } }, 'Diff since'))
           acts.appendChild(h('button.btn.sm.danger', {
             on: {
               click: async () => {
-                let n
-                try { n = (await since(p, e.seq, 'draft')).length } catch (err) { return toast(err.message, 6000) }
-                if (!n) return toast('Draft is already as it was then')
-                if (!await confirmBox('Restore draft to this point?', plural(n, 'file') + ' go back to how they were just after this event, as one commit. That is on the timeline too, so you can return.', 'Restore')) return
-                const r = await restore(p, e.seq, 'you')
-                toast(r.status === 'committed' ? 'Restored ' + plural(r.paths.length, 'file') + ' (draft ' + r.n + ')' : 'Not restored: ' + (r.status === 'conflict' ? 'draft changed meanwhile' : r.error))
+                const n = (await changesSince(p, ref, then)).length
+                if (!n) return toast(where[0].toUpperCase() + where.slice(1) + ' is already as it was then')
+                if (!await confirmBox('Restore ' + where + ' to this point?', plural(n, 'file') + ' go back to how they were at this event (snapshot ' + then + '), as one commit. That is on the timeline too, so you can return.', 'Restore')) return
+                const r = await restoreTo(p, ref, then, { who: 'you', label: e.label || e.note || 'event ' + e.seq })
+                toast(r.status === 'committed' ? 'Restored ' + plural(r.paths.length, 'file') + ' (' + ref + ' ' + r.n + ')' : 'Not restored: ' + (r.status === 'conflict' ? ref + ' changed meanwhile' : r.error))
               }
             }
           }, 'Restore'))
@@ -151,13 +153,11 @@ export const TIMELINE = {
       }).catch(err => { clear(box).appendChild(h('p.note', 'Could not read the change: ' + err.message)) })
       return box
     }
-    async function showSince(e) {
-      const p = P()
-      let ch
-      try { ch = await since(p, e.seq, 'draft') } catch (err) { return toast(err.message, 6000) }
+    async function showSince(e, ref, then) {
+      const ch = await changesSince(P(), ref, then), where = ref === 'draft' ? 'draft' : 'the proposal'
       modal({
-        title: 'Draft since ' + fmtTime(e.at) + ' · ' + label(e).slice(0, 40), wide: true, actions: [{ label: 'Close' }],
-        body: ch.length ? ch.map(c => h('div', h('b.mono', c.path), ' ', h('span.note', c.before === null ? 'new' : !c.entry ? 'deleted' : ''), diffView(c.before ?? '', c.after ?? ''))) : h('p', 'No changes in draft since then.')
+        title: (ref === 'draft' ? 'Draft' : 'Proposal') + ' since ' + fmtTime(e.at) + ' · ' + label(e).slice(0, 40), wide: true, actions: [{ label: 'Close' }],
+        body: ch.length ? ch.map(c => h('div', h('b.mono', c.path), ' ', h('span.note', c.before === null ? 'new' : !c.entry ? 'deleted' : ''), diffView(c.before ?? '', c.after ?? ''))) : h('p', 'No changes in ' + where + ' since then.')
       })
     }
     function paint() { paintBar(); paintLanes(); paintStory(); paintSide() }

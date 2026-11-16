@@ -7,36 +7,32 @@
 // file is its text in a snapshot, read through the Draft (by hash, cached).
 // Every function here takes the project; those that read snapshots are async.
 //
-// Public API: stampEvent, snapshotAt, versions, blame, why, since, restore.
+// Public API: stampEvent, snapshotAt, versions, blame, why, changesSince,
+// restoreTo.
 import { diffLines } from '../lib/text.js';
 
 // What an event records when it is logged: its ref (draft unless it names
-// one) and that ref's snapshot as the page sees it (headOf(ref)), unless it
-// says which. Restoring to it, or a diff since it, starts from there, so
-// nothing has to be inferred from earlier events, which may not have seen
-// every move of the ref (the bench closed, another tab, a push).
+// one) and that ref's snapshot as the page knows it (headOf(ref)), unless it
+// says which. A restore to it, or a diff since it, starts there: nothing is
+// inferred from other events, which may not have seen every move of the
+// ref (the bench closed, another tab, a push). n is null when headOf does
+// not know the ref; the project refuses to log such an event.
 export function stampEvent(e, headOf) {
   const ref = e.ref || 'draft'
-  let n = e.n
-  if (n == null) { try { n = headOf(ref) } catch (err) { n = null } }
-  return { ...e, ref, n: n ?? null }
+  return { ...e, ref, n: e.n ?? headOf(ref) ?? null }
 }
 
-// The snapshot of a ref just after event seq. An event on the ref records
-// it (model/project.js log). For an event on another ref: that of the
-// latest event on this ref before it. null: the timeline does not know,
-// which is not the empty tree.
+// The snapshot of ref that event seq recorded; null when the event is not on
+// that ref (or unknown). Each event belongs to one workspace.
 export function snapshotAt(P, seq, ref = 'draft') {
-  let n = null
-  for (const e of P.events) {
-    if (e.seq == null || e.seq > seq) break
-    if (e.n != null && e.ref === ref) n = e.n
-  }
-  return n
+  const e = P.event(seq)
+  return e && e.ref === ref && isSnap(e.n) ? e.n : null
 }
-function knownAt(P, seq, ref) {
-  const n = snapshotAt(P, seq, ref)
-  if (n == null) throw Object.assign(new Error('the timeline does not know ' + ref + '\'s snapshot at event ' + seq + ': nothing on ' + ref + ' was recorded by then'), { kind: 'missing' })
+// A snapshot number: what restoreTo and changesSince take. 0 (a ref that
+// does not exist, the empty tree) and null (unknown) are not snapshots.
+const isSnap = n => Number.isInteger(n) && n > 0
+function checkSnap(n) {
+  if (!isSnap(n)) throw Object.assign(new Error('a snapshot number is a positive integer (got ' + JSON.stringify(n) + ')'), { kind: 'invalid' })
   return n
 }
 
@@ -109,11 +105,13 @@ export function why(P, seq) {
   return out
 }
 
-// What changed in the person's view of a ref since event seq:
-// [{path, before, after, entry}] (texts null for files kept by hash; entry
-// is the file now, null when removed).
-export async function since(P, seq, ref = 'draft') {
-  const d = P.draftOf(ref), view = P.view(ref), then = knownAt(P, seq, ref)
+// What changed in a view of a ref since its snapshot then: [{path, before,
+// after, entry}] (texts null for files kept by hash; entry is the file now,
+// null when removed). The view is the person's (P.view: with their edits)
+// unless given: an eval passes its transaction, so it sees its own writes.
+export async function changesSince(P, ref, then, view = P.view(ref)) {
+  checkSnap(then)
+  const d = P.draftOf(ref)
   const old = await d.listingOf(then), out = []
   for (const path of new Set([...old.keys(), ...view.list()])) {
     const a = old.get(path), b = view.entry(path)
@@ -124,13 +122,13 @@ export async function since(P, seq, ref = 'draft') {
   return out.sort((x, y) => x.path.localeCompare(y.path))
 }
 
-// Put a ref back as it was just after event seq, as one commit of the
-// person's (or the agent's): {status, …} as Tx.commit answers. Throws (kind
-// missing) when the timeline does not know that state.
-export async function restore(P, seq, who = 'you') {
-  const ref = 'draft', then = knownAt(P, seq, ref), d = P.draftOf(ref)
+// Put a ref back as it was at its snapshot then, as one commit of the
+// person's (or the agent's): {status, …} as Tx.commit answers. The caller
+// names the state (an event's n, from snapshotAt); nothing defaults.
+export async function restoreTo(P, ref, then, { who = 'you', label = 'snapshot ' + then } = {}) {
+  checkSnap(then)
+  const d = P.draftOf(ref)
   await d.settle()
-  const e = P.event(seq), label = e ? (e.label || e.note || 'event ' + seq) : 'the start'
   const tx = d.begin({ label: 'restore', event: { who, note: 'restored to ' + label } })
   for (const path of new Set([...(await d.listingOf(then)).keys(), ...d.list()])) {
     const a = (await d.listingOf(then)).get(path), b = d.entry(path)

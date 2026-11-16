@@ -43,8 +43,8 @@ CREATE TABLE events (
   who TEXT NOT NULL,           -- you | agent | push | ide
   kind TEXT NOT NULL,          -- commit | msg | turn | mark | delegate | publish | accept | reject | outside | …
   thread TEXT,
-  ref TEXT,
-  n INTEGER,
+  ref TEXT NOT NULL,           -- the workspace the event is on: draft | proposal/<id> | main
+  n INTEGER NOT NULL CHECK (n > 0), -- that ref's snapshot when the event happened (made or seen)
   data TEXT NOT NULL,          -- JSON: paths, note, label, and what the kind adds
   PRIMARY KEY (app, owner, seq)
 );

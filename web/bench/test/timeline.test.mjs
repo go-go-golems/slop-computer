@@ -5,7 +5,7 @@
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
 import { Draft } from '../src/core/draft.js'
-import { blame, restore, since, stampEvent, versions } from '../src/model/timeline.js'
+import { blame, changesSince, restoreTo, snapshotAt, stampEvent, versions } from '../src/model/timeline.js'
 import { fakeActor, sha } from './fake-actor.mjs'
 
 // An app opened in the bench for the first time: three files at snapshot 1,
@@ -19,7 +19,7 @@ async function opened() {
     app: 'x', events, threads: new Map(),
     draftOf: () => d, view: () => d.edits || d,
     event: seq => events.find(e => e.seq === seq) || null,
-    log(e) { const ev = { ...stampEvent(e, () => d.head), seq: events.length + 1, at: Date.now(), who: e.who || 'you' }; events.push(ev); return ev },
+    log(e) { const ev = { ...stampEvent(e, ref => ref === 'draft' ? d.head : null), seq: events.length + 1, at: Date.now(), who: e.who || 'you' }; events.push(ev); return ev },
   }
   const commit = async (label, fn) => {
     const tx = d.begin(); fn(tx)
@@ -44,19 +44,35 @@ test('restoring to that bookmark puts the app back, it does not delete it', asyn
   const before = files(d)
   const m = P.log({ kind: 'mark', label: 'before anything' })
   await commit('edit', tx => { tx.write('index.html', '<h1>Changed</h1>\n'); tx.write('new.txt', 'new\n'); tx.remove('styles.css') })
-  assert.deepEqual((await since(P, m.seq)).map(c => c.path), ['index.html', 'new.txt', 'styles.css'])
-  const r = await restore(P, m.seq)
+  const then = snapshotAt(P, m.seq, 'draft')
+  assert.equal(then, m.n)
+  assert.deepEqual((await changesSince(P, 'draft', then)).map(c => c.path), ['index.html', 'new.txt', 'styles.css'])
+  const r = await restoreTo(P, 'draft', then, { label: m.label })
   assert.equal(r.status, 'committed')
   assert.deepEqual(files(d), before)
 })
 
-test('a state the timeline never recorded is refused, not taken for the empty tree', async () => {
+test('an event belongs to one workspace: no snapshot of another, nothing inferred', async () => {
+  const { P } = await opened()
+  const e = P.log({ kind: 'eval', ref: 'proposal/p1', n: 7 })
+  assert.equal(snapshotAt(P, e.seq, 'proposal/p1'), 7)
+  assert.equal(snapshotAt(P, e.seq, 'draft'), null)
+  assert.equal(snapshotAt(P, 99, 'draft'), null, 'no such event')
+})
+
+test('a ref the project does not know cannot be stamped', () => {
+  assert.deepEqual(stampEvent({ kind: 'mark' }, ref => ref === 'draft' ? 4 : null), { kind: 'mark', ref: 'draft', n: 4 })
+  assert.equal(stampEvent({ kind: 'eval', ref: 'proposal/gone' }, ref => ref === 'draft' ? 4 : null).n, null)
+  assert.equal(stampEvent({ kind: 'outside', ref: 'draft', n: 9 }, () => 4).n, 9, 'an event that says which keeps it')
+})
+
+test('restore and diff take a snapshot: 0 (no ref, the empty tree) and null (unknown) are not one', async () => {
   const { d, P } = await opened()
-  // an event from before events recorded snapshots: nothing on draft is known
-  P.events.push({ seq: 1, kind: 'msg', ref: 'draft', n: null, at: Date.now(), who: 'you' })
   const head = d.head
-  await assert.rejects(restore(P, 1), err => err.kind === 'missing')
-  await assert.rejects(since(P, 1), err => err.kind === 'missing')
+  for (const bad of [0, null, undefined, -1, 1.5, '2']) {
+    await assert.rejects(restoreTo(P, 'draft', bad), err => err.kind === 'invalid')
+    await assert.rejects(changesSince(P, 'draft', bad), err => err.kind === 'invalid')
+  }
   assert.equal(d.head, head, 'nothing was committed')
   assert.equal(d.list().length, 3)
 })
