@@ -401,3 +401,109 @@ I applied the review notes from Step 4, plus one inconsistency found on the full
 ### Technical details
 
 - Commits in this ticket: `336149d`, `33b814c`, `1f2bd13`, `a0506ed`, `989d468`, `9484a46`, `6b70cd2`, and this step's.
+
+## Step 6: Server pieces C.3, C.2 and C.4 (ref.move ifAt, push activation, workshop dev instances)
+
+The user asked me to work on the ticket. Committing Sitebench's source to this public repository is still the user's decision (open question 1), so I started with the server work the guide's plan needs, which does not depend on it. Three of Appendix C's additions are built and tested on branch `task/slop3-022-dev-loop`, cut from origin/main `0dfce36` after #45 merged:
+
+- `6c688e7`: `ref.move --ifAt`;
+- `3835fd8`: `files.push --activate`;
+- `d591503`: the `workshop` module's dev-instance functions with a guarded `drop`.
+
+### Prompt Context
+
+**User prompts (verbatim):**
+
+- "merge #45, let's close all gitops since we are working on it. clean worktrees."
+- "Then work on the ticket, commit at appropriate intervals and keep a detailed diary as you work (using the diary format from the skill)."
+
+**Assistant interpretation:** After the SLOP3-021 housekeeping, implement SLOP3-022's plan. Commit at feature boundaries, and record each step here.
+
+**Inferred user intent:** Turn the design into working server pieces, in the order that unblocks the bench.
+
+### What I did
+
+- **C.3, `ref.move {…, ifAt?}`.**
+  - Added `Turn.RefAt(ref)` (`pkg/store/files.go`), which returns the current snapshot inside the turn, or 0 if the ref is missing.
+  - In the `ref.move` verb (`pkg/commands/files.go`), with `ifAt` set and different from the current snapshot, the move fails with `conflict: main points at 7, not 5: it moved since you looked`.
+  - `ifAt: 0` means "only if the ref does not exist".
+  - The result gains `from`, the previous snapshot, which is what a rollback moves back to.
+- **C.2, `files.push {…, activate?: [store]}`.**
+  - After the snapshot, each listed store is opened at `view` (the level `app.status` needs) and brought up through `statusOf`.
+  - The result gains `activated: [{store, app, ref, n, broken}]`, or `{store, error}` for a store the caller cannot see.
+  - `statusOf` (`pkg/commands/mounts.go`) is `app.status`'s body, moved out so both share it.
+  - The files group now gets `filesEnv{kernelEnv, A}`, the actor manager for post-activation build failures. This follows `env.go`'s rule that a group's environment lists what it can reach.
+- **C.4, the `workshop` module** (`pkg/doors/actors/modworkshop.go`):
+  - one-to-one functions `newStore`, `logs`, `restart`, `doc`, `docs`, `sql`, `importDocs` and `importTable`;
+  - `workshopModule(a)` with a custom `drop(id)`. It reads `app.status` as the visitor and refuses unless the store runs *another* store's app *and* follows a ref other than `main`. Only then does it call `store.rm`.
+  - `modules.go` loads the module through `workshopModule`. Its doc line now mentions dev instances.
+- **Tests** (`pkg/host/devloop_test.go`, new):
+  - `TestRefMoveIfAt`: publish with the right `ifAt`; a stale `ifAt` gets `conflict` and main does not move; `ifAt 0` creates once only; a move without `ifAt` reports `from`.
+  - `TestPushActivates`: a good migration is reported as `{ref: draft, n, broken: ""}` and the tables appear. A broken `sql/003_bad.sql` is reported as broken with its name, the instance stays on the last good `n`, and its tables are unchanged. An unknown store gives an `error` entry.
+  - `TestWorkshopDevInstances`, through a trusted tool app:
+    - `newStore` and `follow draft`;
+    - `importTable` and `importDocs`, checked with `sql`, `doc` and `docs`;
+    - `push` with `activate`;
+    - `publish` with a stale `ifAt` (`conflict`), then the right one (`from` = main);
+    - `drop` of the dev instance, after which `app.status` answers `not_found`;
+    - `drop` of a production instance and of the app store, both `permission_denied`.
+
+### Why
+
+- **`drop` is guarded** because platform admins hold `admin` on every store (`pkg/access/check.go:187-189`). A bug in a tool acting as an admin could otherwise delete any store. "Runs unpublished code" (`app_ref != main`) describes exactly the instances a dev loop makes.
+- **`files.push --activate`** spares tools a second call. Its exact purpose is the bench's effects line ("actor ok" or "broken: …") right after a sync.
+- **`ifAt`** closes the publish race named in the guide (§5.8). The Workshop's `publish` had the same gap.
+
+### What worked
+
+- All three new tests passed on their first run. I checked that `h.fail` really compares the error code (`pkg/host/harness_test.go:169-177`), so the refusals are tested.
+- The full suite `GOWORK=off go test -buildvcs=false -tags sqlite_fts5 ./... -count=1` passed (`pkg/host` in 18.6 s), and `golangci-lint run --build-tags sqlite_fts5` reported 0 issues.
+
+### What didn't work
+
+- **First build after C.2:**
+
+  ```
+  pkg/commands/mounts.go:350:52: undefined: actor
+  pkg/commands/mounts.go:350:71: undefined: store
+  pkg/commands/files.go:175:24: cannot use e (variable of struct type filesEnv) as kernelEnv value in argument to putBlobs
+  pkg/commands/files.go:185:22: cannot use e (variable of struct type filesEnv) as kernelEnv value in argument to push
+  ```
+
+  Fixed by adding the imports and passing `e.kernelEnv` at the two call sites.
+- **First build after C.4:** "no required module provides package github.com/go-go-golems/slop-computer/pkg/web". The package is `pkg/doors/web`.
+
+### What I learned
+
+- `modArgs` already turns a trailing plain object into options (`pkg/doors/actors/modules.go:76-100`). So `push(store, files, {activate})` and `publish(store, n, {ifAt})` needed no new plumbing.
+- `pkg/actor` now reports `[no tests to run]` under `go test`, because after #45 its only test file holds benchmarks. That is expected.
+
+### What was tricky
+
+- **`app.status` activates.** It calls `Running`, so reading a status brings the store up. `drop` uses `app.status` for its guard, which can activate an instance just before deleting it. That is harmless, but worth knowing.
+
+### Second pair of eyes
+
+- **The `drop` guard** relies on `app_ref` as an instance's own statement of what it runs. A production instance someone moved to `draft` by hand would become droppable. Is that acceptable, or should drop also require that the caller created the store?
+- **`files.push --activate`** opens each listed store at `view`, the same as `app.status`, which also activates. A viewer could thus trigger activation of a store they can view. That was already true through `app.status`.
+
+### Future
+
+- C.1, embedded views: the big piece. Then C.5, `slop dev`.
+
+### Code review
+
+- `pkg/commands/files.go`: `ref.move`, and `files.push`'s activation loop.
+- `pkg/commands/mounts.go`: `statusOf`.
+- `pkg/doors/actors/modworkshop.go`: `workshopModule` and `drop`.
+- `pkg/host/devloop_test.go`.
+
+### Technical details
+
+```sh
+GOWORK=off go test -buildvcs=false -tags sqlite_fts5 ./pkg/host -run 'TestRefMoveIfAt|TestPushActivates|TestWorkshopDevInstances' -count=1
+GOWORK=off go test -buildvcs=false -tags sqlite_fts5 ./... -count=1
+GOWORK=off golangci-lint run --build-tags sqlite_fts5
+```
+
+- In the GitOps repository, CI's bump for `0dfce36` (#436) was closed by the watcher, so no slop-yolo PR is open.
