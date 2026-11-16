@@ -105,13 +105,19 @@ func writeJSON(t *testing.T, path string, v any) {
 // setup returns a backend whose lunaroute provider is the scripted server.
 func setup(t *testing.T, tiers map[string]string, script ...func(w http.ResponseWriter)) (*Backend, *provider) {
 	t.Helper()
+	return setupAPI(t, "openai-completions", tiers, script...)
+}
+
+// setupAPI is setup with the provider's wire API chosen (Pi's "api" field).
+func setupAPI(t *testing.T, api string, tiers map[string]string, script ...func(w http.ResponseWriter)) (*Backend, *provider) {
+	t.Helper()
 	p := &provider{t: t, script: script}
 	srv := httptest.NewServer(p)
 	t.Cleanup(srv.Close)
 	dir := t.TempDir()
 	writeJSON(t, filepath.Join(dir, "settings.json"), map[string]any{"defaultProvider": "lunaroute", "defaultModel": "big", "defaultThinkingLevel": "medium", "enabledModels": []string{"lunaroute/big"}})
 	writeJSON(t, filepath.Join(dir, "models.json"), map[string]any{"providers": map[string]any{"lunaroute": map[string]any{
-		"baseUrl": srv.URL + "/v1", "api": "openai-completions", "apiKey": "test-key",
+		"baseUrl": srv.URL + "/v1", "api": api, "apiKey": "test-key",
 		"models": []any{
 			map[string]any{"id": "big", "reasoning": true, "input": []string{"text"}, "maxTokens": 100000},
 			map[string]any{"id": "small", "reasoning": true, "input": []string{"text", "image"}, "maxTokens": 1000},

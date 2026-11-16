@@ -153,6 +153,13 @@ func (c *call) run(ctx context.Context) error {
 		if err := engine.KeyInferenceConfig.Set(&t.Data, engine.InferenceConfig{MaxResponseTokens: &perRound}); err != nil {
 			return err
 		}
+		// Say whether this round offers tools rather than rely on each
+		// engine's default for a turn without a tool config: Geppetto's
+		// Responses engine dropped them silently before v0.14.1, and the
+		// model then wrote its calls as text.
+		if err := engine.KeyToolConfig.Set(&t.Data, engine.ToolConfig{Enabled: offersTools}); err != nil {
+			return err
+		}
 		eng, err := res.Engine()
 		if err != nil {
 			return err
