@@ -1061,3 +1061,85 @@ The canvas now shows the real app. For an app project, the frames on its entry p
 GOWORK=off go test -buildvcs=false -tags sqlite_fts5 ./pkg/host -run 'TestBench|TestEmbeddedViews|TestBuildOutputsFresh' -count=1
 # browser: local server built from this branch; /bench mounted; open jot, then an eval: files.replace('index.html', …)
 ```
+
+## Step 13: Bench Phase 3, the live backend loop, and a kernel cache bug
+
+The bench now reports what the server did with each edit: which draft, whether the dev instance came up, and the actor's warnings. It also picks up pushes made outside it, and can reset a dev instance whose migrations no longer fit. The reset uncovered a kernel bug that cached a deleted store's failures by id. Commit `fd2bd78`.
+
+### Prompt Context
+
+**User prompt (verbatim):** see Step 10.
+
+**Assistant interpretation:** Guide Phase 3.
+
+**Inferred user intent:** The backend half of the live loop: migrations and actors, not just pages.
+
+### What I did
+
+- **Effects (`06-agent.js`).** An eval that wrote an app project's files calls `Sync.flush()`, which pushes now and waits. Each embedded frame then waits with `waitVersion(n)` until it shows the activated version, and only then does `frameEffects` measure. The effects gain `draft`, `actor {on, broken}`, `push {error}` and `actorLogs` (warnings and errors since the eval began), and `effectsLine` prints them.
+- **Outside pushes (`Outside`, `03b-slop.js`).**
+  - A poll every 3 s calls `head {app, base}`. When `draft` moved, `merge` takes files changed there and not here, logged as `who: 'push'` with "pushed outside the bench (draft n)", and keeps local edits.
+  - `sync` sends `base`. The actor answers `{conflict, n, files}` instead of pushing when `draft` moved, and `Sync.run` merges and pushes again.
+  - `head` also returns the dev instance's `{n, broken}`.
+- **The dev instance's log** goes to the Console, as frame "actor".
+- **Health:** a failed activation counts in the health pill, and its menu offers "Reset dev data". The project menu does too. `resetDev` uses workshop's guarded `drop`, and the next frame makes a fresh instance.
+- **The kernel fix.** `forgetStore(id)` drops `failed`, `m` and `e` cache entries prefixed `id@`, and `DeleteStore` calls it.
+- **`TestBenchOutsidePushesAndReset`:**
+  - `head` at `base` returns no files;
+  - after an outside push, `head` returns files and `sync` from the old `base` is a conflict that pushes nothing;
+  - `logs` contains the setup's `console.warn`;
+  - `resetDev` drops only the instance;
+  - after a changed applied migration and a reset, the fresh instance is on `draft` and not broken. Without the kernel fix this fails with "migration sql/001.sql changed after it was applied".
+- **Browser check:**
+  - Effects line: "index.html +1 −1 · draft 7 · dev ok · layout changed on index.html".
+  - `slop push --ref draft` from a terminal: the frames showed "version SEVEN, from a terminal". The project's file had it, and the timeline had `[write, push, index.html, "pushed outside the bench (draft 8)"]`.
+  - A changed migration gave "draft 10 · dev instance stays on 9: activation of jot@10 failed: migration sql/001_notes.sql changed after it was applied; add a new migration instead", and the header showed "1 issue … dev broken".
+  - Reset, after the fix: "0 issues … draft 11 dev ok".
+
+### Why
+
+- **Waiting for the frames before measuring:** otherwise the layout diff compares the old page with itself, and the effects say nothing.
+- **A merge, file by file:** the guide's collaboration limit (open question 4). It is safe for the common cases of a terminal and a bench, or two people on different files.
+
+### What worked
+
+- The server already had everything (activation results, logs, guarded drop). Phase 3 is page and actor code plus the one kernel fix.
+
+### What didn't work
+
+- **"dev on 7" after an outside push.** The CLI push activated nothing through the bench, so the bench's `act` was stale. `head` now carries the dev status.
+- **"dev on 9" instead of "dev broken", and "0 issues".** `Outside.logs` copied `app.logs`' `broken`, which is the actor's crash state, empty here, over the activation failure. Logs may now set it but never clear it.
+- **Reset left the instance broken, on main** ("version ONE" in the frames, `app status`: `"n": 1`, the same "changed after it was applied"). `Running` caches failed activations by `id@n` (`pkg/kernel/apps.go:113-125`), and nothing cleared them on delete. That is the kernel fix.
+- **Playwright's `getByRole('button', { name: 'Reset' })` matched "Reset scope" too.** It needed `exact: true`.
+- **In `Sync.run`, a `return` in the conflict branch skipped the retry,** which sits after `try/finally`. I found it by reading before running; the branch now falls through.
+
+### What I learned
+
+- `app.logs`' `broken` and `app.status`' `broken` are different things: an actor in a crash loop versus a version that failed to activate.
+
+### What was tricky
+
+- **The manifest cache had the same flaw for app stores:** a store made again numbers its snapshots from 1, so `id@1` could return a deleted store's manifest. `forgetStore` covers it, but I have no test for that case.
+
+### Second pair of eyes
+
+- **Two pollers per open app** (`head` and `logs` every 3 s) per bench tab. That is fine for a few developers. A `log.watch` stream (guide, Appendix C) would replace them.
+
+### Future
+
+- Open the PR for Phases 0–3.
+- Phase 4: the agent's API for slop apps.
+
+### Code review
+
+- `runEval` in `06-agent.js`;
+- `Outside` and `Sync.flush` in `03b-slop.js`;
+- `sync`/`head`/`logs`/`resetDev` in `apps/bench/actor.js`;
+- `forgetStore` in `pkg/kernel/apps.go`.
+
+### Technical details
+
+```sh
+GOWORK=off go test -buildvcs=false -tags sqlite_fts5 ./pkg/host -run TestBenchOutsidePushesAndReset -count=1
+# without k.forgetStore(id) in DeleteStore: bench_test.go:254: the fresh dev instance = map[… broken:migration sql/001.sql changed after it was applied …]
+```

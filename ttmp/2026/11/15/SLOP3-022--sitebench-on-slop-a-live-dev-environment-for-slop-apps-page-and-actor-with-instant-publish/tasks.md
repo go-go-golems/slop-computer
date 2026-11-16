@@ -17,7 +17,7 @@
 - [x] Commit Sitebench's source (user approved): web/bench → apps/bench, stamped build
 - [x] Bench Phase 1: projects are app stores (actor apps/open/read/sync/create; Sync to draft)
 - [x] Bench Phase 2 (page): canvas frames are embedded dev views; Sitebench's PROBE served by slop
-- [ ] Bench Phase 3: actor status and logs in effects and Console; reload on outside pushes; reset dev data
+- [x] Bench Phase 3: actor status and logs in effects and Console; outside pushes merged; reset dev data (kernel: forget a deleted store's caches)
 - [ ] Bench Phase 4: the agent's API for slop apps (app.* for data), fixtures and scenarios on instances
 - [ ] Bench Phase 5: publish from the bench (preflight, approve, rollout, rollback)
 - [ ] Bench Phase 6: proposals on refs, history on snapshots
