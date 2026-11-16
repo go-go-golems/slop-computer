@@ -799,3 +799,89 @@ Codex's review of #51 found two P1 bugs. Both are real, and both are fixed with 
 - Start with `apps/bench/actor.js` `changeList`, then `web/bench/src/model/timeline.js` (`stampEvent`, `knownAt`, `versions`).
 - Then `web/bench/test/fake-actor.mjs` and `test/timeline.test.mjs`.
 - Run `cd web/bench && npm test`, then `go test ./pkg/host -run TestBench`.
+
+## Step 11: Making the second bug impossible to write — one workspace per event, restore takes a snapshot
+
+Step 10 fixed the restore bug. This step changes the shape so that it can't come back. The person asked whether better types or API shape would have prevented the review's bugs. The answer was:
+
+- The first bug is a type error, given one change type shared by every hop.
+- The second needs a different shape: `?? 0` on `number | null` is well-typed.
+
+The person said "ye" to doing the shape change in #51 now and recording the rest in SLOP3-024. The browser check found two more problems in `session.diff`; both are fixed.
+
+### Prompt Context
+
+**User prompts (verbatim):** "are these errors that coudl be caught / made impossible to express with better types or API shape?", then "ye" (to: do step 1 in #51 now; add steps 2 and 3 to SLOP3-024's notes).
+
+**Assistant interpretation:** In #51, events must carry their ref and snapshot, enforced in SQL and in the code that writes them. Restore and diff take a snapshot number, not an event to infer one from. The type and API ideas for later go to SLOP3-024's notes on main.
+
+**Inferred user intent:** The core should make the wrong thing hard to write, not rely on each caller remembering.
+
+**Commits:**
+- 9662ee1 — "Bench: every event is on one ref with its snapshot; restore and diff take a snapshot"
+- 94744e9 (on main) — "SLOP3-024: notes on types and API shape from the review of #51; tasks"
+
+### What I did
+- **`001_bench.sql`:** `events.ref TEXT NOT NULL`, `events.n INTEGER NOT NULL CHECK (n > 0)`. The migration hasn't shipped, so it changed in place.
+- **Actor:**
+  - `addEvent` throws on an event without a ref or snapshot.
+  - `logEvents` checks the whole batch before writing any of it, and refuses more than 200 events (it used to cut them off silently).
+- **Page:**
+  - `Project.headOf(ref)` is a Draft's head, or for a proposal not opened yet, its last known snapshot or base.
+  - `log` throws for an event it cannot stamp.
+  - The outbox drops a batch the server refused with `invalid_argument` and retries only other errors. Before, any error was retried forever.
+- **`model/timeline.js`:**
+  - `snapshotAt(P, seq, ref)` is the event's own `n` when the event is on that ref, and `null` otherwise. Nothing is inferred from other events.
+  - `restoreTo(P, ref, n, {who, label})` and `changesSince(P, ref, n, view?)` take a snapshot number; `checkSnap` refuses 0, `null` and non-integers as `invalid`.
+  - `since`, `restore` and `knownAt` are gone.
+- **Marks belong to a workspace:**
+  - `P.mark({…, ref})`; the shell's + Mark passes `App.ws`, and `session.mark` passes `ctx.ws`.
+  - `session.marks` reports `where`.
+  - The Timeline offers Diff since and Restore on the event's own workspace, so a proposal can be restored to one of its marks.
+- **`session.diff`:**
+  - It now diffs the eval's transaction (`ctx.tx`), so it sees the eval's own writes.
+  - A mark in another workspace is named as such.
+- **SLOP3-024 notes §7**, with four tasks:
+  1. declared argument types for actor actions;
+  2. TypeScript declarations for verb-backed modules, generated from the Go input structs;
+  3. a tagged change type and a snapshot type distinct from "ref absent" (`files.commit`'s `base: 0`);
+  4. a server-side "set the tree to snapshot n".
+
+### Why
+- **No inference at all, rather than better inference:** with each event on one workspace, "the state at this event" is a field, not a search. The remaining cross-workspace question ("draft's state at a proposal event") had no clear meaning anyway. The Timeline offered "Restore draft" on proposal events, which restored something the event wasn't about.
+- **Refusing at the page and at the server:** the page refuses before the event is shown; the server refuses whatever reaches it anyway; SQL refuses whatever gets past both. Each layer fails loudly instead of storing `null`.
+- **Dropping a refused batch:** an `invalid_argument` won't change on retry, so retrying only loops.
+
+### What worked
+- **Tests:** `npm test` 23/23 (timeline 6), `go test ./pkg/host` ok, `go vet` clean.
+- **`TestBenchRecords`** covers the refusals:
+  - events need a ref and a snapshot, with `n: 0` and a missing ref refused;
+  - a batch with one bad event writes nothing. The next event still gets seq 3.
+- **Browser, on `bench24`** (a fresh store; see below):
+  - **Marks:** M1 on draft (n 3); M2 in a new proposal (n 3, from its base, before its Draft was opened). After a reload both came back with seq, ref and n.
+  - **`session.diff('M2 in proposal')`, in the proposal:** showed the eval's own `README.md` write and the earlier `styles.css` commit.
+  - **`session.diff('M1 on draft')`, in the proposal:** "missing: the mark "M1 on draft" is in draft, and this eval works in proposal/…: a diff is within one workspace".
+  - **Restore of the proposal to M2:** "2 files go back … (snapshot 3)". The proposal went to 6 with its three original files, and draft stayed at 3.
+
+### What didn't work
+- **`bench23` can't take this build.** Its store already applied the old `001_bench.sql`, and slop refuses a migration changed after it was applied ("add a new migration instead"). That's the intended guard. I used a new store, `bench24`. Staging is unaffected, since it never ran this migration.
+- **First browser run:** `session.diff` in the eval that wrote `styles.css` said "no changes … since then". It diffed the committed view, not the eval's transaction. That behaviour predates this step, but it went against "an eval's reads see its own writes". Fixed with the `view` argument.
+- **First browser run:** the mark in the other workspace was refused with the generic "pass an event seq or the label of a mark in this workspace". The error now finds the mark and says where it is.
+
+### What I learned
+- **The bug was about meaning, not data.** The cross-workspace inference was the last place the timeline guessed. Removing it showed that restoring draft "at" a proposal event never had a clear meaning, so restore and diff are within one workspace.
+
+### What was tricky to build
+- **Stamping an event in a proposal that was never opened on this page.** Its Draft has no head yet, so `headOf` falls back to the snapshot the server last listed for it, or its base. Without that, the agent's first message in a new proposal could not be logged.
+
+### What warrants a second pair of eyes
+- **Events dropped after a refusal** disappear from the page's timeline (with a header error). That's right for a bad event, but check that no common path can produce one: every page logger passes either nothing (draft) or a ref from `App.ws` or `ctx.ws`.
+
+### What should be done in the future
+- SLOP3-024 §7's four tasks; the staging deploy and the scripted smoke test.
+
+### Code review instructions
+- `apps/bench/sql/001_bench.sql` (events), `apps/bench/actor.js` `addEvent` and `logEvents`.
+- `web/bench/src/model/project.js` `headOf`, `log`, `flushEvents`.
+- `web/bench/src/model/timeline.js` `snapshotAt`, `restoreTo`, `changesSince`.
+- `web/bench/test/timeline.test.mjs`.

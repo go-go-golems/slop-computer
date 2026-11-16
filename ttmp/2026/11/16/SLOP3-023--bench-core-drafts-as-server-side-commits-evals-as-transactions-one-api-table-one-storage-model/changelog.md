@@ -24,3 +24,7 @@ UI layer ported to ui/ modules with main.js and an esbuild bundle; merged main (
 ## 2026-11-16
 
 Review of #51: commits pass files kept by hash through the actor (it had rebuilt them as text); events record their snapshot and an unknown one is refused (restoring to a bookmark made before any commit deleted every file). One strict stand-in actor for the Node tests. Diary step 10.
+
+## 2026-11-16
+
+Events are on one ref with their snapshot (NOT NULL, checked by the actor and the page); restoreTo/changesSince take a snapshot; marks belong to a workspace; session.diff sees the eval's writes. SLOP3-024 notes §7 hold the type/API follow-ups. Diary step 11.
