@@ -845,3 +845,236 @@ People who prefer their own editor need a loop too, and it shares the server pie
 
 The bench, if open, shows the same changes live through `log.wait` (5.4). So a person can edit in their editor and watch the bench's canvas, frames, effects and scenarios.
 
+---
+
+## Part 6. Decisions
+
+Each record states the choice, the alternatives that were considered, and its status.
+
+**D1. The bench is a slop app trusted with `workshop`, not a page built into the server.**
+- *Context.* The bench needs to push code, create instances and open views as the person.
+- *Alternatives.* (a) A system page on the live host, next to `shell.js`. It could open views with the session cookie and be the shell for its frames without new server code. But it would have to drop the `window.claude` storage and model that Sitebench is built on, and it would ship inside the server binary. (b) A slop app, as proved in Part 4.
+- *Decision.* (b), plus the embed feature (C.1).
+- *Consequences.* The bench updates like any app. It needs one server feature, embedded views, and adds functions to the `workshop` module.
+- *Status.* Proposed.
+
+**D2. Every edit makes a snapshot on `draft`.**
+- *Context.* The loop must be live, and history should point at real versions.
+- *Alternatives.* (a) Write the working tree with `files.put` and snapshot rarely. But views serve snapshots, not the working tree, so nothing would reload. (b) One snapshot per sync.
+- *Decision.* (b).
+- *Consequences.* Many small snapshots; pruning is D4.
+- *Status.* Proposed.
+
+**D3. Dev data comes from fixtures, never from production by default.**
+- *Context.* A dev instance that follows `draft` runs untested code against its data.
+- *Decision.* Seed from fixtures. Copying production data is an explicit admin action with a warning (5.6).
+- *Status.* Proposed.
+
+**D4. Pruning draft snapshots is postponed.**
+- *Decision.* Keep every snapshot at first. Later, prune draft snapshots older than N days that no ref, mark or proposal names.
+- *Status.* Open, not blocking.
+
+**D5. One dev instance per person per app.**
+- *Alternatives.* One shared dev instance per app: simpler, but two people's data and sessions would mix.
+- *Decision.* Per person: `<app>-dev-<6 characters of the user id>`. Proposals and scenario runs get their own instances.
+- *Consequence.* Two people editing one app still share `draft`. That is a non-goal for the first version.
+- *Status.* Proposed.
+
+**D6. The probe is injected by the server into dev embeds only.**
+- *Alternatives.* Apps include a script. That breaks "any app opens in the bench", and leaks a dev tool into production.
+- *Decision.* The server injects it into dev embeds only.
+- *Status.* Proposed.
+
+**D7. The agent runs in the page.**
+- *Alternatives.* A server agent through actor `sample` with tools (Pinboard phase 6).
+- *Decision.* The page, because the frames, panels and approvals the host API drives live there, and Part 4 shows it works.
+- *Consequence.* A server agent can come later for headless jobs.
+- *Status.* Proposed.
+
+---
+
+## Part 7. Implementation plan
+
+Each phase ends with something a person can use, and with the tests that prove it. Phases 1–3 deliver the fluid loop. Phases 4–6 deliver review and publish at Sitebench's level.
+
+### Phase 0: Sitebench as an app (done as an experiment)
+
+- **What exists.** `scripts/01-stage0-sitebench-as-a-slop-app.sh` and `various/stage0-app.json`.
+- **To keep it.** Add Sitebench's source as `apps/bench/` with a build step that writes `apps/bench/dist/` (`build.mjs`, `build-worker.mjs`). Whether the source goes into this public repository is the user's decision. It is not committed today (`sources/MANIFEST.md`).
+- **Test.** Push, open, check that `Store.mode === 'db'` and that an eval runs (Part 4).
+
+### Phase 1: projects are app stores (no server changes)
+
+- **The bench actor** (`apps/bench/actor.js`): actions `projects`, `open`, `sync`, `create` and `importZip`, over `use('workshop')` (`stores`, `refs`, `files`, `read`, `push`, `moveRef`, `status`).
+- **The page:**
+  - Replace `Projects.load/create/open` (`04-project.js:361-420`) with calls to those actions.
+  - Keep `Project` in memory.
+  - Add `Sync`, a debounced full-tree push to `draft`: unchanged files by `{path, sha256, size}` computed with `crypto.subtle`, changed files inline as `{path, text}`.
+  - Keep the event log and threads in the bench's documents under `p_<app>/`.
+- **Frames stay srcdoc** in this phase, so pages render without their backend. That is enough to edit static apps like reports.
+- **Tests.** A Go test in `pkg/host` that pushes a minimal bench, calls `open` and `sync` through `actor.call`, and checks `ref.ls` (draft moved) and `files.cat` (the new text). A Playwright script like `test/run-app.mjs` against a local server.
+
+### Phase 2: dev instances and embedded views (server)
+
+- **`workshop` additions** (`pkg/doors/actors/modworkshop.go`): `newInstance`, `drop`, `embed`, `logs`, `restart`, `docs`, `sql`, `seed`. Appendix C has the contracts.
+- **Embeds** (`pkg/doors/pages`):
+  - a view kind "embed" that records the parent origin and the dev flag;
+  - `/e/<token>/v/<n>/` routing in `sandbox.go`;
+  - `frame-ancestors` from the embed;
+  - probe injection and a Go port of `instrument()` for dev embeds;
+  - `renew` for embeds.
+- **The probe** (`pkg/doors/pages/assets/probe.js`): Sitebench's `PROBE` (`05-site.js:63-471`), minus `window.site` and `fxOp`, with exact-origin messaging.
+- **The bench page:**
+  - `FrameHost` loads `iframe.src` from `embed()` instead of `srcdoc`;
+  - a small shell for its frames (hello, reload, reopen, renew, download, confirm);
+  - the Data view reads the instance's documents and tables.
+- **Tests.** Go tests for embed access (another person's dev instance is refused), frame-ancestors, probe injection only with `dev`, and `instrument` (port the cases from `test/run-steps.mjs` trace checks). Playwright: edit `styles.css`, and see the embedded frame reload with its input values kept.
+
+### Phase 3: the live backend loop
+
+- **`files.push` reports activation** (`pkg/commands/files.go:300-396`): an optional `activate: [store…]` input that runs `Running` on each and returns `{store, n, broken}`.
+- **Effects** gain `actor` (5.9). The health pill counts actor failures. The Console merges `app.logs`.
+- **Reset dev data.** Offer it automatically when activation fails on a changed migration.
+- **Outside edits.** The bench actor long-polls `log.wait` on the app store, and the page reloads files when someone else pushes.
+- **Tests.** A migration that fails shows in effects, and the frame stays on the old version. A `slop push --ref draft` from the CLI reloads the bench's frames.
+
+### Phase 4: fixtures, scenarios and the agent's app verbs
+
+- **Fixture seeding** (`docs` and `sql`, 5.6), fixture frames on their own instances, scenario runs on run instances with the new `docs`/`sql`/`call` checks.
+- **Host API.** `app.*` replaces `data.*`. Rewrite `API_GUIDE` for slop apps.
+- **Tests.** Port `test/run-scen.mjs` to a template app with an actor, for example Corner Coffee with `actor.js` and `sql/001_menu.sql`.
+
+### Phase 5: publish
+
+- **`ref.move` gains `ifAt`** (compare-and-swap).
+- **The bench** gets the preflight and approval card, the rollout list (`app.status` per instance, "Activate now"), and rollback.
+- **The agent** gets `publish.check`, and `publish.run` behind `ui.approve`.
+- **Tests:**
+  - publish moves `main`, and a production view gets `reload`;
+  - a changed applied migration is refused by the preflight;
+  - two publishers racing: one fails with a conflict;
+  - rollback moves `main` back.
+
+### Phase 6: proposals on refs, history on snapshots, and `slop dev`
+
+- **Proposals** as `proposal/<oid>` refs with their own instances. Review checks across instances.
+- **Events** carry `snap`. The playhead uses snapshot instances. Restore is `ref.move draft n`.
+- **`slop dev <dir> --app <id>`** in `cmd/slop/cmds/`, built on `pkg/client/folder.go`.
+- **Later:**
+  - a developer code right (`pkg/authz/code.go`);
+  - per-instance secrets and policy, so dev never spends production secrets (gap 9);
+  - snapshot pruning (D4).
+
+---
+
+## Appendix A. Sitebench's host API (84 verbs) and what happens to each
+
+Source: `API_SIGS`, `06-agent.js:75-94`. Bold verbs are long calls that pause the eval's timer.
+
+| Group | Verbs | On slop |
+|---|---|---|
+| files | `list read exists lines write replace remove grep blame` | kept; backed by draft or a proposal, synced by push |
+| data | `tables rows define insert update remove drop` | replaced by `app.docs/doc/setDoc/sql/call/status/logs/reset` |
+| frames | `list open update move label close arrange focus outline inspect check click type text query console reload waitFor count layout snapshot compare data` | kept; answered by the injected probe in embedded views |
+| snapshots | `list` | kept |
+| fixtures | `list save capture` | kept; slop fixture format (5.6); `capture` reads the instance |
+| scenarios | `list read save` **`run runAll`** | kept; runs on run instances |
+| ui | `panel values set` **`ask`** `panels closePanel selection pins resolvePin notify pin` **`approve`** | kept |
+| llm | **`llm`** | kept; slop's `sample` |
+| agents | **`delegate`** `roles` | kept |
+| tx, dry | `begin commit rollback`; `begin end apply discard` | kept; a rollback re-syncs the reverted files |
+| session | `recall message stream` **`waitFor`** `mark marks events diff workspace` | kept |
+| lib | `def list remove source` | kept; `.agent/lib/*.js` are files in the app's tree, so they ship with the app (exclude them from the page, see open questions) |
+| log | `log` | kept |
+| new | — | `publish.check`, `publish.run` (5.8) |
+
+## Appendix B. Slop verbs and APIs the bench uses (exist today)
+
+| Verb or API | Use in the bench | Source |
+|---|---|---|
+| `store.ls` | project list; instances by `app` | `pkg/commands/stores.go:23-47` |
+| `store.new {id, type, app}`, `store.rm` | app stores and instances | `stores.go:48-63, 64` |
+| `files.ls`, `files.cat` | read a project's tree at a ref | `pkg/commands/files.go` |
+| `files.push {store, files, ref, message}`, `files.blobs` | sync to draft or a proposal | `files.go:139-158, 300-396` |
+| `snap.ls`, `ref.ls`, `ref.move` | history, refs, publish, restore | `files.go:165-217` |
+| `app.follow`, `app.status`, `app.logs`, `app.restart` | instances and their state | `pkg/commands/actors.go:53-79, 132-163`; `mounts.go:101-129` |
+| `actor.call`, `claude.use('slop').actions.x` | call actions | `actors.go:36-52`; `web/runtime/src/caps.ts:281-319` |
+| `import.docs`, `import.table`, `store.export`, `import.folder` | seed and copy data | `pkg/commands/data.go:53-176` |
+| `log.wait`, `log.show` | outside edits | `stores.go:154-200` |
+| `preview.url` | static previews (interim) | `pkg/commands/preview.go:19-60` |
+| `app.trust` | trust the bench with `workshop` | `actors.go:80-116` |
+| `window.claude.use('db' \| 'user' \| 'sample' \| 'downloads')` | the bench's own storage, identity, model, export | `web/runtime/src/index.ts:15-71` |
+
+## Appendix C. Proposed additions (contracts to refine during implementation)
+
+**C.1 `workshop.embed(store, {dev?, path?})` → `{src, view, secret, version, expires}`.**
+- Opens a view of `store` as the visiting person, for the calling app's origin.
+- Requires the calling app to be trusted with `workshop`, and the person to hold `view` on the store.
+- `src` is `https://s<label>.<sandbox>/e/<token>/v/<n>/<path>`; the sandbox adds the calling app's origin to `frame-ancestors`.
+- `dev: true` also requires `admin` on the store, and makes the sandbox inject `/_slop/probe.js` and add `data-src` to HTML.
+- Code: `pkg/doors/pages/views.go` (open), `sandbox.go` (serve), `pkg/doors/actors/modworkshop.go` (module), `pkg/doors/pages/assets/probe.js`.
+
+**C.2 `files.push {…, activate?: [store]}`.**
+- After the push, runs `Running` on each listed store that follows the moved ref.
+- Returns `activated: [{store, n, broken}]`.
+- Code: `pkg/commands/files.go:300-396`.
+
+**C.3 `ref.move {store, ref, n, ifAt?}`.**
+- Fails with `conflict` when the ref is not at `ifAt`.
+- Code: `files.go:204-217`, `pkg/store/files.go:230-251`.
+
+**C.4 `workshop` module additions.**
+- `newInstance(app, id, {ref, type})`: `store.new {app}` then `app.follow`.
+- `drop(id)`: `store.rm`.
+- `seed(id, fixture)`: `import.docs` and `import.table`.
+- `logs(id)`, `restart(id)`, `docs(id, coll)`, `sql(id, query)`: read-only `sql.query`.
+- Code: `pkg/doors/actors/modworkshop.go`.
+
+**C.5 `slop dev <dir> --app <id>`.**
+- Poll, push to `draft`, print the activation result and new log lines.
+- Code: `cmd/slop/cmds/`, `pkg/client/folder.go`.
+
+**C.6 Later additions.**
+- `log.watch`, a stream verb, so tools need not poll.
+- A developer code right.
+- Per-instance secrets and policy for dev.
+- An actor clock offset for fixtures.
+- Snapshot pruning.
+
+## Appendix D. File reference
+
+**Sitebench** (archive root; `sources/MANIFEST.md`):
+
+| File | Read it for |
+|---|---|
+| `sitebench/README.md` | layout, build, the file table |
+| `sitebench/src/03-store.js` | storage over `window.claude.use('db')` |
+| `sitebench/src/04-project.js` | the project model: workspaces, proposals, tables, the event log, blame, why, restore |
+| `sitebench/src/05-site.js` | `instrument`, `buildDoc`, `PROBE` (the in-frame script and its operations), `FrameHost`, `Headless` |
+| `sitebench/src/05b-snapshots.js`, `05c-scenarios.js` | layout diffs, snapshots; fixtures, scenarios, recording |
+| `sitebench/src/06-agent.js` | sandbox bridge, `API_SIGS`, `hostAPI`, `runEval`, `frameEffects`, `API_GUIDE`, `Agent` |
+| `sitebench/src/worker.js`, `core.js` | the QuickJS worker, scope persistence, the term core |
+| `sitebench/src/07-dock.js` … `11-app.js` | dock, canvas, views, agent views, archive, panels, app shell |
+| `sitebench/test/mock.js`, `test/run-*.mjs` | the stand-in for Claude, and the Playwright scripts |
+| `eval-agent-api-examples.md`, `tb/textbook.txt` | the one-tool API design and the agentalg textbook |
+| `att/fs/formskate/app/host.js`, `app/ui/dock.jsx`; `att/shop/shop.html` | the two apps Sitebench's dock, canvas, matrix, flows, pins and scenarios came from |
+
+**Slop** (repository root):
+
+| File | Read it for |
+|---|---|
+| `pkg/store/files.go` | trees, snapshots, refs, the code guard |
+| `pkg/kernel/apps.go`, `pkg/actor/manager.go` | `Running`, activation, migrations, actor lifecycle |
+| `pkg/commands/files.go`, `stores.go`, `actors.go`, `mounts.go`, `data.go`, `preview.go` | the verbs |
+| `pkg/doors/pages/live.go`, `views.go`, `sandbox.go`, `assets/shell.js` | shell, views, the sandbox origin, reload on ref moves |
+| `web/runtime/src/index.ts`, `transport.ts`, `caps.ts`, `sample.ts` | the page runtime (`window.claude`) |
+| `pkg/doors/actors/modworkshop.go`, `apps/workshop/` | the Workshop module and app |
+| `pkg/host/workshop_module_test.go` | the draft, follow and publish loop as a test |
+| `doc/building-apps.md`, `doc/claude-apis/` | how apps are written; the runtime contract |
+
+## Open questions
+
+1. **Should Sitebench's source go into this repository?** It is public. The decision blocks Phase 0's packaging, not the design.
+2. **`.agent/lib/*.js` and the other bench files in the app tree** (`fixtures/`, `scenarios/`, `.agent/`) are pushed with the app. They are harmless, but they are visible under `/_s/`. Either keep them, or keep them in the bench's documents. This is a decision for Phase 4.
+3. **Embeds for people without `admin` on the store**, for example reviewers who should see a proposal's frames. C.1 requires `view` for normal embeds and `admin` for dev embeds. That may need a review level.
+4. **Collaboration.** Two people on one app share `draft`, so the second push wins, file by file. Sitebench has the same limit within one browser. Locking or merging is future work.
