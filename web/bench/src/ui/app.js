@@ -133,7 +133,11 @@ export const App = {
     this.P = P; this.ws = 'draft'; this.sel = null; this.logs = []
     this.offs.push(
       P.ev.on('files', (ws, paths) => { this.ev.emit('files', ws, paths); this.paintHeader() }),
-      P.ev.on('proposals', () => { if (this.ws !== 'draft' && (this.proposal() || {}).status !== 'open') this.setWs('draft'); this.ev.emit('proposals'); this.paintHeader(); if (this.canvas) this.canvas.sync() }),
+      P.ev.on('proposals', () => {
+        if (this.ws !== 'draft' && (this.proposal() || {}).status !== 'open') this.setWs('draft')
+        Headless.prune(P, ref => (P.proposals.get(ref) || {}).status === 'open')
+        this.ev.emit('proposals'); this.paintHeader(); if (this.canvas) this.canvas.sync()
+      }),
       P.ev.on('frames', () => { if (this.canvas) this.canvas.sync() }),
       P.ev.on('events', e => this.ev.emit('events', e)),
       P.ev.on('marks', () => this.ev.emit('events')),

@@ -144,7 +144,17 @@ export class Project {
     if (this.sending || !this.outbox.length) return
     const batch = this.outbox.splice(0, 100)
     this.sending = Slop.call('logEvents', { app: this.app, events: batch.map(e => { const o = { ...e }; delete o.seq; delete o.at; return o }) })
-      .then(saved => { saved.forEach((s, i) => { batch[i].seq = s.seq; batch[i].at = s.at; this.bySeq.set(s.seq, batch[i]) }); this.sortEvents() })
+      .then(saved => {
+        // the server's version is the event; one it had already (an outside
+        // change it knew) replaces the page's copy
+        saved.forEach((s, i) => {
+          const e = batch[i], known = this.bySeq.get(s.seq)
+          if (known && known !== e) { this.events.splice(this.events.indexOf(e), 1); return }
+          for (const k of Object.keys(e)) if (!(k in s)) delete e[k]
+          Object.assign(e, s); this.bySeq.set(s.seq, e)
+        })
+        this.sortEvents(); this.ev.emit('events', null)
+      })
       .catch(e => { Records.error = 'the timeline: ' + (e.message || e); Records.ev.emit('status'); this.outbox.unshift(...batch) })
       .finally(() => { this.sending = null; if (this.outbox.length) setTimeout(() => this.flushEvents(), 1000) })
   }

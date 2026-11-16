@@ -1,4 +1,4 @@
-/* the bench, built from web/bench: do not edit. source sha256:1305c0274d1edfee045c54e2c6e5961281ae98d1436304f1e43b266d53777130 */
+/* the bench, built from web/bench: do not edit. source sha256:d4994e3733fecce2ea28fdff73748e3ba997da1b7998b910f617df65e83b3012 */
 // The bench: a live dev environment for slop apps. Built from web/bench/src.
 (() => {
   // src/lib/util.js
@@ -1591,6 +1591,13 @@
     },
     clear(project) {
       for (const [k, fh] of this.pool) if (!project || fh.project === project) {
+        fh.dispose();
+        this.pool.delete(k);
+      }
+    },
+    // pooled frames of refs no longer live (a closed proposal) are disposed
+    prune(project, live) {
+      for (const [k, fh] of this.pool) if (fh.project === project && fh.ref && !live(fh.ref)) {
         fh.dispose();
         this.pool.delete(k);
       }
@@ -5340,11 +5347,17 @@ Markdown files (README.md, notes, specs) render in the Docs panel. Keep README.m
         return o;
       }) }).then((saved) => {
         saved.forEach((s, i) => {
-          batch[i].seq = s.seq;
-          batch[i].at = s.at;
-          this.bySeq.set(s.seq, batch[i]);
+          const e = batch[i], known = this.bySeq.get(s.seq);
+          if (known && known !== e) {
+            this.events.splice(this.events.indexOf(e), 1);
+            return;
+          }
+          for (const k of Object.keys(e)) if (!(k in s)) delete e[k];
+          Object.assign(e, s);
+          this.bySeq.set(s.seq, e);
         });
         this.sortEvents();
+        this.ev.emit("events", null);
       }).catch((e) => {
         Records.error = "the timeline: " + (e.message || e);
         Records.ev.emit("status");
@@ -5877,6 +5890,7 @@ Markdown files (README.md, notes, specs) render in the Docs panel. Keep README.m
         }),
         P.ev.on("proposals", () => {
           if (this.ws !== "draft" && (this.proposal() || {}).status !== "open") this.setWs("draft");
+          Headless.prune(P, (ref) => (P.proposals.get(ref) || {}).status === "open");
           this.ev.emit("proposals");
           this.paintHeader();
           if (this.canvas) this.canvas.sync();
@@ -7526,6 +7540,7 @@ Markdown files (README.md, notes, specs) render in the Docs panel. Keep README.m
       async function loadVersions() {
         const path = S.cur, ws = App.ws;
         S.versions = null;
+        S.vhead = P().draftOf(ws).head;
         try {
           const v = await versions(P(), path, ws);
           if (S.cur === path && App.ws === ws) {
@@ -7591,8 +7606,8 @@ Markdown files (README.md, notes, specs) render in the Docs panel. Keep README.m
             load(true);
           } } }, "Keep mine"),
           " ",
-          h("button.btn.sm", { title: "Drop your edit and show theirs", on: { click: () => {
-            d.takeTheirs([S.cur]);
+          h("button.btn.sm", { title: "Drop your edit and show theirs", on: { click: async () => {
+            await d.takeTheirs([S.cur]);
             load(false);
           } } }, "Take theirs")
         ));
@@ -7752,12 +7767,15 @@ Markdown files (README.md, notes, specs) render in the Docs panel. Keep README.m
           paintFoot();
           return;
         }
-        if (S.cur && (!paths.length || paths.includes(S.cur)) && !S.pending && P().read(S.cur, ws) !== ta.value) {
+        const mine = S.cur && (!paths.length || paths.includes(S.cur));
+        if (mine && S.vhead !== P().draftOf(ws).head) {
           S.bkey = "";
           S.bdata = null;
-          load(true);
           loadVersions();
-        } else paintFoot();
+          paintBlame();
+        }
+        if (mine && !S.pending && P().read(S.cur, ws) !== ta.value) load(true);
+        else paintFoot();
       });
       const who = (v) => v.who === "agent" ? "Claude" : v.who === "push" ? "outside" : "you";
       const vlabel = (v) => (v.sha256 ? "saved" : "removed") + " by " + who(v) + " in " + v.n;

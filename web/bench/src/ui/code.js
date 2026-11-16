@@ -121,7 +121,7 @@ export const CODE = {
 
     async function loadVersions() {
       const path = S.cur, ws = App.ws
-      S.versions = null
+      S.versions = null; S.vhead = P().draftOf(ws).head
       try { const v = await versions(P(), path, ws); if (S.cur === path && App.ws === ws) { S.versions = v; paintFoot() } } catch { }
     }
     function paintFoot() {
@@ -146,7 +146,7 @@ export const CODE = {
       if (conflict) foot.appendChild(h('div.conflict', { style: { flexBasis: '100%', color: 'var(--accent)' } },
         'Your edit conflicts with ' + d.ref + ' ' + conflict.at + ': someone else changed ' + S.cur + ' too. ',
         h('button.btn.sm', { title: 'Commit your version over theirs', on: { click: async () => { const r = await d.keepMine(); toast(r.status === 'committed' ? 'Your version is in ' + d.ref + ' ' + r.n : 'Still not committed: ' + (r.error || r.status)); load(true) } } }, 'Keep mine'), ' ',
-        h('button.btn.sm', { title: 'Drop your edit and show theirs', on: { click: () => { d.takeTheirs([S.cur]); load(false) } } }, 'Take theirs')))
+        h('button.btn.sm', { title: 'Drop your edit and show theirs', on: { click: async () => { await d.takeTheirs([S.cur]); load(false) } } }, 'Take theirs')))
     }
     function revertToDraft() {
       const text = P().read(S.cur, 'draft')
@@ -225,8 +225,11 @@ export const CODE = {
       if (ws !== App.ws) return
       paintList(); changedSoon()
       if (S.snap) { paintFoot(); return }
+      const mine = S.cur && (!paths.length || paths.includes(S.cur))
+      // a commit (anyone's, the person's own too) makes a version and changes blame
+      if (mine && S.vhead !== P().draftOf(ws).head) { S.bkey = ''; S.bdata = null; loadVersions(); paintBlame() }
       // a change from elsewhere (a commit, the agent, a poll): show it unless the person is typing
-      if (S.cur && (!paths.length || paths.includes(S.cur)) && !S.pending && P().read(S.cur, ws) !== ta.value) { S.bkey = ''; S.bdata = null; load(true); loadVersions() }
+      if (mine && !S.pending && P().read(S.cur, ws) !== ta.value) load(true)
       else paintFoot()
     })
 

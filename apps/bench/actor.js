@@ -570,7 +570,8 @@ defineActor({
       },
     },
     // Add events to the visitor's timeline ([{kind, who, thread, ref, n,
-    // …data}]); the answer has them numbered.
+    // …data}]); the answer has them numbered (an 'outside' change already
+    // on the timeline answers with the event there).
     logEvents: {
       requires: 'view',
       async run(ctx, { app, events }) {
@@ -579,6 +580,13 @@ defineActor({
         return events.slice(0, 200).map((e) => {
           const { kind, who, thread, ref, n } = e || {};
           if (typeof kind !== 'string' || !kind || kind === 'commit') ctx.fail('invalid_argument', 'an event has a kind (commits are logged by commit)');
+          // A change seen from outside may already be on this timeline: the
+          // person's own commit from another tab, or another tab's report of
+          // the same push. The answer is then the event already there.
+          if (kind === 'outside' && typeof ref === 'string' && typeof n === 'number') {
+            const known = sql.one("SELECT * FROM events WHERE app = ? AND owner = ? AND ref = ? AND n = ? AND kind IN ('commit', 'outside') ORDER BY seq LIMIT 1", app, ctx.visitor.id, ref, n);
+            if (known) return eventOut(known);
+          }
           const data = Object.assign({}, e);
           for (const k of ['kind', 'who', 'thread', 'ref', 'n', 'seq', 'at']) delete data[k];
           return addEvent(ctx, app, { kind, who, thread, ref, n, data });

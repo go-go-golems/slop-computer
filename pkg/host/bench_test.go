@@ -343,6 +343,14 @@ func TestBenchRecords(t *testing.T) {
 		t.Fatalf("logEvents = %v", logged)
 	}
 	h.fail(admin, "actor.call", map[string]any{"store": "bench", "action": "logEvents", "args": map[string]any{"app": "jot", "events": []any{map[string]any{"kind": "commit"}}}}, "invalid_argument")
+	// Two tabs seeing the same outside change log it once: the second is
+	// answered with the event already there.
+	outside := map[string]any{"kind": "outside", "who": "push", "ref": "draft", "n": 7, "paths": []any{"a.txt"}}
+	first := act("logEvents", map[string]any{"app": "jot", "events": []any{outside}}).([]any)
+	again := act("logEvents", map[string]any{"app": "jot", "events": []any{outside}}).([]any)
+	if num(first[0].(map[string]any)["seq"]) != 3 || num(again[0].(map[string]any)["seq"]) != 3 {
+		t.Fatalf("outside twice = %v, %v", first, again)
+	}
 	if older := act("events", map[string]any{"app": "jot", "before": 2}).([]any); len(older) != 1 || older[0].(map[string]any)["kind"] != "msg" {
 		t.Fatalf("events before 2 = %v", older)
 	}
@@ -354,7 +362,7 @@ func TestBenchRecords(t *testing.T) {
 		t.Fatalf("snap = %v", s)
 	}
 	p := act("project", map[string]any{"app": "jot"}).(map[string]any)
-	if p["meta"] == nil || len(p["threads"].([]any)) != 1 || num(p["threads"].([]any)[0].(map[string]any)["count"]) != 3 || len(p["events"].([]any)) != 2 {
+	if p["meta"] == nil || len(p["threads"].([]any)) != 1 || num(p["threads"].([]any)[0].(map[string]any)["count"]) != 3 || len(p["events"].([]any)) != 3 {
 		t.Fatalf("project = %v", p)
 	}
 	act("forget", map[string]any{"app": "jot"})

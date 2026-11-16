@@ -288,5 +288,7 @@ export const Headless = {
   },
   // every pooled frame of a project reloads on its next use (the instance moved)
   stale(project) { for (const fh of this.pool.values()) if (fh.project === project) fh.stale = true },
-  clear(project) { for (const [k, fh] of this.pool) if (!project || fh.project === project) { fh.dispose(); this.pool.delete(k) } }
+  clear(project) { for (const [k, fh] of this.pool) if (!project || fh.project === project) { fh.dispose(); this.pool.delete(k) } },
+  // pooled frames of refs no longer live (a closed proposal) are disposed
+  prune(project, live) { for (const [k, fh] of this.pool) if (fh.project === project && fh.ref && !live(fh.ref)) { fh.dispose(); this.pool.delete(k) } }
 }

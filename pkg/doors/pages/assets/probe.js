@@ -1,4 +1,4 @@
-/* the bench, built from web/bench: do not edit. source sha256:1305c0274d1edfee045c54e2c6e5961281ae98d1436304f1e43b266d53777130 */
+/* the bench, built from web/bench: do not edit. source sha256:d4994e3733fecce2ea28fdff73748e3ba997da1b7998b910f617df65e83b3012 */
 // slop's dev probe (SLOP3-022): the bench's PROBE from web/bench/src/frames/probe.js,
 // which the sandbox adds to dev embeds only, after the runtime. It answers the
 // tool that framed the view (the boot data's parentOrigin) and nothing else.
@@ -385,8 +385,10 @@ function PROBE(CFG) {
     waitFor: async (q, timeout = 2000) => {
       const t0 = performance.now()
       while (true) {
-        const el = qsa(q).find(x => x.offsetParent || getComputedStyle(x).position === 'fixed')
-        if (el && (el.offsetParent || getComputedStyle(el).position === 'fixed')) return info(el)
+        // visible as a scenario's expect means it: a box with an area (body
+        // has no offsetParent, so that test never passed for it)
+        const el = qsa(q).find(x => { const r = x.getBoundingClientRect(); return r.width > 0 && r.height > 0 })
+        if (el) return info(el)
         if (performance.now() - t0 > timeout) throw new Error('nothing visible matches ' + q + ' after ' + timeout + ' ms')
         await new Promise(r => setTimeout(r, 40))
       }

@@ -1,60 +1,75 @@
-# The bench (Sitebench)
+# The bench
 
-A coding-agent workbench that started as a Claude artifact, Sitebench, and
-is becoming slop's environment for developing slop apps (SLOP3-022: the
-guide is `ttmp/2026/11/15/SLOP3-022-…/design-doc/01-…`). Claude works
-through one `eval` tool that runs JavaScript in a QuickJS sandbox, against a
-project of HTML, CSS and JS files plus small data tables, shown live in
-frames on a canvas.
+slop's environment for developing slop apps, itself a slop app
+(`apps/bench`: a page, and an actor with SQL). A person opens one of their
+app stores in it and sees its pages live, in frames of their own dev
+instance. They edit the app's files and talk to Claude, who works through a
+single `eval` tool: JavaScript run in a QuickJS sandbox against the host API
+(files, instances, frames, scenarios, the timeline).
 
-The source came from `sitebench-workspace.zip` (sha256 `048f3d25…`, see the
-ticket's `sources/MANIFEST.md`): `sitebench/src`, `sitebench/test` and the
-two build scripts, merged into `build.mjs`. The archive's other folders
-(reference material) are not here.
+It began as a Claude artifact, Sitebench (SLOP3-022 brought it onto slop).
+SLOP3-023 rewrote its core and gave the source the layout below. The guide is
+`ttmp/2026/11/16/SLOP3-023-…/design-doc/01-guide-…md`: section 5 covers the
+design, section 6 the code layout.
+
+## The model in four sentences
+
+- **The server is the only place an app's files live.** Each workspace is a
+  ref of the app store: `draft`, or `proposal/<id>`. A `Draft`
+  (`core/draft.js`) reads a ref's snapshots and changes it with
+  `files.commit`, which sends an explicit change list against a base and is
+  merged on the server file by file.
+- **Every write is a transaction (`Tx`).** The person's typing is one live
+  Tx, committed a moment after the last keystroke. Each eval is one Tx:
+  committed if the eval succeeds, dropped if it fails. A subagent's Tx folds
+  into its caller's.
+- **The host API is one declared table** (`core/api.js`, entries in
+  `agent/api/`). One dispatcher checks arguments and enforces the thread's
+  mode and the dry-run rules. The reference the agent reads is generated
+  from the same table.
+- **Project state** lives in the bench actor's SQL
+  (`apps/bench/actor.js`): threads, the timeline, snapshots, proposals and
+  meta. Per-viewer preferences (layout, theme) stay in localStorage.
 
 ## Layout
 
-- `src/`: the source.
-  - `NN-*.js` files are concatenated in order into `apps/bench/app.js`.
-  - `index.html` holds all the CSS.
-  - `worker.js` and `core.js` are the sandbox worker and the term core.
-- `build.mjs` writes `apps/bench/{app.js, index.html, sandbox.js}`, each
-  stamped with the hash of the sources (`../build-stamp.mjs`); `go test`
-  fails when they are stale. `apps/bench/app.json` (and later `actor.js`)
-  are written by hand.
-- `test/`: Sitebench's Playwright scripts (`run-*.mjs`) with a stand-in for
-  Claude (`mock.js`), plus the screenshots they write (ignored).
+Each module says what it is for in its header comment and exports a small
+API. The layers import downward only:
+
+```
+lib → core → server → model → frames → agent → ui → main.js
+```
+
+`tools/imports.mjs` writes and checks every module's import lines (run it
+with `--write` after adding a name). The build runs the check and stops on a
+name that resolves nowhere.
+
+| Directory | What it holds |
+|---|---|
+| `lib/` | helpers with no bench concepts: DOM (`dom.js`), text (diffs, Markdown, YAML, highlighting), CSS rules, utilities |
+| `core/` | the pure core, testable under Node: `Draft` and `Tx`, the API table and dispatcher, scenario and fixture specs |
+| `server/` | the line to the server: the actor's actions and the Drafts registry (`slop.js`), instances and the watch, publishing, records |
+| `model/` | an app being developed (`project.js`: workspaces, proposals, threads, events), its history (`timeline.js`), templates |
+| `frames/` | frames of instances (`host.js`), the in-frame probe, layout maps and snapshots, scenario runs, frame event streams |
+| `agent/` | the sandbox bridge, one eval as a Tx (`eval.js`), its effects, the API tables (`api/`), the agent loop, roles, the guide |
+| `ui/` | the shell (`app.js`), the dock, and one module per view: canvas, code and docs, history, inspector, console and eval, data, threads, review, panels, scenarios |
+| `worker/` | the sandbox worker (QuickJS) and the core it runs in every session; built separately |
+| `main.js` | the entry point: registers the views, adds the panel calls to the API, boots the shell |
+
+`index.html` holds the page and all its CSS.
 
 ## Build and test
 
 ```
-make bench                      # npm ci + node build.mjs
-cd ../../apps/bench && python3 -m http.server 8765 &
-node test/run-app.mjs           # or any test/run-*.mjs
+make bench          # npm ci + node build.mjs
+npm test            # the core under Node: Draft and Tx, the API table, evals against an in-memory server
 ```
 
-The scripts expect Chrome at `/usr/bin/google-chrome` and Playwright at
-`/opt/npm-tools/node_modules/playwright`; adjust the paths at the top of a
-script to run elsewhere. On slop, push `apps/bench` as an app (`slop push
-apps/bench --store bench`) and mount it on the live host.
+`build.mjs` writes `apps/bench/{app.js, index.html, sandbox.js}` and
+`pkg/doors/pages/assets/probe.js`. Each file's first line is a stamp: the
+hash of the sources (`../build-stamp.mjs`). `go test ./pkg/host` fails when
+an output is stale. `pkg/host/bench_test.go` tests the actor.
 
-## Source files
-
-| File | What it holds |
-|---|---|
-| `01-util.js` | DOM helpers, diffs, syntax highlighters, Markdown, YAML |
-| `02-templates.js` | project templates (Corner Coffee, Landing, Blank) |
-| `03-store.js` | storage: the artifact database, with local and in-memory fallbacks |
-| `04-project.js` | projects: files, proposals, tables, event log, marks, threads, blame |
-| `05-site.js` | frames: page building, the in-frame helper script, frame hosts |
-| `05b-snapshots.js` | snapshots and layout diffs |
-| `05c-scenarios.js` | fixtures, scenarios, recording |
-| `06-agent.js` | the sandbox bridge, the host API, the agent loop, compaction, subagents, the API guide |
-| `07-dock.js` | the dock: tiles, tabs, layouts |
-| `08-canvas.js` | the canvas: frames, flows, matrix, playhead |
-| `09-views.js` | Code (with blame), Data, Inspector, Layers, Console, Eval, Docs |
-| `10-agentviews.js` | Agent, Review, Timeline |
-| `10b-archive.js` | zip export and import, transcripts |
-| `10c-scenarioview.js` | the Scenarios panel |
-| `10d-panels.js` | panels, live sources, charts |
-| `11-app.js` | the app shell, header and boot |
+To try it, push `apps/bench` to a store on a slop server (local or staging),
+trust it with `workshop`, allow `sample` for admins, and mount it on the
+live host. `scripts/deploy-apps.sh` shows the commands.

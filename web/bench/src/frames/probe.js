@@ -374,8 +374,10 @@ export function PROBE(CFG) {
     waitFor: async (q, timeout = 2000) => {
       const t0 = performance.now()
       while (true) {
-        const el = qsa(q).find(x => x.offsetParent || getComputedStyle(x).position === 'fixed')
-        if (el && (el.offsetParent || getComputedStyle(el).position === 'fixed')) return info(el)
+        // visible as a scenario's expect means it: a box with an area (body
+        // has no offsetParent, so that test never passed for it)
+        const el = qsa(q).find(x => { const r = x.getBoundingClientRect(); return r.width > 0 && r.height > 0 })
+        if (el) return info(el)
         if (performance.now() - t0 > timeout) throw new Error('nothing visible matches ' + q + ' after ' + timeout + ' ms')
         await new Promise(r => setTimeout(r, 40))
       }
