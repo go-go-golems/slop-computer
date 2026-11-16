@@ -110,7 +110,41 @@ Two routes, and they do not conflict:
 
 SLOP3-023 left the bench in layered ES modules (lib → core → server → model → frames → agent → ui). The natural seams for types are the Draft and Tx, the API table entries (`core/api.js`), the eval context (`agent/eval.js`), and the bench actor's action arguments and results. Convert layer by layer, bottom up.
 
-## 7. Related
+## 7. Types and API shape: what the review of #51 showed
+
+The review of #51 (SLOP3-023, diary steps 10 and 11) found two bugs. They show what types would catch and what needs a different shape instead.
+
+**What happened:**
+
+- **The bench actor's `commit` rebuilt the change list** of `files.commit` with code that knew only two of its four kinds. A file kept by hash was committed as the text `undefined`. With the change type shared by every hop, this is a compile error: `c.text` doesn't exist on every variant.
+- **`restore` read an unknown snapshot (`null`) as 0**, the empty tree, and deleted every file. `?? 0` on a `number | null` is well-typed, so types alone would not have caught it. It needed a different shape, which #51 now has:
+  - `events.n` and `events.ref` are `NOT NULL` (n > 0);
+  - every event belongs to one workspace and records that workspace's snapshot;
+  - `restoreTo(P, ref, n)` and `changesSince(P, ref, n)` take a snapshot number and refuse 0 and `null`.
+
+**What remains:**
+
+1. **Declared argument types for the bench actor's actions,** checked by one function before `run`. The bench's host API got this in SLOP3-023 (`web/bench/src/core/api.js`). The actor's 35 actions did not: they take untyped JSON and convert it by hand (`text()` is `String(v ?? '')`), so a wrong shape becomes a different value instead of an error. This can be done before TypeScript, in JavaScript.
+
+   It might belong in slop itself: actions declare their `args`, as the host API declares `sig`, and the actor runtime answers `invalid_argument`.
+2. **TypeScript declarations for the verb-backed modules** (workshop, system), generated from the Go input structs of the verbs they call.
+   - The module's functions map to verbs: `{JS: "commit", Verb: "files.commit"}` in `pkg/doors/actors/modworkshop.go`.
+   - `FileChange` in `pkg/commands/files.go` carries JSON-schema tags.
+   - Today only the go-go-goja bridged modules and `database` carry declarations (`pkg/actor/bridge.go` `typeScriptOf`, the catalog's `Module.TypeScript`); workshop has none.
+
+   With them, an actor written in TypeScript gets a typed `w.commit(store, changes: FileChange[], …)`.
+3. **A tagged change type,** `{kind: 'text' | 'data' | 'blob' | 'delete', …}`, handled exhaustively (a `never` check). It would be shared by the page's Draft, the actor and the Node tests' stand-in actor. On the wire, `files.commit` takes "exactly one of text, data, sha256 or delete", a Go struct standing in for a sum type. The tag could live on the client side only, or be added to the verb.
+4. **A snapshot type only the server hands out** (a branded `Snapshot`), distinct from "the ref doesn't exist".
+   - `files.commit`'s `base: 0` means "the ref must not exist". That marker number is what made 0 look like a plausible default elsewhere; a separate value (`base: null`, or `absent: true`) would not.
+   - The page checks snapshots at runtime (`web/bench/src/model/timeline.js` `checkSnap`); a type would check them at build time.
+5. **"Set a ref's tree to snapshot n" as one server commit.** The store's `ResetTree` exists. Restore would then not compute deletions on the client from a listing it might have wrong.
+
+**What types would not catch:**
+
+- **A stand-in that accepts more than the real server.** That is a difference in behaviour. #51 handles it with one stand-in that applies `files.commit`'s rule (`web/bench/test/fake-actor.mjs`); running the same tests against both would be stronger.
+- **An explicit default** such as `?? 0` on `number | null`.
+
+## 8. Related
 
 - SLOP3-023 (the bench core rewrite): `ttmp/2026/11/16/SLOP3-023--bench-core-drafts-as-server-side-commits-evals-as-transactions-one-api-table-one-storage-model/`. Its diary records when this came up.
 - Files named above: `pkg/doors/pages/storebytes.go`, `pkg/actor/actor.go`, `pkg/actor/catalog.go`, `pkg/commands/eval.go`, `web/bench/build.mjs`.
