@@ -70,7 +70,10 @@ const Sandbox = {
   drop(sid) { if (this.worker) this.worker.postMessage({ type: 'drop', sid }) }
 }
 
-const LONG_CALLS = new Set(['agents.delegate', 'llm', 'ui.approve', 'ui.ask', 'session.waitFor', 'scenarios.run', 'scenarios.runAll', 'publish.run'])
+const LONG_CALLS = new Set(['agents.delegate', 'llm', 'ui.approve', 'ui.ask', 'session.waitFor', 'scenarios.run', 'scenarios.runAll', 'publish.check', 'publish.run'])
+// The sync holds an eval must not wait for: its own, and those of the evals
+// that delegated to it (they end only after it does).
+const ownHolds = ctx => [...(ctx.holds || []), ...(ctx.hold ? [ctx.hold] : [])]
 // signatures: a parameter ending in ? is optional. Used to check calls and to say how to call a verb.
 const API_SIGS = {
   'files.list': 'prefix?', 'files.read': 'path', 'files.exists': 'path', 'files.lines': 'path, from?, to?', 'files.write': 'path, text',
@@ -207,10 +210,11 @@ function hostAPI(ctx) {
       return r
     },
     // publishing is the person's: the agent checks, and asks with an approval card
-    'publish.check': async () => { needApp(); const pf = await Publish.preflight(P); return { ...pf, summary: Publish.lines(pf) } },
+    // inside an eval: its own hold and its delegating evals' are not waited for (see runEval)
+    'publish.check': async () => { needApp(); const pf = await Publish.preflight(P, { own: ownHolds(ctx) }); return { ...pf, summary: Publish.lines(pf) } },
     'publish.run': async (o = {}) => {
       writable(); noDryData(); needApp()
-      const pf = await Publish.preflight(P)
+      const pf = await Publish.preflight(P, { own: ownHolds(ctx) })
       if (pf.refs.draft === pf.refs.main) return { published: false, why: 'main is already draft ' + pf.refs.draft }
       if (pf.blockers.length) throw policy('not publishable: ' + pf.blockers.join('; '))
       const ok = await approvalCard(ctx, 'Publish draft ' + pf.refs.draft + ' of ' + P.meta.app + ' to main?', [o.note ? String(o.note) : '', ...Publish.lines(pf)].filter(Boolean).join('\n'))
@@ -488,7 +492,7 @@ async function runEval(ctx, code, api, { sid, restore } = {}) {
   // only once the eval has committed: held until then, and a rollback
   // leaves nothing to push.
   const held = !!(P.meta.app && ws === 'main')
-  if (held) Sync.hold(P)
+  if (held) ctx.hold = Sync.hold(P)
   let r, tx
   const effects = {}
   try {
@@ -501,7 +505,7 @@ async function runEval(ctx, code, api, { sid, restore } = {}) {
       for (const [name, snap] of tx.tables) P.restoreTable(name, snap, ctx.who, ws)
       effects.rolledBack = [...tx.files.keys(), ...[...tx.tables.keys()].map(t => 'table ' + t)]
     }
-    if (held) Sync.release(P)
+    if (held) { Sync.release(P, ctx.hold); ctx.hold = null }
   }
   if (!effects.rolledBack) {
     const files = []
@@ -516,8 +520,11 @@ async function runEval(ctx, code, api, { sid, restore } = {}) {
   // comes up on them (or says why not) and its frames reload before the
   // frames are measured. Its new warnings and errors are effects too.
   if (r.ok && tx.files.size && P.meta.app && ws === 'main' && Slop.on) {
-    const s = await Sync.flush(P)
+    // a subagent's writes wait for the eval that delegated to it: not an
+    // error, and not yet in draft
+    const s = await Sync.flush(P, { own: ctx.holds || [] })
     if (s.error) effects.push = { error: s.error }
+    else if (s.deferred) effects.push = { deferred: 'the eval that delegated this one still holds the app: these edits reach draft when it ends' }
     else {
       effects.draft = s.n
       if (s.act) effects.actor = s.act.broken ? { broken: s.act.broken, on: s.act.n } : { on: s.act.n }
@@ -824,7 +831,7 @@ const Agent = {
   },
   // one model turn on a thread: the eval tool runs in the thread's sandbox session. Throws on failure.
   async turn(P, th, msg, text, o) {
-    const ctx = { project: P, ws: o.ws, who: 'agent', thread: th.id, mode: th.mode, depth: o.depth || 0, budget: o.budget, role: th.role || null, tier: th.tier, model: th.model, signal: o.signal, children: [] }
+    const ctx = { project: P, ws: o.ws, who: 'agent', thread: th.id, mode: th.mode, depth: o.depth || 0, budget: o.budget, role: th.role || null, tier: th.tier, model: th.model, signal: o.signal, children: [], holds: o.holds || [] }
     const api = hostAPI(ctx)
     ctx.onApproval = card => { msg.approval = card; this.ev.emit('step', th.id) }
     ctx.onPanel = id => { msg.panels = msg.panels || []; if (!msg.panels.includes(id)) msg.panels.push(id); this.ev.emit('step', th.id) }
@@ -946,7 +953,7 @@ const Agent = {
     if (pctx.children) pctx.children.push({ thread: th.id, role })
     P.log({ kind: 'delegate', who: pctx.who || 'agent', ws: pctx.ws, thread: pctx.thread, note: role + ': ' + task.slice(0, 120), child: th.id })
     let failure = null
-    try { await this.turn(P, th, msg, prompt, { ws, depth: (pctx.depth || 0) + 1, budget, signal: abort.signal }); msg.status = 'done' }
+    try { await this.turn(P, th, msg, prompt, { ws, depth: (pctx.depth || 0) + 1, budget, signal: abort.signal, holds: ownHolds(pctx) }); msg.status = 'done' }
     catch (e) { failure = e; msg.status = abort.signal.aborted ? 'stopped' : 'error'; msg.error = e && e.message || String(e) }
     finally {
       this.turns.delete(th.id)

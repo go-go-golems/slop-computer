@@ -1922,3 +1922,137 @@ The user merged geppetto#450, then had me bump the toolchain, merge Geppetto's D
 
 - **After #49 merges and deploys,** staging (slop.yolo) gets the fix with its own Pi config. Check there that `lunaroute/*` models on Responses work for the bench.
 - **Still open:** the 10-round cap per sample call (the bench should continue), and Codex round 8 on #47.
+
+## Step 26: overlapping evals on one app (Codex round 8 on #47)
+
+The user merged #47, #48 and #49. I removed their worktrees and branches. Then I fixed the one Codex finding still open from #47's last review, on a new branch from main.
+
+### Prompt Context
+
+**User prompt (verbatim):** "all 3 PRs merged"
+
+**Assistant interpretation:** Clean up after the merges, check main, and carry on with the open work: the round-8 finding first.
+
+### What I did
+
+- **The finding:** "Avoid acknowledging edits while another eval holds the project".
+  - Two evals on the same app's main workspace both hold P. The first to end releases its hold and calls `Sync.flush(P)`.
+  - `flush` broke out as soon as `held(P)`, and its "not in draft" message also required `!held(P)`.
+  - So runEval reported the old draft as `effects.draft`, with no error.
+- **The fix** (`03b-slop.js`): `flush(P, { own = 0, wait = true })`.
+  - `others()` is `syncHolds > own`. Other evals' holds are waited for, up to FLUSH_WAIT, and then: "another eval on this app is still running after 60 s: these edits reach draft when it ends".
+  - The caller's own hold is never waited for: in-eval `publish.check`/`publish.run` pass `own: 1` when `ws() === 'main'`, matching runEval's rule for when it holds.
+  - `App.openProject` passes `wait: false`, so switching projects never blocks on an eval.
+- **Checked through `window.__SB` in the bench on the local server** (jot):
+
+  | Case | Result |
+  |---|---|
+  | another eval holds; this write is committed; that hold ends after 3 s | waited 3,038 ms, draft 14 → 15, no error, nothing pending |
+  | `own: 1` | returned in 0 ms, edit pending, no error |
+  | `wait: false` | returned in 0 ms |
+  | a hold that never ends | the error above after 60 s, draft unchanged, `act` null |
+
+  Each case cleaned up its check file.
+- **Tests:** `go test ./pkg/host -run 'TestBench|TestBuildOutputsFresh'` passes.
+- **Cleanup after the merges:** removed the `bench`, `gbump` and `s22` worktrees and their local branches. All four branch tips are ancestors of origin/main; `-D` was needed because `-d` compares against the user's checkout (`task/favicon`).
+
+### What was tricky
+
+- **`flush` has three callers that want different things** (runEval after its release; an eval publishing from inside itself; a project switch). One rule for "held" could not serve all three, so the caller says which holds are its own and whether to wait.
+
+### Future
+
+- **Deploy:** `publish-image` for main (`084eaa2`) opens a GitOps PR. Merging it deploys staging, then `make deploy-apps` pushes the bench.
+- **The 10-round cap** per sample call (the bench should continue).
+
+## Step 27: staging deployed (sha-084eaa2), the bench shipped; a sudoku dry run
+
+The user approved the deploy. Staging now runs main with #47–#49, and `make deploy-apps` installed the bench there. The user then asked for a walkthrough of building a Sudoku app in the bench. I did a dry run on the local server first (same model, same Responses path as staging), so the walkthrough describes what actually happens. Along the way the user raised two side ideas to keep for later.
+
+### Prompt Context
+
+**User prompts (verbatim):**
+- "ok PR is open for k3s, merge, deploy"
+- "then, walk me through creating a little sudoku paying app from scratch using bench."
+- "would adding iframe capability with injecting some kind of snapshotting conduit allow us to take snapshots of the real thing from within the agents themselves? since we control the hosting side too."
+- "(this is a side idea, so I dont lose it)"
+- "don't tackle the task, just write it up as a follow up we need to design out"
+- "also write down as future task researching how to do scratchpads with repeatable scripts for the coding agent (say, solving soduko puzzles in our sudoku example), for later, no need to do more research now"
+- "is it possible to access the dev / staging version live while it's being written as well? where?"
+
+### What I did
+
+- **Deploy:**
+  - Merged gitops #438 (merge commit 7ceeb40, the repo's style) and closed #437 as superseded. Argo `slop` was Synced/Healthy within ~2 min; one pod, 0 restarts.
+  - Log: `Pi models ready (Geppetto): 14`. Hosts: `/healthz` and `/readyz` 200, `/auth/login` 303; `/guestbook`, `/f/shop`, `/office`, `/workshop` and `/examples/static-site/` all 200.
+  - Data parity before and after: 31 mounts, 135 stores, 121 apps, none broken.
+- **Apps:** `make deploy-apps SLOP=<cli built at 084eaa2>` from a main worktree. The bench is new on staging (snapshot 1, trusted with workshop, `sample` on for @admin, mounted at `/bench`, 200). Staging now has 122 apps, none broken.
+- **Staging's model:** all three tiers are `lunaroute/deepseek-4.1-flash` (low/medium/high), the model #49 fixes. I could not run its agent myself: the bench is behind ZITADEL, and the CLI has no sample verb.
+- **Sudoku dry run** (local server, real Pi config, Responses):
+  1. **Created the app:** project menu → "New slop app…" → `sudoku`/`Sudoku`. Draft 1, with README.md, app.json (db capability), index.html and styles.css, and a dev instance (`dev ok`).
+  2. **First prompt** (Main target): 165 s, 9 evals. It wrote index.html, styles.css and a 10 KB game.js (draft 2), then tested in the frames by clicking cells and typing. It stopped at the 10-round cap mid-step. The board worked at 1280 and 375 px with 30 givens.
+  3. **"continue":** another 165 s, again ended by the cap. The agent widened the scope: to write scenarios it changed "New puzzle" from random to cycling (draft 4).
+  4. **Publish:** the dialog's preflight said "draft 4 → main (first publish) … no production instance yet: nothing serves main". Main became 4. `/f/:id` serves only `type: release` stores, so it 404s for a bench app. `slop mount set apps.localhost:18490 /sudoku sudoku` serves it, with the note "guests cannot read sudoku … grant @guest view to make it public". At 420 px the game rendered fully (screenshot `various/sudoku-dry-run-live-375.png`).
+  5. **Watching the dev instance live:** the dev store is `<app>-dev-<first 6 of the user id>`. Mounting `sudoku-dev-2915cc` at `/sudoku-dev` works. After a draft edit (title marker), `/sudoku-dev` showed it and `/sudoku` (main) did not; I reverted it.
+- **Side ideas, written down, not designed or built:**
+  - `design-doc/02-follow-up-the-agent-sees-screenshots-of-its-frames-design-needed.md`, with task `6q5p`;
+  - task `ia46`: scratchpads with repeatable scripts for the agent.
+- **Gaps from the dry run, as tasks:**
+  - `ltcr`: a first publish leaves the app unreachable without the CLI;
+  - `hm4w`: no link to open the dev instance outside the canvas;
+  - `28ip`: the 10-round cap ends replies mid-step.
+
+### What didn't work
+
+- **Counting staging's state:** my first attempt looped over `"mount ls"` and the like as unquoted `$c`. zsh doesn't word-split that, so the CLI got one argument and printed no JSON. `${=c}` fixed it.
+- **`tail` on the first `deploy-apps` run** hid the snapshot lines, so I ran it again. That's safe: the script only sends changed bytes.
+
+### What I learned
+
+- **Main mode is the right default for app projects.** It's what made the dry run work. Auto-to-proposal can't run the slop runtime (step 23).
+- **A useful prompt** names the interactions, says "no actor yet", and asks the agent to check in the frames. A follow-up should be just as specific ("finish checking, fix, report; no scenarios").
+
+## Step 28: Codex on #50 — delegation and sandbox timeouts
+
+Codex found two real problems with step 26's fix. Holds are now tokens, so a delegated eval never waits on the eval that delegated it. The publish calls get the longer sandbox budget. I also wrote the user's access rule into the dev-link proposal.
+
+### Prompt Context
+
+**User prompt (verbatim):** "anybody with the link has access, no gating on guest or so. address code review comments if they are not negligible edge cases on #50"
+
+**Assistant interpretation:** Write the access rule into the dev-link proposal (task hm4w). Fix the #50 review findings that matter.
+
+### What I did
+
+- **Finding 1 (P2), "Exclude awaiting ancestor evals from the hold wait":**
+  - A parent eval awaiting `agents.delegate('qa', …)` keeps its hold, and QA works in the parent's workspace. Each writing child eval then waited 60 s and reported a push error.
+  - The fix:
+    - `Sync.hold(P)` returns a token; `release(P, token)`.
+    - `delegate` passes `ownHolds(pctx)` (the parent's own hold plus its ancestors') to the child's turn as `ctx.holds`.
+    - `flush(P, { own })` never waits while one of the caller's own holds is on P, and returns `deferred`.
+    - runEval reports `effects.push.deferred` ("the eval that delegated this one still holds the app: these edits reach draft when it ends") instead of a draft number.
+- **Finding 2 (P2), "Account for preflight waits in sandbox timeout budgets":** `publish.check` and `publish.run` are now in the worker's `LONG` set (`publish.run` was missing before, even though it waits for an approval card), and `publish.check` is in the page's `LONG_CALLS`.
+- **What testing the fixes showed:**
+  - An eval publishing from main holds the app itself, so waiting for other evals could never get its edits pushed. The `ours()` rule now covers that too: it fails at once.
+  - flush waited for other evals even with nothing to push; it now breaks first when nothing is pending.
+  - The preflight message said "files written in this eval" when the held edits could be another eval's.
+- **Checked in the bench on the local server:**
+
+  | Case | Result |
+  |---|---|
+  | child flush, parent holding | 0 ms, deferred, draft unchanged; the parent's flush then pushed it |
+  | parent plus an independent eval holding | deferred, 0 ms |
+  | independent eval for 3 s | waited 3,031 ms, pushed |
+  | nothing pending, another eval holding | 0 ms |
+  | Eval panel on main: `publish.check` while another eval holds pending edits | error after 77 ms, new message |
+  | Eval panel in a proposal: `publish.check` waiting 25 s | `ok 24604 ms`, past the 20 s budget |
+
+- **Tests:** `go test ./pkg/host -run 'TestBench|TestBuildOutputsFresh'` passes. Commit `daa15cd`.
+
+### What didn't work
+
+- **My first Eval-panel check** read `document.querySelector('.block')`, an empty block, so both results came back blank. The results were in later `.block` cards.
+
+### What was tricky
+
+- **"Who may I wait for" depends on who holds what.** A caller can wait for an eval that will end without it. It can't wait for one that ends only after it: its own hold, or a parent awaiting a delegation. Tokens make the difference visible.

@@ -58,7 +58,7 @@ const App = {
   // ---- projects ----
   async openProject(id) {
     // an app project's edits not yet in draft are pushed before it is let go
-    if (this.P && this.P.meta.app && Slop.on) await Sync.flush()
+    if (this.P && this.P.meta.app && Slop.on) await Sync.flush(this.P, { wait: false })
     let P
     try { P = await Projects.open(id) } catch (e) { toast('Could not open that project: ' + e.message); return false }
     this.offs.forEach(f => f()); this.offs = []

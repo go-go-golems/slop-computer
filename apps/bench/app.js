@@ -1,4 +1,4 @@
-/* the bench, built from web/bench: do not edit. source sha256:12fe43e65b8c224bd0a3d8229265b6f59712b392d1fb82f53479df4b0a326895 */
+/* the bench, built from web/bench: do not edit. source sha256:e6570f7b8783df1523240924169cab96f86d4f146603443bf7c81d95c4c21139 */
 // Sitebench: a live-site workbench. Built from src/*.js
 "use strict";
 (() => {
@@ -1083,13 +1083,14 @@ const Sync = {
     if (P === this.P && this.status !== 'error') this.set('dirty')
   },
   // While an eval runs on P, P is not pushed: its writes may still roll
-  // back. Releasing P's last hold pushes whatever then differs from its
+  // back. Each eval holds P with a token of its own (flush tells them
+  // apart); releasing P's last hold pushes whatever then differs from its
   // draft. Other projects push as usual.
-  hold(P) { P.syncHolds = (P.syncHolds || 0) + 1 },
-  held(P) { return !!(P && P.syncHolds) },
-  release(P) {
-    P.syncHolds = Math.max(0, (P.syncHolds || 0) - 1)
-    if (P.syncHolds) return
+  hold(P) { const tok = {}; (P.syncHolds || (P.syncHolds = new Set())).add(tok); return tok },
+  held(P) { return !!(P && P.syncHolds && P.syncHolds.size) },
+  release(P, tok) {
+    if (P.syncHolds) P.syncHolds.delete(tok)
+    if (this.held(P)) return
     if (!this.pending(P)) { this.queue.delete(P); if (P === this.P && this.status === 'dirty') this.set('synced') }
     this.soon()
   },
@@ -1144,16 +1145,29 @@ const Sync = {
   // Push P (default: the attached project) now and wait until every edit
   // made so far is in its draft (an eval's effects need the activation;
   // switching projects must not drop edits). A push that fails is not
-  // retried in a loop: one try, then the error. While an eval holds
-  // pushes, this returns at once; P stays queued for after it. If other
-  // pushes keep it waiting past FLUSH_WAIT, it says so rather than answer
-  // with a draft that lacks the edits.
-  async flush(P = this.P) {
-    if (!P || !P.meta.app) return { n: null, act: null, error: '' }
-    let tries = 0, waited = false
+  // retried in a loop: one try, then the error. If other pushes keep it
+  // waiting past FLUSH_WAIT, it says so rather than answer with a draft
+  // that lacks the edits.
+  //
+  // Evals still running on P hold it (their writes may roll back), and
+  // nothing of P is pushed until the last hold ends. own lists the caller's
+  // holds: its own (app.publish inside an eval) and those of the evals that
+  // delegated to it, which cannot end before it does. While one of them
+  // holds P, waiting is pointless: P stays queued for after them and the
+  // result is deferred. Otherwise another eval's hold is waited for, up to
+  // FLUSH_WAIT, and if it outlasts that the result says so: an eval that
+  // ended while another still runs must not report the old draft as its
+  // own. wait: false returns at once instead (switching projects does not
+  // block on someone's eval; P stays queued).
+  async flush(P = this.P, { own = [], wait = true } = {}) {
+    if (!P || !P.meta.app) return { n: null, act: null, error: '', deferred: false }
+    const mine = new Set(own), holders = () => [...(P.syncHolds || [])]
+    const ours = () => holders().some(t => mine.has(t)), others = () => holders().some(t => !mine.has(t))
+    let tries = 0, waited = ''
     for (const t0 = now(); ;) {
-      if (this.busy || Outside.merging) {
-        if (now() - t0 > FLUSH_WAIT) { waited = true; break }
+      const blocked = this.busy || Outside.merging ? 'push' : wait && others() && !ours() && this.pending(P) ? 'eval' : ''
+      if (blocked) {
+        if (now() - t0 > FLUSH_WAIT) { waited = blocked; break }
         await sleep(30); continue
       }
       if (this.held(P) || !this.pending(P) || (tries && P.syncError) || tries >= FLUSH_TRIES) break
@@ -1162,15 +1176,20 @@ const Sync = {
     }
     // gave up with edits unpushed (and no push error to say why): say so
     let late = ''
-    if (this.pending(P) && !this.held(P) && !P.syncError) {
-      if (waited) late = 'still waiting for another push after ' + Math.round(FLUSH_WAIT / 1000) + ' s: these edits are not in draft yet'
+    const secs = Math.round(FLUSH_WAIT / 1000)
+    if (this.pending(P) && !P.syncError) {
+      if (waited === 'eval') late = 'another eval on this app is still running after ' + secs + ' s: these edits reach draft when it ends'
+      else if (this.held(P)) late = ''
+      else if (waited) late = 'still waiting for another push after ' + secs + ' s: these edits are not in draft yet'
       else if (tries >= FLUSH_TRIES) late = 'draft kept moving: ' + tries + ' pushes did not get these edits in'
     }
+    // held by the caller or the evals it runs inside: pushed after they end
+    const deferred = !late && !P.syncError && this.pending(P) && ours()
     // an error is about edits still unpushed: with none left (undone, or
     // pushed since), draft has everything
     if (!this.pending(P)) { P.syncError = ''; if (P === this.P && this.status === 'error') this.set('synced') } else this.queue.add(P)
     this.soon()
-    return { n: P.refs ? P.refs.draft ?? null : null, act: late ? null : P.lastAct || (P === this.P ? this.act : null), error: late || P.syncError || '' }
+    return { n: P.refs ? P.refs.draft ?? null : null, act: late || deferred ? null : P.lastAct || (P === this.P ? this.act : null), error: late || P.syncError || '', deferred }
   },
   label() {
     const s = { idle: 'ready', dirty: 'unsaved', pushing: 'pushing…', synced: 'draft ' + (this.n ?? '–'), error: 'error' }[this.status] || this.status
@@ -1278,10 +1297,10 @@ const Embeds = {
 const Publish = {
   // Only once every edit is in draft: a preflight of an older draft would
   // approve (and publish) code that is not what the editor shows.
-  async preflight(P) {
-    const f = await Sync.flush(P)
+  async preflight(P, o = {}) {
+    const f = await Sync.flush(P, o)
     if (f.error) throw new Error('your edits are not in draft (' + f.error + '); fix that before publishing')
-    if (Sync.pending(P)) throw new Error(Sync.held(P) ? 'files written in this eval reach draft when it ends: publish in a later eval' : 'your edits are still being pushed to draft; try again in a moment')
+    if (Sync.pending(P)) throw new Error(Sync.held(P) ? 'edits a running eval made are not in draft until it ends (this one included, when publishing from an eval): publish after that' : 'your edits are still being pushed to draft; try again in a moment')
     return await Slop.call('preflight', { app: P.meta.app })
   },
   async run(P, pf, who = 'you', note = '') {
@@ -3000,7 +3019,10 @@ const Sandbox = {
   drop(sid) { if (this.worker) this.worker.postMessage({ type: 'drop', sid }) }
 }
 
-const LONG_CALLS = new Set(['agents.delegate', 'llm', 'ui.approve', 'ui.ask', 'session.waitFor', 'scenarios.run', 'scenarios.runAll', 'publish.run'])
+const LONG_CALLS = new Set(['agents.delegate', 'llm', 'ui.approve', 'ui.ask', 'session.waitFor', 'scenarios.run', 'scenarios.runAll', 'publish.check', 'publish.run'])
+// The sync holds an eval must not wait for: its own, and those of the evals
+// that delegated to it (they end only after it does).
+const ownHolds = ctx => [...(ctx.holds || []), ...(ctx.hold ? [ctx.hold] : [])]
 // signatures: a parameter ending in ? is optional. Used to check calls and to say how to call a verb.
 const API_SIGS = {
   'files.list': 'prefix?', 'files.read': 'path', 'files.exists': 'path', 'files.lines': 'path, from?, to?', 'files.write': 'path, text',
@@ -3137,10 +3159,11 @@ function hostAPI(ctx) {
       return r
     },
     // publishing is the person's: the agent checks, and asks with an approval card
-    'publish.check': async () => { needApp(); const pf = await Publish.preflight(P); return { ...pf, summary: Publish.lines(pf) } },
+    // inside an eval: its own hold and its delegating evals' are not waited for (see runEval)
+    'publish.check': async () => { needApp(); const pf = await Publish.preflight(P, { own: ownHolds(ctx) }); return { ...pf, summary: Publish.lines(pf) } },
     'publish.run': async (o = {}) => {
       writable(); noDryData(); needApp()
-      const pf = await Publish.preflight(P)
+      const pf = await Publish.preflight(P, { own: ownHolds(ctx) })
       if (pf.refs.draft === pf.refs.main) return { published: false, why: 'main is already draft ' + pf.refs.draft }
       if (pf.blockers.length) throw policy('not publishable: ' + pf.blockers.join('; '))
       const ok = await approvalCard(ctx, 'Publish draft ' + pf.refs.draft + ' of ' + P.meta.app + ' to main?', [o.note ? String(o.note) : '', ...Publish.lines(pf)].filter(Boolean).join('\n'))
@@ -3418,7 +3441,7 @@ async function runEval(ctx, code, api, { sid, restore } = {}) {
   // only once the eval has committed: held until then, and a rollback
   // leaves nothing to push.
   const held = !!(P.meta.app && ws === 'main')
-  if (held) Sync.hold(P)
+  if (held) ctx.hold = Sync.hold(P)
   let r, tx
   const effects = {}
   try {
@@ -3431,7 +3454,7 @@ async function runEval(ctx, code, api, { sid, restore } = {}) {
       for (const [name, snap] of tx.tables) P.restoreTable(name, snap, ctx.who, ws)
       effects.rolledBack = [...tx.files.keys(), ...[...tx.tables.keys()].map(t => 'table ' + t)]
     }
-    if (held) Sync.release(P)
+    if (held) { Sync.release(P, ctx.hold); ctx.hold = null }
   }
   if (!effects.rolledBack) {
     const files = []
@@ -3446,8 +3469,11 @@ async function runEval(ctx, code, api, { sid, restore } = {}) {
   // comes up on them (or says why not) and its frames reload before the
   // frames are measured. Its new warnings and errors are effects too.
   if (r.ok && tx.files.size && P.meta.app && ws === 'main' && Slop.on) {
-    const s = await Sync.flush(P)
+    // a subagent's writes wait for the eval that delegated to it: not an
+    // error, and not yet in draft
+    const s = await Sync.flush(P, { own: ctx.holds || [] })
     if (s.error) effects.push = { error: s.error }
+    else if (s.deferred) effects.push = { deferred: 'the eval that delegated this one still holds the app: these edits reach draft when it ends' }
     else {
       effects.draft = s.n
       if (s.act) effects.actor = s.act.broken ? { broken: s.act.broken, on: s.act.n } : { on: s.act.n }
@@ -3754,7 +3780,7 @@ const Agent = {
   },
   // one model turn on a thread: the eval tool runs in the thread's sandbox session. Throws on failure.
   async turn(P, th, msg, text, o) {
-    const ctx = { project: P, ws: o.ws, who: 'agent', thread: th.id, mode: th.mode, depth: o.depth || 0, budget: o.budget, role: th.role || null, tier: th.tier, model: th.model, signal: o.signal, children: [] }
+    const ctx = { project: P, ws: o.ws, who: 'agent', thread: th.id, mode: th.mode, depth: o.depth || 0, budget: o.budget, role: th.role || null, tier: th.tier, model: th.model, signal: o.signal, children: [], holds: o.holds || [] }
     const api = hostAPI(ctx)
     ctx.onApproval = card => { msg.approval = card; this.ev.emit('step', th.id) }
     ctx.onPanel = id => { msg.panels = msg.panels || []; if (!msg.panels.includes(id)) msg.panels.push(id); this.ev.emit('step', th.id) }
@@ -3876,7 +3902,7 @@ const Agent = {
     if (pctx.children) pctx.children.push({ thread: th.id, role })
     P.log({ kind: 'delegate', who: pctx.who || 'agent', ws: pctx.ws, thread: pctx.thread, note: role + ': ' + task.slice(0, 120), child: th.id })
     let failure = null
-    try { await this.turn(P, th, msg, prompt, { ws, depth: (pctx.depth || 0) + 1, budget, signal: abort.signal }); msg.status = 'done' }
+    try { await this.turn(P, th, msg, prompt, { ws, depth: (pctx.depth || 0) + 1, budget, signal: abort.signal, holds: ownHolds(pctx) }); msg.status = 'done' }
     catch (e) { failure = e; msg.status = abort.signal.aborted ? 'stopped' : 'error'; msg.error = e && e.message || String(e) }
     finally {
       this.turns.delete(th.id)
@@ -6070,7 +6096,7 @@ const App = {
   // ---- projects ----
   async openProject(id) {
     // an app project's edits not yet in draft are pushed before it is let go
-    if (this.P && this.P.meta.app && Slop.on) await Sync.flush()
+    if (this.P && this.P.meta.app && Slop.on) await Sync.flush(this.P, { wait: false })
     let P
     try { P = await Projects.open(id) } catch (e) { toast('Could not open that project: ' + e.message); return false }
     this.offs.forEach(f => f()); this.offs = []

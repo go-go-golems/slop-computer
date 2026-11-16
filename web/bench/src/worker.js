@@ -239,7 +239,7 @@ function cut(s, n) { s = String(s); return s.length > n ? s.slice(0, n) + `… [
 
 // ---------- engine 1: QuickJS, one context per session ----------
 const sessions = new Map()          // sid -> {vm, libHash}
-const LONG = new Set(['agents.delegate', 'llm', 'ui.approve'])
+const LONG = new Set(['agents.delegate', 'llm', 'ui.approve', 'publish.check', 'publish.run'])
 const MAX_SESSIONS = 8
 function dropSession(sid) { const S = sessions.get(sid); if (S) { sessions.delete(sid); try { S.vm.dispose() } catch (e) { } } }
 function evalIn(vm, src, ms = 3000) {
