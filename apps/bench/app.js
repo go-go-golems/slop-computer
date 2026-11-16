@@ -1,4 +1,4 @@
-/* the bench, built from web/bench: do not edit. source sha256:bd6358ae211922d9f820fd22b9580aa16dc3b771ab56ec9c17885e4ab1e6c7aa */
+/* the bench, built from web/bench: do not edit. source sha256:12fe43e65b8c224bd0a3d8229265b6f59712b392d1fb82f53479df4b0a326895 */
 // Sitebench: a live-site workbench. Built from src/*.js
 "use strict";
 (() => {
@@ -3520,7 +3520,7 @@ How a slop app runs:
 - app.json is the manifest: { "title", "page": "${entry}" (the entry page), "actor": "actor.js"?, "capabilities": { "db": {}, "user": {}, "sample": {}, … }, "type"? }. Read it first, and README.md.
 - Only the entry page gets the runtime; other .html files are served as plain files. Build one page and navigate inside it (hash routes: location.hash).
 - Pages use window.claude: const db = await window.claude.use('db'), then db.doc('notes/a').set({…}), (await db.doc('notes/a').get()).data(), db.collection('notes').get(), onSnapshot(…). const slop = await window.claude.use('slop'); await slop.actions.<name>(args) calls the actor. Capabilities the manifest does not declare are null. There is no window.site and no site.db.
-- actor.js: defineActor({ actions: { name: { requires: 'view' | 'interact' | 'admin', async run(ctx, args) { … } } }, setup(ctx) { … } }). ctx.visitor is {id, name, level}. use('sql') runs SQL on the instance's own tables; use('db') reads and writes its documents.
+- actor.js: defineActor({ actions: { name: { requires: 'view' | 'interact' | 'admin', async run(ctx, args) { … } } }, setup(ctx) { … } }). ctx.visitor is {id, name, level}. use('sql') runs SQL on the instance's own tables, synchronously, with each argument a separate parameter (never an array): sql.all(query, ...args) -> rows, sql.one(query, ...args) -> row or null, sql.run(query, ...args) -> {changes, lastRowid}, sql.transaction(fn). use('db') reads and writes its documents.
 - sql/NNN_name.sql are migrations, applied once per instance, in order. Never edit one that has run; add a new file. In development, app.resetDev() replaces the dev instance and its data when you must.
 - Pushing a tree with app.json needs an admin: the person is one, or the bench could not push.
 
