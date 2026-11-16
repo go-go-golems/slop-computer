@@ -1,0 +1,39 @@
+<!doctype html><title>embed test</title>
+<body style="font:13px monospace"><h3>A tool framing a dev view (SLOP3-022 C.1)</h3>
+<pre id="log">opening…</pre>
+<script>
+(async () => {
+  const log = (s) => { window.events.push(s); document.getElementById('log').textContent = window.events.join('\n'); };
+  window.events = [];
+  const slop = await window.claude.use('slop');
+  let e = null, f = null, origin = '';
+  // (Re)open the embed: on load, and when the runtime says a new version is
+  // out (the way a bench reloads a dev frame in place).
+  const open = async () => {
+    e = await slop.actions.embed({ store: 'jot-dev', dev: true });
+    origin = new URL(e.src).origin;
+    log('embed v' + e.version + ' dev=' + e.dev);
+    const next = document.createElement('iframe');
+    next.src = e.src; next.id = 'dev'; next.style = 'width:480px;height:220px;border:1px solid #888';
+    if (f) f.replaceWith(next); else document.body.append(next);
+    f = next;
+  };
+  addEventListener('message', (ev) => {
+    if (ev.origin !== origin) return;
+    const m = ev.data || {};
+    if (m.slop === 1) {
+      log('runtime: ' + m.type);
+      // The tool answers the runtime like the shell: the view and its secret.
+      if (m.type === 'hello') ev.source.postMessage({ slop: 1, type: 'view', view: e.view, secret: e.secret }, origin);
+      if (m.type === 'reload') open();
+    }
+    if (m.slopProbe === 1) {
+      if (m.ev) log('probe: ' + m.ev + (m.text ? ' ' + m.text : '') + (m.url ? ' ' + m.url : ''));
+      if (m.ev === 'ready') ev.source.postMessage({ slopProbe: 1, op: 'state', id: 1 }, origin);
+      if (m.reply === 1) log('probe state: ' + JSON.stringify(m.value));
+    }
+  });
+  await open();
+})();
+</script>
+</body>

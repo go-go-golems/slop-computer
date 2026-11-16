@@ -507,3 +507,120 @@ GOWORK=off golangci-lint run --build-tags sqlite_fts5
 ```
 
 - In the GitOps repository, CI's bump for `0dfce36` (#436) was closed by the watcher, so no slop-yolo PR is open.
+
+## Step 7: C.1, embedded views, with a browser check of the live loop
+
+A tool app trusted with `workshop` can now frame a real view of another store in its own page, and act as the shell for it. Commit `b5c0588`. A dev embed adds `data-src` lines and a small probe. On a local server, a push to `draft` from the CLI reached the embedded frame of a scratch tool **291 ms** after the push started.
+
+### Prompt Context
+
+**User prompt (verbatim):** see Step 6.
+
+**Assistant interpretation:** Continue the plan with C.1, the piece that lets the bench show real frames.
+
+**Inferred user intent:** The fluid loop: see the app under development, live, inside the tool.
+
+### What I did
+
+- **Read the existing code paths:**
+  - `openView` already takes a `parent` origin and passes it as `?parent=` (`pkg/doors/pages/views.go:147-191`).
+  - The sandbox resets `parent` to the main host unless it is in `frameOrigins()`, and sets `frame-ancestors` from that list (`sandbox.go:114` before this change).
+  - The runtime takes its secret from `{slop:1, type:"view"}` sent by its parent, and asks for `renew` (`web/runtime/src/transport.ts:91-134`).
+  - `views.Renew` extends a view's expiry without rotating its secret (`pkg/rt/views.go:361-365`).
+- **`pkg/doors/pages/embed.go` (new):**
+  - `Embed(ctx, p, store, toolStore, toolApp, dev)`. It requires admin on the store for `dev`, computes the tool's origin `toolOrigin(toolStore, toolApp)`, and calls `openView` with that parent. It registers a token `emb_…` with `{label, parent, dev, view, until}` and returns `{src, view, secret, version, expiresAt, origin, level, caps, dev}`. `src` is `/e/<token>/v/<n>/?mode=app&parent=…`.
+  - `RenewEmbed(ctx, p, view, toolStore, toolApp)` works only for the same person and the same tool. It re-checks access as the shell's renew does, and extends the token with the view (`embeds.extend`).
+  - `instrument(page, file)`, over `golang.org/x/net/html`'s tokenizer. It adds `data-src="file:line"` to body elements and leaves every other byte as it was.
+  - `verbErr`, which turns the door's `rtFail` into a `verbs.Error` with its code.
+- **`sandbox.go`:**
+  - `/e/<token>/…` resolves the token on its own origin only (the label must match), then serves the rest of the path as usual.
+  - `frame-ancestors` is `frameOrigins()` plus the tool's origin, because every ancestor in the chain must match.
+  - The boot's `parentOrigin` is the embed's parent, whatever the URL says.
+  - Dev embeds are instrumented and get `/_slop/probe.js` after the runtime. `inject` takes extra tags.
+  - The `/` redirect keeps the `/e/<token>` prefix.
+- **`assets/probe.js` (new, written for this protocol):**
+  - messages marked `slopProbe: 1`;
+  - `ready` (on load);
+  - `log` (console output, `error`, `unhandledrejection`);
+  - ops `state` (scroll, plus form values keyed by `data-src|name`), `restore` and `src(x, y)`;
+  - the origin and source checked on every message.
+- **The `workshop` module:** `embed(store, {dev})` and `renewEmbed(view)` in `workshopModule`, with the same trust check as `drop`. The actors door gets `Embed` and `RenewEmbed` from the pages door (`pkg/host/host.go`).
+- **`go.mod`:** `golang.org/x/net` moved from indirect to direct (`go mod tidy` changed only that line).
+- **Tests:**
+  - `TestInstrument` (`pkg/doors/pages/embed_test.go`):
+    - line numbers across a tag that spans two lines;
+    - head and script content untouched;
+    - an existing `data-src` kept;
+    - `<img …/>`;
+    - the unquoted `type=text/>`, whose slash belongs to the value;
+    - a page without a body;
+    - an escaped file name.
+  - `TestEmbeddedViews` (`pkg/host/devloop_test.go`):
+    - a dev embed as an admin: CSP lists the main host and the tool origin, the boot names the tool, the probe and `data-src` are there;
+    - `app.js` loads under the embed address;
+    - the token on another origin, and an unknown token, both give 404;
+    - a plain embed as a viewer: framed by the tool, with no probe and no `data-src`;
+    - a viewer asking for a dev embed gets `not_granted`;
+    - renew works for the opener and is `not_found` for another person.
+- **The browser check** (local server built from this branch; scripts in `scripts/02-embed-test/`):
+  - Apps: `jot`, whose page writes and reads a document; `jot-dev`, which follows `draft`; and `embedtest`, a tool that embeds `jot-dev` as a dev view, answers `hello`, and re-embeds on `reload`.
+  - Playwright: the frame chain was the live shell, then the tool (its own sandbox origin), then the dev view (`/e/emb_…/v/2/`). The tool's log showed `runtime: hello`, `probe: ready`, `probe state: {"scroll":[0,0],"fields":[["index.html:2|q",""]]}` and `probe: log jot loaded`. The embedded page's `db` worked ("from the dev instance, version ONE"), and its elements carried `data-src`.
+  - **The live edit:** `slop push jot --store jot --ref draft` with "version THREE". The tool got `runtime: reload`, opened `embed v4`, and the frame showed "version THREE" 291 ms after the push command started (polling every 100 ms). Screenshot, cropped to the frame: `various/c1-embed-live-v3.png`.
+
+### Why
+
+- **Embeds are opened through the trusted module, as the visitor.** The tool's identity, and so its origin, comes from the calling actor (`a.Store().ID`, `a.App()`), never from a parameter. A page cannot ask to be framed by an arbitrary origin.
+- **The token binds the frame address to one store's origin**, and expires with the view.
+
+### What worked
+
+- The design in the guide (§5.5) held up against the code. The only additions were the ancestor chain in `frame-ancestors` and extending the token on renew.
+- The full suite passed, and lint reported 0 issues after the fixes below.
+
+### What didn't work
+
+- **The first build:** "embed already declared through import of package embed" (`sandbox.go` imports `embed` for `go:embed`). Renamed the type to `embedAddr`.
+- **The first `TestEmbeddedViews` run:**
+
+  ```
+  want not_granted, got 500 map[error:map[code:internal message:not_granted: a dev view of jot-dev needs admin on it]]
+  ```
+
+  The pages door's `rtFail` is not a `verbs.Error`. Added `verbErr`.
+- **Lint:** "named return "out" with type "map[string]any" found (nonamedreturns)", twice. The exported functions now wrap unexported ones.
+- **`TestInstrument` passed at first while blessing a bug.** `type=text/>` became `type=text data-src=…/>`, which changes the unquoted value from `text/` to `text`. Fixed `withAttr`: a slash closes the tag only after whitespace or a quote. The test's expected line for `<img>` was also wrong (8, actually 9, because the input before it spans two lines). The code was right.
+- **The first `reload` in the browser** left "version ONE" on screen, because my scratch tool did not re-embed. The runtime's fallback reloaded its own URL, which names snapshot 2. A real bench must answer `reload` with a new embed, and the tool now does.
+
+### What I learned
+
+- **The sandbox injects the runtime only into the entry page.** Other `.html` files are served as plain bytes (`sandbox.go`, `writeStoreBytes`). A slop app is therefore one entry page. The bench's frames show deep links into it (`#…`), not separate HTML routes as in Sitebench. The guide should say so (§5.3 and §5.5).
+- **`frame-ancestors` checks every ancestor**, so a tool's embed must allow the shell's hosts too.
+
+### What was tricky
+
+- **The probe had to come after the boot data it reads.** `insertHead` puts tags first in `<head>`, which would have put the probe before `#slop-boot`. `inject` now appends extra tags after the runtime.
+
+### Second pair of eyes
+
+- **The scope of `embed`.** Any app trusted with `workshop` can now frame any store its visitor can view, in the tool's own page, and read it through the frame's runtime only as that visitor. Is that the right scope for `workshop`, or should embedding be its own module or permission?
+- **The probe is deliberately small.** Sitebench's `PROBE` (checks, layout, inspect, trace, recording) would replace it if the user allows that source in this repository.
+
+### Future
+
+- C.5 `slop dev`, then the PR.
+- Correct the guide on single-entry apps.
+
+### Code review
+
+- `pkg/doors/pages/embed.go`;
+- the embed handling in `pkg/doors/pages/sandbox.go`;
+- `pkg/doors/pages/assets/probe.js`;
+- `embed` and `renewEmbed` in `pkg/doors/actors/modworkshop.go`.
+
+### Technical details
+
+```sh
+GOWORK=off go test -buildvcs=false -tags sqlite_fts5 ./pkg/doors/pages -run TestInstrument -count=1
+GOWORK=off go test -buildvcs=false -tags sqlite_fts5 ./pkg/host -run TestEmbeddedViews -count=1
+# browser: scripts/02-embed-test/README.md; latency = probe-seen time − push start = 291 ms
+```
