@@ -207,10 +207,11 @@ function hostAPI(ctx) {
       return r
     },
     // publishing is the person's: the agent checks, and asks with an approval card
-    'publish.check': async () => { needApp(); const pf = await Publish.preflight(P); return { ...pf, summary: Publish.lines(pf) } },
+    // inside an eval on main, the eval holds the app itself (see runEval)
+    'publish.check': async () => { needApp(); const pf = await Publish.preflight(P, { own: ws() === 'main' ? 1 : 0 }); return { ...pf, summary: Publish.lines(pf) } },
     'publish.run': async (o = {}) => {
       writable(); noDryData(); needApp()
-      const pf = await Publish.preflight(P)
+      const pf = await Publish.preflight(P, { own: ws() === 'main' ? 1 : 0 })
       if (pf.refs.draft === pf.refs.main) return { published: false, why: 'main is already draft ' + pf.refs.draft }
       if (pf.blockers.length) throw policy('not publishable: ' + pf.blockers.join('; '))
       const ok = await approvalCard(ctx, 'Publish draft ' + pf.refs.draft + ' of ' + P.meta.app + ' to main?', [o.note ? String(o.note) : '', ...Publish.lines(pf)].filter(Boolean).join('\n'))

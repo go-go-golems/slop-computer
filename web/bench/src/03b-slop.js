@@ -124,16 +124,26 @@ const Sync = {
   // Push P (default: the attached project) now and wait until every edit
   // made so far is in its draft (an eval's effects need the activation;
   // switching projects must not drop edits). A push that fails is not
-  // retried in a loop: one try, then the error. While an eval holds
-  // pushes, this returns at once; P stays queued for after it. If other
-  // pushes keep it waiting past FLUSH_WAIT, it says so rather than answer
-  // with a draft that lacks the edits.
-  async flush(P = this.P) {
+  // retried in a loop: one try, then the error. If other pushes keep it
+  // waiting past FLUSH_WAIT, it says so rather than answer with a draft
+  // that lacks the edits.
+  //
+  // Evals still running on P hold it (their writes may roll back), and
+  // nothing of P is pushed until the last one ends. A caller inside an eval
+  // passes own: 1, its own hold: that one is never waited for, and P stays
+  // queued for after it. Another eval's hold is waited for, up to
+  // FLUSH_WAIT, and if it outlasts that the result says so: an eval that
+  // ended while another still runs must not report the old draft as its
+  // own. wait: false returns at once instead (switching projects does not
+  // block on someone's eval; P stays queued).
+  async flush(P = this.P, { own = 0, wait = true } = {}) {
     if (!P || !P.meta.app) return { n: null, act: null, error: '' }
-    let tries = 0, waited = false
+    const others = () => (P.syncHolds || 0) > own
+    let tries = 0, waited = ''
     for (const t0 = now(); ;) {
-      if (this.busy || Outside.merging) {
-        if (now() - t0 > FLUSH_WAIT) { waited = true; break }
+      const blocked = this.busy || Outside.merging ? 'push' : wait && others() ? 'eval' : ''
+      if (blocked) {
+        if (now() - t0 > FLUSH_WAIT) { waited = blocked; break }
         await sleep(30); continue
       }
       if (this.held(P) || !this.pending(P) || (tries && P.syncError) || tries >= FLUSH_TRIES) break
@@ -142,8 +152,11 @@ const Sync = {
     }
     // gave up with edits unpushed (and no push error to say why): say so
     let late = ''
-    if (this.pending(P) && !this.held(P) && !P.syncError) {
-      if (waited) late = 'still waiting for another push after ' + Math.round(FLUSH_WAIT / 1000) + ' s: these edits are not in draft yet'
+    const secs = Math.round(FLUSH_WAIT / 1000)
+    if (this.pending(P) && !P.syncError) {
+      if (waited === 'eval') late = 'another eval on this app is still running after ' + secs + ' s: these edits reach draft when it ends'
+      else if (this.held(P)) late = ''
+      else if (waited) late = 'still waiting for another push after ' + secs + ' s: these edits are not in draft yet'
       else if (tries >= FLUSH_TRIES) late = 'draft kept moving: ' + tries + ' pushes did not get these edits in'
     }
     // an error is about edits still unpushed: with none left (undone, or
@@ -258,8 +271,8 @@ const Embeds = {
 const Publish = {
   // Only once every edit is in draft: a preflight of an older draft would
   // approve (and publish) code that is not what the editor shows.
-  async preflight(P) {
-    const f = await Sync.flush(P)
+  async preflight(P, o = {}) {
+    const f = await Sync.flush(P, o)
     if (f.error) throw new Error('your edits are not in draft (' + f.error + '); fix that before publishing')
     if (Sync.pending(P)) throw new Error(Sync.held(P) ? 'files written in this eval reach draft when it ends: publish in a later eval' : 'your edits are still being pushed to draft; try again in a moment')
     return await Slop.call('preflight', { app: P.meta.app })
