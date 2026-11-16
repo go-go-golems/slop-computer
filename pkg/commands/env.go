@@ -58,6 +58,12 @@ type (
 		// stripe config).
 		Billing func() *stripe.Service
 	}
+	// filesEnv reaches the actor manager only to report, after a push,
+	// whether the stores it moved activated (SLOP3-022 C.2).
+	filesEnv struct {
+		kernelEnv
+		A *actor.Manager // nil in tests without actors
+	}
 	confirmEnv struct{ Confirm *verbs.Confirmations }
 	evalEnv    struct{ Verbs *verbs.Table }
 	// appVerbsEnv runs apps' verbs (app.verb): their calls go to Table as

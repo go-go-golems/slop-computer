@@ -19,7 +19,7 @@ import (
 	"github.com/go-go-golems/slop-computer/pkg/verbs"
 )
 
-func filesVerbs(e kernelEnv) []*verbs.Verb {
+func filesVerbs(e filesEnv) []*verbs.Verb {
 	return []*verbs.Verb{
 		verbs.Def[FilesLsIn, []store.File]{Name: "files.ls", Doc: "List files: the working tree, a snapshot (--at 3, --at main) or the assets zone.", Scope: verbs.Read, Action: authz.StoreRead,
 			Run: func(req verbs.Req, in FilesLsIn) ([]store.File, error) {
@@ -140,8 +140,30 @@ func filesVerbs(e kernelEnv) []*verbs.Verb {
 			Run: func(req verbs.Req, in FilesPushIn) (any, error) {
 				ctx := req.Context
 				p := req.Principal
-				return push(ctx, e, p, pushArgs{store: in.Store, zone: in.Zone, files: in.Files, blobs: in.Blobs,
+				out, err := push(ctx, e.kernelEnv, p, pushArgs{store: in.Store, zone: in.Zone, files: in.Files, blobs: in.Blobs,
 					message: in.Message, ref: in.Ref, prune: or(in.Prune, true), snapshot: or(in.Snapshot, true)}, true)
+				if err != nil || len(in.Activate) == 0 {
+					return out, err
+				}
+				// The stores that follow the moved ref (a dev instance) come
+				// up on the new snapshot now, and the pusher learns whether
+				// they did, instead of polling app.status.
+				activated := []map[string]any{}
+				for _, id := range in.Activate {
+					st, _, err := e.open(ctx, p, id, rt.LevelView, "reading")
+					if err != nil {
+						activated = append(activated, map[string]any{"store": id, "error": err.Error()})
+						continue
+					}
+					s, err := statusOf(ctx, e.kernelEnv, e.A, st, id)
+					if err != nil {
+						activated = append(activated, map[string]any{"store": id, "error": err.Error()})
+						continue
+					}
+					activated = append(activated, map[string]any{"store": s.Store, "app": s.App, "ref": s.Ref, "n": s.N, "broken": s.Broken})
+				}
+				out.(map[string]any)["activated"] = activated
+				return out, nil
 			}}.Verb(),
 		verbs.Def[FilesBlobsIn, FilesBlobsOut]{Name: "files.blobs", Doc: "Upload blobs {sha256: base64} ahead of a push too large for one request.", Scope: verbs.Write, Action: authz.StoreAdmin,
 			Run: func(req verbs.Req, in FilesBlobsIn) (FilesBlobsOut, error) {
@@ -150,7 +172,7 @@ func filesVerbs(e kernelEnv) []*verbs.Verb {
 				if _, _, err := e.open(ctx, p, in.Store, rt.LevelAdmin, "uploading files"); err != nil {
 					return FilesBlobsOut{}, err
 				}
-				if err := putBlobs(e, in.Blobs); err != nil {
+				if err := putBlobs(e.kernelEnv, in.Blobs); err != nil {
 					return FilesBlobsOut{}, err
 				}
 				m, _ := objOf(in.Blobs)
@@ -160,7 +182,7 @@ func filesVerbs(e kernelEnv) []*verbs.Verb {
 			Run: func(req verbs.Req, in ImportFilesIn) (any, error) {
 				ctx := req.Context
 				p := req.Principal
-				return push(ctx, e, p, pushArgs{store: in.Store, zone: in.Zone, files: in.Files, blobs: in.Blobs}, false)
+				return push(ctx, e.kernelEnv, p, pushArgs{store: in.Store, zone: in.Zone, files: in.Files, blobs: in.Blobs}, false)
 			}}.Verb(),
 		verbs.Def[SnapNewIn, SnapNewOut]{Name: "snap.new", Doc: "Snapshot the working tree and move a ref (default main) to it.", Scope: verbs.Write, Action: authz.StoreAdmin,
 			Run: func(req verbs.Req, in SnapNewIn) (SnapNewOut, error) {
@@ -467,14 +489,15 @@ type FilesRmIn struct {
 
 // FilesPushIn is files.push's input.
 type FilesPushIn struct {
-	Store    string `json:"store" slop:"pos=1"`
-	Files    any    `json:"files"`
-	Blobs    any    `json:"blobs,omitempty"`
-	Message  string `json:"message,omitempty"`
-	Ref      string `json:"ref,omitempty" jsonschema_description:"the ref to move (default main)"`
-	Prune    *bool  `json:"prune,omitempty" jsonschema_description:"delete tree files not in the manifest (default true)"`
-	Snapshot *bool  `json:"snapshot,omitempty" jsonschema_description:"take a snapshot (default true)"`
-	Zone     string `json:"zone,omitempty" jsonschema_description:"tree (default) or assets"`
+	Store    string   `json:"store" slop:"pos=1"`
+	Files    any      `json:"files"`
+	Blobs    any      `json:"blobs,omitempty"`
+	Message  string   `json:"message,omitempty"`
+	Ref      string   `json:"ref,omitempty" jsonschema_description:"the ref to move (default main)"`
+	Prune    *bool    `json:"prune,omitempty" jsonschema_description:"delete tree files not in the manifest (default true)"`
+	Snapshot *bool    `json:"snapshot,omitempty" jsonschema_description:"take a snapshot (default true)"`
+	Zone     string   `json:"zone,omitempty" jsonschema_description:"tree (default) or assets"`
+	Activate []string `json:"activate,omitempty" jsonschema_description:"stores to activate after the snapshot (the instances following the moved ref); the result reports each one's n and broken"`
 }
 
 // FilesBlobsIn is files.blobs's input.

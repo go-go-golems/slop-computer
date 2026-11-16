@@ -1,6 +1,7 @@
 package host
 
 import (
+	"strings"
 	"testing"
 )
 
@@ -61,4 +62,56 @@ func num(v any) int64 {
 		return int64(x)
 	}
 	return -1
+}
+
+// C.2: files.push {activate} brings the listed stores up on the new
+// snapshot and reports each, so a dev loop learns at once that a
+// migration failed, while the instance keeps serving its last good version.
+func TestPushActivates(t *testing.T) {
+	h := newHarness(t)
+	admin := h.tokenFor("admin@example.com", "read", "write", "admin")
+	h.call(admin, "store.new", map[string]any{"id": "jot"})
+	app := devApp()
+	h.call(admin, "files.push", map[string]any{"store": "jot", "files": files(app)})
+	h.call(admin, "files.push", map[string]any{"store": "jot", "files": files(app), "ref": "draft"})
+	h.call(admin, "store.new", map[string]any{"id": "jot-dev", "app": "jot", "type": "jot"})
+	h.call(admin, "app.follow", map[string]any{"store": "jot-dev", "ref": "draft"})
+
+	activated := func(out any) map[string]any {
+		t.Helper()
+		l, _ := out.(map[string]any)["activated"].([]any)
+		if len(l) != 2 {
+			t.Fatalf("activated = %v, want 2 entries", out)
+		}
+		if e, _ := l[1].(map[string]any)["error"].(string); e == "" {
+			t.Fatalf("an unknown store reports no error: %v", l[1])
+		}
+		return l[0].(map[string]any)
+	}
+
+	// A good migration: the dev instance is on the new snapshot.
+	app["sql/002_tags.sql"] = `CREATE TABLE tags (note TEXT, tag TEXT);`
+	out := h.call(admin, "files.push", map[string]any{"store": "jot", "files": files(app), "ref": "draft", "activate": []string{"jot-dev", "nope"}})
+	n := num(out.(map[string]any)["n"])
+	a := activated(out)
+	if a["store"] != "jot-dev" || a["ref"] != "draft" || num(a["n"]) != n || a["broken"] != "" {
+		t.Fatalf("activated[0] = %v, want jot-dev on draft at %d, not broken", a, n)
+	}
+	if got := fmtAny(h.call(admin, "actor.call", map[string]any{"store": "jot-dev", "action": "tables"})); got != `["notes","tags"]` {
+		t.Fatalf("dev tables = %s", got)
+	}
+
+	// A broken migration: reported, and the instance keeps the good version.
+	app["sql/003_bad.sql"] = `CREATE TABL oops (x);`
+	out = h.call(admin, "files.push", map[string]any{"store": "jot", "files": files(app), "ref": "draft", "activate": []string{"jot-dev", "nope"}})
+	a = activated(out)
+	if b, _ := a["broken"].(string); !strings.Contains(b, "003_bad") {
+		t.Fatalf("broken = %q, want the failing migration named", a["broken"])
+	}
+	if num(a["n"]) != n {
+		t.Fatalf("n = %v, want the last good snapshot %d", a["n"], n)
+	}
+	if got := fmtAny(h.call(admin, "actor.call", map[string]any{"store": "jot-dev", "action": "tables"})); got != `["notes","tags"]` {
+		t.Fatalf("dev tables after a failed migration = %s", got)
+	}
 }
