@@ -507,3 +507,82 @@ The server subagent finished (its diary is `reference/02-diary-server-phase-file
 
 ### Technical details
 - A conflict from the actor: `{conflict: {at, paths}}`, e.g. `{"at":5,"paths":["README.md"]}`; `ref.ls` is unchanged afterwards.
+
+## Step 8: The agent layer — evals as transactions, one API table
+
+This step turned the 979-line `06-agent.js` into `agent/`, following guide sections 5.4 and 5.5. An eval is now a `Tx` on the workspace's Draft, and every host-API call is declared once in a table. The rollback machinery, sync holds, flushes, `API_SIGS`, `checkArgs`, `LONG_CALLS`, the worker's `LONG` set and every hand-placed guard are gone. The API table and the transaction side of the API have Node tests (11 tests); the sandbox and frames need a browser and are not run yet.
+
+### Prompt Context
+
+**User prompt (verbatim):** see Steps 2 and 5.
+
+**Assistant interpretation:** Phases 3 and the eval half of phase 2, in the agent layer, following section 6.
+
+**Inferred user intent:** The agent's writes are atomic and composable on the server's terms, and its API cannot drift from its checks.
+
+**Commit (code):**
+- cd23abd — "Bench source: the host API as one declared table (SLOP3-023)"
+- 1820989 — "Bench source: the agent layer — evals as transactions, the host API as one table (SLOP3-023)"
+
+### What I did
+- **`core/api.js`:** `defineAPI(...tables)` takes entries `{sig, doc, writes, pathOf, long, internal, run}`. One `call(ctx, name, args)` does three things:
+  - checks the arguments against `sig`;
+  - guards the modes: a read thread changes nothing; a tests thread writes only `scenarios/` and `fixtures/`;
+  - applies the dry-run rule: only `writes: 'files'` passes inside a dry run.
+
+  `long()` and `reference(notes)` are derived from the same table.
+- **`agent/api/*.js`:** one table per namespace (files, app, frames, tests, session, ui, lib, tx, agents), assembled in `index.js`.
+  - Reads and writes go through `ctx.tx`.
+  - `tx.*` and `dry.*` are child Txs on a `ctx.stack`.
+  - `dry.end` keeps the child's changes as a changeset; `dry.apply` copies them in.
+- **`agent/eval.js`:**
+  - `makeContext`, plus `AgentUI` hooks that the shell sets;
+  - `runEval`: begin (or a child of `parentTx`), run, then on failure drop the Tx;
+  - on success, commit. A `folded` result becomes an effect. A `committed` result waits for the frames to reach `c.n`, then measures effects. A `conflict` result fails the eval with kind `conflict` and refreshes the head.
+- **`agent/effects.js`, `agent/roles.js`, `agent/guide.js`:** `guide.js` is slop-only; the reference is generated, with a note per namespace.
+- **`agent/agent.js`:** turns; summaries; proposals as refs (an empty one is discarded); threads loaded on use; `delegate` passes `parentTx` when the subagent works in the caller's workspace.
+- **`agent/sandbox.js`:** the worker bridge, dispatching through the run's API. `worker.js` reads `long` from the eval message.
+- **Actor:** `closeProposal` accepts `discarded` and logs no event for it. `Instances.ensure` passes `ref` for test instances.
+
+### Why
+- **Dry-run refusal derived from `writes` rather than a `dry: 'refuse'` flag:** what may happen inside a dry run follows from what the transaction can capture (files). A flag would be one more thing to forget, which is the very bug class this phase removes.
+- **Write categories named by target (`files`, `dev`, `main`):** the tests-mode and read-mode rules then read directly off the declaration.
+- **Scenario runs are not writes.** The guide's reviewer, a read-only role, runs scenarios, and the test instance is scratch space.
+- **The guide's `needs: 'app'` is dropped:** every project is an app now.
+- **`ctx.agent` carries the agent to `llm` and `agents.delegate`.** This avoids an import cycle between `agent.js` and the API it runs.
+
+### What worked
+- `npm test`: 17 tests pass (draft 6, api 6, eval-api 5).
+- `node tools/imports.mjs`: no findings in `lib`, `core`, `server`, `model`, `frames` or `agent`. It reports only the nine unmigrated `NN-*.js` UI files.
+- `go test ./pkg/host -run TestBench`: ok, including the new `discarded` case.
+
+### What didn't work
+- **`node --test test/` failed in Node 24:** `Error: Cannot find module '…/web/bench/test'`. Node 24 no longer takes a directory there. The npm script now uses `test/*.test.mjs`.
+- **A precedence slip, caught on review before running anything:** in `frames.compare`, `!(P.proposals.get(what) || {}).status === 'open'` is always false. Fixed to `… .status !== 'open'`.
+- **My first `dry.end` classified changes with nested ternaries** and mislabelled copies kept by hash. I rewrote it to branch on the change's kind.
+
+### What I learned
+- The import tool earned its keep again. It added `blame` and `why` to `files.js`, which I had used without importing; in the browser that would have been a `ReferenceError` on the first `files.blame`.
+- Documents from the actor are `{path, body}` (`store.Doc`), not `{id, data}`. The fixture capture and the scenario `docs` step now read `path` and `body`.
+
+### What was tricky to build
+- **A subagent's transaction is the caller's *current* one** (`pctx.tx` when `delegate` runs). Inside an atomic step or a dry run, the subagent's writes fold into that step, which is the semantics a reader of the code would expect.
+- **A fixture written earlier in the same eval must be found.** So `Fixtures.apply` and `runScenario` take a `read` function, and the API passes `tx.read`. The scenario still runs on the committed code; the guide says so.
+
+### What warrants a second pair of eyes
+- **`afterCommit` waits only for frames whose `ws` matches and whose kind is not `test`,** and only when some activated instance came up unbroken. If no instance follows the ref yet (no dev instance made), effects have no frame part.
+- **After a `conflict`, `runEval` calls `d.refresh()`** so the agent's next eval begins at the new head. Check that this cannot race with the person's live-edits Tx.
+
+### What should be done in the future
+- The UI layer (dock, canvas, views, panels: these add `ui.panel` and friends with `API.add`, and the panel note to `NOTES.ui`).
+- `main.js`, the build, a browser smoke test.
+
+### Code review instructions
+- Start with `src/agent/eval.js` (`runEval`), then `src/agent/api/tx.js`.
+- Then `src/core/api.js` (`guard`).
+- Then `test/eval-api.test.mjs`.
+- Run `cd web/bench && npm test && node tools/imports.mjs`.
+
+### Technical details
+- An eval's effects when it commits: `{files: [{path, change, add, del}], commit: {ref, n, merged}, instances: [{store, n, broken}], actorLogs, newIssues, fixedIssues, newErrors, layout}`.
+- A conflict: `{ok: false, error: {kind: 'conflict', message: 'draft moved to 57 since this eval began on 55, and that also changed index.html: nothing was written. …'}, effects: {conflict: {ref, at, paths}}}`.
