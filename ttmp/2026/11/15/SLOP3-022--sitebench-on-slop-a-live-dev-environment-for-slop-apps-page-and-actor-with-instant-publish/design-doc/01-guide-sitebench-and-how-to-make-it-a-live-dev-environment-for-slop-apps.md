@@ -712,6 +712,8 @@ workshop.embed(store, { dev: true }) → { src, view, secret, version, expires }
 
    It talks to the bench with `postMessage`, using the bench's exact origin instead of `'*'`, and checks `event.origin`.
 
+**One entry page per app.** The sandbox injects the runtime only into an app's entry page (`app.json`'s `page`). Other `.html` files in the tree are served as plain files, without `window.claude` (`sandbox.go`). So a slop app is a single page. The bench's frames show that page at different deep links (`#/menu`, `#/cart`), not separate HTML routes as Sitebench's Corner Coffee had. Templates for the bench should be single-page apps.
+
 **Security notes:**
 
 - Only apps trusted with `workshop` may embed. An admin decides that with `app.trust`.
@@ -1025,23 +1027,23 @@ Source: `API_SIGS`, `06-agent.js:75-94`. Bold verbs are long calls that pause th
 
 ## Appendix C. Proposed additions (contracts to refine during implementation)
 
-**C.1 `workshop.embed(store, {dev?, path?})` → `{src, view, secret, version, expires}`.**
+**C.1 `workshop.embed(store, {dev?})` → `{src, view, secret, version, expiresAt, origin, level, caps, dev}`.** *Built: `b5c0588` (diary step 7). The `path` option was dropped: frames use deep links into the entry page (§5.5).*
 - Opens a view of `store` as the visiting person, for the calling app's origin.
 - Requires the calling app to be trusted with `workshop`, and the person to hold `view` on the store.
 - `src` is `https://s<label>.<sandbox>/e/<token>/v/<n>/<path>`; the sandbox adds the calling app's origin to `frame-ancestors`.
 - `dev: true` also requires `admin` on the store, and makes the sandbox inject `/_slop/probe.js` and add `data-src` to HTML.
 - Code: `pkg/doors/pages/views.go` (open), `sandbox.go` (serve), `pkg/doors/actors/modworkshop.go` (module), `pkg/doors/pages/assets/probe.js`.
 
-**C.2 `files.push {…, activate?: [store]}`.**
+**C.2 `files.push {…, activate?: [store]}`.** *Built: `3835fd8` (diary step 6).*
 - After the push, runs `Running` on each listed store that follows the moved ref.
 - Returns `activated: [{store, n, broken}]`.
 - Code: `pkg/commands/files.go:300-396`.
 
-**C.3 `ref.move {store, ref, n, ifAt?}`.**
+**C.3 `ref.move {store, ref, n, ifAt?}`.** *Built: `6c688e7` (diary step 6). The result also carries `from`.*
 - Fails with `conflict` when the ref is not at `ifAt`.
 - Code: `files.go:204-217`, `pkg/store/files.go:230-251`.
 
-**C.4 `workshop` module additions.**
+**C.4 `workshop` module additions.** *Built: `d591503` (diary step 6). Instead of `newInstance` and `seed`, the module has the one-to-one functions `newStore`, `importDocs` and `importTable`. A tool composes them.*
 - `newInstance(app, id, {ref, type})`: `store.new {app}` then `app.follow`.
 - `drop(id)`: `store.rm`.
 - `seed(id, fixture)`: `import.docs` and `import.table`.
