@@ -9,3 +9,4 @@
 - [ ] TypeScript declarations for the verb-backed modules (workshop, system), generated from the verbs' Go input structs (notes §7.2)
 - [ ] A tagged change type shared by the Draft, the actor and the test stand-in; a snapshot type distinct from "ref absent" (files.commit base 0) (notes §7.3–7.4)
 - [ ] "Set a ref's tree to snapshot n" as one server commit, for restore (notes §7.5)
+- [ ] Type checking in the bench: a TypeScript worker (lazy, warm, its own worker); `types` in eval effects (new/fixed); Code view diagnostics; transpiles TS evals (notes §8)

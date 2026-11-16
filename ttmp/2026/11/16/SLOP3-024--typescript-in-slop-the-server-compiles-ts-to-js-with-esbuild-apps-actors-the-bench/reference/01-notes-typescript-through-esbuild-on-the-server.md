@@ -10,12 +10,14 @@ Topics:
 DocType: reference
 Intent: long-term
 Owners: []
-RelatedFiles: []
+RelatedFiles:
+    - Path: repo://ttmp/2026/11/16/SLOP3-024--typescript-in-slop-the-server-compiles-ts-to-js-with-esbuild-apps-actors-the-bench/scripts/01-ts-check-latency.cjs
+      Note: measures cold and warm TypeScript checks of a small app (notes §8)
 ExternalSources: []
-Summary: "Parked idea: everyone writes TypeScript (people, the agent, the bench) and the slop server compiles it to JavaScript with esbuild's Go API when it serves pages and loads actors. What runs JS today, where esbuild would plug in, what is known, what the full design must settle."
+Summary: 'Parked idea: everyone writes TypeScript (people, the agent, the bench) and the slop server compiles it to JavaScript with esbuild''s Go API when it serves pages and loads actors. What runs JS today, where esbuild would plug in, what is known, what the full design must settle.'
 LastUpdated: 2026-11-16T15:09:17.665766763-05:00
-WhatFor: "Taking up TypeScript support later without redoing the first investigation."
-WhenToUse: "Before writing the full SLOP3-024 design, or when deciding how the bench source becomes TypeScript."
+WhatFor: Taking up TypeScript support later without redoing the first investigation.
+WhenToUse: Before writing the full SLOP3-024 design, or when deciding how the bench source becomes TypeScript.
 ---
 
 # Notes: TypeScript through esbuild on the server
@@ -79,7 +81,7 @@ The hook points:
 1. **Pages:** `writeStoreBytes` (or `resolveStoreFile` before it). A `.ts`/`.tsx` request gets the compiled output, served as `text/javascript`.
 2. **Actors:** `(*Actor).load` and `requirer` in `pkg/actor/actor.go`. Compile `actor.ts` and each required `.ts` before `RunScript`.
 3. **The eval verb:** `pkg/commands/eval.go`, if callers should be able to send TS.
-4. **The agent's evals** (browser, QuickJS). Three options: a server action that transforms text, esbuild's wasm build in the worker (large, roughly 10 MB), or a small type-stripper. The first is the simplest.
+4. **The agent's evals** (browser, QuickJS). Decided in section 8: the bench's type-check worker compiles them (`ts.transpileModule`), so there is no server request.
 
 ## 5. Questions the full design must settle
 
@@ -92,7 +94,7 @@ The hook points:
 - **Type checking.** esbuild does not check types. Options:
   - `tsc --noEmit` in CI and in the bench (through Node in CI, nowhere on the server);
   - the Go port of the TypeScript compiler (typescript-go). Check its state at design time; it may allow checking on the server or in a verb.
-  - Decide whether the agent sees type errors in its eval effects. That would be valuable.
+  - The agent sees type errors in its eval effects, checked in the bench by a browser worker (decided in section 8).
 - **What a single-file transform cannot do.** Under the `isolatedModules` rules, `const enum` across files, namespace merging and `export =` do not work. Document the subset, or turn on `isolatedModules` in the declared `tsconfig`.
 - **Error positions.**
   - Actor logs and stack traces report positions in the compiled JS. Check whether goja can apply an inline source map; if not, map positions on the server.
@@ -144,7 +146,53 @@ The review of #51 (SLOP3-023, diary steps 10 and 11) found two bugs. They show w
 - **A stand-in that accepts more than the real server.** That is a difference in behaviour. #51 handles it with one stand-in that applies `files.commit`'s rule (`web/bench/test/fake-actor.mjs`); running the same tests against both would be stronger.
 - **An explicit default** such as `?? 0` on `number | null`.
 
-## 8. Related
+## 8. Type checking in the bench: a browser worker (decided 2026-11-16)
+
+The agent's eval results should report the type errors an eval introduced; that is where checking pays off most. The two candidates were a TypeScript checker in a Web Worker in the bench, or a check request to the server. **The decision is the browser worker.**
+
+**Measured** with `scripts/01-ts-check-latency.cjs` (TypeScript 5.9.3, a three-file app with the es2022 and DOM libraries; browsers run the same engine):
+
+| | |
+|---|---|
+| Download | `typescript.js` 1.6 MB gzipped (9.1 MB raw); lib `.d.ts` files 0.3 MB gzipped; cached after the first load |
+| First check (cold) | 1.26 s, mostly parsing the DOM's types |
+| Check after an edit (warm) | 30–90 ms |
+| Memory | about 80 MB |
+
+The planted bug (`r.txt` for `r.text`) came back as "Property 'txt' does not exist on type '{ text: string; by: string; }'. Did you mean 'text'?": the message the agent should get.
+
+**Why the browser worker:**
+
+- **Speed.** A checker kept warm re-checks in 30–90 ms per eval. A server would pay about 1.3 s per request, or keep an 80 MB checker warm for every person and app.
+- **It sees the eval's own writes.** It can check the eval's transaction before the commit (dry runs too), and report errors new or fixed since the eval began. That is how the bench already computes effects. A server sees committed snapshots only, unless the page uploads the files.
+- **One worker, three uses:**
+  - type errors in the agent's eval results;
+  - error underlines and hover types for the person in the Code view;
+  - compiling the agent's TypeScript eval code (`ts.transpileModule`) before QuickJS runs it, which settles section 4, item 4.
+- **Nothing new on the server.** It needs no Node or typescript-go dependency. TypeScript's type system can be pushed into very long checks; in the browser that costs one person's tab, not the server.
+
+**Costs:** the 2 MB download and the 80 MB of memory. Both are paid only for apps that have `.ts` files, and the 1.3 s first check runs in the background when the app opens.
+
+**Compiling and checking are different jobs, and they run in different places.** Compiling strips types (esbuild) and is needed wherever code runs. Checking finds type errors and never changes what runs. So serving never waits on a check, and a type error never takes an app down.
+
+| | Compile (strip types) | Check (find type errors) |
+|---|---|---|
+| The server | every page file served and every actor file loaded (section 4), cached by hash | only at gates, on request and cached by snapshot: before publishing (a warning, or a block if the app opts in), `slop check`, agents working without a browser |
+| The bench (browser worker) | the agent's eval code | every change: eval results and the Code view |
+| Locally and in CI | (the server does it) | plain `tsc` |
+
+All three check against the same declarations and `tsconfig`, so they agree.
+
+**The server's part:** it serves the declarations (`slop.d.ts`: the page runtime, the actor API, the modules, the app's actions; section 7) and the `tsconfig`. The bench worker, local `tsc` and CI then all check against the same inputs. A server-side checker comes later, only for users without a browser, such as a check before publishing or an agent working from the CLI. That would be typescript-go once it can be built into the binary, with results cached by snapshot, since a snapshot never changes.
+
+**Implementation notes:**
+
+- **Its own worker,** separate from the QuickJS sandbox: the bench kills the sandbox when an eval overruns its time, and that must not throw away the warm checker.
+- **Inputs:** the worker holds the workspace's files by path and version (sha256). The page sends changes: head moves, the person's edits, and for an eval, the transaction's writes.
+- **Results inform; they never fail an eval.** The effect is `types: {new: [{file, line, message}], fixed: n}`, capped, like `newIssues`. If a check takes longer than about 2 s, the eval says its types were not checked. The agent can also ask with a `types.check()` call in the API table.
+- **Versions:** the TypeScript version is pinned with the bench build, and the declarations carry a version from the server.
+
+## 9. Related
 
 - SLOP3-023 (the bench core rewrite): `ttmp/2026/11/16/SLOP3-023--bench-core-drafts-as-server-side-commits-evals-as-transactions-one-api-table-one-storage-model/`. Its diary records when this came up.
 - Files named above: `pkg/doors/pages/storebytes.go`, `pkg/actor/actor.go`, `pkg/actor/catalog.go`, `pkg/commands/eval.go`, `web/bench/build.mjs`.
