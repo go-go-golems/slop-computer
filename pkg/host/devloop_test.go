@@ -3,12 +3,14 @@ package host
 import (
 	"bytes"
 	"context"
+	"errors"
 	"net/http"
 	"net/url"
 	"os"
 	"path/filepath"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -285,13 +287,30 @@ type syncBuf struct {
 func (s *syncBuf) Write(p []byte) (int, error) { s.mu.Lock(); defer s.mu.Unlock(); return s.b.Write(p) }
 func (s *syncBuf) String() string              { s.mu.Lock(); defer s.mu.Unlock(); return s.b.String() }
 
+// pushFails fails files.push while it is set, as a server that cannot be
+// reached would.
+type pushFails struct {
+	hostTransport
+	on *atomic.Bool
+}
+
+func (t pushFails) RoundTrip(r *http.Request) (*http.Response, error) {
+	if t.on.Load() && strings.HasSuffix(r.URL.Path, "/files.push") {
+		return nil, errors.New("connection refused")
+	}
+	return t.hostTransport.RoundTrip(r)
+}
+
 // C.5: slop dev pushes a folder to draft, makes the person's dev instance
-// on first use, and on each change reports where the instance is (or why
-// it broke) and its new log lines; main is never moved.
+// on first use (with the type its app.json declares, though the app has no
+// main yet), and on each change reports where the instance is (or why it
+// broke) and its new log lines; a failed push is retried without another
+// change; main is never moved.
 func TestSlopDev(t *testing.T) {
 	h := newHarness(t)
 	admin := h.tokenFor("admin@example.com", "read", "write", "admin")
-	c := &client.Client{Server: h.ts.URL, Token: admin, HTTP: &http.Client{Transport: hostTransport{h.cfg.Hosts.Main}}}
+	var down atomic.Bool
+	c := &client.Client{Server: h.ts.URL, Token: admin, HTTP: &http.Client{Transport: pushFails{hostTransport{h.cfg.Hosts.Main}, &down}}}
 	h.call(admin, "store.new", map[string]any{"id": "jot"})
 	dir := t.TempDir()
 	write := func(path, text string) {
@@ -325,6 +344,11 @@ func TestSlopDev(t *testing.T) {
 	if refs := h.call(admin, "ref.ls", map[string]any{"store": "jot"}).(map[string]any); refs["main"] != nil {
 		t.Fatalf("slop dev moved main: %v", refs)
 	}
+	for _, x := range h.call(admin, "store.ls", map[string]any{"all": true}).([]any) {
+		if m := x.(map[string]any); m["id"] == inst && m["type"] != "jot" {
+			t.Fatalf("the instance's type is %q, not app.json's", m["type"])
+		}
+	}
 
 	// The loop: a change is pushed and reported, with the instance's log;
 	// a broken migration is reported and the instance stays on its version.
@@ -348,6 +372,13 @@ func TestSlopDev(t *testing.T) {
 	time.Sleep(50 * time.Millisecond) // a new modification time
 	write("sql/002_tags.sql", `CREATE TABLE tags (note TEXT, tag TEXT);`)
 	wait("log log   setup ran")
+	// The server is unreachable for a push: the change stays pending and
+	// goes up once it is back, with no further edit.
+	down.Store(true)
+	write("README.md", "jot")
+	wait("push failed, will retry")
+	down.Store(false)
+	wait(" on 3 · ok")
 	write("sql/003_bad.sql", `CREATE TABL oops (x);`)
 	wait("broken: ")
 	cancel()

@@ -15,6 +15,7 @@ import (
 	"fmt"
 	"io"
 	"io/fs"
+	"os"
 	"path/filepath"
 	"strings"
 	"time"
@@ -74,7 +75,7 @@ func (c *Client) Dev(ctx context.Context, dir string, o DevOptions) error {
 	if err != nil {
 		return err
 	}
-	if err := c.devInstance(o); err != nil {
+	if err := c.devInstance(o, manifestType(dir)); err != nil {
 		return err
 	}
 	if !printed { // the instance did not exist yet, or followed another ref
@@ -92,6 +93,13 @@ func (c *Client) Dev(ctx context.Context, dir string, o DevOptions) error {
 	since := time.Now().UnixMilli()
 	tick := time.NewTicker(o.Every)
 	defer tick.Stop()
+	// pending: the folder changed since the last push that went through. A
+	// failed push stays pending and is retried after a backoff (1s, doubling
+	// to 30s), or at once when the folder changes again; the same error is
+	// printed once.
+	pending, lastErr := false, ""
+	var retryAt time.Time
+	var backoff time.Duration
 	for i := 0; ; i++ {
 		select {
 		case <-ctx.Done():
@@ -99,19 +107,51 @@ func (c *Client) Dev(ctx context.Context, dir string, o DevOptions) error {
 		case <-tick.C:
 		}
 		pushed := false
-		if s, err := folderStamp(dir); err != nil {
-			_, _ = fmt.Fprintf(o.Out, "reading %s: %v\n", dir, err)
-		} else if s != stamp {
-			stamp = s
+		s, err := folderStamp(dir)
+		switch {
+		case err != nil:
+			lastErr = devErr(o, lastErr, "reading "+dir, err)
+		case s != stamp:
+			stamp, pending, retryAt = s, true, time.Time{}
+		}
+		if pending && !time.Now().Before(retryAt) {
 			if _, _, err := c.devPush(dir, o); err != nil {
-				_, _ = fmt.Fprintf(o.Out, "push: %v\n", err)
+				lastErr = devErr(o, lastErr, "push failed, will retry", err)
+				backoff = min(max(2*backoff, time.Second), 30*time.Second)
+				retryAt = time.Now().Add(backoff)
+			} else {
+				pending, pushed, lastErr, backoff = false, true, "", 0
 			}
-			pushed = true
 		}
 		if pushed || i%4 == 0 { // the log about every 2 s, and right after a push
 			since = c.devLogs(o, since)
 		}
 	}
+}
+
+// devErr prints what went wrong unless it is the error printed last, and
+// returns the message to compare the next error with.
+func devErr(o DevOptions, last, what string, err error) string {
+	msg := what + ": " + err.Error()
+	if msg != last {
+		_, _ = fmt.Fprintln(o.Out, msg)
+	}
+	return msg
+}
+
+// manifestType is the type declared in the folder's app.json: the type a
+// new dev instance gets, so the app's typed mounts serve it. The app store
+// may have no main yet, so its own status cannot say.
+func manifestType(dir string) string {
+	b, err := os.ReadFile(filepath.Join(dir, "app.json"))
+	if err != nil {
+		return ""
+	}
+	var m struct {
+		Type string `json:"type"`
+	}
+	_ = json.Unmarshal(b, &m)
+	return m.Type
 }
 
 // devPush pushes the folder to draft, activating the instance, and prints
@@ -147,18 +187,12 @@ func devLine(o DevOptions, n int64, a map[string]any) {
 	}
 }
 
-// devInstance makes sure the dev instance exists, runs the app, and follows
-// draft.
-func (c *Client) devInstance(o DevOptions) error {
+// devInstance makes sure the dev instance exists (of type typ when it is
+// made), runs the app, and follows draft.
+func (c *Client) devInstance(o DevOptions, typ string) error {
 	st, err := c.Call("app.status", map[string]any{"store": o.Instance})
 	var ae *APIError
 	if errors.As(err, &ae) && ae.Code == "not_found" {
-		typ := ""
-		if as, err := c.Call("app.status", map[string]any{"store": o.App}); err == nil {
-			if man, _ := as.(map[string]any)["manifest"].(map[string]any); man != nil {
-				typ, _ = man["type"].(string)
-			}
-		}
 		if _, err := c.Call("store.new", map[string]any{"id": o.Instance, "app": o.App, "type": typ}); err != nil {
 			return err
 		}
