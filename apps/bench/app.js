@@ -1,4 +1,4 @@
-/* the bench, built from web/bench: do not edit. source sha256:9d105c1a9bef37603d12cf2e9974eaba1a123c6c0767c501c1630edb22dfcad2 */
+/* the bench, built from web/bench: do not edit. source sha256:8996d3c66d618eede66c55ec9d07723b48e4300f015652c3216302f5f8859513 */
 // Sitebench: a live-site workbench. Built from src/*.js
 "use strict";
 (() => {
@@ -1070,31 +1070,32 @@ const textish = f => !BINARY_EXT.test(f.path) && f.size <= 240000
 // unpushed (switched away from mid-eval, or one an agent turn still
 // writes to) stays queued and is pushed all the same.
 const Sync = {
-  P: null, status: 'idle', error: '', n: null, act: null, timer: 0, busy: false, again: false, holds: 0, queue: new Set(), ev: emitter(),
+  P: null, status: 'idle', error: '', n: null, act: null, timer: 0, busy: false, again: false, queue: new Set(), ev: emitter(),
   set(s, err = '') { this.status = s; this.error = err; this.ev.emit('status', s, err) },
   attach(P) { this.P = P; this.n = P && P.refs ? P.refs.draft : null; this.act = P && P.devStatus ? { n: P.devStatus.n, broken: P.devStatus.broken } : null; this.set(P ? 'synced' : 'idle') },
-  soon() { clearTimeout(this.timer); if (!this.holds && this.queue.size) this.timer = setTimeout(() => this.runAll(), 300) },
+  soon() { clearTimeout(this.timer); if ([...this.queue].some(Q => !this.held(Q))) this.timer = setTimeout(() => this.runAll(), 300) },
   schedule(P) {
     if (!P || !P.meta.app) return
     this.queue.add(P); this.soon()
     if (P === this.P && this.status !== 'error') this.set('dirty')
   },
-  // While an eval runs, nothing is pushed: its writes may still roll back.
-  // Releasing the last hold pushes whatever then differs from draft.
-  hold() { this.holds++; clearTimeout(this.timer) },
-  release() {
-    this.holds = Math.max(0, this.holds - 1)
-    if (this.holds) return
-    for (const Q of this.queue) if (!this.pending(Q)) this.queue.delete(Q)
-    if (this.P && !this.pending(this.P) && this.status === 'dirty') this.set('synced')
+  // While an eval runs on P, P is not pushed: its writes may still roll
+  // back. Releasing P's last hold pushes whatever then differs from its
+  // draft. Other projects push as usual.
+  hold(P) { P.syncHolds = (P.syncHolds || 0) + 1 },
+  held(P) { return !!(P && P.syncHolds) },
+  release(P) {
+    P.syncHolds = Math.max(0, (P.syncHolds || 0) - 1)
+    if (P.syncHolds) return
+    if (!this.pending(P)) { this.queue.delete(P); if (P === this.P && this.status === 'dirty') this.set('synced') }
     this.soon()
   },
-  // every queued project, the attached one first
+  // every queued project not held, the attached one first
   async runAll() {
-    for (const Q of [...this.queue].sort((a, b) => (b === this.P) - (a === this.P))) { if (this.holds) return; await this.run(Q) }
+    for (const Q of [...this.queue].sort((a, b) => (b === this.P) - (a === this.P))) if (!this.held(Q)) await this.run(Q)
   },
   async run(P = this.P) {
-    if (!P || !P.meta.app || this.holds) return
+    if (!P || !P.meta.app || this.held(P)) return
     if (this.busy || Outside.merging) { this.queue.add(P); this.again = true; return }
     this.queue.delete(P)
     if (!this.pending(P) && P.refs && P.refs.draft != null) { if (P === this.P && this.status !== 'error') this.set('synced'); return }
@@ -1106,7 +1107,7 @@ const Sync = {
       else { files.push({ path, text }); sent.set(path, text) }
     }
     for (const [path, e] of P.extern) files.push({ path, sha256: e.sha256, size: e.size })
-    const changed = [...sent.keys()], gone = [...P.synced.keys()].filter(p => !P.files.has(p))
+    const changed = [...sent.keys()], gone = [...new Set([...P.synced.keys(), ...P.tree.keys()])].filter(p => !P.files.has(p) && !P.extern.has(p))
     const message = 'bench: ' + [...changed, ...gone.map(p => '-' + p)].slice(0, 6).join(' ') + (changed.length + gone.length > 6 ? ' …' : '')
     try {
       const r = await Slop.call('sync', { app: P.meta.app, files, message, base: P.refs ? P.refs.draft ?? null : null })
@@ -1130,10 +1131,11 @@ const Sync = {
     if (this.again) { this.again = false; this.runAll() }
   },
   // Edits not yet in draft: a text that differs from what was last pushed,
-  // or a file pushed before and removed since.
+  // or a file of draft's tree (text or hash-only) that is gone here.
   pending(P) {
     for (const [p, t] of P.files) if (P.synced.get(p) !== t) return true
     for (const p of P.synced.keys()) if (!P.files.has(p)) return true
+    for (const p of P.tree.keys()) if (!P.files.has(p) && !P.extern.has(p)) return true
     return false
   },
   // Push P (default: the attached project) now and wait until every edit
@@ -1146,7 +1148,7 @@ const Sync = {
     let tried = false
     for (let i = 0; i < 400; i++) {
       if (this.busy || Outside.merging) { await sleep(30); continue }
-      if (this.holds || !this.pending(P) || (tried && P.syncError)) break
+      if (this.held(P) || !this.pending(P) || (tried && P.syncError)) break
       tried = true
       await this.run(P)
     }
@@ -1207,7 +1209,8 @@ const Outside = {
   },
   async mergeIn(P, n, tree) {
     const next = new Map(tree.map(f => [f.path, f]))
-    const mine = p => P.files.has(p) ? P.files.get(p) !== P.synced.get(p) : P.synced.has(p)   // changed here since the last push
+    // changed here since the last push: a text edited, or a file of the old tree (text or hash-only) removed
+    const mine = p => P.files.has(p) ? P.files.get(p) !== P.synced.get(p) : P.synced.has(p) || (P.tree.has(p) && !P.extern.has(p))
     const take = [], gone = []
     for (const [p, f] of next) { const cur = P.tree.get(p); if ((!cur || cur.sha256 !== f.sha256) && !mine(p)) take.push(f) }
     for (const p of P.tree.keys()) if (!next.has(p) && !mine(p)) gone.push(p)
@@ -3322,7 +3325,7 @@ async function runEval(ctx, code, api, { sid, restore } = {}) {
   // only once the eval has committed: held until then, and a rollback
   // leaves nothing to push.
   const held = !!(P.meta.app && ws === 'main')
-  if (held) Sync.hold()
+  if (held) Sync.hold(P)
   let r, tx
   const effects = {}
   try {
@@ -3335,7 +3338,7 @@ async function runEval(ctx, code, api, { sid, restore } = {}) {
       for (const [name, snap] of tx.tables) P.restoreTable(name, snap, ctx.who, ws)
       effects.rolledBack = [...tx.files.keys(), ...[...tx.tables.keys()].map(t => 'table ' + t)]
     }
-    if (held) Sync.release()
+    if (held) Sync.release(P)
   }
   if (!effects.rolledBack) {
     const files = []

@@ -453,7 +453,7 @@ async function runEval(ctx, code, api, { sid, restore } = {}) {
   // only once the eval has committed: held until then, and a rollback
   // leaves nothing to push.
   const held = !!(P.meta.app && ws === 'main')
-  if (held) Sync.hold()
+  if (held) Sync.hold(P)
   let r, tx
   const effects = {}
   try {
@@ -466,7 +466,7 @@ async function runEval(ctx, code, api, { sid, restore } = {}) {
       for (const [name, snap] of tx.tables) P.restoreTable(name, snap, ctx.who, ws)
       effects.rolledBack = [...tx.files.keys(), ...[...tx.tables.keys()].map(t => 'table ' + t)]
     }
-    if (held) Sync.release()
+    if (held) Sync.release(P)
   }
   if (!effects.rolledBack) {
     const files = []
