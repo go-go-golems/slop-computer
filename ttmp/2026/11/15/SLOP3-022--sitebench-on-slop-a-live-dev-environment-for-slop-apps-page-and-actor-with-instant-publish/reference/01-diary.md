@@ -1964,3 +1964,50 @@ The user merged #47, #48 and #49. I removed their worktrees and branches. Then I
 
 - **Deploy:** `publish-image` for main (`084eaa2`) opens a GitOps PR. Merging it deploys staging, then `make deploy-apps` pushes the bench.
 - **The 10-round cap** per sample call (the bench should continue).
+
+## Step 27: staging deployed (sha-084eaa2), the bench shipped; a sudoku dry run
+
+The user approved the deploy. Staging now runs main with #47–#49, and `make deploy-apps` installed the bench there. The user then asked for a walkthrough of building a Sudoku app in the bench. I did a dry run on the local server first (same model, same Responses path as staging), so the walkthrough describes what actually happens. Along the way the user raised two side ideas to keep for later.
+
+### Prompt Context
+
+**User prompts (verbatim):**
+- "ok PR is open for k3s, merge, deploy"
+- "then, walk me through creating a little sudoku paying app from scratch using bench."
+- "would adding iframe capability with injecting some kind of snapshotting conduit allow us to take snapshots of the real thing from within the agents themselves? since we control the hosting side too."
+- "(this is a side idea, so I dont lose it)"
+- "don't tackle the task, just write it up as a follow up we need to design out"
+- "also write down as future task researching how to do scratchpads with repeatable scripts for the coding agent (say, solving soduko puzzles in our sudoku example), for later, no need to do more research now"
+- "is it possible to access the dev / staging version live while it's being written as well? where?"
+
+### What I did
+
+- **Deploy:**
+  - Merged gitops #438 (merge commit 7ceeb40, the repo's style) and closed #437 as superseded. Argo `slop` was Synced/Healthy within ~2 min; one pod, 0 restarts.
+  - Log: `Pi models ready (Geppetto): 14`. Hosts: `/healthz` and `/readyz` 200, `/auth/login` 303; `/guestbook`, `/f/shop`, `/office`, `/workshop` and `/examples/static-site/` all 200.
+  - Data parity before and after: 31 mounts, 135 stores, 121 apps, none broken.
+- **Apps:** `make deploy-apps SLOP=<cli built at 084eaa2>` from a main worktree. The bench is new on staging (snapshot 1, trusted with workshop, `sample` on for @admin, mounted at `/bench`, 200). Staging now has 122 apps, none broken.
+- **Staging's model:** all three tiers are `lunaroute/deepseek-4.1-flash` (low/medium/high), the model #49 fixes. I could not run its agent myself: the bench is behind ZITADEL, and the CLI has no sample verb.
+- **Sudoku dry run** (local server, real Pi config, Responses):
+  1. **Created the app:** project menu → "New slop app…" → `sudoku`/`Sudoku`. Draft 1, with README.md, app.json (db capability), index.html and styles.css, and a dev instance (`dev ok`).
+  2. **First prompt** (Main target): 165 s, 9 evals. It wrote index.html, styles.css and a 10 KB game.js (draft 2), then tested in the frames by clicking cells and typing. It stopped at the 10-round cap mid-step. The board worked at 1280 and 375 px with 30 givens.
+  3. **"continue":** another 165 s, again ended by the cap. The agent widened the scope: to write scenarios it changed "New puzzle" from random to cycling (draft 4).
+  4. **Publish:** the dialog's preflight said "draft 4 → main (first publish) … no production instance yet: nothing serves main". Main became 4. `/f/:id` serves only `type: release` stores, so it 404s for a bench app. `slop mount set apps.localhost:18490 /sudoku sudoku` serves it, with the note "guests cannot read sudoku … grant @guest view to make it public". At 420 px the game rendered fully (screenshot `various/sudoku-dry-run-live-375.png`).
+  5. **Watching the dev instance live:** the dev store is `<app>-dev-<first 6 of the user id>`. Mounting `sudoku-dev-2915cc` at `/sudoku-dev` works. After a draft edit (title marker), `/sudoku-dev` showed it and `/sudoku` (main) did not; I reverted it.
+- **Side ideas, written down, not designed or built:**
+  - `design-doc/02-follow-up-the-agent-sees-screenshots-of-its-frames-design-needed.md`, with task `6q5p`;
+  - task `ia46`: scratchpads with repeatable scripts for the agent.
+- **Gaps from the dry run, as tasks:**
+  - `ltcr`: a first publish leaves the app unreachable without the CLI;
+  - `hm4w`: no link to open the dev instance outside the canvas;
+  - `28ip`: the 10-round cap ends replies mid-step.
+
+### What didn't work
+
+- **Counting staging's state:** my first attempt looped over `"mount ls"` and the like as unquoted `$c`. zsh doesn't word-split that, so the CLI got one argument and printed no JSON. `${=c}` fixed it.
+- **`tail` on the first `deploy-apps` run** hid the snapshot lines, so I ran it again. That's safe: the script only sends changed bytes.
+
+### What I learned
+
+- **Main mode is the right default for app projects.** It's what made the dry run work. Auto-to-proposal can't run the slop runtime (step 23).
+- **A useful prompt** names the interactions, says "no actor yet", and asks the agent to check in the frames. A follow-up should be just as specific ("finish checking, fix, report; no scenarios").
