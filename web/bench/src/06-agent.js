@@ -132,7 +132,8 @@ function hostAPI(ctx) {
   const touchFile = path => {
     const open = txFrames().filter(f => !f.files.has(path)); if (!open.length) return
     const w = ws(), ov = w !== 'main' ? P.overlays.get(w) : null
-    const snap = { text: P.read(path, w), inOv: !!ov && Object.prototype.hasOwnProperty.call(ov.files, path), ovText: ov ? ov.files[path] : undefined, hadBase: !!ov && Object.prototype.hasOwnProperty.call(ov.base, path) }
+    // ext: the hash-only entry a write on main replaces (a binary or large file the bench does not load)
+    const snap = { text: P.read(path, w), ext: w === 'main' ? P.extern.get(path) : undefined, inOv: !!ov && Object.prototype.hasOwnProperty.call(ov.files, path), ovText: ov ? ov.files[path] : undefined, hadBase: !!ov && Object.prototype.hasOwnProperty.call(ov.base, path) }
     for (const f of open) f.files.set(path, snap)
   }
   const touchTable = name => { const open = txFrames().filter(f => !f.tables.has(name)); if (!open.length) return; const snap = P.tableSnap(name, ws()); for (const f of open) f.tables.set(name, snap) }
@@ -480,7 +481,7 @@ async function runEval(ctx, code, api, { sid, restore } = {}) {
   // comes up on them (or says why not) and its frames reload before the
   // frames are measured. Its new warnings and errors are effects too.
   if (r.ok && tx.files.size && P.meta.app && ws === 'main' && Slop.on) {
-    const s = await Sync.flush()
+    const s = await Sync.flush(P)
     if (s.error) effects.push = { error: s.error }
     else {
       effects.draft = s.n

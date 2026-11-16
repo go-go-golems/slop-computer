@@ -92,7 +92,11 @@ class Project {
 
   // put a file back as it was before an eval's first write (the eval failed); logged like any write
   revert(path, ws, snap, { who = 'you', note, thread } = {}) {
-    if (ws === 'main') { if (snap.text === null) this.remove(path, { who, note, thread }); else this.write(path, snap.text, { who, note, thread }); return }
+    if (ws === 'main') {
+      if (snap.text === null) this.remove(path, { who, note, thread }); else this.write(path, snap.text, { who, note, thread })
+      if (snap.ext && !this.files.has(path)) this.extern.set(path, snap.ext)   // the hash-only file it replaced comes back
+      return
+    }
     const ov = this.overlays.get(ws); if (!ov) return
     if (snap.inOv) ov.files[path] = snap.ovText; else delete ov.files[path]
     if (!snap.hadBase) delete ov.base[path]
