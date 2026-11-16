@@ -1691,3 +1691,43 @@ Fixed in `b37267a`. #48 merges it (`4f8a180`, with its in-eval publish message m
 ### Code review
 
 - `Sync.hold`/`held`/`release`/`pending` in `web/bench/src/03b-slop.js`.
+
+## Step 22: Codex round 7 on #47, and where the real model stands
+
+Codex's seventh pass on #47 (`b37267a`) found two more P2s. First, the Eval panel saved an eval's scope and timeline entry to whatever project was open when it finished. Second, `flush` returned the old draft with no error when its ~12 s wait ran out. Fixed in `acd5951`; #48 merges it (`c1592ee`). The user also asked how to get a real model; the answer is below, with the evidence from staging.
+
+### Prompt Context
+
+**User prompt (verbatim):** "How can we wire up real LLM functionality? or where are we at?" (sent mid-turn, after "how can I test it?")
+
+**Assistant interpretation:** Explain what is needed for the bench's agent to run on a real model, and the current state.
+
+**Inferred user intent:** Try the agent for real, not on the fake backend.
+
+### What I did
+
+- **The Eval panel** captures `P`/`ws` at the start of a run: `replScope`, `P.log`, and the header label (with the project's title when another one is open now). The scope view repaints only if the same project is still open.
+- **`flush`:**
+  - waits up to `FLUSH_WAIT` (60 s) for other pushes and tries at most `FLUSH_TRIES` (20) pushes;
+  - giving up with edits pending returns an error ("still waiting for another push after 60 s…" or "draft kept moving…") and keeps the project queued.
+- **Model facts:**
+  - `serve --llm pi` (config `llm: pi`) serves `sample` through Geppetto with Pi's `~/.pi/agent` on the server host. `pkg/llm/request.go` takes `modelTier` (quick/default/complex → Pi models, `pkg/llm/gepp/backend.go`), `model`, `effort`, `maxTokens` and `tools` (at most 16), with `MaxRounds` 10.
+  - The bench calls `window.claude.use('sample')` with one tool and streams through `onText` (`06-agent.js:668`, `:802`).
+  - On staging (read-only CLI with the user's default login), `llm ls` shows `@admin` allowed with no budget and `@member` allowed with 2,000,000; `llm usage` shows 1,200,294 tokens used this month as `@admin`.
+
+### What worked
+
+- **Browser:** a slow eval on `bench-demo`, with `jot` opened 0.6 s in, put its scope (`marker`) and its eval entry on `bench-demo`. `jot`'s latest eval was an older one, and its scope was untouched.
+
+### What didn't work
+
+- **A bench push went to staging by mistake.** In the merge step I chained `$S/rep/bench push apps/bench --store bench` without `SLOP_CREDENTIALS`/`SLOP_SERVER`, so it used the user's default login (staging). Staging answered "error: not_found: no store bench", and nothing was written. `store ls` there shows only `bench-twin`, an existing store of the user's. From now on, every local CLI call sets both variables on the same line.
+- **The flush timeout and tries cap were not exercised.** That would need a push held for over 60 s, or a server answering conflicts 20 times.
+
+### What I learned
+
+- **The real-model path needs no new code:** an environment with `llm: pi` plus the bench's `sample` policy for `@admin` is enough. What is untested is the agent's behaviour with a real model on slop apps: the prompt, tool use and the eval loop.
+
+### Future
+
+- **Run the agent on a real model**, locally with `--llm pi` or on staging after deploying, and fix the prompt and tool loop on what a real model does.
