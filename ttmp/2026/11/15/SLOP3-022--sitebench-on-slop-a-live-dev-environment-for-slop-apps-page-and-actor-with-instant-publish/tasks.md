@@ -6,4 +6,4 @@
 - [x] Stage 0 experiment: Sitebench dist as a slop app on a local server
 - [x] Guide: analysis, design, implementation plan for an intern
 - [x] Second pass: review notes, revision, consistency read
-- [ ] Upload the guide to reMarkable
+- [x] Upload the guide to reMarkable (/ai/2026/11/15/SLOP3-022)

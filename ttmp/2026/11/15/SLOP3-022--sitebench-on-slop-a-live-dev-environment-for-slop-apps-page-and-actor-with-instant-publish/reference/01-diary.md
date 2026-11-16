@@ -323,3 +323,81 @@ I wrote the guide in four parts, committing after each: `33b814c` (parts 1–2),
   - **T2.** "84 verbs in 15 groups" should be 14 groups: agents, data, dry, files, fixtures, frames, lib, llm, log, scenarios, session, snapshots, tx, ui. Counted from `API_SIGS`.
   - **T3.** The summary's "accept and publish become ref moves": accept is a push to `draft`, which moves `draft`. Reword to "accept and publish move refs".
   - **T4.** Checked and correct as written: `ctx.now` is an accessor property (`pkg/actor/actor.go:731`), and reactors are `on: {'<selector>'(ctx, e) {}}` (`apps/backoffice/actor.js:21-24`; `pkg/actor/manager.go:788-800`).
+
+## Step 5: Second pass, bookkeeping, upload
+
+I applied the review notes from Step 4, plus one inconsistency found on the full read. I related the key files, ran the ticket checks, and uploaded the guide to reMarkable.
+
+### Prompt Context
+
+**User prompt (verbatim):** see Step 1. The mid-task messages are quoted in Steps 3 and 4.
+
+**Assistant interpretation:** Finish the guide, store it in the ticket, upload it.
+
+**Inferred user intent:** A finished document to read on the reMarkable, with the work in the repository.
+
+### What I did
+
+- **Applied G1–G8 and T1–T3** (Step 4 lists them):
+  - "accept and publish move refs", plus a pointer to Part 3 for the terms;
+  - the effects one-liner versus the JSON;
+  - illustrative values labelled;
+  - 14 groups of host-API verbs;
+  - "instance" introduced as this guide's word;
+  - "view" defined;
+  - why production frames do not reload on a draft push;
+  - why the bench answers `hello` (`parentOrigin`);
+  - why `policy set` is needed;
+  - the snapshot numbers declared illustrative.
+- **Fixed one inconsistency from the full read.** Phase 1 claimed srcdoc frames render app pages "without their backend". A srcdoc frame has no slop runtime, so only static apps render. Pages that call `window.claude` error until Phase 2.
+- **`docmgr doc relate`** on the guide, with seven files: `modworkshop.go`, `workshop_module_test.go`, `views.go`, `sandbox.go`, `apps.go`, `web/runtime/src/index.ts`, and the stage-0 script.
+- **`docmgr changelog update`.**
+- **`docmgr doctor`.** It warned that the slop reader's diary listed 20 related files without notes. I cleared that list (the guide relates the key files with notes), and doctor then reported "All checks passed".
+- **Committed** `6b70cd2`.
+- **Uploaded:**
+
+  ```
+  remarquee upload bundle <guide> --name "SLOP3-022 Sitebench on slop - live dev environment guide" --remote-dir "/ai/2026/11/15/SLOP3-022" --toc-depth 2 --non-interactive
+  ```
+
+  Result: `OK: uploaded SLOP3-022 Sitebench on slop - live dev environment guide.pdf -> /ai/2026/11/15/SLOP3-022`.
+
+### Why
+
+- The writing guidance asks for a whole-document second reading, with notes before revisions. The notes are in Step 4.
+
+### What worked
+
+- The upload succeeded on the first try.
+
+### What didn't work
+
+- Nothing failed in this step. The rendered PDF was not inspected: the upload policy is upload-only unless something is reported broken. The guide's diagrams use box-drawing characters in code blocks, so check those pages when reading.
+
+### What I learned
+
+- The second pass found mostly comprehension gaps, not factual errors. The one factual error (Phase 1's srcdoc claim) appeared only when Part 7 was read against Part 2.
+
+### What was tricky
+
+- Keeping the snapshot numbers in §5.2, §5.4, §5.8 and §5.10 consistent: 37 for main, 41 for draft, 42 for the next edit.
+
+### Second pair of eyes
+
+- **§5.5 and Appendix C.1, embedded views:** this is the part of the design that touches security-relevant code (framing, view secrets, probe injection).
+- **§5.8, publish:** the migration preflight is the protection for production data.
+
+### Future
+
+- The user's decisions:
+  - whether Sitebench's source may go into this public repository (Open question 1);
+  - then Phases 1–3 of the plan.
+- The local server used for stage 0 was stopped after this step.
+
+### Code review
+
+- The guide: `design-doc/01-guide-sitebench-and-how-to-make-it-a-live-dev-environment-for-slop-apps.md`.
+
+### Technical details
+
+- Commits in this ticket: `336149d`, `33b814c`, `1f2bd13`, `a0506ed`, `989d468`, `9484a46`, `6b70cd2`, and this step's.
