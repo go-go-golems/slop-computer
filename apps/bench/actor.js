@@ -119,6 +119,50 @@ defineActor({
       },
     },
 
+    // The visitor's dev instance of an app, made the first time: a store
+    // that runs the app at draft, with its own (empty) data, typed as the
+    // app's manifest says so the app's typed mounts serve it.
+    dev: {
+      requires: 'view',
+      async run(ctx, { app }) {
+        const w = tool(ctx);
+        storeId(ctx, app);
+        const id = devId(app, ctx.visitor.id);
+        let status = await statusOf(ctx, id);
+        if (!status) {
+          let type = '';
+          try { type = JSON.parse(await w.read(app, 'draft', 'app.json')).type || ''; } catch (e) { /* no manifest, or not JSON: no type */ }
+          await w.newStore(id, type ? { app, type: String(type) } : { app });
+          await w.follow(id, 'draft');
+          status = await statusOf(ctx, id);
+        } else if (status.app !== app) {
+          ctx.fail('conflict', id + ' runs ' + status.app + ', not ' + app);
+        } else if (status.ref !== 'draft') {
+          await w.follow(id, 'draft');
+          status = await statusOf(ctx, id);
+        }
+        return { id, status };
+      },
+    },
+
+    // A dev view of the visitor's dev instance of an app, framed by the
+    // bench's page: {src, view, secret, version, expiresAt, origin, …}. The
+    // page answers the framed runtime's hello with the view and secret, and
+    // its renew through renew below.
+    embed: {
+      requires: 'view',
+      async run(ctx, { app }) {
+        storeId(ctx, app);
+        return await tool(ctx).embed(devId(app, ctx.visitor.id), { dev: true });
+      },
+    },
+    renew: {
+      requires: 'view',
+      async run(ctx, { view }) {
+        return await tool(ctx).renewEmbed(String(view || ''));
+      },
+    },
+
     // A new app store, its first files pushed to draft (main does not exist
     // until the first publish).
     create: {

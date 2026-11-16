@@ -66,7 +66,8 @@ const App = {
     const reloadT = new Map()
     const reload = fh => { clearTimeout(reloadT.get(fh)); reloadT.set(fh, setTimeout(() => fh.load(), 180)) }
     this.offs.push(
-      P.ev.on('files', (ws, paths) => { for (const fh of FrameHosts) if (fh.project === P && (ws === 'main' || fh.ws === ws)) { if (fh.headless) fh.stale = true; else reload(fh) } this.ev.emit('files', ws, paths); this.paintHeader() }),
+      // an embedded frame (the dev instance) reloads when slop says draft moved, not on the edit itself
+      P.ev.on('files', (ws, paths) => { for (const fh of FrameHosts) if (fh.project === P && (ws === 'main' || fh.ws === ws)) { if (fh.headless) fh.stale = true; else if (!fh.embed) reload(fh) } this.ev.emit('files', ws, paths); this.paintHeader() }),
       P.ev.on('tables', name => { for (const fh of FrameHosts) if (fh.project === P) fh.push({ push: 'db', table: name }); this.ev.emit('tables', name) }),
       P.ev.on('marks', () => this.snapMarkSoon(P)),
       P.ev.on('overlays', () => { if (this.ws !== 'main' && (!P.overlays.get(this.ws) || P.overlays.get(this.ws).status !== 'open')) this.setWs('main'); this.ev.emit('overlays'); this.paintHeader(); if (this.canvas) this.canvas.sync() }),

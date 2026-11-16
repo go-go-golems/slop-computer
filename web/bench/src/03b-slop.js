@@ -90,6 +90,28 @@ const Sync = {
   }
 }
 
+// Embedded views (Phase 2): canvas frames of an app project show the
+// person's dev instance, which runs the app at draft on its own data, as
+// slop serves it (instrumented, with the probe). The dev instance is made
+// the first time a frame needs it.
+const Embeds = {
+  ready: new Map(),   // app -> a promise of its dev instance {id, status}
+  dev(P) {
+    const app = P.meta.app
+    if (!this.ready.has(app)) {
+      this.ready.set(app, Slop.call('dev', { app }).then(r => {
+        P.dev = r.id; P.devStatus = r.status
+        if (Sync.P === P && r.status) { Sync.act = { n: r.status.n, broken: r.status.broken }; Sync.ev.emit('status', Sync.status) }
+        return r
+      }, e => { this.ready.delete(app); throw e }))
+    }
+    return this.ready.get(app)
+  },
+  async open(P) { await this.dev(P); return await Slop.call('embed', { app: P.meta.app }) },
+  // The page slop serves with the runtime: app.json's page (index.html).
+  entry(P) { try { return JSON.parse(P.read('app.json') || '{}').page || 'index.html' } catch (e) { return 'index.html' } }
+}
+
 // A new slop app: the smallest tree slop runs, a page and its manifest.
 function slopAppFiles(title) {
   const t = title.replace(/[<&"]/g, '')

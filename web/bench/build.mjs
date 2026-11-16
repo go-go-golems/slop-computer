@@ -6,6 +6,10 @@
 //   sandbox.js  src/worker.js bundled with QuickJS and acorn; src/core.js
 //               (the term core) inlined as __CORE_SRC__
 //
+// and pkg/doors/pages/assets/probe.js: src/05a-probe.js's PROBE, started
+// in embedded mode, which slop's sandbox adds to dev embeds (the frames
+// the bench shows of an app's dev instance).
+//
 // `make bench` runs it. Each output's first line is its source stamp
 // (../build-stamp.mjs), which pkg/host's TestBuildOutputsFresh checks.
 import { build } from 'esbuild';
@@ -40,4 +44,22 @@ await build({
   define: { 'process.env.NODE_ENV': '"production"', __CORE_SRC__: JSON.stringify(readFileSync('src/core.js', 'utf8')) },
   plugins: [stubNode],
 });
-console.log('built', out, '(app.js', app.length, 'bytes)');
+// The server's probe: the boot data names the bench (parentOrigin); the
+// frame address carries the bench's load nonce (sbn).
+const probe = readFileSync('src/05a-probe.js', 'utf8');
+writeFileSync('../../pkg/doors/pages/assets/probe.js', banner + `
+// slop's dev probe (SLOP3-022): Sitebench's PROBE from web/bench/src/05a-probe.js,
+// which the sandbox adds to dev embeds only, after the runtime. It answers the
+// tool that framed the view (the boot data's parentOrigin) and nothing else.
+(() => {
+  'use strict';
+  const bootEl = document.getElementById('slop-boot');
+  let boot = {};
+  try { boot = JSON.parse((bootEl && bootEl.textContent) || '{}'); } catch (e) { boot = {}; }
+  if (!boot.parentOrigin || window.parent === window) return;
+  const q = new URLSearchParams(location.search);
+${probe}
+  PROBE({ embedded: true, origin: boot.parentOrigin, nonce: q.get('sbn') || '', route: location.pathname.split('/').slice(5).join('/') || 'index.html', mode: 'select', pins: [], store: {} });
+})();
+`);
+console.log('built', out, '(app.js', app.length, 'bytes) and the server probe');

@@ -141,3 +141,40 @@ func TestBenchProjects(t *testing.T) {
 	}
 	h.fail(admin, "actor.call", map[string]any{"store": "bench", "action": "open", "args": map[string]any{"app": "Not An Id"}}, "invalid_argument")
 }
+
+// Phase 2: the bench makes the visitor's dev instance of an app (typed as
+// its draft's app.json says, following draft; the same one next time) and
+// frames a dev view of it, for a person on the bench's page, never for a
+// token.
+func TestBenchDevInstance(t *testing.T) {
+	h := newHarness(t)
+	admin := h.tokenFor("admin@example.com", "read", "write", "admin")
+	installBench(t, h, admin)
+	h.call(admin, "mount.set", map[string]any{"host": h.cfg.Hosts.Live[0], "path": "/bench", "store": "bench"})
+	h.call(admin, "store.new", map[string]any{"id": "jot"})
+	h.call(admin, "files.push", map[string]any{"store": "jot", "files": files(devApp()), "ref": "draft"})
+
+	d := h.call(admin, "actor.call", map[string]any{"store": "bench", "action": "dev", "args": map[string]any{"app": "jot"}}).(map[string]any)
+	id, st := d["id"].(string), d["status"].(map[string]any)
+	if !strings.HasPrefix(id, "jot-dev-") || st["app"] != "jot" || st["ref"] != "draft" || st["broken"] != "" {
+		t.Fatalf("dev = %v", d)
+	}
+	for _, x := range h.call(admin, "store.ls", map[string]any{"all": true}).([]any) {
+		if m := x.(map[string]any); m["id"] == id && m["type"] != "jot" {
+			t.Fatalf("the dev instance's type is %q, not app.json's", m["type"])
+		}
+	}
+	if again := h.call(admin, "actor.call", map[string]any{"store": "bench", "action": "dev", "args": map[string]any{"app": "jot"}}).(map[string]any); again["id"] != id {
+		t.Fatalf("a second dev = %v", again)
+	}
+
+	page, v := personView(t, h, "admin@example.com", "/bench")
+	e := result(t, rpc(page, v, "slop.call", map[string]any{"action": "embed", "args": map[string]any{"app": "jot"}}))
+	if src, _ := e["src"].(string); !strings.Contains(src, "/e/emb_") || e["dev"] != true || e["secret"] == "" {
+		t.Fatalf("embed = %v", e)
+	}
+	if r := result(t, rpc(page, v, "slop.call", map[string]any{"action": "renew", "args": map[string]any{"view": e["view"]}})); r["view"] != e["view"] {
+		t.Fatalf("renew = %v", r)
+	}
+	h.fail(admin, "actor.call", map[string]any{"store": "bench", "action": "embed", "args": map[string]any{"app": "jot"}}, "not_granted")
+}
