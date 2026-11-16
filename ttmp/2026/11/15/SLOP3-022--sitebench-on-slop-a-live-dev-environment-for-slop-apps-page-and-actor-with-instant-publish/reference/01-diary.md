@@ -240,3 +240,86 @@ slop policy set bench sample @admin on
 slop mount set --host apps.localhost:18490 --path /bench --store bench
 slop sql query --store bench --sql "SELECT … FROM _docs GROUP BY 1"
 ```
+
+## Step 4: The guide's first draft, and the user's question about stores as projects
+
+I wrote the guide in four parts, committing after each: `33b814c` (parts 1–2), `1f2bd13` (parts 3–4), `a0506ed` (part 5) and `989d468` (parts 6–7, appendices, open questions). The draft is about 11,500 words. While I was writing, the user asked how stores and apps would map to projects. That became §5.3, "Projects are apps".
+
+### Prompt Context
+
+**User prompt (verbatim):** see Step 1.
+
+**Mid-task user message (verbatim):** "can we basically load stores / create stores/apps as projects? how would you map those?"
+
+**Assistant interpretation:** Make the store-to-project mapping explicit:
+
+- which stores show up as projects;
+- what opening one does;
+- how creating one works;
+- where each piece of Sitebench's project state lives on slop.
+
+**Inferred user intent:** The bench should open the apps that already exist on slop (Pinboard, reports, the catalog) and create new ones, not keep a parallel world of projects.
+
+### What I did
+
+- Checked `store.ls`'s fields (`id, type, app, owner, createdAt, level`, `pkg/commands/stores.go:24-47`). An app store has `app == ""` and an `app.json` in its tree; its instances have `app == <id>`.
+- Checked the store id rule (`^[a-z0-9][a-z0-9-]{0,62}$`, `pkg/registry/stores.go:12`) and that `import.docs`, `import.table` and `store.rm` exist (`pkg/commands/data.go:133,176`; `stores.go:64`).
+- Checked that `app.follow` resolves the ref name on the app store and then runs `Running`, so it activates (`pkg/commands/actors.go:132-163`).
+- Checked how far framing is allowed: `frameOrigins` is the main host plus the live hosts (`pkg/doors/pages/sandbox.go:62-68`).
+- Read the shell's message switch (`pkg/doors/pages/assets/shell.js:206-250`), the sandbox's `/v/<n>/` handling with `n == 0` meaning main (`sandbox.go:124-135`), and the runtime's `reload` handling (`web/runtime/src/transport.ts:270-280`).
+- Wrote §5.3:
+  - a mapping table from Sitebench to the bench to the slop mechanism;
+  - pseudocode for `open`;
+  - create, opening a store that is not an app, and export.
+
+### Why
+
+- Each claim in Part 3 that the design leans on was rechecked in the code before the design used it.
+
+### What worked
+
+- The mapping is one-to-one with existing slop objects except two: embedded views and instance seeding. Both are listed in Appendix C.
+
+### What didn't work
+
+- Nothing failed in this step.
+
+### What I learned
+
+- `frameOrigins` decides the central design question. A bench on its own sandbox origin cannot frame another app's view today. That is why §5.5 proposes embedded views, opened by a trusted app, with the bench acting as the shell for its frames.
+
+### What was tricky
+
+- **One working tree serves every ref of a store** (§3.1). A push to `draft` replaces it, so a later `snap.new` without `--ref` would publish draft. The guide warns about this.
+
+### Second pair of eyes
+
+- **§5.5's embed design** should be reviewed by someone who knows the shell and sandbox code. In particular: `renew`, and the bench forwarding `confirm` to its own shell.
+
+### Future
+
+- The second pass (Step 5).
+
+### Code review
+
+- `design-doc/01-guide-…md`, §5.3 to §5.5 and Appendix C.
+
+### Technical details
+
+- Review notes for the second pass, written before revising.
+
+  **Comprehension gaps (where a newcomer would stop):**
+  - **G1.** In §1.2, step 6 shows the one-line effects summary. The model receives JSON (shown in §2.4). Say so.
+  - **G2.** "Instance" is this guide's word. Slop's code says "a store whose `_meta.app` names another store". Say so where the term is introduced (§3.2).
+  - **G3.** §3.4 uses "view" without saying what it is: the server's record of one open page, with an id, a version and a secret.
+  - **G4.** In §5.4, why don't production frames reload when draft moves? `reloadApp` checks them too, but `Running` returns main's unchanged `n`. Say so.
+  - **G5.** In §5.5, why must the bench answer `hello`? The boot script gives the page `parentOrigin`. In an embed that is the bench's origin, so the page's runtime talks to the bench. Say so.
+  - **G6.** In Part 4, why `policy set … sample @admin on`? `sample` is gated per app and audience by the policy matrix. Say so.
+  - **G7.** The summary uses "store", "tree" and "ref" before Part 3 defines them. Point there.
+  - **G8.** The snapshot numbers in §5.2, §5.4 and §5.8 are illustrative. Say so once.
+
+  **Technical corrections:**
+  - **T1.** §2.4's effects JSON has illustrative values (`757 → 791` was not taken from a run). Label it.
+  - **T2.** "84 verbs in 15 groups" should be 14 groups: agents, data, dry, files, fixtures, frames, lib, llm, log, scenarios, session, snapshots, tx, ui. Counted from `API_SIGS`.
+  - **T3.** The summary's "accept and publish become ref moves": accept is a push to `draft`, which moves `draft`. Reword to "accept and publish move refs".
+  - **T4.** Checked and correct as written: `ctx.now` is an accessor property (`pkg/actor/actor.go:731`), and reactors are `on: {'<selector>'(ctx, e) {}}` (`apps/backoffice/actor.js:21-24`; `pkg/actor/manager.go:788-800`).
