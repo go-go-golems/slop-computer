@@ -82,7 +82,50 @@ Rules that decide the kind:
 | model access | `llm.set {subject, value, budget}` | per person or audience; **`sample` needs the policy cell and the payer's access** |
 | where | `mount.set {host, path, store, api?}` | static or live host; a literal segment beats `:param`, longer beats shorter |
 
-### 3.2 An idempotent deploy script
+### 3.2 Developing against a draft, then publishing
+
+Mounts serve `main`. To work on an app without touching its users, push to
+the `draft` ref and run it in a dev instance: a store that runs the app's
+code at `draft` against its own data (SLOP3-022).
+
+```sh
+slop dev ./myapp --app myapp          # push on every change; Ctrl-C to stop
+```
+
+`slop dev` pushes the folder to `draft` (only changed bytes) now and on every
+change, makes your dev instance `myapp-dev-<you>` on first use (it follows
+`draft`), and prints after each push where the instance is or why it broke
+(a failed migration names the file), then the instance's new log lines.
+`--once` pushes, reports and exits. By hand, the same loop is
+`files.push {ref: "draft", activate: [instance]}` plus
+`store.new {id, app}` and `app.follow {store, ref: "draft"}`.
+
+Publishing moves `main` to the draft's snapshot; `--ifAt` makes it a
+compare-and-swap, so two publishers cannot overwrite each other, and the
+answer's `from` is the snapshot to roll back to:
+
+```sh
+slop ref ls myapp                                   # main: 37, draft: 42
+slop ref move myapp main 42 --ifAt 37               # publish (conflict if main moved)
+slop ref move myapp main 37                         # roll back
+```
+
+Instances activate the new version on their next view or event; a failed
+migration leaves an instance on its last good version (`app.status` says
+why). Migrations only add: an applied migration that changed fails
+activation everywhere, so add a new file instead. A dev instance whose
+migration you edited is easiest to drop and make again.
+
+Tools trusted with the `workshop` module do the same for the visitor
+(`push`, `publish`, `newStore`, `follow`, `importDocs`, `importTable`,
+`logs`, `drop` of instances that run unpublished code) and can frame a
+store's view in their own page: `embed(store, {dev})` returns a frame
+address and the view's secret; the tool answers the framed runtime's
+`hello` with `{slop: 1, type: "view", view, secret}` and its `reload` with a
+new embed. A dev embed (admin on the store) adds `data-src="file:line"` to
+the entry page's elements and the dev probe (`/_slop/probe.js`).
+
+### 3.3 An idempotent deploy script
 
 `ttmp/…/SLOP3-015…/scripts/02-deploy.py` is the pattern to copy. One record
 per store:
@@ -106,7 +149,7 @@ It refuses to replace a mount that serves another store. A rerun that prints
 Point it at a local server with `SLOP_CREDENTIALS=<file>` (a separate login)
 and `--live apps.localhost:18300 --static site.localhost:18300`.
 
-### 3.3 Several stores as one site
+### 3.4 Several stores as one site
 
 The catalog is one store (`catalog`: the kit, the data, the landing page)
 plus one store per view, on nested mounts (`/catalog`, `/catalog/list`, …).
