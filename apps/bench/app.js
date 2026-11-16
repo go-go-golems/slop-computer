@@ -1,4 +1,4 @@
-/* the bench, built from web/bench: do not edit. source sha256:0a86a028fac85c2161e79e0269db7048126d89ffb1286b634313e58b8fc59a12 */
+/* the bench, built from web/bench: do not edit. source sha256:b96b5ef987b453735a058d41654de93abc04ceadcad215eccc3329bb690eb122 */
 // Sitebench: a live-site workbench. Built from src/*.js
 "use strict";
 (() => {
@@ -1063,32 +1063,42 @@ const Slop = {
 const BINARY_EXT = /\.(png|jpe?g|gif|webp|avif|ico|bmp|woff2?|ttf|otf|eot|pdf|zip|gz|tgz|wasm|mp3|mp4|m4a|webm|ogg|wav|mov|sqlite|db|bin)$/i
 const textish = f => !BINARY_EXT.test(f.path) && f.size <= 240000
 
-// Sync pushes the open app project's tree to its draft: changed files as
-// text, the rest by the hash the server gave them. One push at a time; edits
-// during a push are picked up by the next.
+// Sync pushes app projects' trees to their drafts: changed files as text,
+// the rest by the hash the server gave them. One push at a time; edits
+// during a push are picked up by the next. The attached project (the open
+// one) is what the header shows; a project let go with edits still
+// unpushed (switched away from mid-eval, or one an agent turn still
+// writes to) stays queued and is pushed all the same.
 const Sync = {
-  P: null, status: 'idle', error: '', n: null, act: null, timer: 0, busy: false, again: false, holds: 0, ev: emitter(),
+  P: null, status: 'idle', error: '', n: null, act: null, timer: 0, busy: false, again: false, holds: 0, queue: new Set(), ev: emitter(),
   set(s, err = '') { this.status = s; this.error = err; this.ev.emit('status', s, err) },
-  attach(P) { clearTimeout(this.timer); this.P = P; this.n = P && P.refs ? P.refs.draft : null; this.act = P && P.devStatus ? { n: P.devStatus.n, broken: P.devStatus.broken } : null; this.set(P ? 'synced' : 'idle') },
+  attach(P) { this.P = P; this.n = P && P.refs ? P.refs.draft : null; this.act = P && P.devStatus ? { n: P.devStatus.n, broken: P.devStatus.broken } : null; this.set(P ? 'synced' : 'idle') },
+  soon() { clearTimeout(this.timer); if (!this.holds && this.queue.size) this.timer = setTimeout(() => this.runAll(), 300) },
   schedule(P) {
-    if (P !== this.P) return
-    clearTimeout(this.timer); if (!this.holds) this.timer = setTimeout(() => this.run(), 300)
-    if (this.status !== 'error') this.set('dirty')
+    if (!P || !P.meta.app) return
+    this.queue.add(P); this.soon()
+    if (P === this.P && this.status !== 'error') this.set('dirty')
   },
   // While an eval runs, nothing is pushed: its writes may still roll back.
   // Releasing the last hold pushes whatever then differs from draft.
   hold() { this.holds++; clearTimeout(this.timer) },
   release() {
     this.holds = Math.max(0, this.holds - 1)
-    if (this.holds || !this.P) return
-    if (this.pending(this.P)) this.schedule(this.P)
-    else if (this.status === 'dirty') this.set('synced')
+    if (this.holds) return
+    for (const Q of this.queue) if (!this.pending(Q)) this.queue.delete(Q)
+    if (this.P && !this.pending(this.P) && this.status === 'dirty') this.set('synced')
+    this.soon()
   },
-  async run() {
-    const P = this.P
+  // every queued project, the attached one first
+  async runAll() {
+    for (const Q of [...this.queue].sort((a, b) => (b === this.P) - (a === this.P))) { if (this.holds) return; await this.run(Q) }
+  },
+  async run(P = this.P) {
     if (!P || !P.meta.app || this.holds) return
-    if (this.busy || Outside.merging) { this.again = true; return }
-    this.busy = true; this.set('pushing')
+    if (this.busy || Outside.merging) { this.queue.add(P); this.again = true; return }
+    this.queue.delete(P)
+    if (!this.pending(P) && P.refs && P.refs.draft != null) { if (P === this.P && this.status !== 'error') this.set('synced'); return }
+    this.busy = true; if (P === this.P) this.set('pushing')
     const sent = new Map(), files = []
     for (const [path, text] of P.files) {
       const t = P.tree.get(path)
@@ -1100,22 +1110,24 @@ const Sync = {
     const message = 'bench: ' + [...changed, ...gone.map(p => '-' + p)].slice(0, 6).join(' ') + (changed.length + gone.length > 6 ? ' …' : '')
     try {
       const r = await Slop.call('sync', { app: P.meta.app, files, message, base: P.refs ? P.refs.draft ?? null : null })
-      if (this.P !== P) return
       if (r.conflict) {   // draft moved under us: take what changed there, keep what changed here, push again
         await Outside.merge(P, r.n, r.files || [])
-        this.again = true
+        this.queue.add(P); this.again = true
       } else {
         P.tree = new Map((r.files || []).map(f => [f.path, f]))
         for (const [path, text] of sent) P.synced.set(path, text)
         for (const p of gone) P.synced.delete(p)
-        this.n = r.n; this.act = (r.activated || [])[0] || this.act
-        P.refs = { ...(P.refs || {}), draft: r.n }
-        this.set(this.pending(P) ? 'dirty' : 'synced'); P.ev.emit('sync', r); App.ev.emit('health')
+        P.refs = { ...(P.refs || {}), draft: r.n }; P.syncError = ''; P.lastAct = (r.activated || [])[0] || P.lastAct || null
+        if (this.pending(P)) this.queue.add(P)
+        if (P === this.P) { this.n = r.n; this.act = P.lastAct || this.act; this.set(this.pending(P) ? 'dirty' : 'synced'); App.ev.emit('health') }
+        P.ev.emit('sync', r)
       }
     } catch (e) {
-      this.set('error', (e && e.message) || String(e)); toast('Pushing to draft failed: ' + this.error, 5000)
+      P.syncError = (e && e.message) || String(e)
+      if (P === this.P) this.set('error', P.syncError)
+      toast('Pushing ' + P.meta.app + ' to draft failed: ' + P.syncError, 5000)
     } finally { this.busy = false }
-    if (this.again) { this.again = false; this.run() }
+    if (this.again) { this.again = false; this.runAll() }
   },
   // Edits not yet in draft: a text that differs from what was last pushed,
   // or a file pushed before and removed since.
@@ -1124,23 +1136,25 @@ const Sync = {
     for (const p of P.synced.keys()) if (!P.files.has(p)) return true
     return false
   },
-  // Push now and wait until every edit made so far is in draft (an eval's
-  // effects need the activation; switching projects must not drop edits).
-  // A push that fails is not retried in a loop: one try, then the error.
-  async flush() {
-    clearTimeout(this.timer)
-    const P = this.P
+  // Push P (default: the attached project) now and wait until every edit
+  // made so far is in its draft (an eval's effects need the activation;
+  // switching projects must not drop edits). A push that fails is not
+  // retried in a loop: one try, then the error. While an eval holds
+  // pushes, this returns at once; P stays queued for after it.
+  async flush(P = this.P) {
+    if (!P || !P.meta.app) return { n: null, act: null, error: '' }
     let tried = false
     for (let i = 0; i < 400; i++) {
       if (this.busy || Outside.merging) { await sleep(30); continue }
-      if (!P || P !== this.P || !P.meta.app || this.holds || !this.pending(P) || (tried && this.status === 'error')) break
+      if (this.holds || !this.pending(P) || (tried && P.syncError)) break
       tried = true
-      await this.run()
+      await this.run(P)
     }
     // an error is about edits still unpushed: with none left (undone, or
     // pushed since), draft has everything
-    if (P && P === this.P && this.status === 'error' && !this.pending(P)) this.set('synced')
-    return { n: this.n, act: this.act, error: this.status === 'error' ? this.error : '' }
+    if (!this.pending(P)) { P.syncError = ''; if (P === this.P && this.status === 'error') this.set('synced') }
+    this.soon()
+    return { n: P.refs ? P.refs.draft ?? null : null, act: P.lastAct || (P === this.P ? this.act : null), error: P.syncError || '' }
   },
   label() {
     const s = { idle: 'ready', dirty: 'unsaved', pushing: 'pushing…', synced: 'draft ' + (this.n ?? '–'), error: 'error' }[this.status] || this.status
@@ -1149,7 +1163,7 @@ const Sync = {
   }
 }
 
-addEventListener('visibilitychange', () => { if (document.visibilityState === 'hidden' && Sync.P && Sync.pending(Sync.P)) Sync.run() })
+addEventListener('visibilitychange', () => { if (document.visibilityState !== 'hidden') return; if (Sync.P && Sync.pending(Sync.P)) Sync.queue.add(Sync.P); Sync.runAll() })
 
 // Outside: pushes to draft that did not come from this page (a terminal's
 // slop dev or slop push, another person, the agent of another bench), and
@@ -1188,7 +1202,7 @@ const Outside = {
     this.merging = true
     try { return await this.mergeIn(P, n, tree) } finally {
       this.merging = false
-      if (Sync.again && !Sync.busy) { Sync.again = false; Sync.run() }
+      if (Sync.again && !Sync.busy) { Sync.again = false; Sync.runAll() }
     }
   },
   async mergeIn(P, n, tree) {
@@ -1248,7 +1262,7 @@ const Publish = {
   // Only once every edit is in draft: a preflight of an older draft would
   // approve (and publish) code that is not what the editor shows.
   async preflight(P) {
-    const f = await Sync.flush()
+    const f = await Sync.flush(P)
     if (f.error) throw new Error('your edits are not in draft (' + f.error + '); fix that before publishing')
     if (Sync.pending(P)) throw new Error(Sync.holds ? 'files written in this eval reach draft when it ends: publish in a later eval' : 'your edits are still being pushed to draft; try again in a moment')
     return await Slop.call('preflight', { app: P.meta.app })
@@ -1386,7 +1400,11 @@ class Project {
 
   // put a file back as it was before an eval's first write (the eval failed); logged like any write
   revert(path, ws, snap, { who = 'you', note, thread } = {}) {
-    if (ws === 'main') { if (snap.text === null) this.remove(path, { who, note, thread }); else this.write(path, snap.text, { who, note, thread }); return }
+    if (ws === 'main') {
+      if (snap.text === null) this.remove(path, { who, note, thread }); else this.write(path, snap.text, { who, note, thread })
+      if (snap.ext && !this.files.has(path)) this.extern.set(path, snap.ext)   // the hash-only file it replaced comes back
+      return
+    }
     const ov = this.overlays.get(ws); if (!ov) return
     if (snap.inOv) ov.files[path] = snap.ovText; else delete ov.files[path]
     if (!snap.hadBase) delete ov.base[path]
@@ -3030,7 +3048,8 @@ function hostAPI(ctx) {
   const touchFile = path => {
     const open = txFrames().filter(f => !f.files.has(path)); if (!open.length) return
     const w = ws(), ov = w !== 'main' ? P.overlays.get(w) : null
-    const snap = { text: P.read(path, w), inOv: !!ov && Object.prototype.hasOwnProperty.call(ov.files, path), ovText: ov ? ov.files[path] : undefined, hadBase: !!ov && Object.prototype.hasOwnProperty.call(ov.base, path) }
+    // ext: the hash-only entry a write on main replaces (a binary or large file the bench does not load)
+    const snap = { text: P.read(path, w), ext: w === 'main' ? P.extern.get(path) : undefined, inOv: !!ov && Object.prototype.hasOwnProperty.call(ov.files, path), ovText: ov ? ov.files[path] : undefined, hadBase: !!ov && Object.prototype.hasOwnProperty.call(ov.base, path) }
     for (const f of open) f.files.set(path, snap)
   }
   const touchTable = name => { const open = txFrames().filter(f => !f.tables.has(name)); if (!open.length) return; const snap = P.tableSnap(name, ws()); for (const f of open) f.tables.set(name, snap) }
@@ -3410,7 +3429,7 @@ async function runEval(ctx, code, api, { sid, restore } = {}) {
   // comes up on them (or says why not) and its frames reload before the
   // frames are measured. Its new warnings and errors are effects too.
   if (r.ok && tx.files.size && P.meta.app && ws === 'main' && Slop.on) {
-    const s = await Sync.flush()
+    const s = await Sync.flush(P)
     if (s.error) effects.push = { error: s.error }
     else {
       effects.draft = s.n
