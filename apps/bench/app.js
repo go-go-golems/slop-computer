@@ -1,4 +1,4 @@
-/* the bench, built from web/bench: do not edit. source sha256:c519d6cf34306af67713c6ac5fda6abde10a5d5a5f6516af0e60410121e9fcb5 */
+/* the bench, built from web/bench: do not edit. source sha256:e6570f7b8783df1523240924169cab96f86d4f146603443bf7c81d95c4c21139 */
 // Sitebench: a live-site workbench. Built from src/*.js
 "use strict";
 (() => {
@@ -1165,10 +1165,7 @@ const Sync = {
     const ours = () => holders().some(t => mine.has(t)), others = () => holders().some(t => !mine.has(t))
     let tries = 0, waited = ''
     for (const t0 = now(); ;) {
-      // nothing to push: nothing to wait for (a push in flight still counts
-      // as pending until it lands)
-      if (!this.pending(P)) break
-      const blocked = this.busy || Outside.merging ? 'push' : wait && others() && !ours() ? 'eval' : ''
+      const blocked = this.busy || Outside.merging ? 'push' : wait && others() && !ours() && this.pending(P) ? 'eval' : ''
       if (blocked) {
         if (now() - t0 > FLUSH_WAIT) { waited = blocked; break }
         await sleep(30); continue

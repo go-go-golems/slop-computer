@@ -145,10 +145,7 @@ const Sync = {
     const ours = () => holders().some(t => mine.has(t)), others = () => holders().some(t => !mine.has(t))
     let tries = 0, waited = ''
     for (const t0 = now(); ;) {
-      // nothing to push: nothing to wait for (a push in flight still counts
-      // as pending until it lands)
-      if (!this.pending(P)) break
-      const blocked = this.busy || Outside.merging ? 'push' : wait && others() && !ours() ? 'eval' : ''
+      const blocked = this.busy || Outside.merging ? 'push' : wait && others() && !ours() && this.pending(P) ? 'eval' : ''
       if (blocked) {
         if (now() - t0 > FLUSH_WAIT) { waited = blocked; break }
         await sleep(30); continue
