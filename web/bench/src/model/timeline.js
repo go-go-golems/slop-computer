@@ -7,11 +7,25 @@
 // file is its text in a snapshot, read through the Draft (by hash, cached).
 // Every function here takes the project; those that read snapshots are async.
 //
-// Public API: snapshotAt, versions, blame, why, since, restore.
+// Public API: stampEvent, snapshotAt, versions, blame, why, since, restore.
 import { diffLines } from '../lib/text.js';
 
-// The draft snapshot just after event seq: that of the latest event on the
-// ref with a snapshot number, at or before it (null: before any).
+// What an event records when it is logged: its ref (draft unless it names
+// one) and that ref's snapshot as the page sees it (headOf(ref)), unless it
+// says which. Restoring to it, or a diff since it, starts from there, so
+// nothing has to be inferred from earlier events, which may not have seen
+// every move of the ref (the bench closed, another tab, a push).
+export function stampEvent(e, headOf) {
+  const ref = e.ref || 'draft'
+  let n = e.n
+  if (n == null) { try { n = headOf(ref) } catch (err) { n = null } }
+  return { ...e, ref, n: n ?? null }
+}
+
+// The snapshot of a ref just after event seq. An event on the ref records
+// it (model/project.js log). For an event on another ref: that of the
+// latest event on this ref before it. null: the timeline does not know,
+// which is not the empty tree.
 export function snapshotAt(P, seq, ref = 'draft') {
   let n = null
   for (const e of P.events) {
@@ -20,9 +34,21 @@ export function snapshotAt(P, seq, ref = 'draft') {
   }
   return n
 }
+function knownAt(P, seq, ref) {
+  const n = snapshotAt(P, seq, ref)
+  if (n == null) throw Object.assign(new Error('the timeline does not know ' + ref + '\'s snapshot at event ' + seq + ': nothing on ' + ref + ' was recorded by then'), { kind: 'missing' })
+  return n
+}
 
-// The versions of a file on a ref: the events whose snapshot changed it,
-// oldest first: [{seq, n, at, who, kind, thread, note, sha256 (null: removed)}].
+// Events that made the snapshot they record; any other event only saw it.
+const MADE = new Set(['commit', 'outside'])
+
+// The versions of a file on a ref: each state of it the timeline knows,
+// oldest first: [{seq, n, at, who, kind, thread, note, sha256 (null:
+// removed), observed}]. A version is a commit's or an outside change's;
+// one first seen at another event (the file as it was when the timeline
+// began, or changed while the bench was closed) is observed: who made it
+// is not known.
 export async function versions(P, path, ref = 'draft', limit = 200) {
   const d = P.draftOf(ref), out = []
   let last
@@ -30,14 +56,14 @@ export async function versions(P, path, ref = 'draft', limit = 200) {
     const f = (await d.listingOf(e.n)).get(path), sum = f ? f.sha256 : null
     if (sum === last) continue
     last = sum
-    out.push({ seq: e.seq, n: e.n, at: e.at, who: e.who, kind: e.kind, thread: e.thread, note: e.note || e.label || '', sha256: sum })
+    out.push({ seq: e.seq, n: e.n, at: e.at, who: e.who, kind: e.kind, thread: e.thread, note: e.note || e.label || '', sha256: sum, observed: !MADE.has(e.kind) })
   }
   return out
 }
 
 // For each line of a file at the ref's head: the seq of the event whose
-// snapshot last changed it (undefined: older than the timeline). Cached per
-// path and head.
+// snapshot last changed it (undefined: older than the timeline, or changed
+// where the timeline did not see who). Cached per path and head.
 const blames = new Map()
 export async function blame(P, path, ref = 'draft') {
   const d = P.draftOf(ref), key = P.app + '|' + ref + '|' + path + '|' + d.head
@@ -49,7 +75,7 @@ export async function blame(P, path, ref = 'draft') {
     const next = []
     for (const x of diffLines(prev, text)) {
       if (x.op === ' ') next.push(attrib[x.a - 1])
-      else if (x.op === '+') next.push(v.seq)
+      else if (x.op === '+') next.push(v.observed ? undefined : v.seq)
     }
     attrib = next; prev = text
   }
@@ -87,7 +113,7 @@ export function why(P, seq) {
 // [{path, before, after, entry}] (texts null for files kept by hash; entry
 // is the file now, null when removed).
 export async function since(P, seq, ref = 'draft') {
-  const d = P.draftOf(ref), view = P.view(ref), then = snapshotAt(P, seq, ref) ?? 0
+  const d = P.draftOf(ref), view = P.view(ref), then = knownAt(P, seq, ref)
   const old = await d.listingOf(then), out = []
   for (const path of new Set([...old.keys(), ...view.list()])) {
     const a = old.get(path), b = view.entry(path)
@@ -99,9 +125,10 @@ export async function since(P, seq, ref = 'draft') {
 }
 
 // Put a ref back as it was just after event seq, as one commit of the
-// person's (or the agent's): {status, …} as Tx.commit answers.
+// person's (or the agent's): {status, …} as Tx.commit answers. Throws (kind
+// missing) when the timeline does not know that state.
 export async function restore(P, seq, who = 'you') {
-  const ref = 'draft', then = snapshotAt(P, seq, ref) ?? 0, d = P.draftOf(ref)
+  const ref = 'draft', then = knownAt(P, seq, ref), d = P.draftOf(ref)
   await d.settle()
   const e = P.event(seq), label = e ? (e.label || e.note || 'event ' + seq) : 'the start'
   const tx = d.begin({ label: 'restore', event: { who, note: 'restored to ' + label } })

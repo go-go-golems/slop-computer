@@ -3,10 +3,8 @@
 // (RUNS=… for more programs, SEED=… to replay one).
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
-import { createHash } from 'node:crypto'
-
 import { Draft } from '../src/core/draft.js'
-const sha = t => createHash('sha256').update(t, 'utf8').digest('hex')
+import { checkChanges, sha } from './fake-actor.mjs'
 
 // a seeded generator (mulberry32), so a failing run can be replayed
 function rng(seed) {
@@ -26,6 +24,7 @@ class Server {
   snap(n) { return this.snaps[n] }
   listing(n) { return [...this.snap(n)].map(([path, t]) => ({ path, sha256: sha(t), size: Buffer.byteLength(t), type: '' })) }
   commitNow({ ref, base, changes }) {
+    checkChanges(changes, s => this.snaps.some(m => [...m.values()].some(t => t === 'blob:' + s || sha(t) === s)))
     const at = this.refs[ref] ?? 0, B = this.snap(base), A = this.snap(at)
     assert.ok(B, 'base ' + base + ' exists')
     const result = c => c.delete ? undefined : c.text ?? 'blob:' + c.sha256
@@ -259,11 +258,16 @@ test('a file kept by hash is committed by its hash', async () => {
   const draft = new Draft({ app: 'app', call: (a, x) => srv.call(a, x), hash: async t => sha(t) })
   await draft.open()
   const tx = draft.begin()
-  tx.copy('logo.png', { sha256: 'ab12', size: 3 })
-  assert.deepEqual(tx.entry('logo.png'), { sha256: 'ab12', size: 3, type: '' })
+  // a blob the server holds (a.txt's), as files.commit requires
+  tx.copy('logo.png', { sha256: sha('a'), size: 1 })
+  assert.deepEqual(tx.entry('logo.png'), { sha256: sha('a'), size: 1, type: '' })
   assert.equal(tx.read('logo.png'), null, 'not a text')
   const r = await tx.commit()
   assert.equal(r.status, 'committed')
-  assert.equal(srv.snap(r.n).get('logo.png'), 'blob:ab12')
+  assert.equal(srv.snap(r.n).get('logo.png'), 'blob:' + sha('a'))
+  // one the server lacks fails the commit, as missing_blobs does
+  const bad = draft.begin()
+  bad.copy('nope.png', { sha256: sha('nowhere'), size: 7 })
+  assert.equal((await bad.commit()).status, 'failed')
   assert.throws(() => draft.begin().copy('x.png', {}), /entry/)
 })

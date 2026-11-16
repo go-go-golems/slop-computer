@@ -4,36 +4,16 @@
 // node --test test/eval-api.test.mjs
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
-import { createHash } from 'node:crypto'
 import { Draft } from '../src/core/draft.js'
 import { defineAPI } from '../src/core/api.js'
 import { FILES } from '../src/agent/api/files.js'
 import { LIB, libEntries } from '../src/agent/api/lib.js'
 import { TX } from '../src/agent/api/tx.js'
+import { fakeActor, sha } from './fake-actor.mjs'
 
-const sha = t => createHash('sha256').update(t).digest('hex')
-// the bench actor's file actions over snapshots in memory (no merging: one writer)
-function server(files) {
-  const snaps = [null, new Map(Object.entries(files))], commits = []
-  const listing = n => [...snaps[n]].map(([path, t]) => ({ path, sha256: sha(t), size: t.length, type: '' }))
-  const call = async (action, a) => {
-    if (action === 'head') return { n: snaps.length - 1 }
-    if (action === 'files') return listing(a.at)
-    if (action === 'read') return { texts: Object.fromEntries(a.paths.map(p => [p, snaps[a.at].get(p)])), binary: [], more: [] }
-    if (action === 'commit') {
-      commits.push(a)
-      const cur = snaps[snaps.length - 1], next = new Map(cur), byHash = new Map([...cur.values()].map(t => [sha(t), t]))
-      for (const c of a.changes) c.delete ? next.delete(c.path) : next.set(c.path, c.text ?? byHash.get(c.sha256))
-      snaps.push(next)
-      return { n: snaps.length - 1, at: a.base, merged: false, files: listing(snaps.length - 1), activated: [], event: null }
-    }
-    throw new Error('no action ' + action)
-  }
-  return { call, commits, snaps }
-}
 const api = defineAPI(FILES, LIB, TX, { 'app.seed': { sig: '{docs, tables}', writes: 'dev', run: () => 'seeded' } })
 async function setup(mode = 'auto') {
-  const srv = server({ 'index.html': '<p>hi</p>\n', 'logo.png': 'PNG-BYTES', 'scenarios/a.json': '{}' })
+  const srv = fakeActor({ 'index.html': '<p>hi</p>\n', 'logo.png': 'PNG-BYTES', 'scenarios/a.json': '{}' })
   const d = new Draft({ app: 'x', call: srv.call, hash: async t => sha(t) })
   await d.open()
   const ctx = { mode, who: 'agent', tx: d.begin({ label: 'eval' }), stack: [], changesets: new Map(), logs: [] }

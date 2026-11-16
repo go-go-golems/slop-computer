@@ -49,6 +49,24 @@ function kindOf(ctx, kind) {
 function text(v, max) { return String(v == null ? '' : v).slice(0, max); }
 function json(v) { try { return JSON.parse(v); } catch (e) { return null; } }
 
+// The changes of a commit as files.commit takes them: {path, text} |
+// {path, data} | {path, sha256, size, type?} | {path, delete: true}. Their
+// fields pass through as given; the server checks that each change is
+// exactly one of these (and that a sha256 names a blob it has). Nothing is
+// coerced here: a change the page got wrong fails, it does not become
+// something else.
+const CHANGE_FIELDS = ['text', 'data', 'sha256', 'size', 'type', 'delete'];
+function changeList(ctx, changes, { deletes = true } = {}) {
+  if (!Array.isArray(changes) || !changes.length) ctx.fail('invalid_argument', 'changes is a non-empty list of {path, text} | {path, data} | {path, sha256, size} | {path, delete: true}');
+  return changes.map((c, i) => {
+    if (!c || typeof c !== 'object' || typeof c.path !== 'string' || !c.path) ctx.fail('invalid_argument', 'changes[' + i + '] has no path');
+    if (!deletes && c.delete) ctx.fail('invalid_argument', c.path + ': a new app has nothing to delete');
+    const out = { path: c.path };
+    for (const k of CHANGE_FIELDS) if (c[k] !== undefined) out[k] = c[k];
+    return out;
+  });
+}
+
 // A person's instance of an app: <app>-<kind>-<the first six characters of
 // their id> (dev is the same name as `slop dev`, pkg/client/dev.go).
 function instanceId(app, person, kind) {
@@ -145,15 +163,18 @@ defineActor({
     },
 
     // A new app store, its first files committed to draft (main does not
-    // exist until the first publish).
+    // exist until the first publish). The first snapshot is the first
+    // event of the creator's timeline, so every later state can be traced
+    // back to it.
     create: {
       requires: 'view',
       async run(ctx, { id, type, files }) {
         const w = tool(ctx);
         storeId(ctx, id, 'id');
-        if (!Array.isArray(files) || !files.length) ctx.fail('invalid_argument', 'a new app needs files: [{path, text}]');
+        const list = changeList(ctx, files, { deletes: false });
         await w.newStore(id, type ? { type: text(type, 63) } : {});
-        const r = await w.commit(id, files.map((f) => ({ path: text(f.path, 512), text: String(f.text) })), { ref: 'draft', base: 0, message: 'created in the bench' });
+        const r = await w.commit(id, list, { ref: 'draft', base: 0, message: 'created in the bench' });
+        addEvent(ctx, id, { kind: 'commit', who: 'you', ref: 'draft', n: r.n, data: { paths: list.map((c) => c.path).sort(), base: 0, at: r.at, merged: false, note: 'created in the bench' } });
         return { app: id, n: r.n };
       },
     },
@@ -195,8 +216,7 @@ defineActor({
         return { texts, binary, more };
       },
     },
-    // Commit changes ([{path, text} | {path, delete: true}]) to a ref over
-    // snapshot base. The server merges them over what was committed since,
+    // Commit changes (changeList's kinds) to a ref over snapshot base. The server merges them over what was committed since,
     // file by file; when someone else changed one of these paths to
     // something else, nothing is written and the answer is {conflict: {at,
     // paths}}. Otherwise the visitor's instances that follow the ref come up
@@ -210,8 +230,7 @@ defineActor({
         storeId(ctx, app);
         benchRef(ctx, ref);
         snap(ctx, base, 'base');
-        if (!Array.isArray(changes) || !changes.length) ctx.fail('invalid_argument', 'changes is a non-empty list of {path, text} or {path, delete: true}');
-        const list = changes.map((c) => (c && c.delete === true ? { path: text(c.path, 512), delete: true } : { path: text(c && c.path, 512), text: String(c && c.text) }));
+        const list = changeList(ctx, changes);
         let r;
         try {
           r = await w.commit(app, list, { ref, base, message: text(message || 'bench', 200), activate: await followers(ctx, app, ref) });

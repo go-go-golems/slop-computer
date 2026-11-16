@@ -117,7 +117,8 @@ export const TIMELINE = {
           acts.appendChild(h('button.btn.sm.danger', {
             on: {
               click: async () => {
-                const n = (await since(p, e.seq, 'draft')).length
+                let n
+                try { n = (await since(p, e.seq, 'draft')).length } catch (err) { return toast(err.message, 6000) }
                 if (!n) return toast('Draft is already as it was then')
                 if (!await confirmBox('Restore draft to this point?', plural(n, 'file') + ' go back to how they were just after this event, as one commit. That is on the timeline too, so you can return.', 'Restore')) return
                 const r = await restore(p, e.seq, 'you')
@@ -151,7 +152,9 @@ export const TIMELINE = {
       return box
     }
     async function showSince(e) {
-      const p = P(), ch = await since(p, e.seq, 'draft')
+      const p = P()
+      let ch
+      try { ch = await since(p, e.seq, 'draft') } catch (err) { return toast(err.message, 6000) }
       modal({
         title: 'Draft since ' + fmtTime(e.at) + ' · ' + label(e).slice(0, 40), wide: true, actions: [{ label: 'Close' }],
         body: ch.length ? ch.map(c => h('div', h('b.mono', c.path), ' ', h('span.note', c.before === null ? 'new' : !c.entry ? 'deleted' : ''), diffView(c.before ?? '', c.after ?? ''))) : h('p', 'No changes in draft since then.')

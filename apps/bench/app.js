@@ -1,4 +1,4 @@
-/* the bench, built from web/bench: do not edit. source sha256:d4994e3733fecce2ea28fdff73748e3ba997da1b7998b910f617df65e83b3012 */
+/* the bench, built from web/bench: do not edit. source sha256:970cd63cc5d14983cc258a493c02f6c40bad20c166ecb442c945b30965567465 */
 // The bench: a live dev environment for slop apps. Built from web/bench/src.
 (() => {
   // src/lib/util.js
@@ -918,7 +918,7 @@
     }
     async commitChanges(base, changes, { message, label: label2, event } = {}) {
       if (!changes.size) return { status: "committed", n: base, at: base, merged: false, activated: [] };
-      const wire = [...changes].map(([path, c]) => c.remove ? { path, delete: true } : typeof c.text === "string" ? { path, text: c.text } : { path, sha256: c.sha256, size: c.size });
+      const wire = [...changes].map(([path, c]) => c.remove ? { path, delete: true } : typeof c.text === "string" ? { path, text: c.text } : { path, sha256: c.sha256, size: c.size, ...c.type ? { type: c.type } : {} });
       let r;
       try {
         r = await this.call("commit", { app: this.app, ref: this.ref, base, changes: wire, message: message || label2 || "bench", event: event || { who: "you", note: message || label2 || "" } });
@@ -1723,6 +1723,18 @@
   };
 
   // src/model/timeline.js
+  function stampEvent(e, headOf) {
+    const ref = e.ref || "draft";
+    let n = e.n;
+    if (n == null) {
+      try {
+        n = headOf(ref);
+      } catch (err) {
+        n = null;
+      }
+    }
+    return { ...e, ref, n: n ?? null };
+  }
   function snapshotAt(P, seq, ref = "draft") {
     let n = null;
     for (const e of P.events) {
@@ -1731,6 +1743,12 @@
     }
     return n;
   }
+  function knownAt(P, seq, ref) {
+    const n = snapshotAt(P, seq, ref);
+    if (n == null) throw Object.assign(new Error("the timeline does not know " + ref + "'s snapshot at event " + seq + ": nothing on " + ref + " was recorded by then"), { kind: "missing" });
+    return n;
+  }
+  var MADE = /* @__PURE__ */ new Set(["commit", "outside"]);
   async function versions(P, path, ref = "draft", limit = 200) {
     const d = P.draftOf(ref), out = [];
     let last;
@@ -1738,7 +1756,7 @@
       const f = (await d.listingOf(e.n)).get(path), sum = f ? f.sha256 : null;
       if (sum === last) continue;
       last = sum;
-      out.push({ seq: e.seq, n: e.n, at: e.at, who: e.who, kind: e.kind, thread: e.thread, note: e.note || e.label || "", sha256: sum });
+      out.push({ seq: e.seq, n: e.n, at: e.at, who: e.who, kind: e.kind, thread: e.thread, note: e.note || e.label || "", sha256: sum, observed: !MADE.has(e.kind) });
     }
     return out;
   }
@@ -1757,7 +1775,7 @@
       const next = [];
       for (const x of diffLines(prev, text)) {
         if (x.op === " ") next.push(attrib[x.a - 1]);
-        else if (x.op === "+") next.push(v.seq);
+        else if (x.op === "+") next.push(v.observed ? void 0 : v.seq);
       }
       attrib = next;
       prev = text;
@@ -1795,7 +1813,7 @@
     return out;
   }
   async function since(P, seq, ref = "draft") {
-    const d = P.draftOf(ref), view = P.view(ref), then = snapshotAt(P, seq, ref) ?? 0;
+    const d = P.draftOf(ref), view = P.view(ref), then = knownAt(P, seq, ref);
     const old = await d.listingOf(then), out = [];
     for (const path of /* @__PURE__ */ new Set([...old.keys(), ...view.list()])) {
       const a = old.get(path), b = view.entry(path);
@@ -1806,7 +1824,7 @@
     return out.sort((x, y) => x.path.localeCompare(y.path));
   }
   async function restore(P, seq, who = "you") {
-    const ref = "draft", then = snapshotAt(P, seq, ref) ?? 0, d = P.draftOf(ref);
+    const ref = "draft", then = knownAt(P, seq, ref), d = P.draftOf(ref);
     await d.settle();
     const e = P.event(seq), label2 = e ? e.label || e.note || "event " + seq : "the start";
     const tx = d.begin({ label: "restore", event: { who, note: "restored to " + label2 } });
@@ -5329,8 +5347,9 @@ Markdown files (README.md, notes, specs) render in the Docs panel. Keep README.m
     // An event from the page (a message, a mark, an eval, …): shown now,
     // numbered by the server when it is saved. Commits are logged by the
     // server itself (addEvent).
+    // An event records the snapshot of its ref when it is logged (stampEvent).
     log(e) {
-      const ev = { ...e, seq: null, at: now(), who: e.who || "you" };
+      const ev = { ...stampEvent(e, (ref) => this.draftOf(ref).head), seq: null, at: now(), who: e.who || "you" };
       this.events.push(ev);
       this.outbox.push(ev);
       this.ev.emit("events", ev);
@@ -7261,7 +7280,12 @@ Markdown files (README.md, notes, specs) render in the Docs panel. Keep README.m
             acts.appendChild(h("button.btn.sm.danger", {
               on: {
                 click: async () => {
-                  const n = (await since(p, e.seq, "draft")).length;
+                  let n;
+                  try {
+                    n = (await since(p, e.seq, "draft")).length;
+                  } catch (err) {
+                    return toast(err.message, 6e3);
+                  }
                   if (!n) return toast("Draft is already as it was then");
                   if (!await confirmBox("Restore draft to this point?", plural(n, "file") + " go back to how they were just after this event, as one commit. That is on the timeline too, so you can return.", "Restore")) return;
                   const r = await restore(p, e.seq, "you");
@@ -7315,7 +7339,13 @@ Markdown files (README.md, notes, specs) render in the Docs panel. Keep README.m
         return box;
       }
       async function showSince(e) {
-        const p = P(), ch = await since(p, e.seq, "draft");
+        const p = P();
+        let ch;
+        try {
+          ch = await since(p, e.seq, "draft");
+        } catch (err) {
+          return toast(err.message, 6e3);
+        }
         modal({
           title: "Draft since " + fmtTime(e.at) + " \xB7 " + label(e).slice(0, 40),
           wide: true,
@@ -7778,7 +7808,7 @@ Markdown files (README.md, notes, specs) render in the Docs panel. Keep README.m
         else paintFoot();
       });
       const who = (v) => v.who === "agent" ? "Claude" : v.who === "push" ? "outside" : "you";
-      const vlabel = (v) => (v.sha256 ? "saved" : "removed") + " by " + who(v) + " in " + v.n;
+      const vlabel = (v) => v.observed ? (v.sha256 ? "as it was" : "gone") + " at " + v.n + ", seen at " + v.kind : (v.sha256 ? "saved" : "removed") + " by " + who(v) + " in " + v.n;
       async function showVersion(path, seq) {
         const list2 = await versions(P(), path, App.ws);
         if (!list2.length) return toast("No saved versions of " + path);

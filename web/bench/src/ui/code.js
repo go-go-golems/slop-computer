@@ -235,7 +235,7 @@ export const CODE = {
 
     // ---- history: an earlier version of the file, read-only, from a snapshot ----
     const who = v => v.who === 'agent' ? 'Claude' : v.who === 'push' ? 'outside' : 'you'
-    const vlabel = v => (v.sha256 ? 'saved' : 'removed') + ' by ' + who(v) + ' in ' + v.n
+    const vlabel = v => v.observed ? (v.sha256 ? 'as it was' : 'gone') + ' at ' + v.n + ', seen at ' + v.kind : (v.sha256 ? 'saved' : 'removed') + ' by ' + who(v) + ' in ' + v.n
     async function showVersion(path, seq) {
       const list = await versions(P(), path, App.ws)
       if (!list.length) return toast('No saved versions of ' + path)

@@ -220,7 +220,7 @@ export class Draft {
   begin(o = {}) { return new Tx(this, { base: this.head, ...o }) }
   async commitChanges(base, changes, { message, label, event } = {}) {
     if (!changes.size) return { status: 'committed', n: base, at: base, merged: false, activated: [] }
-    const wire = [...changes].map(([path, c]) => c.remove ? { path, delete: true } : typeof c.text === 'string' ? { path, text: c.text } : { path, sha256: c.sha256, size: c.size })
+    const wire = [...changes].map(([path, c]) => c.remove ? { path, delete: true } : typeof c.text === 'string' ? { path, text: c.text } : { path, sha256: c.sha256, size: c.size, ...(c.type ? { type: c.type } : {}) })
     let r
     try {
       r = await this.call('commit', { app: this.app, ref: this.ref, base, changes: wire, message: message || label || 'bench', event: event || { who: 'you', note: message || label || '' } })

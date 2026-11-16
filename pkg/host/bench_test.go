@@ -114,10 +114,22 @@ func TestBenchFiles(t *testing.T) {
 	if fmtJSON(k["conflict"]) != fmt.Sprintf(`{"at":%d,"paths":["README.md"]}`, at) || h.refAt(admin, "jot", "draft") != at {
 		t.Fatalf("a conflicting commit = %v", k)
 	}
-	// The timeline has the two bench commits, numbered.
+	// A file kept by hash (a copy of logo.png, as files.copy and accepting
+	// a proposal send it) arrives as that blob, not as text.
+	cp := act("commit", map[string]any{"app": "jot", "ref": "draft", "base": at,
+		"changes": []any{map[string]any{"path": "img/copy.png", "sha256": pngSum, "size": len(png), "type": "image/png"}}})
+	if !strings.Contains(fmtJSON(cp["files"]), `"path":"img/copy.png","sha256":"`+pngSum+`"`) {
+		t.Fatalf("a commit of a file kept by hash = %v", cp)
+	}
+	// A change that is none of the kinds fails; it does not become a file.
+	h.fail(admin, "actor.call", map[string]any{"store": "bench", "action": "commit", "args": map[string]any{"app": "jot", "ref": "draft", "base": num(cp["n"]),
+		"changes": []any{map[string]any{"path": "x.txt"}}}}, "invalid_argument")
+	h.fail(admin, "actor.call", map[string]any{"store": "bench", "action": "commit", "args": map[string]any{"app": "jot", "ref": "draft", "base": num(cp["n"]),
+		"changes": []any{map[string]any{"text": "no path"}}}}, "invalid_argument")
+	// The timeline has the three bench commits, numbered.
 	p := act("project", map[string]any{"app": "jot"})
 	evs := p["events"].([]any)
-	if len(evs) != 2 || num(evs[0].(map[string]any)["seq"]) != 1 || num(evs[1].(map[string]any)["seq"]) != 2 || p["meta"] != nil {
+	if len(evs) != 3 || num(evs[0].(map[string]any)["seq"]) != 1 || num(evs[2].(map[string]any)["seq"]) != 3 || p["meta"] != nil {
 		t.Fatalf("project = %v", p)
 	}
 }
@@ -136,6 +148,13 @@ func TestBenchCreate(t *testing.T) {
 	if got := h.call(admin, "files.cat", map[string]any{"store": "fresh", "at": "draft", "path": "index.html"}); got != "<p>hi</p>" {
 		t.Fatalf("index.html = %v", got)
 	}
+	// The first snapshot opens the creator's timeline.
+	p := h.call(admin, "actor.call", map[string]any{"store": "bench", "action": "project", "args": map[string]any{"app": "fresh"}}).(map[string]any)
+	evs := p["events"].([]any)
+	if len(evs) != 1 || evs[0].(map[string]any)["kind"] != "commit" || evs[0].(map[string]any)["ref"] != "draft" || num(evs[0].(map[string]any)["n"]) != num(r["n"]) {
+		t.Fatalf("the new app's timeline = %v", evs)
+	}
+	h.fail(admin, "actor.call", map[string]any{"store": "bench", "action": "create", "args": map[string]any{"id": "bad", "files": []any{map[string]any{"path": "a.txt", "delete": true}}}}, "invalid_argument")
 }
 
 // The visitor's instances: dev follows draft and comes up on each commit;

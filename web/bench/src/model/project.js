@@ -18,6 +18,7 @@ import { APP_TEMPLATES } from './templates.js';
 import { Drafts, Slop } from '../server/slop.js';
 import { Prefs, Records } from '../server/records.js';
 import { debounce, emitter, now, uid } from '../lib/util.js';
+import { stampEvent } from './timeline.js';
 
 const DEFAULT_META = () => ({ boards: [{ id: 'b1', title: 'Board', frames: [{ id: 'f' + uid(), route: 'index.html', w: 375, h: 720, x: 0, y: 0 }] }], pins: [], panels: [], runs: {} })
 
@@ -133,8 +134,9 @@ export class Project {
   // An event from the page (a message, a mark, an eval, …): shown now,
   // numbered by the server when it is saved. Commits are logged by the
   // server itself (addEvent).
+  // An event records the snapshot of its ref when it is logged (stampEvent).
   log(e) {
-    const ev = { ...e, seq: null, at: now(), who: e.who || 'you' }
+    const ev = { ...stampEvent(e, ref => this.draftOf(ref).head), seq: null, at: now(), who: e.who || 'you' }
     this.events.push(ev); this.outbox.push(ev)
     this.ev.emit('events', ev)
     this.flushEvents()
