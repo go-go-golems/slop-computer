@@ -262,6 +262,13 @@ class Project {
     c.size += size; this.events.push(e); this.saveChunk(); this.ev.emit('events', e)
     return e
   }
+  // The whole log written anew, in chunks as log() makes them (an imported
+  // or duplicated project's history).
+  saveLog() {
+    this.chunks = []; let c = null
+    this.events.forEach((e, i) => { const s = storedSize(e); if (!c || c.size + s > LOG_CHUNK) { c = { id: 'c' + String(this.chunks.length).padStart(4, '0'), start: i, size: 0 }; this.chunks.push(c) } c.size += s })
+    this.chunks.forEach((c, k) => Store.save(this.key('log/' + c.id), { start: c.start, events: this.events.slice(c.start, this.chunks[k + 1] ? this.chunks[k + 1].start : this.events.length).map(e => this.stored(e)) }))
+  }
   saveChunk() {
     const c = this.chunks[this.chunks.length - 1]; if (!c) return
     Store.save(this.key('log/' + c.id), { start: c.start, events: this.events.slice(c.start).map(e => this.stored(e)) })
@@ -453,9 +460,7 @@ const Projects = {
     for (const [name, t] of Object.entries(src.tables || {})) { const tt = { name, cols: [...t.cols], rows: clone(t.rows), seq: Math.max(0, ...t.rows.map(r => +r.id || 0)) }; p.tables.set(name, tt); Store.save(p.key('tables/' + encKey(name)), tt) }
     if (data && data.events && data.events.length) {
       for (const e of data.events) { const c = clone(e); c.i = p.events.length; p.events.push(c) }
-      p.chunks = []; let c = null
-      p.events.forEach((e, i) => { const s = JSON.stringify(e).length; if (!c || c.size + s > 180000) { c = { id: 'c' + String(p.chunks.length).padStart(4, '0'), start: i, size: 0 }; p.chunks.push(c) } c.size += s })
-      p.chunks.forEach((c, k) => Store.save(p.key('log/' + c.id), { start: c.start, events: p.events.slice(c.start, p.chunks[k + 1] ? p.chunks[k + 1].start : p.events.length) }))
+      p.saveLog()
       p.log({ kind: 'note', ws: 'main', who: 'you', note: 'imported as "' + meta.title + '"' })
     } else p.log({ kind: 'init', ws: 'main', who: 'you', note: 'new project from ' + (data ? 'import' : tpl.name), files: Object.fromEntries(p.files) })
     for (const ov of (data && data.overlays) || []) { p.overlays.set(ov.id, clone(ov)); p.saveOverlay(ov) }

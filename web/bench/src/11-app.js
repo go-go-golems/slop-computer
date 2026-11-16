@@ -324,7 +324,7 @@ const App = {
   // ---- boot ----
   async boot() {
     Streams.init()
-    if (/(^|\.)localhost$|^127\.0\.0\.1$/.test(location.hostname)) window.__SB = { App, Snaps, Headless, Agent, Sync, Slop, Outside }   // local test runs only (a local slop serves the bench on *.localhost)
+    if (/(^|\.)localhost$|^127\.0\.0\.1$/.test(location.hostname)) window.__SB = { App, Snaps, Headless, Agent, Sync, Slop, Outside, Projects, Store }   // local test runs only (a local slop serves the bench on *.localhost)
 
     const root = $('#app')
     clear(root)

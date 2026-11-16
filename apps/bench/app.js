@@ -1,4 +1,4 @@
-/* the bench, built from web/bench: do not edit. source sha256:b53e74d155f264237d6ce82c56d6e7a1b759748dcb32affbeba74955b7314a8d */
+/* the bench, built from web/bench: do not edit. source sha256:b681751bcc43e6a81a26b3fe9d451f30764247e05739a8e76bddc324df86bdbe */
 // Sitebench: a live-site workbench. Built from src/*.js
 "use strict";
 (() => {
@@ -1067,17 +1067,26 @@ const textish = f => !BINARY_EXT.test(f.path) && f.size <= 240000
 // text, the rest by the hash the server gave them. One push at a time; edits
 // during a push are picked up by the next.
 const Sync = {
-  P: null, status: 'idle', error: '', n: null, act: null, timer: 0, busy: false, again: false, ev: emitter(),
+  P: null, status: 'idle', error: '', n: null, act: null, timer: 0, busy: false, again: false, holds: 0, ev: emitter(),
   set(s, err = '') { this.status = s; this.error = err; this.ev.emit('status', s, err) },
   attach(P) { clearTimeout(this.timer); this.P = P; this.n = P && P.refs ? P.refs.draft : null; this.act = P && P.devStatus ? { n: P.devStatus.n, broken: P.devStatus.broken } : null; this.set(P ? 'synced' : 'idle') },
   schedule(P) {
     if (P !== this.P) return
-    clearTimeout(this.timer); this.timer = setTimeout(() => this.run(), 300)
+    clearTimeout(this.timer); if (!this.holds) this.timer = setTimeout(() => this.run(), 300)
     if (this.status !== 'error') this.set('dirty')
+  },
+  // While an eval runs, nothing is pushed: its writes may still roll back.
+  // Releasing the last hold pushes whatever then differs from draft.
+  hold() { this.holds++; clearTimeout(this.timer) },
+  release() {
+    this.holds = Math.max(0, this.holds - 1)
+    if (this.holds || !this.P) return
+    if (this.pending(this.P)) this.schedule(this.P)
+    else if (this.status === 'dirty') this.set('synced')
   },
   async run() {
     const P = this.P
-    if (!P || !P.meta.app) return
+    if (!P || !P.meta.app || this.holds) return
     if (this.busy || Outside.merging) { this.again = true; return }
     this.busy = true; this.set('pushing')
     const sent = new Map(), files = []
@@ -1124,7 +1133,7 @@ const Sync = {
     let tried = false
     for (let i = 0; i < 400; i++) {
       if (this.busy || Outside.merging) { await sleep(30); continue }
-      if (!P || P !== this.P || !P.meta.app || !this.pending(P) || (tried && this.status === 'error')) break
+      if (!P || P !== this.P || !P.meta.app || this.holds || !this.pending(P) || (tried && this.status === 'error')) break
       tried = true
       await this.run()
     }
@@ -1547,6 +1556,13 @@ class Project {
     c.size += size; this.events.push(e); this.saveChunk(); this.ev.emit('events', e)
     return e
   }
+  // The whole log written anew, in chunks as log() makes them (an imported
+  // or duplicated project's history).
+  saveLog() {
+    this.chunks = []; let c = null
+    this.events.forEach((e, i) => { const s = storedSize(e); if (!c || c.size + s > LOG_CHUNK) { c = { id: 'c' + String(this.chunks.length).padStart(4, '0'), start: i, size: 0 }; this.chunks.push(c) } c.size += s })
+    this.chunks.forEach((c, k) => Store.save(this.key('log/' + c.id), { start: c.start, events: this.events.slice(c.start, this.chunks[k + 1] ? this.chunks[k + 1].start : this.events.length).map(e => this.stored(e)) }))
+  }
   saveChunk() {
     const c = this.chunks[this.chunks.length - 1]; if (!c) return
     Store.save(this.key('log/' + c.id), { start: c.start, events: this.events.slice(c.start).map(e => this.stored(e)) })
@@ -1738,9 +1754,7 @@ const Projects = {
     for (const [name, t] of Object.entries(src.tables || {})) { const tt = { name, cols: [...t.cols], rows: clone(t.rows), seq: Math.max(0, ...t.rows.map(r => +r.id || 0)) }; p.tables.set(name, tt); Store.save(p.key('tables/' + encKey(name)), tt) }
     if (data && data.events && data.events.length) {
       for (const e of data.events) { const c = clone(e); c.i = p.events.length; p.events.push(c) }
-      p.chunks = []; let c = null
-      p.events.forEach((e, i) => { const s = JSON.stringify(e).length; if (!c || c.size + s > 180000) { c = { id: 'c' + String(p.chunks.length).padStart(4, '0'), start: i, size: 0 }; p.chunks.push(c) } c.size += s })
-      p.chunks.forEach((c, k) => Store.save(p.key('log/' + c.id), { start: c.start, events: p.events.slice(c.start, p.chunks[k + 1] ? p.chunks[k + 1].start : p.events.length) }))
+      p.saveLog()
       p.log({ kind: 'note', ws: 'main', who: 'you', note: 'imported as "' + meta.title + '"' })
     } else p.log({ kind: 'init', ws: 'main', who: 'you', note: 'new project from ' + (data ? 'import' : tpl.name), files: Object.fromEntries(p.files) })
     for (const ov of (data && data.overlays) || []) { p.overlays.set(ov.id, clone(ov)); p.saveOverlay(ov) }
@@ -3364,15 +3378,26 @@ async function runEval(ctx, code, api, { sid, restore } = {}) {
     try { layouts.set(f.id, { route: fh.route, layout: await fh.call('layout', [300], 1200) }) } catch { if (fh.layoutMap) layouts.set(f.id, { route: fh.route, layout: fh.layoutMap }) }
   }))
   ctx.tx = { files: new Map(), tables: new Map(), t0: now() }
-  const r = await Sandbox.run(code, api, { sid, restore, lib: libEntries(P, ws).map(l => ({ name: l.name, source: l.source })) })
-  const tx = ctx.tx; ctx.tx = null; ctx.scratch = null; ctx.txStack = []
+  // An app project's writes reach draft (and its dev instance runs them)
+  // only once the eval has committed: held until then, and a rollback
+  // leaves nothing to push.
+  const held = !!(P.meta.app && ws === 'main')
+  if (held) Sync.hold()
+  let r, tx
   const effects = {}
-  if (!r.ok && (tx.files.size || tx.tables.size)) {
-    const opts = { who: ctx.who, thread: ctx.thread, note: 'rolled back: the eval failed' }
-    for (const [path, snap] of tx.files) P.revert(path, ws, snap, opts)
-    for (const [name, snap] of tx.tables) P.restoreTable(name, snap, ctx.who, ws)
-    effects.rolledBack = [...tx.files.keys(), ...[...tx.tables.keys()].map(t => 'table ' + t)]
-  } else {
+  try {
+    r = await Sandbox.run(code, api, { sid, restore, lib: libEntries(P, ws).map(l => ({ name: l.name, source: l.source })) })
+  } finally {
+    tx = ctx.tx; ctx.tx = null; ctx.scratch = null; ctx.txStack = []
+    if (!r || (!r.ok && (tx.files.size || tx.tables.size))) {
+      const opts = { who: ctx.who, thread: ctx.thread, note: 'rolled back: the eval failed' }
+      for (const [path, snap] of tx.files) P.revert(path, ws, snap, opts)
+      for (const [name, snap] of tx.tables) P.restoreTable(name, snap, ctx.who, ws)
+      effects.rolledBack = [...tx.files.keys(), ...[...tx.tables.keys()].map(t => 'table ' + t)]
+    }
+    if (held) Sync.release()
+  }
+  if (!effects.rolledBack) {
     const files = []
     for (const [path, snap] of tx.files) {
       const cur = P.read(path, ws); if (cur === snap.text) continue
@@ -6272,7 +6297,7 @@ const App = {
   // ---- boot ----
   async boot() {
     Streams.init()
-    if (/(^|\.)localhost$|^127\.0\.0\.1$/.test(location.hostname)) window.__SB = { App, Snaps, Headless, Agent, Sync, Slop, Outside }   // local test runs only (a local slop serves the bench on *.localhost)
+    if (/(^|\.)localhost$|^127\.0\.0\.1$/.test(location.hostname)) window.__SB = { App, Snaps, Headless, Agent, Sync, Slop, Outside, Projects, Store }   // local test runs only (a local slop serves the bench on *.localhost)
 
     const root = $('#app')
     clear(root)
