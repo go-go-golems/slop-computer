@@ -12,14 +12,16 @@ DocType: design-doc
 Intent: long-term
 Owners: []
 RelatedFiles:
-    - Path: web/bench/src/03b-slop.js
-      Note: Sync, Outside, Embeds, Publish — the client-side replication this design removes
-    - Path: web/bench/src/04-project.js
-      Note: Project model (files, overlays, tables, timeline) and app-project bookkeeping (tree, synced, extern)
-    - Path: web/bench/src/06-agent.js
-      Note: host API, runEval (the eval transaction), Agent.turn and delegate
+    - Path: web/bench/src/core/draft.js
+      Note: Draft and Tx — an app ref's files as the server has them, changed by files.commit (replaced 03b-slop.js's Sync and Outside)
+    - Path: web/bench/src/core/api.js
+      Note: the host API as one declared table and the one dispatcher (replaced 06-agent.js's API_SIGS, checkArgs and hand-placed guards)
+    - Path: web/bench/src/agent/eval.js
+      Note: runEval — one eval as one Tx (replaced 06-agent.js's rollback)
+    - Path: web/bench/src/model/project.js
+      Note: the project on Drafts, proposals as refs, threads and the timeline from the actor (replaced 04-project.js)
     - Path: apps/bench/actor.js
-      Note: the bench's server half; sync/head/preflight/publish actions
+      Note: the bench's server half; commit, instances by kind, proposals as refs, project storage in SQL
     - Path: pkg/commands/files.go
       Note: files.push (manifest push with ifAt) and ref.move — the server verbs underneath
     - Path: pkg/store/files.go
@@ -32,6 +34,14 @@ WhenToUse: "Before changing how the bench stores, syncs or commits anything; bef
 ---
 
 # Guide: the bench core rewrite — drafts as server-side commits, evals as transactions
+
+> **Status (2026-11-16): implemented** on branch `task/slop3-023-core`. The diary is `reference/01-diary.md` (steps 1–9) and the server half's is `reference/02-diary-server-phase-files-commit.md`. Remaining: a scripted smoke test, and a run on staging. The code departs from this design in four places:
+> - The Draft core is `web/bench/src/core/draft.js`, not `03c-draft.js`. Section 6's layout replaced the numbered files.
+> - API entries have no `needs: 'app'`, since every project is an app now.
+> - API entries have no `dry: 'refuse'` flag. A dry run refuses every entry whose `writes` is not `files`, which follows from what a dry run can capture.
+> - Threads stayed in `model/project.js`; there is no `model/threads.js`.
+>
+> The examples below that show `needs` or `dry` describe the design as first written.
 
 This guide is for an engineer who is new to slop and to the bench. It explains what the bench is, how it works today, why most of the bugs found in its code reviews come from one design decision, and how we will replace that decision. It ends with a phased implementation plan and the tests that should hold the new design in place.
 

@@ -586,3 +586,144 @@ This step turned the 979-line `06-agent.js` into `agent/`, following guide secti
 ### Technical details
 - An eval's effects when it commits: `{files: [{path, change, add, del}], commit: {ref, n, merged}, instances: [{store, n, broken}], actorLogs, newIssues, fixedIssues, newErrors, layout}`.
 - A conflict: `{ok: false, error: {kind: 'conflict', message: 'draft moved to 57 since this eval began on 55, and that also changed index.html: nothing was written. …'}, effects: {conflict: {ref, at, paths}}}`.
+
+## Step 9: The UI layer, the bundling build, and a browser smoke test
+
+This step ported the last concatenated files (`07-dock.js` through `11-app.js`, about 2,500 lines) into `ui/`. It wrote `main.js`, replaced the concatenating build with an esbuild bundle, and ran the bench in a browser for the first time since the rewrite began, on a local slop server built from this branch. The smoke test found four bugs. One predates the rewrite: a new scenario could never pass its first step. All four are fixed. Main (#50, and the SLOP3-024 ticket) is merged in. The Go suite, `go vet`, the Node tests and the import check all pass.
+
+### Prompt Context
+
+**User prompts (verbatim), in order, during this step:**
+- "is this the refactoring? in fact, can we turn this into typescript? would that work with slop-computer? or are we currently required to use js"
+- "ok let's leave the TS aside for now."
+- "like, actually, could we have the server itself use esbuild (which I think is go) as a tool to serve js while we actually always deal with ts?"
+- "ok, make a docmgr ticket for the TS stuff, and just make a note to write out the full design later on, for now we just want to remember it."
+- "write up a doc with your current notes and knowledge so we can take it up later on."
+- "merged #50 btw"
+
+The standing request is in Steps 2 and 5.
+
+**Assistant interpretation:** Answer the TypeScript question, park it as a ticket with notes, finish the UI port in JavaScript, then bring main in.
+
+**Inferred user intent:** Finish the refactor first. Keep the TypeScript idea (the server compiling TS with esbuild) where it can be taken up later.
+
+**Commits:**
+- 3d754eb (on main) — "SLOP3-024: ticket and notes — TypeScript compiled to JavaScript by the server (esbuild)"
+- 787d6ba — "Bench: the UI layer as modules (ui/), main.js, a bundling build"
+- 4dc9716 — merge of origin/main (#50, SLOP3-023/024 ticket docs)
+- 19020fd — "Bench: fixes from the browser smoke test; legacy CSS and test scripts gone"
+
+### What I did
+- **TypeScript, answered and parked as SLOP3-024.** The bench page could be TypeScript today, since esbuild already builds it; checking types would need `tsc --noEmit`. The actor runs in goja, which runs JavaScript only. The inlined worker core and the probe would need a transform step.
+  - The person's idea, the server compiling TS with esbuild's Go API, has its own ticket. `reference/01-notes-typescript-through-esbuild-on-the-server.md` records:
+    - what runs JavaScript today, and where;
+    - the hook points: `pkg/doors/pages/storebytes.go` `writeStoreBytes`, `pkg/actor/actor.go` `load`/`requirer`, `pkg/commands/eval.go`;
+    - the questions a design must settle.
+
+    The full design is a task. It went to main from a worktree off origin/main.
+- **`ui/`, one module per view or concern:**
+  - `app.js` (the shell) and `dock.js`;
+  - `canvas.js` and `snaps.js`;
+  - `code.js` (Code and Docs) and `history.js` (Timeline and the blame card);
+  - `inspect.js` (Inspector and Layers) and `console.js` (Console and Eval);
+  - `data.js`, `threads.js`, `review.js`, `panels.js`, `scenarios.js`, `archive.js`.
+
+  `lib/css.js` took the CSS helpers. On the new model, the views change as follows:
+  - **Code:** edits go through `P.write` to `Draft.edit`. A conflict shows Keep mine / Take theirs; both now refresh the head first. History and blame read snapshots (`model/timeline.js`), and a proposal can revert a file to draft's version.
+  - **Review:** proposals are refs; their changes are read asynchronously (`P.changes`), and accept commits over the proposal's base. Checks compare layouts against draft and run the scenarios on both.
+  - **Data:** reads the person's dev and test instances (`sql`, `docs` actions). It can seed dev from a fixture, save rows as a fixture, and reset dev.
+  - **Threads:** load their messages on first show; the composer offers Proposal or Draft.
+  - **Panels:** lose the `store` and `fixture` bindings. Widgets read `{sql}` and `{docs}` from an instance. The panel calls are `PANEL_API`, which `main.js` adds with `API.add`, and `PANEL_NOTE` becomes `NOTES.ui`.
+  - **Scenarios:** fixtures apply to the test instance. `saveRecording` lives here.
+  - **Archive:** a download holds draft's files, the open proposals' changes, the threads with transcripts, the timeline and the meta. An import takes a zip's text files.
+- **`main.js`** registers the views by the ids that saved layouts use.
+- **`build.mjs`:**
+  - runs `tools/imports.mjs`;
+  - bundles `src/main.js` (IIFE, not minified) and the worker (`src/worker/`, with `core.js` inlined);
+  - splices `frames/probe.js`, minus `export`, into the server probe, and refuses a probe with imports.
+- **Merged origin/main.** Main had added the SLOP3-023 ticket docs at their first version, so `design-doc/01`, `reference/01-diary.md` and `tasks.md` were add/add conflicts. Main's copies had nothing this branch lacks: the only differing lines came from the earlier section numbering and the old `03c-draft.js` name. I took the branch's copies.
+- **Smoke test on a local server.**
+  - I built `slop023` from this branch, stopped my earlier local test server, and copied its data folder to `$S/lslop23/data`; the old folder is untouched.
+  - I started the build with the same config, pointed at the copy (port 18490, model `pi` → `lunaroute/deepseek-4.1-flash`). Then I pushed `apps/bench` as store `bench23` with `workshop` trust and `sample` for `@admin`, mounted at `apps.localhost:18490/bench23`.
+  - In Playwright:
+    1. a new app from the "Page and actor" template;
+    2. an eval;
+    3. typing in Code;
+    4. a forced conflict and Keep mine;
+    5. a proposal by hand, changed by an eval and accepted;
+    6. Timeline and Data;
+    7. a reload;
+    8. History and Blame;
+    9. a new scenario, run;
+    10. two agent turns (read-only, then a write into its own proposal), then Reject;
+    11. selection and the Inspector, Docs, and the zip download.
+
+### Why
+- **Each view registered from `main.js`**, not by a side effect of being imported: the import tool rewrites import lines to what a module uses, so a side-effect import would be dropped. An explicit `registerViews` is also the one place that names every view.
+- **The app bundle is not minified:** the bench is read in the browser's tools while it is being worked on, and its size is not what makes it load slowly.
+- **Dedupe of `outside` events in the actor rather than the page:** only the server sees every tab's reports, and events are per person, so a commit by someone else remains an `outside` change on my timeline, as it should.
+
+### What worked
+- **Boot:** the shell, the dock with all 13 views, the old `bench` store opened as the first project, no console warnings or errors.
+- **A new app:** `notes23` at draft 1, dev instance ok, 0 issues, files including `sql/001_items.sql`.
+- **An eval** (`files.replace` + `files.write` + `frames.check`) committed as one snapshot: `created NOTES.md · styles.css +1 −1 · draft 2 · instances ok`, 40 ms.
+- **Typing in Code:** "saving…", then draft 3, nothing pending.
+- **The conflict:** I called the actor's `commit` as an outside writer at base 3 while an edit was buffered.
+  - The edit was refused, and the footer said "Your edit conflicts with draft 4: someone else changed README.md too. Keep mine Take theirs".
+  - Keep mine committed draft 5 with the person's text, and the conflict cleared.
+- **A proposal by hand:** created at base 5; an eval in it made snapshot 6; Review showed `styles.css +2 −0` with the diff. Accept all gave draft 7, the proposal `accepted`, and the view back on draft.
+- **Timeline:** every step in order, with seq, ref and n.
+- **Reload:** the app, 10 events and the thread came back from the server.
+- **History:** two versions of `styles.css`, the older one read-only from its snapshot. Blame attributes runs of lines.
+- **Data:** shows the `items` table of the dev instance.
+- **Agent, read-only:** one eval (`files.list`, 30 ms) and a one-sentence answer.
+- **Agent, write turn:** opened its own proposal, committed `index.html` there (snapshot 9), checked the frames, left draft alone. Reject closed it and deleted its ref.
+- **Inspector:** source `index.html:11` and the rule from the accepted proposal at `styles.css:8`.
+- **The zip:** 14 entries (`files/` ×8, a thread, a transcript, `project.json`, `timeline.{json,md}`, `bench.json`).
+- **Gates:** `go vet ./...` clean; `go test ./... -count=1` all ok; `npm test` 17/17; `node tools/imports.mjs` clean.
+
+### What didn't work
+- **A new scenario never passed:**
+  - The step failed with "✗ wait for body · 2021 ms · nothing visible matches body after 2000 ms".
+  - The cause: the probe's `waitFor` counted an element as visible only if it had an `offsetParent` or was fixed, and `body`'s `offsetParent` is always null.
+  - This predates SLOP3-023. The template scenario starts with `{ waitFor: 'body' }`, so it failed for everyone. `waitFor` now uses the rule `expect` uses: a box with an area. After the fix: "✓ wait for body 2 ms · ✓ expect h1 1 ms".
+- **One outside change logged twice:** events 4 (`commit`, who `push`, logged by the actor) and 5 (`outside`, logged by the page's poll) for the same snapshot. The same happens with two tabs of one person. `logEvents` now answers an `outside` at a `(ref, n)` already on the timeline with the event there, and the page keeps the server's version. A new case in `TestBenchRecords` covers it.
+- **The Code view's History button stayed hidden after the person's own commits.** Versions were reloaded only when the text differed from the editor's. The view now remembers the head its versions were read at.
+- **Take theirs did not await `takeTheirs`**, which is async now, so the editor reloaded before the head moved.
+- **A rejected proposal's headless frame stayed in the pool:** still loaded, still showing "Made in the bench". `Headless.prune` drops frames of refs that are no longer open, on every proposals change.
+- **Test-driving mistakes (mine, not the bench's):**
+  - I read `frames.check()` as an array; it returns `{route, errors, issues}`.
+  - Playwright would not click inside the canvas frame (it waits for a stable element under the canvas transform), so I dispatched the click in the frame.
+  - I first picked a headless frame, whose play-mode click came back as `act`.
+  - `App.newProposal('title')` ignores its argument and prompts.
+  - The download waited on slop's "Save a file?" dialog until I pressed Save.
+- **Console noise from restarting the server:** `ERR_INCOMPLETE_CHUNKED_ENCODING` and 401s on `/_rt/events` until the page reloaded.
+- **One error from the reject race:** "the app is broken: activation of notes23@8 failed: sql: connection is already closed". It came from the proposal's headless frame, whose instance was dropped mid-request; `Watch.status.dev.broken` stayed empty.
+
+### What I learned
+- **The import tool can't see property names.** It checks free names. So I checked the properties the views use against the members the model defines (Project, Draft, Fixtures, Instances, Snaps, the `App.*` handles), with a small script. All were present.
+- **An iframe in a hidden dock tab measures 0 × 0, and `innerText` falls back to `textContent`.** The Inspector's "Box 0 × 0" and the canvas frame's "visible" script source were both that, not bugs.
+
+### What was tricky to build
+- **The merge with main:** main had the ticket docs at their first version. Only by reading the lines unique to main could I tell they were superseded, not missing.
+- **Event dedupe in the page:** a deduplicated answer can name an event the page already holds (from the poll) or one it does not. The page drops its own copy in the first case. In the second, it takes the server's fields, removing keys the server's version lacks.
+
+### What warrants a second pair of eyes
+- **`ui/panels.js` `Sources`:** `{sql}` and `{docs}` read the instance on every timeline event and frame event, debounced per widget. A busy page could make a lot of actor calls.
+- **`ui/review.js` `runChecks`** loads a headless frame per board frame per workspace and runs every scenario twice. Long for big apps; the person starts it by hand.
+
+### What should be done in the future
+- Deploy to staging (slop.yolo) and repeat the smoke test there.
+- Turn the smoke test into a script under the ticket's `scripts/`, driven through `window.__SB`.
+- Write SLOP3-024's design when TypeScript is taken up.
+
+### Code review instructions
+- Start with `web/bench/src/main.js` and `ui/app.js` (`wire`, `boot`, `openProject`).
+- Then `ui/code.js` (edits, the conflict footer, history) and `ui/review.js` (accept).
+- Then `apps/bench/actor.js` `logEvents` and `model/project.js` `flushEvents`.
+- Run `cd web/bench && npm test && node build.mjs`, then `go test ./pkg/host`.
+
+### Technical details
+- The local server: `$S/rep/slop023 serve --config $S/lslop23/config.yaml --local --admin-email admin@example.com`; the CLI with `SLOP_CREDENTIALS=$S/lslop/creds.json SLOP_SERVER=http://slop.localhost:18490`.
+- The push: `slop store new bench23 && slop push apps/bench --store bench23 && slop app trust bench23 workshop && slop policy set bench23 sample @admin on && slop mount set apps.localhost:18490 /bench23 bench23`.
+- Sizes: `apps/bench/app.js` 439,575 bytes (not minified); `src/ui/` 14 modules, 2,832 lines.
