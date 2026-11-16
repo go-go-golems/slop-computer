@@ -311,12 +311,12 @@ func parseCSV(data []byte) ([]map[string]any, error) {
 }
 
 type pushFile struct {
-	Path   string `json:"path"`
-	SHA256 string `json:"sha256"`
-	Size   int64  `json:"size"`
-	Type   string `json:"type,omitempty"`
-	Text   string `json:"text,omitempty"` // inline content (eval programs cannot hash)
-	Data   string `json:"data,omitempty"` // inline base64 content
+	Path   string  `json:"path"`
+	SHA256 string  `json:"sha256"`
+	Size   int64   `json:"size"`
+	Type   string  `json:"type,omitempty"`
+	Text   *string `json:"text,omitempty"` // inline content (eval programs cannot hash); "" is an empty file
+	Data   string  `json:"data,omitempty"` // inline base64 content
 }
 
 // push applies a manifest. full=true is files.push (prune and snapshot by
@@ -351,10 +351,13 @@ func push(ctx context.Context, e kernelEnv, p *access.Principal, a pushArgs, ful
 		return nil, err
 	}
 	for i, f := range files {
-		if f.Text == "" && f.Data == "" {
+		if f.Text == nil && f.Data == "" {
 			continue
 		}
-		data := []byte(f.Text)
+		var data []byte
+		if f.Text != nil {
+			data = []byte(*f.Text)
+		}
 		if f.Data != "" {
 			var err error
 			if data, err = base64.StdEncoding.DecodeString(f.Data); err != nil {
@@ -365,7 +368,7 @@ func push(ctx context.Context, e kernelEnv, p *access.Principal, a pushArgs, ful
 		if err != nil {
 			return nil, err
 		}
-		files[i].SHA256, files[i].Size, files[i].Text, files[i].Data = sum, int64(len(data)), "", ""
+		files[i].SHA256, files[i].Size, files[i].Text, files[i].Data = sum, int64(len(data)), nil, ""
 	}
 	sums := []string{}
 	seen := map[string]bool{}

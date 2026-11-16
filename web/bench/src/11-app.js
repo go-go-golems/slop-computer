@@ -57,6 +57,8 @@ const App = {
 
   // ---- projects ----
   async openProject(id) {
+    // an app project's edits not yet in draft are pushed before it is let go
+    if (this.P && this.P.meta.app && Slop.on) await Sync.flush()
     let P
     try { P = await Projects.open(id) } catch (e) { toast('Could not open that project: ' + e.message); return false }
     this.offs.forEach(f => f()); this.offs = []
@@ -297,7 +299,7 @@ const App = {
   // ---- boot ----
   async boot() {
     Streams.init()
-    if (/^(localhost|127\.0\.0\.1)$/.test(location.hostname)) window.__SB = { App, Snaps, Headless, Agent }   // local test runs only
+    if (/(^|\.)localhost$|^127\.0\.0\.1$/.test(location.hostname)) window.__SB = { App, Snaps, Headless, Agent, Sync, Slop, Outside }   // local test runs only (a local slop serves the bench on *.localhost)
 
     const root = $('#app')
     clear(root)
