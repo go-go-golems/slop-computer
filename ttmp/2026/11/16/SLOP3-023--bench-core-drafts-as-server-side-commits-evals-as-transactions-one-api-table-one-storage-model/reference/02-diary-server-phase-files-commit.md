@@ -314,3 +314,112 @@ hash is in Step 4.
 ### Technical details
 
 - N/A.
+
+## Step 4: A verb's error details reach actor JavaScript as `e.extra`
+
+The bench actor will catch `files.commit` conflicts, which carry their
+substance in `verbs.Error.Extra` (`at`, `conflicts`). The path from a verb
+into actor JavaScript dropped it: `actor.Error` had only code, message and
+confirm. It now has `Extra map[string]any`, every place in the module door
+that turns a verb error into an actor error goes through one helper,
+`verbFail`, and the runtime sets `e.extra` on the thrown JS `Error`. An
+action that rethrows the error keeps the details on its way back to an
+`actor.call` caller.
+
+The end-to-end test (a workshop module conflict caught in JavaScript, and
+rethrown to the caller) needs `files.commit`, so it lands with Step 5
+(`TestWorkshopCommit`); this commit carries the unit test of `verbFail`.
+
+### Prompt Context
+
+**User prompt (verbatim):** see Step 1. The lead engineer's fourth message
+(verbatim, abridged): "verb errors lose their structured data on the way
+into actor JavaScript. `pkg/actor/actor.go` `type Error struct {Code,
+Message, Confirm}` has no extra field … Please add `Extra map[string]any
+\`json:"extra,omitempty"\`` to `actor.Error`, copy `ve.Extra` in every place
+a verb error becomes an actor error … and make the JS error object the
+actor sees expose it as `e.extra` … keep `e.code`/`e.message` as they are.
+A test in the actors package that a workshop verb's conflict reaches JS
+with `extra.at` and `extra.conflicts`. Also confirm the change shape for
+deletions in files.commit is `{path, delete: true}`."
+
+**Assistant interpretation:** one conversion helper, the runtime exposes
+the field, and the reverse direction (a rethrown JS error) keeps it too.
+
+**Inferred user intent:** `try { await w.commit(...) } catch (e) { e.code
+=== 'conflict' && e.extra.conflicts }` in the bench actor.
+
+**Commit (code):** Step 3's alias removal is `d34c438` — "Manifest: drop
+the self capability alias". This step's hash is in Step 5.
+
+### What I did
+
+- `pkg/actor/actor.go`: `Error.Extra map[string]any \`json:"extra,omitempty"\``;
+  `errValue` sets `extra` (through `toJS`, i.e. JSON into native objects);
+  `jsError` reads `extra` back from a thrown object, so a rethrow keeps it.
+- `pkg/doors/actors/modules.go`: `verbFail(err) *actor.Error`, which copies
+  `verbs.Error.Extra` through JSON (a typed `[]CommitConflict` becomes
+  `[{path}]`). Used by `callVerb` (both the pre-confirmation `Check` and the
+  call itself) and by every conversion in `modworkshop.go` (`drop`, `embed`,
+  `renewEmbed`; the local `fail` closure is gone).
+- `pkg/commands/actors.go` `actorErr`: an `actor.Error`'s `Extra` becomes
+  the `verbs.Error`'s `Extra` (`actor.call` callers see it); a confirmation
+  still replaces it with `{confirm}` as before.
+- `pkg/doors/actors/modules_test.go`: `TestVerbFailKeepsExtra`.
+
+### Why
+
+- One helper instead of five copies of `ve := verbs.AsError(err); return
+  &actor.Error{Code: ve.Code, Message: ve.Message}` is the reason the field
+  was dropped in the first place.
+- JSON normalization: `Extra` is `any`; a typed value handed to goja would
+  surface Go field names, not JSON names.
+
+### What worked
+
+- `GOWORK=off go test -tags sqlite_fts5 ./pkg/doors/actors -count=1` → `ok`.
+- Step 5's `TestWorkshopCommit` shows the whole path: caught in JS,
+  `{"at":<n>,"conflicts":[{"path":"index.html"}]}`; rethrown, the
+  `actor.call` error has `extra.at`.
+
+### What didn't work
+
+- No failures in this step.
+
+### What I learned
+
+- All I/O rejections go through `a.errValue(a.asError(err))` in `io`
+  (`pkg/actor/actor.go`), so setting the field in `errValue` covers every
+  module, not only workshop.
+
+### What was tricky to build
+
+- `pkg/doors/actors` had no test file and its integration lives in
+  `pkg/host`; the unit test covers the conversion, the host test covers the
+  runtime.
+
+### What warrants a second pair of eyes
+
+- The page door (`pkg/doors/pages`, `rtFail`) still sends only code,
+  message and confirm to the browser runtime: a browser `slop.call` does not
+  see `extra`. Adding it needs a runtime change in `web/runtime` (built
+  output is committed), which I left out of scope.
+- When an action rethrows a `confirmation_required` error, `actorErr` keeps
+  replacing `Extra` with `{confirm}` (as before).
+
+### What should be done in the future
+
+- If the bench page needs a conflict's details directly (not through its
+  actor), carry `extra` through `rtFail` and the page runtime.
+
+### Code review instructions
+
+- `pkg/doors/actors/modules.go` `verbFail`; `pkg/actor/actor.go` `errValue`,
+  `jsError`; `pkg/commands/actors.go` `actorErr`.
+- `GOWORK=off go test -tags sqlite_fts5 ./pkg/doors/actors ./pkg/host -run 'TestVerbFailKeepsExtra|TestWorkshopCommit'`
+  (the second needs Step 5).
+
+### Technical details
+
+- The deletion shape for `files.commit` is `{path, delete: true}`
+  (`FileChange.Delete`), confirmed in Step 5's tests.

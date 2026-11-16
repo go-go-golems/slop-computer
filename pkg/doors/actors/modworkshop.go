@@ -8,7 +8,6 @@ import (
 
 	"github.com/go-go-golems/slop-computer/pkg/actor"
 	"github.com/go-go-golems/slop-computer/pkg/doors/web"
-	"github.com/go-go-golems/slop-computer/pkg/verbs"
 )
 
 // workshopFuncs is the workshop module: what a review or publishing tool
@@ -58,8 +57,7 @@ func (s *Door) workshopModule(a *actor.Actor) goja.Value {
 			ctx := web.WithPrincipal(context.Background(), p)
 			out, err := s.Verbs.Call(ctx, p, "app.status", map[string]any{"store": id})
 			if err != nil {
-				ve := verbs.AsError(err)
-				return nil, &actor.Error{Code: ve.Code, Message: ve.Message}
+				return nil, verbFail(err)
 			}
 			var st struct{ Store, App, Ref string }
 			b, _ := json.Marshal(out)
@@ -68,8 +66,7 @@ func (s *Door) workshopModule(a *actor.Actor) goja.Value {
 				return nil, &actor.Error{Code: "permission_denied", Message: "drop removes only instances that run unpublished code (another store's app, at a ref other than main); " + id + " runs " + st.App + "@" + st.Ref}
 			}
 			if out, err = s.Verbs.Call(ctx, p, "store.rm", map[string]any{"id": id}); err != nil {
-				ve := verbs.AsError(err)
-				return nil, &actor.Error{Code: ve.Code, Message: ve.Message}
+				return nil, verbFail(err)
 			}
 			return out, nil
 		}, func(out any) (goja.Value, error) { return a.ToJS(out), nil })
@@ -81,10 +78,6 @@ func (s *Door) workshopModule(a *actor.Actor) goja.Value {
 		if !s.Gov.Trusted(context.Background(), a.App(), "workshop") {
 			a.Throw("permission_denied", a.App()+" is no longer trusted with workshop")
 		}
-	}
-	fail := func(err error) error {
-		ve := verbs.AsError(err)
-		return &actor.Error{Code: ve.Code, Message: ve.Message}
 	}
 	toJS := func(out any) (goja.Value, error) { return a.ToJS(out), nil }
 	_ = o.Set("embed", func(store string, opts goja.Value) goja.Value {
@@ -101,7 +94,7 @@ func (s *Door) workshopModule(a *actor.Actor) goja.Value {
 		return a.IO(func() (any, error) {
 			out, err := s.Embed(context.Background(), p, store, tool, app, dev)
 			if err != nil {
-				return nil, fail(err)
+				return nil, verbFail(err)
 			}
 			return out, nil
 		}, toJS)
@@ -116,7 +109,7 @@ func (s *Door) workshopModule(a *actor.Actor) goja.Value {
 		return a.IO(func() (any, error) {
 			out, err := s.RenewEmbed(context.Background(), p, view, tool, app)
 			if err != nil {
-				return nil, fail(err)
+				return nil, verbFail(err)
 			}
 			return out, nil
 		}, toJS)
@@ -133,7 +126,7 @@ func (s *Door) workshopModule(a *actor.Actor) goja.Value {
 		return a.IO(func() (any, error) {
 			out, err := s.CloseEmbed(context.Background(), p, view, tool, app)
 			if err != nil {
-				return nil, fail(err)
+				return nil, verbFail(err)
 			}
 			return out, nil
 		}, toJS)
