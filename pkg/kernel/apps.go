@@ -135,6 +135,28 @@ func (k *Kernel) ClearFailure(id string) {
 	}
 }
 
+// forgetStore drops what the kernel remembers about a deleted store: its
+// failed activations and, as an app, its parsed manifests. A store made
+// again under the same id starts clean (SLOP3-022: the bench's "reset dev
+// data" drops a dev instance and makes it again; an app store made again
+// numbers its snapshots from 1).
+func (k *Kernel) forgetStore(id string) {
+	k.mc.mu.Lock()
+	defer k.mc.mu.Unlock()
+	for _, m := range []map[string]string{k.mc.failed, k.mc.e} {
+		for key := range m {
+			if strings.HasPrefix(key, id+"@") {
+				delete(m, key)
+			}
+		}
+	}
+	for key := range k.mc.m {
+		if strings.HasPrefix(key, id+"@") {
+			delete(k.mc.m, key)
+		}
+	}
+}
+
 func (k *Kernel) manifest(ctx context.Context, as *store.Store, n int64) (*apps.Manifest, string) {
 	key := as.ID + "@" + strconv.FormatInt(n, 10)
 	k.mc.mu.Lock()

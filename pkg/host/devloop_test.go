@@ -416,3 +416,27 @@ func TestSlopDev(t *testing.T) {
 	}
 	t.Logf("slop dev printed:\n%s%s", once.String(), out.String())
 }
+
+// files.push with ifAt snapshots only when the ref is still where the
+// pusher saw it, checked in the push's own turn: a stale push writes
+// nothing.
+func TestPushIfAt(t *testing.T) {
+	h := newHarness(t)
+	admin := h.tokenFor("admin@example.com", "read", "write", "admin")
+	h.call(admin, "store.new", map[string]any{"id": "site"})
+	one := map[string]string{"index.html": "<h1>one</h1>"}
+	r := h.call(admin, "files.push", map[string]any{"store": "site", "files": files(one), "ref": "draft", "ifAt": 0}).(map[string]any)
+	n1 := num(r["n"])
+	h.fail(admin, "files.push", map[string]any{"store": "site", "files": files(one), "ref": "draft", "ifAt": 0}, "conflict")
+	two := map[string]string{"index.html": "<h1>two</h1>"}
+	h.call(admin, "files.push", map[string]any{"store": "site", "files": files(two), "ref": "draft", "ifAt": n1})
+	stale := map[string]string{"index.html": "<h1>stale</h1>", "extra.html": "x"}
+	h.fail(admin, "files.push", map[string]any{"store": "site", "files": files(stale), "ref": "draft", "ifAt": n1}, "conflict")
+	if got := h.call(admin, "files.cat", map[string]any{"store": "site", "at": "draft", "path": "index.html"}); got != "<h1>two</h1>" {
+		t.Fatalf("draft index.html = %v", got)
+	}
+	if out := h.call(admin, "files.ls", map[string]any{"store": "site"}).([]any); len(out) != 1 {
+		t.Fatalf("the stale push wrote to the tree: %v", out)
+	}
+	h.fail(admin, "files.push", map[string]any{"store": "site", "files": files(two), "ifAt": 1, "snapshot": false}, "invalid_argument")
+}

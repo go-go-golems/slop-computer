@@ -1,0 +1,11 @@
+{
+  "name": "slop-bench",
+  "private": true,
+  "description": "The bench: Sitebench, a coding-agent workbench, as a slop app for developing slop apps (SLOP3-022)",
+  "scripts": { "build": "node build.mjs" },
+  "devDependencies": {
+    "@tootallnate/quickjs-emscripten": "0.23.0",
+    "acorn": "8.18.0",
+    "esbuild": "0.25.12"
+  }
+}

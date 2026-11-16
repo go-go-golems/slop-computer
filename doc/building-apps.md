@@ -100,6 +100,14 @@ change, makes your dev instance `myapp-dev-<you>` on first use (it follows
 `files.push {ref: "draft", activate: [instance]}` plus
 `store.new {id, app}` and `app.follow {store, ref: "draft"}`.
 
+The bench (`apps/bench`, at `/bench` for admins; built from `web/bench`,
+which is Sitebench) is the same loop in the browser, with a coding agent:
+pick an app store in its project menu, edit by hand or ask the agent, and
+the canvas frames show your dev instance running draft, reloading on each
+push (a terminal's too). An eval's effects say which draft it made and
+whether the dev instance came up; a changed migration offers "Reset dev
+data".
+
 Publishing moves `main` to the draft's snapshot; `--ifAt` makes it a
 compare-and-swap, so two publishers cannot overwrite each other, and the
 answer's `from` is the snapshot to roll back to:

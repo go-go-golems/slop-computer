@@ -14,4 +14,11 @@
 - [x] C.4 workshop dev instances: newStore, logs, restart, doc/docs, sql, importDocs/importTable, guarded drop
 - [x] C.1 embedded views: workshop.embed, /e/<token>/ sandbox route, frame-ancestors, probe + instrument for dev embeds, renew (browser-checked: push → frame 291 ms)
 - [x] C.5 slop dev <dir> --app (poll, push to draft --activate, logs)
-- [ ] Bench app (Phase 1+): needs the user's decision on committing Sitebench's source (open question 1)
+- [x] Commit Sitebench's source (user approved): web/bench → apps/bench, stamped build
+- [x] Bench Phase 1: projects are app stores (actor apps/open/read/sync/create; Sync to draft)
+- [x] Bench Phase 2 (page): canvas frames are embedded dev views; Sitebench's PROBE served by slop
+- [x] Bench Phase 3: actor status and logs in effects and Console; outside pushes merged; reset dev data (kernel: forget a deleted store's caches)
+- [ ] Bench Phase 4: the agent's API for slop apps (app.* for data), fixtures and scenarios on instances
+- [ ] Bench Phase 5: publish from the bench (preflight, approve, rollout, rollback)
+- [ ] Bench Phase 6: proposals on refs, history on snapshots
+- [ ] closeEmbed (free views when frames reload)

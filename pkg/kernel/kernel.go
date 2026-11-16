@@ -200,6 +200,7 @@ func (k *Kernel) DeleteStore(ctx context.Context, p *access.Principal, id string
 		delete(k.open, id)
 	}
 	k.mu.Unlock()
+	k.forgetStore(id)
 	if err := os.RemoveAll(k.dir(id)); err != nil {
 		return fmt.Errorf("store %s unregistered but its files remain: %w", id, err)
 	}

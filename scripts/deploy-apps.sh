@@ -8,6 +8,7 @@
 #
 #   live host                         static host
 #   /workshop      Workshop (admins)  /s/:id      published Blocks sites
+#   /bench         the bench (admins): develop apps live, with an agent
 #   /office        back office app    /examples/static-site
 #   /b/:id         Blocks workspaces (members create them)
 #   /p/:id         Pinup designs (members create them)
@@ -37,6 +38,12 @@ $SLOP mount set "$LIVE_HOST" /workshop workshop >/dev/null
 app backoffice "$repo/apps/backoffice"
 $SLOP app trust backoffice system >/dev/null
 $SLOP mount set "$LIVE_HOST" /office backoffice >/dev/null
+# The bench (SLOP3-022): projects are app stores, edits go to draft, frames
+# show each developer's dev instance; the agent asks the model through sample.
+app bench "$repo/apps/bench"
+$SLOP app trust bench workshop >/dev/null
+$SLOP policy set bench sample @admin on >/dev/null
+$SLOP mount set "$LIVE_HOST" /bench bench >/dev/null
 app blocks-site "$repo/apps/blocks-site"
 $SLOP app trust blocks-site workshop >/dev/null
 $SLOP mount set "$LIVE_HOST" /pub/:id --storeParam id --type blocks-site >/dev/null

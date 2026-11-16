@@ -1,0 +1,8 @@
+{
+  "title": "Bench",
+  "type": "bench",
+  "page": "index.html",
+  "actor": "actor.js",
+  "capabilities": { "db": {}, "user": {}, "sample": {}, "downloads": true },
+  "slop": { "modules": ["workshop"] }
+}
