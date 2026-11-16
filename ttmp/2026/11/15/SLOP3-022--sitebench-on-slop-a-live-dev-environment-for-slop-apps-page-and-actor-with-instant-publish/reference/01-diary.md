@@ -1143,3 +1143,153 @@ The bench now reports what the server did with each edit: which draft, whether t
 GOWORK=off go test -buildvcs=false -tags sqlite_fts5 ./pkg/host -run TestBenchOutsidePushesAndReset -count=1
 # without k.forgetStore(id) in DeleteStore: bench_test.go:254: the fresh dev instance = map[… broken:migration sql/001.sql changed after it was applied …]
 ```
+
+## Step 14: PR #47 (Phases 0–3), and Bench Phase 4, the agent on slop apps
+
+I opened #47 with Phases 0–3 and continued on a stacked branch, `task/slop3-022-bench-p4`. Phase 4 teaches the agent what a slop app is and gives it the dev instance's data. Commit `9d7f431`. The guide's other Phase 4 half, fixtures and scenarios on run instances, is not done.
+
+### Prompt Context
+
+**User prompt (verbatim):** see Step 10.
+
+**Assistant interpretation:** Keep going through the phases; put a reviewable checkpoint up.
+
+**Inferred user intent:** The coding agent working on real slop apps.
+
+### What I did
+
+- **PR #47:** <https://github.com/go-go-golems/slop-computer/pull/47>. `scripts/deploy-apps.sh` installs the bench at `/bench` (trusted with `workshop`, `sample` for `@admin`), and `doc/building-apps.md` §3.2 has a paragraph on it. CI passed; Codex was still running when I wrote this.
+- **The prompt.** `slopGuide(P)` is appended to the agent's prompt for app projects. It covers:
+  - where writes go (`draft`; `main` and publishing are the person's);
+  - what the frames show, and the effects fields;
+  - how a slop app runs (`app.json`, one entry page with `window.claude`, `actor.js`, migrations never edited once run);
+  - the `app.*` verbs, and rules.
+
+  The Eval panel's "API reference (what the agent sees)" shows it too. It is filled when opened, because the panel is built before a project is open.
+- **Host verbs:**
+  - `app.info`, `app.status`, `app.logs`, `app.docs`, `app.doc`, `app.sql`, `app.seedDocs`, `app.seedTable`, `app.resetDev`, with signatures in `API_SIGS`;
+  - `data.*` throws a policy error pointing to them in app projects.
+- **Actor:** `docs`, `doc`, `sql`, `seedDocs` and `seedTable`, all on `<app>-dev-<you>`.
+- **Headless frames of an app project are embedded too,** so the agent's reads work when the canvas tab is hidden. Like canvas frames, they rely on the runtime's `reload`, not on stale marks.
+- **`TestBenchDevData`:** seeded documents and rows are found in the dev instance and not in the app store, and a `DELETE` through `sql` is `invalid_argument` ("not authorized").
+- **Browser:**
+  - `app.info`/`seedDocs`/`docs`/`status` answered `{"app":"jot","entry":"index.html","dev":"jot-dev-2915cc","notes":["notes/hello","notes/seeded"],"status":{"broken":"","n":11,…}}`;
+  - `data.tables` gave "policy: data.tables is Sitebench's own tables, which this slop app does not see. …";
+  - the reference panel contained "THIS PROJECT IS A SLOP APP: the app store "jot" …";
+  - an agent turn on the fake model ran (built with the new prompt).
+
+### Why
+
+- **A stacked branch,** so #47 stays as described while review runs.
+
+### What worked
+
+- The host-API pattern made new verbs one line each. The bridge already awaits promises (`06-agent.js:20-43`).
+
+### What didn't work
+
+- **The reference panel did not show the slop section at first** (`ref: false`). It was built once at boot, before a project was open.
+- **My first read of an eval's output looked before "Edit again"; the value comes after it.**
+
+### What I learned
+
+- **Two `srcdoc` errors appear during an agent turn** ("Cannot read properties of undefined (reading 'use')" from `about:srcdoc`). They come from frames built from files (a snapshot, the playhead or an isolated run). A slop page cannot run there, as the prompt says.
+
+### What was tricky
+
+- **The headless stale marking.** Embedded headless frames must not be marked stale on an edit, or `Headless.get` reloads them before the push lands.
+
+### Second pair of eyes
+
+- **`app.sql` is read-only (`sql.query`).** The agent changes table data through the app's own actions or migrations, as people would. Is that enough for debugging?
+
+### Future
+
+- Phase 4's other half: fixtures and scenarios on run instances.
+- Phase 5.
+
+### Code review
+
+- `slopGuide` and the `app.*` verbs in `06-agent.js`;
+- the data actions in `apps/bench/actor.js`.
+
+### Technical details
+
+```sh
+GOWORK=off go test -buildvcs=false -tags sqlite_fts5 ./pkg/host -run TestBenchDevData -count=1
+```
+
+## Step 15: Bench Phase 5, publish from the bench
+
+The "insta publish" half of the user's request: from the bench, a preflight, a compare-and-swap publish, a rollout with "Activate now", and rollback. The agent can check and propose, and publishes only behind the person's approval. Commit `1a3ab68`.
+
+### Prompt Context
+
+**User prompt (verbatim):** see Step 10, and the ticket's first prompt: "… having for example a live updating staging / dev environment … and then basically 'insta publishing' the results".
+
+**Assistant interpretation:** Guide Phase 5.
+
+**Inferred user intent:** Ship from the same place you build, safely.
+
+### What I did
+
+- **Actor:**
+  - `preflight` compares files at `draft` and `main` (added, changed, removed). It lists new migrations, and blocks on a migration changed or removed after `main` ran it. It lists production instances (the app store when it serves `main`, plus instances whose ref is `main`) and the visitor's dev status.
+  - `publish {app, n, ifAt}`: both required; `ifAt: 0` for a first publish.
+  - `activate {store}`.
+- **Page:** `Publish` (`03b-slop.js`) with `preflight`, `run` (marks the timeline "Published draft n to main"), `rollback` and `lines`. A header button shown for app projects opens the dialog. After a publish, a rollout dialog offers "Activate now" per instance, and "Roll back to n" when there was a `main` before.
+- **Agent:**
+  - `publish.check()` returns the preflight plus a `summary`;
+  - `publish.run({note})` shows `approvalCard` with the summary, publishes only on approve, and otherwise throws kind `approval`. It is in `LONG_CALLS` so the wait does not count against the eval's time.
+  - The prompt says to check first and never edit a migration `main` has run.
+- **`TestBenchPublish`:** see the commit.
+- **Browser** (`various/bench-p5-publish-preflight.png`):
+  - `bench-demo` (draft only): the preflight showed "draft 1 → main (first publish)", "files: +README.md +app.json +index.html +styles.css", "your dev instance runs draft 1: ok", "no production instance yet: nothing serves main". Publishing gave "bench-demo @1 · on 1".
+  - Mounting failed before the publish ("bench-demo is plain content: mount it on a static host"), because a store without `main` has no manifest to serve. After the publish it mounted.
+  - An eval edited the `h1` and returned `publish.check().summary`: "draft 2 → main (now 1)", "files: ~index.html", "your dev instance runs draft 2: ok", "production: bench-demo @1".
+  - After publishing, the mount showed "Bench demo, version two". After "Roll back to 1", it showed "Bench demo".
+
+### Why
+
+- **Blocking only changed or removed migrations:** that is what makes production instances refuse a version (Step 13). Everything else is information.
+- **An approval card for the agent:** publishing affects other people. The agent proposes, the person decides.
+
+### What worked
+
+- #46's `ref.move --ifAt` and `from` made publish and rollback two calls.
+
+### What didn't work
+
+- **A Playwright click on the Eval tab timed out** ("<div class="modal">… intercepts pointer events"): the rollout dialog was still open. I closed it first.
+
+### What I learned
+
+- **A store with only a `draft` cannot be mounted on the live host:** without a manifest at `main` it counts as plain content. The first publish is what makes it mountable. The bench could offer the mount after a first publish.
+
+### What was tricky
+
+- **Which instances are "production".** I used those whose ref is `main` (empty means `main`) and that have a manifest. Dev, proposal and run instances follow other refs.
+
+### Second pair of eyes
+
+- **The preflight activates every production instance it reads** (`app.status` runs `Running`). That is what their next view would do anyway, but on an app with many instances the preflight is slower and the activations happen earlier. A status that does not activate would be better.
+
+### Future
+
+- Phase 4's fixtures and scenarios; Phase 6 (proposals on refs).
+- Offering a mount after a first publish.
+- Closing embeds.
+- The PR for Phases 4–5 after #47.
+
+### Code review
+
+- `preflight`/`publish`/`activate` in `apps/bench/actor.js`;
+- `Publish` in `03b-slop.js`;
+- `publishDialog`/`rolloutDialog` in `11-app.js`;
+- `publish.*` in `06-agent.js`.
+
+### Technical details
+
+```sh
+GOWORK=off go test -buildvcs=false -tags sqlite_fts5 ./pkg/host -run TestBenchPublish -count=1
+```
