@@ -624,3 +624,95 @@ GOWORK=off go test -buildvcs=false -tags sqlite_fts5 ./pkg/doors/pages -run Test
 GOWORK=off go test -buildvcs=false -tags sqlite_fts5 ./pkg/host -run TestEmbeddedViews -count=1
 # browser: scripts/02-embed-test/README.md; latency = probe-seen time − push start = 291 ms
 ```
+
+## Step 8: C.5, `slop dev`
+
+The terminal side of the loop: `slop dev <dir> --app <id>`. Commit `972e80e`. It pushes the folder to `draft` now and on every change, makes and maintains the person's dev instance, and prints where the instance is, or why it broke, followed by its new log lines.
+
+### Prompt Context
+
+**User prompt (verbatim):** see Step 6.
+
+**Assistant interpretation:** Continue the plan with C.5.
+
+**Inferred user intent:** The same live loop for people who edit in their own editor.
+
+### What I did
+
+- **`pkg/client/dev.go` (new).** It holds the logic, so `pkg/host` tests can drive it; they cannot import `cmd/slop/cmds`, which imports `pkg/host`.
+  - `DevInstanceID(app, person)` returns `<app>-dev-<first 6 of the id>`, within 63 characters.
+  - `Client.Dev(ctx, dir, DevOptions{App, Instance, Every, Once, Out})`:
+    1. `whoami`, to name the instance.
+    2. A first push to `draft` with `activate: [instance]`.
+    3. `devInstance`: if `app.status` answers `not_found`, it runs `store.new {id, app, type}` (the type from the app's manifest) and `app.follow draft`. An instance that runs another app is an error. One on another ref is set to follow `draft`.
+    4. One status line.
+    5. Unless `Once`: a ticker that compares a folder stamp (path, size, mtime, with the same skip rules as `ReadDir`) and pushes on change. It reads `app.logs` after each push and about every 2 s, printing lines newer than the last one printed.
+  - The output, as `TestSlopDev` printed it:
+
+    ```
+    made dev instance jot-dev-5340a1 (runs jot)
+    draft 1 · jot-dev-5340a1 on 1 · ok
+    dev instance jot-dev-5340a1 follows jot@draft; publish with: slop ref move jot main 1
+    draft 2 · jot-dev-5340a1 on 2 · ok
+      log warn  action ping declares no requires; callers need admin
+      log log   setup ran
+    draft 3 · jot-dev-5340a1 stays on 2 · broken: activation of jot@3 failed: migration sql/003_bad.sql: near "TABL": syntax error
+    ```
+
+- **`cmd/slop/cmds/dev.go` (new):** cobra flags `--app` (default: the folder's name), `--instance`, `--every` (500 ms) and `--once`. It runs under SIGINT/SIGTERM. It is registered next to `push` and `pull` in `extra.go`.
+- **`TestSlopDev`** (`pkg/host/devloop_test.go`), through a `client.Client` on the harness, using the existing `hostTransport`:
+  - `--once` makes the instance on `draft`, and `main` does not exist afterwards;
+  - in the loop, a new migration is reported "ok" with the instance's `setup` log line;
+  - a broken migration is reported as "stays on … broken: …" with the file named.
+- **The guide's Appendix C** marks C.5 as built.
+
+### Why
+
+- **Polling instead of fsnotify:** no new dependency (the slop reader noted `fsnotify` is not in `go.mod`). A stat walk twice a second is cheap for an app folder.
+- **Logs about every 2 s, not every tick,** to keep the request rate low on a shared server.
+
+### What worked
+
+- After the fix below, the test passed. The full suite passed, and lint reported 0 issues.
+
+### What didn't work
+
+- **The first run of `TestSlopDev`** printed "draft 0 · jot-dev-190bc0 on 0 · ok" and never showed a log line:
+
+  ```
+  devloop_test.go:348: waited for "log log   setup ran":
+  ```
+
+  The client decodes answers with `dec.UseNumber()` (`pkg/client/client.go:254-255`), so numbers arrive as `json.Number`. `toInt` read them as 0, and every log line's `at` was "older" than `since`. `toInt` now handles `json.Number`.
+- **`pkill -f "rep/s22 serve --local"`** killed its own shell (exit 144), because the pattern appeared in the command line. This happened again after Step 5. Anchoring the pattern (`^/tmp/…/rep/s22 serve`) avoids it.
+
+### What I learned
+
+- `client.Call` answers carry `json.Number`. Any client-side code reading numbers must handle it.
+
+### What was tricky
+
+- **Not printing the status twice.** When the instance already exists and follows `draft`, the first push's activation entry already says where it is. When it does not exist yet, that entry is an error, and a status read after `devInstance` gives the line. `devPush` reports whether it printed.
+
+### Second pair of eyes
+
+- **The publish hint** printed by `slop dev` is `slop ref move <app> main <n>`, without `--ifAt`. Should it print the current `main` so the hint is a compare-and-swap?
+
+### Future
+
+- Open the PR with C.1–C.5, and wait for Codex.
+- The bench app itself waits on the user's decision about Sitebench's source.
+
+### Code review
+
+- `pkg/client/dev.go`;
+- `cmd/slop/cmds/dev.go`;
+- `TestSlopDev`.
+
+### Technical details
+
+```sh
+GOWORK=off go test -buildvcs=false -tags sqlite_fts5 ./pkg/host -run TestSlopDev -count=1 -v
+slop dev ./myapp --app myapp            # Ctrl-C to stop
+slop dev ./myapp --app myapp --once     # push, report, exit
+```

@@ -1050,7 +1050,7 @@ Source: `API_SIGS`, `06-agent.js:75-94`. Bold verbs are long calls that pause th
 - `logs(id)`, `restart(id)`, `docs(id, coll)`, `sql(id, query)`: read-only `sql.query`.
 - Code: `pkg/doors/actors/modworkshop.go`.
 
-**C.5 `slop dev <dir> --app <id>`.**
+**C.5 `slop dev <dir> --app <id>`.** *Built (diary step 8): `client.Dev` (`pkg/client/dev.go`) and `cmd/slop/cmds/dev.go`; flags `--instance`, `--every`, `--once`.*
 - Poll, push to `draft`, print the activation result and new log lines.
 - Code: `cmd/slop/cmds/`, `pkg/client/folder.go`.
 
