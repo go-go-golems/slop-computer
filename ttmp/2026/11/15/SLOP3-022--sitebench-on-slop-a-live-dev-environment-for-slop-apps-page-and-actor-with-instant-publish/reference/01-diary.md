@@ -1499,7 +1499,7 @@ Codex's third pass found no major issues on #48 (`145551a`). On #47 (`e0e274e`) 
   - `LOG_PIECE` is 200000 bytes;
   - `stored()` skips the byte count for short events (`json.length <= LOG_EVENT / 3`);
   - `loadLog` counts chunk sizes in bytes.
-- **`scripts/02-log-pieces-check.mjs`** loads `utf8Len`/`logPieces` out of the source and checks four corpora against `Buffer.byteLength(JSON.stringify({text}))`.
+- **`scripts/03-log-pieces-check.mjs`** loads `utf8Len`/`logPieces` out of the source and checks four corpora against `Buffer.byteLength(JSON.stringify({text}))`.
 
 ### Why
 
@@ -1533,5 +1533,5 @@ Codex's third pass found no major issues on #48 (`145551a`). On #47 (`e0e274e`) 
 ### Technical details
 
 ```sh
-node ttmp/…/scripts/02-log-pieces-check.mjs web/bench/src/04-project.js
+node ttmp/…/scripts/03-log-pieces-check.mjs web/bench/src/04-project.js
 ```
