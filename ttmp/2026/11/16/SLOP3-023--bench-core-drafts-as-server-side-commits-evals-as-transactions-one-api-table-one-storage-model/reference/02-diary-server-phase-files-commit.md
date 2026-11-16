@@ -241,3 +241,76 @@ ambiguity between a ref called `42` and snapshot 42 in `Store.Ref`.
 - Ref names: `^[a-z][a-z0-9._-]{0,62}(/[a-z0-9][a-z0-9._-]{0,62}){0,3}$`.
   Valid: `main`, `draft`, `proposal/p8k2x1`, `x/1/2/3`. Invalid: `""`, `1`,
   `Main`, `x/`, `/x`, `x//y`, `x/.y`, `a/b/c/d/e`, 64 × `x`.
+
+## Step 3: The `self` capability alias goes
+
+`pkg/rt/manifest.go` accepted `self` as "the old name of artifact" and
+rewrote it. No app in `apps/` declares a `self` capability (pinboard's
+`"write": "self"` is a rule level, which I left alone), so the alias, its
+rewrite and its entry in `ContractCaps` are gone, and a manifest declaring
+`self` is now refused as an unknown capability.
+
+This is independent of the rest of the work, so it is its own commit.
+
+### Prompt Context
+
+**User prompt (verbatim):** see Step 1 (brief item 3: "Remove the alias if
+no app in `apps/` declares the `self` capability … leave levels alone").
+
+**Assistant interpretation:** delete the compatibility alias and its test
+use; keep the rule level `self`.
+
+**Inferred user intent:** no backwards-compatibility code.
+
+**Commit (code):** the previous step's store layer is `9aae6b8` — "Store:
+SnapshotFiles and ResetTree in a turn, RemoveRef, ref names". This step's
+hash is in Step 4.
+
+### What I did
+
+- `git grep -n '"self" *:'` outside `ttmp`: only `pkg/rt/core_test.go:206`
+  (the test that used the alias) and the alias itself.
+- `pkg/rt/manifest.go`: removed `"self": true` from `ContractCaps` and the
+  `if name == "self" { name = "artifact" }` rewrite.
+- `pkg/rt/core_test.go` `TestManifest`: declares `"artifact":{}` instead,
+  and `{"capabilities":{"self":{}}}` joins the manifests that must be
+  refused.
+
+### Why
+
+- The brief and the user's standing direction: no legacy aliases.
+
+### What worked
+
+- `GOWORK=off go test -tags sqlite_fts5 ./pkg/rt` → `ok`.
+
+### What didn't work
+
+- No failures.
+
+### What I learned
+
+- `self` survives in two unrelated places that must stay: the rule level
+  (`pkg/rt/rules.go` `levelNames`) and the `{self}` path variable in rules.
+
+### What was tricky to build
+
+- Nothing.
+
+### What warrants a second pair of eyes
+
+- A deployed app outside this repository that still declares `self` now
+  fails to parse (the brief accepts that).
+
+### What should be done in the future
+
+- N/A.
+
+### Code review instructions
+
+- `pkg/rt/manifest.go` `ContractCaps`, `ParseManifest`;
+  `GOWORK=off go test -tags sqlite_fts5 ./pkg/rt -run TestManifest`.
+
+### Technical details
+
+- N/A.
