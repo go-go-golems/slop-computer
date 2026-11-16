@@ -1,4 +1,4 @@
-/* the bench, built from web/bench: do not edit. source sha256:22a6d3c8872160167b4e674148296cae7812bdfa3708993dfdf74eaac0e48bdc */
+/* the bench, built from web/bench: do not edit. source sha256:bd6358ae211922d9f820fd22b9580aa16dc3b771ab56ec9c17885e4ab1e6c7aa */
 // Sitebench: a live-site workbench. Built from src/*.js
 "use strict";
 (() => {
@@ -1063,6 +1063,9 @@ const Slop = {
 const BINARY_EXT = /\.(png|jpe?g|gif|webp|avif|ico|bmp|woff2?|ttf|otf|eot|pdf|zip|gz|tgz|wasm|mp3|mp4|m4a|webm|ogg|wav|mov|sqlite|db|bin)$/i
 const textish = f => !BINARY_EXT.test(f.path) && f.size <= 240000
 
+// How long flush waits for other pushes, and how many pushes it tries.
+const FLUSH_WAIT = 60000, FLUSH_TRIES = 20
+
 // Sync pushes app projects' trees to their drafts: changed files as text,
 // the rest by the hash the server gave them. One push at a time; edits
 // during a push are picked up by the next. The attached project (the open
@@ -1142,21 +1145,32 @@ const Sync = {
   // made so far is in its draft (an eval's effects need the activation;
   // switching projects must not drop edits). A push that fails is not
   // retried in a loop: one try, then the error. While an eval holds
-  // pushes, this returns at once; P stays queued for after it.
+  // pushes, this returns at once; P stays queued for after it. If other
+  // pushes keep it waiting past FLUSH_WAIT, it says so rather than answer
+  // with a draft that lacks the edits.
   async flush(P = this.P) {
     if (!P || !P.meta.app) return { n: null, act: null, error: '' }
-    let tried = false
-    for (let i = 0; i < 400; i++) {
-      if (this.busy || Outside.merging) { await sleep(30); continue }
-      if (this.held(P) || !this.pending(P) || (tried && P.syncError)) break
-      tried = true
+    let tries = 0, waited = false
+    for (const t0 = now(); ;) {
+      if (this.busy || Outside.merging) {
+        if (now() - t0 > FLUSH_WAIT) { waited = true; break }
+        await sleep(30); continue
+      }
+      if (this.held(P) || !this.pending(P) || (tries && P.syncError) || tries >= FLUSH_TRIES) break
+      tries++
       await this.run(P)
+    }
+    // gave up with edits unpushed (and no push error to say why): say so
+    let late = ''
+    if (this.pending(P) && !this.held(P) && !P.syncError) {
+      if (waited) late = 'still waiting for another push after ' + Math.round(FLUSH_WAIT / 1000) + ' s: these edits are not in draft yet'
+      else if (tries >= FLUSH_TRIES) late = 'draft kept moving: ' + tries + ' pushes did not get these edits in'
     }
     // an error is about edits still unpushed: with none left (undone, or
     // pushed since), draft has everything
-    if (!this.pending(P)) { P.syncError = ''; if (P === this.P && this.status === 'error') this.set('synced') }
+    if (!this.pending(P)) { P.syncError = ''; if (P === this.P && this.status === 'error') this.set('synced') } else this.queue.add(P)
     this.soon()
-    return { n: P.refs ? P.refs.draft ?? null : null, act: P.lastAct || (P === this.P ? this.act : null), error: P.syncError || '' }
+    return { n: P.refs ? P.refs.draft ?? null : null, act: late ? null : P.lastAct || (P === this.P ? this.act : null), error: late || P.syncError || '' }
   },
   label() {
     const s = { idle: 'ready', dirty: 'unsaved', pushing: 'pushing…', synced: 'draft ' + (this.n ?? '–'), error: 'error' }[this.status] || this.status
@@ -4822,16 +4836,19 @@ registerView('evalrepl', {
       const code = ta.value, t0 = now()
       const card = h('div.block', h('header', h('h3', 'Running…'), h('span.sub', fmtTime(t0))))
       res.prepend(card)
-      const ctx = { project: App.P, ws: App.ws, who: 'you', mode: 'auto' }
-      const r = await runEval(ctx, code, hostAPI(ctx), { sid: 'repl:' + App.P.id, restore: App.P.meta.replScope && App.P.meta.replScope.vars })
-      if (r.scope) { App.P.meta.replScope = r.scope; App.P.saveMeta(); paintScope() }
+      // the project and workspace the eval started on keep its results, even
+      // if another project is opened while it runs
+      const P = App.P, ws = App.ws
+      const ctx = { project: P, ws, who: 'you', mode: 'auto' }
+      const r = await runEval(ctx, code, hostAPI(ctx), { sid: 'repl:' + P.id, restore: P.meta.replScope && P.meta.replScope.vars })
+      if (r.scope) { P.meta.replScope = r.scope; P.saveMeta(); if (App.P === P) paintScope() }
       clear(card)
       if (r.effects) card.appendChild(h('div.fx', effectsLine(r.effects)))
-      put(card, h('header', h('h3', { style: { color: r.ok ? '' : 'var(--accent)' } }, r.ok ? 'ok' : r.error.kind), h('span.sub', (r.ms ?? '?') + ' ms · ' + (r.engine || '') + ' · ' + (App.ws === 'main' ? 'main' : 'proposal')), h('span.sp'),
+      put(card, h('header', h('h3', { style: { color: r.ok ? '' : 'var(--accent)' } }, r.ok ? 'ok' : r.error.kind), h('span.sub', (r.ms ?? '?') + ' ms · ' + (r.engine || '') + ' · ' + (ws === 'main' ? 'main' : 'proposal') + (App.P !== P ? ' · ' + P.title : '')), h('span.sp'),
         h('button.btn.sm', { on: { click: () => { ta.value = code; ta.focus() } } }, 'Edit again')),
         r.ok ? h('pre.mono.yaml', { style: { margin: 0, whiteSpace: 'pre-wrap', fontSize: '11.5px', maxHeight: '420px', overflow: 'auto' }, html: hlYAML(toYAML(r.value)) }) : h('pre.mono', { style: { margin: 0, whiteSpace: 'pre-wrap', fontSize: '11.5px' } }, r.error.message + (r.error.line ? '\n(line ' + r.error.line + ')' : '')),
         r.logs && r.logs.length ? h('pre.mono.note', { style: { margin: 0, whiteSpace: 'pre-wrap' } }, r.logs.map(l => l.level + ': ' + l.text).join('\n')) : null)
-      App.P.log({ kind: 'eval', who: 'you', ws: App.ws, ok: r.ok, note: (code.split('\n').find(l => l.trim() && !l.trim().startsWith('//')) || '').trim().slice(0, 90), calls: [...new Set(r.calls || [])].slice(0, 12) })
+      P.log({ kind: 'eval', who: 'you', ws, ok: r.ok, note: (code.split('\n').find(l => l.trim() && !l.trim().startsWith('//')) || '').trim().slice(0, 90), calls: [...new Set(r.calls || [])].slice(0, 12) })
     }
     ta.addEventListener('keydown', e => { if (e.key === 'Enter' && (e.metaKey || e.ctrlKey)) { e.preventDefault(); run() } if (e.key === 'Tab') { e.preventDefault(); ta.setRangeText('  ', ta.selectionStart, ta.selectionEnd, 'end') } })
     // filled when opened: an app project adds the slop section the agent gets
