@@ -58,7 +58,7 @@ const Sync = {
   async run() {
     const P = this.P
     if (!P || !P.meta.app) return
-    if (this.busy) { this.again = true; return }
+    if (this.busy || Outside.merging) { this.again = true; return }
     this.busy = true; this.set('pushing')
     const sent = new Map(), files = []
     for (const [path, text] of P.files) {
@@ -81,18 +81,32 @@ const Sync = {
         for (const p of gone) P.synced.delete(p)
         this.n = r.n; this.act = (r.activated || [])[0] || this.act
         P.refs = { ...(P.refs || {}), draft: r.n }
-        this.set('synced'); P.ev.emit('sync', r); App.ev.emit('health')
+        this.set(this.pending(P) ? 'dirty' : 'synced'); P.ev.emit('sync', r); App.ev.emit('health')
       }
     } catch (e) {
       this.set('error', (e && e.message) || String(e)); toast('Pushing to draft failed: ' + this.error, 5000)
     } finally { this.busy = false }
     if (this.again) { this.again = false; this.run() }
   },
-  // Push now and wait for it (an eval's effects need the activation).
+  // Edits not yet in draft: a text that differs from what was last pushed,
+  // or a file pushed before and removed since.
+  pending(P) {
+    for (const [p, t] of P.files) if (P.synced.get(p) !== t) return true
+    for (const p of P.synced.keys()) if (!P.files.has(p)) return true
+    return false
+  },
+  // Push now and wait until every edit made so far is in draft (an eval's
+  // effects need the activation; switching projects must not drop edits).
+  // A push that fails is not retried in a loop: one try, then the error.
   async flush() {
     clearTimeout(this.timer)
-    for (let i = 0; i < 200 && (this.busy || this.status === 'dirty'); i++) {
-      if (!this.busy) await this.run(); else await sleep(30)
+    const P = this.P
+    let tried = false
+    for (let i = 0; i < 400; i++) {
+      if (this.busy || Outside.merging) { await sleep(30); continue }
+      if (!P || P !== this.P || !P.meta.app || !this.pending(P) || (tried && this.status === 'error')) break
+      tried = true
+      await this.run()
     }
     return { n: this.n, act: this.act, error: this.status === 'error' ? this.error : '' }
   },
@@ -103,6 +117,8 @@ const Sync = {
   }
 }
 
+addEventListener('visibilitychange', () => { if (document.visibilityState === 'hidden' && Sync.P && Sync.pending(Sync.P)) Sync.run() })
+
 // Outside: pushes to draft that did not come from this page (a terminal's
 // slop dev or slop push, another person, the agent of another bench), and
 // the dev instance's log. Polled every few seconds while an app project is
@@ -110,7 +126,7 @@ const Sync = {
 // keeps this page's text (the next push writes it): the second push wins,
 // file by file.
 const Outside = {
-  timer: 0, logT: 0,
+  timer: 0, logT: 0, merging: false,
   start(P) {
     clearInterval(this.timer); this.logT = Date.now() - 60000
     if (P && P.meta.app && Slop.on) this.timer = setInterval(() => this.poll(P), 3000)
@@ -137,19 +153,30 @@ const Outside = {
     return r
   },
   async merge(P, n, tree) {
+    this.merging = true
+    try { return await this.mergeIn(P, n, tree) } finally {
+      this.merging = false
+      if (Sync.again && !Sync.busy) { Sync.again = false; Sync.run() }
+    }
+  },
+  async mergeIn(P, n, tree) {
     const next = new Map(tree.map(f => [f.path, f]))
     const mine = p => P.files.has(p) ? P.files.get(p) !== P.synced.get(p) : P.synced.has(p)   // changed here since the last push
     const take = [], gone = []
     for (const [p, f] of next) { const cur = P.tree.get(p); if ((!cur || cur.sha256 !== f.sha256) && !mine(p)) take.push(f) }
     for (const p of P.tree.keys()) if (!next.has(p) && !mine(p)) gone.push(p)
+    // what each of those files is here now: an edit made while the read is
+    // in flight wins over the outside text (the next push sends it)
+    const local = new Map([...take.map(f => f.path), ...gone].map(p => [p, P.files.get(p)]))
     const { texts } = take.length ? await Slop.readAll(P.meta.app, String(n), take.filter(textish).map(f => f.path)) : { texts: {} }
     const changed = [], note = 'pushed outside the bench (draft ' + n + ')'
     for (const f of take) {
+      if (P.files.get(f.path) !== local.get(f.path)) continue
       if (typeof texts[f.path] === 'string') { P.files.set(f.path, texts[f.path]); P.synced.set(f.path, texts[f.path]); P.extern.delete(f.path); P.log({ kind: 'write', ws: 'main', who: 'push', path: f.path, after: texts[f.path], note }) }
       else { P.extern.set(f.path, f); P.files.delete(f.path); P.synced.delete(f.path) }
       changed.push(f.path)
     }
-    for (const p of gone) { P.files.delete(p); P.synced.delete(p); P.extern.delete(p); P.log({ kind: 'remove', ws: 'main', who: 'push', path: p, note }); changed.push(p) }
+    for (const p of gone) { if (P.files.get(p) !== local.get(p)) continue; P.files.delete(p); P.synced.delete(p); P.extern.delete(p); P.log({ kind: 'remove', ws: 'main', who: 'push', path: p, note }); changed.push(p) }
     P.tree = next; P.refs = { ...(P.refs || {}), draft: n }
     if (Sync.P === P) { Sync.n = n; Sync.ev.emit('status', Sync.status) }
     if (changed.length) { P.ev.emit('files', 'main', changed); toast('draft ' + n + ': ' + plural(changed.length, 'file') + ' changed outside the bench (' + changed.slice(0, 3).join(', ') + (changed.length > 3 ? ', …' : '') + ')', 4000) }

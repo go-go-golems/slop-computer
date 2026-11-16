@@ -90,9 +90,9 @@ func TestBenchProjects(t *testing.T) {
 		t.Fatalf("read = %v", r)
 	}
 
-	// sync: one file changed, one removed, the rest (the binary too) by hash
-	// and size.
-	var push []any
+	// sync: one file changed, one removed, one new and empty (a "New file"
+	// in the Code panel), the rest (the binary too) by hash and size.
+	push := []any{map[string]any{"path": "notes.txt", "text": ""}}
 	for p := range app {
 		switch p {
 		case "index.html":
@@ -104,8 +104,11 @@ func TestBenchProjects(t *testing.T) {
 	}
 	s := act("sync", map[string]any{"app": "jot", "files": push, "message": "bench: index.html -app.js"})
 	n := num(s["n"])
-	if n <= num(refs["draft"]) || len(s["files"].([]any)) != len(app)-1 || len(s["activated"].([]any)) != 0 {
+	if n <= num(refs["draft"]) || len(s["files"].([]any)) != len(app) || len(s["activated"].([]any)) != 0 {
 		t.Fatalf("sync = %v", s)
+	}
+	if got := h.call(admin, "files.cat", map[string]any{"store": "jot", "at": "draft", "path": "notes.txt"}); got != "" {
+		t.Fatalf("draft notes.txt = %q", got)
 	}
 	if got := h.call(admin, "files.cat", map[string]any{"store": "jot", "at": "draft", "path": "index.html"}); !strings.Contains(got.(string), "edited") {
 		t.Fatalf("draft index.html = %v", got)
