@@ -44,7 +44,7 @@ export class Tx {
     // (the person's edits: they see the newest files they did not touch)
     this.live = live
     this.base = parent ? parent.base : base
-    this.changes = new Map()   // path → {text} | {remove: true}
+    this.changes = new Map()   // path → {text} | {sha256, size, type} (kept by hash) | {remove: true}
     this.state = 'open'        // open | committing | committed | folded | aborted
   }
   get open() { return this.state === 'open' }
@@ -55,7 +55,7 @@ export class Tx {
   // {text} for a text file, {sha256, size, type} for one kept by hash, null when absent
   entry(path) {
     const c = this.changes.get(path)
-    if (c) return c.remove ? null : { text: c.text }
+    if (c) return c.remove ? null : c
     return this.under(path)
   }
   read(path) { const e = this.entry(path); return e && typeof e.text === 'string' ? e.text : null }
@@ -72,6 +72,12 @@ export class Tx {
     this.changes.set(path, { text })
   }
   remove(path) { this.must(); this.changes.set(path, { remove: true }) }
+  // put a file the server already has, by hash (a binary or large file)
+  copy(path, entry) {
+    this.must()
+    if (!entry || typeof entry.sha256 !== 'string') throw Object.assign(new Error('copy needs an entry {sha256, size}'), { kind: 'invalid' })
+    this.changes.set(path, { sha256: entry.sha256, size: entry.size, type: entry.type || '' })
+  }
   // drop own changes to these paths (all when none given)
   forget(paths) { this.must(); for (const p of paths || [...this.changes.keys()]) this.changes.delete(p) }
   child(o = {}) { this.must(); return new Tx(this.draft, { ...o, parent: this }) }
@@ -80,7 +86,7 @@ export class Tx {
   diff() {
     return this.paths().map(path => {
       const b = this.under(path), c = this.changes.get(path)
-      return { path, before: b && typeof b.text === 'string' ? b.text : null, existed: b !== null, after: c.remove ? null : c.text }
+      return { path, before: b && typeof b.text === 'string' ? b.text : null, existed: b !== null, after: c.remove || typeof c.text !== 'string' ? null : c.text }
     })
   }
   abort() { if (this.state === 'open') this.state = 'aborted' }
@@ -152,8 +158,23 @@ export class Draft {
       want = more
     }
   }
-  // a file's text at snapshot n, loading it if needed
-  async textAt(n, path) { await this.load(n); return this.read(path, n) }
+  // a snapshot's listing alone (history reads many snapshots, few texts)
+  async listingOf(n) {
+    if (n === 0) return new Map()
+    if (!this.listings.has(n)) this.remember(n, await this.call('files', { app: this.app, at: n }))
+    return this.listing(n)
+  }
+  // one file's text at snapshot n (null: absent, or kept by hash)
+  async text(n, path) {
+    const f = (await this.listingOf(n)).get(path)
+    if (!f || !textish(f) || this.binary.has(f.sha256)) return null
+    if (!this.texts.has(f.sha256)) {
+      const r = await this.call('read', { app: this.app, at: n, paths: [path] })
+      if (typeof (r.texts || {})[path] === 'string') this.texts.set(f.sha256, r.texts[path])
+      else { this.binary.add(f.sha256); return null }
+    }
+    return this.texts.get(f.sha256)
+  }
 
   // Switch the shown head to n once it is loaded, in order with other
   // switches; emits 'head' (n, prev, paths that differ, source).
@@ -186,7 +207,7 @@ export class Draft {
   begin(o = {}) { return new Tx(this, { base: this.head, ...o }) }
   async commitChanges(base, changes, { message, label, event } = {}) {
     if (!changes.size) return { status: 'committed', n: base, at: base, merged: false, activated: [] }
-    const wire = [...changes].map(([path, c]) => c.remove ? { path, delete: true } : { path, text: c.text })
+    const wire = [...changes].map(([path, c]) => c.remove ? { path, delete: true } : typeof c.text === 'string' ? { path, text: c.text } : { path, sha256: c.sha256, size: c.size })
     let r
     try {
       r = await this.call('commit', { app: this.app, ref: this.ref, base, changes: wire, message: message || label || 'bench', event: event || { who: 'you', note: message || label || '' } })
@@ -196,7 +217,7 @@ export class Draft {
     if (r.conflict) return { status: 'conflict', at: r.conflict.at, conflicts: r.conflict.paths }
     this.epoch++
     // the texts just sent are cached by hash, so loading n reads only what others changed
-    for (const c of changes.values()) if (!c.remove) this.texts.set(await this.hash(c.text), c.text)
+    for (const c of changes.values()) if (typeof c.text === 'string') this.texts.set(await this.hash(c.text), c.text)
     if (r.files) this.remember(r.n, r.files)
     // a later commit may already have moved the head past n
     if (this.head == null || r.n > this.head) await this.moveHead(r.n, 'commit')

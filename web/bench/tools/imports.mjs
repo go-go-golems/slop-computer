@@ -38,17 +38,6 @@ function walkDir(dir, out = []) {
   return out;
 }
 
-// a tiny AST walker: calls visit(node, parent, key) for every node
-function walk(node, visit, parent = null, key = '') {
-  if (!node || typeof node.type !== 'string') return;
-  visit(node, parent, key);
-  for (const k of Object.keys(node)) {
-    if (k === 'type' || k === 'start' || k === 'end' || k === 'loc') continue;
-    const v = node[k];
-    if (Array.isArray(v)) v.forEach((c) => walk(c, visit, node, k));
-    else if (v && typeof v.type === 'string') walk(v, visit, node, k);
-  }
-}
 function patternNames(p, out) {
   if (!p) return out;
   if (p.type === 'Identifier') out.push(p.name);
@@ -59,32 +48,103 @@ function patternNames(p, out) {
   return out;
 }
 
+// Scopes, as JavaScript has them in a module (strict): var and parameters
+// belong to the nearest function; let, const, class and function
+// declarations to the nearest block. Pass 1 records each scope's names (so
+// hoisting is right); pass 2 resolves every reference through the scope
+// chain, and what resolves nowhere is free: an import, a global, or a bug.
+const FN = new Set(['FunctionDeclaration', 'FunctionExpression', 'ArrowFunctionExpression']);
+const BLOCK = new Set(['Program', 'BlockStatement', 'StaticBlock', 'ForStatement', 'ForInStatement', 'ForOfStatement', 'SwitchStatement', 'CatchClause', 'ClassExpression']);
+function isRef(n, parent, key) {
+  if (!parent) return true;
+  if (parent.type === 'MemberExpression' && key === 'property' && !parent.computed) return false;
+  if ((parent.type === 'Property' || parent.type === 'PropertyDefinition' || parent.type === 'MethodDefinition') && key === 'key' && !parent.computed) return false;
+  if (parent.type === 'LabeledStatement' || parent.type === 'BreakStatement' || parent.type === 'ContinueStatement') return false;
+  if (/^(Import|Export)/.test(parent.type)) return false;
+  if (parent.type === 'MetaProperty') return false;
+  return true;
+}
 function analyze(file) {
   const src = readFileSync(file, 'utf8');
   const ast = parse(src, { ecmaVersion: 'latest', sourceType: 'module', allowHashBang: true });
-  const exports = new Set(), top = new Set(), local = new Set(), used = new Set(), imports = [];
+  const exports = new Set(), top = new Set(), imports = [];
   for (const n of ast.body) {
-    if (n.type === 'ImportDeclaration') { imports.push(n); for (const s of n.specifiers) top.add(s.local.name); continue; }
-    const d = n.type === 'ExportNamedDeclaration' ? n.declaration : n;
-    if (n.type === 'ExportNamedDeclaration' && !n.declaration) for (const s of n.specifiers) exports.add(s.exported.name);
-    if (!d) continue;
-    const names = d.type === 'VariableDeclaration' ? d.declarations.flatMap((x) => patternNames(x.id, [])) : d.id ? [d.id.name] : [];
-    names.forEach((x) => { top.add(x); if (n.type === 'ExportNamedDeclaration') exports.add(x); });
+    if (n.type === 'ImportDeclaration') { imports.push(n); continue; }
+    if (n.type === 'ExportNamedDeclaration' && !n.declaration) for (const sp of n.specifiers) exports.add(sp.exported.name);
+    const d = n.type === 'ExportNamedDeclaration' ? n.declaration : null;
+    if (d) (d.type === 'VariableDeclaration' ? d.declarations.flatMap((x) => patternNames(x.id, [])) : [d.id.name]).forEach((x) => exports.add(x));
   }
-  walk(ast, (n, parent, key) => {
-    if (n.type === 'VariableDeclarator') patternNames(n.id, []).forEach((x) => local.add(x));
-    if ((n.type === 'FunctionDeclaration' || n.type === 'FunctionExpression' || n.type === 'ArrowFunctionExpression')) { if (n.id) local.add(n.id.name); n.params.forEach((p) => patternNames(p, []).forEach((x) => local.add(x))); }
-    if (n.type === 'ClassDeclaration' || n.type === 'ClassExpression') { if (n.id) local.add(n.id.name); }
-    if (n.type === 'CatchClause' && n.param) patternNames(n.param, []).forEach((x) => local.add(x));
-    if (n.type !== 'Identifier') return;
-    if (parent && (parent.type === 'MemberExpression' && key === 'property' && !parent.computed)) return;
-    if (parent && (parent.type === 'Property' || parent.type === 'PropertyDefinition' || parent.type === 'MethodDefinition') && key === 'key' && !parent.computed) return;
-    if (parent && (parent.type === 'LabeledStatement' || parent.type === 'BreakStatement' || parent.type === 'ContinueStatement')) return;
-    if (parent && (parent.type === 'ImportSpecifier' || parent.type === 'ExportSpecifier' || parent.type === 'ImportDefaultSpecifier')) return;
-    used.add(n.name);
-  });
+  // pass 1: declarations per scope node
+  const names = new Map();
+  const declare = (scope, list) => { if (!names.has(scope)) names.set(scope, new Set()); list.forEach((x) => names.get(scope).add(x)); };
+  const decl = (node, stack) => {
+    const fnScope = [...stack].reverse().find((s) => FN.has(s.type) || s.type === 'Program');
+    const block = stack[stack.length - 1];
+    if (node.type === 'VariableDeclaration') {
+      const where = node.kind === 'var' ? fnScope : block;
+      declare(where, node.declarations.flatMap((x) => patternNames(x.id, [])));
+    } else if (node.type === 'FunctionDeclaration' || node.type === 'ClassDeclaration') declare(block, [node.id.name]);
+    else if (node.type === 'ImportDeclaration') declare(block, node.specifiers.map((x) => x.local.name));
+  };
+  const scan = (node, stack) => {
+    if (!node || typeof node.type !== 'string') return;
+    decl(node, stack);
+    const opens = FN.has(node.type) || BLOCK.has(node.type);
+    if (opens) {
+      stack = [...stack, node];
+      if (FN.has(node.type)) declare(node, [...node.params.flatMap((x) => patternNames(x, [])), ...(node.type === 'FunctionExpression' && node.id ? [node.id.name] : [])]);
+      if (node.type === 'CatchClause' && node.param) declare(node, patternNames(node.param, []));
+      if (node.type === 'ClassExpression' && node.id) declare(node, [node.id.name]);
+    }
+    for (const k of Object.keys(node)) {
+      if (k === 'type' || k === 'start' || k === 'end') continue;
+      const v = node[k];
+      if (Array.isArray(v)) v.forEach((c) => scan(c, stack));
+      else if (v && typeof v.type === 'string') scan(v, stack);
+    }
+  };
+  scan(ast, []);
+  for (const x of names.get(ast) || []) top.add(x);
+  // pass 2: references, resolved through the chain
+  const free = new Set();
+  const resolve = (node, parent, key, stack) => {
+    if (!node || typeof node.type !== 'string') return;
+    if (FN.has(node.type) || BLOCK.has(node.type)) stack = [...stack, node];
+    if (node.type === 'Identifier' && isRef(node, parent, key)) {
+      const known = stack.some((s) => names.has(s) && names.get(s).has(node.name));
+      if (!known) free.add(node.name);
+    }
+    for (const k of Object.keys(node)) {
+      if (k === 'type' || k === 'start' || k === 'end') continue;
+      const v = node[k];
+      if (Array.isArray(v)) v.forEach((c) => resolve(c, node, k, stack));
+      else if (v && typeof v.type === 'string') resolve(v, node, k, stack);
+    }
+  };
+  resolve(ast, null, '', []);
+  // names an import line provides count as free (the tool decides them)
+  for (const i of imports) for (const sp of i.specifiers) { top.delete(sp.local.name); }
+  const used = new Set(free);
+  for (const i of imports) for (const sp of i.specifiers) if (usedBelowImports(ast, sp.local.name)) used.add(sp.local.name);
   const end = imports.length ? imports[imports.length - 1].end : 0;
-  return { file, src, exports, top, local, used, imports, end, head: imports.length ? imports[0].start : 0 };
+  return { file, src, exports, top, local: new Set(), used, imports, end, head: imports.length ? imports[0].start : 0 };
+}
+// whether a name imported now is referenced (pass 2 saw it as declared by its import)
+function usedBelowImports(ast, name) {
+  let hit = false;
+  const visit = (node, parent, key) => {
+    if (hit || !node || typeof node.type !== 'string') return;
+    if (node.type === 'ImportDeclaration') return;
+    if (node.type === 'Identifier' && node.name === name && isRef(node, parent, key)) { hit = true; return; }
+    for (const k of Object.keys(node)) {
+      if (k === 'type' || k === 'start' || k === 'end') continue;
+      const v = node[k];
+      if (Array.isArray(v)) v.forEach((c) => visit(c, node, k));
+      else if (v && typeof v.type === 'string') visit(v, node, k);
+    }
+  };
+  visit(ast, null, '');
+  return hit;
 }
 
 const files = walkDir(ROOT).filter((f) => !SKIP.has(relative(ROOT, f)));

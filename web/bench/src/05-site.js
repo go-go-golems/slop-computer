@@ -1,4 +1,8 @@
 // ---------- site runtime: build a page from project files, instrument it, inject the probe ----------
+import { $, h, toast } from './lib/dom.js';
+import { Slop } from './server/slop.js';
+import { clone, emitter, hashStr, now, sleep, uid } from './lib/util.js';
+import { escHtml } from './lib/text.js';
 
 // add data-src="file:line" to every element in <body> (or everywhere, for fragments)
 function instrument(html, file) {

@@ -1,4 +1,10 @@
 // ---------- app: header, projects, workspaces, modes, selection, wiring, boot ----------
+import { $, clear, confirmBox, h, modal, popMenu, promptBox, put, toast } from './lib/dom.js';
+import { Projects } from './model/project.js';
+import { Publish } from './server/publish.js';
+import { Slop } from './server/slop.js';
+import { clamp, clone, debounce, emitter, fmtAgo, lineOf, now, offsetOfLine, plural } from './lib/util.js';
+
 const App = {
   P: null, ws: 'main', mode: 'select', sel: null, logs: [], ev: emitter(), prefs: {}, canvas: null, offs: [], traceTarget: null,
 

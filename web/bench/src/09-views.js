@@ -1,4 +1,9 @@
 // ---------- code view: file list, tabs, editor with highlighting; edits write to the current workspace ----------
+import { Slop } from './server/slop.js';
+import { clear, confirmBox, h, modal, popMenu, promptBox, put, toast } from './lib/dom.js';
+import { debounce, fmtAgo, fmtTime, lineOf, now, offsetOfLine, plural } from './lib/util.js';
+import { diffView, escHtml, highlight, hlYAML, renderMarkdown, toYAML } from './lib/text.js';
+
 registerView('code', {
   title: 'Code', sub: 'files',
   make() {

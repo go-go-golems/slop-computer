@@ -1,4 +1,11 @@
 // ---------- sandbox: QuickJS (wasm) in a worker, with a page-side watchdog ----------
+import { Publish } from './server/publish.js';
+import { Slop } from './server/slop.js';
+import { clamp, clone, emitter, now, plural, sleep, trunc, uid } from './lib/util.js';
+import { diffStat, diffText, toYAML } from './lib/text.js';
+import { h, modal, toast } from './lib/dom.js';
+import { restore, since } from './model/timeline.js';
+
 const Sandbox = {
   worker: null, engine: 'off', seq: 0, runs: new Map(), ev: emitter(), tried: 0,
   async spawn() {

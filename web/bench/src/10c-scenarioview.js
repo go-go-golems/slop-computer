@@ -1,4 +1,7 @@
 // ---------- scenarios panel: flows that pass or fail, the fixtures they run on ----------
+import { clear, h, promptBox, toast } from './lib/dom.js';
+import { debounce, fmtAgo, plural } from './lib/util.js';
+
 registerView('scenarios', {
   title: 'Scenarios', sub: 'flows that pass or fail',
   badge: () => { const P = App.P; if (!P) return null; const bad = scenarioList(P, App.ws).filter(s => s.last && !s.last.ok).length; return bad ? h('span.count', String(bad)) : null },

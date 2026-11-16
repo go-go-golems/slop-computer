@@ -3,6 +3,9 @@
 // runs against instead of the live data: { description, tables: { menu: [rows] | "live" }, store: {}, clock: "2026-05-01T08:30" }.
 // A scenario (scenarios/<name>.json) is a list of steps run in a frame of its own, against a copy of the data:
 // { description, page, size: [w, h], fixture, steps: [ { click }, { type, text }, { expect, text|count|visible|value }, … ] }
+import { clamp, now, plural, sleep } from './lib/util.js';
+import { promptBox, toast } from './lib/dom.js';
+
 const SCEN_DIR = 'scenarios/', FIX_DIR = 'fixtures/'
 const STEP_KINDS = ['go', 'click', 'type', 'waitFor', 'wait', 'expect', 'data', 'store', 'snapshot']
 

@@ -1,4 +1,7 @@
 // ---------- layout diffs: what an edit did to the page, as text ----------
+import { clamp, hashStr, now, uid } from './lib/util.js';
+import { h, modal, toast } from './lib/dom.js';
+
 const STYLE_PARTS = ['color', 'background', 'font-size', 'font-weight']
 function layoutDiff(A, B) {
   const am = new Map((A && A.items || []).map(i => [i.k, i])), bm = new Map((B && B.items || []).map(i => [i.k, i]))

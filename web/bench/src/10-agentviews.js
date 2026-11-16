@@ -1,4 +1,8 @@
 // ---------- agent: threads, chat with eval steps, modes, model ----------
+import { $$, clear, confirmBox, h, modal, popMenu, promptBox, put, svgEl, toast } from './lib/dom.js';
+import { clamp, debounce, fmtAgo, fmtTime, now, plural } from './lib/util.js';
+import { diffStat, diffView, hlJS, hlYAML, renderMarkdown } from './lib/text.js';
+
 const MODELS = [
   { v: 'quick', label: 'Quick' }, { v: 'default', label: 'Default' }, { v: 'complex', label: 'Complex' },
   { v: 'm:claude-haiku-5-5', label: 'Haiku 5.5' }, { v: 'm:claude-sonnet-5-5', label: 'Sonnet 5.5' }, { v: 'm:claude-opus-5-5', label: 'Opus 5.5' }

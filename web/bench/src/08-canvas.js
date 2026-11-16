@@ -1,4 +1,7 @@
 // ---------- canvas: boards of live frames, pan and zoom, flows, pins, proposal rows (shop-next's app side) ----------
+import { clamp, debounce, fmtAgo, fmtTime, now, plural, uid } from './lib/util.js';
+import { clear, h, popMenu, promptBox, put, svgEl, toast } from './lib/dom.js';
+
 const SIZES = [{ w: 375, h: 720, n: 'Phone' }, { w: 768, h: 900, n: 'Tablet' }, { w: 1280, h: 800, n: 'Desktop' }]
 registerView('canvas', {
   title: 'Canvas', sub: 'live frames',

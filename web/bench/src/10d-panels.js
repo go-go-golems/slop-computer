@@ -3,6 +3,11 @@
 // bound to the pages (a CSS variable or a style previewed live in every frame, a site.store key, a fixture), and the
 // person can keep a previewed value in the CSS file. Widgets (value, chart, table, list, text) show live values
 // from the project: table rows, the store, check issues, scenario results, events, a frame's DOM, or read-only code.
+import { clamp, clone, debounce, fmtAgo, fmtTime, now, plural, trunc } from './lib/util.js';
+import { clear, h, modal, popMenu, svgEl, toast } from './lib/dom.js';
+import { hlYAML, renderMarkdown, toYAML } from './lib/text.js';
+import { since } from './model/timeline.js';
+
 const PANEL_CONTROLS = ['slider', 'toggle', 'select', 'text', 'color', 'button']
 const PANEL_WIDGETS = ['value', 'chart', 'table', 'list', 'text']
 const SOURCE_KEYS = ['data', 'store', 'issues', 'scenarios', 'events', 'frameEvents', 'frame', 'eval', 'lib']

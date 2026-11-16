@@ -1,4 +1,7 @@
 // ---------- dock: tiles of tabbed views, split by dragging, gutters, floating windows, named layouts (form-skate) ----------
+import { $$, clear, h, popMenu } from './lib/dom.js';
+import { clamp, debounce, emitter, uid } from './lib/util.js';
+
 const Views = {}            // id -> {title, make(): {el, show?, hide?}}
 function registerView(id, def) { Views[id] = def }
 const tile = (views, active) => ({ t: 'tile', id: uid('t'), views, active: active || views[0] })
