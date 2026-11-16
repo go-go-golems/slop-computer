@@ -6,9 +6,11 @@ import (
 	"slices"
 
 	"github.com/go-go-golems/slop-computer/pkg/access"
+	"github.com/go-go-golems/slop-computer/pkg/actor"
 	"github.com/go-go-golems/slop-computer/pkg/authz"
 	"github.com/go-go-golems/slop-computer/pkg/registry"
 	"github.com/go-go-golems/slop-computer/pkg/rt"
+	"github.com/go-go-golems/slop-computer/pkg/store"
 	"github.com/go-go-golems/slop-computer/pkg/sysdb"
 	"github.com/go-go-golems/slop-computer/pkg/verbs"
 )
@@ -106,26 +108,7 @@ func mountVerbs(e mountEnv) []*verbs.Verb {
 				if err != nil {
 					return AppStatusOut{}, err
 				}
-				r, err := e.K.Running(ctx, in.Store)
-				if err != nil {
-					return AppStatusOut{}, err
-				}
-				out := AppStatusOut{Store: r.Store, App: r.App, Ref: st.Meta("app_ref"), N: r.N, Broken: r.Broken()}
-				if out.Broken == "" && e.A != nil {
-					// a build that failed after activation (a mount's route
-					// policy, SLOP3-012): "app@n: why"
-					out.Broken = e.A.Broken(in.Store)
-				}
-				if m := r.Manifest; m != nil {
-					caps := []string{}
-					for c := range m.Caps.Declared {
-						caps = append(caps, c)
-					}
-					slices.Sort(caps)
-					out.Manifest = (map[string]any{"title": m.Title, "page": m.Entry(), "actor": m.Actor, "type": m.Type,
-						"capabilities": caps, "slop": m.Slop, "live": m.Live()})
-				}
-				return out, nil
+				return statusOf(ctx, e.kernelEnv, e.A, st, in.Store)
 			}}.Verb(),
 		verbs.Def[AppLsIn, []map[string]any]{Name: "app.ls", Doc: "List the stores that are apps (their tree's main snapshot holds app.json).", Scope: verbs.Read, Action: authz.Platform,
 			Run: func(req verbs.Req, in AppLsIn) ([]map[string]any, error) {
@@ -362,6 +345,31 @@ type AppStatusOut struct {
 	N        int64          `json:"n"`
 	Ref      string         `json:"ref"`
 	Store    string         `json:"store"`
+}
+
+// statusOf is app.status for an opened store. Running activates a pending
+// version, so asking is also how a store comes up on a new snapshot.
+func statusOf(ctx context.Context, e kernelEnv, a *actor.Manager, st *store.Store, id string) (AppStatusOut, error) {
+	r, err := e.K.Running(ctx, id)
+	if err != nil {
+		return AppStatusOut{}, err
+	}
+	out := AppStatusOut{Store: r.Store, App: r.App, Ref: st.Meta("app_ref"), N: r.N, Broken: r.Broken()}
+	if out.Broken == "" && a != nil {
+		// a build that failed after activation (a mount's route
+		// policy, SLOP3-012): "app@n: why"
+		out.Broken = a.Broken(id)
+	}
+	if m := r.Manifest; m != nil {
+		caps := []string{}
+		for c := range m.Caps.Declared {
+			caps = append(caps, c)
+		}
+		slices.Sort(caps)
+		out.Manifest = (map[string]any{"title": m.Title, "page": m.Entry(), "actor": m.Actor, "type": m.Type,
+			"capabilities": caps, "slop": m.Slop, "live": m.Live()})
+	}
+	return out, nil
 }
 
 // mountAt is the mount at host+path, or nil.

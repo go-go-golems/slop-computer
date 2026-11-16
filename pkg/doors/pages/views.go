@@ -44,6 +44,8 @@ type rtState struct {
 	leases  map[string]lease // store \x00 path
 
 	once onceCache // keyed calls: a resend gets the first result
+
+	embeds embeds // embedded views' frame addresses (embed.go)
 }
 
 type lease struct {

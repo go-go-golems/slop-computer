@@ -1,0 +1,11 @@
+<!doctype html><title>jot</title>
+<main><h1>Jot</h1><p id="out">loading…</p><input name="q" placeholder="type here"></main>
+<script>
+(async () => {
+  const db = await window.claude.use('db');
+  await db.doc('notes/hello').set({ text: 'from the dev instance, version THREE' });
+  const d = await db.doc('notes/hello').get();
+  document.getElementById('out').textContent = d.data().text;
+  console.log('jot loaded');
+})();
+</script>

@@ -1,0 +1,1 @@
+{ "title": "Embed test", "actor": "actor.js", "capabilities": { "db": {} }, "slop": { "modules": ["workshop"] } }

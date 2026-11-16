@@ -9,6 +9,9 @@
 package actors
 
 import (
+	"context"
+
+	"github.com/go-go-golems/slop-computer/pkg/access"
 	caproom "github.com/go-go-golems/slop-computer/pkg/caps/room"
 	"github.com/go-go-golems/slop-computer/pkg/doors/web"
 	"github.com/go-go-golems/slop-computer/pkg/llm"
@@ -27,4 +30,9 @@ type Door struct {
 	// door's open views (nil: room.emit reaches nobody).
 	Ledger *llm.Ledger
 	Rooms  *caproom.Rooms
+	// Embed and RenewEmbed open and renew a view of a store framed by a
+	// tool app's own page (the page door's; SLOP3-022 C.1). Nil: the
+	// workshop module has no embed.
+	Embed      func(ctx context.Context, p *access.Principal, store, toolStore, toolApp string, dev bool) (map[string]any, error)
+	RenewEmbed func(ctx context.Context, p *access.Principal, view, toolStore, toolApp string) (map[string]any, error)
 }

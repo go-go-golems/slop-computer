@@ -401,3 +401,418 @@ I applied the review notes from Step 4, plus one inconsistency found on the full
 ### Technical details
 
 - Commits in this ticket: `336149d`, `33b814c`, `1f2bd13`, `a0506ed`, `989d468`, `9484a46`, `6b70cd2`, and this step's.
+
+## Step 6: Server pieces C.3, C.2 and C.4 (ref.move ifAt, push activation, workshop dev instances)
+
+The user asked me to work on the ticket. Committing Sitebench's source to this public repository is still the user's decision (open question 1), so I started with the server work the guide's plan needs, which does not depend on it. Three of Appendix C's additions are built and tested on branch `task/slop3-022-dev-loop`, cut from origin/main `0dfce36` after #45 merged:
+
+- `6c688e7`: `ref.move --ifAt`;
+- `3835fd8`: `files.push --activate`;
+- `d591503`: the `workshop` module's dev-instance functions with a guarded `drop`.
+
+### Prompt Context
+
+**User prompts (verbatim):**
+
+- "merge #45, let's close all gitops since we are working on it. clean worktrees."
+- "Then work on the ticket, commit at appropriate intervals and keep a detailed diary as you work (using the diary format from the skill)."
+
+**Assistant interpretation:** After the SLOP3-021 housekeeping, implement SLOP3-022's plan. Commit at feature boundaries, and record each step here.
+
+**Inferred user intent:** Turn the design into working server pieces, in the order that unblocks the bench.
+
+### What I did
+
+- **C.3, `ref.move {…, ifAt?}`.**
+  - Added `Turn.RefAt(ref)` (`pkg/store/files.go`), which returns the current snapshot inside the turn, or 0 if the ref is missing.
+  - In the `ref.move` verb (`pkg/commands/files.go`), with `ifAt` set and different from the current snapshot, the move fails with `conflict: main points at 7, not 5: it moved since you looked`.
+  - `ifAt: 0` means "only if the ref does not exist".
+  - The result gains `from`, the previous snapshot, which is what a rollback moves back to.
+- **C.2, `files.push {…, activate?: [store]}`.**
+  - After the snapshot, each listed store is opened at `view` (the level `app.status` needs) and brought up through `statusOf`.
+  - The result gains `activated: [{store, app, ref, n, broken}]`, or `{store, error}` for a store the caller cannot see.
+  - `statusOf` (`pkg/commands/mounts.go`) is `app.status`'s body, moved out so both share it.
+  - The files group now gets `filesEnv{kernelEnv, A}`, the actor manager for post-activation build failures. This follows `env.go`'s rule that a group's environment lists what it can reach.
+- **C.4, the `workshop` module** (`pkg/doors/actors/modworkshop.go`):
+  - one-to-one functions `newStore`, `logs`, `restart`, `doc`, `docs`, `sql`, `importDocs` and `importTable`;
+  - `workshopModule(a)` with a custom `drop(id)`. It reads `app.status` as the visitor and refuses unless the store runs *another* store's app *and* follows a ref other than `main`. Only then does it call `store.rm`.
+  - `modules.go` loads the module through `workshopModule`. Its doc line now mentions dev instances.
+- **Tests** (`pkg/host/devloop_test.go`, new):
+  - `TestRefMoveIfAt`: publish with the right `ifAt`; a stale `ifAt` gets `conflict` and main does not move; `ifAt 0` creates once only; a move without `ifAt` reports `from`.
+  - `TestPushActivates`: a good migration is reported as `{ref: draft, n, broken: ""}` and the tables appear. A broken `sql/003_bad.sql` is reported as broken with its name, the instance stays on the last good `n`, and its tables are unchanged. An unknown store gives an `error` entry.
+  - `TestWorkshopDevInstances`, through a trusted tool app:
+    - `newStore` and `follow draft`;
+    - `importTable` and `importDocs`, checked with `sql`, `doc` and `docs`;
+    - `push` with `activate`;
+    - `publish` with a stale `ifAt` (`conflict`), then the right one (`from` = main);
+    - `drop` of the dev instance, after which `app.status` answers `not_found`;
+    - `drop` of a production instance and of the app store, both `permission_denied`.
+
+### Why
+
+- **`drop` is guarded** because platform admins hold `admin` on every store (`pkg/access/check.go:187-189`). A bug in a tool acting as an admin could otherwise delete any store. "Runs unpublished code" (`app_ref != main`) describes exactly the instances a dev loop makes.
+- **`files.push --activate`** spares tools a second call. Its exact purpose is the bench's effects line ("actor ok" or "broken: …") right after a sync.
+- **`ifAt`** closes the publish race named in the guide (§5.8). The Workshop's `publish` had the same gap.
+
+### What worked
+
+- All three new tests passed on their first run. I checked that `h.fail` really compares the error code (`pkg/host/harness_test.go:169-177`), so the refusals are tested.
+- The full suite `GOWORK=off go test -buildvcs=false -tags sqlite_fts5 ./... -count=1` passed (`pkg/host` in 18.6 s), and `golangci-lint run --build-tags sqlite_fts5` reported 0 issues.
+
+### What didn't work
+
+- **First build after C.2:**
+
+  ```
+  pkg/commands/mounts.go:350:52: undefined: actor
+  pkg/commands/mounts.go:350:71: undefined: store
+  pkg/commands/files.go:175:24: cannot use e (variable of struct type filesEnv) as kernelEnv value in argument to putBlobs
+  pkg/commands/files.go:185:22: cannot use e (variable of struct type filesEnv) as kernelEnv value in argument to push
+  ```
+
+  Fixed by adding the imports and passing `e.kernelEnv` at the two call sites.
+- **First build after C.4:** "no required module provides package github.com/go-go-golems/slop-computer/pkg/web". The package is `pkg/doors/web`.
+
+### What I learned
+
+- `modArgs` already turns a trailing plain object into options (`pkg/doors/actors/modules.go:76-100`). So `push(store, files, {activate})` and `publish(store, n, {ifAt})` needed no new plumbing.
+- `pkg/actor` now reports `[no tests to run]` under `go test`, because after #45 its only test file holds benchmarks. That is expected.
+
+### What was tricky
+
+- **`app.status` activates.** It calls `Running`, so reading a status brings the store up. `drop` uses `app.status` for its guard, which can activate an instance just before deleting it. That is harmless, but worth knowing.
+
+### Second pair of eyes
+
+- **The `drop` guard** relies on `app_ref` as an instance's own statement of what it runs. A production instance someone moved to `draft` by hand would become droppable. Is that acceptable, or should drop also require that the caller created the store?
+- **`files.push --activate`** opens each listed store at `view`, the same as `app.status`, which also activates. A viewer could thus trigger activation of a store they can view. That was already true through `app.status`.
+
+### Future
+
+- C.1, embedded views: the big piece. Then C.5, `slop dev`.
+
+### Code review
+
+- `pkg/commands/files.go`: `ref.move`, and `files.push`'s activation loop.
+- `pkg/commands/mounts.go`: `statusOf`.
+- `pkg/doors/actors/modworkshop.go`: `workshopModule` and `drop`.
+- `pkg/host/devloop_test.go`.
+
+### Technical details
+
+```sh
+GOWORK=off go test -buildvcs=false -tags sqlite_fts5 ./pkg/host -run 'TestRefMoveIfAt|TestPushActivates|TestWorkshopDevInstances' -count=1
+GOWORK=off go test -buildvcs=false -tags sqlite_fts5 ./... -count=1
+GOWORK=off golangci-lint run --build-tags sqlite_fts5
+```
+
+- In the GitOps repository, CI's bump for `0dfce36` (#436) was closed by the watcher, so no slop-yolo PR is open.
+
+## Step 7: C.1, embedded views, with a browser check of the live loop
+
+A tool app trusted with `workshop` can now frame a real view of another store in its own page, and act as the shell for it. Commit `b5c0588`. A dev embed adds `data-src` lines and a small probe. On a local server, a push to `draft` from the CLI reached the embedded frame of a scratch tool **291 ms** after the push started.
+
+### Prompt Context
+
+**User prompt (verbatim):** see Step 6.
+
+**Assistant interpretation:** Continue the plan with C.1, the piece that lets the bench show real frames.
+
+**Inferred user intent:** The fluid loop: see the app under development, live, inside the tool.
+
+### What I did
+
+- **Read the existing code paths:**
+  - `openView` already takes a `parent` origin and passes it as `?parent=` (`pkg/doors/pages/views.go:147-191`).
+  - The sandbox resets `parent` to the main host unless it is in `frameOrigins()`, and sets `frame-ancestors` from that list (`sandbox.go:114` before this change).
+  - The runtime takes its secret from `{slop:1, type:"view"}` sent by its parent, and asks for `renew` (`web/runtime/src/transport.ts:91-134`).
+  - `views.Renew` extends a view's expiry without rotating its secret (`pkg/rt/views.go:361-365`).
+- **`pkg/doors/pages/embed.go` (new):**
+  - `Embed(ctx, p, store, toolStore, toolApp, dev)`. It requires admin on the store for `dev`, computes the tool's origin `toolOrigin(toolStore, toolApp)`, and calls `openView` with that parent. It registers a token `emb_…` with `{label, parent, dev, view, until}` and returns `{src, view, secret, version, expiresAt, origin, level, caps, dev}`. `src` is `/e/<token>/v/<n>/?mode=app&parent=…`.
+  - `RenewEmbed(ctx, p, view, toolStore, toolApp)` works only for the same person and the same tool. It re-checks access as the shell's renew does, and extends the token with the view (`embeds.extend`).
+  - `instrument(page, file)`, over `golang.org/x/net/html`'s tokenizer. It adds `data-src="file:line"` to body elements and leaves every other byte as it was.
+  - `verbErr`, which turns the door's `rtFail` into a `verbs.Error` with its code.
+- **`sandbox.go`:**
+  - `/e/<token>/…` resolves the token on its own origin only (the label must match), then serves the rest of the path as usual.
+  - `frame-ancestors` is `frameOrigins()` plus the tool's origin, because every ancestor in the chain must match.
+  - The boot's `parentOrigin` is the embed's parent, whatever the URL says.
+  - Dev embeds are instrumented and get `/_slop/probe.js` after the runtime. `inject` takes extra tags.
+  - The `/` redirect keeps the `/e/<token>` prefix.
+- **`assets/probe.js` (new, written for this protocol):**
+  - messages marked `slopProbe: 1`;
+  - `ready` (on load);
+  - `log` (console output, `error`, `unhandledrejection`);
+  - ops `state` (scroll, plus form values keyed by `data-src|name`), `restore` and `src(x, y)`;
+  - the origin and source checked on every message.
+- **The `workshop` module:** `embed(store, {dev})` and `renewEmbed(view)` in `workshopModule`, with the same trust check as `drop`. The actors door gets `Embed` and `RenewEmbed` from the pages door (`pkg/host/host.go`).
+- **`go.mod`:** `golang.org/x/net` moved from indirect to direct (`go mod tidy` changed only that line).
+- **Tests:**
+  - `TestInstrument` (`pkg/doors/pages/embed_test.go`):
+    - line numbers across a tag that spans two lines;
+    - head and script content untouched;
+    - an existing `data-src` kept;
+    - `<img …/>`;
+    - the unquoted `type=text/>`, whose slash belongs to the value;
+    - a page without a body;
+    - an escaped file name.
+  - `TestEmbeddedViews` (`pkg/host/devloop_test.go`):
+    - a dev embed as an admin: CSP lists the main host and the tool origin, the boot names the tool, the probe and `data-src` are there;
+    - `app.js` loads under the embed address;
+    - the token on another origin, and an unknown token, both give 404;
+    - a plain embed as a viewer: framed by the tool, with no probe and no `data-src`;
+    - a viewer asking for a dev embed gets `not_granted`;
+    - renew works for the opener and is `not_found` for another person.
+- **The browser check** (local server built from this branch; scripts in `scripts/02-embed-test/`):
+  - Apps: `jot`, whose page writes and reads a document; `jot-dev`, which follows `draft`; and `embedtest`, a tool that embeds `jot-dev` as a dev view, answers `hello`, and re-embeds on `reload`.
+  - Playwright: the frame chain was the live shell, then the tool (its own sandbox origin), then the dev view (`/e/emb_…/v/2/`). The tool's log showed `runtime: hello`, `probe: ready`, `probe state: {"scroll":[0,0],"fields":[["index.html:2|q",""]]}` and `probe: log jot loaded`. The embedded page's `db` worked ("from the dev instance, version ONE"), and its elements carried `data-src`.
+  - **The live edit:** `slop push jot --store jot --ref draft` with "version THREE". The tool got `runtime: reload`, opened `embed v4`, and the frame showed "version THREE" 291 ms after the push command started (polling every 100 ms). Screenshot, cropped to the frame: `various/c1-embed-live-v3.png`.
+
+### Why
+
+- **Embeds are opened through the trusted module, as the visitor.** The tool's identity, and so its origin, comes from the calling actor (`a.Store().ID`, `a.App()`), never from a parameter. A page cannot ask to be framed by an arbitrary origin.
+- **The token binds the frame address to one store's origin**, and expires with the view.
+
+### What worked
+
+- The design in the guide (§5.5) held up against the code. The only additions were the ancestor chain in `frame-ancestors` and extending the token on renew.
+- The full suite passed, and lint reported 0 issues after the fixes below.
+
+### What didn't work
+
+- **The first build:** "embed already declared through import of package embed" (`sandbox.go` imports `embed` for `go:embed`). Renamed the type to `embedAddr`.
+- **The first `TestEmbeddedViews` run:**
+
+  ```
+  want not_granted, got 500 map[error:map[code:internal message:not_granted: a dev view of jot-dev needs admin on it]]
+  ```
+
+  The pages door's `rtFail` is not a `verbs.Error`. Added `verbErr`.
+- **Lint:** "named return "out" with type "map[string]any" found (nonamedreturns)", twice. The exported functions now wrap unexported ones.
+- **`TestInstrument` passed at first while blessing a bug.** `type=text/>` became `type=text data-src=…/>`, which changes the unquoted value from `text/` to `text`. Fixed `withAttr`: a slash closes the tag only after whitespace or a quote. The test's expected line for `<img>` was also wrong (8, actually 9, because the input before it spans two lines). The code was right.
+- **The first `reload` in the browser** left "version ONE" on screen, because my scratch tool did not re-embed. The runtime's fallback reloaded its own URL, which names snapshot 2. A real bench must answer `reload` with a new embed, and the tool now does.
+
+### What I learned
+
+- **The sandbox injects the runtime only into the entry page.** Other `.html` files are served as plain bytes (`sandbox.go`, `writeStoreBytes`). A slop app is therefore one entry page. The bench's frames show deep links into it (`#…`), not separate HTML routes as in Sitebench. The guide should say so (§5.3 and §5.5).
+- **`frame-ancestors` checks every ancestor**, so a tool's embed must allow the shell's hosts too.
+
+### What was tricky
+
+- **The probe had to come after the boot data it reads.** `insertHead` puts tags first in `<head>`, which would have put the probe before `#slop-boot`. `inject` now appends extra tags after the runtime.
+
+### Second pair of eyes
+
+- **The scope of `embed`.** Any app trusted with `workshop` can now frame any store its visitor can view, in the tool's own page, and read it through the frame's runtime only as that visitor. Is that the right scope for `workshop`, or should embedding be its own module or permission?
+- **The probe is deliberately small.** Sitebench's `PROBE` (checks, layout, inspect, trace, recording) would replace it if the user allows that source in this repository.
+
+### Future
+
+- C.5 `slop dev`, then the PR.
+- Correct the guide on single-entry apps.
+
+### Code review
+
+- `pkg/doors/pages/embed.go`;
+- the embed handling in `pkg/doors/pages/sandbox.go`;
+- `pkg/doors/pages/assets/probe.js`;
+- `embed` and `renewEmbed` in `pkg/doors/actors/modworkshop.go`.
+
+### Technical details
+
+```sh
+GOWORK=off go test -buildvcs=false -tags sqlite_fts5 ./pkg/doors/pages -run TestInstrument -count=1
+GOWORK=off go test -buildvcs=false -tags sqlite_fts5 ./pkg/host -run TestEmbeddedViews -count=1
+# browser: scripts/02-embed-test/README.md; latency = probe-seen time − push start = 291 ms
+```
+
+## Step 8: C.5, `slop dev`
+
+The terminal side of the loop: `slop dev <dir> --app <id>`. Commit `972e80e`. It pushes the folder to `draft` now and on every change, makes and maintains the person's dev instance, and prints where the instance is, or why it broke, followed by its new log lines.
+
+### Prompt Context
+
+**User prompt (verbatim):** see Step 6.
+
+**Assistant interpretation:** Continue the plan with C.5.
+
+**Inferred user intent:** The same live loop for people who edit in their own editor.
+
+### What I did
+
+- **`pkg/client/dev.go` (new).** It holds the logic, so `pkg/host` tests can drive it; they cannot import `cmd/slop/cmds`, which imports `pkg/host`.
+  - `DevInstanceID(app, person)` returns `<app>-dev-<first 6 of the id>`, within 63 characters.
+  - `Client.Dev(ctx, dir, DevOptions{App, Instance, Every, Once, Out})`:
+    1. `whoami`, to name the instance.
+    2. A first push to `draft` with `activate: [instance]`.
+    3. `devInstance`: if `app.status` answers `not_found`, it runs `store.new {id, app, type}` (the type from the app's manifest) and `app.follow draft`. An instance that runs another app is an error. One on another ref is set to follow `draft`.
+    4. One status line.
+    5. Unless `Once`: a ticker that compares a folder stamp (path, size, mtime, with the same skip rules as `ReadDir`) and pushes on change. It reads `app.logs` after each push and about every 2 s, printing lines newer than the last one printed.
+  - The output, as `TestSlopDev` printed it:
+
+    ```
+    made dev instance jot-dev-5340a1 (runs jot)
+    draft 1 · jot-dev-5340a1 on 1 · ok
+    dev instance jot-dev-5340a1 follows jot@draft; publish with: slop ref move jot main 1
+    draft 2 · jot-dev-5340a1 on 2 · ok
+      log warn  action ping declares no requires; callers need admin
+      log log   setup ran
+    draft 3 · jot-dev-5340a1 stays on 2 · broken: activation of jot@3 failed: migration sql/003_bad.sql: near "TABL": syntax error
+    ```
+
+- **`cmd/slop/cmds/dev.go` (new):** cobra flags `--app` (default: the folder's name), `--instance`, `--every` (500 ms) and `--once`. It runs under SIGINT/SIGTERM. It is registered next to `push` and `pull` in `extra.go`.
+- **`TestSlopDev`** (`pkg/host/devloop_test.go`), through a `client.Client` on the harness, using the existing `hostTransport`:
+  - `--once` makes the instance on `draft`, and `main` does not exist afterwards;
+  - in the loop, a new migration is reported "ok" with the instance's `setup` log line;
+  - a broken migration is reported as "stays on … broken: …" with the file named.
+- **The guide's Appendix C** marks C.5 as built.
+
+### Why
+
+- **Polling instead of fsnotify:** no new dependency (the slop reader noted `fsnotify` is not in `go.mod`). A stat walk twice a second is cheap for an app folder.
+- **Logs about every 2 s, not every tick,** to keep the request rate low on a shared server.
+
+### What worked
+
+- After the fix below, the test passed. The full suite passed, and lint reported 0 issues.
+
+### What didn't work
+
+- **The first run of `TestSlopDev`** printed "draft 0 · jot-dev-190bc0 on 0 · ok" and never showed a log line:
+
+  ```
+  devloop_test.go:348: waited for "log log   setup ran":
+  ```
+
+  The client decodes answers with `dec.UseNumber()` (`pkg/client/client.go:254-255`), so numbers arrive as `json.Number`. `toInt` read them as 0, and every log line's `at` was "older" than `since`. `toInt` now handles `json.Number`.
+- **`pkill -f "rep/s22 serve --local"`** killed its own shell (exit 144), because the pattern appeared in the command line. This happened again after Step 5. Anchoring the pattern (`^/tmp/…/rep/s22 serve`) avoids it.
+
+### What I learned
+
+- `client.Call` answers carry `json.Number`. Any client-side code reading numbers must handle it.
+
+### What was tricky
+
+- **Not printing the status twice.** When the instance already exists and follows `draft`, the first push's activation entry already says where it is. When it does not exist yet, that entry is an error, and a status read after `devInstance` gives the line. `devPush` reports whether it printed.
+
+### Second pair of eyes
+
+- **The publish hint** printed by `slop dev` is `slop ref move <app> main <n>`, without `--ifAt`. Should it print the current `main` so the hint is a compare-and-swap?
+
+### Future
+
+- Open the PR with C.1–C.5, and wait for Codex.
+- The bench app itself waits on the user's decision about Sitebench's source.
+
+### Code review
+
+- `pkg/client/dev.go`;
+- `cmd/slop/cmds/dev.go`;
+- `TestSlopDev`.
+
+### Technical details
+
+```sh
+GOWORK=off go test -buildvcs=false -tags sqlite_fts5 ./pkg/host -run TestSlopDev -count=1 -v
+slop dev ./myapp --app myapp            # Ctrl-C to stop
+slop dev ./myapp --app myapp --once     # push, report, exit
+```
+
+## Step 9: PR #46, two rounds of Codex findings, and a CI flake
+
+PR #46 carries C.1–C.5. Codex reviewed it twice and found four real bugs, all fixed with tests:
+
+- **Round 1** (`7718910`), both in `slop dev`: a failed push was never retried, and a new app's dev instance got no type.
+- **Round 2** (`f94887e`), both in embeds: a token caller could open an embed with more authority than the token had (P1), and `<g/>` lost its self-closing slash.
+
+CI's first run failed in `TestBlocksSiteReader`, a test this PR does not touch. Its `TempDir` cleanup raced with something still writing. The rerun after `7718910` passed. On `f94887e` Codex found no major issues ("Didn't find any major issues. Hooray!"), and CI passed (run 43786562382).
+
+### Prompt Context
+
+**User prompt (verbatim):** see Step 6.
+
+**Assistant interpretation:** Open the PR, answer the review, and leave the merge to the user.
+
+**Inferred user intent:** A reviewed, green PR ready to merge.
+
+### What I did
+
+- **Opened #46** (<https://github.com/go-go-golems/slop-computer/pull/46>).
+- **Codex P2: "Update the folder stamp only after a successful push"** (`pkg/client/dev.go:107`).
+  - The loop advanced `stamp` before `devPush`, so a failed push was never retried.
+  - Now a change sets `pending`. A failed push stays pending and is retried after a backoff (1 s, doubling to 30 s), or at once on another edit. `devErr` prints a repeated error once.
+- **Codex P2: "Read the draft manifest when determining the dev instance type"** (`pkg/client/dev.go:160`).
+  - The type came from `app.status` on the app store, which reads `main`. A new app with only a `draft` gave the instance no type, and `pkg/doors/pages/site.go:53` refuses typed mounts for it.
+  - Now `manifestType(dir)` reads the folder's `app.json`, the manifest being pushed.
+- **`TestSlopDev` additions:**
+  - a check of the instance's type in `store.ls`. Against the previous `dev.go` it fails: `devloop_test.go:349: the instance's type is "", not app.json's`;
+  - a `pushFails` transport that fails `files.push` while a flag is set. The test writes a file with the flag on, waits for "push failed, will retry", clears the flag, and waits for "on 3 · ok" with no further edit.
+- **Codex P1: "Preserve token authority when opening embedded views"** (`pkg/doors/pages/embed.go:131`).
+  - A view keeps only `v.User`, and `viewPrincipal` (`pkg/doors/pages/actors.go:22-31`) rebuilds a full person with `Web.PersonAs`.
+  - So an embed opened by an action called with a token (say `write` without `admin`) gave the frame's `slop.call` more authority than the token had.
+  - `renewEmbed` had the same hole: its answer carries the secret, so a scoped token of the same person could take over that person's browser embed.
+  - Codex offered two fixes: keep the token's authority in the view, or reject tokens. I rejected tokens (`tokenEmbed` in both). An embed is a frame in a browser, opened by a person's page, and a view that kept a token's scopes would also outlive the token's revocation.
+- **`TestEmbeddedViews`, rewritten.**
+  - It now signs the admin and Bob in (`personView`), opens the tool's page view, and calls `embed`/`renew` over `slop.call` as a page does.
+  - It checks that an admin's token gets `not_granted` for both.
+  - `jot-dev` is granted to `@member` rather than to Bob's id, so the test does not depend on a browser sign-in and `tokenFor` making the same person.
+  - The previous version of the test opened embeds with tokens successfully, which demonstrates the hole.
+- **Codex P2: "Preserve self-closing tags without attributes"** (`pkg/doors/pages/embed.go:237`).
+  - `withAttr` treated a slash as self-closing only after whitespace or a quote, so `<g/>` became `<g/ data-src=…>`. In inline SVG, the elements after `<defs/>` would become its children.
+  - The token type cannot tell the cases apart: `x/net/html` returns `SelfClosingTagToken` whenever the byte before `>` is `/`, even when an unquoted value took it.
+  - `closesTag(head)` follows HTML's tokenizer: the slash closes after whitespace, a quote, the tag name or a valueless attribute, and belongs to an unquoted value otherwise.
+  - Test: `<defs/>`, `<g/>`, `<rect hidden/>`, `<circle r="1" />`, `<path d=M0/>` (the slash is the value's), `<use x=1 />`.
+- **`doc/building-apps.md`** says embeds are for a person on a page.
+- **The CI failure** (run 43782893587, job "release / publish", step "Run tests"):
+
+  ```
+  --- FAIL: TestBlocksSiteReader (0.36s)
+      testing.go:1464: TempDir RemoveAll cleanup: unlinkat /tmp/TestBlocksSiteReader399659965/001: directory not empty
+  ```
+
+  - `gh run view --log-failed` printed nothing. `gh api repos/go-go-golems/slop-computer/actions/jobs/<id>/logs` gave the log.
+  - Locally the test passed 60 times out of 60 (`-count=60`).
+  - It is the only failed `publish-image` run in the last 30.
+  - The next run, on `7718910`, passed (run 43783586702).
+
+### Why
+
+- **Backoff rather than retrying every tick:** a server that is down would otherwise get a full manifest every 500 ms and fill the terminal with the same error.
+
+### What worked
+
+- Both fixes pass, with the full suite passing and lint reporting 0 issues.
+
+### What didn't work
+
+- `gh pr checks 46 --json …` is not supported by this `gh` version ("unknown flag: --json").
+
+### What I learned
+
+- **A view carries a person, not a principal.** Anything that turns a module call into a view must make sure the caller had a person's full authority. Here that means refusing tokens.
+- **The test harness never stops the actor manager.** `newHarnessWith` (`pkg/host/harness_test.go:49-75`) registers cleanups for `ts.Close`, `k.Close` and `sys.Close`, but `actor.Manager` has no shutdown at all. An actor turn still running at teardown can reopen a store through the kernel after `k.Close` and recreate its files while `RemoveAll` runs. This is the likely cause of the flake, but it is not proven.
+
+### What was tricky
+
+- **Telling a flake from a regression.** The failing test calls `app.status`, whose code this PR moved into `statusOf`. That shared function only reads, and the test passes 60 times locally.
+
+### Second pair of eyes
+
+- **A shutdown for `actor.Manager`** (stop timers, wait for running turns), called by `serve` on exit and by the harness, would fix the flake at its cause. It belongs in its own change.
+
+### Future
+
+- The merge is the user's: #46 is reviewed clean and green at `f94887e`.
+- After the merge: one slop-yolo bump, then re-push the catalog kit.
+
+### Code review
+
+- `pkg/client/dev.go`: the loop's `pending`/`retryAt`/`backoff`, `devErr` and `manifestType`.
+- `pkg/doors/pages/embed.go`: `tokenEmbed` in `embed` and `renewEmbed`, and `closesTag`.
+- `TestEmbeddedViews`: embeds through signed-in pages.
+
+### Technical details
+
+```sh
+gh api repos/go-go-golems/slop-computer/actions/jobs/133023896936/logs > ci46.log
+GOWORK=off go test -buildvcs=false -tags sqlite_fts5 ./pkg/host -run 'TestBlocksSiteReader$' -count=60   # ok
+```

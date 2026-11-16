@@ -84,6 +84,17 @@ func (s *Door) serveSandbox(w http.ResponseWriter, r *http.Request) {
 	}
 	r = r.WithContext(context.WithValue(ctx, originStore{}, storeID))
 	p := r.URL.Path
+	// An embedded view's page and files: /e/<token>/v/<n>/… (embed.go).
+	var emb *embedAddr
+	if rest, ok := strings.CutPrefix(p, "/e/"); ok {
+		tok, after, _ := strings.Cut(rest, "/")
+		x, ok := s.rt.embeds.get(tok)
+		if !ok || x.label != label {
+			notFound(w)
+			return
+		}
+		emb, p = &x, "/"+after
+	}
 	get := r.Method == http.MethodGet || r.Method == http.MethodHead
 	switch {
 	case p == "/_rt/events" && get:
@@ -111,11 +122,16 @@ func (s *Door) serveSandbox(w http.ResponseWriter, r *http.Request) {
 		s.serveAssetBlob(w, r, storeID, strings.TrimPrefix(p, "/_blob/"))
 		return
 	}
-	w.Header().Set("Content-Security-Policy", "frame-ancestors "+strings.Join(s.frameOrigins(), " "))
+	ancestors := s.frameOrigins()
+	if emb != nil {
+		// every ancestor must match: the shell's hosts, and the tool
+		ancestors = append(slices.Clone(ancestors), emb.parent)
+	}
+	w.Header().Set("Content-Security-Policy", "frame-ancestors "+strings.Join(ancestors, " "))
 	m := versionPath.FindStringSubmatch(p)
 	if m == nil {
 		if p == "/" || p == "" {
-			http.Redirect(w, r, "/v/0/", http.StatusFound)
+			http.Redirect(w, r, strings.TrimSuffix(r.URL.Path, p)+"/v/0/", http.StatusFound)
 			return
 		}
 		notFound(w)
@@ -162,8 +178,14 @@ func (s *Door) serveSandbox(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	parent := r.URL.Query().Get("parent")
-	if !slices.Contains(s.frameOrigins(), parent) {
+	switch {
+	case emb != nil:
+		parent = emb.parent // the tool that opened the embed, whatever the URL says
+	case !slices.Contains(s.frameOrigins(), parent):
 		parent = s.frameOrigins()[0]
+	}
+	if emb != nil && emb.dev {
+		page = instrument(page, entry)
 	}
 	declared := map[string]any{}
 	if man != nil {
@@ -176,7 +198,11 @@ func (s *Door) serveSandbox(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("Content-Type", "text/html; charset=utf-8")
 	w.Header().Set("Cache-Control", cachePrivate)
 	w.Header().Set("X-Content-Type-Options", "nosniff")
-	_, _ = w.Write(inject(page, boot))
+	var extra []string
+	if emb != nil && emb.dev {
+		extra = append(extra, `<script src="`+assetURL("probe.js")+`"></script>`) // after the boot data it reads
+	}
+	_, _ = w.Write(inject(page, boot, extra...))
 }
 
 // appManifest reads app.json of an app store's snapshot (nil when absent).
@@ -197,14 +223,18 @@ var (
 	doctype  = regexp.MustCompile(`(?i)^\s*<!doctype[^>]*>`)
 )
 
-// inject puts the boot data and the runtime first in a page's head.
-func inject(page []byte, boot any) []byte {
+// inject puts the boot data, the runtime and any extra tags first in a
+// page's head.
+func inject(page []byte, boot any, extra ...string) []byte {
 	raw, _ := json.Marshal(boot)
 	// json.Marshal escapes <, > and & (as \u003c…), so the data cannot close the script.
 	var head bytes.Buffer
 	head.WriteString(`<script type="application/json" id="slop-boot">`)
 	head.Write(raw)
 	head.WriteString(`</script><script src="` + assetURL("claude.js") + `"></script>`)
+	for _, t := range extra {
+		head.WriteString(t)
+	}
 	return insertHead(page, head.Bytes())
 }
 

@@ -45,8 +45,8 @@ func (s *Door) Install(m *actor.Manager) {
 	})
 	m.Register(actor.Module{Name: "system", Class: actor.ClassTrusted, Doc: "People, grants, links, mounts, policy, LLM budgets, comps, secrets and the system log, as the visitor.",
 		Load: func(st actor.Setup) goja.Value { return s.systemModule(st.Actor) }})
-	m.Register(actor.Module{Name: "workshop", Class: actor.ClassTrusted, Doc: "Stores, snapshots, refs and files of any store the visitor may read; push to draft, publish, run drafts.",
-		Load: func(st actor.Setup) goja.Value { return s.verbModule(st.Actor, "workshop", workshopFuncs) }})
+	m.Register(actor.Module{Name: "workshop", Class: actor.ClassTrusted, Doc: "Stores, snapshots, refs and files of any store the visitor may read; push to draft, publish, run drafts in dev instances (create, seed, read, drop).",
+		Load: func(st actor.Setup) goja.Value { return s.workshopModule(st.Actor) }})
 }
 
 // verbModule builds a module's object from its functions.
