@@ -1390,3 +1390,87 @@ slop app status bench-demo-1 --peek true    # {"n": 11, "next": 1, …} after a 
 ```
 
 Screenshot: `various/bench-p5-preflight-next.png` (the preflight with an instance waiting).
+
+## Step 17: Codex round 2 on #47 and #48
+
+Codex's second pass found four more real P2s:
+- three on #47: a sync base check that was not atomic, a duplicate manifest entry when a hash-only file is rewritten, and an opening snapshot too large to save;
+- one on #48: a migration that production ran, which a rollback took out of `main`.
+
+All are fixed with tests and a browser check. #47 is at `e0e274e`; #48 is at `145551a` (the fix `6689d59`, plus a merge of #47).
+
+### Prompt Context
+
+**User prompt (verbatim):** see Step 16 ("check codex review comments on the PRs").
+
+**Assistant interpretation:** Keep going until Codex's findings are dealt with.
+
+**Inferred user intent:** Mergeable PRs.
+
+### What I did
+
+- **`files.push` takes `ifAt`.** It is checked in the push's own `s.Do` turn, before the blobs, against `t.RefAt(ref)`; a mismatch is a `conflict` with `Extra.at`, and nothing is written. `ifAt` without a snapshot is `invalid_argument`. The bench's `sync` passes `ifAt: base ?? 0` and turns a `conflict` (`e.code` in actor JS) into `{conflict, n, files}`.
+- **`Project.write` on `main`** deletes the path from `extern`.
+- **The log storage** (`04-project.js`):
+  - Limits are `LOG_CHUNK` 150000, `LOG_EVENT` 60000 and `LOG_PIECE` 100000 characters.
+  - `stored(e)` returns the event, or a stub `{$ext, n}` after saving its JSON in pieces `logx/<id>-<k>`. A `WeakMap` remembers what was saved, so an unchanged big event is not rewritten.
+  - `loadLog(logs, parts)` serves both loaders, and `remove` also clears `logx`.
+  - The coalesced-write path adds the event's growth to its chunk's size.
+- **`app.status {migrations}`** returns `applied` (from `_migrations` via `st.ReadQuery`). In the preflight, each production instance's `applied` is checked against the draft's sha256s, giving the blocker "migration X differs from the one that ran on …". It skips paths already blocked as changed against `main`.
+- **PR comments** with `@codex review`. I first posted #48's with an invented hash ("0a1f1b6+") and corrected it to `6689d59` by `PATCH`ing the comment.
+
+### Why
+
+- **`ifAt` on `files.push`,** not a lock in the bench: only the store's turn makes check-and-write atomic. `ref.move` already had the same shape.
+- **Splitting at storage,** not splitting `init` events: `init` events are read in several places (`stateAt`, history at `04-project.js:321`, `pageEvents`, the timeline labels). Keeping events whole in memory changed none of them. It also covers a single large `write`.
+- **Instances' applied migrations,** not `main`'s history: `activate` checks `_migrations`, so that is the ground truth.
+
+### What worked
+
+- **`TestPushIfAt`:** a match, `ifAt` 0 on an existing ref, a stale `ifAt` (the tree still has one file), and `ifAt` with `snapshot: false`.
+- **`TestBenchPublish`:** "differs from the one that ran on jot, jot-1". With the blockers loop emptied, it fails (`blockers:[]`).
+- **Browser, `bench-big`** (`a.txt` and `b.txt` at 140000 bytes, `big.js` at 250007):
+  - replacing `big.js` gave `flushError: ""`, `extern: []`, and draft `"// small now\n"`;
+  - after a reload, events were `["init","write:big.js"]` with `initA`/`initB` 140000.
+- **Browser, `bench-demo` after the merge:** a push from a stale base came back as a conflict and was merged. Draft had both the bench's CSS edit and `outside2.txt`; the test changes were removed afterwards. The Publish dialog showed "production: bench-demo @1, bench-demo-1 @11 (1 on its next view)".
+
+### What didn't work
+
+- **The first assertion for the migration blocker** expected "ran on jot-1". The app store `jot` had also run `002`, so the message lists "jot, jot-1".
+- **`fmt` was missing twice** (`files.go`, `mounts.go`): "undefined: fmt".
+- **The CLI's `push` does not expose `ifAt`:** it is a hand-written client command. The verb takes it.
+- **A `sed` on the PR comment did not match** my own wording; replacing only the hash worked.
+
+### What I learned
+
+- **`_migrations` and other `_` tables are invisible to `sql.query`** (`appName` in `pkg/store/sqlpolicy.go:24`). Kernel facts need a verb.
+- **The app store itself counts as a production instance** when it serves `main` (mounted), and it records its own migrations.
+
+### What was tricky
+
+- **Piece size against the document limit:** the store checks `JSON.stringify(data).length` ≤ 255000. A 100000-character slice of JSON at worst doubles when stringified again, which stays under the limit.
+
+### Second pair of eyes
+
+- **`Store.listRaw` reads at most 1000 documents per collection** in db mode, so `logx/` over 1000 pieces (about 100 MB of history) would lose events. That is unlikely, but the bound is not enforced.
+- **The "removed after it ran on main" blocker is stricter than activation,** which ignores missing migrations. Keep it, or make it a warning?
+
+### Future
+
+- Wait for Codex round 3, then the user merges #47 and #48.
+- Phase 4b; Phase 6.
+
+### Code review
+
+- `push`'s `ifAt` in `pkg/commands/files.go`;
+- the `sync` action in `apps/bench/actor.js`;
+- `stored`/`loadLog` in `web/bench/src/04-project.js`;
+- `app.status` migrations in `pkg/commands/mounts.go`;
+- the `ranElsewhere` loop in the preflight.
+
+### Technical details
+
+```sh
+GOWORK=off go test -buildvcs=false -tags sqlite_fts5 ./pkg/host -run 'TestPushIfAt|TestBenchPublish' -count=1
+slop app status jot-1 --peek true --migrations true   # applied: {"sql/001.sql": "…", "sql/002.sql": "…"}
+```
