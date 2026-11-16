@@ -1474,3 +1474,64 @@ All are fixed with tests and a browser check. #47 is at `e0e274e`; #48 is at `14
 GOWORK=off go test -buildvcs=false -tags sqlite_fts5 ./pkg/host -run 'TestPushIfAt|TestBenchPublish' -count=1
 slop app status jot-1 --peek true --migrations true   # applied: {"sql/001.sql": "…", "sql/002.sql": "…"}
 ```
+
+## Step 18: Codex round 3 (#48 clean; two more on #47)
+
+Codex's third pass found no major issues on #48 (`145551a`). On #47 (`e0e274e`) it found two more real P2s, now fixed in `843c669`, with `b8ed113` for the `probe.js` stamp I first forgot to commit. The first: tree reads went through the mutable `draft` ref instead of the snapshot they report. The second: log pieces were sized in characters while storage limits UTF-8 bytes. #48's head `38c7edf` merges them.
+
+### Prompt Context
+
+**User prompt (verbatim):** see Step 16.
+
+**Assistant interpretation:** Keep fixing until Codex is clean.
+
+**Inferred user intent:** Mergeable PRs.
+
+### What I did
+
+- **Snapshot-consistent tree reads** in `apps/bench/actor.js`:
+  - `open` reads `files` at `String(refs.draft)`;
+  - `sync` reads its answer at `String(res.n)`;
+  - the conflict answer and `head` read at `String(refs.draft)`.
+  - `openApp` reads texts at `String(p.refs.draft)`.
+- **Byte-based log sizes:**
+  - `utf8Len` and `logPieces(json, max)` in `04-project.js`;
+  - `LOG_PIECE` is 200000 bytes;
+  - `stored()` skips the byte count for short events (`json.length <= LOG_EVENT / 3`);
+  - `loadLog` counts chunk sizes in bytes.
+- **`scripts/02-log-pieces-check.mjs`** loads `utf8Len`/`logPieces` out of the source and checks four corpora against `Buffer.byteLength(JSON.stringify({text}))`.
+
+### Why
+
+- **The SDK limit is the one that counts:** `claude.js` `checkBody` rejects more than 262,144 bytes of UTF-8 JSON. `03-store.js`'s own 255,000-character check is looser for non-ASCII text.
+
+### What worked
+
+- **The piece check:**
+  - cjk: 3 pieces, at most 200009 bytes;
+  - quotes: 7 pieces, at most 200011;
+  - emoji: 3 pieces, at most 200011;
+  - ascii: 3 pieces, at most 200011.
+  
+  All of them join back exactly.
+- **Browser:** `bench-cjk` (`a.txt`/`b.txt` at 210000 bytes each, 70000 characters) gave `initA` 70000 and `initB` 70000 after a reload, with no storage errors in the console.
+
+### What didn't work
+
+- **I committed `843c669` without the rebuilt `pkg/doors/pages/assets/probe.js`:** I staged `apps/bench` and `web/bench` only. `TestBuildOutputsFresh` would have failed in CI. Fixed in `b8ed113`. From now on I stage `pkg/doors/pages/assets/probe.js` with every bench rebuild.
+- **My wait loop's `created_at` filter (03:40Z) was later than Codex's comments (03:16Z),** so the background check printed none. I found them by commit id.
+
+### What I learned
+
+- **A ref read after a write can belong to someone else's write.** Every read that pairs with a number should be read at that number.
+
+### Code review
+
+- `logPieces`/`utf8Len` in `web/bench/src/04-project.js`;
+- the four `w.files(app, String(…))` calls in `apps/bench/actor.js`.
+
+### Technical details
+
+```sh
+node ttmp/…/scripts/02-log-pieces-check.mjs web/bench/src/04-project.js
+```
