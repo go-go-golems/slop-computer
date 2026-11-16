@@ -123,7 +123,9 @@ store's view in their own page: `embed(store, {dev})` returns a frame
 address and the view's secret; the tool answers the framed runtime's
 `hello` with `{slop: 1, type: "view", view, secret}` and its `reload` with a
 new embed. A dev embed (admin on the store) adds `data-src="file:line"` to
-the entry page's elements and the dev probe (`/_slop/probe.js`).
+the entry page's elements and the dev probe (`/_slop/probe.js`). Embeds are
+opened for a person on a page: an action called with a token (`slop call`)
+is refused one, since the view would act without the token's scopes.
 
 ### 3.3 An idempotent deploy script
 

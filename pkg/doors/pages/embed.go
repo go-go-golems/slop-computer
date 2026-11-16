@@ -118,6 +118,9 @@ func (s *Door) embed(ctx context.Context, p *access.Principal, storeID, toolStor
 	if p == nil || p.ID() == "" {
 		return nil, rtErr("not_granted", "an embedded view is opened for a person")
 	}
+	if p.Kind == access.KindToken {
+		return nil, rtErr("not_granted", tokenEmbed)
+	}
 	if dev {
 		d, _, err := s.K.Access.Can(ctx, p, storeID, rt.LevelAdmin, "developing", true)
 		if err != nil {
@@ -140,6 +143,12 @@ func (s *Door) embed(ctx context.Context, p *access.Principal, storeID, toolStor
 		"origin": v.Origin, "level": v.Level, "caps": v.Caps, "dev": dev}, nil
 }
 
+// tokenEmbed refuses embeds to a caller with a token. A view keeps only its
+// person, and its calls act with the person's full authority, so a view
+// opened for a token would shed the token's scopes (and outlive its
+// revocation). An embed is for a page in a browser, opened by a person.
+const tokenEmbed = "embedded views are opened for a person in a browser, not for a token: a view would not keep the token's scopes"
+
 // verbErr gives the page door's protocol errors their codes as verb
 // errors, for the workshop module that calls Embed and RenewEmbed.
 func verbErr(err error) error {
@@ -160,6 +169,9 @@ func (s *Door) RenewEmbed(ctx context.Context, p *access.Principal, viewID, tool
 }
 
 func (s *Door) renewEmbed(ctx context.Context, p *access.Principal, viewID, toolStore, toolApp string) (map[string]any, error) {
+	if p != nil && p.Kind == access.KindToken {
+		return nil, rtErr("not_granted", tokenEmbed) // the answer carries the view's secret
+	}
 	v := s.rt.views.Get(viewID)
 	x, ok := s.rt.embeds.byView(viewID)
 	if v == nil || !ok || p == nil || v.User != p.ID() || x.parent != s.toolOrigin(toolStore, toolApp) {
@@ -224,21 +236,33 @@ func instrument(page []byte, file string) []byte {
 	}
 }
 
-// withAttr inserts attr before a start tag's closing > or />. A slash
-// right after an unquoted value is part of the value (type=text/> is
-// type="text/"), so the attribute then goes before the > alone.
+// withAttr inserts attr before a start tag's closing > or />, keeping a
+// self-closing slash last (it matters in inline SVG: <defs/> holds nothing).
 func withAttr(raw []byte, attr string) []byte {
 	end := len(raw)
 	if end == 0 || raw[end-1] != '>' {
 		return raw
 	}
 	end--
-	if end > 1 && raw[end-1] == '/' && strings.ContainsRune(" \t\r\n\"'", rune(raw[end-2])) {
+	if end > 1 && raw[end-1] == '/' && closesTag(raw[:end-1]) {
 		end--
 	}
-	head := bytes.TrimRight(raw[:end], " \t\r\n")
+	head := bytes.TrimRight(raw[:end], " \t\r\n\f")
 	out := make([]byte, 0, len(raw)+len(attr))
 	out = append(out, head...)
 	out = append(out, attr...)
 	return append(out, raw[end:]...)
+}
+
+// closesTag reports whether a slash right after head (a start tag up to
+// its last slash) makes the tag self-closing, as HTML's tokenizer reads it:
+// after whitespace or a quote, after the tag name (<g/>) or an attribute
+// without a value (<rect hidden/>); not after an unquoted value, which
+// takes the slash (type=text/> is type="text/").
+func closesTag(head []byte) bool {
+	if strings.IndexByte(" \t\r\n\f\"'", head[len(head)-1]) >= 0 {
+		return true
+	}
+	word := head[bytes.LastIndexAny(head, " \t\r\n\f")+1:]
+	return !bytes.Contains(word, []byte("="))
 }

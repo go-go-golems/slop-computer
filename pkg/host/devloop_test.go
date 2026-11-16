@@ -206,27 +206,45 @@ defineActor({
 });
 `
 
+// personView signs email in on the live host and opens the page mounted
+// at path, as a browser does.
+func personView(t *testing.T, h *harness, email, path string) (*site, map[string]any) {
+	t.Helper()
+	live := h.cfg.Hosts.Live[0]
+	b := h.browser()
+	b.signIn(email)
+	s := h.site(live)
+	signInSite(t, h, s, b, live, path)
+	return s, guestView(t, s, path)
+}
+
 // C.1: a tool trusted with workshop opens a view of a store for the
-// visitor, framed by its own page: the sandbox lets the tool's origin frame
-// it and names the tool as the runtime's parent; a dev embed (admin only)
-// adds data-src lines and the probe; tokens are bound to their origin; a
-// renew is for the person and the tool that opened the view.
+// person on its page, framed by its own page: the sandbox lets the tool's
+// origin frame it and names the tool as the runtime's parent; a dev embed
+// (admin only) adds data-src lines and the probe; tokens are bound to
+// their origin; a renew is for the person and the tool that opened the
+// view. A caller with a token gets neither: the view would shed its scopes.
 func TestEmbeddedViews(t *testing.T) {
 	h := newHarness(t)
 	admin := h.tokenFor("admin@example.com", "read", "write", "admin")
-	bob := h.tokenFor("bob@example.com", "read", "write")
-	bobID := h.call(bob, "whoami", map[string]any{}).(map[string]any)["id"].(string)
 	toolApp(t, h, admin, "devbench", embedBenchActor, "workshop")
 	h.call(admin, "app.trust", map[string]any{"app": "devbench", "module": "workshop"})
+	h.call(admin, "mount.set", map[string]any{"host": h.cfg.Hosts.Live[0], "path": "/devbench", "store": "devbench"})
 	h.call(admin, "store.new", map[string]any{"id": "jot"})
 	app := devApp()
 	h.call(admin, "files.push", map[string]any{"store": "jot", "files": files(app)})
 	h.call(admin, "files.push", map[string]any{"store": "jot", "files": files(app), "ref": "draft"})
 	h.call(admin, "store.new", map[string]any{"id": "jot-dev", "app": "jot", "type": "jot"})
 	h.call(admin, "app.follow", map[string]any{"store": "jot-dev", "ref": "draft"})
-	h.call(admin, "grant.set", map[string]any{"store": "jot-dev", "subject": bobID, "level": "view"})
-	embed := func(token string, dev bool) map[string]any {
-		return h.call(token, "actor.call", map[string]any{"store": "devbench", "action": "embed", "args": map[string]any{"store": "jot-dev", "dev": dev}}).(map[string]any)
+	h.call(admin, "grant.set", map[string]any{"store": "jot-dev", "subject": "@member", "level": "view"})
+	adminPage, adminTool := personView(t, h, "admin@example.com", "/devbench")
+	bobPage, bobTool := personView(t, h, "bob@example.com", "/devbench")
+	call := func(s *site, tool map[string]any, action string, args map[string]any) map[string]any {
+		return rpc(s, tool, "slop.call", map[string]any{"action": action, "args": args})
+	}
+	embed := func(s *site, tool map[string]any, dev bool) map[string]any {
+		t.Helper()
+		return result(t, call(s, tool, "embed", map[string]any{"store": "jot-dev", "dev": dev}))
 	}
 	open := func(src string) (string, string, int, string) {
 		u, _ := url.Parse(src)
@@ -234,8 +252,8 @@ func TestEmbeddedViews(t *testing.T) {
 		return u.Host, u.Query().Get("parent"), r.StatusCode, r.Header.Get("Content-Security-Policy") + "\n" + body
 	}
 
-	// A dev embed, as an admin.
-	e := embed(admin, true)
+	// A dev embed, for an admin.
+	e := embed(adminPage, adminTool, true)
 	host, tool, status, page := open(e["src"].(string))
 	if status != 200 || e["dev"] != true || e["secret"] == "" {
 		t.Fatalf("dev embed: %d %v", status, e)
@@ -261,21 +279,29 @@ func TestEmbeddedViews(t *testing.T) {
 		t.Fatalf("an unknown token: %d, want 404", r.StatusCode)
 	}
 
-	// A plain embed, as a viewer: framed by the tool, no probe, no data-src.
-	e2 := embed(bob, false)
+	// A plain embed, for a viewer: framed by the tool, no probe, no data-src.
+	e2 := embed(bobPage, bobTool, false)
 	_, tool2, status, page := open(e2["src"].(string))
 	if status != 200 || tool2 != tool || strings.Contains(page, "probe.js") || strings.Contains(page, "data-src") || !strings.Contains(page, " "+tool+"\n") {
 		t.Fatalf("plain embed: %d %q\n%s", status, tool2, page)
 	}
 	// A viewer gets no dev embed.
-	h.fail(bob, "actor.call", map[string]any{"store": "devbench", "action": "embed", "args": map[string]any{"store": "jot-dev", "dev": true}}, "not_granted")
+	if out := call(bobPage, bobTool, "embed", map[string]any{"store": "jot-dev", "dev": true}); errCode(out) != "not_granted" {
+		t.Fatalf("a viewer's dev embed = %v", out)
+	}
 
 	// Renew: for the person and the tool that opened the view.
-	r := h.call(admin, "actor.call", map[string]any{"store": "devbench", "action": "renew", "args": map[string]any{"view": e["view"]}}).(map[string]any)
+	r := result(t, call(adminPage, adminTool, "renew", map[string]any{"view": e["view"]}))
 	if r["view"] != e["view"] || r["secret"] != e["secret"] {
 		t.Fatalf("renew = %v", r)
 	}
-	h.fail(bob, "actor.call", map[string]any{"store": "devbench", "action": "renew", "args": map[string]any{"view": e["view"]}}, "not_found")
+	if out := call(bobPage, bobTool, "renew", map[string]any{"view": e["view"]}); errCode(out) != "not_found" {
+		t.Fatalf("another person's renew = %v", out)
+	}
+
+	// A token, even an admin's, opens and renews no embed (Codex on #46).
+	h.fail(admin, "actor.call", map[string]any{"store": "devbench", "action": "embed", "args": map[string]any{"store": "jot-dev"}}, "not_granted")
+	h.fail(admin, "actor.call", map[string]any{"store": "devbench", "action": "renew", "args": map[string]any{"view": e["view"]}}, "not_granted")
 }
 
 // syncBuf is a bytes.Buffer two goroutines may use.

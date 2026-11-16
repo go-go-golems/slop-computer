@@ -36,6 +36,15 @@ func TestInstrument(t *testing.T) {
 	if got := string(instrument([]byte("<title>t</title><ul>\n<li>a</li></ul>"), "f.html")); got != `<title>t</title><ul data-src="f.html:1">`+"\n"+`<li data-src="f.html:2">a</li></ul>` {
 		t.Errorf("no body: %s", got)
 	}
+	// Self-closing tags stay self-closing (in SVG, <defs/> holds nothing);
+	// a slash that ends an unquoted value is the value's.
+	svg := "<body><svg><defs/><g/><rect hidden/><circle r=\"1\" /><path d=M0/><use x=1 /></svg>"
+	for _, want := range []string{`<defs data-src="s.html:1"/>`, `<g data-src="s.html:1"/>`, `<rect hidden data-src="s.html:1"/>`,
+		`<circle r="1" data-src="s.html:1"/>`, `<path d=M0/ data-src="s.html:1">`, `<use x=1 data-src="s.html:1"/>`} {
+		if got := string(instrument([]byte(svg), "s.html")); !strings.Contains(got, want) {
+			t.Errorf("svg: missing %q in %s", want, got)
+		}
+	}
 	// A file name cannot break out of the attribute.
 	if got := string(instrument([]byte(`<p>x</p>`), `a"b.html`)); got != `<p data-src="a&#34;b.html:1">x</p>` {
 		t.Errorf("escaping: %s", got)
