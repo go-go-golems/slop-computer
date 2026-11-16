@@ -2011,3 +2011,48 @@ The user approved the deploy. Staging now runs main with #47–#49, and `make de
 
 - **Main mode is the right default for app projects.** It's what made the dry run work. Auto-to-proposal can't run the slop runtime (step 23).
 - **A useful prompt** names the interactions, says "no actor yet", and asks the agent to check in the frames. A follow-up should be just as specific ("finish checking, fix, report; no scenarios").
+
+## Step 28: Codex on #50 — delegation and sandbox timeouts
+
+Codex found two real problems with step 26's fix. Holds are now tokens, so a delegated eval never waits on the eval that delegated it. The publish calls get the longer sandbox budget. I also wrote the user's access rule into the dev-link proposal.
+
+### Prompt Context
+
+**User prompt (verbatim):** "anybody with the link has access, no gating on guest or so. address code review comments if they are not negligible edge cases on #50"
+
+**Assistant interpretation:** Write the access rule into the dev-link proposal (task hm4w). Fix the #50 review findings that matter.
+
+### What I did
+
+- **Finding 1 (P2), "Exclude awaiting ancestor evals from the hold wait":**
+  - A parent eval awaiting `agents.delegate('qa', …)` keeps its hold, and QA works in the parent's workspace. Each writing child eval then waited 60 s and reported a push error.
+  - The fix:
+    - `Sync.hold(P)` returns a token; `release(P, token)`.
+    - `delegate` passes `ownHolds(pctx)` (the parent's own hold plus its ancestors') to the child's turn as `ctx.holds`.
+    - `flush(P, { own })` never waits while one of the caller's own holds is on P, and returns `deferred`.
+    - runEval reports `effects.push.deferred` ("the eval that delegated this one still holds the app: these edits reach draft when it ends") instead of a draft number.
+- **Finding 2 (P2), "Account for preflight waits in sandbox timeout budgets":** `publish.check` and `publish.run` are now in the worker's `LONG` set (`publish.run` was missing before, even though it waits for an approval card), and `publish.check` is in the page's `LONG_CALLS`.
+- **What testing the fixes showed:**
+  - An eval publishing from main holds the app itself, so waiting for other evals could never get its edits pushed. The `ours()` rule now covers that too: it fails at once.
+  - flush waited for other evals even with nothing to push; it now breaks first when nothing is pending.
+  - The preflight message said "files written in this eval" when the held edits could be another eval's.
+- **Checked in the bench on the local server:**
+
+  | Case | Result |
+  |---|---|
+  | child flush, parent holding | 0 ms, deferred, draft unchanged; the parent's flush then pushed it |
+  | parent plus an independent eval holding | deferred, 0 ms |
+  | independent eval for 3 s | waited 3,031 ms, pushed |
+  | nothing pending, another eval holding | 0 ms |
+  | Eval panel on main: `publish.check` while another eval holds pending edits | error after 77 ms, new message |
+  | Eval panel in a proposal: `publish.check` waiting 25 s | `ok 24604 ms`, past the 20 s budget |
+
+- **Tests:** `go test ./pkg/host -run 'TestBench|TestBuildOutputsFresh'` passes. Commit `daa15cd`.
+
+### What didn't work
+
+- **My first Eval-panel check** read `document.querySelector('.block')`, an empty block, so both results came back blank. The results were in later `.block` cards.
+
+### What was tricky
+
+- **"Who may I wait for" depends on who holds what.** A caller can wait for an eval that will end without it. It can't wait for one that ends only after it: its own hold, or a parent awaiting a delegation. Tokens make the difference visible.
