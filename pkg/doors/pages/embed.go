@@ -83,6 +83,17 @@ func (e *embeds) byView(view string) (embedAddr, bool) {
 	return embedAddr{}, false
 }
 
+// dropView forgets a closed view's embed addresses.
+func (e *embeds) dropView(view string) {
+	e.mu.Lock()
+	defer e.mu.Unlock()
+	for k, x := range e.m {
+		if x.view == view {
+			delete(e.m, k)
+		}
+	}
+}
+
 // extend keeps a view's embed addresses as long as its renewed secret, so
 // files the page loads later still resolve.
 func (e *embeds) extend(view string, until time.Time) {
@@ -183,6 +194,23 @@ func (s *Door) renewEmbed(ctx context.Context, p *access.Principal, viewID, tool
 	s.rt.views.Renew(v)
 	s.rt.embeds.extend(v.ID, v.Expires)
 	return map[string]any{"view": v.ID, "secret": v.Secret, "expiresAt": v.Expires}, nil
+}
+
+// CloseEmbed ends an embedded view, for the person and the tool that
+// opened it (a tool reloading a frame opens a new view and closes the old
+// one, as the shell does with its own views).
+func (s *Door) CloseEmbed(ctx context.Context, p *access.Principal, viewID, toolStore, toolApp string) (map[string]any, error) {
+	if p != nil && p.Kind == access.KindToken {
+		return nil, verbErr(rtErr("not_granted", tokenEmbed))
+	}
+	v := s.rt.views.Get(viewID)
+	x, ok := s.rt.embeds.byView(viewID)
+	if v == nil || !ok || p == nil || v.User != p.ID() || x.parent != s.toolOrigin(toolStore, toolApp) {
+		return nil, verbErr(rtErr("not_found", "no such embedded view"))
+	}
+	s.rt.views.Close(v, false)
+	s.rt.embeds.dropView(viewID)
+	return map[string]any{"closed": viewID}, nil
 }
 
 var bodyOpen = regexp.MustCompile(`(?i)<body[\s>/]`)

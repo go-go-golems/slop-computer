@@ -24,6 +24,7 @@ type Running struct {
 	Manifest *apps.Manifest `json:"manifest,omitempty"` // nil: plain content, no app.json
 	Active   bool           `json:"active"`             // N is activated (migrations, setup and smoke check done)
 	Failed   *Failure       `json:"failed,omitempty"`   // the newest version failed; the store keeps the last active one
+	Next     int64          `json:"next,omitempty"`     // Peek only: a newer version the store activates on its next use
 }
 
 // Failure is why a version could not be activated.
@@ -55,6 +56,18 @@ type manifestCache struct {
 // Running resolves the app a store runs, activating the store first when
 // its app has a newer snapshot on the ref it follows.
 func (k *Kernel) Running(ctx context.Context, id string) (Running, error) {
+	return k.running(ctx, id, true)
+}
+
+// Peek is Running without activating: N is the version the store runs now
+// and Next the newer snapshot its ref points at, which it activates on its
+// next use (a failure already recorded for that snapshot is reported as
+// Running reports it).
+func (k *Kernel) Peek(ctx context.Context, id string) (Running, error) {
+	return k.running(ctx, id, false)
+}
+
+func (k *Kernel) running(ctx context.Context, id string, activate bool) (Running, error) {
 	s, err := k.Store(ctx, id)
 	if err != nil {
 		return Running{}, err
@@ -88,6 +101,15 @@ func (k *Kernel) Running(ctx context.Context, id string) (Running, error) {
 	if why == "" {
 		if failed := k.failedActivation(id, n); failed != "" {
 			why = failed
+		} else if !activate {
+			r.Next, r.N = n, cur
+			if cur > 0 {
+				r.Manifest, _ = k.manifest(ctx, as, cur)
+				r.Active = true
+			} else {
+				r.Manifest = nil
+			}
+			return r, nil
 		} else if err := k.activate(ctx, s, r); err != nil {
 			k.recordFailure(id, n, err.Error())
 			why = "activation of " + r.App + "@" + strconv.FormatInt(n, 10) + " failed: " + err.Error()

@@ -146,7 +146,7 @@ func New(cfg *config.Config, sys *sysdb.DB, env *commands.Env) *Server {
 		env.A.Secret = func(ctx context.Context, app, name string) (string, error) { return s.Gov.Secret(ctx, key, app, name) }
 		s.Pages.InstallActors(env.A)
 		(&actorsdoor.Door{Web: s.web, Gov: s.Gov, Verbs: s.Verbs, Confirm: env.Confirm, Ledger: s.Ledger, Rooms: s.Pages.Rooms(),
-			Embed: s.Pages.Embed, RenewEmbed: s.Pages.RenewEmbed}).Install(env.A)
+			Embed: s.Pages.Embed, RenewEmbed: s.Pages.RenewEmbed, CloseEmbed: s.Pages.CloseEmbed}).Install(env.A)
 	}
 	s.mainRoutes(s.main)
 	s.Static = http.HandlerFunc(s.Pages.ServeStatic)

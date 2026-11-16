@@ -78,13 +78,14 @@ class FrameHost {
     FrameHosts.add(this)
   }
   size(w, h) { this.w = w; this.h = h; Object.assign(this.el.style, { width: w + 'px', height: h + 'px' }); if (this.iframe) Object.assign(this.iframe.style, { width: w + 'px', height: h + 'px' }) }
-  // An app project's canvas frame on its entry page shows the person's dev
-  // instance as slop serves it (an embedded view); anything else (another
-  // page, a proposal, a fixture, the playhead, a headless check) is built
-  // from the project's files as Sitebench does.
+  // An app project's frame on its entry page shows the person's dev
+  // instance as slop serves it (an embedded view), on the canvas and in
+  // headless checks alike; anything else (another page, a proposal, a
+  // fixture, an isolated run, the playhead) is built from the project's
+  // files as Sitebench does.
   get embeddable() {
     const P = this.project
-    return Slop.on && !!P.meta.app && !this.headless && this.at == null && !this.fixture && !this.isolate && this.ws === 'main' && this.route.split('#')[0] === Embeds.entry(P)
+    return Slop.on && !!P.meta.app && this.at == null && !this.fixture && !this.isolate && this.ws === 'main' && this.route.split('#')[0] === Embeds.entry(P)
   }
   async load({ keepState = true } = {}) {
     if (keepState && this.iframe && this.ready) { try { this.saved = await this.call('state', [], 400) } catch { } }
@@ -150,10 +151,11 @@ class FrameHost {
   setFixture(name) { this.fixture = name || null; this.fx = null; return this.load({ keepState: false }) }
   swap() {
     const n = this.next; if (!n) return
-    if (this.iframe && this.iframe !== n.ifr) { hostByNonce.delete(this.nonce); this.iframe.remove() }
+    if (this.iframe && this.iframe !== n.ifr) { hostByNonce.delete(this.nonce); this.iframe.remove(); if (this.embed && (!n.embed || n.embed.view !== this.embed.view)) Embeds.close(this.embed) }
     n.ifr.style.opacity = 1; this.iframe = n.ifr; this.nonce = n.nonce; this.next = null; this.loading = false; this.ready = true
     this.embed = n.embed || null; this.origin = n.origin || ''
-    if (this.embed) { this.post({ push: 'mode', mode: App.mode }); this.post({ push: 'pins', pins: App.pinsFor(this.route) }); const pv = Preview.payload(); if (pv) this.post({ push: 'preview', preview: pv }) }
+    if (this.embed && this.headless) this.post({ push: 'mode', mode: 'play' })
+    else if (this.embed) { this.post({ push: 'mode', mode: App.mode }); this.post({ push: 'pins', pins: App.pinsFor(this.route) }); const pv = Preview.payload(); if (pv) this.post({ push: 'preview', preview: pv }) }
     for (const [, p] of this.pend) p.rej(Object.assign(new Error('page reloaded'), { kind: 'frame' })); this.pend.clear()
     n.res(this)
     if (this.saved) { this.post({ op: 'restore', args: [this.saved], id: 0 }); this.saved = null }
@@ -216,7 +218,7 @@ class FrameHost {
     this.route = st.join('/') || 'index.html'
     this.saved = null; this.ev.emit('nav', this.route); this.load({ keepState: false })
   }
-  dispose() { FrameHosts.delete(this); hostByNonce.delete(this.nonce); if (this.next) hostByNonce.delete(this.next.nonce); this.el.remove() }
+  dispose() { FrameHosts.delete(this); hostByNonce.delete(this.nonce); if (this.next) hostByNonce.delete(this.next.nonce); this.el.remove(); if (this.embed) Embeds.close(this.embed); if (this.next && this.next.embed) Embeds.close(this.next.embed) }
 }
 
 // The bench is the shell of its embedded frames: it answers their slop

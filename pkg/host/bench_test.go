@@ -7,6 +7,8 @@ import (
 	"encoding/base64"
 	"encoding/hex"
 	"encoding/json"
+	"fmt"
+	"net/url"
 	"strings"
 	"testing"
 )
@@ -187,6 +189,19 @@ func TestBenchDevInstance(t *testing.T) {
 		t.Fatalf("renew = %v", r)
 	}
 	h.fail(admin, "actor.call", map[string]any{"store": "bench", "action": "embed", "args": map[string]any{"app": "jot"}}, "not_granted")
+
+	// Closing: the view and its frame address end; a token closes nothing.
+	h.fail(admin, "actor.call", map[string]any{"store": "bench", "action": "close", "args": map[string]any{"view": e["view"]}}, "not_granted")
+	if c := result(t, rpc(page, v, "slop.call", map[string]any{"action": "close", "args": map[string]any{"view": e["view"]}})); c["closed"] != e["view"] {
+		t.Fatalf("close = %v", c)
+	}
+	if out := rpc(page, v, "slop.call", map[string]any{"action": "renew", "args": map[string]any{"view": e["view"]}}); errCode(out) != "not_found" {
+		t.Fatalf("renew after close = %v", out)
+	}
+	u, _ := url.Parse(e["src"].(string))
+	if r, _ := h.get(u.Host, u.RequestURI()); r.StatusCode != 404 {
+		t.Fatalf("the closed embed's address answers %d", r.StatusCode)
+	}
 }
 
 // Phase 3: a sync made from a draft that has moved since (a push from a
@@ -255,5 +270,122 @@ func TestBenchOutsidePushesAndReset(t *testing.T) {
 	st := act("dev", map[string]any{"app": "jot"})["status"].(map[string]any)
 	if st["broken"] != "" || num(st["n"]) != draft {
 		t.Fatalf("the fresh dev instance = %v, want draft %d and not broken", st, draft)
+	}
+}
+
+// Phase 4: the agent's app.* verbs read and seed the visitor's dev
+// instance, never the app store or a production instance.
+func TestBenchDevData(t *testing.T) {
+	h := newHarness(t)
+	admin := h.tokenFor("admin@example.com", "read", "write", "admin")
+	installBench(t, h, admin)
+	act := func(action string, args map[string]any) any {
+		t.Helper()
+		return h.call(admin, "actor.call", map[string]any{"store": "bench", "action": action, "args": args})
+	}
+	h.call(admin, "store.new", map[string]any{"id": "jot"})
+	h.call(admin, "files.push", map[string]any{"store": "jot", "files": files(devApp()), "ref": "draft"})
+	dev := act("dev", map[string]any{"app": "jot"}).(map[string]any)["id"].(string)
+
+	act("seedDocs", map[string]any{"app": "jot", "coll": "pins", "id": "slug", "rows": []any{
+		map[string]any{"slug": "a", "title": "First"}, map[string]any{"slug": "b", "title": "Second"}}})
+	if docs := act("docs", map[string]any{"app": "jot", "coll": "pins"}).([]any); len(docs) != 2 {
+		t.Fatalf("docs = %v", docs)
+	}
+	if d := act("doc", map[string]any{"app": "jot", "path": "pins/b"}).(map[string]any); !strings.Contains(fmtJSON(d), "Second") {
+		t.Fatalf("doc = %v", d)
+	}
+	act("seedTable", map[string]any{"app": "jot", "table": "notes", "rows": []any{map[string]any{"id": "n1"}, map[string]any{"id": "n2"}}})
+	if rows := act("sql", map[string]any{"app": "jot", "sql": "SELECT count(*) AS n FROM notes"}); !strings.Contains(fmtJSON(rows), `"n":2`) {
+		t.Fatalf("sql = %v", rows)
+	}
+	// The data went to the dev instance only.
+	if docs := h.call(admin, "docs.ls", map[string]any{"store": "jot", "coll": "pins"}).([]any); len(docs) != 0 {
+		t.Fatalf("the app store got the seeded documents: %v", docs)
+	}
+	if docs := h.call(admin, "docs.ls", map[string]any{"store": dev, "coll": "pins"}).([]any); len(docs) != 2 {
+		t.Fatalf("the dev instance has %v", docs)
+	}
+	h.fail(admin, "actor.call", map[string]any{"store": "bench", "action": "sql", "args": map[string]any{"app": "jot", "sql": "DELETE FROM notes"}}, "invalid_argument") // read-only
+}
+
+// Phase 5: the bench's preflight says what publishing would do and what
+// blocks it; publish moves main only from where the preflight saw it;
+// activate brings a production instance up now; publishing the previous
+// snapshot rolls back.
+func TestBenchPublish(t *testing.T) {
+	h := newHarness(t)
+	admin := h.tokenFor("admin@example.com", "read", "write", "admin")
+	installBench(t, h, admin)
+	act := func(action string, args map[string]any) map[string]any {
+		t.Helper()
+		return h.call(admin, "actor.call", map[string]any{"store": "bench", "action": action, "args": args}).(map[string]any)
+	}
+	strs := func(v any) string { return fmtJSON(v) }
+	app := devApp()
+	h.call(admin, "store.new", map[string]any{"id": "jot"})
+	h.call(admin, "files.push", map[string]any{"store": "jot", "files": files(app), "ref": "draft"})
+
+	// The first publish: everything is new, nothing serves main yet.
+	pf := act("preflight", map[string]any{"app": "jot"})
+	d1 := num(pf["refs"].(map[string]any)["draft"])
+	if pf["refs"].(map[string]any)["main"] != nil || len(pf["added"].([]any)) != len(app) || strs(pf["migrations"]) != `["sql/001.sql"]` || len(pf["blockers"].([]any)) != 0 || len(pf["production"].([]any)) != 0 {
+		t.Fatalf("first preflight = %v", pf)
+	}
+	if r := act("publish", map[string]any{"app": "jot", "n": d1, "ifAt": 0}); num(r["from"]) != 0 {
+		t.Fatalf("first publish = %v", r)
+	}
+	h.call(admin, "store.new", map[string]any{"id": "jot-1", "app": "jot", "type": "jot"})
+	h.call(admin, "app.status", map[string]any{"store": "jot-1"}) // runs main, applies 001
+
+	// A changed migration blocks.
+	bad := devApp()
+	bad["sql/001.sql"] = "CREATE TABLE notes (id TEXT PRIMARY KEY, extra TEXT);"
+	h.call(admin, "files.push", map[string]any{"store": "jot", "files": files(bad), "ref": "draft"})
+	if pf = act("preflight", map[string]any{"app": "jot"}); !strings.Contains(strs(pf["blockers"]), "sql/001.sql changed") {
+		t.Fatalf("a changed migration: %v", pf)
+	}
+
+	// A new migration is listed; a stale ifAt is refused; then publish,
+	// activate and roll back.
+	good := devApp()
+	good["sql/002.sql"] = "CREATE TABLE tags (note TEXT);"
+	h.call(admin, "files.push", map[string]any{"store": "jot", "files": files(good), "ref": "draft"})
+	pf = act("preflight", map[string]any{"app": "jot"})
+	d2 := num(pf["refs"].(map[string]any)["draft"])
+	if strs(pf["migrations"]) != `["sql/002.sql"]` || len(pf["blockers"].([]any)) != 0 || !strings.Contains(strs(pf["production"]), `"jot-1"`) {
+		t.Fatalf("second preflight = %v", pf)
+	}
+	h.fail(admin, "actor.call", map[string]any{"store": "bench", "action": "publish", "args": map[string]any{"app": "jot", "n": d2, "ifAt": 0}}, "conflict")
+	act("publish", map[string]any{"app": "jot", "n": d2, "ifAt": d1})
+	// The rollout dialog's preflight only looks: jot-1 still runs d1, and
+	// d2 waits for its next use; activate brings it up.
+	pf = act("preflight", map[string]any{"app": "jot"})
+	if !strings.Contains(strs(pf["production"]), fmt.Sprintf(`{"broken":"","n":%d,"next":%d,"store":"jot-1"}`, d1, d2)) {
+		t.Fatalf("after the publish, production = %v", pf["production"])
+	}
+	if a := act("activate", map[string]any{"store": "jot-1"}); num(a["n"]) != d2 || a["broken"] != "" {
+		t.Fatalf("activate = %v", a)
+	}
+	act("publish", map[string]any{"app": "jot", "n": d1, "ifAt": d2}) // roll back
+	if refs := h.call(admin, "ref.ls", map[string]any{"store": "jot"}).(map[string]any); num(refs["main"]) != d1 {
+		t.Fatalf("after the rollback, main = %v", refs)
+	}
+
+	// main no longer has sql/002.sql, but jot-1 ran it: a draft with another
+	// 002 is blocked, though main alone would call it new.
+	other := devApp()
+	other["sql/002.sql"] = "CREATE TABLE labels (note TEXT);"
+	h.call(admin, "files.push", map[string]any{"store": "jot", "files": files(other), "ref": "draft"})
+	if pf = act("preflight", map[string]any{"app": "jot"}); !strings.Contains(strs(pf["blockers"]), "sql/002.sql differs from the one that ran on") || !strings.Contains(strs(pf["blockers"]), "jot-1") || strs(pf["migrations"]) != `["sql/002.sql"]` {
+		t.Fatalf("a migration that ran before the rollback: %v", pf)
+	}
+	// The same 002 again is fine: jot-1 has it already.
+	h.call(admin, "files.push", map[string]any{"store": "jot", "files": files(good), "ref": "draft"})
+	if pf = act("preflight", map[string]any{"app": "jot"}); len(pf["blockers"].([]any)) != 0 {
+		t.Fatalf("the migration that ran, unchanged: %v", pf["blockers"])
+	}
+	if st := h.call(admin, "app.status", map[string]any{"store": "jot-1", "peek": true, "migrations": true}).(map[string]any); !strings.Contains(fmtJSON(st["applied"]), `"sql/002.sql"`) {
+		t.Fatalf("app.status migrations = %v", st)
 	}
 }

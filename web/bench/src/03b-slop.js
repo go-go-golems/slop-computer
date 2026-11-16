@@ -245,8 +245,50 @@ const Embeds = {
     return this.ready.get(app)
   },
   async open(P) { await this.dev(P); return await Slop.call('embed', { app: P.meta.app }) },
+  // The view of a frame that reloaded or went away (best effort: it expires anyway).
+  close(e) { if (e && e.view) Slop.call('close', { view: e.view }).catch(() => { }) },
   // The page slop serves with the runtime: app.json's page (index.html).
   entry(P) { try { return JSON.parse(P.read('app.json') || '{}').page || 'index.html' } catch (e) { return 'index.html' } }
+}
+
+// Publishing (Phase 5): main moves to a draft snapshot, only if main is
+// still where the preflight saw it; production instances follow on their
+// next view (or now: activate). Publishing main's previous snapshot again is
+// the rollback.
+const Publish = {
+  // Only once every edit is in draft: a preflight of an older draft would
+  // approve (and publish) code that is not what the editor shows.
+  async preflight(P) {
+    const f = await Sync.flush(P)
+    if (f.error) throw new Error('your edits are not in draft (' + f.error + '); fix that before publishing')
+    if (Sync.pending(P)) throw new Error(Sync.held(P) ? 'files written in this eval reach draft when it ends: publish in a later eval' : 'your edits are still being pushed to draft; try again in a moment')
+    return await Slop.call('preflight', { app: P.meta.app })
+  },
+  async run(P, pf, who = 'you', note = '') {
+    const n = pf.refs.draft, at = pf.refs.main ?? 0
+    const r = await Slop.call('publish', { app: P.meta.app, n, ifAt: at })
+    P.refs = { ...(P.refs || {}), main: n }
+    P.mark({ label: 'Published draft ' + n + ' to main', note: (note ? note + ' · ' : '') + (at ? 'main was ' + at : 'first publish') + (pf.migrations.length ? ' · migrations: ' + pf.migrations.join(', ') : ''), by: who, kind: 'milestone' })
+    Slop.refresh().catch(() => { })
+    return { n, from: r.from ?? at }
+  },
+  async rollback(P, to, from, who = 'you') {
+    await Slop.call('publish', { app: P.meta.app, n: to, ifAt: from })
+    P.refs = { ...(P.refs || {}), main: to }
+    P.mark({ label: 'Rolled main back to ' + to, note: 'from ' + from, by: who, kind: 'milestone' })
+    Slop.refresh().catch(() => { })
+  },
+  // A preflight as lines, for the dialog and the agent's approval card.
+  lines(pf) {
+    const d = pf.refs.draft, m = pf.refs.main
+    const out = [d === m ? 'main is already draft ' + d + ': nothing to publish' : 'draft ' + d + ' → main' + (m != null ? ' (now ' + m + ')' : ' (first publish)')]
+    if (pf.added.length || pf.changed.length || pf.removed.length) out.push('files: ' + [...pf.added.map(p => '+' + p), ...pf.changed.map(p => '~' + p), ...pf.removed.map(p => '-' + p)].slice(0, 30).join(' '))
+    if (pf.migrations.length) out.push('new migrations run on every production instance: ' + pf.migrations.join(', '))
+    out.push(pf.dev ? (pf.dev.broken ? 'your dev instance failed on it: ' + pf.dev.broken : pf.dev.n === d ? 'your dev instance runs draft ' + d + ': ok' : 'your dev instance is on ' + pf.dev.n + ', not draft ' + d + (pf.dev.next === d ? ' (it has not been opened since)' : '')) : 'no dev instance of yours has run this draft')
+    out.push(pf.production.length ? 'production: ' + pf.production.map(x => x.store + ' @' + x.n + (x.next ? ' (' + x.next + ' on its next view)' : '') + (x.broken ? ' (broken)' : '')).join(', ') : 'no production instance yet: nothing serves main')
+    for (const b of pf.blockers) out.push('BLOCKED: ' + b)
+    return out
+  }
 }
 
 // A new slop app: the smallest tree slop runs, a page and its manifest.

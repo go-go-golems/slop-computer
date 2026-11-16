@@ -70,7 +70,7 @@ const Sandbox = {
   drop(sid) { if (this.worker) this.worker.postMessage({ type: 'drop', sid }) }
 }
 
-const LONG_CALLS = new Set(['agents.delegate', 'llm', 'ui.approve', 'ui.ask', 'session.waitFor', 'scenarios.run', 'scenarios.runAll'])
+const LONG_CALLS = new Set(['agents.delegate', 'llm', 'ui.approve', 'ui.ask', 'session.waitFor', 'scenarios.run', 'scenarios.runAll', 'publish.run'])
 // signatures: a parameter ending in ? is optional. Used to check calls and to say how to call a verb.
 const API_SIGS = {
   'files.list': 'prefix?', 'files.read': 'path', 'files.exists': 'path', 'files.lines': 'path, from?, to?', 'files.write': 'path, text',
@@ -90,7 +90,10 @@ const API_SIGS = {
   'tx.begin': '', 'tx.commit': '', 'tx.rollback': '', 'dry.begin': '', 'dry.end': '', 'dry.apply': 'id, paths?', 'dry.discard': 'id',
   'session.recall': 'query, {limit, thread, all}?', 'session.message': 'n, {thread}?', 'session.stream': '{kind, frame, since, limit}?', 'session.waitFor': 'kind, {frame, match, timeout}?',
   'session.mark': 'label, {kind, why}?', 'session.marks': '', 'session.events': '{kind, path, since, limit}?', 'session.diff': 'markLabelOrIndex', 'session.workspace': '',
-  'lib.def': 'name, fn, {description}?', 'lib.list': '', 'lib.remove': 'name', 'lib.source': 'name', 'log': '...values'
+  'lib.def': 'name, fn, {description}?', 'lib.list': '', 'lib.remove': 'name', 'lib.source': 'name', 'log': '...values',
+  'app.info': '', 'app.status': '', 'app.logs': '{limit}?', 'app.docs': 'coll', 'app.doc': 'path', 'app.sql': 'query, args?',
+  'app.seedDocs': 'coll, rows, {id}?', 'app.seedTable': 'table, rows', 'app.resetDev': '',
+  'publish.check': '', 'publish.run': '{note}?'
 }
 function checkArgs(name, args) {
   const sig = API_SIGS[name]; if (sig == null || sig.startsWith('...')) return null
@@ -157,6 +160,8 @@ function hostAPI(ctx) {
   const frameInfo = f => { const v = App.hostFor(f.id); return { id: f.id, label: f.label || undefined, route: v ? v.route : f.route, page: v && v.route !== f.route ? f.route : undefined, w: f.w, h: f.h, x: f.x, y: f.y, fixture: f.fixture || undefined, errors: v ? v.errors : 0, issues: v ? v.issues.length : 0 } }
   const canvasLog = note => P.log({ kind: 'canvas', ws: 'main', who, thread: ctx.thread, note })
   const strip = e => { const o = { ...e }; delete o.after; delete o.files; return o }
+  // app.* is for slop app projects; data.* is Sitebench's own tables, which a slop app's pages do not see
+  const needApp = () => { if (!P.meta.app || !Slop.on) throw policy('app.* is for slop app projects (a project opened from an app store on a slop server)'); return P.meta.app }
   const MARK_KINDS = ['bookmark', 'milestone', 'decision', 'question', 'checkpoint']
   const api = {
     'files.list': prefix => ls().filter(p => !prefix || p.startsWith(prefix)).map(path => ({ path, size: rd(path).length, lines: rd(path).split('\n').length })),
@@ -184,6 +189,34 @@ function hostAPI(ctx) {
       const out = []
       for (const path of ls()) { if (opts.path && !path.startsWith(opts.path)) continue; rd(path).split('\n').forEach((l, i) => { if (out.length < 200 && re.test(l)) out.push({ path, line: i + 1, text: l.trim().slice(0, 200) }) }) }
       return out
+    },
+    // ---- a slop app's dev instance (app projects on slop): its state, log and data ----
+    'app.info': () => { const app = needApp(); return { app, draft: P.refs ? P.refs.draft ?? null : null, main: P.refs ? P.refs.main ?? null : null, entry: Embeds.entry(P), dev: P.dev || null, devStatus: Sync.act || null, instances: P.instances || [] } },
+    'app.status': async () => { const app = needApp(); const r = await Slop.call('head', { app }); return { draft: r.refs.draft ?? null, main: r.refs.main ?? null, dev: r.dev } },
+    'app.logs': async (o = {}) => { const app = needApp(); const r = await Slop.call('logs', { app }); return { broken: r.broken || '', lines: (r.lines || []).slice(-clamp(+o.limit || 50, 1, 300)) } },
+    'app.docs': coll => Slop.call('docs', { app: needApp(), coll: need(coll, 'coll') }),
+    'app.doc': path => Slop.call('doc', { app: needApp(), path: need(path, 'path') }),
+    'app.sql': (query, args) => Slop.call('sql', { app: needApp(), sql: need(query, 'query'), args: args || [] }),
+    'app.seedDocs': (coll, rows, o = {}) => { writable(); noDryData(); return Slop.call('seedDocs', { app: needApp(), coll: need(coll, 'coll'), rows, id: o.id }) },
+    'app.seedTable': (table, rows) => { writable(); noDryData(); return Slop.call('seedTable', { app: needApp(), table: need(table, 'table'), rows }) },
+    'app.resetDev': async () => {
+      writable(); noDryData(); const app = needApp()
+      const r = await Slop.call('resetDev', { app })
+      Embeds.ready.delete(app); Sync.act = null; Sync.ev.emit('status', Sync.status)
+      await Promise.all([...FrameHosts].filter(fh => fh.project === P && fh.embed).map(fh => fh.load({ keepState: false })))
+      return r
+    },
+    // publishing is the person's: the agent checks, and asks with an approval card
+    'publish.check': async () => { needApp(); const pf = await Publish.preflight(P); return { ...pf, summary: Publish.lines(pf) } },
+    'publish.run': async (o = {}) => {
+      writable(); noDryData(); needApp()
+      const pf = await Publish.preflight(P)
+      if (pf.refs.draft === pf.refs.main) return { published: false, why: 'main is already draft ' + pf.refs.draft }
+      if (pf.blockers.length) throw policy('not publishable: ' + pf.blockers.join('; '))
+      const ok = await approvalCard(ctx, 'Publish draft ' + pf.refs.draft + ' of ' + P.meta.app + ' to main?', [o.note ? String(o.note) : '', ...Publish.lines(pf)].filter(Boolean).join('\n'))
+      if (!ok) throw Object.assign(new Error('the person declined to publish'), { kind: 'approval' })
+      const r = await Publish.run(P, pf, who, o.note ? String(o.note) : '')
+      return { published: true, n: r.n, from: r.from, rollback: 'publishing ' + r.from + ' again rolls back; the person can do it from the rollout dialog' }
     },
     // data: in a proposal, the first write to a table copies it into the proposal; main's rows change only on accept
     'data.tables': () => [...P.tablesIn(ws()).values()].map(t => ({ name: t.name, cols: t.cols, count: t.rows.length, ...(ws() !== 'main' && P.ownsTable(t.name, ws()) ? { proposalCopy: true } : {}) })),
@@ -416,6 +449,8 @@ function hostAPI(ctx) {
     'agents.delegate': (role, task, o = {}) => Agent.delegate(ctx, role, need(task, 'task'), o),
     'agents.roles': () => Object.entries(ROLES).map(([name, r]) => ({ name, describe: r.describe, writes: r.mode === 'read' ? false : r.mode === 'tests' ? 'scenarios/ and fixtures/ only' : true, evals: r.evals }))
   }
+  // In a slop app project, Sitebench's tables are not the app's data: its pages use slop's db and its actor SQL
+  if (P.meta.app && Slop.on) for (const k of Object.keys(api)) if (k.startsWith('data.')) api[k] = () => { throw policy(k + ' is Sitebench\'s own tables, which this slop app does not see. Its data is in your dev instance: app.docs(coll), app.doc(path), app.sql(query), app.seedDocs(coll, rows), app.seedTable(table, rows)') }
   return api
 }
 function parseJSONReply(text) {
@@ -541,6 +576,36 @@ function scopeSummary(scope) {
   if (!scope || !scope.vars) return ''
   const k = v => v === null ? 'null' : Array.isArray(v) ? 'array(' + v.length + ')' : typeof v === 'object' ? 'object' : typeof v
   return Object.entries(scope.vars).map(([n, v]) => n + ': ' + k(v)).join(', ')
+}
+
+// What the agent is told when the project is a slop app (SLOP3-022 Phase 4):
+// it replaces the site runtime described in API_GUIDE.
+function slopGuide(P) {
+  const app = P.meta.app, entry = Embeds.entry(P)
+  return `THIS PROJECT IS A SLOP APP: the app store "${app}" on a slop server. It replaces "How pages run" above.
+
+Where things go. Your file writes in main go to the app's draft ref, pushed after each eval. People use main; only the person publishes. The canvas frames on ${entry} show ${P.dev || 'the person\'s dev instance'}, which runs draft on its own data: after an eval that wrote files, it activates the new version and the frames reload before your effects are measured. effects.draft is the new snapshot; effects.actor is {on: n} or {on: n, broken: "why"} when the new version did not activate (the frames then still show the old one); effects.actorLogs are the actor's new warnings and errors. A frame on another .html file, a proposal or a fixture is built from the files without slop's runtime, so it cannot show the app's data.
+
+How a slop app runs:
+- app.json is the manifest: { "title", "page": "${entry}" (the entry page), "actor": "actor.js"?, "capabilities": { "db": {}, "user": {}, "sample": {}, … }, "type"? }. Read it first, and README.md.
+- Only the entry page gets the runtime; other .html files are served as plain files. Build one page and navigate inside it (hash routes: location.hash).
+- Pages use window.claude: const db = await window.claude.use('db'), then db.doc('notes/a').set({…}), (await db.doc('notes/a').get()).data(), db.collection('notes').get(), onSnapshot(…). const slop = await window.claude.use('slop'); await slop.actions.<name>(args) calls the actor. Capabilities the manifest does not declare are null. There is no window.site and no site.db.
+- actor.js: defineActor({ actions: { name: { requires: 'view' | 'interact' | 'admin', async run(ctx, args) { … } } }, setup(ctx) { … } }). ctx.visitor is {id, name, level}. use('sql') runs SQL on the instance's own tables, synchronously, with each argument a separate parameter (never an array): sql.all(query, ...args) -> rows, sql.one(query, ...args) -> row or null, sql.run(query, ...args) -> {changes, lastRowid}, sql.transaction(fn). use('db') reads and writes its documents.
+- sql/NNN_name.sql are migrations, applied once per instance, in order. Never edit one that has run; add a new file. In development, app.resetDev() replaces the dev instance and its data when you must.
+- Pushing a tree with app.json needs an admin: the person is one, or the bench could not push.
+
+The dev instance (not production):
+app.info() -> {app, draft, main, entry, dev, devStatus, instances}     app.status() -> {draft, main, dev: {n, broken}}
+app.logs({limit}?) -> {broken, lines: [{at, level, text}]} (its actor's console, setup and activation failures)
+app.docs(coll) -> documents     app.doc(path) -> one document     app.sql(query, args?) -> rows (read-only)
+app.seedDocs(coll, rows, {id}?) adds documents (id: the field naming each one)     app.seedTable(table, rows) inserts rows into a table a migration made
+app.resetDev() a fresh dev instance on draft, with no data
+data.* (Sitebench's own tables) are refused here: they are not this app's data.
+
+Working rules for slop apps:
+- After writing actor.js or a migration, look at effects.actor and app.logs() before going on.
+- Keep the person's production data out of it: seed the dev instance (app.seedDocs, app.seedTable) to try things.
+- Say which draft your change made; publishing it is the person's call. publish.check() -> what publishing would do ({refs, added, changed, removed, migrations, blockers, production, dev, summary}); publish.run({note}?) asks the person with an approval card and publishes only if they approve. Run publish.check first, and never edit a migration that main has run.`
 }
 
 const API_GUIDE = `You are the coding agent inside Sitebench, an IDE where a person builds real websites (HTML, CSS, JS files plus small data tables) and watches them run live in frames on a canvas.
@@ -795,7 +860,7 @@ const Agent = {
       }
     }
     const R = th.role && ROLES[th.role]
-    const head = (R ? 'You are the ' + th.role + ' subagent, called by the main agent through delegate(). ' + R.describe + (R.mode === 'read' ? ' Writes are refused (policy errors); canvas arrangement and ui.pin are allowed.' : R.mode === 'tests' ? ' You may write only scenarios/ and fixtures/ (other writes are refused); canvas arrangement and ui.pin are allowed.' : '') + ' Reply to the main agent, briefly. Your budget is ' + o.budget.max + ' evals.\n\n' : '') + API_GUIDE + '\n\n'
+    const head = (R ? 'You are the ' + th.role + ' subagent, called by the main agent through delegate(). ' + R.describe + (R.mode === 'read' ? ' Writes are refused (policy errors); canvas arrangement and ui.pin are allowed.' : R.mode === 'tests' ? ' You may write only scenarios/ and fixtures/ (other writes are refused); canvas arrangement and ui.pin are allowed.' : '') + ' Reply to the main agent, briefly. Your budget is ' + o.budget.max + ' evals.\n\n' : '') + API_GUIDE + '\n\n' + (P.meta.app && Slop.on ? slopGuide(P) + '\n\n' : '')
     // long thread: fold older messages into the summary first
     try { await this.compact(P, th, { end: th.msgs.length - 2, signal: o.signal, onStart: n => { msg.note = 'Summarizing ' + plural(n, 'earlier message') + '…'; this.ev.emit('text', th.id) } }) } catch (e) { if (o.signal && o.signal.aborted) throw e }
     if (msg.note) { delete msg.note; this.ev.emit('text', th.id) }

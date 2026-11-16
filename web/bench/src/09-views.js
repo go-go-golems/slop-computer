@@ -414,7 +414,9 @@ registerView('evalrepl', {
       P.log({ kind: 'eval', who: 'you', ws, ok: r.ok, note: (code.split('\n').find(l => l.trim() && !l.trim().startsWith('//')) || '').trim().slice(0, 90), calls: [...new Set(r.calls || [])].slice(0, 12) })
     }
     ta.addEventListener('keydown', e => { if (e.key === 'Enter' && (e.metaKey || e.ctrlKey)) { e.preventDefault(); run() } if (e.key === 'Tab') { e.preventDefault(); ta.setRangeText('  ', ta.selectionStart, ta.selectionEnd, 'end') } })
-    const ref = h('details.block', h('summary', { style: { cursor: 'pointer', fontWeight: 700 } }, 'API reference (what the agent sees)'), h('pre.mono', { style: { whiteSpace: 'pre-wrap', fontSize: '11px', margin: 0 } }, API_GUIDE.split('\n\nWorking rules')[0].split('\n').slice(4).join('\n')))
+    // filled when opened: an app project adds the slop section the agent gets
+    const refText = h('pre.mono', { style: { whiteSpace: 'pre-wrap', fontSize: '11px', margin: 0 } })
+    const ref = h('details.block', { on: { toggle: () => { if (ref.open) refText.textContent = API_GUIDE.split('\n\nWorking rules')[0].split('\n').slice(4).join('\n') + (App.P && App.P.meta.app && Slop.on ? '\n\n' + slopGuide(App.P) : '') } } }, h('summary', { style: { cursor: 'pointer', fontWeight: 700 } }, 'API reference (what the agent sees)'), refText)
     const paintEngine = () => { engine.textContent = 'Sandbox: ' + ({ quickjs: 'QuickJS (wasm) in a worker', worker: 'worker realm (QuickJS failed to load)', loading: 'starting…', off: 'unavailable here' }[Sandbox.engine] || Sandbox.engine) }
     Sandbox.ev.on('engine', paintEngine); paintEngine()
     const scopeLine = h('div.toolbar', { style: { minHeight: '30px', fontSize: 'var(--fs-xs)' } })

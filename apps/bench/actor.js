@@ -39,9 +39,12 @@ async function allStores(ctx) {
 }
 
 // A store that does not exist, or that the visitor cannot read, has no
-// status; neither case is an error here.
-async function statusOf(ctx, id) {
-  try { return await tool(ctx).status(id); } catch (e) { return null; }
+// status; neither case is an error here. Asking activates a newer version
+// the store follows; with {peek: true} it only looks ({n: running now,
+// next: the version it activates on its next use}); with {migrations:
+// true} the answer has applied: {sql/… name: sha256} of what ran there.
+async function statusOf(ctx, id, opts) {
+  try { return await tool(ctx).status(id, opts || {}); } catch (e) { return null; }
 }
 
 defineActor({
@@ -219,6 +222,122 @@ defineActor({
       requires: 'view',
       async run(ctx, { view }) {
         return await tool(ctx).renewEmbed(String(view || ''));
+      },
+    },
+    close: {
+      requires: 'view',
+      async run(ctx, { view }) {
+        return await tool(ctx).closeEmbed(String(view || ''));
+      },
+    },
+
+    // The dev instance's data, for the agent and the Data view (Phase 4):
+    // its documents, its SQL tables (read-only), and seeding them. These
+    // reach the visitor's own dev instance only, never a production one.
+    docs: {
+      requires: 'view',
+      async run(ctx, { app, coll }) {
+        storeId(ctx, app);
+        return await tool(ctx).docs(devId(app, ctx.visitor.id), String(coll || ''));
+      },
+    },
+    doc: {
+      requires: 'view',
+      async run(ctx, { app, path }) {
+        storeId(ctx, app);
+        return await tool(ctx).doc(devId(app, ctx.visitor.id), String(path || ''));
+      },
+    },
+    sql: {
+      requires: 'view',
+      async run(ctx, { app, sql, args }) {
+        storeId(ctx, app);
+        return await tool(ctx).sql(devId(app, ctx.visitor.id), String(sql || ''), Array.isArray(args) ? args : []);
+      },
+    },
+    seedDocs: {
+      requires: 'view',
+      async run(ctx, { app, coll, rows, id }) {
+        storeId(ctx, app);
+        if (!Array.isArray(rows)) ctx.fail('invalid_argument', 'rows must be a list of objects');
+        return await tool(ctx).importDocs(devId(app, ctx.visitor.id), String(coll || ''), rows, id ? { id: String(id) } : {});
+      },
+    },
+    seedTable: {
+      requires: 'view',
+      async run(ctx, { app, table, rows }) {
+        storeId(ctx, app);
+        if (!Array.isArray(rows)) ctx.fail('invalid_argument', 'rows must be a list of objects');
+        return await tool(ctx).importTable(devId(app, ctx.visitor.id), String(table || ''), rows);
+      },
+    },
+
+    // Publishing (Phase 5). preflight says what moving main to draft would
+    // do: the files that change, the migrations that will run on every
+    // production instance, what blocks it (a migration that changed or went
+    // away after it ran: production instances would refuse the version),
+    // the production instances (stores that follow main) and the visitor's
+    // dev instance, which should be running this draft. Both trees are read
+    // at the snapshots in refs, the ones publish is then given, so a push
+    // in between cannot change what was approved; and it only looks: no
+    // instance activates because someone opened the dialog.
+    preflight: {
+      requires: 'view',
+      async run(ctx, { app }) {
+        const w = tool(ctx);
+        storeId(ctx, app);
+        const refs = await w.refs(app);
+        if (refs.draft == null) ctx.fail('not_found', app + ' has no draft');
+        const [draft, main] = await Promise.all([w.files(app, String(refs.draft)), refs.main != null ? w.files(app, String(refs.main)) : []]);
+        const dm = new Map(draft.map((f) => [f.path, f])), mm = new Map(main.map((f) => [f.path, f]));
+        const added = [], changed = [], removed = [];
+        for (const [path, f] of dm) { const m = mm.get(path); if (!m) added.push(path); else if (m.sha256 !== f.sha256) changed.push(path); }
+        for (const path of mm.keys()) if (!dm.has(path)) removed.push(path);
+        const mig = (path) => /^sql\/.+\.sql$/.test(path);
+        const blockers = [
+          ...changed.filter(mig).map((path) => 'migration ' + path + ' changed after it ran on main: add a new migration instead'),
+          ...removed.filter(mig).map((path) => 'migration ' + path + ' was removed after it ran on main'),
+        ];
+        const instances = (await allStores(ctx)).filter((s) => s.app === app).map((s) => s.id);
+        const production = [], ranElsewhere = new Map(); // path → stores where another version of it ran
+        for (const id of [app, ...instances]) {
+          const st = await statusOf(ctx, id, { peek: true, migrations: true });
+          if (!st || !(st.manifest || st.next) || (st.ref || 'main') !== 'main') continue;
+          production.push({ store: id, n: st.n, next: st.next || 0, broken: st.broken || '' });
+          // what an instance ran is what counts: main may have been rolled
+          // back past a migration that it still has
+          for (const [path, sum] of Object.entries(st.applied || {})) {
+            const f = dm.get(path);
+            if (f && f.sha256 !== sum && !changed.includes(path)) ranElsewhere.set(path, [...(ranElsewhere.get(path) || []), id]);
+          }
+        }
+        for (const [path, ids] of ranElsewhere) blockers.push('migration ' + path + ' differs from the one that ran on ' + ids.join(', ') + ': add a new migration instead');
+        const dev = await statusOf(ctx, devId(app, ctx.visitor.id), { peek: true });
+        return { refs, added, changed, removed, migrations: added.filter(mig), blockers, production, dev: dev ? { n: dev.n, next: dev.next || 0, broken: dev.broken || '' } : null };
+      },
+    },
+
+    // Move main to snapshot n, only if main is still at ifAt (0: main does
+    // not exist yet), so two publishers cannot overwrite each other. The
+    // answer's from is where main was: publishing that again rolls back.
+    publish: {
+      requires: 'view',
+      async run(ctx, { app, n, ifAt }) {
+        storeId(ctx, app);
+        if (typeof n !== 'number' || !(n > 0)) ctx.fail('invalid_argument', 'n is the snapshot to publish');
+        if (typeof ifAt !== 'number') ctx.fail('invalid_argument', 'ifAt is where main is now (0 when it does not exist)');
+        return await tool(ctx).publish(app, n, { ifAt });
+      },
+    },
+
+    // Bring an instance up on the version it follows now ("Activate now";
+    // otherwise it does on its next view or event).
+    activate: {
+      requires: 'view',
+      async run(ctx, { store }) {
+        storeId(ctx, store, 'store');
+        const st = await tool(ctx).status(store);
+        return { store, n: st.n, broken: st.broken || '' };
       },
     },
 
