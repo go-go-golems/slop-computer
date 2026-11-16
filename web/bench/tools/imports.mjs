@@ -21,7 +21,7 @@ const SKIP = new Set(['worker/worker.js', 'worker/core.js']);
 const GLOBALS = new Set(('window document navigator location history console localStorage sessionStorage fetch URL URLSearchParams Blob File FileReader ' +
   'TextEncoder TextDecoder crypto performance requestAnimationFrame cancelAnimationFrame setTimeout clearTimeout setInterval clearInterval queueMicrotask ' +
   'addEventListener removeEventListener dispatchEvent getComputedStyle matchMedia innerWidth innerHeight devicePixelRatio scrollX scrollY open alert ' +
-  'ResizeObserver MutationObserver IntersectionObserver Worker MessageChannel AbortController AbortSignal Event CustomEvent KeyboardEvent MouseEvent ' +
+  'ResizeObserver MutationObserver IntersectionObserver Worker MessageChannel CompressionStream DecompressionStream Response Request Headers AbortController AbortSignal Event CustomEvent KeyboardEvent MouseEvent ' +
   'Node Element HTMLElement HTMLIFrameElement HTMLInputElement HTMLTextAreaElement SVGElement DocumentFragment DOMParser XMLSerializer Range Selection ' +
   'CSS CSSRule CSSStyleRule CSSMediaRule structuredClone btoa atob escape unescape encodeURIComponent decodeURIComponent encodeURI decodeURI ' +
   'Object Array String Number Boolean Symbol BigInt Math JSON Date RegExp Error TypeError RangeError SyntaxError ReferenceError Promise Proxy Reflect ' +

@@ -1,13 +1,21 @@
-// ---------- dock: tiles of tabbed views, split by dragging, gutters, floating windows, named layouts (form-skate) ----------
-import { $$, clear, h, popMenu } from './lib/dom.js';
-import { clamp, debounce, emitter, uid } from './lib/util.js';
+// ui/dock.js — the workbench's layout: tiles of tabbed views, split by
+// dragging, gutters, floating windows, named layouts.
+//
+// A view is {title, sub, badge?, make()} and make() returns {el, show?,
+// hide?}; main.js registers them all (registerViews). A layout is a tree of
+// splits and tiles; the shell saves it when Dock emits 'changed'.
+//
+// Owns: the layout and the view instances. Public API: Dock, Views,
+// registerViews, LAYOUTS, normalize, walkTiles.
+import { $$, clear, h, popMenu } from '../lib/dom.js';
+import { clamp, debounce, emitter, uid } from '../lib/util.js';
 
-const Views = {}            // id -> {title, make(): {el, show?, hide?}}
-function registerView(id, def) { Views[id] = def }
+export const Views = {}     // id -> {title, sub, badge?, make(): {el, show?, hide?}}
+export function registerViews(defs) { Object.assign(Views, defs) }
 const tile = (views, active) => ({ t: 'tile', id: uid('t'), views, active: active || views[0] })
 const split = (dir, kids, sizes) => ({ t: 'split', id: uid('s'), dir, kids, sizes: sizes || kids.map(() => 1 / kids.length) })
 
-const LAYOUTS = {
+export const LAYOUTS = {
   Build: () => split('row', [
     tile(['agent', 'evalrepl']),
     split('col', [tile(['canvas', 'timeline']), tile(['console', 'data', 'scenarios'])], [0.7, 0.3]),
@@ -25,7 +33,7 @@ const LAYOUTS = {
   Canvas: () => split('row', [tile(['canvas']), tile(['inspector', 'layers', 'agent', 'panels'])], [0.74, 0.26])
 }
 
-function normalize(n) {
+export function normalize(n) {
   if (!n) return null
   if (n.t === 'tile') { if (!n.views.length) return null; if (!n.views.includes(n.active)) n.active = n.views[0]; return n }
   const kids = [], sizes = []
@@ -39,12 +47,12 @@ function normalize(n) {
   const sum = sizes.reduce((a, b) => a + b, 0) || 1
   return Object.assign(n, { kids, sizes: sizes.map(s => s / sum) })
 }
-function walkTiles(n, fn, parent) { if (!n) return; if (n.t === 'tile') fn(n, parent); else n.kids.forEach(k => walkTiles(k, fn, n)) }
+export function walkTiles(n, fn, parent) { if (!n) return; if (n.t === 'tile') fn(n, parent); else n.kids.forEach(k => walkTiles(k, fn, n)) }
 function tileOf(layout, view) { let r = null; walkTiles(layout, t => { if (t.views.includes(view)) r = t }); return r }
 function tileById(layout, id) { let r = null; walkTiles(layout, t => { if (t.id === id) r = t }); return r }
 function replaceNode(n, id, rep) { if (!n) return n; if (n.id === id) return rep; if (n.t === 'split') n.kids = n.kids.map(k => replaceNode(k, id, rep)); return n }
 
-const Dock = {
+export const Dock = {
   layout: null, floats: [], inst: {}, el: null, work: null, ev: emitter(), dragging: null, z: 0,
   mount(work) {
     this.work = work; this.el = h('div.dock'); work.appendChild(this.el)
@@ -59,7 +67,8 @@ const Dock = {
   },
   isOpen(id) { return !!tileOf(this.layout, id) || this.floats.some(f => f.view === id) },
   set(layout, floats) { this.layout = normalize(layout); if (floats) this.floats = floats.filter(f => Views[f.view] && !tileOf(this.layout, f.view)); this.render(); this.changed() },
-  changed: debounce(function () { App.savePrefs() }, 600),
+  // the layout changed: the shell saves it (a per-viewer preference)
+  changed: debounce(function () { Dock.ev.emit('changed') }, 600),
   // ---- operations ----
   detach(view) {
     walkTiles(this.layout, t => { const i = t.views.indexOf(view); if (i >= 0) { t.views.splice(i, 1); if (t.active === view) t.active = t.views[Math.max(0, i - 1)] } })

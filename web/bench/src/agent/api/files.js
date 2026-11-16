@@ -6,19 +6,12 @@
 // list, or dropped if it fails). A file kept by hash (binary, or larger
 // than the bench edits) can be listed, copied and removed, not read.
 //
-// Public API: FILES (an API table), checkPath, missing.
+// Public API: FILES (an API table), missing, readText.
 import { blame, why } from '../../model/timeline.js';
 
 export const missing = msg => Object.assign(new Error(msg), { kind: 'missing' })
 const invalid = msg => Object.assign(new Error(msg), { kind: 'invalid' })
 
-// The paths an app may hold (the server checks them again).
-export function checkPath(path) {
-  if (typeof path !== 'string' || !path) return 'path must be a non-empty string'
-  if (path.length > 200) return 'a path is at most 200 characters'
-  if (path.startsWith('/') || path.includes('\\') || path.split('/').some(s => !s || s === '.' || s === '..')) return 'a path is relative, with / between non-empty parts and no . or .. (got ' + JSON.stringify(path) + ')'
-  return null
-}
 export function readText(tx, path) {
   if (typeof path !== 'string' || !path) throw invalid('path must be a non-empty string')
   const t = tx.read(path)
@@ -66,8 +59,6 @@ export const FILES = {
   'files.write': {
     sig: 'path, text', doc: 'creates or replaces the whole file', writes: 'files',
     run: (ctx, path, text) => {
-      const bad = checkPath(path)
-      if (bad) throw invalid(bad)
       const created = !ctx.tx.has(path)
       ctx.tx.write(path, String(text))
       return { path, created, lines: String(text).split('\n').length }
@@ -120,8 +111,6 @@ export const FILES = {
   'files.copy': {
     sig: 'from, to', doc: 'copies a file, text or kept by hash', writes: 'files', pathOf: ([, to]) => to,
     run: (ctx, from, to) => {
-      const bad = checkPath(to)
-      if (bad) throw invalid(bad)
       const e = ctx.tx.entry(from)
       if (!e) throw missing('no file ' + from)
       typeof e.text === 'string' ? ctx.tx.write(to, e.text) : ctx.tx.copy(to, e)

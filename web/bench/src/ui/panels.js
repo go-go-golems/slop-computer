@@ -1,19 +1,35 @@
-// ---------- panels: small UIs Claude declares ----------
-// A panel is a list of items. Controls (slider, toggle, select, text, color, button) hold values; a control can be
-// bound to the pages (a CSS variable or a style previewed live in every frame, a site.store key, a fixture), and the
-// person can keep a previewed value in the CSS file. Widgets (value, chart, table, list, text) show live values
-// from the project: table rows, the store, check issues, scenario results, events, a frame's DOM, or read-only code.
-import { clamp, clone, debounce, fmtAgo, fmtTime, now, plural, trunc } from './lib/util.js';
-import { clear, h, modal, popMenu, svgEl, toast } from './lib/dom.js';
-import { hlYAML, renderMarkdown, toYAML } from './lib/text.js';
-import { since } from './model/timeline.js';
+// ui/panels.js — panels: small UIs Claude (or the person) declares.
+//
+// A panel is a list of items. Controls (slider, toggle, select, text,
+// color, button) hold values; a control can be bound to the pages: a CSS
+// variable or a style previewed live in every canvas frame (Preview), which
+// the person can keep in the CSS file. Widgets (value, chart, table, list,
+// text) show live values (Sources). Panels live in the project's meta; the
+// agent makes them through ui.panel and friends (PANEL_API, added to the
+// host API by the shell, with PANEL_NOTE under the ui calls).
+//
+// Public API: Panels, Preview, panelEl, checkPanel, initSources, PANEL_API,
+// PANEL_NOTE, PANELS (a view).
+import { App } from './app.js';
+import { Dock } from './dock.js';
+import { FrameHosts } from '../frames/host.js';
+import { Slop } from '../server/slop.js';
+import { Streams } from '../frames/streams.js';
+import { clamp, clone, debounce, fmtAgo, fmtTime, now, plural, trunc } from '../lib/util.js';
+import { clear, h, modal, popMenu, svgEl, toast } from '../lib/dom.js';
+import { cssSet, findRule } from '../lib/css.js';
+import { effectsLine } from '../agent/effects.js';
+import { hlYAML, renderMarkdown, toYAML } from '../lib/text.js';
+import { layoutIn } from '../frames/layout.js';
+import { makeContext, runEval } from '../agent/eval.js';
+import { scenarioList } from '../core/scenario.js';
 
 const PANEL_CONTROLS = ['slider', 'toggle', 'select', 'text', 'color', 'button']
 const PANEL_WIDGETS = ['value', 'chart', 'table', 'list', 'text']
-const SOURCE_KEYS = ['data', 'store', 'issues', 'scenarios', 'events', 'frameEvents', 'frame', 'eval', 'lib']
+const SOURCE_KEYS = ['sql', 'docs', 'issues', 'scenarios', 'events', 'frameEvents', 'frame', 'eval', 'lib']
 const FRAME_EVENT_KINDS = ['click', 'change', 'nav', 'load', 'console', 'error']
 
-function checkPanel(spec) {
+export function checkPanel(spec) {
   if (!spec || typeof spec !== 'object' || Array.isArray(spec)) return 'a panel is { title, items: [ … ] }'
   if (!Array.isArray(spec.items) || !spec.items.length) return 'items must be a non-empty list of controls and widgets'
   if (spec.items.length > 24) return 'at most 24 items in a panel'
@@ -27,11 +43,11 @@ function checkPanel(spec) {
       if (ids.has(it.id)) return where + ': id "' + it.id + '" is used twice'; ids.add(it.id)
     }
     if (it.type === 'slider' && (typeof it.min !== 'number' || typeof it.max !== 'number' || it.max <= it.min)) return where + ': a slider needs numbers min < max'
-    if (it.type === 'select' && !Array.isArray(it.options) && !(it.bind && (it.bind.fixture || it.bind.css))) return where + ': a select needs options: [value, …] or [{ value, label }, …]'
+    if (it.type === 'select' && !Array.isArray(it.options) && !(it.bind && it.bind.css)) return where + ': a select needs options: [value, …] or [{ value, label }, …]'
     if (it.type === 'button' && typeof it.run !== 'string') return where + ': a button needs run: "code" (it runs as the person, with `values` in scope)'
     if (it.bind) {
-      const b = it.bind, k = Object.keys(b).filter(x => ['cssVar', 'style', 'store', 'fixture', 'css'].includes(x))
-      if (k.length !== 1) return where + ': bind is one of { cssVar: "--name", unit?, file? } | { style: { selector, prop }, unit?, file? } | { css: { on: {…}, off: {…} } } (toggle) or { css: { optionValue: {…} } } (select) | { store: key } | { fixture: { on?, off?, frames? } }'
+      const b = it.bind, k = Object.keys(b).filter(x => ['cssVar', 'style', 'css'].includes(x))
+      if (k.length !== 1) return where + ': bind is one of { cssVar: "--name", unit?, file? } | { style: { selector, prop }, unit?, file? } | { css: { on: {…}, off: {…} } } (toggle) or { css: { optionValue: {…} } } (select)'
       if (b.css) {
         if (!['toggle', 'select'].includes(it.type)) return where + ': bind.css is for a toggle ({ on, off }) or a select (one entry per option)'
         if (typeof b.css !== 'object' || !Object.keys(b.css).length) return where + ': bind.css maps each state to CSS: { on: { "--font": "…", "body": { "font-family": "…" } }, off: { … } }'
@@ -55,7 +71,7 @@ function checkPanel(spec) {
 }
 
 // ---------- the live preview: CSS variables and styles shown in every canvas frame, not yet in any file ----------
-const Preview = {
+export const Preview = {
   vars: {}, rules: {},              // name -> { value, panel }, 'selector|prop' -> { selector, prop, value, panel }
   payload() { return { vars: Object.fromEntries(Object.entries(this.vars).map(([k, v]) => [k, v.value])), rules: Object.values(this.rules).map(r => ({ selector: r.selector, prop: r.prop, value: r.value })) } },
   push() { const pv = this.payload(); for (const fh of FrameHosts) if (!fh.headless && fh.project === App.P) fh.push({ push: 'preview', preview: pv }); App.ev.emit('preview') },
@@ -65,7 +81,7 @@ const Preview = {
 const cssFiles = (P, ws) => P.list(ws).filter(p => p.endsWith('.css'))
 const fmtVal = (v, unit) => typeof v === 'number' ? String(Math.round(v * 1000) / 1000) + (unit || '') : String(v)
 
-const Panels = {
+export const Panels = {
   waiting: new Map(), runs: new Map(),
   list(P) { return P.meta.panels || (P.meta.panels = []) },
   get(P, id) { return this.list(P).find(p => p.id === id) || null },
@@ -74,7 +90,7 @@ const Panels = {
     const bad = checkPanel(spec); if (bad) throw Object.assign(new Error(bad), { kind: 'invalid' })
     let p = this.get(P, id)
     const values = {}
-    for (const it of spec.items) if (it.id && it.type !== 'button') values[it.id] = p && p.values && it.id in p.values ? p.values[it.id] : this.initial(P, it, o.ws || 'main')
+    for (const it of spec.items) if (it.id && it.type !== 'button') values[it.id] = p && p.values && it.id in p.values ? p.values[it.id] : this.initial(P, it, o.ws || 'draft')
     if (!p) { p = { id, created: now() }; this.list(P).push(p); while (this.list(P).length > 30) this.list(P).shift() }
     Object.assign(p, { spec: clone(spec), values, by: o.by || 'agent', thread: o.thread || p.thread || null, t: now(), pinned: o.pinned ?? p.pinned ?? false })
     P.saveMeta(); App.ev.emit('panels', id)
@@ -91,13 +107,10 @@ const Panels = {
         if (m) { const raw = m[1].trim(); if (it.type === 'slider') { const n = parseFloat(raw); if (!isNaN(n)) return n } else if (it.type !== 'toggle') return raw }
       }
     }
-    if (b.store !== undefined && P.meta.store && b.store in P.meta.store) return P.meta.store[b.store]
-    if (b.fixture && it.type === 'toggle') return false
     return it.type === 'slider' ? it.min : it.type === 'toggle' ? false : it.type === 'select' ? (this.options(P, it)[0] || {}).value ?? '' : it.type === 'color' ? '#000000' : ''
   },
   options(P, it) {
     if (it.bind && it.bind.css && !it.options) return Object.keys(it.bind.css).map(k => ({ value: k, label: k }))
-    if (it.bind && it.bind.fixture && !it.options) return [{ value: '', label: 'Live data' }, ...fixtureList(P, App.ws).map(f => ({ value: f.name, label: f.name }))]
     return (it.options || []).map(o => typeof o === 'object' ? { value: o.value, label: o.label ?? String(o.value) } : { value: o, label: String(o) })
   },
   // the person (or ui.set) changes a value: apply its binding
@@ -119,13 +132,6 @@ const Panels = {
     }
     else if (b && b.cssVar) { Preview.vars[b.cssVar] = { value: fmtVal(v, b.unit), panel: p.id, item: id }; Preview.push() }
     else if (b && b.style) { Preview.rules[b.style.selector + '|' + b.style.prop] = { selector: b.style.selector, prop: b.style.prop, value: fmtVal(v, b.unit), panel: p.id, item: id }; Preview.push() }
-    else if (b && b.store !== undefined) { P.meta.store[b.store] = clone(v); P.saveMeta(); for (const fh of FrameHosts) if (fh.project === P && !fh.fx) fh.push({ push: 'store', key: b.store, value: v }); App.ev.emit('store', b.store) }
-    else if (b && b.fixture) {
-      const name = it.type === 'toggle' ? (v ? b.fixture.on : (b.fixture.off || null)) : (v || null)
-      const targets = P.board().frames.filter(f => !b.fixture.frames || b.fixture.frames === 'all' || [].concat(b.fixture.frames).includes(f.id) || [].concat(b.fixture.frames).includes(f.route))
-      for (const f of targets) { f.fixture = name || undefined; for (const fh of App.canvas ? App.canvas.hostsFor(f.id) : []) fh.setFixture(f.fixture) }
-      P.saveMeta(); P.ev.emit('frames')
-    }
     p.log = (p.log || []).concat([{ t: now(), id, v, by }]).slice(-40)
     App.ev.emit('panelvalue', p.id, id)
   },
@@ -151,17 +157,16 @@ const Panels = {
       written.set(f, t)
     }
     const what = [...Object.entries(Preview.vars).filter(([, v]) => v.panel === p.id).map(([k, v]) => k + ': ' + v.value), ...Object.values(Preview.rules).filter(r => r.panel === p.id).map(r => r.selector + ' { ' + r.prop + ': ' + r.value + ' }')]
-    for (const [f, t] of written) P.write(f, t, { ws, who: 'you', note: 'kept from panel "' + (p.spec.title || p.id) + '": ' + what.join(', ') })
+    for (const [f, t] of written) P.write(f, t, ws)
     Preview.clear(p.id)
     return { files: [...written.keys()], what }
   },
   // a button: its code runs as the person, in the workspace being viewed, with the panel's values in scope
   async run(P, p, it) {
     const code = 'const values = ' + JSON.stringify(p.values) + '\n' + it.run
-    const ctx = { project: P, ws: App.ws, who: 'you', mode: 'auto' }
     this.runs.set(p.id, { label: it.label, busy: true }); App.ev.emit('panelvalue', p.id)
-    const r = await runEval(ctx, code, hostAPI(ctx), { sid: 'panel:' + P.id + ':' + p.id })
-    P.log({ kind: 'eval', who: 'you', ws: App.ws, ok: r.ok, note: 'panel "' + (p.spec.title || p.id) + '": ' + (it.label || 'button'), calls: [...new Set(r.calls || [])].slice(0, 12) })
+    const r = await runEval(makeContext(P, { ws: App.ws, who: 'you', mode: 'auto' }), code, { sid: 'panel:' + P.app + ':' + p.id })
+    P.log({ kind: 'eval', who: 'you', ref: App.ws, ok: r.ok, note: 'panel "' + (p.spec.title || p.id) + '": ' + (it.label || 'button'), calls: [...new Set(r.calls || [])].slice(0, 12) })
     this.runs.set(p.id, { label: it.label, ok: r.ok, out: r.ok ? (r.value === undefined ? 'done' : trunc(toYAML(r.value), 600)) : r.error.kind + ': ' + r.error.message, fx: effectsLine(r.effects) })
     App.ev.emit('panelvalue', p.id)
     return r
@@ -170,62 +175,54 @@ const Panels = {
 }
 
 // ---------- live sources for widgets ----------
-const Streams = {
-  issues: [], events: [], frames: [],
-  // what the person does on the canvas, and what the pages say: clicks, changes, navigation, loads, console
-  frame(fh, kind, detail, extra) {
-    const e = { t: now(), kind, frame: fh.route, w: fh.w, fid: fh.fid, ws: fh.ws, detail: String(detail || '').slice(0, 200), ...(extra || {}) }
-    this.frames.push(e); if (this.frames.length > 500) this.frames.shift()
-    App.ev.emit('frameevent', e)
-  },
-  // project events and frame events in one list, oldest first
-  merged(P, { kind, frame, since, limit = 50 } = {}) {
-    const kinds = kind ? [].concat(kind) : null
-    const proj = P.events.filter(e => (since == null || e.t > since) && (!kinds || kinds.includes(e.kind)) && !frame).map(e => ({ t: e.t, source: 'project', kind: e.kind, who: e.who === 'agent' ? 'claude' : e.who, ws: e.ws, path: e.path, table: e.table, detail: e.label || e.note || '', i: e.i }))
-    const fr = this.frames.filter(e => (since == null || e.t > since) && (!kinds || kinds.includes(e.kind)) && (!frame || e.frame === frame || e.fid === frame)).map(e => ({ t: e.t, source: 'frame', kind: e.kind, frame: e.frame + ' ' + e.w + 'px', detail: e.detail }))
-    return [...proj, ...fr].sort((a, b) => a.t - b.t).slice(-clamp(+limit || 50, 1, 500))
-  },
+// Widgets read the dev instance's data ({sql}, {docs}), the bench's own
+// records (check issues over time, scenario results, timeline events), what
+// happens in frames (frames/streams.js), a frame's DOM, or read-only code.
+const Sources = {
+  issues: [],
   init() {
     App.ev.on('health', () => { const v = App.health(), last = this.issues[this.issues.length - 1]; if (!last || last.v !== v || now() - last.t > 60000) { this.issues.push({ t: now(), v }); if (this.issues.length > 240) this.issues.shift() } })
-    App.ev.on('project', () => { this.issues = []; this.frames = [] })
+    App.ev.on('project', () => { this.issues = [] })
   },
-  // what changes make a source worth reading again
+  // what changes make a source worth reading again: [emitter, event] pairs
   triggers(from) {
-    if (from.data) return ['tables']
-    if (from.store !== undefined) return ['store']
-    if (from.issues) return ['health']
-    if (from.scenarios) return ['scenarios']
-    if (from.events) return ['events']
-    if (from.frameEvents) return ['frameevent']
-    if (from.frame) return ['frameready', 'tables', 'store']
-    return ['files', 'tables', 'scenarios', 'panelvalue']
+    if (from.sql || from.docs) return [[App.ev, 'events'], [Streams.ev, 'frameevent']]
+    if (from.issues) return [[App.ev, 'health']]
+    if (from.scenarios) return [[App.ev, 'scenarios'], [App.ev, 'files']]
+    if (from.events) return [[App.ev, 'events']]
+    if (from.frameEvents) return [[Streams.ev, 'frameevent']]
+    if (from.frame) return [[App.ev, 'frameready'], [Streams.ev, 'frameevent']]
+    return [[App.ev, 'files'], [App.ev, 'scenarios'], [App.ev, 'panelvalue']]
+  },
+  // rows: count, sum of a field, counts (or sums of `of`) per group, the last `limit`
+  shape(rows, from) {
+    if (from.where) rows = rows.filter(r => Object.entries(from.where).every(([k, v]) => r[k] === v))
+    if (from.count) return rows.length
+    if (from.sum) return rows.reduce((a, r) => a + (+r[from.sum] || 0), 0)
+    if (from.group) { const m = new Map(); for (const r of rows) { const k = String(r[from.group] ?? '—'); m.set(k, (m.get(k) || 0) + (from.of ? (+r[from.of] || 0) : 1)) } return [...m].map(([label, value]) => ({ label, value })) }
+    return from.limit ? rows.slice(-from.limit) : rows
+  },
+  perBucket(times, from) {
+    const per = from.per === 'hour' ? 3600000 : 60000, n = clamp(+from.buckets || 30, 5, 120), end = Math.ceil(now() / per) * per, out = Array.from({ length: n }, (_, k) => ({ t: end - (n - k) * per, value: 0 }))
+    for (const t of times) { const k = Math.floor((t - (end - n * per)) / per); if (k >= 0 && k < n) out[k].value++ }
+    return out
   },
   async read(P, from, p) {
-    if (from.data) {
-      let rows = P.rows(from.data, from.where, App.ws)
-      if (from.count) return rows.length
-      if (from.sum) return rows.reduce((a, r) => a + (+r[from.sum] || 0), 0)
-      if (from.group) { const m = new Map(); for (const r of rows) { const k = String(r[from.group] ?? '—'); m.set(k, (m.get(k) || 0) + (from.of ? (+r[from.of] || 0) : 1)) } return [...m].map(([label, value]) => ({ label, value })) }
-      if (from.limit) rows = rows.slice(-from.limit)
-      return rows
-    }
-    if (from.store !== undefined) { const v = (P.meta.store || {})[from.store]; return from.count ? (Array.isArray(v) ? v.reduce((a, x) => a + (+(x && x.qty) || 1), 0) : v ? Object.keys(v).length : 0) : v }
+    if (from.sql) return this.shape(await Slop.call('sql', { app: P.app, kind: from.kind || 'dev', query: from.sql, args: from.args || [] }), from)
+    if (from.docs) return this.shape((await Slop.call('docs', { app: P.app, kind: from.kind || 'dev', coll: from.docs })).map(d => ({ id: d.path.split('/').pop(), ...d.body })), from)
     if (from.issues) return this.issues.map(x => ({ t: x.t, value: x.v }))
     if (from.scenarios) { const l = scenarioList(P, App.ws); return from.count ? l.filter(s => s.last && s.last.ok).length + ' / ' + l.length : l.map(s => ({ scenario: s.name, result: s.error ? 'invalid' : !s.last ? 'not run' : s.last.ok ? 'passes' : 'fails at step ' + (s.last.failedAt + 1), when: s.last ? fmtAgo(s.last.t) : '' })) }
-    if (from.events) {
-      const per = from.per === 'hour' ? 3600000 : 60000, n = clamp(+from.buckets || 30, 5, 120), end = Math.ceil(now() / per) * per, out = Array.from({ length: n }, (_, k) => ({ t: end - (n - k) * per, value: 0 }))
-      for (const e of P.events) { if (from.events !== true && e.kind !== from.events) continue; const k = Math.floor((e.t - (end - n * per)) / per); if (k >= 0 && k < n) out[k].value++ }
-      return out
-    }
+    if (from.events) return this.perBucket(P.events.filter(e => from.events === true || e.kind === from.events).map(e => e.at), from)
     if (from.frameEvents) {
       const kinds = from.frameEvents === true ? null : [].concat(from.frameEvents)
-      const evs = this.frames.filter(e => (!kinds || kinds.includes(e.kind)) && (!from.frame || e.frame === from.frame || e.fid === from.frame))
+      const evs = Streams.frames.filter(e => (!kinds || kinds.includes(e.kind)) && (!from.frame || e.frame === from.frame || e.fid === from.frame))
       if (from.count) return evs.length
-      if (from.per) { const per = from.per === 'hour' ? 3600000 : 60000, n = clamp(+from.buckets || 30, 5, 120), end = Math.ceil(now() / per) * per, out = Array.from({ length: n }, (_, k) => ({ t: end - (n - k) * per, value: 0 })); for (const e of evs) { const k = Math.floor((e.t - (end - n * per)) / per); if (k >= 0 && k < n) out[k].value++ } return out }
+      if (from.per) return this.perBucket(evs.map(e => e.t), from)
       return evs.slice(-(from.limit || 20)).reverse().map(e => ({ when: fmtTime(e.t), frame: e.frame + ' ' + e.w, kind: e.kind, what: e.detail }))
     }
     if (from.frame) {
-      const fr = P.frame(from.frame) || P.board().frames.find(f => f.route === from.frame); if (!fr) throw new Error('no frame ' + from.frame)
+      const fr = P.frame(from.frame) || P.board().frames.find(f => f.route === from.frame)
+      if (!fr) throw new Error('no frame ' + from.frame)
       const { fh } = await layoutIn(P, fr, App.ws)
       if (from.count) return fh.call('count', [from.count], 3000)
       if (from.text) return fh.call('text', [from.text], 3000)
@@ -233,14 +230,14 @@ const Streams = {
     }
     if (from.eval || from.lib) {
       const code = 'const values = ' + JSON.stringify(p.values) + '\n' + (from.eval || 'return await lib.' + from.lib + '(...' + JSON.stringify(from.args || []) + ')')
-      const ctx = { project: P, ws: App.ws, who: 'you', mode: 'read' }
-      const r = await runEval(ctx, code, hostAPI(ctx), { sid: 'panelsrc:' + P.id + ':' + p.id })
+      const r = await runEval(makeContext(P, { ws: App.ws, who: 'you', mode: 'read' }), code, { sid: 'panelsrc:' + P.app + ':' + p.id })
       if (!r.ok) throw new Error(r.error.kind + ': ' + r.error.message)
       return r.value
     }
     throw new Error('unknown source')
   }
 }
+export const initSources = () => Sources.init()
 
 // ---------- charts: one axis, thin marks, a tooltip on hover ----------
 function chartEl(data, it) {
@@ -300,7 +297,7 @@ function chartEl(data, it) {
 const fmtNum = v => typeof v !== 'number' ? String(v) : Math.abs(v) >= 10000 ? (v / 1000).toFixed(Math.abs(v) >= 100000 ? 0 : 1) + 'k' : Number.isInteger(v) ? String(v) : String(Math.round(v * 100) / 100)
 
 // ---------- one panel, as a card ----------
-function panelEl(P, p, { inline } = {}) {
+export function panelEl(P, p, { inline } = {}) {
   const card = h('div.panel' + (inline ? '.inline' : ''), { 'data-panel': p.id })
   const base = [], wl = []            // the card's listeners; the widgets' listeners (renewed on each paint)
   const paint = () => {
@@ -320,7 +317,7 @@ function panelEl(P, p, { inline } = {}) {
     if (pv || waiting) card.appendChild(h('div.pfoot',
       pv ? [h('span.note', 'Previewing ' + plural(pv, 'value') + ' on the canvas, not in any file yet'), h('span.sp'),
         h('button.btn.sm', { on: { click: () => Preview.clear(p.id) } }, 'Reset'),
-        h('button.btn.sm.primary', { title: 'Write the values into the CSS' + (App.ws !== 'main' ? ' of this proposal' : ''), on: { click: () => { const r = Panels.keep(P, p); toast('Kept ' + r.what.join(', ') + ' in ' + r.files.join(', ')) } } }, 'Keep')] : h('span.sp'),
+        h('button.btn.sm.primary', { title: 'Write the values into the CSS' + (App.ws !== 'draft' ? ' of this proposal' : ''), on: { click: () => { const r = Panels.keep(P, p); toast('Kept ' + r.what.join(', ') + ' in ' + r.files.join(', ')) } } }, 'Keep')] : h('span.sp'),
       waiting ? [h('button.btn.sm', { on: { click: () => waiting.resolve(null) } }, 'Cancel'), h('button.btn.sm.primary', { on: { click: () => waiting.resolve(clone(p.values)) } }, waiting.label || 'Done')] : null))
   }
   const repaintSoon = debounce(() => { if (!card.contains(document.activeElement) || document.activeElement.type !== 'range') paint() }, 60)
@@ -346,17 +343,17 @@ function controlEl(P, p, it) {
   else if (it.type === 'text') input = h('input', { value: v ?? '', placeholder: it.placeholder || '', on: { change: e => set(e.target.value) } })
   else if (it.type === 'color') input = h('input', { type: 'color', value: /^#[0-9a-f]{6}$/i.test(v) ? v : '#000000', on: { input: e => set(e.target.value) } })
   else if (it.type === 'button') return h('div.prow.btnrow', h('button.btn.sm', { disabled: !!(Panels.runs.get(p.id) || {}).busy, title: it.description || '', on: { click: () => Panels.run(P, p, it) } }, it.label || 'Run'), it.description ? h('span.note', it.description) : null)
-  const bind = it.bind ? h('span.pb', { title: 'What this control changes' }, it.bind.css ? (() => { const m = it.bind.css[it.type === 'toggle' ? (v ? 'on' : 'off') : String(v)] || {}, n = Object.entries(m).reduce((a, [k, x]) => a + (k.startsWith('--') ? 1 : Object.keys(x).length), 0); return 'css: ' + plural(n, 'value') }) () : it.bind.cssVar ? it.bind.cssVar : it.bind.style ? it.bind.style.selector + ' ' + it.bind.style.prop : it.bind.store !== undefined ? 'store: ' + it.bind.store : it.bind.fixture ? 'fixture' : '') : null
+  const bind = it.bind ? h('span.pb', { title: 'What this control changes' }, it.bind.css ? (() => { const m = it.bind.css[it.type === 'toggle' ? (v ? 'on' : 'off') : String(v)] || {}, n = Object.entries(m).reduce((a, [k, x]) => a + (k.startsWith('--') ? 1 : Object.keys(x).length), 0); return 'css: ' + plural(n, 'value') }) () : it.bind.cssVar ? it.bind.cssVar : it.bind.style ? it.bind.style.selector + ' ' + it.bind.style.prop : '') : null
   return h('div.prow', label, input, out, bind)
 }
 function widgetEl(P, p, it, offs) {   // offs collects the listeners, removed when the card repaints
   const box = h('div.pw' + (it.type === 'value' ? '.val' : ''))
-  if (it.type === 'text' && !it.from) { box.appendChild(renderMarkdown(String(it.text || it.markdown || ''), f => P.read(f, 'main') !== null)); return box }
+  if (it.type === 'text' && !it.from) { box.appendChild(renderMarkdown(String(it.text || it.markdown || ''), f => P.read(f, 'draft') !== null)); return box }
   let seq = 0
   const load = async () => {
     const my = ++seq
     let v, err
-    try { v = await Streams.read(P, it.from, p) } catch (e) { err = e.message }
+    try { v = await Sources.read(P, it.from, p) } catch (e) { err = e.message }
     if (my !== seq) return
     clear(box)
     if (it.label && it.type !== 'value') box.appendChild(h('div.pl', it.label))
@@ -371,17 +368,17 @@ function widgetEl(P, p, it, offs) {   // offs collects the listeners, removed wh
       if (Array.isArray(v) && v.length > rows.length) box.appendChild(h('div.note', '… ' + (v.length - rows.length) + ' more'))
     }
     else if (it.type === 'list') box.appendChild(h('ul.plist', (Array.isArray(v) ? v : [v]).slice(0, it.limit || 30).map(x => h('li', x && typeof x === 'object' ? (x.label ?? x.name ?? Object.values(x).filter(v => v != null && v !== '' && typeof v !== 'object').join(' · ')) + ((x.label ?? x.name) != null && x.value !== undefined ? ': ' + x.value : '') : String(x)))))
-    else if (it.type === 'text') box.appendChild(renderMarkdown(String(v ?? ''), f => P.read(f, 'main') !== null))
+    else if (it.type === 'text') box.appendChild(renderMarkdown(String(v ?? ''), f => P.read(f, 'draft') !== null))
   }
   const soon = debounce(load, it.from.eval || it.from.lib ? 400 : 150)
-  for (const t of Streams.triggers(it.from)) offs.push(App.ev.on(t, (...a) => { if (t === 'panelvalue' && a[0] !== p.id) return; soon() }))
+  for (const [em, t] of Sources.triggers(it.from)) offs.push(em.on(t, (...a) => { if (t === 'panelvalue' && a[0] !== p.id) return; soon() }))
   offs.push(App.ev.on('ws', soon))
   box.appendChild(h('p.note', '…')); load()
   return box
 }
 
 // ---------- the Panels tab: pinned panels, and panels made from the Eval panel ----------
-registerView('panels', {
+export const PANELS = {
   title: 'Panels', sub: 'controls and live values',
   make() {
     const body = h('div.scroll'), el = h('div', body)
@@ -390,11 +387,64 @@ registerView('panels', {
       const list = Panels.list(P).filter(p => p.pinned)
       body.appendChild(h('div.toolbar', h('b', 'Panels'), h('span.note', 'pinned from threads, or made in the Eval panel'), h('span.sp'),
         Preview.count() ? [h('span.note', 'Previewing ' + plural(Preview.count(), 'value')), h('button.btn.sm', { on: { click: () => Preview.clear() } }, 'Reset all')] : null))
-      if (!list.length) body.appendChild(h('div.empty', h('p', 'No pinned panels.'), h('p.note', 'Ask Claude for one, for example: "give me sliders for the menu\'s font size and spacing, a toggle for the empty-menu fixture, and a chart of open orders by status". Panels show in the reply; pin one here from its ⋯ menu.')))
+      if (!list.length) body.appendChild(h('div.empty', h('p', 'No pinned panels.'), h('p.note', 'Ask Claude for one, for example: "give me sliders for the menu\'s font size and spacing, a dark-theme toggle, and a chart of open orders by status". Panels show in the reply; pin one here from its ⋯ menu.')))
       for (const p of list.slice().reverse()) body.appendChild(panelEl(P, p))
     }
     const later = debounce(() => { if (Dock.visible('panels')) paint() }, 80)
     App.ev.on('panels', later); App.ev.on('project', () => { Preview.vars = {}; Preview.rules = {}; later() })
     return { el, show: paint }
   }
-})
+}
+
+// ---------- the panel calls of the host API (added to it by the shell) ----------
+const missing = msg => Object.assign(new Error(msg), { kind: 'missing' })
+export const PANEL_API = {
+  'ui.panel': {
+    sig: 'id, spec', doc: 'creates or updates a panel (same id = same panel; values the person set are kept), shown in your reply',
+    run: (ctx, id, spec) => {
+      if (!/^[\w-]{1,40}$/.test(id)) throw Object.assign(new Error('panel ids are words: letters, digits, _ or -'), { kind: 'invalid' })
+      const p = Panels.upsert(ctx.project, id, spec, { by: ctx.who === 'agent' ? 'agent' : 'you', thread: ctx.thread, ws: ctx.ws, pinned: ctx.onPanel ? undefined : true })
+      if (ctx.onPanel) ctx.onPanel(id); else setTimeout(() => Dock.open('panels'), 50)
+      return { id, shown: ctx.onPanel ? 'in your reply' : 'in the Panels tab', values: p.values }
+    }
+  },
+  'ui.values': {
+    sig: 'id', doc: 'current values, and what the person changed',
+    run: (ctx, id) => {
+      const p = Panels.get(ctx.project, id)
+      if (!p) throw missing('no panel ' + id + '. Panels: ' + Panels.list(ctx.project).map(x => x.id).join(', '))
+      return { ...p.values, changed: (p.log || []).filter(l => l.by === 'you').slice(-8).map(l => l.id + ' → ' + JSON.stringify(l.v)) }
+    }
+  },
+  'ui.set': {
+    sig: 'id, controlId, value',
+    run: (ctx, id, cid, value) => { const p = Panels.get(ctx.project, id); if (!p) throw missing('no panel ' + id); Panels.set(ctx.project, p, cid, value, { by: ctx.who }); return p.values }
+  },
+  'ui.ask': {
+    sig: 'id, spec?, {label}?', doc: 'shows the panel and waits for the person to press Done: its values (Cancel throws kind approval)', long: true,
+    run: async (ctx, id, spec, o = {}) => {
+      if (spec) PANEL_API['ui.panel'].run(ctx, id, spec)
+      else if (!Panels.get(ctx.project, id)) throw missing('no panel ' + id + ': pass a spec')
+      else if (ctx.onPanel) ctx.onPanel(id)
+      const v = await new Promise(resolve => { Panels.waiting.set(id, { resolve, label: o.label }); App.ev.emit('ask', id); if (ctx.signal) ctx.signal.addEventListener('abort', () => resolve(null)) })
+      Panels.waiting.delete(id); App.ev.emit('ask', id)
+      if (!v) throw Object.assign(new Error('the person cancelled the panel'), { kind: 'approval' })
+      return v
+    }
+  },
+  'ui.panels': { sig: '', run: ctx => Panels.list(ctx.project).map(p => ({ id: p.id, title: p.spec.title, values: p.values, pinned: p.pinned, items: p.spec.items.map(i => i.id ? i.type + ' ' + i.id : i.type) })) },
+  'ui.closePanel': { sig: 'id', run: (ctx, id) => { Panels.remove(ctx.project, id); return true } },
+}
+// what the agent reads about panels, under the ui calls
+export const PANEL_NOTE = `Panels: small UIs you show in your reply, to let the person tune things live or watch numbers. Keep one small (2–6 items).
+  controls: { type: 'slider', id, label, min, max, step?, value?, unit? } | { type: 'toggle', id, label } | { type: 'select', id, options: [v | {value, label}] } | { type: 'text', id } | { type: 'color', id }
+    bind (optional) previews a control live in every canvas frame; the person presses Keep to write it into the CSS:
+      { cssVar: '--menu-scale', unit?: 'px', file?: 'styles.css' } | { style: { selector: '.cats', prop: 'gap' }, unit: 'px' }
+      { css: { on: { '--font': '"Courier New", monospace', 'body': { background: '#000' } }, off: { … } } }: a toggle (or a select, one entry per option value) switching several CSS values at once
+    { type: 'button', label, run: "code" } runs as the person, in the workspace being viewed, with \`values\` in scope
+  widgets: { type: 'value' | 'chart' | 'table' | 'list' | 'text', label?, from } (charts: kind: 'line' | 'bar'; a text widget may have markdown instead of from)
+    from: { sql: "SELECT …", args?, kind?: 'dev' | 'test', where?, count?, sum?: field, group?: field, of?: field } | { docs: coll, the same options } (the instance's data)
+          | { issues: true } | { scenarios: true, count? } | { events: kind | true, per?: 'minute' | 'hour' } | { frameEvents: 'click' | 'change' | 'nav' | 'load' | 'console' | 'error' | true, frame?, count?, per? }
+          | { frame: frameIdOrRoute, count | text: selector } | { eval: "read-only code; \`values\` in scope" } | { lib: name, args? }
+    widgets refresh when what they read changes (an eval source also when a control moves)
+  Offer a panel when the person is tuning something visual (sliders bound to CSS variables), or asks to watch numbers.`

@@ -1,9 +1,25 @@
-// ---------- canvas: boards of live frames, pan and zoom, flows, pins, proposal rows (shop-next's app side) ----------
-import { clamp, debounce, fmtAgo, fmtTime, now, plural, uid } from './lib/util.js';
-import { clear, h, popMenu, promptBox, put, svgEl, toast } from './lib/dom.js';
+// ui/canvas.js — the canvas: frames of the app's pages, live, on a board
+// you pan and zoom; arrows for links between pages; pins; comparing a
+// proposal with draft (one above the other) or every open proposal at once
+// (the matrix).
+//
+// A frame shows a workspace on the instance that runs it: draft on the
+// person's dev instance, a proposal on their prop instance (frames/host.js).
+//
+// Public API: CANVAS (a view); it sets App.canvas: {sync, paintAll, hostFor,
+// hostsFor, focusFrame, fit, newPin, showPin, compareWs, reset}.
+import { App } from './app.js';
+import { Dock } from './dock.js';
+import { FrameHost, showing } from '../frames/host.js';
+import { Snaps, layoutDiff, layoutIn } from '../frames/layout.js';
+import { clamp, debounce, fmtAgo, fmtTime, now, plural, uid } from '../lib/util.js';
+import { clear, h, popMenu, promptBox, put, svgEl, toast } from '../lib/dom.js';
+import { compareModal } from './snaps.js';
+import { saveRecording } from './scenarios.js';
+import { stepLabel } from '../core/scenario.js';
 
 const SIZES = [{ w: 375, h: 720, n: 'Phone' }, { w: 768, h: 900, n: 'Tablet' }, { w: 1280, h: 800, n: 'Desktop' }]
-registerView('canvas', {
+export const CANVAS = {
   title: 'Canvas', sub: 'live frames',
   badge: () => { const n = App.health(); return n ? h('span.count.bad', String(n)) : null },
   make() {
@@ -13,9 +29,9 @@ registerView('canvas', {
     const cv = h('div.cv', world, hud, pop)
     world.appendChild(flows)
     const zoomLbl = h('button.btn.sm', { title: 'Reset to 100%', on: { click: () => zoomTo(1) } }, '100%')
-    const cmpBtn = h('button.btn.sm', { title: 'Show main and the proposal one above the other', on: { click: () => { C.compare = !C.compare; sync() } } }, 'Compare')
+    const cmpBtn = h('button.btn.sm', { title: 'Show draft and the proposal one above the other', on: { click: () => { C.compare = !C.compare; sync() } } }, 'Compare')
     const mxRoute = h('select.sel', { title: 'Page shown in every cell of the matrix', style: { height: '24px', fontSize: '11px' }, hidden: true, on: { change: () => { C.mxRoute = mxRoute.value; sync() } } })
-    const mxBtn = h('button.btn.sm', { title: 'Matrix: one row per proposal (and main), one column per viewport', on: { click: () => { C.matrix = !C.matrix; C.fitted = false; sync() } } }, 'Matrix')
+    const mxBtn = h('button.btn.sm', { title: 'Matrix: one row per proposal (and draft), one column per viewport', on: { click: () => { C.matrix = !C.matrix; C.fitted = false; sync() } } }, 'Matrix')
     const flowBtn = h('button.btn.sm.on', { title: 'Arrows for links between pages', on: { click: () => { C.flows = !C.flows; flowBtn.classList.toggle('on', C.flows); drawFlows() } } }, 'Flows')
     const bar = h('div.toolbar',
       h('div.rel', h('button.btn.sm', { on: { click: e => addFrameMenu(e.currentTarget) } }, '+ Frame')),
@@ -68,21 +84,21 @@ registerView('canvas', {
     // ---- frames ----
     function frameView(fr, role, ws) {
       const P = App.P
-      const host = new FrameHost({ project: P, route: fr.route, w: fr.w, h: fr.h, ws, fid: fr.id + (role === 'p' ? ':p' : ''), fixture: fr.fixture || null, at: role === 'a' ? App.playhead : null })
+      const host = new FrameHost({ project: P, route: fr.route, w: fr.w, h: fr.h, ...showing(ws), fid: fr.id + (role === 'p' ? ':p' : '') })
       const routeSel = h('select.route', { title: 'Page in this frame', on: { change: () => { if (host.rec) host.recStep({ go: routeSel.value }); else if (role === 'a') { fr.route = routeSel.value; App.P.saveMeta() } host.navigate(routeSel.value) } } })
       const back = h('button.fact', { title: 'Back to this frame\'s page', hidden: true, on: { click: () => host.navigate(fr.route) } }, '↩')
       const meta = h('span.meta'), status = h('div.fstatus', { hidden: true }), flabel = h('b.flabel', { title: 'Double-click the header to rename' })
-      const fxTag = h('span.tag.fx', { hidden: true, title: 'This frame runs against a fixture, not the live data', on: { click: e => frameMenu(e.currentTarget, v) } })
+      const recTag = h('span.tag.fx', { hidden: true, title: 'Recording a scenario' }, 'recording')
       const recBar = h('div.recbar', { hidden: true })
       const v = { fr, role, host, el: null, pos: () => role === 'p' ? { x: v.fr.x, y: v.fr.y + C.rowH + 110 } : { x: v.fr.x, y: v.fr.y } }
       const head = h('div.fh', flabel, routeSel, meta, h('span.sp'),
-        role === 'p' ? h('span.tag.ws', 'proposal') : null, fxTag, back,
+        role === 'p' ? h('span.tag.ws', 'proposal') : null, recTag, back,
         role === 'a' ? h('div.rel', h('button.fact', { title: 'Viewport size', on: { click: e => sizeMenu(e.currentTarget, fr) } }, '⇔')) : null,
-        role !== 'm' ? h('button.fact', { title: 'Data, snapshots, recording', on: { click: e => frameMenu(e.currentTarget, v) } }, '⋯') : null,
+        role !== 'm' ? h('button.fact', { title: 'Snapshots, comparisons, recording', on: { click: e => frameMenu(e.currentTarget, v) } }, '⋯') : null,
         h('button.fact', { title: 'Reload', on: { click: () => host.load({ keepState: false }) } }, '↻'),
         role === 'a' ? h('button.fact', { title: 'Close frame', on: { click: () => App.P.removeFrame(fr.id) } }, '×') : null)
       const body = h('div.fb', host.el, status, recBar)
-      v.el = h('div.frm' + (ws !== 'main' ? '.prop' : '') + (role === 'm' ? '.mx' : ''), head, body)
+      v.el = h('div.frm' + (ws !== 'draft' ? '.prop' : '') + (role === 'm' ? '.mx' : ''), head, body)
       v.scaleHead = () => { const k = clamp(1 / C.z, 0.6, 6); head.style.transform = 'scale(' + k + ')'; head.style.width = fr.w / k + 'px' }
       v.paint = () => {
         const p = v.pos(); Object.assign(v.el.style, { left: p.x + 'px', top: p.y + 'px', width: v.fr.w + 'px' })
@@ -93,8 +109,7 @@ registerView('canvas', {
         flabel.textContent = v.fr.label || ''; flabel.hidden = !v.fr.label; routeSel.classList.toggle('sub', !!fr.label)
         meta.textContent = v.fr.w + '×' + v.fr.h + (host.errors ? ' · ' + plural(host.errors, 'error') : '') + (host.issues.length ? ' · ' + plural(host.issues.length, 'issue') : '')
         meta.style.color = host.errors || host.issues.length ? 'var(--accent)' : ''
-        v.el.classList.toggle('past', host.at != null)
-        fxTag.hidden = !host.fixture && !host.rec; fxTag.textContent = host.rec ? 'recording' : host.fixture ? 'fixture: ' + host.fixture : ''; fxTag.title = host.rec ? 'Recording on a copy of the data' : 'Runs on fixtures/' + host.fixture + '.json instead of the live data (click to change)'
+        recTag.hidden = !host.rec
         recBar.hidden = !host.rec
         if (host.rec) put(clear(recBar), h('span.dot'), h('b', 'Recording'), h('span', plural(host.rec.steps.length, 'step') + (host.rec.steps.length ? ' · last: ' + stepLabel(host.rec.steps[host.rec.steps.length - 1]).slice(0, 48) : ' · click and type in Play mode; pick an element in Select mode to check its text')), h('span.sp'),
           h('button.btn.sm', { on: { click: async () => { await host.stopRecording(); v.paint() } } }, 'Discard'),
@@ -124,31 +139,31 @@ registerView('canvas', {
     }
     function layoutRows() { const fs = App.P && !C.matrix ? App.P.board().frames : []; C.rowH = fs.reduce((m, f) => Math.max(m, f.y + f.h), 0); for (const v of C.views.values()) v.paint(); drawFlows() }
     function sync() {
-      const P = App.P, props = P ? P.openOverlays() : []
+      const P = App.P, props = P ? P.openProposals().map(p => ({ id: p.ref, title: p.title })) : []
       mxBtn.hidden = !P || !props.length; if (mxBtn.hidden) C.matrix = false
       mxBtn.classList.toggle('on', !!C.matrix); mxRoute.hidden = !C.matrix
-      cmpBtn.hidden = !P || App.ws === 'main' || C.matrix; cmpBtn.classList.toggle('on', C.compare && App.ws !== 'main')
+      cmpBtn.hidden = !P || App.ws === 'draft' || C.matrix; cmpBtn.classList.toggle('on', C.compare && App.ws !== 'draft')
       const want = new Map()
       if (P && C.matrix) {
-        // one row per workspace (main, then each open proposal), one column per viewport the board uses
-        const routes = [...new Set([...P.list('main'), ...props.flatMap(o => P.list(o.id))].filter(x => /\.html?$/.test(x)))]
+        // one row per workspace (draft, then each open proposal), one column per viewport the board uses
+        const routes = [...new Set([...P.list('draft'), ...props.flatMap(o => P.list(o.id))].filter(x => /\.html?$/.test(x)))]
         if (!routes.includes(C.mxRoute)) C.mxRoute = (App.sel && routes.includes(App.sel.route) && App.sel.route) || (P.board().frames[0] || {}).route || routes[0]
         clear(mxRoute); for (const r of routes) mxRoute.appendChild(h('option', { value: r, selected: r === C.mxRoute }, r))
         const sizes = [...new Map(P.board().frames.map(f => [f.w + 'x' + f.h, { w: f.w, h: f.h }])).values()].sort((a, b) => a.w - b.w)
         if (!sizes.length) sizes.push({ w: 375, h: 720 })
         const rowH = Math.max(...sizes.map(s => s.h)) + 120
-        ;[{ id: 'main', title: 'main' }, ...props].forEach((o, r) => {
+        ;[{ id: 'draft', title: 'draft' }, ...props].forEach((o, r) => {
           let x = 0
           for (const sz of sizes) {
             const key = 'mx|' + o.id + '|' + sz.w + 'x' + sz.h + '|' + C.mxRoute
-            want.set(key, { role: 'm', ws: o.id, fr: { id: 'mx:' + o.id + ':' + sz.w + 'x' + sz.h, route: C.mxRoute, w: sz.w, h: sz.h, x, y: r * rowH, label: (o.id === 'main' ? 'main' : o.title) + ' · ' + sz.w + 'px' } })
+            want.set(key, { role: 'm', ws: o.id, fr: { id: 'mx:' + o.id + ':' + sz.w + 'x' + sz.h, route: C.mxRoute, w: sz.w, h: sz.h, x, y: r * rowH, label: o.title + ' · ' + sz.w + 'px' } })
             x += sz.w + 60
           }
         })
       } else if (P) for (const fr of P.board().frames) {
-        const past = App.playhead != null
-        want.set(fr.id + '|a', { fr, role: 'a', ws: past || (C.compare && App.ws !== 'main') ? 'main' : App.ws })
-        if (!past && C.compare && App.ws !== 'main') want.set(fr.id + '|p', { fr, role: 'p', ws: App.ws })
+        const cmp = C.compare && App.ws !== 'draft'
+        want.set(fr.id + '|a', { fr, role: 'a', ws: cmp ? 'draft' : App.ws })
+        if (cmp) want.set(fr.id + '|p', { fr, role: 'p', ws: App.ws })
       }
       for (const [k, v] of C.views) {
         const w = want.get(k)
@@ -177,30 +192,9 @@ registerView('canvas', {
         }
       }
     }
-    // move every primary frame to the playhead; while a step is loading, only the latest one is kept
-    let phBusy = false, phNext = undefined
-    async function playhead() {
-      if (phBusy) { phNext = App.playhead; return }
-      phBusy = true
-      try {
-        const at = App.playhead
-        await Promise.all([...C.views.values()].filter(v => v.role === 'a' && v.host.at !== at).map(v => { v.host.at = at; v.host.fx = null; v.host.saved = null; return v.host.load({ keepState: false }).then(() => v.paint()) }))
-      } finally { phBusy = false }
-      hudPaint()
-      if (phNext !== undefined) { phNext = undefined; playhead() }
-    }
-    C.playhead = playhead
     function hudPaint() {
       clear(hud)
-      if (App.playhead != null && App.P) {
-        const P = App.P, e = P.events[App.playhead] || {}, pe = App.pageEvents(P), k = pe.findIndex(x => x.i >= App.playhead)
-        const step = d => { const list = App.pageEvents(P), j = d < 0 ? [...list].reverse().find(x => x.i < App.playhead) : list.find(x => x.i > App.playhead); if (j) App.setPlayhead(j.i); else if (d > 0) App.setPlayhead(null) }
-        hud.append(h('span.chip.on.past', 'as of ' + fmtTime(e.t)), h('span.note', (e.kind === 'write' ? (e.created ? 'created ' : 'wrote ') + e.path : e.kind === 'remove' ? 'removed ' + e.path : e.label || e.note || e.kind) + (e.who === 'agent' ? ' · Claude' : '')),
-          h('button.btn.sm', { title: 'Previous change to the pages', on: { click: () => step(-1) } }, '◀'), h('button.btn.sm', { title: 'Next change to the pages', on: { click: () => step(1) } }, '▶'),
-          h('button.btn.sm.primary', { title: 'Back to the pages as they are now', on: { click: () => App.setPlayhead(null) } }, 'Now'))
-        return
-      }
-      hud.append(h('span.chip.on', App.mode), h('span.chip', App.ws === 'main' ? 'main' : 'proposal: ' + ((App.P && App.P.overlays.get(App.ws)) || {}).title))
+      hud.append(h('span.chip.on', App.mode), h('span.chip', App.ws === 'draft' ? 'draft' : 'proposal: ' + (App.proposal() || {}).title))
       if (App.mode === 'select') hud.append(h('span.note', 'click to select · double-click text to edit'))
       if (App.mode === 'comment') hud.append(h('span.note', 'click to drop a pin'))
     }
@@ -210,40 +204,31 @@ registerView('canvas', {
       for (const r of routes) { items.push({ group: r }); for (const s of SIZES) items.push({ label: s.n + ' ' + s.w + '×' + s.h, run: () => { const f = P.addFrame({ route: r, w: s.w, h: s.h }); setTimeout(() => focusFrame(f.id), 50) } }) }
       popMenu(btn, items)
     }
-    // the frame's ⋯ menu: which data it runs against, snapshots and comparisons, recording a scenario
+    // the frame's ⋯ menu: snapshots and comparisons, recording a scenario
     function frameMenu(btn, v) {
-      const P = App.P, host = v.host, fr = v.fr, fxs = fixtureList(P, host.ws)
+      const P = App.P, host = v.host, fr = v.fr
       const snaps = Snaps.list(P).filter(s => s.route === host.route && s.w === fr.w).slice(-6).reverse()
-      const items = [{ group: 'Data' },
-        { label: 'Live data', sub: host.ws === 'main' ? 'main' : 'this proposal', on: !host.fixture, disabled: !!host.rec, run: () => setFx(v, null) },
-        ...fxs.map(x => ({ label: 'Fixture: ' + x.name, sub: x.error ? 'invalid JSON' : [x.tables.join(', '), x.clock ? 'clock ' + x.clock : ''].filter(Boolean).join(' · '), on: host.fixture === x.name, disabled: !!x.error || !!host.rec, run: () => setFx(v, x.name) })),
-        host.fixture ? { label: 'Reset fixture data', sub: 'undo what the page changed', run: () => host.resetData() } : null,
-        { label: 'New fixture from live data…', run: async () => { const n = await promptBox('New fixture', 'Saves a copy of the current tables as fixtures/<name>.json; edit it to make edge cases (empty, long names, many rows).', 'sample'); if (!n) return
-          const tables = {}; for (const [k, t] of P.tablesIn(host.ws)) tables[k] = t.rows
-          const name = n.replace(/[^\w-]/g, '-'); P.write(fixturePath(name), JSON.stringify({ description: '', tables, clock: null }, null, 2) + '\n', { ws: host.ws, who: 'you', note: 'new fixture' }); setFx(v, name); App.code && App.code.open(fixturePath(name)) } },
-        { hr: true }, { group: 'Snapshots' },
-        { label: 'Take snapshot', sub: 'a frozen copy of the page and its layout', run: async () => { const m = await Snaps.take(P, host, { label: (fr.label || host.route) + ' ' + fmtTime(now()) }); if (m) toast('Snapshot of ' + host.route + ' kept') } },
-        ...snaps.map(s => ({ label: 'Compare with ' + (s.label || fmtTime(s.t)), sub: s.ws !== host.ws ? s.ws === 'main' ? 'main' : 'proposal' : s.note || '', run: () => compareWithSnap(v, s) })),
-        App.ws !== 'main' ? { label: 'Compare main with this proposal', sub: 'layout differences on ' + host.route, run: () => compareWs(v, 'main', App.ws) } : null,
+      const items = [{ group: 'Snapshots' },
+        { label: 'Take snapshot', sub: 'a frozen copy of the page and its layout', run: async () => { await Snaps.take(P, host, { label: (fr.label || host.route) + ' ' + fmtTime(now()) }); toast('Snapshot of ' + host.route + ' kept') } },
+        ...snaps.map(s => ({ label: 'Compare with ' + (s.label || fmtTime(s.t)), sub: s.ws !== host.ws ? (s.ws === 'draft' ? 'draft' : 'proposal') : s.note || '', run: () => compareWithSnap(v, s) })),
+        App.ws !== 'draft' ? { label: 'Compare draft with this proposal', sub: 'layout differences on ' + host.route, run: () => compareWs(v, 'draft', App.ws) } : null,
         { hr: true }, { group: 'Scenarios' },
         host.rec ? { label: 'Stop recording…', run: async () => { const r = await host.stopRecording(); v.paint(); await saveRecording(P, r, host.ws) } }
-          : { label: 'Record a scenario', sub: 'on a copy of the data; replays with Run', disabled: role(v) === 'm', run: async () => { if (App.mode !== 'play') App.setMode('play'); await host.startRecording(fr); v.paint() } }]
-      popMenu(btn, items, { right: true })
+          : { label: 'Record a scenario', sub: 'click and type in Play mode; saved as scenarios/<name>.json', disabled: v.role === 'm', run: async () => { if (App.mode !== 'play') App.setMode('play'); await host.startRecording(fr); v.paint() } }]
+      popMenu(btn, items.filter(Boolean), { right: true })
     }
-    const role = v => v.role
-    function setFx(v, name) { v.fr.fixture = name || undefined; App.P.saveMeta(); for (const o of C.views.values()) if (o.fr === v.fr) o.host.setFixture(name).then(() => o.paint()); App.P.log({ kind: 'canvas', ws: 'main', who: 'you', note: (v.fr.label || v.fr.route) + (name ? ' runs on fixture ' + name : ' runs on live data') }) }
     async function compareWithSnap(v, s) {
-      const P = App.P, doc = await Snaps.load(P, s.id); if (!doc) return toast('That snapshot is gone')
-      const cur = await Snaps.capture(v.host), diff = layoutDiff(doc.layout, cur.layout)
-      compareModal(P, v.host.route + ': ' + (s.label || fmtTime(s.t)) + ' → now', { label: s.label || fmtTime(s.t), doc, meta: s }, { label: 'now', doc: cur, meta: cur }, diff)
+      const P = App.P, doc = await Snaps.load(P, s.id)
+      const cur = await Snaps.capture(v.host), diff = layoutDiff(doc.layout, cur.doc.layout)
+      compareModal(v.host.route + ': ' + (s.label || fmtTime(s.t)) + ' → now', { label: s.label || fmtTime(s.t), doc, meta: s }, { label: 'now', doc: cur.doc, meta: cur }, diff)
     }
     async function compareWs(v, a, b) {
       const P = App.P, fr = { ...v.fr, route: v.host.route }
       try {
         const A = (await layoutIn(P, fr, a, { headless: true })).fh, B = (await layoutIn(P, fr, b, { headless: true })).fh
         const [sa, sb] = [await Snaps.capture(A), await Snaps.capture(B)]
-        const title = t => t === 'main' ? 'main' : 'proposal: ' + ((P.overlays.get(t) || {}).title || t)
-        compareModal(P, v.host.route + ' ' + fr.w + 'px: ' + title(a) + ' → ' + title(b), { label: title(a), doc: sa, meta: sa }, { label: title(b), doc: sb, meta: sb }, layoutDiff(sa.layout, sb.layout))
+        const title = t => t === 'draft' ? 'draft' : 'proposal: ' + ((P.proposals.get(t) || {}).title || t)
+        compareModal(v.host.route + ' ' + fr.w + 'px: ' + title(a) + ' → ' + title(b), { label: title(a), doc: sa.doc, meta: sa }, { label: title(b), doc: sb.doc, meta: sb }, layoutDiff(sa.doc.layout, sb.doc.layout))
       } catch (e) { toast('Could not compare: ' + e.message) }
     }
     C.compareWs = (fid, a, b) => { const v = [...C.views.values()].find(x => x.fr.id === fid && x.role === 'a'); if (v) return compareWs(v, a, b) }
@@ -272,8 +257,8 @@ registerView('canvas', {
       const save = () => {
         const text = ta.value.trim(); if (!text) return closePop()
         const P = App.P, n = (P.meta.pins || []).reduce((a, p) => Math.max(a, p.n), 0) + 1
-        P.meta.pins.push({ id: 'pin' + uid(), n, route: host.route, src: m.info.src, selector: m.info.selector, rx: +m.rx.toFixed(3), ry: +m.ry.toFixed(3), text, by: 'you', t: now(), resolved: false })
-        P.saveMeta(); P.log({ kind: 'pin', who: 'you', ws: 'main', note: '#' + n + ' ' + text.slice(0, 100), path: m.info.src.split(':')[0] }); App.ev.emit('pins'); closePop()
+        ;(P.meta.pins = P.meta.pins || []).push({ id: 'pin' + uid(), n, route: host.route, src: m.info.src, selector: m.info.selector, rx: +m.rx.toFixed(3), ry: +m.ry.toFixed(3), text, by: 'you', t: now(), resolved: false })
+        P.saveMeta(); P.log({ kind: 'pin', who: 'you', note: '#' + n + ' ' + text.slice(0, 100), paths: m.info.src ? [m.info.src.split(':')[0]] : undefined }); App.ev.emit('pins'); closePop()
       }
       ta.addEventListener('keydown', e => { if (e.key === 'Enter' && (e.metaKey || e.ctrlKey)) save(); if (e.key === 'Escape') closePop() })
       pop.appendChild(h('div.pinpop', h('b', 'Pin on ' + (m.info.tag || 'element') + ' '), h('span.note', m.info.src || host.route), ta,
@@ -301,4 +286,4 @@ registerView('canvas', {
     App.canvas = C
     return { el, show: () => { if (!C.fitted) sync() } }
   }
-})
+}

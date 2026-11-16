@@ -1,5 +1,5 @@
-/* the bench, built from web/bench: do not edit. source sha256:e6570f7b8783df1523240924169cab96f86d4f146603443bf7c81d95c4c21139 */
-// slop's dev probe (SLOP3-022): Sitebench's PROBE from web/bench/src/05a-probe.js,
+/* the bench, built from web/bench: do not edit. source sha256:1305c0274d1edfee045c54e2c6e5961281ae98d1436304f1e43b266d53777130 */
+// slop's dev probe (SLOP3-022): the bench's PROBE from web/bench/src/frames/probe.js,
 // which the sandbox adds to dev embeds only, after the runtime. It answers the
 // tool that framed the view (the boot data's parentOrigin) and nothing else.
 (() => {
@@ -9,50 +9,30 @@
   try { boot = JSON.parse((bootEl && bootEl.textContent) || '{}'); } catch (e) { boot = {}; }
   if (!boot.parentOrigin || window.parent === window) return;
   const q = new URLSearchParams(location.search);
-// ---------- the probe: runs inside each frame; reports picks, logs, checks and layout, answers the host's ops ----------
-// One source, two uses. The bench stringifies PROBE into srcdoc frames
-// (buildDoc), where it also defines window.site. The build writes the same
-// function into slop's server (pkg/doors/pages/assets/probe.js), which adds
-// it to dev embeds: embedded views of an app's dev instance that the bench
-// frames on the canvas (CFG.embedded). There the page has slop's runtime
-// instead of window.site, links navigate as they do in the app, and every
-// message goes to and comes from the bench's origin (CFG.origin) only.
-// The probe runs inside each sandboxed frame. It defines window.site, reports picks, logs and checks,
-// and answers the host's ops. It is stringified into the page, so it must stand alone.
+// frames/probe.js — the script slop adds to the bench's embedded views of an
+// instance: it reports picks, console lines, checks and layouts, and answers
+// the bench's ops (click, type, query, layout, snapshot, …).
+//
+// It runs inside the framed page, not in the bench, so it must stand alone:
+// build.mjs writes this function into pkg/doors/pages/assets/probe.js, which
+// slop's sandbox serves after the runtime in dev embeds. It talks to the
+// bench's origin only (CFG.origin) and to nothing else; links navigate as
+// they do in the app.
+//
+// Public API: PROBE(CFG) — CFG {embedded, origin, nonce, route, mode, pins,
+// preview, record}. The host side is frames/host.js.
 function PROBE(CFG) {
-  // embedded: talk to the bench's origin only (a srcdoc frame's parent is the bench itself)
   const post = m => parent.postMessage(Object.assign({ __sb: 'probe', nonce: CFG.nonce }, m), CFG.origin || '*')
   const fmt = v => { try { return typeof v === 'string' ? v : v instanceof Error ? v.name + ': ' + v.message : JSON.stringify(v) } catch (e) { return String(v) } }
-  if (CFG.clock) {           // a fixture's clock: time starts at its moment and runs on from there
-    const T = new Date(CFG.clock).getTime(), RD = Date, t0 = performance.now()
-    if (!isNaN(T)) { const FD = class extends RD { constructor(...a) { if (a.length) super(...a); else super(T + performance.now() - t0) } static now() { return T + performance.now() - t0 } }; window.Date = FD }
-  }
   for (const l of ['log', 'info', 'warn', 'error']) { const o = console[l].bind(console); console[l] = (...a) => { o(...a); post({ ev: 'log', level: l, text: a.map(fmt).join(' ').slice(0, 2000) }) } }
   addEventListener('error', e => post({ ev: 'log', level: 'error', text: e.message, src: e.filename && !/^about:/.test(e.filename) ? e.filename.split('/').pop() + (e.lineno ? ':' + e.lineno : '') : '' }))
   addEventListener('unhandledrejection', e => post({ ev: 'log', level: 'error', text: 'Unhandled rejection: ' + fmt(e.reason && e.reason.message || e.reason) }))
 
-  let seq = 0, mode = CFG.mode || 'select', pins = CFG.pins || [], selected = null, recording = !!CFG.record
-  const pend = new Map(), storeData = CFG.store || {}, storeSubs = {}, dbSubs = {}
-  const rpc = (op, args) => new Promise((res, rej) => { const id = ++seq; pend.set(id, { res, rej }); post({ ev: 'rpc', id, op, args }) })
-  const cp = v => v === undefined ? undefined : JSON.parse(JSON.stringify(v))
+  let mode = CFG.mode || 'select', pins = CFG.pins || [], selected = null, recording = !!CFG.record
   // a file of the app, from a URL of an embedded view (/e/<token>/v/<n>/<path>)
   const fileOfURL = href => { try { return decodeURIComponent(new URL(href, location.href).pathname.replace(/^\/e\/[^/]+\/v\/\d+\//, '').replace(/^\/v\/\d+\//, '')) } catch (e) { return '' } }
-  // the file a stylesheet came from: data-file on a style the bench inlined, else (embedded) its URL
-  const sheetFile = s => (s.ownerNode && s.ownerNode.dataset && s.ownerNode.dataset.file) || (CFG.embedded && s.href ? fileOfURL(s.href) : '')
-  if (!CFG.embedded) window.site = Object.freeze({
-    route: CFG.route,
-    db: Object.freeze({
-      rows: (t, w) => rpc('db.rows', [t, w]), insert: (t, r) => rpc('db.insert', [t, r]), update: (t, id, p) => rpc('db.update', [t, id, p]),
-      remove: (t, id) => rpc('db.remove', [t, id]), tables: () => rpc('db.tables', []), on: (t, fn) => { (dbSubs[t] = dbSubs[t] || []).push(fn) }
-    }),
-    store: Object.freeze({
-      get: (k, d) => k in storeData ? cp(storeData[k]) : d,
-      set: (k, v) => { storeData[k] = cp(v); post({ ev: 'store', key: k, value: storeData[k] }); for (const f of storeSubs[k] || []) try { f(cp(v)) } catch (e) { console.error(e) } },
-      on: (k, fn) => { (storeSubs[k] = storeSubs[k] || []).push(fn) }
-    }),
-    nav: r => post({ ev: 'nav', route: String(r) })
-  })
-
+  // the file a stylesheet came from: its URL (an inline style has none)
+  const sheetFile = s => s.href ? fileOfURL(s.href) : ''
   // ---- element helpers ----
   const srcOf = el => el && el.closest && (el.closest('[data-src]') || {}).dataset?.src || ''
   function find(t) {
@@ -122,11 +102,11 @@ function PROBE(CFG) {
     if (el.type === 'checkbox' || el.type === 'radio') a.checked = el.checked
     return Object.keys(a).length ? a : undefined
   }
-  // settle: no db calls in flight and no DOM changes for a moment (pages render after site.db.rows answers)
+  // settle: no DOM changes for a moment (a page renders after its data arrives)
   let lastMut = performance.now()
   async function settle(max = 1500) {
     const t0 = performance.now()
-    while (performance.now() - t0 < max) { if (pend.size === 0 && performance.now() - lastMut > 80) return true; await new Promise(r => setTimeout(r, 25)) }
+    while (performance.now() - t0 < max) { if (performance.now() - lastMut > 80) return true; await new Promise(r => setTimeout(r, 25)) }
     return false
   }
   // layout map: every rendered element keyed by its source line, or by its path from the nearest element that has one
@@ -172,7 +152,7 @@ function PROBE(CFG) {
     doc.querySelectorAll('[contenteditable]').forEach(n => { n.removeAttribute('contenteditable'); n.classList.remove('__sbedit') })
     doc.removeAttribute('data-sbmode')
     const css = {}
-    if (CFG.embedded) {   // linked stylesheets become inline ones, so a snapshot stands alone
+    {   // linked stylesheets become inline ones, so a snapshot stands alone
       const live = [...document.styleSheets]
       doc.querySelectorAll('link[rel~=stylesheet]').forEach(l => {
         const sh = live.find(x => x.href && l.href && x.href === new URL(l.getAttribute('href'), location.href).href)
@@ -285,8 +265,7 @@ function PROBE(CFG) {
     // what the person does in play mode is an event stream (panels and Claude can follow it)
     if (!e.__sbReplay) { const t = e.target.closest('a, button, input, select, textarea, label, summary, [role=button], [data-id]') || e.target; if (t && t !== document.body && t !== document.documentElement) post({ ev: 'act', kind: 'click', sel: selPath(t), text: (t.innerText || t.value || '').trim().replace(/\s+/g, ' ').slice(0, 60) }) }
     // play: same-project links navigate the frame; submit buttons submit without leaving the page
-    const a = CFG.embedded ? null : e.target.closest('a[href]')   // an embedded app navigates as it does on its own
-    if (a) { const href = a.getAttribute('href'); if (href && !/^([a-z]+:|\/\/|#)/i.test(href)) { e.preventDefault(); site.nav(href.split('#')[0]) } else if (/^[a-z]+:|^\/\//i.test(href || '')) { e.preventDefault(); console.warn('external link blocked in preview: ' + href) } return }
+    // links navigate as they do in the app
     const btn = e.target.closest('button, input[type=submit]')
     if (btn && btn.form && (btn.type === 'submit')) {
       e.preventDefault()
@@ -429,9 +408,6 @@ function PROBE(CFG) {
   addEventListener('message', e => {
     if (e.source !== parent || (CFG.origin && e.origin !== CFG.origin)) return
     const m = e.data; if (!m || m.__sb !== 'host') return
-    if (m.reply) { const p = pend.get(m.reply); if (p) { pend.delete(m.reply); m.ok ? p.res(m.value) : p.rej(new Error(m.error)) } return }
-    if (m.push === 'store') { storeData[m.key] = m.value; for (const f of storeSubs[m.key] || []) try { f(cp(m.value)) } catch (err) { console.error(err) } return }
-    if (m.push === 'db') { for (const f of dbSubs[m.table] || []) try { f() } catch (err) { console.error(err) } return }
     if (m.push === 'mode') { setMode(m.mode); return }
     if (m.push === 'preview') { applyPreview(m.preview); return }
     if (m.push === 'pins') { pins = m.pins || []; drawPins(); return }
@@ -442,5 +418,5 @@ function PROBE(CFG) {
   document.readyState === 'complete' ? setTimeout(ready, 0) : addEventListener('load', () => setTimeout(ready, 0))
 }
 
-  PROBE({ embedded: true, origin: boot.parentOrigin, nonce: q.get('sbn') || '', route: location.pathname.split('/').slice(5).join('/') || 'index.html', mode: 'select', pins: [], store: {} });
+  PROBE({ embedded: true, origin: boot.parentOrigin, nonce: q.get('sbn') || '', route: location.pathname.split('/').slice(5).join('/') || 'index.html', mode: 'select', pins: [] });
 })();

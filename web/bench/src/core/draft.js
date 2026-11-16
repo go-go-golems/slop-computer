@@ -27,13 +27,23 @@
 // hashes with the injected hash(text) (hex sha256 of the UTF-8 bytes).
 // Events: 'head' (n, prev, paths, source: open | poll | commit), 'commit'
 // (the answer, with paths), 'edits', 'conflict', 'error'.
-// Public API: Draft, Tx, textish. Tested by test/draft.test.mjs (node --test).
+// Public API: Draft, Tx, textish, checkPath. Tested by test/draft.test.mjs (node --test).
 import { emitter } from '../lib/util.js';
 
 const BINARY_EXT = /\.(png|jpe?g|gif|webp|avif|ico|bmp|tiff?|woff2?|ttf|otf|eot|mp[34]|m4a|wav|ogg|webm|mov|zip|gz|tgz|br|zst|pdf|wasm|bin|sqlite|db)$/i
 const TEXT_MAX = 240000
 // a file kept as text: not a known binary type, not too large to edit
 export const textish = f => !BINARY_EXT.test(f.path) && f.size <= TEXT_MAX
+
+// The paths an app may hold (the server checks them again): relative, with
+// / between non-empty parts and no . or .., at most 200 characters. null
+// when the path is fine, else why not.
+export function checkPath(path) {
+  if (typeof path !== 'string' || !path) return 'path must be a non-empty string'
+  if (path.length > 200) return 'a path is at most 200 characters'
+  if (path.startsWith('/') || path.includes('\\') || path.split('/').some(s => !s || s === '.' || s === '..')) return 'a path is relative, with / between non-empty parts and no . or .. (got ' + JSON.stringify(path) + ')'
+  return null
+}
 
 export class Tx {
   constructor(draft, { base, parent = null, label = '', live = false, event = null } = {}) {
@@ -67,7 +77,8 @@ export class Tx {
   }
   write(path, text) {
     this.must()
-    if (typeof path !== 'string' || !path) throw Object.assign(new Error('path must be a non-empty string'), { kind: 'invalid' })
+    const bad = checkPath(path)
+    if (bad) throw Object.assign(new Error(bad), { kind: 'invalid' })
     if (typeof text !== 'string') throw Object.assign(new Error('text must be a string'), { kind: 'invalid' })
     this.changes.set(path, { text })
   }
@@ -75,6 +86,8 @@ export class Tx {
   // put a file the server already has, by hash (a binary or large file)
   copy(path, entry) {
     this.must()
+    const bad = checkPath(path)
+    if (bad) throw Object.assign(new Error(bad), { kind: 'invalid' })
     if (!entry || typeof entry.sha256 !== 'string') throw Object.assign(new Error('copy needs an entry {sha256, size}'), { kind: 'invalid' })
     this.changes.set(path, { sha256: entry.sha256, size: entry.size, type: entry.type || '' })
   }
@@ -244,14 +257,23 @@ export class Draft {
     if (!tx || tx.base === this.head) return
     if (!tx.changes.size || this.changed(tx.base, this.head).every(p => !tx.changes.has(p))) tx.base = this.head
   }
-  // Keep one's own text over a conflicting change: the base moves to the
-  // head, so the next commit replaces what is there.
-  keepMine() { if (this.edits) { this.edits.base = this.head; return this.settle() } }
-  // Take the server's version of these paths: the edits to them are dropped.
-  takeTheirs(paths) {
+  // Keep one's own text over a conflicting change: the head is brought up
+  // to where the ref is (a conflict does not move it), the base moves to
+  // it, so the next commit replaces what is there.
+  async keepMine() {
+    if (!this.edits) return { status: 'committed', n: this.head, paths: [] }
+    await this.refresh()
+    this.edits.base = this.head
+    return this.settle()
+  }
+  // Take the server's version of these paths: the edits to them are
+  // dropped, and the head is brought up to show theirs.
+  async takeTheirs(paths) {
     if (!this.edits) return
-    this.edits.forget(paths); this.rebaseEdits()
+    this.edits.forget(paths)
     if (this.conflict && this.conflict.conflicts.every(p => !this.edits.changes.has(p))) this.conflict = null
+    await this.refresh()
+    this.rebaseEdits()
     this.ev.emit('edits', null)
   }
   settle() {

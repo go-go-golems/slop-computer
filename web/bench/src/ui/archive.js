@@ -1,6 +1,15 @@
-// ---------- archives: zip a whole project (files, tables, proposals, threads, transcripts, timeline), read it back ----------
-import { h, toast } from './lib/dom.js';
-import { now, plural } from './lib/util.js';
+// ui/archive.js — an app as a zip, and a zip as a new app's files.
+//
+// A download holds draft's files (text; files kept by hash are listed, not
+// included), the open proposals' changed files, the threads with readable
+// transcripts, the timeline, and the bench's meta for the app. Importing
+// takes the text files of such a download, or of any zip of an app.
+//
+// Public API: makeZip, readZip, appZip, readArchive, transcriptMd,
+// timelineMd, saveFile, slug.
+import { checkPath } from '../core/draft.js';
+import { h, toast } from '../lib/dom.js';
+import { now, plural } from '../lib/util.js';
 
 const CRC_T = (() => { const t = new Uint32Array(256); for (let n = 0; n < 256; n++) { let c = n; for (let k = 0; k < 8; k++) c = c & 1 ? 0xEDB88320 ^ (c >>> 1) : c >>> 1; t[n] = c >>> 0 } return t })()
 function crc32(u8) { let c = 0xFFFFFFFF; for (let i = 0; i < u8.length; i++) c = CRC_T[(c ^ u8[i]) & 255] ^ (c >>> 8); return (c ^ 0xFFFFFFFF) >>> 0 }
@@ -11,7 +20,7 @@ async function inflateRaw(u8) {
   return viaStream(u8, new DecompressionStream('deflate-raw'))
 }
 // entries: [{name, data: string | Uint8Array}] -> Blob (deflate when it helps, else store; UTF-8 names)
-async function makeZip(entries) {
+export async function makeZip(entries) {
   const enc = new TextEncoder(), parts = [], central = []
   const d = new Date(), dt = (((d.getFullYear() - 1980) << 25) | ((d.getMonth() + 1) << 21) | (d.getDate() << 16) | (d.getHours() << 11) | (d.getMinutes() << 5) | (d.getSeconds() >> 1)) >>> 0
   let off = 0
@@ -33,7 +42,7 @@ async function makeZip(entries) {
   end.setUint32(0, 0x06054b50, true); end.setUint16(8, entries.length, true); end.setUint16(10, entries.length, true); end.setUint32(12, size, true); end.setUint32(16, off, true)
   return new Blob([...parts, ...central, new Uint8Array(end.buffer)], { type: 'application/zip' })
 }
-async function readZip(buf) {
+export async function readZip(buf) {
   const u8 = new Uint8Array(buf), dv = new DataView(u8.buffer, u8.byteOffset, u8.byteLength)
   let e = u8.length - 22; while (e >= 0 && dv.getUint32(e, true) !== 0x06054b50) e--
   if (e < 0) throw new Error('not a zip file')
@@ -52,10 +61,10 @@ async function readZip(buf) {
 
 // ---------- readable exports ----------
 const fence = (text, lang = '') => { const run = Math.max(2, ...((String(text).match(/`+/g) || []).map(s => s.length))) + 1; const f = '`'.repeat(run); return f + lang + '\n' + text + '\n' + f }
-const slug = s => String(s || 'untitled').toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-|-$/g, '').slice(0, 48) || 'untitled'
+export const slug = s => String(s || 'untitled').toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-|-$/g, '').slice(0, 48) || 'untitled'
 const stamp = t => new Date(t).toISOString().replace('T', ' ').slice(0, 19)
-function transcriptMd(P, th) {
-  const out = ['# ' + th.title, '', 'Project: ' + P.title + ' · thread started ' + stamp(th.created) + ' · exported ' + stamp(now()), 'Mode: ' + (th.mode || 'auto') + ' · writes to: ' + (th.target === 'main' ? 'main' : 'proposals') + ' · model: ' + (th.model || th.tier || 'default'), '']
+export function transcriptMd(P, th) {
+  const out = ['# ' + th.title, '', 'App: ' + P.app + ' · thread started ' + stamp(th.created) + ' · exported ' + stamp(now()), 'Mode: ' + (th.mode || 'auto') + ' · commits to: ' + (th.target === 'draft' ? 'draft' : 'proposals') + ' · model: ' + (th.model || th.tier || 'default'), '']
   if (th.summary) out.push('> **Summary Claude sees in place of messages 1–' + th.summary.upTo + '** (' + (th.summary.by === 'you' ? 'edited by you' : th.summary.by === 'fallback' ? 'listed without a model' : 'by Claude') + ', ' + stamp(th.summary.t) + ')', '>', ...th.summary.text.split('\n').map(l => '> ' + l), '')
   for (const [i, m] of th.msgs.entries()) {
     if (th.summary && i === th.summary.upTo) out.push('---', '', '*Claude sees the messages from here on in full; the ones above are summarized.*', '')
@@ -79,64 +88,58 @@ function transcriptMd(P, th) {
   }
   return out.join('\n')
 }
-function timelineMd(P) {
-  const who = e => e.who === 'agent' ? 'Claude' + (P.threads.get(e.thread) ? ' (' + P.threads.get(e.thread).title + ')' : '') : e.who === 'site' ? 'page' : e.who === 'ide' ? 'Sitebench' : 'you'
-  const what = e => e.kind === 'write' ? (e.created ? 'created ' : 'wrote ') + '`' + e.path + '`' : e.kind === 'remove' ? 'removed `' + e.path + '`' : e.kind === 'mark' ? '**' + (e.mk || 'mark') + ': ' + e.label + '**' + (e.note ? ' (' + e.note + ')' : '') : e.kind === 'eval' ? 'eval' + (e.calls && e.calls.length ? ': ' + e.calls.join(', ') : '') : e.kind === 'data' ? e.table + ' ' + e.note : e.kind
-  const out = ['# Timeline: ' + P.title, '', '| # | Time | Who | What | Where | Note |', '|---|---|---|---|---|---|']
-  for (const e of P.events) out.push('| ' + e.i + ' | ' + stamp(e.t) + ' | ' + who(e) + ' | ' + what(e) + ' | ' + (e.ws === 'main' || !e.ws ? 'main' : 'proposal ' + ((P.overlays.get(e.ws) || {}).title || e.ws)).replace(/\|/g, '/') + ' | ' + String(e.note || '').replace(/\|/g, '/').replace(/\n/g, ' ').slice(0, 140) + ' |')
+export function timelineMd(P) {
+  const who = e => e.who === 'agent' ? 'Claude' + (P.threads.get(e.thread) ? ' (' + P.threads.get(e.thread).title + ')' : '') : e.who === 'push' ? 'outside' : e.who === 'ide' ? 'bench' : 'you'
+  const what = e => e.kind === 'commit' ? 'committed ' + (e.paths || []).map(p => '`' + p + '`').join(', ') : e.kind === 'mark' ? '**' + (e.mk || 'mark') + ': ' + e.label + '**' + (e.note ? ' (' + e.note + ')' : '') : e.kind === 'eval' ? 'eval' + (e.calls && e.calls.length ? ': ' + e.calls.join(', ') : '') : e.kind
+  const out = ['# Timeline: ' + P.app, '', '| seq | Time | Who | What | Where | Note |', '|---|---|---|---|---|---|']
+  for (const e of P.events) out.push('| ' + (e.seq ?? '') + ' | ' + stamp(e.at) + ' | ' + who(e) + ' | ' + what(e).replace(/\|/g, '/') + ' | ' + (e.ref || 'draft') + (e.n != null ? ' ' + e.n : '') + ' | ' + String(e.note || '').replace(/\|/g, '/').replace(/\n/g, ' ').slice(0, 140) + ' |')
   return out.join('\n') + '\n'
 }
-async function projectZip(P) {
+export async function appZip(P) {
   const E = [], add = (name, data) => E.push({ name, data: typeof data === 'string' ? data : JSON.stringify(data, null, 1) })
-  add('sitebench.json', { sitebench: 2, app: 'Sitebench', title: P.title, template: P.meta.template, created: P.meta.created, exported: now(),
-    counts: { files: P.files.size, tables: P.tables.size, proposals: P.overlays.size, threads: P.threads.size, events: P.events.length },
-    layout: 'files/ = the site (main). tables/ = data. proposals/ = overlay workspaces. threads/ + transcripts/ = agent chats. timeline.json = the full session log (file contents after each write).' })
-  add('project.json', { title: P.meta.title, template: P.meta.template, created: P.meta.created, updated: P.meta.updated, boards: P.meta.boards, pins: P.meta.pins, store: P.meta.store, view: P.meta.view })
-  for (const [path, text] of [...P.files].sort()) add('files/' + path, text)
-  for (const t of P.tables.values()) add('tables/' + t.name + '.json', t)
-  for (const ov of P.overlays.values()) {
-    add('proposals/' + ov.id + '.json', ov)
-    if (ov.status === 'open') for (const [path, text] of Object.entries(ov.files)) if (text !== null) add('proposals/' + ov.id + '-' + slug(ov.title) + '/' + path, text)
+  const paths = P.list('draft'), hashed = paths.filter(p => P.read(p, 'draft') === null)
+  for (const path of paths) { const t = P.read(path, 'draft'); if (t !== null) add('files/' + path, t) }
+  for (const p of P.openProposals()) {
+    const ch = await P.changes(p.ref).catch(() => [])
+    add('proposals/' + p.ref.slice(9) + '.json', { ref: p.ref, title: p.title, base: p.base, thread: p.thread, changes: ch.map(c => ({ path: c.path, removed: !c.entry })) })
+    for (const c of ch) if (c.after !== null) add('proposals/' + p.ref.slice(9) + '/' + c.path, c.after)
   }
   let k = 0
-  for (const th of [...P.threads.values()].sort((a, b) => a.created - b.created)) { k++; add('threads/' + th.id + '.json', th); add('transcripts/' + String(k).padStart(2, '0') + '-' + slug(th.title) + '.md', transcriptMd(P, th)) }
+  for (const th of [...P.threads.values()].sort((a, b) => a.created - b.created)) {
+    await P.loadThread(th.id).catch(() => null)
+    if (!th.msgs) continue
+    k++
+    add('threads/' + th.id + '.json', { ...th, saved: undefined })
+    add('transcripts/' + String(k).padStart(2, '0') + '-' + slug(th.title) + '.md', transcriptMd(P, th))
+  }
+  add('project.json', P.meta)
   add('timeline.json', P.events); add('timeline.md', timelineMd(P))
+  add('bench.json', { bench: 3, app: P.app, title: P.title, exported: now(), refs: P.refs, draft: P.draft.head,
+    counts: { files: paths.length, proposals: P.openProposals().length, threads: k, events: P.events.length },
+    keptByHash: hashed, layout: 'files/ = draft (text files; keptByHash lists the others). proposals/ = open proposals, their changed files. threads/ + transcripts/ = agent threads. timeline.* = the session log.' })
   return makeZip(E)
 }
-// zip (Sitebench export, or any folder of site files) or JSON -> data for Projects.create
-const TEXT_EXT = /\.(html?|css|js|mjs|json|md|markdown|svg|txt|xml|csv)$/i
-async function readArchive(buf, filename = 'import') {
+// A zip (a bench download, or any folder of an app's files) → the text
+// files of a new app's draft: [{path, text}].
+const TEXT_EXT = /\.(html?|css|js|mjs|json|md|markdown|svg|txt|xml|csv|sql)$/i
+export async function readArchive(buf, filename = 'import') {
   const head = new Uint8Array(buf.slice ? buf.slice(0, 4) : buf)
-  if (!(head[0] === 0x50 && head[1] === 0x4b)) {
-    const d = JSON.parse(new TextDecoder().decode(buf)); if (!d || typeof d.files !== 'object') throw new Error('no files in that JSON'); return d
-  }
+  if (!(head[0] === 0x50 && head[1] === 0x4b)) throw new Error(filename + ' is not a zip')
   const entries = await readZip(buf), dec = new TextDecoder()
-  const manifest = entries.find(e => /(^|\/)sitebench\.json$/.test(e.name))
+  const manifest = entries.find(e => /(^|\/)bench\.json$/.test(e.name))
   if (manifest) {
-    const root = manifest.name.slice(0, -'sitebench.json'.length), J = name => { const e = entries.find(x => x.name === root + name); return e ? JSON.parse(dec.decode(e.data)) : null }
-    const m = JSON.parse(dec.decode(manifest.data)), meta = J('project.json') || {}
-    const data = { title: meta.title || m.title, template: meta.template || m.template, created: meta.created, boards: meta.boards, pins: meta.pins || [], store: meta.store || {}, files: {}, tables: {}, overlays: [], threads: [], events: J('timeline.json') || [] }
-    for (const e of entries) {
-      const n = e.name.slice(root.length)
-      if (!e.name.startsWith(root)) continue
-      if (n.startsWith('files/')) data.files[n.slice(6)] = dec.decode(e.data)
-      else if (/^tables\/[^/]+\.json$/.test(n)) { const t = JSON.parse(dec.decode(e.data)); data.tables[t.name || n.slice(7, -5)] = t }
-      else if (/^proposals\/[^/]+\.json$/.test(n)) data.overlays.push(JSON.parse(dec.decode(e.data)))
-      else if (/^threads\/[^/]+\.json$/.test(n)) data.threads.push(JSON.parse(dec.decode(e.data)))
-    }
-    return data
+    const root = manifest.name.slice(0, -'bench.json'.length) + 'files/'
+    return entries.filter(e => e.name.startsWith(root) && e.name.length > root.length).map(e => ({ path: e.name.slice(root.length), text: dec.decode(e.data) })).filter(f => !checkPath(f.path))
   }
-  // a plain folder of site files: keep text files, drop a shared top folder
+  // a plain folder of files: keep text files, drop a shared top folder
   const texts = entries.filter(e => TEXT_EXT.test(e.name) && e.data.length < 240000)
-  if (!texts.length) throw new Error('no text files (html, css, js, md…) in that zip')
+  if (!texts.length) throw new Error('no text files (html, css, js, md, sql…) in that zip')
   const tops = new Set(texts.map(e => e.name.includes('/') ? e.name.split('/')[0] + '/' : ''))
   const strip = tops.size === 1 && [...tops][0] ? [...tops][0] : ''
-  const files = {}
-  for (const e of texts) { const p = e.name.slice(strip.length); if (!validPath(p)) files[p] = dec.decode(e.data) }
-  return { title: (strip ? strip.slice(0, -1) : filename.replace(/\.zip$/i, '')) || 'Imported site', template: 'import', files, tables: {} }
+  return texts.map(e => ({ path: e.name.slice(strip.length), text: dec.decode(e.data) })).filter(f => !checkPath(f.path))
 }
 // hand a file to the viewer: the downloads capability when granted, else a plain link click
-async function saveFile(filename, data) {
+export async function saveFile(filename, data) {
   let dl = null; try { dl = window.claude && await window.claude.use('downloads') } catch { }
   if (dl) {
     try { await dl.save({ filename, data }); toast('Saved ' + filename); return true }
