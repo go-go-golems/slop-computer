@@ -28,9 +28,9 @@ slop.store.new({ id: 'library' });
 slop.docs.set({ store: 'library', batch: rows.map(r => (
   { path: 'books/' + r.isbn, data: { title: r.title, year: Number(r.year) } })) });
 const recent = slop.docs.query({ store: 'library', coll: 'books', where: [['year', '>=', 2000]], orderBy: 'year', desc: true });
-slop.files.push({ store: 'library', message: 'site', files: [
+const site = slop.files.push({ store: 'library', message: 'site', ifAt: 0, files: [
   { path: 'index.html', text: '<h1>Library</h1>' }, { path: 'style.css', text: 'h1 { color: red }' }] });
-slop.files.push({ store: 'library', message: 'site again', files: [{ path: 'index.html', text: '<h1>Library!</h1>' }] });
+slop.files.push({ store: 'library', message: 'site again', ifAt: site.n, files: [{ path: 'index.html', text: '<h1>Library!</h1>' }] });
 console.log('imported', rows.length, { ok: true });
 return { books: rows.length, recent: recent.map(d => d.body.title),
   snaps: slop.snap.ls({ store: 'library' }).map(s => s.message),
@@ -165,7 +165,7 @@ func TestExportImport(t *testing.T) {
 		"text": "title,words\nfirst,10\nsecond,250\n"})
 	h.call(admin, "import.docs", map[string]any{"store": "src", "coll": "books", "id": "isbn", "format": "csv", "text": booksCSV})
 	h.call(admin, "docs.update", map[string]any{"store": "src", "path": "books/111", "data": map[string]any{"tags": []any{"x"}}})
-	h.call(admin, "files.push", map[string]any{"store": "src", "files": []any{
+	h.push(admin, map[string]any{"store": "src", "files": []any{
 		map[string]any{"path": "index.html", "text": "<p>hi</p>"},
 		map[string]any{"path": "img/dot.png", "data": "iVBORw0KGgo="}}})
 	h.call(admin, "files.put", map[string]any{"store": "src", "zone": "assets", "path": "up/a.txt", "text": "asset"})

@@ -1122,9 +1122,9 @@ The same `needs` runs `can()` before the handler, whichever door the call came t
 | --- | --- |
 | Stores | `store.ls`, `store.new`, `store.fork`, `store.rm`, `store.export`, `store.import`, `store.meta` |
 | Content | `docs.get`, `docs.list`, `docs.query`, `docs.set`, `docs.update`, `docs.replace` (string replace in a field), `docs.rm`, `docs.batch` |
-| Files | `files.ls`, `files.cat`, `files.pull` (a store's tree into a folder), `files.push` (a folder into the tree, then a snapshot), `files.rm` |
+| Files | `files.ls`, `files.cat`, `files.pull` (a store's tree into a folder), `files.push` (a folder into the tree, then a snapshot), `files.commit` (a change list against a base snapshot), `files.rm` |
 | SQL (admin) | `sql.query`, `sql.exec`, `sql.schema` |
-| History | `log.show`, `log.watch`, `snap.ls`, `snap.new`, `ref.ls`, `ref.move`, `step.start`, `step.end`, `step.ls`, `step.keep`, `step.revert` |
+| History | `log.show`, `log.watch`, `snap.ls`, `ref.ls`, `ref.move`, `ref.rm`, `step.start`, `step.end`, `step.ls`, `step.keep`, `step.revert` |
 | Actors | `actor.call`, `actor.status`, `actor.logs`, `actor.restart`, `alarm.ls`, `alarm.fire` |
 | Sites | `mount.ls`, `mount.set`, `mount.rm`, `mount.undo` |
 | People and access | `whoami`, `grant.ls`, `grant.set`, `grant.rm`, `link.new`, `link.rm`, `approve.ls`, `approve.set`, `token.ls`, `token.rm`, `secret.ls`, `secret.set` |

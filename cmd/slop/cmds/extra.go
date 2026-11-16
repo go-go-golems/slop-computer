@@ -8,6 +8,7 @@ import (
 	"io"
 	"os"
 	"path/filepath"
+	"strconv"
 	"strings"
 
 	"github.com/spf13/cobra"
@@ -16,8 +17,9 @@ import (
 )
 
 // addExtraCommands adds the commands that work with local files (push,
-// pull, eval, the importers, store export --folder, files cat) and the
-// call shorthand for actor.call. Where a
+// pull, eval, the importers, store export --folder, files cat), ref move
+// (which reads the ref when --ifAt is not given) and the call shorthand
+// for actor.call. Where a
 // verb of the same name exists, the local command replaces its generated
 // one (and still calls that verb).
 func addExtraCommands(root *cobra.Command) {
@@ -31,6 +33,7 @@ func addExtraCommands(root *cobra.Command) {
 	}
 	replace(root, "import", importDocsCmd(), importTableCmd(), importFilesCmd(), importFolderCmd())
 	replace(root, "store", storeExportCmd())
+	replace(root, "ref", refMoveCmd())
 	replace(root, "files", filesCatCmd())
 }
 
@@ -60,11 +63,17 @@ func resolve() (*client.Client, error) { return client.Resolve(flagServer) }
 
 func pushCmd() *cobra.Command {
 	var storeID, message, ref string
-	var noPrune bool
+	var ifAt int64
 	cmd := &cobra.Command{
 		Use:   "push <dir>",
-		Short: "Replace a store's tree with a folder and snapshot it (only changed bytes are sent)",
-		Args:  cobra.ExactArgs(1),
+		Short: "Replace a store's tree with a folder and snapshot it onto a ref (only changed bytes are sent)",
+		Long: `Replace the tree of a store's ref with a folder and snapshot it: files the
+folder does not have are deleted. Only the bytes the server lacks are sent.
+
+The push applies only if the ref still points where --ifAt says (0: the ref
+does not exist yet); without --ifAt the ref is read just before the push. A
+ref that moved in between is answered with conflict, and nothing is written.`,
+		Args: cobra.ExactArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			c, err := resolve()
 			if err != nil {
@@ -74,7 +83,11 @@ func pushCmd() *cobra.Command {
 				abs, _ := filepath.Abs(args[0])
 				storeID = filepath.Base(abs)
 			}
-			res, err := c.Push(storeID, args[0], map[string]any{"message": message, "ref": ref, "prune": !noPrune})
+			in := map[string]any{"message": message, "ref": ref}
+			if cmd.Flags().Changed("ifAt") {
+				in["ifAt"] = ifAt
+			}
+			res, err := c.Push(storeID, args[0], in)
 			if err != nil {
 				return err
 			}
@@ -84,7 +97,48 @@ func pushCmd() *cobra.Command {
 	cmd.Flags().StringVar(&storeID, "store", "", "the store (default: the folder's name)")
 	cmd.Flags().StringVarP(&message, "message", "m", "", "snapshot message")
 	cmd.Flags().StringVar(&ref, "ref", "", "the ref to move (default main)")
-	cmd.Flags().BoolVar(&noPrune, "no-prune", false, "keep tree files that are not in the folder")
+	cmd.Flags().Int64Var(&ifAt, "ifAt", 0, "push only if the ref points at this snapshot (0: it does not exist yet); default: where it points now")
+	return cmd
+}
+
+// refMoveCmd is ref.move with --ifAt optional: without it the ref is read
+// first, and the move says where it moved the ref from.
+func refMoveCmd() *cobra.Command {
+	var ifAt int64
+	cmd := &cobra.Command{
+		Use:   "move <store> <ref> <n>",
+		Short: "Point a ref at a snapshot (main: publish, or roll back), only if it is still where --ifAt says",
+		Long: `Point a store's ref at snapshot n. The move applies only if the ref points
+at --ifAt now (0: it does not exist yet), so two publishers cannot overwrite
+each other: otherwise the answer is conflict and nothing moves. Without
+--ifAt the ref is read first and the move prints "ref: from → to".`,
+		Args: cobra.ExactArgs(3),
+		RunE: func(cmd *cobra.Command, args []string) error {
+			n, err := strconv.ParseInt(args[2], 10, 64)
+			if err != nil {
+				return fmt.Errorf("n must be a snapshot number: %w", err)
+			}
+			c, err := resolve()
+			if err != nil {
+				return err
+			}
+			from, read := ifAt, !cmd.Flags().Changed("ifAt")
+			if read {
+				if from, err = c.RefAt(args[0], args[1]); err != nil {
+					return err
+				}
+			}
+			res, err := c.Call("ref.move", map[string]any{"store": args[0], "ref": args[1], "n": n, "ifAt": from})
+			if err != nil {
+				return err
+			}
+			if read {
+				_, _ = fmt.Fprintf(cmd.ErrOrStderr(), "%s: %d → %d\n", args[1], from, n)
+			}
+			return printOut(res)
+		},
+	}
+	cmd.Flags().Int64Var(&ifAt, "ifAt", 0, "move only if the ref points at this snapshot now (0: it does not exist yet); default: where it points now")
 	return cmd
 }
 

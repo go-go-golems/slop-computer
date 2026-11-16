@@ -43,7 +43,7 @@ func TestExpressModule(t *testing.T) {
 	admin := h.tokenFor("admin@example.com", "read", "write", "admin")
 	live := h.cfg.Hosts.Live[0]
 	h.call(admin, "store.new", map[string]any{"id": "ex"})
-	h.call(admin, "files.push", map[string]any{"store": "ex", "files": files(map[string]string{
+	h.push(admin, map[string]any{"store": "ex", "files": files(map[string]string{
 		"app.json":          `{"title":"Express","actor":"actor.js"}`,
 		"actor.js":          expressActor,
 		"sql/001_items.sql": "CREATE TABLE items (id INTEGER PRIMARY KEY, title TEXT NOT NULL);",
@@ -129,7 +129,7 @@ func TestExpressModule(t *testing.T) {
 	} {
 		id := "bad" + name
 		h.call(admin, "store.new", map[string]any{"id": id})
-		h.call(admin, "files.push", map[string]any{"store": id, "files": files(map[string]string{
+		h.push(admin, map[string]any{"store": id, "files": files(map[string]string{
 			"app.json": `{"title":"Bad","actor":"actor.js"}`,
 			"actor.js": src,
 		})})

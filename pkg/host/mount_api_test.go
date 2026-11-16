@@ -31,7 +31,7 @@ func TestMountAPIPolicy(t *testing.T) {
 	admin := h.tokenFor("admin@example.com", "read", "write", "admin")
 	live := h.cfg.Hosts.Live[0]
 	h.call(admin, "store.new", map[string]any{"id": "jr"})
-	h.call(admin, "files.push", map[string]any{"store": "jr", "files": files(map[string]string{
+	h.push(admin, map[string]any{"store": "jr", "files": files(map[string]string{
 		"app.json":   `{"title":"Journal","actor":"actor.js"}`,
 		"actor.js":   apiActor,
 		"index.html": "<!doctype html><title>journal page</title>",
@@ -171,7 +171,7 @@ func TestMountAPIPolicy(t *testing.T) {
 	// A store served only by an API mount: a route outside its allowlist
 	// breaks the actor visibly; widening the mount fixes it, no restart.
 	h.call(admin, "store.new", map[string]any{"id": "solo"})
-	h.call(admin, "files.push", map[string]any{"store": "solo", "files": files(map[string]string{
+	h.push(admin, map[string]any{"store": "solo", "files": files(map[string]string{
 		"app.json": `{"title":"Solo","actor":"actor.js"}`,
 		"actor.js": `const app = require('express').app();
 app.get('/api/feed.json').public().handle((c, r) => r.json({ ok: 1 }));

@@ -55,10 +55,12 @@ type Visitor struct {
 }
 
 // Error is an actor failure with a code (permission_denied, actor_error…).
+// In JavaScript it is an Error with .code, and .confirm and .extra when set.
 type Error struct {
-	Code    string `json:"code"`
-	Message string `json:"message"`
-	Confirm string `json:"confirm,omitempty"` // confirmation_required: the confirmation's id
+	Code    string         `json:"code"`
+	Message string         `json:"message"`
+	Confirm string         `json:"confirm,omitempty"` // confirmation_required: the confirmation's id
+	Extra   map[string]any `json:"extra,omitempty"`   // a verb error's details (conflict: at, conflicts; missing_blobs: missing)
 }
 
 func (e *Error) Error() string { return e.Code + ": " + e.Message }
@@ -789,6 +791,9 @@ func (a *Actor) errValue(e *Error) goja.Value {
 	if e.Confirm != "" {
 		_ = obj.Set("confirm", e.Confirm)
 	}
+	if e.Extra != nil {
+		_ = obj.Set("extra", a.toJS(e.Extra))
+	}
 	return obj
 }
 
@@ -803,6 +808,9 @@ func (a *Actor) jsError(v goja.Value) *Error {
 			e := &Error{Code: c.String(), Message: msg}
 			if cf := obj.Get("confirm"); cf != nil && !goja.IsUndefined(cf) {
 				e.Confirm = cf.String()
+			}
+			if x := obj.Get("extra"); x != nil && !goja.IsUndefined(x) {
+				e.Extra, _ = a.fromJS(x).(map[string]any) // a rethrown verb error keeps its details
 			}
 			return e
 		}

@@ -18,12 +18,12 @@ func TestPreviews(t *testing.T) {
 	mia := h.tokenFor("mia@example.com")
 	live := h.cfg.Origin(h.cfg.Hosts.Live[0])
 	h.call(admin, "store.new", map[string]any{"id": "priv"})
-	h.call(admin, "files.push", map[string]any{"store": "priv", "files": files(map[string]string{
+	h.push(admin, map[string]any{"store": "priv", "files": files(map[string]string{
 		"index.html":       `<!doctype html><html><head><title>Priv</title><link rel="stylesheet" href="/style.css"></head><body><h1>main</h1><a href="/about/">about</a></body></html>`,
 		"about/index.html": `<h1>About</h1>`,
 		"style.css":        `h1 { color: teal }`,
 	})})
-	h.call(admin, "files.push", map[string]any{"store": "priv", "ref": "draft", "files": files(map[string]string{
+	h.push(admin, map[string]any{"store": "priv", "ref": "draft", "files": files(map[string]string{
 		"index.html": `<!doctype html><html><head><title>Priv</title></head><body><h1>draft</h1></body></html>`,
 	})})
 	host := func(url string) string { return strings.TrimSuffix(strings.TrimPrefix(url, h.cfg.Scheme+"://"), "/") }

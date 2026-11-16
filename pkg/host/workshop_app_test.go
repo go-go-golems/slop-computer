@@ -15,7 +15,7 @@ func TestWorkshopApp(t *testing.T) {
 	admin := h.tokenFor("admin@example.com", "read", "write", "admin")
 	static := h.cfg.Hosts.Static[0]
 	h.call(admin, "store.new", map[string]any{"id": "workshop"})
-	h.call(admin, "files.push", map[string]any{"store": "workshop", "files": appDir(t, "workshop")})
+	h.push(admin, map[string]any{"store": "workshop", "files": appDir(t, "workshop")})
 	if st := h.call(admin, "app.status", map[string]any{"store": "workshop"}).(map[string]any); st["broken"] != "" {
 		t.Fatalf("workshop is broken: %v", st)
 	}
@@ -25,10 +25,10 @@ func TestWorkshopApp(t *testing.T) {
 	}
 
 	h.call(admin, "store.new", map[string]any{"id": "site"})
-	h.call(admin, "files.push", map[string]any{"store": "site", "files": files(map[string]string{"index.html": "<h1>one</h1>"})})
+	h.push(admin, map[string]any{"store": "site", "files": files(map[string]string{"index.html": "<h1>one</h1>"})})
 	h.call(admin, "grant.set", map[string]any{"store": "site", "subject": "@guest", "level": "view"})
 	h.call(admin, "mount.set", map[string]any{"host": static, "path": "/site", "store": "site"})
-	d := h.call(admin, "files.push", map[string]any{"store": "site", "ref": "draft", "files": files(map[string]string{"index.html": "<h1>two</h1>"})}).(map[string]any)
+	d := h.push(admin, map[string]any{"store": "site", "ref": "draft", "files": files(map[string]string{"index.html": "<h1>two</h1>"})}).(map[string]any)
 
 	ov := fmtAny(call("overview", nil))
 	if !strings.Contains(ov, `"id":"site"`) || strings.Contains(ov, `"id":"workshop"`) {
@@ -40,7 +40,7 @@ func TestWorkshopApp(t *testing.T) {
 	}
 	th := call("comment", map[string]any{"store": "site", "n": d["n"], "text": "make it bigger",
 		"anchor": map[string]any{"selector": "h1", "tag": "h1", "text": "two", "fx": 0.5, "fy": 0.5}}).(map[string]any)
-	d2 := h.call(admin, "files.push", map[string]any{"store": "site", "ref": "draft", "files": files(map[string]string{"index.html": "<h1 style=\"font-size:4em\">two</h1>"})}).(map[string]any)
+	d2 := h.push(admin, map[string]any{"store": "site", "ref": "draft", "files": files(map[string]string{"index.html": "<h1 style=\"font-size:4em\">two</h1>"})}).(map[string]any)
 	call("reply", map[string]any{"thread": th["id"], "text": "bigger now", "n": d2["n"], "agent": true})
 	call("publish", map[string]any{"store": "site", "n": d2["n"]})
 	if _, body := h.get(static, "/site/"); !strings.Contains(body, "4em") {
@@ -53,7 +53,7 @@ func TestWorkshopApp(t *testing.T) {
 	}
 	// Files: push one file onto a snapshot (the rest kept by hash), remove
 	// one, or replace the whole tree; each is a new draft, main untouched.
-	h.call(admin, "files.push", map[string]any{"store": "site", "ref": "draft", "files": files(map[string]string{
+	h.push(admin, map[string]any{"store": "site", "ref": "draft", "files": files(map[string]string{
 		"index.html": "<h1>three</h1>", "style.css": "h1{}", "img/a.svg": "<svg/>"})})
 	base := h.call(admin, "snap.ls", map[string]any{"store": "site"}).([]any)[0].(map[string]any)["n"]
 	listed := fmtAny(call("files", map[string]any{"store": "site", "n": base}))

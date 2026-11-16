@@ -10,6 +10,7 @@ import (
 	"io"
 	"mime"
 	"path"
+	"regexp"
 	"strconv"
 	"strings"
 )
@@ -233,6 +234,15 @@ func (t *Turn) Snapshot(message, ref string) (int64, error) {
 	return n, nil
 }
 
+// refNameRe is what a ref may be called: lowercase, starting with a letter,
+// up to four /-separated segments of at most 63 characters (draft, main,
+// proposal/p8k2x1). A name never starts with a digit, so Store.Ref can
+// tell a ref from a snapshot number.
+var refNameRe = regexp.MustCompile(`^[a-z][a-z0-9._-]{0,62}(/[a-z0-9][a-z0-9._-]{0,62}){0,3}$`)
+
+// ValidRefName reports whether name may be given to a ref.
+func ValidRefName(name string) bool { return refNameRe.MatchString(name) }
+
 // RefAt is the snapshot a ref points at inside this turn (0 if the ref does
 // not exist), for compare-and-swap moves.
 func (t *Turn) RefAt(ref string) (int64, error) {
@@ -244,13 +254,61 @@ func (t *Turn) RefAt(ref string) (int64, error) {
 	return n, err
 }
 
-// MoveRef points a ref at snapshot n.
-func (t *Turn) MoveRef(ref string, n int64) error {
-	var exists int
-	if err := t.s.w.QueryRowContext(t.ctx, `SELECT count(*) FROM _snapshots WHERE n = ?`, n).Scan(&exists); err != nil {
+// HasSnapshot reports whether snapshot n exists, inside the turn.
+func (t *Turn) HasSnapshot(n int64) (bool, error) {
+	var c int
+	err := t.s.w.QueryRowContext(t.ctx, `SELECT count(*) FROM _snapshots WHERE n = ?`, n).Scan(&c)
+	return c > 0, err
+}
+
+// SnapshotFiles lists the files of snapshot n inside the turn, by path
+// (n = 0, "no snapshot", has none).
+func (t *Turn) SnapshotFiles(n int64) ([]File, error) { return snapshotFiles(t.ctx, t.s.w, n) }
+
+// ResetTree makes the tree zone hold exactly the files of snapshot n (n =
+// 0: no files). It writes only the paths that differ, so a tree already
+// at n is left alone and the turn records no change for it.
+func (t *Turn) ResetTree(n int64) error {
+	want, err := t.SnapshotFiles(n)
+	if err != nil {
 		return err
 	}
-	if exists == 0 {
+	cur, err := t.TreeFiles()
+	if err != nil {
+		return err
+	}
+	have := make(map[string]File, len(cur))
+	for _, f := range cur {
+		have[f.Path] = f
+	}
+	keep := make(map[string]bool, len(want))
+	for _, f := range want {
+		keep[f.Path] = true
+		if h, ok := have[f.Path]; !ok || h.SHA256 != f.SHA256 || h.Type != f.Type {
+			if _, err := t.PutBlob("tree", f.Path, f.SHA256, f.Size, f.Type); err != nil {
+				return err
+			}
+		}
+	}
+	for _, f := range cur {
+		if !keep[f.Path] {
+			if _, err := t.RemoveFile("tree", f.Path); err != nil {
+				return err
+			}
+		}
+	}
+	return nil
+}
+
+// MoveRef points a ref at snapshot n, creating the ref when it does not
+// exist; the name must be a ValidRefName.
+func (t *Turn) MoveRef(ref string, n int64) error {
+	if !ValidRefName(ref) {
+		return fmt.Errorf("invalid ref name %q (lowercase, starting with a letter: main, draft, proposal/x1)", ref)
+	}
+	if ok, err := t.HasSnapshot(n); err != nil {
+		return err
+	} else if !ok {
 		return fmt.Errorf("no snapshot %d", n)
 	}
 	if err := t.guardCode(); err != nil {
@@ -265,6 +323,24 @@ func (t *Turn) MoveRef(ref string, n int64) error {
 	}
 	t.record(Change{Kind: "ref", Key: ref, Op: "move", Version: n})
 	return nil
+}
+
+// RemoveRef deletes a ref; its snapshots stay. It reports whether the ref
+// existed. Like every ref writer it refuses, without the code right, a
+// store that holds app code.
+func (t *Turn) RemoveRef(ref string) (bool, error) {
+	if err := t.guardCode(); err != nil {
+		return false, err
+	}
+	res, err := t.s.w.ExecContext(t.ctx, `DELETE FROM _refs WHERE name = ?`, ref)
+	if err != nil {
+		return false, err
+	}
+	n, _ := res.RowsAffected()
+	if n > 0 {
+		t.record(Change{Kind: "ref", Key: ref, Op: "remove"})
+	}
+	return n > 0, nil
 }
 
 // Snapshot is one frozen tree.
@@ -332,7 +408,11 @@ func (s *Store) Ref(ctx context.Context, at string) (int64, error) {
 
 // SnapshotFiles lists the files of snapshot n.
 func (s *Store) SnapshotFiles(ctx context.Context, n int64) ([]File, error) {
-	rows, err := s.ro.QueryContext(ctx, `SELECT path, sha256, size, type FROM _snapshot_files WHERE n = ? ORDER BY path`, n)
+	return snapshotFiles(ctx, s.ro, n)
+}
+
+func snapshotFiles(ctx context.Context, q querier, n int64) ([]File, error) {
+	rows, err := q.QueryContext(ctx, `SELECT path, sha256, size, type FROM _snapshot_files WHERE n = ? ORDER BY path`, n)
 	if err != nil {
 		return nil, err
 	}

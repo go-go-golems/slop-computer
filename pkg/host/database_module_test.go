@@ -52,7 +52,7 @@ func TestDatabaseModule(t *testing.T) {
 	h := newHarness(t)
 	admin := h.tokenFor("admin@example.com", "read", "write", "admin")
 	h.call(admin, "store.new", map[string]any{"id": "dbm"})
-	h.call(admin, "files.push", map[string]any{"store": "dbm", "files": files(map[string]string{
+	h.push(admin, map[string]any{"store": "dbm", "files": files(map[string]string{
 		"app.json":          `{"title":"DB","actor":"actor.js"}`,
 		"actor.js":          databaseActor,
 		"database.js":       `module.exports = { x: 'tree file' };`,

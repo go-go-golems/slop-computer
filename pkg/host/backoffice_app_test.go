@@ -14,7 +14,7 @@ func TestBackofficeApp(t *testing.T) {
 	admin := h.tokenFor("admin@example.com", "read", "write", "admin")
 	mia := h.tokenFor("mia@example.com", "read", "write", "admin")
 	h.call(admin, "store.new", map[string]any{"id": "backoffice"})
-	h.call(admin, "files.push", map[string]any{"store": "backoffice", "files": appDir(t, "backoffice")})
+	h.push(admin, map[string]any{"store": "backoffice", "files": appDir(t, "backoffice")})
 	if st := h.call(admin, "app.status", map[string]any{"store": "backoffice"}).(map[string]any); st["broken"] != "" {
 		t.Fatalf("backoffice is broken: %v", st)
 	}

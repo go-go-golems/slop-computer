@@ -39,7 +39,7 @@ func TestCatalogViewsOnStaticHost(t *testing.T) {
 		{"catalog-agents", "/catalog/agents", appDir(t, "catalog-agents")},
 	} {
 		h.call(admin, "store.new", map[string]any{"id": s.id})
-		h.call(admin, "files.push", map[string]any{"store": s.id, "files": s.files})
+		h.push(admin, map[string]any{"store": s.id, "files": s.files})
 		h.call(admin, "grant.set", map[string]any{"store": s.id, "subject": "@guest", "level": "view"})
 		h.call(admin, "mount.set", map[string]any{"host": static, "path": s.mount, "store": s.id})
 	}

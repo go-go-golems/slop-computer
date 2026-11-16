@@ -84,7 +84,7 @@ func linkStore(t *testing.T, h *harness, admin, owner string) string {
 	t.Helper()
 	live := h.cfg.Hosts.Live[0]
 	h.call(owner, "store.new", map[string]any{"id": "notes"})
-	h.call(admin, "files.push", map[string]any{"store": "notes", "files": files(map[string]string{
+	h.push(admin, map[string]any{"store": "notes", "files": files(map[string]string{
 		"app.json": `{"title":"Notes","capabilities":{"db":{}}}`, "index.html": "<!doctype html><title>n</title>"})})
 	h.call(admin, "mount.set", map[string]any{"host": live, "path": "/notes", "store": "notes"})
 	return live
@@ -148,7 +148,7 @@ func TestActionWithoutRequiresNeedsAdmin(t *testing.T) {
 	admin := h.tokenFor("admin@example.com", "read", "write", "admin")
 	mia := h.tokenFor("mia@example.com")
 	h.call(admin, "store.new", map[string]any{"id": "pk"})
-	h.call(admin, "files.push", map[string]any{"store": "pk", "files": files(map[string]string{
+	h.push(admin, map[string]any{"store": "pk", "files": files(map[string]string{
 		"app.json":   `{"title":"Poke","actor":"actor.js","capabilities":{"db":{}}}`,
 		"actor.js":   undeclaredActor,
 		"index.html": "<!doctype html><title>pk</title>",
@@ -241,7 +241,7 @@ func TestActionRequiresBadLevelFailsActivation(t *testing.T) {
 	h := newHarness(t)
 	admin := h.tokenFor("admin@example.com", "read", "write", "admin")
 	h.call(admin, "store.new", map[string]any{"id": "bad"})
-	h.call(admin, "files.push", map[string]any{"store": "bad", "files": files(map[string]string{
+	h.push(admin, map[string]any{"store": "bad", "files": files(map[string]string{
 		"app.json":   `{"title":"Bad","actor":"actor.js","capabilities":{"db":{}}}`,
 		"actor.js":   `defineActor({ actions: { mine: { requires: 'self', run(ctx) { return 1; } } } });`,
 		"index.html": "<!doctype html><title>bad</title>",
@@ -281,7 +281,7 @@ func TestAlarmPlatformActsAsStore(t *testing.T) {
 	admin := h.tokenFor("admin@example.com", "read", "write", "admin")
 	h.call(admin, "store.new", map[string]any{"id": "other"})
 	h.call(admin, "store.new", map[string]any{"id": "pf"})
-	h.call(admin, "files.push", map[string]any{"store": "pf", "files": files(map[string]string{
+	h.push(admin, map[string]any{"store": "pf", "files": files(map[string]string{
 		"app.json":   `{"title":"PF","actor":"actor.js","capabilities":{"db":{}},"slop":{"platform":["grants.set"]}}`,
 		"actor.js":   platformAlarmActor,
 		"index.html": "<!doctype html><title>pf</title>",
@@ -358,7 +358,7 @@ func TestStoresOpenRechecks(t *testing.T) {
 	h.call(admin, "store.new", map[string]any{"id": "src"})
 	h.call(admin, "docs.set", map[string]any{"store": "src", "path": "notes/a", "data": map[string]any{"t": 1}})
 	h.call(admin, "store.new", map[string]any{"id": "reader"})
-	h.call(admin, "files.push", map[string]any{"store": "reader", "files": files(map[string]string{
+	h.push(admin, map[string]any{"store": "reader", "files": files(map[string]string{
 		"app.json":   `{"title":"Reader","actor":"actor.js","capabilities":{"db":{}}}`,
 		"actor.js":   readerActor,
 		"index.html": "<!doctype html><title>r</title>",
