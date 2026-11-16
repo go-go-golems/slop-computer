@@ -816,3 +816,248 @@ CI's first run failed in `TestBlocksSiteReader`, a test this PR does not touch. 
 gh api repos/go-go-golems/slop-computer/actions/jobs/133023896936/logs > ci46.log
 GOWORK=off go test -buildvcs=false -tags sqlite_fts5 ./pkg/host -run 'TestBlocksSiteReader$' -count=60   # ok
 ```
+
+## Step 10: merging #46, and importing Sitebench as the bench
+
+The user merged the server side and approved committing Sitebench's source, which unblocked the bench app. Sitebench now lives in the repository as `web/bench/` (source) building `apps/bench/` (the app), with the same stamped-output convention as `web/admin`. Commit `33ee76c`.
+
+### Prompt Context
+
+**User prompt (verbatim):** "merge #46, then tell me where we are at with the coding agent?"
+
+Then: "1. yes you can commit it. then move on."
+
+**Assistant interpretation:** Merge #46. Report the bench's status. Then commit Sitebench's source (the open question I numbered 1) and carry on with the bench phases.
+
+**Inferred user intent:** Get the coding agent working on real slop apps, not just designed.
+
+### What I did
+
+- **Merged #46** (`dee7f72`), after checking it was mergeable and green at `fee1c98`.
+- **Re-extracted the archive.** The unzipped copy had lived in a worktree I removed. `~/Downloads/sitebench-workspace.zip` still matched the manifest (sha256 `048f3d25…`). I extracted only `sitebench/` into an empty scratch directory.
+- **Scanned for secrets** before anything went into the public repository: key and token patterns, emails, hosts and home paths. The only hits were `you@example.com`, `localhost`, `w3.org`, and the probe masking password fields.
+- **`web/bench/`:**
+  - `src/` and `test/` unchanged;
+  - `test/.gitignore` for the screenshots and zips the scripts write;
+  - a README with the provenance;
+  - `package.json` pinning `@tootallnate/quickjs-emscripten` 0.23.0 (its only release since 2023), acorn 8.18.0 (what the bundle contained) and esbuild 0.25.12 (as `web/admin`), plus its lockfile;
+  - `build.mjs`, merging Sitebench's two builds. It writes `apps/bench/{app.js, index.html, sandbox.js}` with the source stamp. `index.html` carries the stamp in an HTML comment before the doctype, which keeps standards mode, and `stampRe` is unanchored.
+- **The rest of the plumbing:** `make bench` (also in `.PHONY`), a `TestBuildOutputsFresh` entry, and `apps/bench/app.json` from stage 0.
+
+### Why
+
+- **A committed build output, like `web/admin` → `apps/backoffice`:** `go test` needs no node, and the app folder pushes as it is.
+
+### What worked
+
+- `app.js` and `index.html` are byte-identical to Sitebench's own `dist/` after the stamp line.
+- On the local server the pushed app booted ("Corner Coffee 7 files", "0 issues"), and an eval ran in the QuickJS worker: "ok 23 ms · quickjs · main", "7 files, 3646 bytes of css".
+
+### What didn't work
+
+- **`sandbox.js` differs from Sitebench's** after the stamp: same size within 7 bytes, different minified names, probably another esbuild version. The eval above shows it works.
+- **A secrets scan with `F="…"; grep … $F`** found nothing, because zsh does not split words. `set -- …; "$@"` fixed it.
+- **Playwright's `fill` on the Eval textarea timed out** ("element is not visible"): the Eval tab sat behind Agent. Clicking the tab first fixed it.
+
+### What I learned
+
+- Nothing in the repository walks `apps/`. `scripts/deploy-apps.sh` lists apps by hand, so the bench is added there only when it should deploy.
+
+### What was tricky
+
+- **Deciding what "Sitebench's source" means.** It is the `sitebench/` folder only. The archive's reference folders (form-skate, the shop, the textbook) are other material and stay out.
+
+### Second pair of eyes
+
+- **The `npm install` warning `allow-scripts`.** esbuild's binary came from its optional platform package, so the build works without install scripts. CI's `npm ci` should behave the same.
+
+### Future
+
+- Phase 1.
+
+### Code review
+
+- `web/bench/build.mjs`;
+- `web/bench/package.json`.
+
+### Technical details
+
+```sh
+make bench    # cd web/bench && npm ci && node build.mjs
+for f in app.js index.html sandbox.js; do tail -n +2 apps/bench/$f | cmp - sbzip/sitebench/dist/$f; done
+```
+
+## Step 11: Bench Phase 1, projects are app stores
+
+A project in the bench can now be an app store on the server. Its files are the app's tree at `draft`, every edit is pushed there, and the bench's own documents keep threads, timeline, boards and proposals. Commit `8ce82aa`.
+
+### Prompt Context
+
+**User prompt (verbatim):** see Step 10.
+
+**Assistant interpretation:** Guide Phase 1: the bench's actor, and the page's projects over it.
+
+**Inferred user intent:** Open a real slop app in the coding agent.
+
+### What I did
+
+- **`apps/bench/actor.js`,** trusted with `workshop`, acting as the visitor:
+  - `apps`: the stores the visitor administers that run no other store's app, with refs and instances, leaving the bench out;
+  - `open`: `draft` from `main` the first time, with `ifAt: 0`, then the tree;
+  - `read`: texts in 4 MB answers, with binary files named;
+  - `sync`: `files.push` to `draft` with `activate` on the dev instance when it exists, answering with the new tree;
+  - `create`: `store.new` plus a push to `draft`.
+- **The page, a new `src/03b-slop.js`:**
+  - `Slop`: the actor bridge. It is off without an actor, so the bench stays plain Sitebench on claude.ai.
+  - `Sync`: debounce 300 ms, one push at a time. Changed files go as text; the rest by `sha256` and `size` from the server's tree.
+  - `slopAppFiles`, the "New slop app" template.
+- **`04-project.js`:**
+  - `Project` gains `tree`, `synced` and `extern`. `extern` holds binary and over-240 KB files, which are pushed back by hash.
+  - `write` and `remove` call `Sync.schedule` for app projects instead of saving file documents.
+  - `Projects.openApp` (files from `draft`, the rest from `p_<app>/`) and `createApp`.
+- **`11-app.js`:**
+  - the project menu shows "Apps on this server" and "New slop app…";
+  - the storage pill shows "draft n" and the dev state;
+  - "Forget" for an app project leaves the store alone.
+- **`TestBenchProjects`** (`pkg/host/bench_test.go`):
+  - `apps` lists `jot` but not the bench or an instance;
+  - `open` makes `draft` equal to `main`;
+  - `read` names a real PNG (pushed with `blobs`) as binary;
+  - `sync` pushes one change and one removal while `main` stays put and the PNG keeps its hash;
+  - with a dev instance, `sync` reports `activated`;
+  - `create` gives `draft` without `main`, and a bad id is `invalid_argument`.
+- **Browser check:**
+  - The menu listed the local apps ("jot: draft 4 · main 1 · 1 instance").
+  - Opening `jot` gave "jot 2 files" and the pill "draft 4".
+  - An eval's `files.replace` turned the pill into "draft 5" after 412 ms. On the server, `draft` held the edit, the snapshot message was "bench: index.html", and `main` was still "version ONE".
+
+### Why
+
+- **The project id is the app id,** so the bench's documents for `jot` are `p_jot/…`, as the guide's mapping says.
+- **Frames stay srcdoc in Phase 1,** as planned. The console errors "Cannot read properties of undefined (reading 'use')" are `jot`'s page calling `window.claude` in a srcdoc frame.
+
+### What worked
+
+- The actor stayed small because `workshop` already had everything.
+
+### What didn't work
+
+- **The first PNG in the test was a Go string with invalid UTF-8.** JSON turned it into U+FFFD, so the server stored text. I pushed a real PNG with `blobs` instead.
+- **A hash-only entry needs its size:** `no blob 6b7fa434… of 0 bytes for logo.png`. The page's `Sync` had the same bug. It now sends `size`.
+- **My second sync in the test** overwrote `push[0]`, an arbitrary entry because Go map order is random, and so listed `index.html` twice (`index.html appears twice`). It now builds the manifest from the returned tree, and the test passes three runs in a row.
+
+### What I learned
+
+- **`files.push` entries by hash need `size`.**
+- **Module functions take positional arguments plus a trailing options object** (`pkg/doors/actors/modules.go:92-98`), so `moveRef(app, 'draft', n, {ifAt: 0})` works.
+
+### What was tricky
+
+- **Edits made outside the bench.** On open, the bench compares `draft` with its timeline's last state. If they differ, it logs an `init` event by "push" noting that draft changed outside the bench. Live outside edits are Phase 3.
+
+### Second pair of eyes
+
+- **`sync` prunes:** files missing from the manifest are deleted. A push from a terminal between the bench's open and its next sync is overwritten. Phase 3 should compare `draft` before pushing, or reload on outside commits.
+
+### Future
+
+- Phase 2: frames as embedded views.
+
+### Code review
+
+- `apps/bench/actor.js`;
+- `web/bench/src/03b-slop.js`;
+- `openApp` in `web/bench/src/04-project.js`.
+
+### Technical details
+
+```sh
+GOWORK=off go test -buildvcs=false -tags sqlite_fts5 ./pkg/host -run TestBenchProjects -count=3
+slop push apps/bench --store bench && slop app trust bench workshop && slop mount set --host <live> --path /bench --store bench
+```
+
+## Step 12: Bench Phase 2, canvas frames are the dev instance, live
+
+The canvas now shows the real app. For an app project, the frames on its entry page are embedded views of the person's dev instance, served by slop with the instrumented page, the runtime and Sitebench's own probe. An edit reached both frames in 515 ms. Commit `be4d4a5`.
+
+### Prompt Context
+
+**User prompt (verbatim):** see Step 10.
+
+**Assistant interpretation:** Guide Phase 2, the page half; the server half was C.1.
+
+**Inferred user intent:** The live dev environment: edit, and see the running app change.
+
+### What I did
+
+- **One probe source.** `PROBE` moved from `05-site.js` into `src/05a-probe.js` (33,346 bytes). `build.mjs` also writes it into `pkg/doors/pages/assets/probe.js`, stamped, wrapped to start in embedded mode, with the nonce from the frame address (`sbn`) and the origin from the boot data's `parentOrigin`. It replaces C.1's small probe. `TestBuildOutputsFresh` covers it.
+- **Embedded mode inside PROBE:**
+  - it posts to and accepts messages from `CFG.origin` only;
+  - there is no `window.site`;
+  - links are not intercepted;
+  - `sheetFile` maps a `<link>` stylesheet to its file from the URL (`/e/<token>/v/<n>/<path>`);
+  - snapshots inline linked stylesheets.
+- **`FrameHost`:**
+  - `embeddable`: on slop, an app project, the entry page, `main`, and not headless, a fixture or the playhead;
+  - `load` gets an embed through `Embeds.open`, which makes the dev instance once, sets `sbn`, and keeps the deep-link hash;
+  - `swap` keeps the embed and origin and pushes mode, pins and preview;
+  - `post` targets the frame's origin.
+- **The bench as shell,** a listener for `slop: 1` messages from the iframes of its embeds:
+  - `hello` gets the view and secret;
+  - `renew` goes through the actor;
+  - `reload` and `reopen` reload in place, keeping state;
+  - `consent`, `confirm` and `download` are declined with a toast; `compose` and `permissions` are answered as the shell does.
+- **Edits no longer reload embedded frames themselves.** They reload when the runtime says `draft` moved (`11-app.js`).
+- **The actor:** `dev` makes the instance once (type from `draft`'s `app.json`, following `draft`), plus `embed` and `renew`.
+- **`TestBenchDevInstance`:** a typed instance on `draft`, made once; `embed` and `renew` through a signed-in page's `slop.call`; `not_granted` for a token.
+- **Browser check** (`various/bench-p2-embedded-frames.png`):
+  - Both frames ran `jot` with its `db` ("from the dev instance, version FOUR (from the bench)"), 4 `data-src` elements and the probe. The pill read "draft 5 dev ok", and the Console showed "jot loaded" twice.
+  - An eval replaced the text, and both frames showed "version FIVE, live" 515 ms after Run, with the pill at "draft 6 dev ok".
+  - Clicking the `h1` showed "Source index.html:2" in the Inspector.
+  - "New slop app…" created `bench-demo` ("4 files", "draft 1 dev ok"). In its frames, `frames.inspect` returned `styles.css main`, `frames.check` returned 0 issues, and `frames.outline` showed `main @index.html:10`.
+
+### Why
+
+- **Sitebench's PROBE, not the small one:** the bench's Inspector, checks, layout diffs, select, text edit and snapshots all speak its protocol. With one source, srcdoc and embedded frames behave the same.
+- **Consent, confirm and downloads go through main-host endpoints** (`/_site/views/<id>/consent`, `/_site/confirm`) that the bench's origin cannot call with the person's session. They are declined rather than faked.
+
+### What worked
+
+- PROBE needed only six small changes for embedded mode.
+
+### What didn't work
+
+- **The build's first probe** failed `node --check`: "SyntaxError: Invalid regular expression flags". In a JS template literal, `\/` is `/`. The route now comes from `pathname.split('/').slice(5)`.
+- **An eval whose output I searched for in the whole page text** seemed to return nothing. The result was in the Eval panel, as a JSON string inside the output.
+
+### What I learned
+
+- **Every edit opens new views for embedded frames:** one embed per frame per reload. Views expire after an hour, and the old iframes are removed. A `closeEmbed` would free them sooner.
+
+### What was tricky
+
+- **Which load a runtime message belongs to.** During a reload two iframes exist. The listener matches `e.source` against both the current and the next iframe and checks the origin of that load's embed. Only the current one may trigger a reload.
+
+### Second pair of eyes
+
+- **The double reload.** The server sends `reload` to every view of the dev instance, so with two frames there are two reloads per push. Each is coalesced by `reloadSoon`, which is fine, but worth watching with many frames.
+
+### Future
+
+- Phase 3: actor status and logs in effects and the Console; reloading on outside pushes; resetting dev data.
+- Phase 4: the agent's API for slop apps (`app.*` instead of `data.*`).
+- Closing embeds.
+
+### Code review
+
+- `web/bench/src/05a-probe.js` (the embedded-mode changes);
+- `FrameHost` and the runtime listener in `web/bench/src/05-site.js`;
+- `Embeds` in `03b-slop.js`;
+- `dev`/`embed`/`renew` in `apps/bench/actor.js`.
+
+### Technical details
+
+```sh
+GOWORK=off go test -buildvcs=false -tags sqlite_fts5 ./pkg/host -run 'TestBench|TestEmbeddedViews|TestBuildOutputsFresh' -count=1
+# browser: local server built from this branch; /bench mounted; open jot, then an eval: files.replace('index.html', …)
+```
