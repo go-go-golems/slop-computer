@@ -77,6 +77,7 @@ const App = {
       this.ev.on('pins', () => { for (const fh of FrameHosts) if (!fh.headless && fh.project === P) fh.push({ push: 'pins', pins: this.pinsFor(fh.route) }) }),
       this.ev.on('health', () => { this.paintHeader(); Dock.refreshTabs() }),
       ...this.autoMarks(P))
+    Sync.attach(P.meta.app ? P : null)
     this.ev.emit('project', P)
     if (this.canvas) this.canvas.sync()
     this.paintHeader()
@@ -128,11 +129,25 @@ const App = {
     paint()
     const m = modal({ title: 'New project', body: [h('p.note', 'Each project is its own repository: files, tables, proposals, threads and timeline. Try ideas side by side.'), cards, name], actions: [{ label: 'Cancel' }, { label: 'Create', primary: true, run: () => { go(); return false } }] })
   },
+  newAppDialog() {
+    const id = h('input.txt', { value: '', placeholder: 'id: lowercase letters, digits and -', style: { width: '100%' } })
+    const title = h('input.txt', { value: '', placeholder: 'Title (optional)', style: { width: '100%' } })
+    const go = async () => {
+      const v = id.value.trim()
+      if (!/^[a-z0-9][a-z0-9-]{0,62}$/.test(v)) { toast('The id is a store id: lowercase letters, digits and -, at most 63'); return false }
+      try { await Projects.createApp({ id: v, title: title.value.trim() || v }); await this.openProject(v); toast('New app ' + v + ' (on draft; publish to make it visible)') }
+      catch (e) { toast('Could not create ' + v + ': ' + (e.message || e), 5000) }
+    }
+    modal({ title: 'New slop app', body: [h('p.note', 'An app store with app.json and a page. Your edits go to its draft ref; nothing is visible to others until you publish it.'), id, title], actions: [{ label: 'Cancel' }, { label: 'Create', primary: true, run: go }] })
+    setTimeout(() => id.focus(), 0)
+  },
   async duplicate() { const d = this.P.export(); d.title = this.P.title + ' copy'; const p = await Projects.create({ data: d }); await this.openProject(p.id); toast('Duplicated as "' + p.title + '"') },
   async rename() { const t = await promptBox('Rename project', 'Title', this.P.title); if (t) { this.P.meta.title = t; this.P.saveMeta(); this.paintHeader() } },
   async remove() {
     const P = this.P
-    if (!await confirmBox('Delete "' + P.title + '"?', 'Its files, tables, proposals, threads and timeline are deleted from storage. Export it first if you may want it back.', 'Delete project')) return
+    if (P.meta.app) {
+      if (!await confirmBox('Forget "' + P.title + '" here?', 'The bench forgets its threads, timeline, proposals and boards for this app. The app store, its files, refs and instances stay as they are.', 'Forget')) return
+    } else if (!await confirmBox('Delete "' + P.title + '"?', 'Its files, tables, proposals, threads and timeline are deleted from storage. Export it first if you may want it back.', 'Delete project')) return
     const id = P.id; await Projects.remove(id)
     const next = Projects.index.projects[0]
     if (next) await this.openProject(next.id); else { const p = await Projects.create({ template: 'blank', title: 'Untitled' }); await this.openProject(p.id) }
@@ -191,7 +206,7 @@ const App = {
       modes: h('div.seg.modes', [['select', 'Select', 'V'], ['play', 'Play', 'P'], ['comment', 'Comment', 'C']].map(([m, l, k]) => h('button', { 'data-m': m, title: l + ' (' + k + ')', on: { click: () => this.setMode(m) } }, l))),
       health: h('button.pill', { title: 'Layout, contrast and a11y checks, plus page errors', on: { click: e => this.healthMenu(e.currentTarget) } }),
       agent: h('button.pill.hide-s', { title: 'Claude', on: { click: () => Dock.open('agent') } }),
-      store: h('button.pill.hide-s', { on: { click: () => Store.flush() } })
+      store: h('button.pill.hide-s', { on: { click: () => { Store.flush(); if (this.P && this.P.meta.app) Sync.run() } } })
     }
     const H = this.hdr
     return h('header.bar', h('div.brand', 'Sitebench', h('i', 'live site workbench')),
@@ -211,13 +226,29 @@ const App = {
     H.health.className = 'pill' + (n ? ' bad' : ''); clear(H.health).append(h('b', String(n)), h('span', n === 1 ? 'issue' : 'issues'))
     const busy = Agent.anyBusy()
     H.agent.className = 'pill hide-s' + (busy ? ' busy' : ''); clear(H.agent).append(h('b', busy ? 'Working' : Agent.sample ? 'Idle' : Agent.ready ? 'Off' : '…'), h('span', 'Claude'))
-    const [lbl, where] = Store.label().split('|')
-    H.store.title = where + (Store.error ? ' · ' + Store.error : '') + ' (click to save now)'; H.store.className = 'pill hide-s' + (Store.status === 'error' ? ' bad' : '')
-    clear(H.store).append(h('b', lbl.split(' · ')[1]), h('span', lbl.split(' · ')[0]))
+    if (P.meta.app) {
+      // An app project: where draft is, and the visitor's dev instance on it.
+      const l = Sync.label(), bad = Sync.status === 'error' || (Sync.act && Sync.act.broken)
+      H.store.title = 'App store ' + P.meta.app + ': edits go to its draft ref' + (l.title ? ' · ' + l.title : '') + ' (click to push now)'
+      H.store.className = 'pill hide-s' + (bad ? ' bad' : '')
+      clear(H.store).append(h('b', l.status), h('span', l.dev || 'app'))
+    } else {
+      const [lbl, where] = Store.label().split('|')
+      H.store.title = where + (Store.error ? ' · ' + Store.error : '') + ' (click to save now)'; H.store.className = 'pill hide-s' + (Store.status === 'error' ? ' bad' : '')
+      clear(H.store).append(h('b', lbl.split(' · ')[1]), h('span', lbl.split(' · ')[0]))
+    }
   },
   projectMenu(btn) {
-    const items = [{ group: 'Projects in this artifact' }]
-    for (const p of Projects.index.projects) items.push({ label: p.title, sub: (p.files || '?') + ' files · ' + fmtAgo(p.updated), on: this.P && p.id === this.P.id, run: () => { if (!this.P || p.id !== this.P.id) this.openProject(p.id) } })
+    const items = [{ group: Slop.on ? 'Recent' : 'Projects in this artifact' }]
+    for (const p of Projects.index.projects) items.push({ label: (p.app ? '▣ ' : '') + p.title, sub: (p.app ? 'app · ' : '') + (p.files || '?') + ' files · ' + fmtAgo(p.updated), on: this.P && p.id === this.P.id, run: () => { if (!this.P || p.id !== this.P.id) this.openProject(p.id) } })
+    if (Slop.on) {
+      items.push({ group: 'Apps on this server' })
+      const opened = new Set(Projects.index.projects.map(p => p.id))
+      const apps = Slop.apps.filter(a => !opened.has(a.id))
+      for (const a of apps.slice(0, 30)) items.push({ label: '▣ ' + a.id, sub: [a.refs.draft != null ? 'draft ' + a.refs.draft : '', a.refs.main != null ? 'main ' + a.refs.main : 'not published', plural(a.instances.length, 'instance')].filter(Boolean).join(' · '), run: () => this.openProject(a.id) })
+      if (!apps.length) items.push({ note: Slop.error || 'Every app you can develop is in the list above.' })
+      items.push({ label: 'New slop app…', sub: 'an app store with a page, on draft', run: () => this.newAppDialog() })
+    }
     items.push({ hr: true }, { label: 'New project…', sub: 'from a template', run: () => this.newProjectDialog() }, { label: 'Duplicate', sub: 'try an idea on a copy', run: () => this.duplicate() },
       { label: 'Rename…', run: () => this.rename() }, { label: 'Download project', sub: '.zip with transcripts and timeline', run: () => this.downloadProject() }, { label: 'Import project…', sub: '.zip or .json', run: () => this.importDialog() },
       { hr: true }, { label: 'Delete project…', danger: true, run: () => this.remove() }, { note: Store.label().split('|')[1] + '.' })
@@ -265,6 +296,8 @@ const App = {
     Store.ev.on('status', () => this.paintHeader())
     Agent.ev.on('turn', () => this.paintHeader()); Agent.ev.on('ready', () => this.paintHeader())
     await Store.init()
+    Sync.ev.on('status', () => this.paintHeader())
+    await Slop.init()
     this.prefs = (await Store.get('prefs')) || {}
     this.theme(this.prefs.theme || 'auto'); this.mode = this.prefs.mode || 'select'
     await Projects.load()

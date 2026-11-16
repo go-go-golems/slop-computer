@@ -1,4 +1,4 @@
-/* the bench, built from web/bench: do not edit. source sha256:ab926f6beab043a86fbc4390ba14e48f2c31b379619095ce29d69e39caaa8c18 */
+/* the bench, built from web/bench: do not edit. source sha256:ea58d6cf8f287eba5786a999c9ad26bbbb31aa15ee0eef25f0d4041328a6ec78 */
 // Sitebench: a live-site workbench. Built from src/*.js
 "use strict";
 (() => {
@@ -1017,6 +1017,110 @@ function validPath(path) {
   return null
 }
 
+// ===== 03b-slop.js =====
+// ---------- slop: the bench's actor, app stores as projects, sync to draft (SLOP3-022) ----------
+// On a slop server the page has an actor (apps/bench/actor.js) trusted with
+// the workshop module. A project can then be an app store: its files are the
+// app's tree at the draft ref, and every edit is pushed there; the bench's
+// own documents keep only what Sitebench adds (threads, timeline, boards,
+// proposals). Without an actor (a claude.ai artifact) Slop.on is false and
+// the bench is Sitebench as it was.
+const Slop = {
+  on: false, actions: null, apps: [], ev: emitter(), error: '',
+
+  async init() {
+    try {
+      if (window.claude && typeof window.claude.use === 'function') {
+        const s = await window.claude.use('slop')
+        if (s && s.actions && typeof s.actions.apps === 'function') { this.actions = s.actions; this.on = true }
+      }
+    } catch (e) { this.on = false }
+    if (this.on) this.refresh().catch(e => { this.error = e.message || String(e) })
+    return this.on
+  },
+  async call(name, args) {
+    if (!this.on) throw Object.assign(new Error('not on a slop server with the bench actor'), { kind: 'policy' })
+    return await this.actions[name](args || {})
+  },
+  async refresh() { this.apps = (await this.call('apps')) || []; this.error = ''; this.ev.emit('apps'); return this.apps },
+  app(id) { return this.apps.find(a => a.id === id) || null },
+
+  // File texts at a ref, in as many reads as the actor's answer budget needs.
+  async readAll(app, at, paths) {
+    const texts = {}, binary = []
+    let want = paths.slice()
+    while (want.length) {
+      const r = await this.call('read', { app, at, paths: want })
+      Object.assign(texts, r.texts || {}); binary.push(...(r.binary || []))
+      if (!r.more || !r.more.length || r.more.length === want.length) break
+      want = r.more
+    }
+    return { texts, binary }
+  }
+}
+
+// Files the bench never loads as text: they ride along in pushes by hash.
+const BINARY_EXT = /\.(png|jpe?g|gif|webp|avif|ico|bmp|woff2?|ttf|otf|eot|pdf|zip|gz|tgz|wasm|mp3|mp4|m4a|webm|ogg|wav|mov|sqlite|db|bin)$/i
+const textish = f => !BINARY_EXT.test(f.path) && f.size <= 240000
+
+// Sync pushes the open app project's tree to its draft: changed files as
+// text, the rest by the hash the server gave them. One push at a time; edits
+// during a push are picked up by the next.
+const Sync = {
+  P: null, status: 'idle', error: '', n: null, act: null, timer: 0, busy: false, again: false, ev: emitter(),
+  set(s, err = '') { this.status = s; this.error = err; this.ev.emit('status', s, err) },
+  attach(P) { clearTimeout(this.timer); this.P = P; this.n = P && P.refs ? P.refs.draft : null; this.act = P && P.devStatus ? { n: P.devStatus.n, broken: P.devStatus.broken } : null; this.set(P ? 'synced' : 'idle') },
+  schedule(P) {
+    if (P !== this.P) return
+    clearTimeout(this.timer); this.timer = setTimeout(() => this.run(), 300)
+    if (this.status !== 'error') this.set('dirty')
+  },
+  async run() {
+    const P = this.P
+    if (!P || !P.meta.app) return
+    if (this.busy) { this.again = true; return }
+    this.busy = true; this.set('pushing')
+    const sent = new Map(), files = []
+    for (const [path, text] of P.files) {
+      const t = P.tree.get(path)
+      if (t && P.synced.get(path) === text) files.push({ path, sha256: t.sha256, size: t.size })
+      else { files.push({ path, text }); sent.set(path, text) }
+    }
+    for (const [path, e] of P.extern) files.push({ path, sha256: e.sha256, size: e.size })
+    const changed = [...sent.keys()], gone = [...P.synced.keys()].filter(p => !P.files.has(p))
+    const message = 'bench: ' + [...changed, ...gone.map(p => '-' + p)].slice(0, 6).join(' ') + (changed.length + gone.length > 6 ? ' …' : '')
+    try {
+      const r = await Slop.call('sync', { app: P.meta.app, files, message })
+      if (this.P !== P) return
+      P.tree = new Map((r.files || []).map(f => [f.path, f]))
+      for (const [path, text] of sent) P.synced.set(path, text)
+      for (const p of gone) P.synced.delete(p)
+      this.n = r.n; this.act = (r.activated || [])[0] || this.act
+      P.refs = { ...(P.refs || {}), draft: r.n }
+      this.set('synced'); P.ev.emit('sync', r)
+    } catch (e) {
+      this.set('error', (e && e.message) || String(e)); toast('Pushing to draft failed: ' + this.error, 5000)
+    } finally { this.busy = false }
+    if (this.again) { this.again = false; this.run() }
+  },
+  label() {
+    const s = { idle: 'ready', dirty: 'unsaved', pushing: 'pushing…', synced: 'draft ' + (this.n ?? '–'), error: 'error' }[this.status] || this.status
+    const a = this.act, dev = a ? (a.broken ? 'dev broken' : a.n === this.n ? 'dev ok' : 'dev on ' + a.n) : ''
+    return { status: s, dev, title: this.error || (a && a.broken) || '' }
+  }
+}
+
+// A new slop app: the smallest tree slop runs, a page and its manifest.
+function slopAppFiles(title) {
+  const t = title.replace(/[<&"]/g, '')
+  return {
+    'app.json': JSON.stringify({ title: t, page: 'index.html', capabilities: { db: {} } }, null, 2) + '\n',
+    'index.html': '<!doctype html>\n<html lang="en">\n<head>\n<meta charset="utf-8">\n<meta name="viewport" content="width=device-width, initial-scale=1">\n<title>' + t + '</title>\n<link rel="stylesheet" href="styles.css">\n</head>\n<body>\n<main>\n  <h1>' + t + '</h1>\n  <p>A new slop app.</p>\n</main>\n</body>\n</html>\n',
+    'styles.css': 'body { font: 16px/1.5 system-ui, sans-serif; margin: 0; }\nmain { max-width: 40rem; margin: 3rem auto; padding: 0 1rem; }\n',
+    'README.md': '# ' + t + '\n\nA slop app. `app.json` is its manifest; `index.html` its page. Edits in the bench go to the `draft` ref; publishing moves `main`.\n'
+  }
+}
+
 // ===== 04-project.js =====
 // ---------- project model: main files, overlay workspaces, tables, session log, marks, threads ----------
 class Project {
@@ -1024,6 +1128,11 @@ class Project {
     this.id = meta.id; this.meta = meta
     this.files = new Map(); this.overlays = new Map(); this.tables = new Map(); this.threads = new Map()
     this.events = []; this.chunks = []        // chunks: [{id, start, size}]
+    // An app project (meta.app, on slop): main's files are the app store's
+    // tree at draft. tree: the server's entries {path, sha256, size};
+    // synced: each file's text as last pushed; extern: files kept out of
+    // the text model (binary, too large), pushed back by hash.
+    this.tree = new Map(); this.synced = new Map(); this.extern = new Map(); this.refs = null; this.devStatus = null
     this.ev = emitter()
     this.saveMeta = debounce(() => { this.meta.updated = now(); Store.save(this.key(), this.meta); Projects.touch(this) }, 500)
   }
@@ -1047,7 +1156,7 @@ class Project {
     if (text.length > 240000) throw Object.assign(new Error('file too large (max 240 KB)'), { kind: 'invalid' })
     const before = this.read(path, ws)
     if (before === text) return false
-    if (ws === 'main') { this.files.set(path, text); Store.save(this.key('files/' + encKey(path)), { path, text }) }
+    if (ws === 'main') { this.files.set(path, text); if (this.meta.app) Sync.schedule(this); else Store.save(this.key('files/' + encKey(path)), { path, text }) }
     else {
       const ov = this.overlay(ws)
       if (!(path in ov.base)) ov.base[path] = this.files.has(path) ? this.files.get(path) : null
@@ -1059,7 +1168,7 @@ class Project {
   }
   remove(path, { ws = 'main', who = 'you', note, thread } = {}) {
     if (this.read(path, ws) === null) return false
-    if (ws === 'main') { this.files.delete(path); Store.remove(this.key('files/' + encKey(path))) }
+    if (ws === 'main') { this.files.delete(path); if (this.meta.app) Sync.schedule(this); else Store.remove(this.key('files/' + encKey(path))) }
     else {
       const ov = this.overlay(ws)
       if (!(path in ov.base)) ov.base[path] = this.files.has(path) ? this.files.get(path) : null
@@ -1413,6 +1522,8 @@ const Projects = {
   },
   async open(id) {
     const meta = await Store.get('p_' + id)
+    if (meta && meta.app) return this.openApp(meta.app, meta)
+    if (!meta && Slop.app(id)) return this.openApp(id, null)
     if (!meta) throw new Error('project not found')
     const p = new Project(meta)
     const [files, ovs, tables, threads, logs] = await Promise.all(['files', 'ov', 'tables', 'threads', 'log'].map(c => Store.list(p.key(c))))
@@ -1428,6 +1539,55 @@ const Projects = {
     meta.boards = meta.boards && meta.boards.length ? meta.boards : [{ id: 'b1', name: 'Board', frames: [] }]
     meta.pins = meta.pins || []; meta.store = meta.store || {}
     return p
+  },
+  // An app store as a project: files from its draft (made from main the
+  // first time), everything else from the bench's documents p_<app>/…,
+  // which start empty the first time the app is opened here.
+  async openApp(app, meta) {
+    const o = await Slop.call('open', { app })
+    const fresh = !meta
+    meta = meta || { id: app, app, title: app, template: 'app', created: now(), updated: now(), boards: null, pins: [], store: {}, v: 1 }
+    meta.id = app; meta.app = app
+    const p = new Project(meta)
+    p.refs = o.refs || {}; p.devStatus = o.devStatus || null; p.instances = o.instances || []; p.dev = o.dev
+    const tree = o.files || []
+    p.tree = new Map(tree.map(f => [f.path, f]))
+    const { texts } = await Slop.readAll(app, 'draft', tree.filter(textish).map(f => f.path))
+    for (const f of tree) {
+      if (typeof texts[f.path] === 'string') { p.files.set(f.path, texts[f.path]); p.synced.set(f.path, texts[f.path]) }
+      else p.extern.set(f.path, f)
+    }
+    if (!fresh) {
+      const [ovs, tables, threads, logs] = await Promise.all(['ov', 'tables', 'threads', 'log'].map(c => Store.list(p.key(c))))
+      for (const { data } of ovs) if (data && data.id) p.overlays.set(data.id, data)
+      for (const { data } of tables) if (data && data.name) p.tables.set(data.name, data)
+      for (const { data } of threads) if (data && data.id) p.threads.set(data.id, data)
+      for (const { id: cid, data } of logs.sort((a, b) => a.id < b.id ? -1 : 1)) {
+        const start = p.events.length
+        for (const e of (data && data.events) || []) { e.i = p.events.length; p.events.push(e) }
+        p.chunks.push({ id: cid, start, size: JSON.stringify(data || {}).length })
+      }
+    }
+    let page = 'index.html'
+    try { page = JSON.parse(p.files.get('app.json') || '{}').page || page } catch (e) { /* a broken manifest still opens */ }
+    if (!meta.boards || !meta.boards.length) meta.boards = [{ id: 'b1', name: 'Board', frames: [{ id: 'f' + uid(), route: page, w: 1280, h: 800, x: 0, y: 0 }, { id: 'f' + uid(), route: page, w: 375, h: 720, x: 1340, y: 0 }] }]
+    meta.pins = meta.pins || []; meta.store = meta.store || {}
+    // The timeline starts from the draft as it is; a draft that moved since
+    // the bench last saw it (a push from a terminal) is noted.
+    const last = p.events.length ? p.stateAt(p.events.length - 1) : null
+    if (!last) p.log({ kind: 'init', ws: 'main', who: 'you', note: 'opened app ' + app + ' at draft ' + (p.refs.draft ?? '–'), files: Object.fromEntries(p.files) })
+    else if ([...p.files].some(([k, v]) => last.get(k) !== v) || [...last.keys()].some(k => !p.files.has(k))) p.log({ kind: 'init', ws: 'main', who: 'push', note: 'draft ' + (p.refs.draft ?? '–') + ' changed outside the bench', files: Object.fromEntries(p.files) })
+    if (fresh) Store.save(p.key(), meta)
+    if (!this.index.projects.some(x => x.id === app)) this.index.projects.unshift({ id: app, app, title: meta.title, template: 'app', updated: meta.updated, created: meta.created, files: p.files.size })
+    this.saveIndex(); this.ev.emit('index')
+    return p
+  },
+  // A new app store with its first files on draft; the caller opens it.
+  async createApp({ id, title, files }) {
+    const list = Object.entries(files || slopAppFiles(title || id)).map(([path, text]) => ({ path, text }))
+    await Slop.call('create', { id, files: list })
+    await Slop.refresh()
+    return id
   },
   async remove(id) {
     const key = 'p_' + id
@@ -5459,6 +5619,7 @@ const App = {
       this.ev.on('pins', () => { for (const fh of FrameHosts) if (!fh.headless && fh.project === P) fh.push({ push: 'pins', pins: this.pinsFor(fh.route) }) }),
       this.ev.on('health', () => { this.paintHeader(); Dock.refreshTabs() }),
       ...this.autoMarks(P))
+    Sync.attach(P.meta.app ? P : null)
     this.ev.emit('project', P)
     if (this.canvas) this.canvas.sync()
     this.paintHeader()
@@ -5510,11 +5671,25 @@ const App = {
     paint()
     const m = modal({ title: 'New project', body: [h('p.note', 'Each project is its own repository: files, tables, proposals, threads and timeline. Try ideas side by side.'), cards, name], actions: [{ label: 'Cancel' }, { label: 'Create', primary: true, run: () => { go(); return false } }] })
   },
+  newAppDialog() {
+    const id = h('input.txt', { value: '', placeholder: 'id: lowercase letters, digits and -', style: { width: '100%' } })
+    const title = h('input.txt', { value: '', placeholder: 'Title (optional)', style: { width: '100%' } })
+    const go = async () => {
+      const v = id.value.trim()
+      if (!/^[a-z0-9][a-z0-9-]{0,62}$/.test(v)) { toast('The id is a store id: lowercase letters, digits and -, at most 63'); return false }
+      try { await Projects.createApp({ id: v, title: title.value.trim() || v }); await this.openProject(v); toast('New app ' + v + ' (on draft; publish to make it visible)') }
+      catch (e) { toast('Could not create ' + v + ': ' + (e.message || e), 5000) }
+    }
+    modal({ title: 'New slop app', body: [h('p.note', 'An app store with app.json and a page. Your edits go to its draft ref; nothing is visible to others until you publish it.'), id, title], actions: [{ label: 'Cancel' }, { label: 'Create', primary: true, run: go }] })
+    setTimeout(() => id.focus(), 0)
+  },
   async duplicate() { const d = this.P.export(); d.title = this.P.title + ' copy'; const p = await Projects.create({ data: d }); await this.openProject(p.id); toast('Duplicated as "' + p.title + '"') },
   async rename() { const t = await promptBox('Rename project', 'Title', this.P.title); if (t) { this.P.meta.title = t; this.P.saveMeta(); this.paintHeader() } },
   async remove() {
     const P = this.P
-    if (!await confirmBox('Delete "' + P.title + '"?', 'Its files, tables, proposals, threads and timeline are deleted from storage. Export it first if you may want it back.', 'Delete project')) return
+    if (P.meta.app) {
+      if (!await confirmBox('Forget "' + P.title + '" here?', 'The bench forgets its threads, timeline, proposals and boards for this app. The app store, its files, refs and instances stay as they are.', 'Forget')) return
+    } else if (!await confirmBox('Delete "' + P.title + '"?', 'Its files, tables, proposals, threads and timeline are deleted from storage. Export it first if you may want it back.', 'Delete project')) return
     const id = P.id; await Projects.remove(id)
     const next = Projects.index.projects[0]
     if (next) await this.openProject(next.id); else { const p = await Projects.create({ template: 'blank', title: 'Untitled' }); await this.openProject(p.id) }
@@ -5573,7 +5748,7 @@ const App = {
       modes: h('div.seg.modes', [['select', 'Select', 'V'], ['play', 'Play', 'P'], ['comment', 'Comment', 'C']].map(([m, l, k]) => h('button', { 'data-m': m, title: l + ' (' + k + ')', on: { click: () => this.setMode(m) } }, l))),
       health: h('button.pill', { title: 'Layout, contrast and a11y checks, plus page errors', on: { click: e => this.healthMenu(e.currentTarget) } }),
       agent: h('button.pill.hide-s', { title: 'Claude', on: { click: () => Dock.open('agent') } }),
-      store: h('button.pill.hide-s', { on: { click: () => Store.flush() } })
+      store: h('button.pill.hide-s', { on: { click: () => { Store.flush(); if (this.P && this.P.meta.app) Sync.run() } } })
     }
     const H = this.hdr
     return h('header.bar', h('div.brand', 'Sitebench', h('i', 'live site workbench')),
@@ -5593,13 +5768,29 @@ const App = {
     H.health.className = 'pill' + (n ? ' bad' : ''); clear(H.health).append(h('b', String(n)), h('span', n === 1 ? 'issue' : 'issues'))
     const busy = Agent.anyBusy()
     H.agent.className = 'pill hide-s' + (busy ? ' busy' : ''); clear(H.agent).append(h('b', busy ? 'Working' : Agent.sample ? 'Idle' : Agent.ready ? 'Off' : '…'), h('span', 'Claude'))
-    const [lbl, where] = Store.label().split('|')
-    H.store.title = where + (Store.error ? ' · ' + Store.error : '') + ' (click to save now)'; H.store.className = 'pill hide-s' + (Store.status === 'error' ? ' bad' : '')
-    clear(H.store).append(h('b', lbl.split(' · ')[1]), h('span', lbl.split(' · ')[0]))
+    if (P.meta.app) {
+      // An app project: where draft is, and the visitor's dev instance on it.
+      const l = Sync.label(), bad = Sync.status === 'error' || (Sync.act && Sync.act.broken)
+      H.store.title = 'App store ' + P.meta.app + ': edits go to its draft ref' + (l.title ? ' · ' + l.title : '') + ' (click to push now)'
+      H.store.className = 'pill hide-s' + (bad ? ' bad' : '')
+      clear(H.store).append(h('b', l.status), h('span', l.dev || 'app'))
+    } else {
+      const [lbl, where] = Store.label().split('|')
+      H.store.title = where + (Store.error ? ' · ' + Store.error : '') + ' (click to save now)'; H.store.className = 'pill hide-s' + (Store.status === 'error' ? ' bad' : '')
+      clear(H.store).append(h('b', lbl.split(' · ')[1]), h('span', lbl.split(' · ')[0]))
+    }
   },
   projectMenu(btn) {
-    const items = [{ group: 'Projects in this artifact' }]
-    for (const p of Projects.index.projects) items.push({ label: p.title, sub: (p.files || '?') + ' files · ' + fmtAgo(p.updated), on: this.P && p.id === this.P.id, run: () => { if (!this.P || p.id !== this.P.id) this.openProject(p.id) } })
+    const items = [{ group: Slop.on ? 'Recent' : 'Projects in this artifact' }]
+    for (const p of Projects.index.projects) items.push({ label: (p.app ? '▣ ' : '') + p.title, sub: (p.app ? 'app · ' : '') + (p.files || '?') + ' files · ' + fmtAgo(p.updated), on: this.P && p.id === this.P.id, run: () => { if (!this.P || p.id !== this.P.id) this.openProject(p.id) } })
+    if (Slop.on) {
+      items.push({ group: 'Apps on this server' })
+      const opened = new Set(Projects.index.projects.map(p => p.id))
+      const apps = Slop.apps.filter(a => !opened.has(a.id))
+      for (const a of apps.slice(0, 30)) items.push({ label: '▣ ' + a.id, sub: [a.refs.draft != null ? 'draft ' + a.refs.draft : '', a.refs.main != null ? 'main ' + a.refs.main : 'not published', plural(a.instances.length, 'instance')].filter(Boolean).join(' · '), run: () => this.openProject(a.id) })
+      if (!apps.length) items.push({ note: Slop.error || 'Every app you can develop is in the list above.' })
+      items.push({ label: 'New slop app…', sub: 'an app store with a page, on draft', run: () => this.newAppDialog() })
+    }
     items.push({ hr: true }, { label: 'New project…', sub: 'from a template', run: () => this.newProjectDialog() }, { label: 'Duplicate', sub: 'try an idea on a copy', run: () => this.duplicate() },
       { label: 'Rename…', run: () => this.rename() }, { label: 'Download project', sub: '.zip with transcripts and timeline', run: () => this.downloadProject() }, { label: 'Import project…', sub: '.zip or .json', run: () => this.importDialog() },
       { hr: true }, { label: 'Delete project…', danger: true, run: () => this.remove() }, { note: Store.label().split('|')[1] + '.' })
@@ -5647,6 +5838,8 @@ const App = {
     Store.ev.on('status', () => this.paintHeader())
     Agent.ev.on('turn', () => this.paintHeader()); Agent.ev.on('ready', () => this.paintHeader())
     await Store.init()
+    Sync.ev.on('status', () => this.paintHeader())
+    await Slop.init()
     this.prefs = (await Store.get('prefs')) || {}
     this.theme(this.prefs.theme || 'auto'); this.mode = this.prefs.mode || 'select'
     await Projects.load()

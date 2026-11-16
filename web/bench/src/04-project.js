@@ -4,6 +4,11 @@ class Project {
     this.id = meta.id; this.meta = meta
     this.files = new Map(); this.overlays = new Map(); this.tables = new Map(); this.threads = new Map()
     this.events = []; this.chunks = []        // chunks: [{id, start, size}]
+    // An app project (meta.app, on slop): main's files are the app store's
+    // tree at draft. tree: the server's entries {path, sha256, size};
+    // synced: each file's text as last pushed; extern: files kept out of
+    // the text model (binary, too large), pushed back by hash.
+    this.tree = new Map(); this.synced = new Map(); this.extern = new Map(); this.refs = null; this.devStatus = null
     this.ev = emitter()
     this.saveMeta = debounce(() => { this.meta.updated = now(); Store.save(this.key(), this.meta); Projects.touch(this) }, 500)
   }
@@ -27,7 +32,7 @@ class Project {
     if (text.length > 240000) throw Object.assign(new Error('file too large (max 240 KB)'), { kind: 'invalid' })
     const before = this.read(path, ws)
     if (before === text) return false
-    if (ws === 'main') { this.files.set(path, text); Store.save(this.key('files/' + encKey(path)), { path, text }) }
+    if (ws === 'main') { this.files.set(path, text); if (this.meta.app) Sync.schedule(this); else Store.save(this.key('files/' + encKey(path)), { path, text }) }
     else {
       const ov = this.overlay(ws)
       if (!(path in ov.base)) ov.base[path] = this.files.has(path) ? this.files.get(path) : null
@@ -39,7 +44,7 @@ class Project {
   }
   remove(path, { ws = 'main', who = 'you', note, thread } = {}) {
     if (this.read(path, ws) === null) return false
-    if (ws === 'main') { this.files.delete(path); Store.remove(this.key('files/' + encKey(path))) }
+    if (ws === 'main') { this.files.delete(path); if (this.meta.app) Sync.schedule(this); else Store.remove(this.key('files/' + encKey(path))) }
     else {
       const ov = this.overlay(ws)
       if (!(path in ov.base)) ov.base[path] = this.files.has(path) ? this.files.get(path) : null
@@ -393,6 +398,8 @@ const Projects = {
   },
   async open(id) {
     const meta = await Store.get('p_' + id)
+    if (meta && meta.app) return this.openApp(meta.app, meta)
+    if (!meta && Slop.app(id)) return this.openApp(id, null)
     if (!meta) throw new Error('project not found')
     const p = new Project(meta)
     const [files, ovs, tables, threads, logs] = await Promise.all(['files', 'ov', 'tables', 'threads', 'log'].map(c => Store.list(p.key(c))))
@@ -408,6 +415,55 @@ const Projects = {
     meta.boards = meta.boards && meta.boards.length ? meta.boards : [{ id: 'b1', name: 'Board', frames: [] }]
     meta.pins = meta.pins || []; meta.store = meta.store || {}
     return p
+  },
+  // An app store as a project: files from its draft (made from main the
+  // first time), everything else from the bench's documents p_<app>/…,
+  // which start empty the first time the app is opened here.
+  async openApp(app, meta) {
+    const o = await Slop.call('open', { app })
+    const fresh = !meta
+    meta = meta || { id: app, app, title: app, template: 'app', created: now(), updated: now(), boards: null, pins: [], store: {}, v: 1 }
+    meta.id = app; meta.app = app
+    const p = new Project(meta)
+    p.refs = o.refs || {}; p.devStatus = o.devStatus || null; p.instances = o.instances || []; p.dev = o.dev
+    const tree = o.files || []
+    p.tree = new Map(tree.map(f => [f.path, f]))
+    const { texts } = await Slop.readAll(app, 'draft', tree.filter(textish).map(f => f.path))
+    for (const f of tree) {
+      if (typeof texts[f.path] === 'string') { p.files.set(f.path, texts[f.path]); p.synced.set(f.path, texts[f.path]) }
+      else p.extern.set(f.path, f)
+    }
+    if (!fresh) {
+      const [ovs, tables, threads, logs] = await Promise.all(['ov', 'tables', 'threads', 'log'].map(c => Store.list(p.key(c))))
+      for (const { data } of ovs) if (data && data.id) p.overlays.set(data.id, data)
+      for (const { data } of tables) if (data && data.name) p.tables.set(data.name, data)
+      for (const { data } of threads) if (data && data.id) p.threads.set(data.id, data)
+      for (const { id: cid, data } of logs.sort((a, b) => a.id < b.id ? -1 : 1)) {
+        const start = p.events.length
+        for (const e of (data && data.events) || []) { e.i = p.events.length; p.events.push(e) }
+        p.chunks.push({ id: cid, start, size: JSON.stringify(data || {}).length })
+      }
+    }
+    let page = 'index.html'
+    try { page = JSON.parse(p.files.get('app.json') || '{}').page || page } catch (e) { /* a broken manifest still opens */ }
+    if (!meta.boards || !meta.boards.length) meta.boards = [{ id: 'b1', name: 'Board', frames: [{ id: 'f' + uid(), route: page, w: 1280, h: 800, x: 0, y: 0 }, { id: 'f' + uid(), route: page, w: 375, h: 720, x: 1340, y: 0 }] }]
+    meta.pins = meta.pins || []; meta.store = meta.store || {}
+    // The timeline starts from the draft as it is; a draft that moved since
+    // the bench last saw it (a push from a terminal) is noted.
+    const last = p.events.length ? p.stateAt(p.events.length - 1) : null
+    if (!last) p.log({ kind: 'init', ws: 'main', who: 'you', note: 'opened app ' + app + ' at draft ' + (p.refs.draft ?? '–'), files: Object.fromEntries(p.files) })
+    else if ([...p.files].some(([k, v]) => last.get(k) !== v) || [...last.keys()].some(k => !p.files.has(k))) p.log({ kind: 'init', ws: 'main', who: 'push', note: 'draft ' + (p.refs.draft ?? '–') + ' changed outside the bench', files: Object.fromEntries(p.files) })
+    if (fresh) Store.save(p.key(), meta)
+    if (!this.index.projects.some(x => x.id === app)) this.index.projects.unshift({ id: app, app, title: meta.title, template: 'app', updated: meta.updated, created: meta.created, files: p.files.size })
+    this.saveIndex(); this.ev.emit('index')
+    return p
+  },
+  // A new app store with its first files on draft; the caller opens it.
+  async createApp({ id, title, files }) {
+    const list = Object.entries(files || slopAppFiles(title || id)).map(([path, text]) => ({ path, text }))
+    await Slop.call('create', { id, files: list })
+    await Slop.refresh()
+    return id
   },
   async remove(id) {
     const key = 'p_' + id
