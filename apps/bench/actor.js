@@ -107,22 +107,31 @@ defineActor({
     // deleted). base is the draft the tree was made from: when draft moved
     // since (a push from a terminal, another person), nothing is pushed and
     // the answer is {conflict, n, files}, the draft as it is now, for the
-    // page to merge. Otherwise the visitor's dev instance, when it exists,
-    // comes up on the new snapshot and says how that went; the answer has
-    // the new tree.
+    // page to merge; the push checks base in the same turn that writes it
+    // (ifAt), so a push landing in between is never overwritten. Otherwise
+    // the visitor's dev instance, when it exists, comes up on the new
+    // snapshot and says how that went; the answer has the new tree.
     sync: {
       requires: 'view',
       async run(ctx, { app, files, message, base }) {
         const w = tool(ctx);
         storeId(ctx, app);
         if (!Array.isArray(files)) ctx.fail('invalid_argument', 'files must be a list of {path, text} or {path, sha256, size}');
-        if (base !== undefined) {
+        const moved = async () => {
           const refs = await w.refs(app);
-          if ((refs.draft ?? null) !== (base ?? null)) return { conflict: true, n: refs.draft ?? null, files: refs.draft != null ? await w.files(app, 'draft') : [] };
-        }
+          return { conflict: true, n: refs.draft ?? null, files: refs.draft != null ? await w.files(app, 'draft') : [] };
+        };
         const dev = devId(app, ctx.visitor.id);
         const devExists = (await statusOf(ctx, dev)) !== null;
-        const res = await w.push(app, files, { ref: 'draft', message: String(message || 'bench').slice(0, 200), activate: devExists ? [dev] : [] });
+        const opts = { ref: 'draft', message: String(message || 'bench').slice(0, 200), activate: devExists ? [dev] : [] };
+        if (base !== undefined) opts.ifAt = base ?? 0;
+        let res;
+        try {
+          res = await w.push(app, files, opts);
+        } catch (e) {
+          if (e && e.code === 'conflict') return await moved();
+          throw e;
+        }
         return { n: res.n, activated: res.activated || [], files: await w.files(app, 'draft') };
       },
     },

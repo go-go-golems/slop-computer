@@ -1,9 +1,16 @@
 // ---------- project model: main files, overlay workspaces, tables, session log, marks, threads ----------
+// Log documents stay under the store's 255,000-character limit: a chunk
+// holds about LOG_CHUNK characters of events; an event over LOG_EVENT is
+// saved apart, in LOG_PIECE pieces (escaped, a piece at most doubles).
+const LOG_CHUNK = 150000, LOG_EVENT = 60000, LOG_PIECE = 100000
+const storedSize = e => { const n = JSON.stringify(e).length; return n > LOG_EVENT ? 64 : n }
+
 class Project {
   constructor(meta) {
     this.id = meta.id; this.meta = meta
     this.files = new Map(); this.overlays = new Map(); this.tables = new Map(); this.threads = new Map()
     this.events = []; this.chunks = []        // chunks: [{id, start, size}]
+    this.ext = new WeakMap()                  // event → {id, json, n}: how an event too large for a chunk was saved
     // An app project (meta.app, on slop): main's files are the app store's
     // tree at draft. tree: the server's entries {path, sha256, size};
     // synced: each file's text as last pushed; extern: files kept out of
@@ -32,7 +39,7 @@ class Project {
     if (text.length > 240000) throw Object.assign(new Error('file too large (max 240 KB)'), { kind: 'invalid' })
     const before = this.read(path, ws)
     if (before === text) return false
-    if (ws === 'main') { this.files.set(path, text); if (this.meta.app) Sync.schedule(this); else Store.save(this.key('files/' + encKey(path)), { path, text }) }
+    if (ws === 'main') { this.files.set(path, text); this.extern.delete(path); if (this.meta.app) Sync.schedule(this); else Store.save(this.key('files/' + encKey(path)), { path, text }) }
     else {
       const ov = this.overlay(ws)
       if (!(path in ov.base)) ov.base[path] = this.files.has(path) ? this.files.get(path) : null
@@ -218,18 +225,53 @@ class Project {
     e.t = now(); e.i = this.events.length
     const last = this.events[this.events.length - 1]
     if (e.kind === 'write' && last && last.kind === 'write' && last.who === e.who && last.who === 'you' && last.path === e.path && last.ws === e.ws && e.t - (last.t2 || last.t) < 20000 && !e.note) {
-      last.after = e.after; last.t2 = e.t; this.saveChunk(); this.ev.emit('events'); return last
+      const c = this.chunks[this.chunks.length - 1], was = storedSize(last)
+      last.after = e.after; last.t2 = e.t; if (c) c.size += storedSize(last) - was
+      this.saveChunk(); this.ev.emit('events'); return last
     }
     let c = this.chunks[this.chunks.length - 1]
-    const size = JSON.stringify(e).length
-    if (!c || c.size + size > 180000) { c = { id: 'c' + String(this.chunks.length).padStart(4, '0'), start: this.events.length, size: 0 }; this.chunks.push(c) }
+    const size = storedSize(e)
+    if (!c || c.size + size > LOG_CHUNK) { c = { id: 'c' + String(this.chunks.length).padStart(4, '0'), start: this.events.length, size: 0 }; this.chunks.push(c) }
     c.size += size; this.events.push(e); this.saveChunk(); this.ev.emit('events', e)
     return e
   }
   saveChunk() {
     const c = this.chunks[this.chunks.length - 1]; if (!c) return
-    const next = this.chunks.length > 0 ? this.events.length : 0
-    Store.save(this.key('log/' + c.id), { start: c.start, events: this.events.slice(c.start, next) })
+    Store.save(this.key('log/' + c.id), { start: c.start, events: this.events.slice(c.start).map(e => this.stored(e)) })
+  }
+  // An event as its chunk keeps it: itself, or, when its JSON is too large
+  // to share a document (an app's opening snapshot, a large file's write),
+  // a stub {$ext, n} with the JSON saved in n pieces under logx/.
+  stored(e) {
+    const json = JSON.stringify(e)
+    if (json.length <= LOG_EVENT) return e
+    let x = this.ext.get(e)
+    if (!x || x.json !== json) {
+      const id = x ? x.id : uid('x'), n = Math.ceil(json.length / LOG_PIECE)
+      for (let k = 0; k < n; k++) Store.save(this.key('logx/' + id + '-' + k), { text: json.slice(k * LOG_PIECE, (k + 1) * LOG_PIECE) })
+      x = { id, json, n }; this.ext.set(e, x)
+    }
+    return { $ext: x.id, n: x.n }
+  }
+  // The log as saved: chunks in order, stubs put back together from their
+  // pieces (an event whose pieces are missing is left out).
+  loadLog(logs, parts) {
+    const piece = new Map(parts.map(d => [d.id, d.data && d.data.text]))
+    for (const { id: cid, data } of logs.sort((a, b) => a.id < b.id ? -1 : 1)) {
+      const start = this.events.length
+      for (const raw of (data && data.events) || []) {
+        let e = raw
+        if (raw && raw.$ext) {
+          let json = ''
+          for (let k = 0; k < raw.n && json !== null; k++) { const t = piece.get(raw.$ext + '-' + k); json = typeof t === 'string' ? json + t : null }
+          try { e = json === null ? null : JSON.parse(json) } catch (err) { e = null }
+          if (!e) continue
+          this.ext.set(e, { id: raw.$ext, json, n: raw.n })
+        }
+        e.i = this.events.length; this.events.push(e)
+      }
+      this.chunks.push({ id: cid, start, size: (data && data.events || []).reduce((n, x) => n + JSON.stringify(x).length, 0) })
+    }
   }
   // files of main as they were just after event i (-1: before anything)
   stateAt(i) {
@@ -402,16 +444,12 @@ const Projects = {
     if (!meta && Slop.app(id)) return this.openApp(id, null)
     if (!meta) throw new Error('project not found')
     const p = new Project(meta)
-    const [files, ovs, tables, threads, logs] = await Promise.all(['files', 'ov', 'tables', 'threads', 'log'].map(c => Store.list(p.key(c))))
+    const [files, ovs, tables, threads, logs, parts] = await Promise.all(['files', 'ov', 'tables', 'threads', 'log', 'logx'].map(c => Store.list(p.key(c))))
     for (const { data } of files) if (data && typeof data.path === 'string') p.files.set(data.path, data.text || '')
     for (const { data } of ovs) if (data && data.id) p.overlays.set(data.id, data)
     for (const { data } of tables) if (data && data.name) p.tables.set(data.name, data)
     for (const { data } of threads) if (data && data.id) p.threads.set(data.id, data)
-    for (const { id: cid, data } of logs.sort((a, b) => a.id < b.id ? -1 : 1)) {
-      const start = p.events.length
-      for (const e of (data && data.events) || []) { e.i = p.events.length; p.events.push(e) }
-      p.chunks.push({ id: cid, start, size: JSON.stringify(data || {}).length })
-    }
+    p.loadLog(logs, parts)
     meta.boards = meta.boards && meta.boards.length ? meta.boards : [{ id: 'b1', name: 'Board', frames: [] }]
     meta.pins = meta.pins || []; meta.store = meta.store || {}
     return p
@@ -434,15 +472,11 @@ const Projects = {
       else p.extern.set(f.path, f)
     }
     if (!fresh) {
-      const [ovs, tables, threads, logs] = await Promise.all(['ov', 'tables', 'threads', 'log'].map(c => Store.list(p.key(c))))
+      const [ovs, tables, threads, logs, parts] = await Promise.all(['ov', 'tables', 'threads', 'log', 'logx'].map(c => Store.list(p.key(c))))
       for (const { data } of ovs) if (data && data.id) p.overlays.set(data.id, data)
       for (const { data } of tables) if (data && data.name) p.tables.set(data.name, data)
       for (const { data } of threads) if (data && data.id) p.threads.set(data.id, data)
-      for (const { id: cid, data } of logs.sort((a, b) => a.id < b.id ? -1 : 1)) {
-        const start = p.events.length
-        for (const e of (data && data.events) || []) { e.i = p.events.length; p.events.push(e) }
-        p.chunks.push({ id: cid, start, size: JSON.stringify(data || {}).length })
-      }
+      p.loadLog(logs, parts)
     }
     let page = 'index.html'
     try { page = JSON.parse(p.files.get('app.json') || '{}').page || page } catch (e) { /* a broken manifest still opens */ }
@@ -467,7 +501,7 @@ const Projects = {
   },
   async remove(id) {
     const key = 'p_' + id
-    for (const c of ['files', 'ov', 'tables', 'threads', 'log']) for (const d of await Store.list(key + '/' + c)) Store.remove(key + '/' + c + '/' + d.id)
+    for (const c of ['files', 'ov', 'tables', 'threads', 'log', 'logx']) for (const d of await Store.list(key + '/' + c)) Store.remove(key + '/' + c + '/' + d.id)
     Store.remove(key)
     this.index.projects = this.index.projects.filter(p => p.id !== id)
     if (this.index.current === id) this.index.current = null

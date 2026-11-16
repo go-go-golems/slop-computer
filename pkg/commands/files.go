@@ -7,6 +7,7 @@ import (
 	"encoding/csv"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"sort"
 	"strings"
 	"unicode/utf8"
@@ -141,7 +142,7 @@ func filesVerbs(e filesEnv) []*verbs.Verb {
 				ctx := req.Context
 				p := req.Principal
 				out, err := push(ctx, e.kernelEnv, p, pushArgs{store: in.Store, zone: in.Zone, files: in.Files, blobs: in.Blobs,
-					message: in.Message, ref: in.Ref, prune: or(in.Prune, true), snapshot: or(in.Snapshot, true)}, true)
+					message: in.Message, ref: in.Ref, prune: or(in.Prune, true), snapshot: or(in.Snapshot, true), ifAt: in.IfAt}, true)
 				if err != nil || len(in.Activate) == 0 {
 					return out, err
 				}
@@ -326,7 +327,8 @@ type pushArgs struct {
 	store, zone     string
 	files, blobs    any
 	message, ref    string
-	prune, snapshot bool // files.push only (full)
+	prune, snapshot bool   // files.push only (full)
+	ifAt            *int64 // files.push only: snapshot only if ref still points here (0: does not exist)
 }
 
 func push(ctx context.Context, e kernelEnv, p *access.Principal, a pushArgs, full bool) (any, error) {
@@ -390,7 +392,24 @@ func push(ctx context.Context, e kernelEnv, p *access.Principal, a pushArgs, ful
 	snap := full && zone == "tree" && a.snapshot
 	var n int64
 	removed := 0
+	if a.ifAt != nil && !snap {
+		return nil, verbs.Errf("invalid_argument", "ifAt goes with a snapshot")
+	}
 	c, err := s.Do(ctx, who(p, d), func(t *store.Turn) error {
+		// in the same turn as the push, so nothing moves the ref in between
+		if a.ifAt != nil {
+			ref := a.ref
+			if ref == "" {
+				ref = "main"
+			}
+			at, err := t.RefAt(ref)
+			if err != nil {
+				return err
+			}
+			if at != *a.ifAt {
+				return &verbs.Error{Code: "conflict", Message: fmt.Sprintf("%s points at %d, not %d: it moved since you looked", ref, at, *a.ifAt), Extra: map[string]any{"at": at}}
+			}
+		}
 		for _, f := range files {
 			if _, err := t.PutBlob(zone, f.Path, f.SHA256, f.Size, f.Type); err != nil {
 				return err
@@ -501,6 +520,7 @@ type FilesPushIn struct {
 	Snapshot *bool    `json:"snapshot,omitempty" jsonschema_description:"take a snapshot (default true)"`
 	Zone     string   `json:"zone,omitempty" jsonschema_description:"tree (default) or assets"`
 	Activate []string `json:"activate,omitempty" jsonschema_description:"stores to activate after the snapshot (the instances following the moved ref); the result reports each one's n and broken"`
+	IfAt     *int64   `json:"ifAt,omitempty" jsonschema_description:"push only if the ref points at this snapshot now (0: only if it does not exist yet); otherwise conflict, nothing written"`
 }
 
 // FilesBlobsIn is files.blobs's input.
