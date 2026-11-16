@@ -1650,3 +1650,44 @@ Fixed in `aa56b77`. #48 merges it (`651cec3`, one source conflict in `Sync.flush
 ### Technical details
 
 `bench-big` and `bench-cjk` are local test apps; `bench-big`'s draft keeps the test edits (`switch2.txt`, an HTML comment).
+
+## Step 21: Codex round 6 on #47: holds per project; removed hash-only files are pending
+
+Codex's sixth pass (`aa56b77`) found two more gaps in the round-5 `Sync`:
+- a hold was global, so an eval running on app A kept app B's finished eval from pushing;
+- `pending()` only looked at text files, so a hash-only file replaced and then removed was never deleted from draft.
+
+Fixed in `b37267a`. #48 merges it (`4f8a180`, with its in-eval publish message moved to `Sync.held(P)`).
+
+### Prompt Context
+
+**User prompt (verbatim):** see Step 16.
+
+**Assistant interpretation:** Keep fixing until Codex is clean.
+
+**Inferred user intent:** Mergeable PRs.
+
+### What I did
+
+- **Per-project holds:** `P.syncHolds`, with `hold(P)`/`held(P)`/`release(P)`. `soon()` arms the timer if any queued project is not held, `runAll` skips held projects, and `run`/`flush` check `held(P)`. `runEval` holds and releases its own project.
+- **`pending(P)` checks draft's tree:** any path of `P.tree` absent from both `P.files` and `P.extern` is pending. `run`'s `gone` list and `Outside.mergeIn`'s `mine()` use the same rule.
+
+### What worked
+
+- **Browser:**
+  - on `bench-big`, one eval that wrote `big.js` and removed it gave draft 7 without `big.js`;
+  - with `bench-big` held through `Sync.hold`, an eval on `bench-demo` pushed (26 → 27, `heldB.txt`), and a later one reported "created probe3.txt · draft 29 · dev ok";
+  - on #48, the in-eval `publish.check` was still refused with the "publish in a later eval" message.
+- **Cleanup:** `bench-big` got `big.js` back (draft 8), and `bench-demo`'s draft is back to its four files.
+
+### What didn't work
+
+- **"wrote draft 7 · dev ok" looked like the `bench-demo` eval reporting `bench-big`'s draft.** It was my scraper: in the Eval panel, an entry's effects line comes before its "Edit again" and its return value after. I had joined one entry's value to the previous entry's effects. I reran with a unique return value and read around it.
+
+### What I learned
+
+- **The Eval panel's entry layout is effects, "Edit again", value.** Scrape around a unique value, not after the first "Edit again".
+
+### Code review
+
+- `Sync.hold`/`held`/`release`/`pending` in `web/bench/src/03b-slop.js`.
