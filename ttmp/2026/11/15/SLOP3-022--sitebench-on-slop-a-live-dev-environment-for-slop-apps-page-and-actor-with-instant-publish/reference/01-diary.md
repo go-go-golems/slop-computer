@@ -716,3 +716,103 @@ GOWORK=off go test -buildvcs=false -tags sqlite_fts5 ./pkg/host -run TestSlopDev
 slop dev ./myapp --app myapp            # Ctrl-C to stop
 slop dev ./myapp --app myapp --once     # push, report, exit
 ```
+
+## Step 9: PR #46, two rounds of Codex findings, and a CI flake
+
+PR #46 carries C.1–C.5. Codex reviewed it twice and found four real bugs, all fixed with tests:
+
+- **Round 1** (`7718910`), both in `slop dev`: a failed push was never retried, and a new app's dev instance got no type.
+- **Round 2** (`f94887e`), both in embeds: a token caller could open an embed with more authority than the token had (P1), and `<g/>` lost its self-closing slash.
+
+CI's first run failed in `TestBlocksSiteReader`, a test this PR does not touch. Its `TempDir` cleanup raced with something still writing. The rerun after `7718910` passed. On `f94887e` Codex found no major issues ("Didn't find any major issues. Hooray!"), and CI passed (run 43786562382).
+
+### Prompt Context
+
+**User prompt (verbatim):** see Step 6.
+
+**Assistant interpretation:** Open the PR, answer the review, and leave the merge to the user.
+
+**Inferred user intent:** A reviewed, green PR ready to merge.
+
+### What I did
+
+- **Opened #46** (<https://github.com/go-go-golems/slop-computer/pull/46>).
+- **Codex P2: "Update the folder stamp only after a successful push"** (`pkg/client/dev.go:107`).
+  - The loop advanced `stamp` before `devPush`, so a failed push was never retried.
+  - Now a change sets `pending`. A failed push stays pending and is retried after a backoff (1 s, doubling to 30 s), or at once on another edit. `devErr` prints a repeated error once.
+- **Codex P2: "Read the draft manifest when determining the dev instance type"** (`pkg/client/dev.go:160`).
+  - The type came from `app.status` on the app store, which reads `main`. A new app with only a `draft` gave the instance no type, and `pkg/doors/pages/site.go:53` refuses typed mounts for it.
+  - Now `manifestType(dir)` reads the folder's `app.json`, the manifest being pushed.
+- **`TestSlopDev` additions:**
+  - a check of the instance's type in `store.ls`. Against the previous `dev.go` it fails: `devloop_test.go:349: the instance's type is "", not app.json's`;
+  - a `pushFails` transport that fails `files.push` while a flag is set. The test writes a file with the flag on, waits for "push failed, will retry", clears the flag, and waits for "on 3 · ok" with no further edit.
+- **Codex P1: "Preserve token authority when opening embedded views"** (`pkg/doors/pages/embed.go:131`).
+  - A view keeps only `v.User`, and `viewPrincipal` (`pkg/doors/pages/actors.go:22-31`) rebuilds a full person with `Web.PersonAs`.
+  - So an embed opened by an action called with a token (say `write` without `admin`) gave the frame's `slop.call` more authority than the token had.
+  - `renewEmbed` had the same hole: its answer carries the secret, so a scoped token of the same person could take over that person's browser embed.
+  - Codex offered two fixes: keep the token's authority in the view, or reject tokens. I rejected tokens (`tokenEmbed` in both). An embed is a frame in a browser, opened by a person's page, and a view that kept a token's scopes would also outlive the token's revocation.
+- **`TestEmbeddedViews`, rewritten.**
+  - It now signs the admin and Bob in (`personView`), opens the tool's page view, and calls `embed`/`renew` over `slop.call` as a page does.
+  - It checks that an admin's token gets `not_granted` for both.
+  - `jot-dev` is granted to `@member` rather than to Bob's id, so the test does not depend on a browser sign-in and `tokenFor` making the same person.
+  - The previous version of the test opened embeds with tokens successfully, which demonstrates the hole.
+- **Codex P2: "Preserve self-closing tags without attributes"** (`pkg/doors/pages/embed.go:237`).
+  - `withAttr` treated a slash as self-closing only after whitespace or a quote, so `<g/>` became `<g/ data-src=…>`. In inline SVG, the elements after `<defs/>` would become its children.
+  - The token type cannot tell the cases apart: `x/net/html` returns `SelfClosingTagToken` whenever the byte before `>` is `/`, even when an unquoted value took it.
+  - `closesTag(head)` follows HTML's tokenizer: the slash closes after whitespace, a quote, the tag name or a valueless attribute, and belongs to an unquoted value otherwise.
+  - Test: `<defs/>`, `<g/>`, `<rect hidden/>`, `<circle r="1" />`, `<path d=M0/>` (the slash is the value's), `<use x=1 />`.
+- **`doc/building-apps.md`** says embeds are for a person on a page.
+- **The CI failure** (run 43782893587, job "release / publish", step "Run tests"):
+
+  ```
+  --- FAIL: TestBlocksSiteReader (0.36s)
+      testing.go:1464: TempDir RemoveAll cleanup: unlinkat /tmp/TestBlocksSiteReader399659965/001: directory not empty
+  ```
+
+  - `gh run view --log-failed` printed nothing. `gh api repos/go-go-golems/slop-computer/actions/jobs/<id>/logs` gave the log.
+  - Locally the test passed 60 times out of 60 (`-count=60`).
+  - It is the only failed `publish-image` run in the last 30.
+  - The next run, on `7718910`, passed (run 43783586702).
+
+### Why
+
+- **Backoff rather than retrying every tick:** a server that is down would otherwise get a full manifest every 500 ms and fill the terminal with the same error.
+
+### What worked
+
+- Both fixes pass, with the full suite passing and lint reporting 0 issues.
+
+### What didn't work
+
+- `gh pr checks 46 --json …` is not supported by this `gh` version ("unknown flag: --json").
+
+### What I learned
+
+- **A view carries a person, not a principal.** Anything that turns a module call into a view must make sure the caller had a person's full authority. Here that means refusing tokens.
+- **The test harness never stops the actor manager.** `newHarnessWith` (`pkg/host/harness_test.go:49-75`) registers cleanups for `ts.Close`, `k.Close` and `sys.Close`, but `actor.Manager` has no shutdown at all. An actor turn still running at teardown can reopen a store through the kernel after `k.Close` and recreate its files while `RemoveAll` runs. This is the likely cause of the flake, but it is not proven.
+
+### What was tricky
+
+- **Telling a flake from a regression.** The failing test calls `app.status`, whose code this PR moved into `statusOf`. That shared function only reads, and the test passes 60 times locally.
+
+### Second pair of eyes
+
+- **A shutdown for `actor.Manager`** (stop timers, wait for running turns), called by `serve` on exit and by the harness, would fix the flake at its cause. It belongs in its own change.
+
+### Future
+
+- The merge is the user's: #46 is reviewed clean and green at `f94887e`.
+- After the merge: one slop-yolo bump, then re-push the catalog kit.
+
+### Code review
+
+- `pkg/client/dev.go`: the loop's `pending`/`retryAt`/`backoff`, `devErr` and `manifestType`.
+- `pkg/doors/pages/embed.go`: `tokenEmbed` in `embed` and `renewEmbed`, and `closesTag`.
+- `TestEmbeddedViews`: embeds through signed-in pages.
+
+### Technical details
+
+```sh
+gh api repos/go-go-golems/slop-computer/actions/jobs/133023896936/logs > ci46.log
+GOWORK=off go test -buildvcs=false -tags sqlite_fts5 ./pkg/host -run 'TestBlocksSiteReader$' -count=60   # ok
+```
