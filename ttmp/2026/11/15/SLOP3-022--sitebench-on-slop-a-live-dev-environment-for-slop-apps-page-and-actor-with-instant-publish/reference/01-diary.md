@@ -1535,3 +1535,59 @@ Codex's third pass found no major issues on #48 (`145551a`). On #47 (`e0e274e`) 
 ```sh
 node ttmp/…/scripts/03-log-pieces-check.mjs web/bench/src/04-project.js
 ```
+
+## Step 19: Codex round 4 on #47: eval writes held until commit; imported history bounded
+
+Codex's fourth pass on #47 (`b8ed113`) found two more real P2s:
+- an eval that waits past the 300 ms debounce and then fails had its intermediate writes pushed, and the dev instance activated on them, before the rollback;
+- import and duplicate wrote history around the new bounded storage.
+
+Fixed in `3fbba56`. #48 merges it (`0114524`) and adds a clearer refusal for publishing in the same eval as writes (`470be35`).
+
+### Prompt Context
+
+**User prompt (verbatim):** see Step 16.
+
+**Assistant interpretation:** Keep fixing until Codex is clean.
+
+**Inferred user intent:** Mergeable PRs.
+
+### What I did
+
+- **Holding pushes during an eval:**
+  - `Sync.holds` with `hold()`/`release()`: `schedule()` marks the project dirty but sets no timer while held, and `run()` and `flush()` do nothing while held.
+  - `release()` schedules a push when something is pending; otherwise it turns `dirty` back to `synced`.
+  - `runEval` holds around `Sandbox.run` for app projects on `main`. The rollback moved into the `finally`, so it also runs if the sandbox throws, and the hold is released after it.
+- **`Project.saveLog()`** rebuilds every chunk with `storedSize`/`stored()`. `Projects.create` uses it instead of its own `JSON.stringify(e).length` chunking.
+- **The test hook** also exposes `Projects` and `Store`.
+- **On #48, `Publish.preflight` inside a held eval with pending writes** now says "files written in this eval reach draft when it ends: publish in a later eval".
+
+### Why
+
+- **Holding at `Sync`,** not deferring `P.write`: the eval's reads have to see its own writes, and only the push must wait.
+
+### What worked
+
+- **Browser (`bench-demo`):**
+  - write `held.txt`, `setTimeout` 1.5 s, throw: draft stayed 15, with no `held.txt`;
+  - the same eval returning: draft 16 with `held.txt` "kept".
+- **The import check:** `Projects.create({data})` with an `init` of two 140000-character files, then a reload: `initA`/`initB` were 140000, with 2 pieces under `logx`. The test project was removed.
+- **Publishing in the same eval:** in the writing eval, `publish.check()` was refused with the new message; the next eval's check showed "draft 18 → main (now 1)", "files: +held2.txt ~index.html".
+
+### What didn't work
+
+- **My eval-output scraper picked up the earlier result line** ("rolled back held.txt Error") for the second eval. I relied on the draft reads instead.
+
+### What I learned
+
+- **Two places wrote log chunks** (`log()` and the import path). Codex found the second one after the first was fixed. Both now go through `stored()`.
+
+### Second pair of eyes
+
+- **Local (non-app) projects save each file as its own document:** a CJK file near the 240,000-character cap is ~720 KB and would be refused. That is pre-existing Sitebench behaviour, not touched here.
+
+### Code review
+
+- `Sync.hold`/`release` in `03b-slop.js`;
+- the `try`/`finally` in `runEval` (`06-agent.js`);
+- `saveLog` in `04-project.js`.
