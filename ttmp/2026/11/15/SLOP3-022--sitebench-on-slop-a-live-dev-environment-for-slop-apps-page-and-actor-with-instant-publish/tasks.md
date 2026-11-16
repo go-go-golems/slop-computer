@@ -22,6 +22,8 @@
 - [ ] Bench Phase 4b: fixtures and scenarios on run instances
 - [x] Bench Phase 5: publish from the bench (preflight, approve, rollout, rollback; agent publish.check/run behind approval)
 - [ ] Offer a mount after an app's first publish
-- [ ] A status that does not activate, for preflight
+- [x] A status that does not activate, for preflight (kernel.Peek, app.status peek)
+- [x] Close embeds (workshop.closeEmbed; frames close their old view on reload)
+- [x] Codex on #47 (4) and #48 (4) fixed
 - [ ] Bench Phase 6: proposals on refs, history on snapshots
 - [ ] closeEmbed (free views when frames reload)

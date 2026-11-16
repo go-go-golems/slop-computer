@@ -1293,3 +1293,100 @@ The "insta publish" half of the user's request: from the bench, a preflight, a c
 ```sh
 GOWORK=off go test -buildvcs=false -tags sqlite_fts5 ./pkg/host -run TestBenchPublish -count=1
 ```
+
+## Step 16: Closing embeds, and Codex on #47 and #48
+
+Two pieces of work. First, `closeEmbed`: the bench now closes a frame's old view when the frame reloads, where before every edit left a view open for an hour (`cd08e7a`, on #48). Second, eight Codex findings, four per PR, all P2 and all real. #47's are about losing edits in `Sync` and an empty file failing a push (`e3d5f8a`). #48's are about publishing: what gets approved versus what gets published, a preflight that activated instances, and dry runs that wrote (`c6d3542`). Phases 0–3 are on #47 and Phases 4–5 on #48; #48 is stacked on #47 and has #47's fixes merged in (`243c089`).
+
+### Prompt Context
+
+**User prompt (verbatim):** "check codex review comments on the PRs"
+
+**Assistant interpretation:** Read Codex's findings on #47 and #48, fix the real ones, and push.
+
+**Inferred user intent:** Get both PRs to mergeable.
+
+### What I did
+
+- **`closeEmbed`:**
+  - `Door.CloseEmbed` (`pkg/doors/pages/embed.go`) closes the view and drops its embed addresses, for the person and the tool that opened it; a token gets `not_granted`.
+  - `workshop.closeEmbed`, and an actor action `close`.
+  - `FrameHost.swap` closes the previous view once the reloaded one takes its place, and `dispose` closes both.
+  - `TestBenchDevInstance`: after a close, renew is `not_found` and the frame's address is 404.
+- **#47, Sync:**
+  - `pending(P)` is true when some text differs from what was last pushed, or a pushed file was removed since.
+  - `flush()` loops on `pending`, not on the status.
+  - `run()` ends in `dirty` when edits arrived during the push.
+  - `Outside.merge` records each file's text before the read and skips any file edited meanwhile; `Outside.merging` holds pushes.
+  - `openProject` flushes first, and a hidden tab pushes.
+- **#47, `files.push`:** `pushFile.Text` is now a `*string`, so `""` is an empty file.
+- **The test hook:** `window.__SB` is now set on `*.localhost` (where a local slop serves the bench), with `Sync`, `Slop` and `Outside`. That made the page-side races scriptable from Playwright.
+- **#48, publishing:**
+  - The preflight reads `files` at `String(refs.draft)` and `String(refs.main)`.
+  - `kernel.Peek` and `app.status {peek}`; the actor's `statusOf(ctx, id, peek)`; production entries carry `next`.
+  - `Publish.preflight` refuses on a flush error or pending edits.
+  - `flush()` clears a stale error when nothing is pending.
+  - `noDryData()` guards `app.seedDocs`, `app.seedTable`, `app.resetDev` and `publish.run`.
+- **PR comments** map each finding to its fix and ask `@codex review`.
+
+### Why
+
+- **`Peek` in the kernel, not in the bench:** only the kernel knows the store's `app_version` against the ref, plus recorded failures.
+- **One flag on `app.status`:** cheaper than a new verb, and the CLI gets it for free (`slop app status <store> --peek true`, a string flag like every boolean in this CLI).
+
+### What worked
+
+- **Each Go fix has a test that fails without it:**
+  - the empty file: "actor.call … sync …" failed at the old `files.go`;
+  - the peeking preflight: `production = [… n:3 next:0 store:jot-1]` with the activating status.
+- **The browser runs through `__SB`:**
+  - a queued edit during a push reached draft ("two");
+  - an empty file synced (`""`);
+  - an edit made during the outside read was kept ("local while reading" on the page and in draft);
+  - the edit made before a project switch was in draft;
+  - with a failing push: "Could not check bench-demo: your edits are not in draft (simulated push failure); fix that before publishing";
+  - "bench-demo-1 @11 (1 on its next view)", still `{n:11, next:1}` after the dialog;
+  - the four writes in `.dry()` were refused ("policy: dry runs capture file writes only…"), with 0 documents before and after.
+
+### What didn't work
+
+- **`frame.evaluate` could not see `App`** ("ReferenceError: App is not defined"): the build wraps the bench in an IIFE, and the old hook only matched a bare `localhost`.
+- **A stale `error` status blocked publishing.** In the first refusal run, the test edit was removed after the simulated failure, but `Sync` stayed in `error`. The next Publish refused, and the script timed out waiting for "Publish draft". That is the flush fix above.
+- **"Activate now" was missing after a publish,** because bench-demo was already "@11 · on 11". It was not the preflight: `reloadApp` (`pkg/doors/pages/views.go:525`) activates every store with an open view of the app when its ref moves. My earlier test tabs had left views on bench-demo. A fresh instance without views (`bench-demo-1`) showed the waiting state.
+- **My first draft of `statusOf` called `Running` and then `Peek`,** which would still activate. I caught it on reread and changed it to choose one.
+- **`dry.begin()` in an eval:** "'dry' is not defined". The form is `step.dry()`, e.g. `app.resetDev().dry()`.
+- **Toasts are `#toast`,** not `.toast`.
+
+### What I learned
+
+- **"On its next use" includes open views:** publishing reloads them right away. The rollout dialog's "activates on its next view" holds only for stores nobody has open.
+- **Views of closed tabs stay registered** until they expire or their stream ends. That is the same reason `closeEmbed` was worth doing for frames.
+
+### What was tricky
+
+- **Never-activated production instances have no manifest under `Peek`.** The production filter is now `manifest || next`.
+
+### Second pair of eyes
+
+- **`Kernel.Peek` reports a recorded failure for `next`** as `Running` does (`Failed` set, `N` the current version). It does not report `next` in that case. Is that what a rollout list wants?
+- **The `__SB` hook on `*.localhost`:** a production host never ends in `.localhost`, but check that no deployment serves the bench under such a name.
+
+### Future
+
+- Phase 4b (fixtures and scenarios), Phase 6 (proposals on refs).
+- Offering a mount after a first publish.
+- An `actor.Manager` shutdown for the `TestBlocksSiteReader` flake.
+
+### Code review
+
+- **#47:** `Sync.pending`/`flush`/`run`, `Outside.merge`/`mergeIn` in `web/bench/src/03b-slop.js`; `pushFile.Text` in `pkg/commands/files.go`.
+- **#48:** `Kernel.Peek` and `running(ctx, id, activate)` in `pkg/kernel/apps.go`; `statusOf(..., peek)` in `pkg/commands/mounts.go`; `preflight` in `apps/bench/actor.js`; `Publish.preflight` in `03b-slop.js`; `CloseEmbed` in `pkg/doors/pages/embed.go`.
+
+### Technical details
+
+```sh
+GOWORK=off go test -buildvcs=false -tags sqlite_fts5 ./pkg/host -run 'TestBench|TestEmbeddedViews|TestBuildOutputsFresh' -count=1
+slop app status bench-demo-1 --peek true    # {"n": 11, "next": 1, …} after a rollback to 1
+```
+
+Screenshot: `various/bench-p5-preflight-next.png` (the preflight with an instance waiting).
