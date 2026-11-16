@@ -11,12 +11,24 @@ Topics:
 DocType: reference
 Intent: long-term
 Owners: []
-RelatedFiles: []
+RelatedFiles:
+    - Path: repo://cmd/slop/cmds/extra.go
+      Note: slop push --ifAt, slop ref move
+    - Path: repo://pkg/commands/files.go
+      Note: files.commit, files.push/ref.move with required ifAt, ref.rm, import.files
+    - Path: repo://pkg/doors/actors/modules.go
+      Note: 'verbFail: verb error details as e.extra'
+    - Path: repo://pkg/doors/actors/modworkshop.go
+      Note: workshop commit and dropRef; preconditions of each write
+    - Path: repo://pkg/host/commit_test.go
+      Note: files.commit, ref.rm and workshop conflict tests
+    - Path: repo://pkg/store/files.go
+      Note: Turn.SnapshotFiles, ResetTree, HasSnapshot, RemoveRef, ValidRefName
 ExternalSources: []
-Summary: "Implementation diary of SLOP3-023 phase 1 (server): files.commit, required ifAt on every ref write, ref.rm, ref-name validation, verb error details in actor JavaScript, removal of snap.new and the self capability alias."
+Summary: 'Implementation diary of SLOP3-023 phase 1 (server): files.commit, required ifAt on every ref write, ref.rm, ref-name validation, verb error details in actor JavaScript, removal of snap.new and the self capability alias.'
 LastUpdated: 2026-11-16T13:40:03.41911302-05:00
-WhatFor: "Reviewing and continuing the server half of SLOP3-023 (branch task/slop3-023-server)."
-WhenToUse: "Before reviewing the server PR, or when the bench rewrite (phase 2) needs the exact server contract."
+WhatFor: Reviewing and continuing the server half of SLOP3-023 (branch task/slop3-023-server).
+WhenToUse: Before reviewing the server PR, or when the bench rewrite (phase 2) needs the exact server contract.
 ---
 
 # Diary: server phase (files.commit)
@@ -669,3 +681,96 @@ or `extra.stores` when followed). `import.files`: `{store, files, blobs?,
 zone?}` → `{files, rev?}`. Workshop: `commit(store, changes, {base, …})`,
 `push(store, files, {ifAt, …})`, `moveRef(store, ref, n, {ifAt})`,
 `publish(store, n, {ifAt})`, `dropRef(store, ref, {ifAt})`.
+
+## Step 6: Each commit checked on its own, and the full suite
+
+The lead asked for commits at validated boundaries, so the work is four
+commits, and I checked that each of them builds and passes on its own, not
+only the last one. I checked out each intermediate commit in a throwaway
+worktree, built it and ran the affected packages; then ran `make test` on
+the branch head. Everything passes.
+
+### Prompt Context
+
+**User prompt (verbatim):** see Step 1. The lead engineer's fifth message:
+"The user asked that every agent keep a detailed diary in the diary skill's
+investigation format and commit at appropriate intervals … Commit at
+meaningful validated boundaries (e.g. store helpers + tests; files.commit +
+tests; required ifAt + callers; ref.rm/ValidRefName; actor error extras),
+each commit with its diary step, rather than one commit at the end."
+
+**Assistant interpretation:** split the finished work into self-contained
+commits, each with its diary step, and prove each one stands alone.
+
+**Inferred user intent:** a reviewable history in which every commit is a
+working state.
+
+**Commit (code):** Step 5's verb layer is `81b64e6` — "files.commit; every
+ref write states where the ref is; ref.rm". This diary step is committed on
+its own after it.
+
+### What I did
+
+- Split the work into four commits:
+  - `9aae6b8` store layer (Steps 1–2);
+  - `d34c438` the `self` alias (Step 3);
+  - `e8c6e9a` actor error details (Step 4);
+  - `81b64e6` the verb layer and every caller (Step 5).
+- Two files carried changes for two commits (`modules.go`, `modworkshop.go`:
+  the `verbFail` conversion for Step 4, the workshop table and doc for Step
+  5). I copied the finished files aside, wrote Step 4's versions from
+  `HEAD` plus only the `verbFail` changes, committed, and restored the
+  finished files for Step 5. No stash.
+- `git worktree add --detach <scratchpad>/t23s-verify 9aae6b8`, then for
+  each of `9aae6b8 d34c438 e8c6e9a`: `go build -tags sqlite_fts5 ./...` and
+  `go test -tags sqlite_fts5 -count=1 ./pkg/store ./pkg/rt ./pkg/doors/...
+  ./pkg/commands ./pkg/host`; then `git worktree remove`.
+- `make test` on `81b64e6`.
+- `docmgr doc relate` of the six primary files to this diary.
+
+### Why
+
+- Splitting the two shared files by hand keeps every commit buildable,
+  which `git add` of whole files could not.
+
+### What worked
+
+- All three intermediate commits: build ok; `pkg/store`, `pkg/rt`,
+  `pkg/doors/actors` (from `e8c6e9a`), `pkg/doors/pages`, `pkg/commands`,
+  `pkg/host` all `ok` (`pkg/host` 20.8s, 20.8s, 23.4s).
+- `make test` on `81b64e6`: 22 packages `ok`, no `FAIL`.
+- Earlier on the same tree: `make lint` → `0 issues.`, `make fmt-check` →
+  no diff.
+
+### What didn't work
+
+- No failures in this step.
+
+### What I learned
+
+- N/A.
+
+### What was tricky to build
+
+- Keeping the intermediate `modworkshop.go` coherent: Step 4's version is
+  `HEAD`'s header and table with the finished `workshopModule` function, and
+  without the now unused `verbs` import.
+
+### What warrants a second pair of eyes
+
+- See Step 5's list; nothing new here.
+
+### What should be done in the future
+
+- Merge order with the bench rewrite: `TestBenchCreate` is skipped on this
+  branch and should be re-enabled by the bench PR.
+
+### Code review instructions
+
+- `git log --oneline 11edca9..` on `task/slop3-023-server`; review commit by
+  commit, in order.
+
+### Technical details
+
+- Commits: `9aae6b8`, `d34c438`, `e8c6e9a`, `81b64e6`, then this diary
+  step.
