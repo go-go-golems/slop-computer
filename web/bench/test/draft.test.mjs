@@ -1,20 +1,11 @@
-// The Draft core (src/03c-draft.js) against a fake server with files.commit's
+// The Draft core (src/core/draft.js) against a fake server with files.commit's
 // rules, under random interleavings: node --test test/draft.test.mjs
 // (RUNS=… for more programs, SEED=… to replay one).
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
 import { createHash } from 'node:crypto'
-import { readFileSync } from 'node:fs'
 
-const src = readFileSync(new URL('../src/03c-draft.js', import.meta.url), 'utf8')
-function emitter() {
-  const m = new Map()
-  return {
-    on(ev, fn) { if (!m.has(ev)) m.set(ev, new Set()); m.get(ev).add(fn); return () => m.get(ev).delete(fn) },
-    emit(ev, ...a) { for (const fn of m.get(ev) || []) fn(...a) },
-  }
-}
-const { Draft } = new Function('emitter', src + '\nreturn { Draft, Tx, textish }')(emitter)
+import { Draft } from '../src/core/draft.js'
 const sha = t => createHash('sha256').update(t, 'utf8').digest('hex')
 
 // a seeded generator (mulberry32), so a failing run can be replayed
@@ -37,13 +28,13 @@ class Server {
   commitNow({ ref, base, changes }) {
     const at = this.refs[ref] ?? 0, B = this.snap(base), A = this.snap(at)
     assert.ok(B, 'base ' + base + ' exists')
-    const result = c => c.remove ? undefined : c.text
+    const result = c => c.delete ? undefined : c.text
     if (at !== base) {
       const paths = changes.filter(c => B.get(c.path) !== A.get(c.path) && result(c) !== A.get(c.path)).map(c => c.path)
       if (paths.length) { this.log.push({ kind: 'conflict', ref, at }); return { conflict: { at, paths } } }
     }
     const next = new Map(A)
-    for (const c of changes) c.remove ? next.delete(c.path) : next.set(c.path, c.text)
+    for (const c of changes) c.delete ? next.delete(c.path) : next.set(c.path, c.text)
     const same = next.size === A.size && [...next].every(([p, t]) => A.get(p) === t)
     const n = same && at ? at : this.snaps.push(next) - 1
     this.refs[ref] = n
@@ -174,7 +165,7 @@ async function program(seed) {
     // each path's last edit was committed, and only a later commit changed it since
     for (const [p, t] of lastEdit) {
       const commits = srv.log.filter(e => e.kind === 'commit')
-      const mine = commits.findLastIndex(e => e.changes.some(c => c.path === p && (t === null ? c.remove : c.text === t)))
+      const mine = commits.findLastIndex(e => e.changes.some(c => c.path === p && (t === null ? c.delete : c.text === t)))
       assert.ok(mine >= 0, 'the person\'s last edit of ' + p + ' was committed')
       const later = commits.slice(mine + 1).some(e => e.changes.some(c => c.path === p))
       if (!later) assert.equal(srv.snap(srv.refs.draft).get(p) ?? null, t, 'the person\'s last edit of ' + p + ' is there')

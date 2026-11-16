@@ -1,4 +1,6 @@
-// ---------- draft: an app ref's files as the server has them, and transactions that change them (SLOP3-023) ----------
+// core/draft.js — an app ref's files as the server has them, and transactions
+// that change them (SLOP3-023).
+//
 // The server is the only place an app's files live. A Draft caches what it
 // has read, which never goes stale: a snapshot's listing (n → path →
 // {sha256, size, type}) never changes, and a text is cached by its hash.
@@ -7,28 +9,37 @@
 // change list against that base, merged per file on the server) or folded
 // into its parent. A Tx that is dropped leaves nothing behind.
 //
-//   const tx = draft.begin({ label: 'eval 3' })
+//   const tx = draft.begin({ label: 'eval 3', event: { who: 'agent', thread } })
 //   tx.write('index.html', html); tx.remove('old.js')
-//   const r = await tx.commit()   // {status: 'committed', n, at, merged, paths, activated}
+//   const r = await tx.commit()   // {status: 'committed', n, at, merged, paths, activated, event}
 //                                 // | {status: 'folded', paths} (a nested Tx)
 //                                 // | {status: 'conflict', at, conflicts: [path], paths}
 //                                 // | {status: 'failed', code, error, paths}
 //
-// A Draft talks to the server through call(action, args), the bench actor's
-// actions: head {app, ref} → {n}; files {app, at} → [{path, sha256, size,
-// type}]; read {app, at, paths} → {texts, binary, more}; commit {app, ref,
-// base, changes, message, label} → {n, at, merged, files, activated} or
-// {conflict: {at, paths}} (nothing written). hash(text) is the hex sha256 of
-// the text's UTF-8 bytes.
+// Owns: the snapshot cache, Tx, and the person's live edits (edit, settle,
+// keepMine, takeTheirs). Does not own: where files are shown (ui/code.js) or
+// what a commit means for the timeline (model/project.js listens to 'commit').
+// No DOM and no network of its own: a Draft talks to the server through the
+// injected call(action, args), the bench actor's actions — head {app, ref} →
+// {n}; files {app, at} → [{path, sha256, size, type}]; read {app, at, paths}
+// → {texts, binary, more}; commit {app, ref, base, changes, message, event} →
+// {n, at, merged, files, activated, event} or {conflict: {at, paths}} — and
+// hashes with the injected hash(text) (hex sha256 of the UTF-8 bytes).
+// Events: 'head' (n, prev, paths, source: open | poll | commit), 'commit'
+// (the answer, with paths), 'edits', 'conflict', 'error'.
+// Public API: Draft, Tx, textish. Tested by test/draft.test.mjs (node --test).
+import { emitter } from '../lib/util.js';
 
 const BINARY_EXT = /\.(png|jpe?g|gif|webp|avif|ico|bmp|tiff?|woff2?|ttf|otf|eot|mp[34]|m4a|wav|ogg|webm|mov|zip|gz|tgz|br|zst|pdf|wasm|bin|sqlite|db)$/i
 const TEXT_MAX = 240000
 // a file kept as text: not a known binary type, not too large to edit
-const textish = f => !BINARY_EXT.test(f.path) && f.size <= TEXT_MAX
+export const textish = f => !BINARY_EXT.test(f.path) && f.size <= TEXT_MAX
 
-class Tx {
-  constructor(draft, { base, parent = null, label = '', live = false } = {}) {
+export class Tx {
+  constructor(draft, { base, parent = null, label = '', live = false, event = null } = {}) {
     this.draft = draft; this.parent = parent; this.label = label
+    // what the timeline says about the commit: {who, thread, note}
+    this.event = event
     // live: reads fall through to the draft's head instead of a fixed base
     // (the person's edits: they see the newest files they did not touch)
     this.live = live
@@ -84,14 +95,14 @@ class Tx {
     }
     this.state = 'committing'
     let r
-    try { r = await this.draft.commitChanges(this.base, this.changes, { message, label: this.label }) } catch (e) { r = { status: 'failed', code: e.code || '', error: e.message || String(e) } }
+    try { r = await this.draft.commitChanges(this.base, this.changes, { message, label: this.label, event: this.event }) } catch (e) { r = { status: 'failed', code: e.code || '', error: e.message || String(e) } }
     r.paths = paths
     this.state = r.status === 'committed' ? 'committed' : 'open'
     return r
   }
 }
 
-class Draft {
+export class Draft {
   constructor({ app, ref = 'draft', call, hash }) {
     this.app = app; this.ref = ref; this.call = call; this.hash = hash
     this.head = null              // the snapshot loaded and shown
@@ -102,6 +113,7 @@ class Draft {
     this.queue = Promise.resolve()  // head switches, in order
     this.epoch = 0                // bumped by each commit: a head poll sent before it is stale
     this.edits = null             // the person's uncommitted edits (a live Tx), made on first use
+    this.conflict = null          // the last commit of those edits that conflicted, until resolved
   }
 
   // ---- reading (synchronous, at a loaded snapshot) ----
@@ -144,20 +156,20 @@ class Draft {
   async textAt(n, path) { await this.load(n); return this.read(path, n) }
 
   // Switch the shown head to n once it is loaded, in order with other
-  // switches; emits 'head' (n, prev, paths that differ).
-  moveHead(n) {
+  // switches; emits 'head' (n, prev, paths that differ, source).
+  moveHead(n, source) {
     return (this.queue = this.queue.then(async () => {
       if (n === this.head) return
       await this.load(n)
       const prev = this.head; this.head = n
       const paths = prev == null ? this.list(n) : this.changed(prev, n)
       if (this.edits) this.rebaseEdits()
-      this.ev.emit('head', n, prev, paths)
+      this.ev.emit('head', n, prev, paths, source)
     }).catch(e => { this.ev.emit('error', e) }))
   }
   async open() {
     const r = await this.call('head', { app: this.app, ref: this.ref })
-    await this.moveHead(r.n ?? 0)
+    await this.moveHead(r.n ?? 0, 'open')
     return this.head
   }
   // Ask where the ref is; follow it when it moved (someone else committed,
@@ -166,18 +178,18 @@ class Draft {
   async refresh() {
     const epoch = this.epoch
     const r = await this.call('head', { app: this.app, ref: this.ref })
-    if (epoch === this.epoch && (r.n ?? 0) !== this.head) await this.moveHead(r.n ?? 0)
+    if (epoch === this.epoch && (r.n ?? 0) !== this.head) await this.moveHead(r.n ?? 0, 'poll')
     return this.head
   }
 
   // ---- writing ----
   begin(o = {}) { return new Tx(this, { base: this.head, ...o }) }
-  async commitChanges(base, changes, { message, label } = {}) {
+  async commitChanges(base, changes, { message, label, event } = {}) {
     if (!changes.size) return { status: 'committed', n: base, at: base, merged: false, activated: [] }
-    const wire = [...changes].map(([path, c]) => c.remove ? { path, remove: true } : { path, text: c.text })
+    const wire = [...changes].map(([path, c]) => c.remove ? { path, delete: true } : { path, text: c.text })
     let r
     try {
-      r = await this.call('commit', { app: this.app, ref: this.ref, base, changes: wire, message: message || label || 'bench', label: label || '' })
+      r = await this.call('commit', { app: this.app, ref: this.ref, base, changes: wire, message: message || label || 'bench', event: event || { who: 'you', note: message || label || '' } })
     } catch (e) {
       return { status: 'failed', code: (e && e.code) || '', error: (e && e.message) || String(e) }
     }
@@ -187,8 +199,10 @@ class Draft {
     for (const c of changes.values()) if (!c.remove) this.texts.set(await this.hash(c.text), c.text)
     if (r.files) this.remember(r.n, r.files)
     // a later commit may already have moved the head past n
-    if (this.head == null || r.n > this.head) await this.moveHead(r.n)
-    return { status: 'committed', n: r.n, at: r.at, merged: !!r.merged, activated: r.activated || [] }
+    if (this.head == null || r.n > this.head) await this.moveHead(r.n, 'commit')
+    const out = { status: 'committed', n: r.n, at: r.at, merged: !!r.merged, activated: r.activated || [], event: r.event || null }
+    this.ev.emit('commit', { ...out, paths: [...changes.keys()].sort() })
+    return out
   }
 
   // ---- the person's edits: one live Tx, committed after a pause ----
@@ -213,7 +227,12 @@ class Draft {
   // head, so the next commit replaces what is there.
   keepMine() { if (this.edits) { this.edits.base = this.head; return this.settle() } }
   // Take the server's version of these paths: the edits to them are dropped.
-  takeTheirs(paths) { if (this.edits) { this.edits.forget(paths); this.rebaseEdits(); this.ev.emit('edits', null) } }
+  takeTheirs(paths) {
+    if (!this.edits) return
+    this.edits.forget(paths); this.rebaseEdits()
+    if (this.conflict && this.conflict.conflicts.every(p => !this.edits.changes.has(p))) this.conflict = null
+    this.ev.emit('edits', null)
+  }
   settle() {
     clearTimeout(this.editT)
     return (this.settling = (this.settling || Promise.resolve()).then(async () => {
@@ -221,16 +240,21 @@ class Draft {
       if (!tx || !tx.changes.size) return { status: 'committed', n: this.head, paths: [] }
       // what is sent; edits made while it is in flight stay buffered, on top
       const sent = new Map(tx.changes), base = tx.base, paths = [...sent.keys()].sort()
-      const r = await this.commitChanges(base, sent, { message: 'edited ' + paths.slice(0, 3).join(', ') + (paths.length > 3 ? ', …' : ''), label: 'you' })
+      const note = 'edited ' + paths.slice(0, 3).join(', ') + (paths.length > 3 ? ', …' : '')
+      const r = await this.commitChanges(base, sent, { message: note, label: 'you', event: { who: 'you', note } })
       r.paths = paths
       if (r.status === 'committed') {
+        this.conflict = null
         for (const [p, c] of sent) if (tx.changes.get(p) === c) tx.changes.delete(p)
         // the rest was typed over a view that had the sent edits, now at n;
         // it moves there unless someone else changed one of its paths too
         const others = this.changed(base, r.n).filter(p => !sent.has(p))
         if (others.every(p => !tx.changes.has(p))) tx.base = r.n
         this.rebaseEdits()
-      } else this.ev.emit(r.status === 'conflict' ? 'conflict' : 'error', r)
+      } else {
+        if (r.status === 'conflict') this.conflict = r
+        this.ev.emit(r.status === 'conflict' ? 'conflict' : 'error', r)
+      }
       this.ev.emit('edits', null)
       return r
     }))
