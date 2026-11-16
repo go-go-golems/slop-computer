@@ -15,7 +15,7 @@ func TestStaticSite(t *testing.T) {
 	admin := h.tokenFor("admin@example.com", "read", "write", "admin")
 	static := h.cfg.Hosts.Static[0]
 	h.call(admin, "store.new", map[string]any{"id": "weft"})
-	h.call(admin, "files.push", map[string]any{"store": "weft", "files": files(map[string]string{
+	h.push(admin, map[string]any{"store": "weft", "files": files(map[string]string{
 		"index.html":      `<link rel="stylesheet" href="style.css"><h1>Weft</h1><a href="docs/">docs</a>`,
 		"style.css":       `h1 { color: teal }`,
 		"docs/index.html": `<h1>Docs</h1>`,
@@ -73,7 +73,7 @@ func TestStaticSite(t *testing.T) {
 		t.Fatalf("/_s at main: %s", r.Header.Get("Cache-Control"))
 	}
 	// A new push is served at once (the mount follows main).
-	h.call(admin, "files.push", map[string]any{"store": "weft", "prune": false, "files": files(map[string]string{"style.css": "h1 { color: navy }"})})
+	h.commit(admin, map[string]any{"store": "weft", "changes": files(map[string]string{"style.css": "h1 { color: navy }"})})
 	if _, body := h.get(static, "/r/weft/style.css"); body != "h1 { color: navy }" {
 		t.Fatalf("after push: %q", body)
 	}
@@ -84,7 +84,7 @@ func TestStaticSite(t *testing.T) {
 
 	// A :param mount serves any store of a type; mount undo restores.
 	h.call(admin, "store.new", map[string]any{"id": "rel-1", "type": "release"})
-	h.call(admin, "files.push", map[string]any{"store": "rel-1", "files": files(map[string]string{"index.html": "release one"})})
+	h.push(admin, map[string]any{"store": "rel-1", "files": files(map[string]string{"index.html": "release one"})})
 	h.call(admin, "grant.set", map[string]any{"store": "rel-1", "subject": "@guest", "level": "view"})
 	h.call(admin, "mount.set", map[string]any{"host": static, "path": "/rel/:id", "storeParam": "id", "type": "release"})
 	if _, body := h.get(static, "/rel/rel-1/"); body != "release one" {
@@ -104,7 +104,7 @@ func TestStaticSite(t *testing.T) {
 
 	// Host kinds: a live app is refused on a static host, plain content on a live one.
 	h.call(admin, "store.new", map[string]any{"id": "board"})
-	h.call(admin, "files.push", map[string]any{"store": "board", "files": files(map[string]string{
+	h.push(admin, map[string]any{"store": "board", "files": files(map[string]string{
 		"app.json": `{"title":"Board","capabilities":{"db":{}}}`, "index.html": "board"})})
 	h.fail(admin, "mount.set", map[string]any{"host": static, "path": "/board", "store": "board"}, "invalid_argument")
 	h.fail(admin, "mount.set", map[string]any{"host": h.cfg.Hosts.Live[0], "path": "/weft", "store": "weft"}, "invalid_argument")
@@ -121,16 +121,16 @@ func TestOnlyAdminsPushAppCode(t *testing.T) {
 	bob := h.tokenFor("bob@example.com")
 	h.call(bob, "store.new", map[string]any{"id": "bobs-site"})
 	// Plain content is fine.
-	h.call(bob, "files.push", map[string]any{"store": "bobs-site", "files": files(map[string]string{"index.html": "hi"})})
+	h.push(bob, map[string]any{"store": "bobs-site", "files": files(map[string]string{"index.html": "hi"})})
 	// app.json is code.
-	h.fail(bob, "files.push", map[string]any{"store": "bobs-site", "files": files(map[string]string{"index.html": "hi", "app.json": "{}"})}, "permission_denied")
+	h.fail(bob, "files.push", map[string]any{"store": "bobs-site", "ifAt": h.refAt(bob, "bobs-site", "main"), "files": files(map[string]string{"index.html": "hi", "app.json": "{}"})}, "permission_denied")
 	h.fail(bob, "files.put", map[string]any{"store": "bobs-site", "path": "app.json", "text": "{}"}, "permission_denied")
 	// Content stores of an app's data are not code: a data store's assets are fine.
 	h.call(bob, "files.put", map[string]any{"store": "bobs-site", "zone": "assets", "path": "a.txt", "text": "x"})
 	// Nor through an import: a bundle whose tree holds app.json is code.
 	admin := h.tokenFor("admin@example.com", "read", "write", "admin")
 	h.call(admin, "store.new", map[string]any{"id": "an-app"})
-	h.call(admin, "files.push", map[string]any{"store": "an-app", "files": files(map[string]string{
+	h.push(admin, map[string]any{"store": "an-app", "files": files(map[string]string{
 		"app.json": `{"title":"A","actor":"actor.js"}`, "actor.js": "defineActor({})", "index.html": "hi"})})
 	app := h.call(admin, "store.export", map[string]any{"id": "an-app"}).(map[string]any)
 	h.fail(bob, "import.folder", map[string]any{"store": "bobs-app", "bundle": app["bundle"], "blobs": app["blobs"]}, "permission_denied")
@@ -152,7 +152,7 @@ func TestQueryLimitAfterReadRules(t *testing.T) {
 	admin := h.tokenFor("admin@example.com", "read", "write", "admin")
 	mia := h.tokenFor("mia@example.com")
 	h.call(admin, "store.new", map[string]any{"id": "ruled"})
-	h.call(admin, "files.push", map[string]any{"store": "ruled", "files": files(map[string]string{
+	h.push(admin, map[string]any{"store": "ruled", "files": files(map[string]string{
 		"app.json":   `{"title":"R","capabilities":{"db":{"rules":[{"path":"notes/a","read":"admin","write":"admin"}]}}}`,
 		"index.html": "x"})})
 	h.call(admin, "grant.set", map[string]any{"store": "ruled", "subject": "@member", "level": "view"})
@@ -176,13 +176,13 @@ func TestStoresModuleReadsByRules(t *testing.T) {
 	h := newHarness(t)
 	admin := h.tokenFor("admin@example.com", "read", "write", "admin")
 	h.call(admin, "store.new", map[string]any{"id": "vault"})
-	h.call(admin, "files.push", map[string]any{"store": "vault", "files": files(map[string]string{
+	h.push(admin, map[string]any{"store": "vault", "files": files(map[string]string{
 		"app.json":   `{"title":"V","capabilities":{"db":{"rules":[{"path":"notes/secret","read":"admin","write":"admin"}]}}}`,
 		"index.html": "x"})})
 	h.call(admin, "docs.set", map[string]any{"store": "vault", "path": "notes/secret", "data": map[string]any{"n": 1}})
 	h.call(admin, "docs.set", map[string]any{"store": "vault", "path": "notes/open", "data": map[string]any{"n": 2}})
 	h.call(admin, "store.new", map[string]any{"id": "reader"})
-	h.call(admin, "files.push", map[string]any{"store": "reader", "files": files(map[string]string{
+	h.push(admin, map[string]any{"store": "reader", "files": files(map[string]string{
 		"app.json": `{"title":"Reader","actor":"actor.js"}`,
 		"actor.js": `
 defineActor({

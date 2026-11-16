@@ -75,8 +75,9 @@ Rules that decide the kind:
 | Step | Verb | Notes |
 |---|---|---|
 | create | `store.new {id}` | fails if it exists: check `store.ls {all: true}` first |
-| upload | `files.push {store, files, message}` | a whole tree; entries are `{path, text}` or `{path, sha256}`; missing blobs come back as `missing_blobs` with the list in `error.extra.missing` (upload with `files.blobs`); an unchanged tree reuses the ref's snapshot |
-| or | `slop push <dir> --store <id> -m …` | the CLI does the same from a folder, sending only changed bytes |
+| upload | `files.push {store, files, ifAt, message}` | a whole tree; entries are `{path, text}` or `{path, sha256, size}`; files not listed are deleted; `ifAt` (required) is where the ref points now, `0` when it does not exist yet: if it moved, the answer is `conflict` (`error.extra.at`) and nothing is written; missing blobs come back as `missing_blobs` with the list in `error.extra.missing` (upload with `files.blobs`); an unchanged tree reuses the ref's snapshot |
+| or | `slop push <dir> --store <id> -m …` | the CLI does the same from a folder, sending only changed bytes; it reads the ref for `ifAt` unless you pass `--ifAt` |
+| change files | `files.commit {store, ref, base, changes, message}` | `changes` are `{path, text}`, `{path, data}` (base64), `{path, sha256, size}` or `{path, delete: true}`; files not listed stay; `base` (required) is the snapshot the changes start from (`0`: the ref does not exist yet). If the ref moved since `base`, the changes apply over it unless it changed one of the same paths to something else: then `conflict`, with `error.extra.at` and `error.extra.conflicts` (`[{path}]`), and nothing is written. The answer: `{n, at, base, merged}` |
 | who may see | `grant.set {store, subject, level}` | `@guest view` for static stores; `@member interact` to let signed-in people write |
 | capabilities with a cost | `policy.set {app, capability, audience, value}` | `sample`, `assets`, `user.email`, `fetch`, `secrets`, `platform`, `stores`; off by default except `assets` for members |
 | model access | `llm.set {subject, value, budget}` | per person or audience; **`sample` needs the policy cell and the payer's access** |
@@ -97,8 +98,9 @@ change, makes your dev instance `myapp-dev-<you>` on first use (it follows
 `draft`), and prints after each push where the instance is or why it broke
 (a failed migration names the file), then the instance's new log lines.
 `--once` pushes, reports and exits. By hand, the same loop is
-`files.push {ref: "draft", activate: [instance]}` plus
-`store.new {id, app}` and `app.follow {store, ref: "draft"}`.
+`files.push {ref: "draft", ifAt, activate: [instance]}` (or `files.commit
+{ref: "draft", base, changes, activate: [instance]}` to change some files)
+plus `store.new {id, app}` and `app.follow {store, ref: "draft"}`.
 
 The bench (`apps/bench`, at `/bench` for admins; built from `web/bench`,
 which is Sitebench) is the same loop in the browser, with a coding agent:
@@ -108,15 +110,22 @@ push (a terminal's too). An eval's effects say which draft it made and
 whether the dev instance came up; a changed migration offers "Reset dev
 data".
 
-Publishing moves `main` to the draft's snapshot; `--ifAt` makes it a
-compare-and-swap, so two publishers cannot overwrite each other, and the
-answer's `from` is the snapshot to roll back to:
+Publishing moves `main` to the draft's snapshot. Every ref move is a
+compare-and-swap: `ref.move` requires `ifAt`, where the ref points now, so
+two publishers cannot overwrite each other, and the answer's `from` is the
+snapshot to roll back to. The CLI reads the ref when you leave out `--ifAt`
+and prints `main: 37 → 42`:
 
 ```sh
 slop ref ls myapp                                   # main: 37, draft: 42
 slop ref move myapp main 42 --ifAt 37               # publish (conflict if main moved)
-slop ref move myapp main 37                         # roll back
+slop ref move myapp main 37                         # roll back (from where main is now)
 ```
+
+Ref names are lowercase and start with a letter, with up to four
+`/`-separated segments (`main`, `draft`, `proposal/p8k2x1`). `ref.rm {store,
+ref, ifAt}` removes a ref (its snapshots stay); it refuses `main` and a ref
+that a store follows.
 
 Instances activate the new version on their next view or event; a failed
 migration leaves an instance on its last good version (`app.status` says
@@ -125,8 +134,10 @@ activation everywhere, so add a new file instead. A dev instance whose
 migration you edited is easiest to drop and make again.
 
 Tools trusted with the `workshop` module do the same for the visitor
-(`push`, `publish`, `newStore`, `follow`, `importDocs`, `importTable`,
-`logs`, `drop` of instances that run unpublished code) and can frame a
+(`commit`, `push`, `publish`, `moveRef`, `dropRef`, `newStore`, `follow`,
+`importDocs`, `importTable`, `logs`, `drop` of instances that run
+unpublished code; a verb's error is thrown with `e.code` and its details as
+`e.extra`, such as a commit conflict's `e.extra.conflicts`) and can frame a
 store's view in their own page: `embed(store, {dev})` returns a frame
 address and the view's secret; the tool answers the framed runtime's
 `hello` with `{slop: 1, type: "view", view, secret}` and its `reload` with a
@@ -150,7 +161,9 @@ per store:
 ```
 
 For each record it plans, then (with `--apply`) runs: `store.new` if missing;
-`files.push` only if `files.ls` differs (path and sha256); each grant that
+`files.push` only if `files.ls` differs (path and sha256; since SLOP3-023
+the push also needs `ifAt`, main's snapshot from `ref.ls`, which the script
+predates); each grant that
 differs; each policy cell that differs; `mount.set` if the mount is missing
 or its API policy differs (compared by inclusion: the server adds defaults).
 It refuses to replace a mount that serves another store. A rerun that prints

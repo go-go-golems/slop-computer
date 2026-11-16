@@ -111,7 +111,7 @@ func clubSite(t *testing.T, h *harness, email string) (*site, map[string]any, st
 	admin := h.tokenFor("admin@example.com", "read", "write", "admin")
 	live := h.cfg.Hosts.Live[0]
 	h.call(admin, "store.new", map[string]any{"id": "club"})
-	h.call(admin, "files.push", map[string]any{"store": "club", "files": files(map[string]string{
+	h.push(admin, map[string]any{"store": "club", "files": files(map[string]string{
 		"app.json": `{"title":"Club","capabilities":{"db":{}}}`, "index.html": "<!doctype html><title>c</title>"})})
 	h.call(admin, "grant.set", map[string]any{"store": "club", "subject": "@member", "level": "view"})
 	h.call(admin, "grant.set", map[string]any{"store": "club", "subject": "@subscriber", "level": "interact"})
@@ -369,7 +369,7 @@ func TestPolicyChangeClosesViews(t *testing.T) {
 	admin := h.tokenFor("admin@example.com", "read", "write", "admin")
 	live := h.cfg.Hosts.Live[0]
 	h.call(admin, "store.new", map[string]any{"id": "pics"})
-	h.call(admin, "files.push", map[string]any{"store": "pics", "files": files(map[string]string{
+	h.push(admin, map[string]any{"store": "pics", "files": files(map[string]string{
 		"app.json": `{"title":"Pics","capabilities":{"db":{},"assets":{}}}`, "index.html": "<!doctype html><title>p</title>"})})
 	h.call(admin, "grant.set", map[string]any{"store": "pics", "subject": "@member", "level": "interact"})
 	h.call(admin, "mount.set", map[string]any{"host": live, "path": "/pics", "store": "pics"})

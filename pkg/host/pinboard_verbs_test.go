@@ -43,7 +43,7 @@ func kitchen(t *testing.T) (*harness, string, string, string) {
 	h := newHarness(t)
 	admin := h.tokenFor("admin@example.com", "read", "write", "admin")
 	h.call(admin, "store.new", map[string]any{"id": "pinboard"})
-	h.call(admin, "files.push", map[string]any{"store": "pinboard", "files": appDir(t, "pinboard")})
+	h.push(admin, map[string]any{"store": "pinboard", "files": appDir(t, "pinboard")})
 	ada, bob, carol := h.tokenFor("ada@example.com"), h.tokenFor("bob@example.com"), h.tokenFor("carol@example.com")
 	h.call(ada, "store.new", map[string]any{"id": "kitchen", "type": "pinboard", "app": "pinboard"})
 	h.call(ada, "docs.set", map[string]any{"store": "kitchen", "path": "board/meta", "data": map[string]any{"title": "Kitchen"}})

@@ -33,7 +33,7 @@ func toolApp(t *testing.T, h *harness, admin, id, actorJS string, modules ...str
 	t.Helper()
 	mods := `"` + strings.Join(modules, `","`) + `"`
 	h.call(admin, "store.new", map[string]any{"id": id})
-	h.call(admin, "files.push", map[string]any{"store": id, "files": files(map[string]string{
+	h.push(admin, map[string]any{"store": id, "files": files(map[string]string{
 		"app.json":   `{"title":"Tool","actor":"actor.js","capabilities":{"db":{}},"slop":{"modules":[` + mods + `]}}`,
 		"actor.js":   actorJS,
 		"index.html": "<!doctype html><title>tool</title>",
@@ -115,7 +115,7 @@ func TestCallsSurviveActorRestart(t *testing.T) {
 	h := newHarness(t)
 	admin := h.tokenFor("admin@example.com", "read", "write", "admin")
 	h.call(admin, "store.new", map[string]any{"id": "busy"})
-	h.call(admin, "files.push", map[string]any{"store": "busy", "files": files(map[string]string{
+	h.push(admin, map[string]any{"store": "busy", "files": files(map[string]string{
 		"app.json": `{"title":"Busy","actor":"actor.js"}`,
 		"actor.js": `
 defineActor({
@@ -165,7 +165,7 @@ func TestQueuedCallsRunOnceInOrder(t *testing.T) {
 	h := newHarness(t)
 	admin := h.tokenFor("admin@example.com", "read", "write", "admin")
 	h.call(admin, "store.new", map[string]any{"id": "line"})
-	h.call(admin, "files.push", map[string]any{"store": "line", "files": files(map[string]string{
+	h.push(admin, map[string]any{"store": "line", "files": files(map[string]string{
 		"app.json": `{"title":"Line","actor":"actor.js"}`,
 		"actor.js": `
 const db = use('db');
@@ -219,7 +219,7 @@ func TestActorsCannotWriteAppCode(t *testing.T) {
 	h := newHarness(t)
 	admin := h.tokenFor("admin@example.com", "read", "write", "admin")
 	h.call(admin, "store.new", map[string]any{"id": "maker"})
-	h.call(admin, "files.push", map[string]any{"store": "maker", "files": files(map[string]string{
+	h.push(admin, map[string]any{"store": "maker", "files": files(map[string]string{
 		"app.json": `{"title":"Maker","actor":"actor.js"}`,
 		"actor.js": `
 const files = use('files');

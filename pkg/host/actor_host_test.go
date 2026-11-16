@@ -100,7 +100,7 @@ func exerciseHostActor(t *testing.T, h *harness) {
 	admin := h.tokenFor("admin@example.com", "read", "write", "admin")
 	live := h.cfg.Hosts.Live[0]
 	h.call(admin, "store.new", map[string]any{"id": "hosted"})
-	h.call(admin, "files.push", map[string]any{"store": "hosted", "files": files(map[string]string{
+	h.push(admin, map[string]any{"store": "hosted", "files": files(map[string]string{
 		"app.json": `{"title":"Hosted","actor":"actor.js","capabilities":{"db":{}}}`,
 		"actor.js": hostActor,
 	})})

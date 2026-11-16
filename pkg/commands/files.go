@@ -137,36 +137,15 @@ func filesVerbs(e filesEnv) []*verbs.Verb {
 				})
 				return FilesRmOut{Removed: n}, fileErr(err)
 			}}.Verb(),
-		verbs.Def[FilesPushIn, any]{Name: "files.push", Doc: "Replace the tree with a manifest [{path, sha256, size, type?} or {path, text|data}] and snapshot it. Send blobs {sha256: base64} the server lacks; it answers missing_blobs otherwise.", Scope: verbs.Write, Action: authz.StoreAdmin,
-			Run: func(req verbs.Req, in FilesPushIn) (any, error) {
-				ctx := req.Context
-				p := req.Principal
-				out, err := push(ctx, e.kernelEnv, p, pushArgs{store: in.Store, zone: in.Zone, files: in.Files, blobs: in.Blobs,
-					message: in.Message, ref: in.Ref, prune: or(in.Prune, true), snapshot: or(in.Snapshot, true), ifAt: in.IfAt}, true)
-				if err != nil || len(in.Activate) == 0 {
-					return out, err
-				}
-				// The stores that follow the moved ref (a dev instance) come
-				// up on the new snapshot now, and the pusher learns whether
-				// they did, instead of polling app.status.
-				activated := []map[string]any{}
-				for _, id := range in.Activate {
-					st, _, err := e.open(ctx, p, id, rt.LevelView, "reading")
-					if err != nil {
-						activated = append(activated, map[string]any{"store": id, "error": err.Error()})
-						continue
-					}
-					s, err := statusOf(ctx, e.kernelEnv, e.A, st, id, false)
-					if err != nil {
-						activated = append(activated, map[string]any{"store": id, "error": err.Error()})
-						continue
-					}
-					activated = append(activated, map[string]any{"store": s.Store, "app": s.App, "ref": s.Ref, "n": s.N, "broken": s.Broken})
-				}
-				out.(map[string]any)["activated"] = activated
-				return out, nil
+		verbs.Def[FilesPushIn, FilesPushOut]{Name: "files.push", Doc: "Replace the tree of a ref (default main) with a manifest [{path, sha256, size, type?} or {path, text|data}] and snapshot it; files not listed are deleted. ifAt is required: the snapshot the ref points at now (0: it does not exist yet); when it moved, the answer is conflict (extra.at) and nothing is written. Send blobs {sha256: base64} the server lacks; it answers missing_blobs (extra.missing) otherwise. activate: instances to bring up on the new snapshot.", Scope: verbs.Write, Action: authz.StoreAdmin,
+			Run: func(req verbs.Req, in FilesPushIn) (FilesPushOut, error) {
+				return e.push(req.Context, req.Principal, in)
 			}}.Verb(),
-		verbs.Def[FilesBlobsIn, FilesBlobsOut]{Name: "files.blobs", Doc: "Upload blobs {sha256: base64} ahead of a push too large for one request.", Scope: verbs.Write, Action: authz.StoreAdmin,
+		verbs.Def[FilesCommitIn, FilesCommitOut]{Name: "files.commit", Doc: "Commit changes [{path, text} | {path, data} (base64) | {path, sha256, size, type?} | {path, delete: true}] to a ref (default main) as a new snapshot; files not listed stay as they are. base is required: the snapshot the changes start from (0: the ref does not exist yet). When the ref moved since base, the changes apply over where it is now, unless a changed path was also changed there to a different result: then the answer is conflict (extra.at, extra.conflicts [{path}]) and nothing is written; so is a ref removed since base. An unchanged tree keeps the ref's snapshot. Blobs the server lacks: missing_blobs (extra.missing); send them as blobs {sha256: base64}. activate: instances to bring up on the new snapshot.", Scope: verbs.Write, Action: authz.StoreAdmin,
+			Run: func(req verbs.Req, in FilesCommitIn) (FilesCommitOut, error) {
+				return e.commit(req.Context, req.Principal, in)
+			}}.Verb(),
+		verbs.Def[FilesBlobsIn, FilesBlobsOut]{Name: "files.blobs", Doc: "Upload blobs {sha256: base64} ahead of a push or commit too large for one request.", Scope: verbs.Write, Action: authz.StoreAdmin,
 			Run: func(req verbs.Req, in FilesBlobsIn) (FilesBlobsOut, error) {
 				ctx := req.Context
 				p := req.Principal
@@ -179,30 +158,9 @@ func filesVerbs(e filesEnv) []*verbs.Verb {
 				m, _ := objOf(in.Blobs)
 				return FilesBlobsOut{Stored: len(m)}, nil
 			}}.Verb(),
-		verbs.Def[ImportFilesIn, any]{Name: "import.files", Doc: "Add files to a zone without pruning or snapshotting (files.push's arguments).", Scope: verbs.Write, Action: authz.StoreAdmin,
-			Run: func(req verbs.Req, in ImportFilesIn) (any, error) {
-				ctx := req.Context
-				p := req.Principal
-				return push(ctx, e.kernelEnv, p, pushArgs{store: in.Store, zone: in.Zone, files: in.Files, blobs: in.Blobs}, false)
-			}}.Verb(),
-		verbs.Def[SnapNewIn, SnapNewOut]{Name: "snap.new", Doc: "Snapshot the working tree and move a ref (default main) to it.", Scope: verbs.Write, Action: authz.StoreAdmin,
-			Run: func(req verbs.Req, in SnapNewIn) (SnapNewOut, error) {
-				ctx := req.Context
-				p := req.Principal
-				s, d, err := e.open(ctx, p, in.Store, rt.LevelAdmin, "snapshotting")
-				if err != nil {
-					return SnapNewOut{}, err
-				}
-				var n int64
-				c, err := s.Do(ctx, who(p, d), func(t *store.Turn) error {
-					var err error
-					n, err = t.Snapshot(in.Message, in.Ref)
-					return err
-				})
-				if err != nil {
-					return SnapNewOut{}, fileErr(err)
-				}
-				return SnapNewOut{N: n, Rev: c.Rev}, nil
+		verbs.Def[ImportFilesIn, ImportFilesOut]{Name: "import.files", Doc: "Add files to a zone (tree or assets) from a manifest like files.push's, without deleting others or taking a snapshot.", Scope: verbs.Write, Action: authz.StoreAdmin,
+			Run: func(req verbs.Req, in ImportFilesIn) (ImportFilesOut, error) {
+				return e.importFiles(req.Context, req.Principal, in)
 			}}.Verb(),
 		verbs.Def[SnapLsIn, []store.Snapshot]{Name: "snap.ls", Doc: "List a store's snapshots, newest first.", Scope: verbs.Read, Action: authz.StoreRead,
 			Run: func(req verbs.Req, in SnapLsIn) ([]store.Snapshot, error) {
@@ -224,29 +182,39 @@ func filesVerbs(e filesEnv) []*verbs.Verb {
 				}
 				return s.Refs(ctx)
 			}}.Verb(),
-		verbs.Def[RefMoveIn, RefMoveOut]{Name: "ref.move", Doc: "Point a ref at a snapshot (moving main back is a rollback). With --ifAt it moves only if the ref still points there (0: only if it does not exist yet), so two publishers cannot overwrite each other.", Scope: verbs.Write, Action: authz.StoreAdmin,
+		verbs.Def[RefMoveIn, RefMoveOut]{Name: "ref.move", Doc: "Point a ref at snapshot n (moving main back is a rollback), creating it if needed. ifAt is required: the snapshot the ref points at now (0: it does not exist yet); when it moved, the answer is conflict (extra.at) and nothing moves, so two publishers cannot overwrite each other. Ref names are lowercase and start with a letter (main, draft, proposal/x1).", Scope: verbs.Write, Action: authz.StoreAdmin,
 			Run: func(req verbs.Req, in RefMoveIn) (RefMoveOut, error) {
 				ctx := req.Context
 				p := req.Principal
+				if in.IfAt == nil {
+					return RefMoveOut{}, verbs.Errf("invalid_argument", "ref.move needs ifAt: the snapshot %s points at now (0: it does not exist yet)", in.Ref)
+				}
+				ref := in.Ref
+				if !store.ValidRefName(ref) {
+					return RefMoveOut{}, badRef(ref)
+				}
 				s, d, err := e.open(ctx, p, in.Store, rt.LevelAdmin, "moving refs")
 				if err != nil {
 					return RefMoveOut{}, err
 				}
-				var from int64
 				c, err := s.Do(ctx, who(p, d), func(t *store.Turn) error {
-					var err error
-					if from, err = t.RefAt(in.Ref); err != nil {
+					if err := refIsAt(t, ref, *in.IfAt); err != nil {
 						return err
 					}
-					if in.IfAt != nil && *in.IfAt != from {
-						return verbs.Errf("conflict", "%s points at %d, not %d: it moved since you looked", in.Ref, from, *in.IfAt)
-					}
-					return t.MoveRef(in.Ref, in.N)
+					return t.MoveRef(ref, in.N)
 				})
 				if err != nil {
 					return RefMoveOut{}, fileErr(err)
 				}
-				return RefMoveOut{Ref: in.Ref, N: in.N, From: from, Rev: c.Rev}, nil
+				out := RefMoveOut{Ref: ref, N: in.N, From: *in.IfAt}
+				if c != nil {
+					out.Rev = c.Rev
+				}
+				return out, nil
+			}}.Verb(),
+		verbs.Def[RefRmIn, RefRmOut]{Name: "ref.rm", Doc: "Remove a ref (its snapshots stay). ifAt is required: the snapshot the ref points at now; when it moved, the answer is conflict (extra.at) and nothing is removed. main is not removed (remove the store), nor a ref that a store follows (app.follow): conflict, naming them in extra.stores.", Scope: verbs.Write, Action: authz.StoreAdmin,
+			Run: func(req verbs.Req, in RefRmIn) (RefRmOut, error) {
+				return e.removeRef(req.Context, req.Principal, in)
 			}}.Verb(),
 	}
 }
@@ -311,7 +279,8 @@ func parseCSV(data []byte) ([]map[string]any, error) {
 	return out, nil
 }
 
-type pushFile struct {
+// manifestFile is one entry of a files.push or import.files manifest.
+type manifestFile struct {
 	Path   string  `json:"path"`
 	SHA256 string  `json:"sha256"`
 	Size   int64   `json:"size"`
@@ -320,28 +289,16 @@ type pushFile struct {
 	Data   string  `json:"data,omitempty"` // inline base64 content
 }
 
-// push applies a manifest. full=true is files.push (prune and snapshot by
-// default); false is import.files (neither).
-// pushArgs are files.push's and import.files's arguments.
-type pushArgs struct {
-	store, zone     string
-	files, blobs    any
-	message, ref    string
-	prune, snapshot bool   // files.push only (full)
-	ifAt            *int64 // files.push only: snapshot only if ref still points here (0: does not exist)
-}
-
-func push(ctx context.Context, e kernelEnv, p *access.Principal, a pushArgs, full bool) (any, error) {
-	s, d, err := e.open(ctx, p, a.store, rt.LevelAdmin, "pushing files")
-	if err != nil {
-		return nil, err
-	}
-	zone := zoneOf(a.zone)
-	raw, ok := listOf(a.files)
+// readManifest decodes a manifest for store s: it stores the call's blobs
+// and each entry's inline content, and checks that every entry names a
+// clean path once and a blob the server has (missing_blobs, with the list
+// in extra.missing, otherwise).
+func readManifest(e kernelEnv, s *store.Store, filesArg, blobsArg any) ([]manifestFile, error) {
+	raw, ok := listOf(filesArg)
 	if !ok {
 		return nil, verbs.Errf("invalid_argument", "files is a list of {path, sha256, size}")
 	}
-	var files []pushFile
+	var files []manifestFile
 	b, _ := json.Marshal(raw)
 	if err := json.Unmarshal(b, &files); err != nil {
 		return nil, verbs.Errf("invalid_argument", "files is a list of {path, sha256, size}")
@@ -349,7 +306,7 @@ func push(ctx context.Context, e kernelEnv, p *access.Principal, a pushArgs, ful
 	if len(files) > store.MaxTreeFiles {
 		return nil, verbs.Errf("invalid_argument", "at most %d files", store.MaxTreeFiles)
 	}
-	if err := putBlobs(e, a.blobs); err != nil {
+	if err := putBlobs(e, blobsArg); err != nil {
 		return nil, err
 	}
 	for i, f := range files {
@@ -384,76 +341,427 @@ func push(ctx context.Context, e kernelEnv, p *access.Principal, a pushArgs, ful
 		seen[f.Path] = true
 		sums = append(sums, f.SHA256)
 	}
-	if missing := s.Blobs.Missing(sums); len(missing) > 0 {
-		sort.Strings(missing)
-		return nil, &verbs.Error{Code: "missing_blobs", Message: "send these blobs", Extra: map[string]any{"missing": missing}}
+	if err := missingBlobs(s, sums); err != nil {
+		return nil, err
 	}
-	prune := full && a.prune
-	snap := full && zone == "tree" && a.snapshot
-	var n int64
-	removed := 0
-	if a.ifAt != nil && !snap {
-		return nil, verbs.Errf("invalid_argument", "ifAt goes with a snapshot")
+	return files, nil
+}
+
+// missingBlobs is the missing_blobs error for the sums the server lacks,
+// listed in extra.missing (the CLI uploads them with files.blobs and
+// retries), or nil.
+func missingBlobs(s *store.Store, sums []string) error {
+	missing := s.Blobs.Missing(sums)
+	if len(missing) == 0 {
+		return nil
 	}
+	sort.Strings(missing)
+	return &verbs.Error{Code: "missing_blobs", Message: "send these blobs", Extra: map[string]any{"missing": missing}}
+}
+
+// refArg is an optional ref argument: main when empty, otherwise a
+// ValidRefName.
+func refArg(ref string) (string, error) {
+	if ref == "" {
+		return "main", nil
+	}
+	if !store.ValidRefName(ref) {
+		return "", badRef(ref)
+	}
+	return ref, nil
+}
+
+func badRef(ref string) error {
+	return verbs.Errf("invalid_argument", "%q is not a ref name (lowercase, starting with a letter: main, draft, proposal/x1)", ref)
+}
+
+// refIsAt is the precondition of a ref write, checked in the write's own
+// turn so nothing moves the ref in between: ref points at ifAt (0: it does
+// not exist), or the answer is conflict with extra.at.
+func refIsAt(t *store.Turn, ref string, ifAt int64) error {
+	at, err := t.RefAt(ref)
+	if err != nil {
+		return err
+	}
+	if at != ifAt {
+		return &verbs.Error{Code: "conflict", Message: fmt.Sprintf("%s points at %d, not %d: it moved since you looked", ref, at, ifAt),
+			Extra: map[string]any{"at": at}}
+	}
+	return nil
+}
+
+// push is files.push: the tree becomes the manifest, snapshotted onto the
+// ref, if the ref is still at ifAt.
+func (e filesEnv) push(ctx context.Context, p *access.Principal, in FilesPushIn) (FilesPushOut, error) {
+	if in.IfAt == nil {
+		return FilesPushOut{}, verbs.Errf("invalid_argument", "files.push needs ifAt: the snapshot the ref points at now (0: it does not exist yet)")
+	}
+	ref, err := refArg(in.Ref)
+	if err != nil {
+		return FilesPushOut{}, err
+	}
+	s, d, err := e.open(ctx, p, in.Store, rt.LevelAdmin, "pushing files")
+	if err != nil {
+		return FilesPushOut{}, err
+	}
+	files, err := readManifest(e.kernelEnv, s, in.Files, in.Blobs)
+	if err != nil {
+		return FilesPushOut{}, err
+	}
+	out := FilesPushOut{Files: len(files)}
 	c, err := s.Do(ctx, who(p, d), func(t *store.Turn) error {
-		// in the same turn as the push, so nothing moves the ref in between
-		if a.ifAt != nil {
-			ref := a.ref
-			if ref == "" {
-				ref = "main"
-			}
-			at, err := t.RefAt(ref)
-			if err != nil {
+		if err := refIsAt(t, ref, *in.IfAt); err != nil {
+			return err
+		}
+		listed := make(map[string]bool, len(files))
+		for _, f := range files {
+			listed[f.Path] = true
+			if _, err := t.PutBlob("tree", f.Path, f.SHA256, f.Size, f.Type); err != nil {
 				return err
 			}
-			if at != *a.ifAt {
-				return &verbs.Error{Code: "conflict", Message: fmt.Sprintf("%s points at %d, not %d: it moved since you looked", ref, at, *a.ifAt), Extra: map[string]any{"at": at}}
+		}
+		cur, err := t.TreeFiles()
+		if err != nil {
+			return err
+		}
+		for _, f := range cur {
+			if !listed[f.Path] {
+				if _, err := t.RemoveFile("tree", f.Path); err != nil {
+					return err
+				}
+				out.Removed++
 			}
 		}
+		out.N, err = t.Snapshot(in.Message, ref)
+		return err
+	})
+	if err != nil {
+		return FilesPushOut{}, fileErr(err)
+	}
+	if c != nil {
+		out.Rev = c.Rev
+	}
+	out.Activated = e.activate(ctx, p, in.Activate)
+	return out, nil
+}
+
+// importFiles is import.files: the manifest's files are added to a zone;
+// nothing is deleted and no snapshot is taken.
+func (e filesEnv) importFiles(ctx context.Context, p *access.Principal, in ImportFilesIn) (ImportFilesOut, error) {
+	s, d, err := e.open(ctx, p, in.Store, rt.LevelAdmin, "importing files")
+	if err != nil {
+		return ImportFilesOut{}, err
+	}
+	files, err := readManifest(e.kernelEnv, s, in.Files, in.Blobs)
+	if err != nil {
+		return ImportFilesOut{}, err
+	}
+	zone := zoneOf(in.Zone)
+	c, err := s.Do(ctx, who(p, d), func(t *store.Turn) error {
 		for _, f := range files {
 			if _, err := t.PutBlob(zone, f.Path, f.SHA256, f.Size, f.Type); err != nil {
 				return err
 			}
 		}
-		if prune {
-			cur, err := t.ZoneFiles(zone)
-			if err != nil {
-				return err
-			}
-			for _, f := range cur {
-				if !seen[f.Path] {
-					if _, err := t.RemoveFile(zone, f.Path); err != nil {
-						return err
-					}
-					removed++
-				}
-			}
-		}
-		if snap {
-			var err error
-			n, err = t.Snapshot(a.message, a.ref)
-			return err
-		}
 		return nil
 	})
 	if err != nil {
-		return nil, fileErr(err)
+		return ImportFilesOut{}, fileErr(err)
 	}
-	out := map[string]any{"files": len(files), "removed": removed}
-	if n > 0 {
-		out["n"] = n
-	}
+	out := ImportFilesOut{Files: len(files)}
 	if c != nil {
-		out["rev"] = c.Rev
+		out.Rev = c.Rev
 	}
 	return out, nil
 }
 
-// SnapNewIn is snap.new's input.
-type SnapNewIn struct {
-	Store   string `json:"store" slop:"pos=1"`
-	Message string `json:"message,omitempty" slop:"pos=2"`
-	Ref     string `json:"ref,omitempty"`
+// fileChange is a FileChange with its content in the blob store.
+type fileChange struct {
+	Path, SHA256, Type string
+	Size               int64
+	Delete             bool
+}
+
+// readChanges checks files.commit's changes (a clean path, once each, and
+// exactly one of text, data, sha256 or delete), stores inline contents as
+// blobs, and answers missing_blobs for sha256 entries the server lacks.
+func readChanges(s *store.Store, in []FileChange) ([]fileChange, error) {
+	if len(in) > store.MaxTreeFiles {
+		return nil, verbs.Errf("invalid_argument", "at most %d changes", store.MaxTreeFiles)
+	}
+	out := make([]fileChange, 0, len(in))
+	seen := make(map[string]bool, len(in))
+	sums := []string{}
+	for _, c := range in {
+		if !store.ValidFilePath(c.Path) {
+			return nil, verbs.Errf("invalid_argument", "bad path %q", c.Path)
+		}
+		if seen[c.Path] {
+			return nil, verbs.Errf("invalid_argument", "%s appears twice", c.Path)
+		}
+		seen[c.Path] = true
+		given := 0
+		for _, g := range []bool{c.Text != nil, c.Data != nil, c.SHA256 != "", c.Delete} {
+			if g {
+				given++
+			}
+		}
+		if given != 1 {
+			return nil, verbs.Errf("invalid_argument", "%s: give exactly one of text, data, sha256 or delete", c.Path)
+		}
+		f := fileChange{Path: c.Path, Type: c.Type, Delete: c.Delete}
+		switch {
+		case c.SHA256 != "":
+			if !blobs.ValidSum(c.SHA256) {
+				return nil, verbs.Errf("invalid_argument", "%s: sha256 %q is not a sha256", c.Path, c.SHA256)
+			}
+			f.SHA256, f.Size = c.SHA256, c.Size
+			sums = append(sums, c.SHA256)
+		case c.Text != nil || c.Data != nil:
+			var data []byte
+			if c.Text != nil {
+				data = []byte(*c.Text)
+			} else {
+				var err error
+				if data, err = base64.StdEncoding.DecodeString(*c.Data); err != nil {
+					return nil, verbs.Errf("invalid_argument", "%s: data must be base64", c.Path)
+				}
+			}
+			if len(data) > store.MaxTreeFile {
+				return nil, verbs.Errf("invalid_argument", "file %s is too large", c.Path)
+			}
+			sum, err := s.Blobs.Put(data)
+			if err != nil {
+				return nil, err
+			}
+			f.SHA256, f.Size = sum, int64(len(data))
+		}
+		out = append(out, f)
+	}
+	if err := missingBlobs(s, sums); err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
+// commit is files.commit. In one turn: where the ref is now (at); when it
+// moved since base, a per-path check that nothing changed there conflicts
+// with this commit; then the tree becomes snapshot at, the changes are
+// applied, and the tree is snapshotted onto the ref.
+func (e filesEnv) commit(ctx context.Context, p *access.Principal, in FilesCommitIn) (FilesCommitOut, error) {
+	if in.Base == nil || *in.Base < 0 {
+		return FilesCommitOut{}, verbs.Errf("invalid_argument", "files.commit needs base: the snapshot the changes start from (0: the ref does not exist yet)")
+	}
+	base := *in.Base
+	ref, err := refArg(in.Ref)
+	if err != nil {
+		return FilesCommitOut{}, err
+	}
+	s, d, err := e.open(ctx, p, in.Store, rt.LevelAdmin, "committing files")
+	if err != nil {
+		return FilesCommitOut{}, err
+	}
+	if err := putBlobs(e.kernelEnv, in.Blobs); err != nil {
+		return FilesCommitOut{}, err
+	}
+	changes, err := readChanges(s, in.Changes)
+	if err != nil {
+		return FilesCommitOut{}, err
+	}
+	out := FilesCommitOut{Base: base}
+	c, err := s.Do(ctx, who(p, d), func(t *store.Turn) error {
+		at, err := t.RefAt(ref)
+		if err != nil {
+			return err
+		}
+		if base > 0 {
+			if ok, err := t.HasSnapshot(base); err != nil {
+				return err
+			} else if !ok {
+				return verbs.Errf("invalid_argument", "base %d is not a snapshot of %s", base, in.Store)
+			}
+		}
+		if at == 0 && base > 0 {
+			// removed since base: recreating it from these changes alone
+			// is never what the committer meant
+			return &verbs.Error{Code: "conflict", Message: fmt.Sprintf("%s was removed since %d", ref, base),
+				Extra: map[string]any{"at": int64(0), "conflicts": []CommitConflict{}}}
+		}
+		if at != base {
+			conflicts, err := commitConflicts(t, base, at, changes)
+			if err != nil {
+				return err
+			}
+			if len(conflicts) > 0 {
+				paths := make([]string, len(conflicts))
+				for i, c := range conflicts {
+					paths[i] = c.Path
+				}
+				return &verbs.Error{Code: "conflict",
+					Message: fmt.Sprintf("%s moved from %d to %d, which also changed %s", ref, base, at, strings.Join(paths, ", ")),
+					Extra:   map[string]any{"at": at, "conflicts": conflicts}}
+			}
+		}
+		if err := t.ResetTree(at); err != nil {
+			return err
+		}
+		for _, c := range changes {
+			if c.Delete {
+				if _, err := t.RemoveFile("tree", c.Path); err != nil {
+					return err
+				}
+				continue
+			}
+			if _, err := t.PutBlob("tree", c.Path, c.SHA256, c.Size, c.Type); err != nil {
+				return err
+			}
+		}
+		out.At, out.Merged = at, at != base
+		out.N, err = t.Snapshot(in.Message, ref)
+		return err
+	})
+	if err != nil {
+		return FilesCommitOut{}, fileErr(err)
+	}
+	if c != nil {
+		out.Rev = c.Rev
+	}
+	out.Activated = e.activate(ctx, p, in.Activate)
+	return out, nil
+}
+
+// commitConflicts are the changes whose path changed between base and at
+// (added, removed or given other bytes) to something other than what the
+// change makes it: a change that agrees with theirs is no conflict.
+func commitConflicts(t *store.Turn, base, at int64, changes []fileChange) ([]CommitConflict, error) {
+	byPath := func(n int64) (map[string]string, error) {
+		fs, err := t.SnapshotFiles(n)
+		m := make(map[string]string, len(fs))
+		for _, f := range fs {
+			m[f.Path] = f.SHA256
+		}
+		return m, err
+	}
+	was, err := byPath(base)
+	if err != nil {
+		return nil, err
+	}
+	now, err := byPath(at)
+	if err != nil {
+		return nil, err
+	}
+	out := []CommitConflict{}
+	for _, c := range changes {
+		before, inBase := was[c.Path]
+		after, inAt := now[c.Path]
+		if inBase == inAt && before == after {
+			continue // untouched since base
+		}
+		if (c.Delete && !inAt) || (!c.Delete && inAt && after == c.SHA256) {
+			continue // they made the same change
+		}
+		out = append(out, CommitConflict{Path: c.Path})
+	}
+	return out, nil
+}
+
+// activate brings each store up on the snapshot the ref it follows points
+// at now, and reports it (SLOP3-022 C.2): the dev loop learns at once that
+// a migration failed, while the instance keeps serving its last good
+// version. A store that cannot be read or activated reports why in error.
+func (e filesEnv) activate(ctx context.Context, p *access.Principal, ids []string) []Activated {
+	if len(ids) == 0 {
+		return nil
+	}
+	out := make([]Activated, 0, len(ids))
+	for _, id := range ids {
+		st, _, err := e.open(ctx, p, id, rt.LevelView, "reading")
+		if err != nil {
+			out = append(out, Activated{Store: id, Error: err.Error()})
+			continue
+		}
+		s, err := statusOf(ctx, e.kernelEnv, e.A, st, id, false)
+		if err != nil {
+			out = append(out, Activated{Store: id, Error: err.Error()})
+			continue
+		}
+		out = append(out, Activated{Store: s.Store, App: s.App, Ref: s.Ref, N: s.N, Broken: s.Broken})
+	}
+	return out
+}
+
+// removeRef is ref.rm.
+func (e filesEnv) removeRef(ctx context.Context, p *access.Principal, in RefRmIn) (RefRmOut, error) {
+	if in.IfAt == nil {
+		return RefRmOut{}, verbs.Errf("invalid_argument", "ref.rm needs ifAt: the snapshot %s points at now", in.Ref)
+	}
+	if in.Ref == "main" {
+		return RefRmOut{}, verbs.Errf("invalid_argument", "main is removed by removing the store")
+	}
+	s, d, err := e.open(ctx, p, in.Store, rt.LevelAdmin, "removing refs")
+	if err != nil {
+		return RefRmOut{}, err
+	}
+	followers, err := e.following(ctx, s.ID, in.Ref)
+	if err != nil {
+		return RefRmOut{}, err
+	}
+	if len(followers) > 0 {
+		return RefRmOut{}, &verbs.Error{Code: "conflict", Message: fmt.Sprintf("%s follows %s@%s: make it follow another ref first (app.follow)", strings.Join(followers, ", "), s.ID, in.Ref),
+			Extra: map[string]any{"stores": followers}}
+	}
+	out := RefRmOut{Ref: in.Ref}
+	c, err := s.Do(ctx, who(p, d), func(t *store.Turn) error {
+		at, err := t.RefAt(in.Ref)
+		if err != nil {
+			return err
+		}
+		if at == 0 {
+			return verbs.Errf("not_found", "%s has no ref %s", s.ID, in.Ref)
+		}
+		if err := refIsAt(t, in.Ref, *in.IfAt); err != nil {
+			return err
+		}
+		out.N = at
+		_, err = t.RemoveRef(in.Ref)
+		return err
+	})
+	if err != nil {
+		return RefRmOut{}, fileErr(err)
+	}
+	if c != nil {
+		out.Rev = c.Rev
+	}
+	return out, nil
+}
+
+// following lists the stores that run app at ref (app.follow), the app
+// store itself included. It reads every store's registry row and the meta
+// of app's instances, outside any turn: a store that starts following ref
+// meanwhile is not seen (it then runs nothing until it follows another).
+func (e filesEnv) following(ctx context.Context, app, ref string) ([]string, error) {
+	rows, err := e.K.Registry.Stores(ctx, "")
+	if err != nil {
+		return nil, err
+	}
+	out := []string{}
+	for _, r := range rows {
+		if r.ID != app && r.App != app {
+			continue
+		}
+		if r.ID == app && r.App != "" && r.App != app {
+			continue // the store runs another app's code
+		}
+		st, err := e.K.Store(ctx, r.ID)
+		if err != nil {
+			return nil, err
+		}
+		if st.Meta("app_ref") == ref {
+			out = append(out, r.ID)
+		}
+	}
+	sort.Strings(out)
+	return out, nil
 }
 
 // SnapLsIn is snap.ls's input.
@@ -471,7 +779,14 @@ type RefMoveIn struct {
 	Store string `json:"store" slop:"pos=1"`
 	Ref   string `json:"ref" slop:"pos=2"`
 	N     int64  `json:"n" slop:"pos=3"`
-	IfAt  *int64 `json:"ifAt,omitempty" jsonschema_description:"move only if the ref points at this snapshot now (0: only if it does not exist yet)"`
+	IfAt  *int64 `json:"ifAt" jsonschema_description:"required: the snapshot the ref points at now (0: it does not exist yet); otherwise conflict, nothing moves"`
+}
+
+// RefRmIn is ref.rm's input.
+type RefRmIn struct {
+	Store string `json:"store" slop:"pos=1"`
+	Ref   string `json:"ref" slop:"pos=2"`
+	IfAt  *int64 `json:"ifAt" jsonschema_description:"required: the snapshot the ref points at now; otherwise conflict, nothing removed"`
 }
 
 // FilesLsIn is files.ls's input.
@@ -512,15 +827,35 @@ type FilesRmIn struct {
 // FilesPushIn is files.push's input.
 type FilesPushIn struct {
 	Store    string   `json:"store" slop:"pos=1"`
-	Files    any      `json:"files"`
-	Blobs    any      `json:"blobs,omitempty"`
+	Files    any      `json:"files" jsonschema_description:"the whole tree: [{path, sha256, size, type?} or {path, text} or {path, data (base64)}]"`
+	Blobs    any      `json:"blobs,omitempty" jsonschema_description:"{sha256: base64} for blobs the server lacks"`
 	Message  string   `json:"message,omitempty"`
 	Ref      string   `json:"ref,omitempty" jsonschema_description:"the ref to move (default main)"`
-	Prune    *bool    `json:"prune,omitempty" jsonschema_description:"delete tree files not in the manifest (default true)"`
-	Snapshot *bool    `json:"snapshot,omitempty" jsonschema_description:"take a snapshot (default true)"`
-	Zone     string   `json:"zone,omitempty" jsonschema_description:"tree (default) or assets"`
+	IfAt     *int64   `json:"ifAt" jsonschema_description:"required: the snapshot the ref points at now (0: it does not exist yet); otherwise conflict, nothing written"`
 	Activate []string `json:"activate,omitempty" jsonschema_description:"stores to activate after the snapshot (the instances following the moved ref); the result reports each one's n and broken"`
-	IfAt     *int64   `json:"ifAt,omitempty" jsonschema_description:"push only if the ref points at this snapshot now (0: only if it does not exist yet); otherwise conflict, nothing written"`
+}
+
+// FilesCommitIn is files.commit's input.
+type FilesCommitIn struct {
+	Store    string       `json:"store" slop:"pos=1"`
+	Ref      string       `json:"ref,omitempty" jsonschema_description:"the ref to commit to (default main)"`
+	Base     *int64       `json:"base" jsonschema_description:"required: the snapshot the changes start from (0: the ref does not exist yet)"`
+	Message  string       `json:"message,omitempty"`
+	Changes  []FileChange `json:"changes"`
+	Blobs    any          `json:"blobs,omitempty" jsonschema_description:"{sha256: base64} for blobs the server lacks"`
+	Activate []string     `json:"activate,omitempty" jsonschema_description:"stores to activate after the snapshot (the instances following the ref); the result reports each one's n and broken"`
+}
+
+// FileChange is one change of files.commit: exactly one of text, data,
+// sha256 or delete. A path not in the list is unchanged.
+type FileChange struct {
+	Path   string  `json:"path"`
+	Text   *string `json:"text,omitempty" jsonschema_description:"the file's text (an empty string is an empty file)"`
+	Data   *string `json:"data,omitempty" jsonschema_description:"the file's bytes, base64"`
+	SHA256 string  `json:"sha256,omitempty" jsonschema_description:"a blob the server holds, with its size"`
+	Size   int64   `json:"size,omitempty"`
+	Type   string  `json:"type,omitempty" jsonschema_description:"the content type (default: from the path)"`
+	Delete bool    `json:"delete,omitempty" jsonschema_description:"remove the file (nothing to do if it does not exist)"`
 }
 
 // FilesBlobsIn is files.blobs's input.
@@ -547,16 +882,60 @@ type FilesBlobsOut struct {
 	Stored int `json:"stored"`
 }
 
-// SnapNewOut is snap.new's result.
-type SnapNewOut struct {
-	N   int64 `json:"n"`
-	Rev int64 `json:"rev"`
-}
-
 // RefMoveOut is ref.move's result.
 type RefMoveOut struct {
 	N    int64  `json:"n"`
 	From int64  `json:"from"` // where the ref pointed before (0: it did not exist)
 	Ref  string `json:"ref"`
 	Rev  int64  `json:"rev"`
+}
+
+// RefRmOut is ref.rm's result.
+type RefRmOut struct {
+	Ref string `json:"ref"`
+	N   int64  `json:"n"` // where the ref pointed
+	Rev int64  `json:"rev"`
+}
+
+// FilesPushOut is files.push's result.
+type FilesPushOut struct {
+	N         int64       `json:"n"`             // the snapshot the ref points at now (an unchanged tree keeps the ref's)
+	Files     int         `json:"files"`         // entries in the manifest
+	Removed   int         `json:"removed"`       // tree files deleted because the manifest does not list them
+	Rev       int64       `json:"rev,omitempty"` // the store's rev of this write; none when nothing changed
+	Activated []Activated `json:"activated,omitempty"`
+}
+
+// FilesCommitOut is files.commit's result.
+type FilesCommitOut struct {
+	N         int64       `json:"n"`             // the snapshot the ref points at now (a commit that changes nothing keeps at)
+	At        int64       `json:"at"`            // where the ref pointed when the commit applied (0: it did not exist)
+	Base      int64       `json:"base"`          // the base the commit was made from
+	Merged    bool        `json:"merged"`        // at != base: the changes were applied over newer snapshots
+	Rev       int64       `json:"rev,omitempty"` // the store's rev of this write; none when nothing changed
+	Activated []Activated `json:"activated,omitempty"`
+}
+
+// CommitConflict is a path a files.commit changed that the ref's newer
+// snapshot also changed, to something else.
+type CommitConflict struct {
+	Path string `json:"path"`
+}
+
+// Activated is one store a push or commit asked to activate: where it runs
+// now (n, and why it stayed on an older version: broken), or why it could
+// not be read (error; the other fields are then empty).
+type Activated struct {
+	Store  string `json:"store"`
+	App    string `json:"app,omitempty"`
+	Ref    string `json:"ref,omitempty"`
+	N      int64  `json:"n"`
+	Broken string `json:"broken"`
+	Error  string `json:"error,omitempty"`
+}
+
+// ImportFilesOut is import.files's result.
+type ImportFilesOut struct {
+	Files int   `json:"files"`
+	Rev   int64 `json:"rev,omitempty"`
 }

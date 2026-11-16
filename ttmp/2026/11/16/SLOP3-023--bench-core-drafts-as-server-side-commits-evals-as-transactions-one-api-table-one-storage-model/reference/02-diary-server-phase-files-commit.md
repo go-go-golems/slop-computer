@@ -423,3 +423,249 @@ the self capability alias". This step's hash is in Step 5.
 
 - The deletion shape for `files.commit` is `{path, delete: true}`
   (`FileChange.Delete`), confirmed in Step 5's tests.
+
+## Step 5: files.commit, a required ifAt on every ref write, ref.rm, and every caller
+
+This is the verb layer. `files.commit` applies a change list against a
+required `base` in one store turn: where the ref is now (`at`); if it moved,
+a per-path check against the files of `base` and `at`; then the tree is
+reset to `at`, the changes applied, and the tree snapshotted onto the ref.
+`files.push` and `ref.move` now require `ifAt`; `ref.rm` is new; `snap.new`
+is gone; push lost `prune`, `snapshot` and `zone`; `import.files` has its
+own code path. Every caller in the repository passes the precondition: the
+Go client and CLI, `apps/workshop`, `apps/blocks-site`, the workshop module
+table, the tests and the authz fixture.
+
+All target packages pass, `make lint` reports 0 issues. One bench test is
+skipped on purpose: `apps/bench`'s `create` pushes without `ifAt`, and the
+bench is being rewritten by another engineer (I may not edit it).
+
+### Prompt Context
+
+**User prompt (verbatim):** see Step 1 (brief items 1 and 2), and the lead's
+messages quoted in Steps 2 and 4 (`ref.rm`, `ValidRefName` enforcement in
+the verbs, no `from` option, the `{path, delete: true}` deletion shape).
+
+**Assistant interpretation:** one typed write primitive; exact
+preconditions (`ifAt`) on every other ref write; delete what nothing uses.
+
+**Inferred user intent:** the bench's writes become explicit operations
+whose answers mean "committed at n", and no write can silently overwrite
+another.
+
+**Commit (code):** Step 4's actor error details are `e8c6e9a` — "Actors: a
+verb's error details reach JavaScript as e.extra". This step's hash is in
+Step 6.
+
+### What I did
+
+- `pkg/commands/files.go`:
+  - `files.commit` (`FilesCommitIn/Out`, `FileChange`, `CommitConflict`):
+    `readChanges` validates (clean path, once, exactly one of
+    text/data/sha256/delete), stores inline contents as blobs, and answers
+    `missing_blobs` (`extra.missing`) for sha256 entries the server lacks;
+    `commit` runs the turn; `commitConflicts` is the per-path rule.
+  - A ref removed since `base` (`at == 0 && base > 0`) is a conflict
+    (`extra.at: 0`, `extra.conflicts: []`), not a new ref made of the
+    changes alone. The brief did not cover this case; see "second pair of
+    eyes".
+  - `files.push` → `filesEnv.push`: `ifAt` required, always the tree,
+    always pruned, always snapshotted; typed `FilesPushOut`.
+  - `import.files` → `filesEnv.importFiles` (zone, add, no prune, no
+    snapshot; typed `ImportFilesOut`); both share `readManifest`.
+  - `activate` helper, typed `Activated`, used by push and commit.
+  - `refIsAt` (the precondition, conflict with `extra.at`) used by push,
+    `ref.move` and `ref.rm`; `refArg`/`badRef` for ref names.
+  - `ref.move`: `ifAt` required, name must be a `ValidRefName` (no empty
+    name defaulting to main), conflict now carries `extra.at`.
+  - `ref.rm` → `filesEnv.removeRef`; `following` lists stores whose
+    registry row runs this app and whose `app_ref` meta is the ref.
+  - `snap.new` removed (no caller; `files.commit` covers "change the tree
+    and snapshot it", with a precondition).
+- `pkg/doors/actors/modworkshop.go`: `commit` (`files.commit`, default ref
+  draft) and `dropRef` (`ref.rm`) rows, and the comment block stating each
+  write's precondition. `pkg/doors/actors/modules.go`: the module's doc.
+- `pkg/client/folder.go`: `Push` reads the ref (`RefAt`, new) for `ifAt`
+  unless given; `pkg/client/dev.go`: `devPush` documented (it uses `Push`).
+- `cmd/slop/cmds/extra.go`: `slop push` loses `--no-prune` (nothing used
+  it) and gains `--ifAt`; `slop ref move` replaces the generated command:
+  `--ifAt`, or it reads the ref and prints `ref: from → to` on stderr after
+  the move.
+- `apps/workshop/actor.js`: `push` with puts/removes is now
+  `w.commit(store, changes, {base: n})` (a merge over draft instead of
+  replacing draft with n plus the changes); `replace` is `w.push` with
+  `ifAt` = draft now; `publish` passes `ifAt` = main now.
+- `apps/blocks-site/actor.js`: reads `w.refs(to)`, pushes with `ifAt:
+  refs.draft ?? 0`, publishes with `ifAt: refs.main ?? 0`.
+- Tests:
+  - `pkg/host/harness_test.go`: `h.refAt`, `h.push` (fills `ifAt` from
+    `ref.ls` unless given), `h.commit` (fills `base`). `sed -E
+    's/h\.call\(([A-Za-z]+), "files\.push", /h.push(\1, /g'` over
+    `pkg/host/*_test.go` (116 call sites).
+  - The four `"prune": false` pushes (`actors_test.go`, `serving_test.go`)
+    became `h.commit` with the same files as `changes`.
+  - `h.fail(... "files.push" ...)` sites pass an explicit `ifAt`;
+    `stores_test.go`'s eval program chains `ifAt: site.n`; `cases.json`
+    gets `"ifAt": 0`; the JS test actors in `devloop_test.go` and
+    `workshop_module_test.go` pass `ifAt`.
+  - `pkg/host/commit_test.go` (new): `TestCommitClean`, `TestCommitMerge`,
+    `TestCommitArguments`, `TestCommitActivates`, `TestCommitConcurrent`,
+    `TestRefRm`, `TestWorkshopCommit`.
+  - `devloop_test.go`: `TestRefMoveIfAt` (required ifAt, `extra.at`, bad
+    names, `proposal/p8k2x1`), `TestPushIfAt` (required ifAt, the removed
+    knobs refused, bad ref name).
+  - `cmd/slop/cmds/refs_test.go` (new): the CLI against a fake server.
+  - `bench_test.go`: the two `sync` calls pass `base` (the bench actor
+    turns it into `ifAt`); `create` moved to `TestBenchCreate`, skipped.
+- Docs: `doc/building-apps.md` (verbs table, dev loop, publishing, ref
+  names, `ref.rm`, workshop functions and `e.extra`, the deploy script's
+  missing `ifAt`), `doc/design/slop-v3.md` (verb table).
+
+### Why
+
+- `ifAt` as a pointer without `omitempty`: the verb table reports it
+  required (`invalid_argument: files.push needs ifAt`) before `Run`, and the
+  nil check catches an explicit `null`.
+- The harness helper keeps 116 test call sites readable and makes the
+  precondition explicit at the one place it is computed; the tests of the
+  precondition itself pass `ifAt` directly.
+- Workshop's file edits as a commit: before, "push onto #n" replaced draft
+  with n's files plus the edit, silently dropping anything committed to
+  draft since n.
+- `slop push --no-prune` removed rather than reimplemented: nothing in the
+  repo or scripts uses it, and `files.commit` is the primitive for "add
+  these files".
+
+### What worked
+
+- `GOWORK=off go test -tags sqlite_fts5 -count=1 ./pkg/store ./pkg/commands ./pkg/host ./pkg/client ./pkg/doors/... ./cmd/... ./pkg/rt ./pkg/actor`
+  → all `ok` (`pkg/host` 21.5s; 145 PASS, 3 SKIP: `TestBenchCreate` (new,
+  see below) and the pre-existing env-gated `TestBenchActorRuntime`,
+  `TestBenchPageDBQuery`).
+- `GOWORK=off go test -race -tags sqlite_fts5 ./pkg/host -run 'TestCommitConcurrent|TestWorkshopCommit' -count=3` → `ok`.
+- `make lint` → `0 issues.`; `make fmt-check` → no diff.
+
+### What didn't work
+
+- My first Python edit of the type section raised
+  `ValueError: substring not found`: the earlier replacement of the
+  `pushFile … SnapLsIn` range had already removed `SnapNewIn`. Re-ran
+  without that part.
+- The `sed` that rewrote test pushes also rewrote the helper's own
+  `return h.call(token, "files.push", args)` into `return h.push(token,
+  args)` (infinite recursion); caught by `grep` before running, fixed.
+- First full run, two failures:
+  - `bench_test.go:106: actor.call map[action:sync …]: 400 map[error:map[code:invalid_argument message:files.push needs ifAt]]`
+  - `serving_test.go:126: files.push map[… ifAt:0 store:bobs-site]: want permission_denied, got 409 map[error:map[code:conflict extra:map[at:1] message:main points at 1, not 0: it moved since you looked]]`
+    (the precondition is checked before `guardCode`; the test now passes
+    main's real position so it still tests D9.)
+- `TestBenchCreate` without the skip:
+  `bench_test.go:154: actor.call map[action:create …]: 400 map[error:map[code:invalid_argument message:files.push needs ifAt]]`.
+- `commit_test.go:103: tree at 2 = map[empty.txt: index.html:<h1>two</h1> style.css:h1{}]`:
+  I compared `json.Marshal` output (which escapes `<` as `<`) with a
+  literal holding `<`; replaced by `reflect.DeepEqual`.
+- `gofmt -l` listed `pkg/host/commit_test.go` (comment alignment); `gofmt -w`.
+- `make lint`: `pkg/commands/files.go:521:4: ineffectual assignment to data (ineffassign)`,
+  `1 issues:`, `make: *** [Makefile:6: lint] Error 1` (`data := []byte{}`
+  before an if/else that always assigns); now `var data []byte`.
+- `refs_test.go`: `write /dev/null: bad file descriptor` (I opened
+  `/dev/null` read-only to swallow stdout); `os.OpenFile(..., O_WRONLY)`.
+- I could not drive the real CLI against `slop serve --local`: the CLI
+  needs a token, and the `X-Slop-As` header the config comment mentions is
+  not implemented (`git grep -i slop-as` finds only that comment). The CLI
+  is tested against a fake server instead, and the client's `Push` against
+  the real server through `TestSlopDev`.
+
+### What I learned
+
+- `Snapshot` dedups only against the ref's own current snapshot, so "a
+  no-op commit returns at" holds exactly; the same tree on another ref
+  still makes a new snapshot number.
+- The registry row's `App` plus each instance's `app_ref` meta is enough to
+  find a ref's followers; it is read outside the store turn.
+
+### What was tricky to build
+
+- Conflict rule, path by path: "they changed it" is presence or sha256
+  differing between `base` and `at`; "same result" is (delete and absent at
+  `at`) or (same sha256 at `at`). A path absent from both is untouched.
+  `base = 0` over an existing ref treats everything there as theirs, so a
+  new path merges and an existing one conflicts.
+- Ordering inside the turn: the precondition and conflict check come
+  before `ResetTree`, so a refused commit writes nothing (the turn rolls
+  back anyway, but nothing is even attempted).
+- Inline contents are stored as blobs before the turn (as push did), so a
+  refused commit can leave unreferenced blobs, as a refused push could.
+
+### What warrants a second pair of eyes
+
+- The removed-ref conflict (`at == 0 && base > 0`), my addition.
+- `ref.rm`'s follower check runs outside the turn: a store that starts
+  following the ref between the check and the removal is not seen (it then
+  runs nothing until it follows another ref). App stores follow their own
+  `app_ref` too and are included.
+- `slop dev` still replaces draft wholesale: `Push` reads draft just before
+  the push, so `ifAt` only guards that window, not commits made since the
+  previous push. Making the loop pass the n of its last push would refuse
+  (and keep retrying) after any other writer touched draft; that is a
+  product decision.
+- `TestBenchCreate` is skipped until the bench rewrite passes `ifAt` in
+  `create` (and `sync` without `base` also fails now).
+- `ttmp` scripts of SLOP3-004/013/015/018 call `files.push` without `ifAt`
+  and would now fail; they are historical and I left them.
+- Tree-zone writes outside a snapshot (`files.put`/`files.rm` on the tree,
+  `import.files` into the tree) are now transient: the next push replaces
+  the tree and the next commit resets it.
+
+### What should be done in the future
+
+- Phase 2 (bench): `w.commit(app, changes, {base, activate})`, catching
+  `e.code === 'conflict'` with `e.extra.at` / `e.extra.conflicts`; `create`
+  and `sync` with `ifAt`; then remove the skip in `TestBenchCreate`.
+- Consider whether `files.put`/`files.rm` on the tree zone should go, now
+  that the tree is rebuilt from snapshots on every write.
+
+### Code review instructions
+
+- Start at `pkg/commands/files.go`: `commit`, `commitConflicts`,
+  `readChanges`, `push`, `refIsAt`, `removeRef`, `following`, then the
+  types at the end of the file.
+- Then `pkg/doors/actors/modworkshop.go` (table), `pkg/client/folder.go`
+  (`Push`, `RefAt`), `cmd/slop/cmds/extra.go` (`pushCmd`, `refMoveCmd`),
+  `apps/workshop/actor.js` (`push`, `publish`), `apps/blocks-site/actor.js`.
+- Tests: `pkg/host/commit_test.go`, `pkg/host/devloop_test.go`
+  (`TestRefMoveIfAt`, `TestPushIfAt`), `cmd/slop/cmds/refs_test.go`.
+- `GOWORK=off go test -tags sqlite_fts5 ./pkg/store ./pkg/commands ./pkg/host ./pkg/client ./pkg/doors/... ./cmd/...` and `make lint`.
+
+### Technical details
+
+`files.commit` input:
+
+```json
+{"store": "jot", "ref": "draft", "base": 41, "message": "…",
+ "changes": [{"path": "index.html", "text": "…"},
+             {"path": "logo.png", "data": "<base64>", "type": "image/png"},
+             {"path": "big.bin", "sha256": "<hex>", "size": 2048, "type": "…"},
+             {"path": "old.js", "delete": true}],
+ "blobs": {"<sha256>": "<base64>"},
+ "activate": ["jot-dev-d4776d"]}
+```
+
+Output: `{"n", "at", "base", "merged", "rev"?, "activated"?: [{"store",
+"app"?, "ref"?, "n", "broken", "error"?}]}`. Errors: `invalid_argument`
+(no or negative base, base not a snapshot, bad path, duplicate path, not
+exactly one of text/data/sha256/delete, unknown field, bad ref name, bad
+base64, too large, too many files); `missing_blobs` with
+`extra.missing: [sha256…]`; `conflict` with `extra.at` and
+`extra.conflicts: [{"path"}]` (empty list when the ref was removed since
+base).
+
+`files.push` input: `{store, files, blobs?, message?, ref? (main), ifAt
+(required), activate?}`; output `{n, files, removed, rev?, activated?}`.
+`ref.move`: `{store, ref, n, ifAt (required)}` → `{n, from, ref, rev}`.
+`ref.rm`: `{store, ref, ifAt (required)}` → `{ref, n, rev}`; errors
+`invalid_argument` (no ifAt, main), `not_found`, `conflict` (`extra.at`;
+or `extra.stores` when followed). `import.files`: `{store, files, blobs?,
+zone?}` → `{files, rev?}`. Workshop: `commit(store, changes, {base, …})`,
+`push(store, files, {ifAt, …})`, `moveRef(store, ref, n, {ifAt})`,
+`publish(store, n, {ifAt})`, `dropRef(store, ref, {ifAt})`.

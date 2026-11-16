@@ -110,7 +110,7 @@ func TestBlocksSiteUploads(t *testing.T) {
 
 	// What the server allows, whatever the actor says: a probe app answering {asset} for any id.
 	h.call(admin, "store.new", map[string]any{"id": "probe"})
-	h.call(admin, "files.push", map[string]any{"store": "probe", "files": files(map[string]string{"app.json": `{"title":"probe","actor":"actor.js"}`, "actor.js": probeActor})})
+	h.push(admin, map[string]any{"store": "probe", "files": files(map[string]string{"app.json": `{"title":"probe","actor":"actor.js"}`, "actor.js": probeActor})})
 	h.call(admin, "store.new", map[string]any{"id": "probe-1", "app": "probe"})
 	h.call(admin, "bind.set", map[string]any{"store": "probe-1", "alias": "source", "target": "ws-weft"})
 	h.call(admin, "grant.set", map[string]any{"store": "ws-weft", "subject": "store:probe-1", "level": "view"})
@@ -171,7 +171,7 @@ func TestStoreBytesFacts(t *testing.T) {
 		map[string]any{"path": "page.html", "data": base64.StdEncoding.EncodeToString([]byte("<script>alert(1)</script>")), "type": "text/html"},
 	}})
 	h.call(admin, "store.new", map[string]any{"id": "cacher"})
-	h.call(admin, "files.push", map[string]any{"store": "cacher", "files": files(map[string]string{"app.json": `{"title":"c","actor":"actor.js"}`,
+	h.push(admin, map[string]any{"store": "cacher", "files": files(map[string]string{"app.json": `{"title":"c","actor":"actor.js"}`,
 		"actor.js": `defineActor({ http: {
   'GET /x/:id': { level: 'public', run: (ctx, req) => ({ asset: { from: 'source', id: req.params.id }, headers: { 'Cache-Control': 'public, max-age=31536000, immutable' } }) },
   'GET /page': { level: 'public', run: () => ({ html: '<p>hi</p>', headers: { 'Cache-Control': 'public, max-age=600' } }) },

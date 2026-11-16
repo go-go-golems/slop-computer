@@ -12,8 +12,11 @@ const benchActor = `
 const ws = use('workshop');
 defineActor({
   actions: {
-    async push(ctx, { store, text }) { return await ws.push(store, [{ path: 'index.html', text }], { message: 'from the bench' }); },
-    async publish(ctx, { store, n }) { return await ws.publish(store, n); },
+    async push(ctx, { store, text }) {
+      const refs = await ws.refs(store);
+      return await ws.push(store, [{ path: 'index.html', text }], { message: 'from the bench', ifAt: refs.draft ?? 0 });
+    },
+    async publish(ctx, { store, n }) { const refs = await ws.refs(store); return await ws.publish(store, n, { ifAt: refs.main ?? 0 }); },
     async refs(ctx, { store }) { return await ws.refs(store); },
     async read(ctx, { store, at, path }) { return await ws.read(store, at, path); },
     async follow(ctx, { store, ref }) { return await ws.follow(store, ref); },
@@ -36,7 +39,7 @@ func TestWorkshopModule(t *testing.T) {
 	}
 
 	h.call(admin, "store.new", map[string]any{"id": "site"})
-	h.call(admin, "files.push", map[string]any{"store": "site", "files": files(map[string]string{"index.html": "<h1>one</h1>"})})
+	h.push(admin, map[string]any{"store": "site", "files": files(map[string]string{"index.html": "<h1>one</h1>"})})
 	h.call(admin, "grant.set", map[string]any{"store": "site", "subject": "@guest", "level": "view"})
 	h.call(admin, "mount.set", map[string]any{"host": static, "path": "/site", "store": "site"})
 	serves := func() string { _, body := h.get(static, "/site/"); return body }
@@ -90,7 +93,7 @@ func TestWorkshopModule(t *testing.T) {
 		"sql/001.sql": `CREATE TABLE notes (id TEXT PRIMARY KEY);`,
 		"index.html":  "<title>jot</title>",
 	}
-	h.call(admin, "files.push", map[string]any{"store": "jot", "files": files(app)})
+	h.push(admin, map[string]any{"store": "jot", "files": files(app)})
 	h.call(admin, "store.new", map[string]any{"id": "jot-scratch", "app": "jot", "type": "jot"})
 	tables := func(store string) string {
 		return fmtAny(h.call(admin, "actor.call", map[string]any{"store": store, "action": "tables"}))
@@ -99,7 +102,7 @@ func TestWorkshopModule(t *testing.T) {
 		t.Fatalf("scratch on main: %s", got)
 	}
 	app["sql/002_tags.sql"] = `CREATE TABLE tags (note TEXT, tag TEXT);`
-	h.call(admin, "files.push", map[string]any{"store": "jot", "files": files(app), "ref": "draft"})
+	h.push(admin, map[string]any{"store": "jot", "files": files(app), "ref": "draft"})
 	h.fail(admin, "app.follow", map[string]any{"store": "jot-scratch", "ref": "nope"}, "not_found")
 	f := call("follow", map[string]any{"store": "jot-scratch", "ref": "draft"}).(map[string]any)
 	if f["ref"] != "draft" || f["broken"] != "" {

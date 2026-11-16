@@ -33,14 +33,15 @@ func devApp() map[string]string {
 
 // C.3: ref.move with ifAt is a compare-and-swap, so a publish cannot
 // silently overwrite another one; the result says where the ref was.
+// SLOP3-023: ifAt is required, and ref names are checked.
 func TestRefMoveIfAt(t *testing.T) {
 	h := newHarness(t)
 	admin := h.tokenFor("admin@example.com", "read", "write", "admin")
 	h.call(admin, "store.new", map[string]any{"id": "jot"})
 	app := devApp()
-	n1 := num(h.call(admin, "files.push", map[string]any{"store": "jot", "files": files(app)}).(map[string]any)["n"])
+	n1 := num(h.push(admin, map[string]any{"store": "jot", "files": files(app)}).(map[string]any)["n"])
 	app["sql/002_tags.sql"] = `CREATE TABLE tags (note TEXT, tag TEXT);`
-	n2 := num(h.call(admin, "files.push", map[string]any{"store": "jot", "files": files(app), "ref": "draft"}).(map[string]any)["n"])
+	n2 := num(h.push(admin, map[string]any{"store": "jot", "files": files(app), "ref": "draft"}).(map[string]any)["n"])
 
 	// Publish draft: main is still at n1.
 	out := h.call(admin, "ref.move", map[string]any{"store": "jot", "ref": "main", "n": n2, "ifAt": n1}).(map[string]any)
@@ -49,8 +50,8 @@ func TestRefMoveIfAt(t *testing.T) {
 	}
 	// A second publisher who still believes main is at n1 is refused.
 	e := h.fail(admin, "ref.move", map[string]any{"store": "jot", "ref": "main", "n": n1, "ifAt": n1}, "conflict")
-	if e == nil {
-		t.Fatal("stale ifAt: no error")
+	if at := num(e["extra"].(map[string]any)["at"]); at != n2 {
+		t.Fatalf("conflict extra.at = %d, want %d", at, n2)
 	}
 	if refs := h.call(admin, "ref.ls", map[string]any{"store": "jot"}).(map[string]any); num(refs["main"]) != n2 {
 		t.Fatalf("main moved by a refused publish: %v", refs)
@@ -58,11 +59,17 @@ func TestRefMoveIfAt(t *testing.T) {
 	// ifAt 0: only if the ref does not exist yet.
 	h.call(admin, "ref.move", map[string]any{"store": "jot", "ref": "release", "n": n1, "ifAt": 0})
 	h.fail(admin, "ref.move", map[string]any{"store": "jot", "ref": "release", "n": n2, "ifAt": 0}, "conflict")
-	// Without ifAt the move is unconditional, as before (a rollback).
-	out = h.call(admin, "ref.move", map[string]any{"store": "jot", "ref": "main", "n": n1}).(map[string]any)
+	// Without ifAt nothing moves; a rollback states where main is.
+	h.fail(admin, "ref.move", map[string]any{"store": "jot", "ref": "main", "n": n1}, "invalid_argument")
+	out = h.call(admin, "ref.move", map[string]any{"store": "jot", "ref": "main", "n": n1, "ifAt": n2}).(map[string]any)
 	if num(out["from"]) != n2 {
 		t.Fatalf("rollback from = %v, want %d", out["from"], n2)
 	}
+	// Ref names: lowercase, starting with a letter, /-separated segments.
+	for _, bad := range []string{"42", "Draft", "draft/", "/x", "a//b", "a b", "a/b/c/d/e/f", ""} {
+		h.fail(admin, "ref.move", map[string]any{"store": "jot", "ref": bad, "n": n1, "ifAt": 0}, "invalid_argument")
+	}
+	h.call(admin, "ref.move", map[string]any{"store": "jot", "ref": "proposal/p8k2x1", "n": n1, "ifAt": 0})
 }
 
 func num(v any) int64 {
@@ -85,8 +92,8 @@ func TestPushActivates(t *testing.T) {
 	admin := h.tokenFor("admin@example.com", "read", "write", "admin")
 	h.call(admin, "store.new", map[string]any{"id": "jot"})
 	app := devApp()
-	h.call(admin, "files.push", map[string]any{"store": "jot", "files": files(app)})
-	h.call(admin, "files.push", map[string]any{"store": "jot", "files": files(app), "ref": "draft"})
+	h.push(admin, map[string]any{"store": "jot", "files": files(app)})
+	h.push(admin, map[string]any{"store": "jot", "files": files(app), "ref": "draft"})
 	h.call(admin, "store.new", map[string]any{"id": "jot-dev", "app": "jot", "type": "jot"})
 	h.call(admin, "app.follow", map[string]any{"store": "jot-dev", "ref": "draft"})
 
@@ -104,7 +111,7 @@ func TestPushActivates(t *testing.T) {
 
 	// A good migration: the dev instance is on the new snapshot.
 	app["sql/002_tags.sql"] = `CREATE TABLE tags (note TEXT, tag TEXT);`
-	out := h.call(admin, "files.push", map[string]any{"store": "jot", "files": files(app), "ref": "draft", "activate": []string{"jot-dev", "nope"}})
+	out := h.push(admin, map[string]any{"store": "jot", "files": files(app), "ref": "draft", "activate": []string{"jot-dev", "nope"}})
 	n := num(out.(map[string]any)["n"])
 	a := activated(out)
 	if a["store"] != "jot-dev" || a["ref"] != "draft" || num(a["n"]) != n || a["broken"] != "" {
@@ -116,7 +123,7 @@ func TestPushActivates(t *testing.T) {
 
 	// A broken migration: reported, and the instance keeps the good version.
 	app["sql/003_bad.sql"] = `CREATE TABL oops (x);`
-	out = h.call(admin, "files.push", map[string]any{"store": "jot", "files": files(app), "ref": "draft", "activate": []string{"jot-dev", "nope"}})
+	out = h.push(admin, map[string]any{"store": "jot", "files": files(app), "ref": "draft", "activate": []string{"jot-dev", "nope"}})
 	a = activated(out)
 	if b, _ := a["broken"].(string); !strings.Contains(b, "003_bad") {
 		t.Fatalf("broken = %q, want the failing migration named", a["broken"])
@@ -139,7 +146,7 @@ defineActor({
       await ws.importDocs(id, 'settings', [{ id: 'shop', open: '07:00' }], { id: 'id' });
       return { rows: await ws.sql(id, 'SELECT count(*) AS n FROM notes'), doc: await ws.doc(id, 'settings/shop'), docs: await ws.docs(id, 'settings') };
     },
-    async push(ctx, { app, files, activate }) { return await ws.push(app, files, { activate }); },
+    async push(ctx, { app, files, activate, ifAt }) { return await ws.push(app, files, { activate, ifAt }); },
     async publish(ctx, { app, n, ifAt }) { return await ws.publish(app, n, { ifAt }); },
     async logs(ctx, { id }) { return await ws.logs(id); },
     async drop(ctx, { id }) { return await ws.drop(id); },
@@ -161,8 +168,8 @@ func TestWorkshopDevInstances(t *testing.T) {
 	}
 	h.call(admin, "store.new", map[string]any{"id": "jot"})
 	app := devApp()
-	main := num(h.call(admin, "files.push", map[string]any{"store": "jot", "files": files(app)}).(map[string]any)["n"])
-	h.call(admin, "files.push", map[string]any{"store": "jot", "files": files(app), "ref": "draft"})
+	main := num(h.push(admin, map[string]any{"store": "jot", "files": files(app)}).(map[string]any)["n"])
+	h.push(admin, map[string]any{"store": "jot", "files": files(app), "ref": "draft"})
 
 	// A dev instance on draft, seeded from a fixture.
 	if f := call("instance", map[string]any{"app": "jot", "id": "jot-dev-a1", "ref": "draft"}).(map[string]any); f["ref"] != "draft" || f["broken"] != "" {
@@ -175,7 +182,7 @@ func TestWorkshopDevInstances(t *testing.T) {
 
 	// A push through the module reports the instance's activation.
 	app["sql/002_tags.sql"] = `CREATE TABLE tags (note TEXT, tag TEXT);`
-	out := call("push", map[string]any{"app": "jot", "files": files(app), "activate": []string{"jot-dev-a1"}}).(map[string]any)
+	out := call("push", map[string]any{"app": "jot", "files": files(app), "activate": []string{"jot-dev-a1"}, "ifAt": h.refAt(admin, "jot", "draft")}).(map[string]any)
 	draft := num(out["n"])
 	if a := fmtAny(out["activated"]); !strings.Contains(a, `"broken":""`) || !strings.Contains(a, `"ref":"draft"`) {
 		t.Fatalf("activated = %s", a)
@@ -232,8 +239,8 @@ func TestEmbeddedViews(t *testing.T) {
 	h.call(admin, "mount.set", map[string]any{"host": h.cfg.Hosts.Live[0], "path": "/devbench", "store": "devbench"})
 	h.call(admin, "store.new", map[string]any{"id": "jot"})
 	app := devApp()
-	h.call(admin, "files.push", map[string]any{"store": "jot", "files": files(app)})
-	h.call(admin, "files.push", map[string]any{"store": "jot", "files": files(app), "ref": "draft"})
+	h.push(admin, map[string]any{"store": "jot", "files": files(app)})
+	h.push(admin, map[string]any{"store": "jot", "files": files(app), "ref": "draft"})
 	h.call(admin, "store.new", map[string]any{"id": "jot-dev", "app": "jot", "type": "jot"})
 	h.call(admin, "app.follow", map[string]any{"store": "jot-dev", "ref": "draft"})
 	h.call(admin, "grant.set", map[string]any{"store": "jot-dev", "subject": "@member", "level": "view"})
@@ -425,11 +432,11 @@ func TestPushIfAt(t *testing.T) {
 	admin := h.tokenFor("admin@example.com", "read", "write", "admin")
 	h.call(admin, "store.new", map[string]any{"id": "site"})
 	one := map[string]string{"index.html": "<h1>one</h1>"}
-	r := h.call(admin, "files.push", map[string]any{"store": "site", "files": files(one), "ref": "draft", "ifAt": 0}).(map[string]any)
+	r := h.push(admin, map[string]any{"store": "site", "files": files(one), "ref": "draft", "ifAt": 0}).(map[string]any)
 	n1 := num(r["n"])
 	h.fail(admin, "files.push", map[string]any{"store": "site", "files": files(one), "ref": "draft", "ifAt": 0}, "conflict")
 	two := map[string]string{"index.html": "<h1>two</h1>"}
-	h.call(admin, "files.push", map[string]any{"store": "site", "files": files(two), "ref": "draft", "ifAt": n1})
+	h.push(admin, map[string]any{"store": "site", "files": files(two), "ref": "draft", "ifAt": n1})
 	stale := map[string]string{"index.html": "<h1>stale</h1>", "extra.html": "x"}
 	h.fail(admin, "files.push", map[string]any{"store": "site", "files": files(stale), "ref": "draft", "ifAt": n1}, "conflict")
 	if got := h.call(admin, "files.cat", map[string]any{"store": "site", "at": "draft", "path": "index.html"}); got != "<h1>two</h1>" {
@@ -438,5 +445,11 @@ func TestPushIfAt(t *testing.T) {
 	if out := h.call(admin, "files.ls", map[string]any{"store": "site"}).([]any); len(out) != 1 {
 		t.Fatalf("the stale push wrote to the tree: %v", out)
 	}
-	h.fail(admin, "files.push", map[string]any{"store": "site", "files": files(two), "ifAt": 1, "snapshot": false}, "invalid_argument")
+	// ifAt is required; prune, snapshot and zone are gone (always the
+	// tree, pruned and snapshotted); a ref name is checked.
+	h.fail(admin, "files.push", map[string]any{"store": "site", "files": files(two), "ref": "draft"}, "invalid_argument")
+	for _, knob := range []string{"prune", "snapshot", "zone"} {
+		h.fail(admin, "files.push", map[string]any{"store": "site", "files": files(two), "ref": "draft", "ifAt": 2, knob: false}, "invalid_argument")
+	}
+	h.fail(admin, "files.push", map[string]any{"store": "site", "files": files(two), "ref": "Draft", "ifAt": 0}, "invalid_argument")
 }
