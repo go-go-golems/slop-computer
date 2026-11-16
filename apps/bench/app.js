@@ -1,4 +1,4 @@
-/* the bench, built from web/bench: do not edit. source sha256:b681751bcc43e6a81a26b3fe9d451f30764247e05739a8e76bddc324df86bdbe */
+/* the bench, built from web/bench: do not edit. source sha256:0a86a028fac85c2161e79e0269db7048126d89ffb1286b634313e58b8fc59a12 */
 // Sitebench: a live-site workbench. Built from src/*.js
 "use strict";
 (() => {
@@ -1250,7 +1250,7 @@ const Publish = {
   async preflight(P) {
     const f = await Sync.flush()
     if (f.error) throw new Error('your edits are not in draft (' + f.error + '); fix that before publishing')
-    if (Sync.pending(P)) throw new Error('your edits are still being pushed to draft; try again in a moment')
+    if (Sync.pending(P)) throw new Error(Sync.holds ? 'files written in this eval reach draft when it ends: publish in a later eval' : 'your edits are still being pushed to draft; try again in a moment')
     return await Slop.call('preflight', { app: P.meta.app })
   },
   async run(P, pf, who = 'you', note = '') {
