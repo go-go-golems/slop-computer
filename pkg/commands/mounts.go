@@ -108,7 +108,7 @@ func mountVerbs(e mountEnv) []*verbs.Verb {
 				if err != nil {
 					return AppStatusOut{}, err
 				}
-				return statusOf(ctx, e.kernelEnv, e.A, st, in.Store)
+				return statusOf(ctx, e.kernelEnv, e.A, st, in.Store, in.Peek)
 			}}.Verb(),
 		verbs.Def[AppLsIn, []map[string]any]{Name: "app.ls", Doc: "List the stores that are apps (their tree's main snapshot holds app.json).", Scope: verbs.Read, Action: authz.Platform,
 			Run: func(req verbs.Req, in AppLsIn) ([]map[string]any, error) {
@@ -313,6 +313,7 @@ type MountUndoIn struct {
 // AppStatusIn is app.status's input.
 type AppStatusIn struct {
 	Store string `json:"store" slop:"pos=1"`
+	Peek  bool   `json:"peek,omitempty" jsonschema_description:"do not activate: n is the version running now, next a newer one it activates on its next use"`
 }
 
 // AppLsIn is app.ls's input.
@@ -343,18 +344,24 @@ type AppStatusOut struct {
 	Broken   string         `json:"broken"`
 	Manifest map[string]any `json:"manifest,omitempty"` // set only to a non-empty object
 	N        int64          `json:"n"`
+	Next     int64          `json:"next,omitempty"` // with peek: the version it activates on its next use
 	Ref      string         `json:"ref"`
 	Store    string         `json:"store"`
 }
 
 // statusOf is app.status for an opened store. Running activates a pending
-// version, so asking is also how a store comes up on a new snapshot.
-func statusOf(ctx context.Context, e kernelEnv, a *actor.Manager, st *store.Store, id string) (AppStatusOut, error) {
-	r, err := e.K.Running(ctx, id)
+// version, so asking is also how a store comes up on a new snapshot; peek
+// only looks.
+func statusOf(ctx context.Context, e kernelEnv, a *actor.Manager, st *store.Store, id string, peek bool) (AppStatusOut, error) {
+	look := e.K.Running
+	if peek {
+		look = e.K.Peek
+	}
+	r, err := look(ctx, id)
 	if err != nil {
 		return AppStatusOut{}, err
 	}
-	out := AppStatusOut{Store: r.Store, App: r.App, Ref: st.Meta("app_ref"), N: r.N, Broken: r.Broken()}
+	out := AppStatusOut{Store: r.Store, App: r.App, Ref: st.Meta("app_ref"), N: r.N, Next: r.Next, Broken: r.Broken()}
 	if out.Broken == "" && a != nil {
 		// a build that failed after activation (a mount's route
 		// policy, SLOP3-012): "app@n: why"

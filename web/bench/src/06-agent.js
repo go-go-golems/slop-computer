@@ -196,10 +196,10 @@ function hostAPI(ctx) {
     'app.docs': coll => Slop.call('docs', { app: needApp(), coll: need(coll, 'coll') }),
     'app.doc': path => Slop.call('doc', { app: needApp(), path: need(path, 'path') }),
     'app.sql': (query, args) => Slop.call('sql', { app: needApp(), sql: need(query, 'query'), args: args || [] }),
-    'app.seedDocs': (coll, rows, o = {}) => { writable(); return Slop.call('seedDocs', { app: needApp(), coll: need(coll, 'coll'), rows, id: o.id }) },
-    'app.seedTable': (table, rows) => { writable(); return Slop.call('seedTable', { app: needApp(), table: need(table, 'table'), rows }) },
+    'app.seedDocs': (coll, rows, o = {}) => { writable(); noDryData(); return Slop.call('seedDocs', { app: needApp(), coll: need(coll, 'coll'), rows, id: o.id }) },
+    'app.seedTable': (table, rows) => { writable(); noDryData(); return Slop.call('seedTable', { app: needApp(), table: need(table, 'table'), rows }) },
     'app.resetDev': async () => {
-      writable(); const app = needApp()
+      writable(); noDryData(); const app = needApp()
       const r = await Slop.call('resetDev', { app })
       Embeds.ready.delete(app); Sync.act = null; Sync.ev.emit('status', Sync.status)
       await Promise.all([...FrameHosts].filter(fh => fh.project === P && fh.embed).map(fh => fh.load({ keepState: false })))
@@ -208,7 +208,7 @@ function hostAPI(ctx) {
     // publishing is the person's: the agent checks, and asks with an approval card
     'publish.check': async () => { needApp(); const pf = await Publish.preflight(P); return { ...pf, summary: Publish.lines(pf) } },
     'publish.run': async (o = {}) => {
-      writable(); needApp()
+      writable(); noDryData(); needApp()
       const pf = await Publish.preflight(P)
       if (pf.refs.draft === pf.refs.main) return { published: false, why: 'main is already draft ' + pf.refs.draft }
       if (pf.blockers.length) throw policy('not publishable: ' + pf.blockers.join('; '))

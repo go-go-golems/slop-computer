@@ -155,7 +155,7 @@ func filesVerbs(e filesEnv) []*verbs.Verb {
 						activated = append(activated, map[string]any{"store": id, "error": err.Error()})
 						continue
 					}
-					s, err := statusOf(ctx, e.kernelEnv, e.A, st, id)
+					s, err := statusOf(ctx, e.kernelEnv, e.A, st, id, false)
 					if err != nil {
 						activated = append(activated, map[string]any{"store": id, "error": err.Error()})
 						continue

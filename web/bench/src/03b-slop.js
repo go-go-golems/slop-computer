@@ -108,6 +108,9 @@ const Sync = {
       tried = true
       await this.run()
     }
+    // an error is about edits still unpushed: with none left (undone, or
+    // pushed since), draft has everything
+    if (P && P === this.P && this.status === 'error' && !this.pending(P)) this.set('synced')
     return { n: this.n, act: this.act, error: this.status === 'error' ? this.error : '' }
   },
   label() {
@@ -213,7 +216,14 @@ const Embeds = {
 // next view (or now: activate). Publishing main's previous snapshot again is
 // the rollback.
 const Publish = {
-  async preflight(P) { await Sync.flush(); return await Slop.call('preflight', { app: P.meta.app }) },
+  // Only once every edit is in draft: a preflight of an older draft would
+  // approve (and publish) code that is not what the editor shows.
+  async preflight(P) {
+    const f = await Sync.flush()
+    if (f.error) throw new Error('your edits are not in draft (' + f.error + '); fix that before publishing')
+    if (Sync.pending(P)) throw new Error('your edits are still being pushed to draft; try again in a moment')
+    return await Slop.call('preflight', { app: P.meta.app })
+  },
   async run(P, pf, who = 'you', note = '') {
     const n = pf.refs.draft, at = pf.refs.main ?? 0
     const r = await Slop.call('publish', { app: P.meta.app, n, ifAt: at })
@@ -234,8 +244,8 @@ const Publish = {
     const out = [d === m ? 'main is already draft ' + d + ': nothing to publish' : 'draft ' + d + ' → main' + (m != null ? ' (now ' + m + ')' : ' (first publish)')]
     if (pf.added.length || pf.changed.length || pf.removed.length) out.push('files: ' + [...pf.added.map(p => '+' + p), ...pf.changed.map(p => '~' + p), ...pf.removed.map(p => '-' + p)].slice(0, 30).join(' '))
     if (pf.migrations.length) out.push('new migrations run on every production instance: ' + pf.migrations.join(', '))
-    out.push(pf.dev ? (pf.dev.broken ? 'your dev instance failed on it: ' + pf.dev.broken : pf.dev.n === d ? 'your dev instance runs draft ' + d + ': ok' : 'your dev instance is on ' + pf.dev.n + ', not draft ' + d) : 'no dev instance of yours has run this draft')
-    out.push(pf.production.length ? 'production: ' + pf.production.map(x => x.store + ' @' + x.n + (x.broken ? ' (broken)' : '')).join(', ') : 'no production instance yet: nothing serves main')
+    out.push(pf.dev ? (pf.dev.broken ? 'your dev instance failed on it: ' + pf.dev.broken : pf.dev.n === d ? 'your dev instance runs draft ' + d + ': ok' : 'your dev instance is on ' + pf.dev.n + ', not draft ' + d + (pf.dev.next === d ? ' (it has not been opened since)' : '')) : 'no dev instance of yours has run this draft')
+    out.push(pf.production.length ? 'production: ' + pf.production.map(x => x.store + ' @' + x.n + (x.next ? ' (' + x.next + ' on its next view)' : '') + (x.broken ? ' (broken)' : '')).join(', ') : 'no production instance yet: nothing serves main')
     for (const b of pf.blockers) out.push('BLOCKED: ' + b)
     return out
   }

@@ -39,9 +39,11 @@ async function allStores(ctx) {
 }
 
 // A store that does not exist, or that the visitor cannot read, has no
-// status; neither case is an error here.
-async function statusOf(ctx, id) {
-  try { return await tool(ctx).status(id); } catch (e) { return null; }
+// status; neither case is an error here. Asking activates a newer version
+// the store follows; with peek it only looks ({n: running now, next: the
+// version it activates on its next use}).
+async function statusOf(ctx, id, peek) {
+  try { return await tool(ctx).status(id, peek ? { peek: true } : {}); } catch (e) { return null; }
 }
 
 defineActor({
@@ -262,7 +264,10 @@ defineActor({
     // production instance, what blocks it (a migration that changed or went
     // away after it ran: production instances would refuse the version),
     // the production instances (stores that follow main) and the visitor's
-    // dev instance, which should be running this draft.
+    // dev instance, which should be running this draft. Both trees are read
+    // at the snapshots in refs, the ones publish is then given, so a push
+    // in between cannot change what was approved; and it only looks: no
+    // instance activates because someone opened the dialog.
     preflight: {
       requires: 'view',
       async run(ctx, { app }) {
@@ -270,7 +275,7 @@ defineActor({
         storeId(ctx, app);
         const refs = await w.refs(app);
         if (refs.draft == null) ctx.fail('not_found', app + ' has no draft');
-        const [draft, main] = await Promise.all([w.files(app, 'draft'), refs.main != null ? w.files(app, 'main') : []]);
+        const [draft, main] = await Promise.all([w.files(app, String(refs.draft)), refs.main != null ? w.files(app, String(refs.main)) : []]);
         const dm = new Map(draft.map((f) => [f.path, f])), mm = new Map(main.map((f) => [f.path, f]));
         const added = [], changed = [], removed = [];
         for (const [path, f] of dm) { const m = mm.get(path); if (!m) added.push(path); else if (m.sha256 !== f.sha256) changed.push(path); }
@@ -283,11 +288,11 @@ defineActor({
         const instances = (await allStores(ctx)).filter((s) => s.app === app).map((s) => s.id);
         const production = [];
         for (const id of [app, ...instances]) {
-          const st = await statusOf(ctx, id);
-          if (st && st.manifest && (st.ref || 'main') === 'main') production.push({ store: id, n: st.n, broken: st.broken || '' });
+          const st = await statusOf(ctx, id, true);
+          if (st && (st.manifest || st.next) && (st.ref || 'main') === 'main') production.push({ store: id, n: st.n, next: st.next || 0, broken: st.broken || '' });
         }
-        const dev = await statusOf(ctx, devId(app, ctx.visitor.id));
-        return { refs, added, changed, removed, migrations: added.filter(mig), blockers, production, dev: dev ? { n: dev.n, broken: dev.broken || '' } : null };
+        const dev = await statusOf(ctx, devId(app, ctx.visitor.id), true);
+        return { refs, added, changed, removed, migrations: added.filter(mig), blockers, production, dev: dev ? { n: dev.n, next: dev.next || 0, broken: dev.broken || '' } : null };
       },
     },
 

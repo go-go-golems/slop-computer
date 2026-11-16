@@ -7,6 +7,7 @@ import (
 	"encoding/base64"
 	"encoding/hex"
 	"encoding/json"
+	"fmt"
 	"net/url"
 	"strings"
 	"testing"
@@ -357,6 +358,12 @@ func TestBenchPublish(t *testing.T) {
 	}
 	h.fail(admin, "actor.call", map[string]any{"store": "bench", "action": "publish", "args": map[string]any{"app": "jot", "n": d2, "ifAt": 0}}, "conflict")
 	act("publish", map[string]any{"app": "jot", "n": d2, "ifAt": d1})
+	// The rollout dialog's preflight only looks: jot-1 still runs d1, and
+	// d2 waits for its next use; activate brings it up.
+	pf = act("preflight", map[string]any{"app": "jot"})
+	if !strings.Contains(strs(pf["production"]), fmt.Sprintf(`{"broken":"","n":%d,"next":%d,"store":"jot-1"}`, d1, d2)) {
+		t.Fatalf("after the publish, production = %v", pf["production"])
+	}
 	if a := act("activate", map[string]any{"store": "jot-1"}); num(a["n"]) != d2 || a["broken"] != "" {
 		t.Fatalf("activate = %v", a)
 	}

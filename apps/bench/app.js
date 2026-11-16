@@ -1,4 +1,4 @@
-/* the bench, built from web/bench: do not edit. source sha256:812df6df85e352790f57a55c5709bc7a6dc9d9e75dc2dab85198cbb157f28be6 */
+/* the bench, built from web/bench: do not edit. source sha256:d30afe11a9354330c9bb1abcc0ab0dcc7ae1ce3421755707d8c76098601b3d2a */
 // Sitebench: a live-site workbench. Built from src/*.js
 "use strict";
 (() => {
@@ -1128,6 +1128,9 @@ const Sync = {
       tried = true
       await this.run()
     }
+    // an error is about edits still unpushed: with none left (undone, or
+    // pushed since), draft has everything
+    if (P && P === this.P && this.status === 'error' && !this.pending(P)) this.set('synced')
     return { n: this.n, act: this.act, error: this.status === 'error' ? this.error : '' }
   },
   label() {
@@ -1233,7 +1236,14 @@ const Embeds = {
 // next view (or now: activate). Publishing main's previous snapshot again is
 // the rollback.
 const Publish = {
-  async preflight(P) { await Sync.flush(); return await Slop.call('preflight', { app: P.meta.app }) },
+  // Only once every edit is in draft: a preflight of an older draft would
+  // approve (and publish) code that is not what the editor shows.
+  async preflight(P) {
+    const f = await Sync.flush()
+    if (f.error) throw new Error('your edits are not in draft (' + f.error + '); fix that before publishing')
+    if (Sync.pending(P)) throw new Error('your edits are still being pushed to draft; try again in a moment')
+    return await Slop.call('preflight', { app: P.meta.app })
+  },
   async run(P, pf, who = 'you', note = '') {
     const n = pf.refs.draft, at = pf.refs.main ?? 0
     const r = await Slop.call('publish', { app: P.meta.app, n, ifAt: at })
@@ -1254,8 +1264,8 @@ const Publish = {
     const out = [d === m ? 'main is already draft ' + d + ': nothing to publish' : 'draft ' + d + ' → main' + (m != null ? ' (now ' + m + ')' : ' (first publish)')]
     if (pf.added.length || pf.changed.length || pf.removed.length) out.push('files: ' + [...pf.added.map(p => '+' + p), ...pf.changed.map(p => '~' + p), ...pf.removed.map(p => '-' + p)].slice(0, 30).join(' '))
     if (pf.migrations.length) out.push('new migrations run on every production instance: ' + pf.migrations.join(', '))
-    out.push(pf.dev ? (pf.dev.broken ? 'your dev instance failed on it: ' + pf.dev.broken : pf.dev.n === d ? 'your dev instance runs draft ' + d + ': ok' : 'your dev instance is on ' + pf.dev.n + ', not draft ' + d) : 'no dev instance of yours has run this draft')
-    out.push(pf.production.length ? 'production: ' + pf.production.map(x => x.store + ' @' + x.n + (x.broken ? ' (broken)' : '')).join(', ') : 'no production instance yet: nothing serves main')
+    out.push(pf.dev ? (pf.dev.broken ? 'your dev instance failed on it: ' + pf.dev.broken : pf.dev.n === d ? 'your dev instance runs draft ' + d + ': ok' : 'your dev instance is on ' + pf.dev.n + ', not draft ' + d + (pf.dev.next === d ? ' (it has not been opened since)' : '')) : 'no dev instance of yours has run this draft')
+    out.push(pf.production.length ? 'production: ' + pf.production.map(x => x.store + ' @' + x.n + (x.next ? ' (' + x.next + ' on its next view)' : '') + (x.broken ? ' (broken)' : '')).join(', ') : 'no production instance yet: nothing serves main')
     for (const b of pf.blockers) out.push('BLOCKED: ' + b)
     return out
   }
@@ -3006,10 +3016,10 @@ function hostAPI(ctx) {
     'app.docs': coll => Slop.call('docs', { app: needApp(), coll: need(coll, 'coll') }),
     'app.doc': path => Slop.call('doc', { app: needApp(), path: need(path, 'path') }),
     'app.sql': (query, args) => Slop.call('sql', { app: needApp(), sql: need(query, 'query'), args: args || [] }),
-    'app.seedDocs': (coll, rows, o = {}) => { writable(); return Slop.call('seedDocs', { app: needApp(), coll: need(coll, 'coll'), rows, id: o.id }) },
-    'app.seedTable': (table, rows) => { writable(); return Slop.call('seedTable', { app: needApp(), table: need(table, 'table'), rows }) },
+    'app.seedDocs': (coll, rows, o = {}) => { writable(); noDryData(); return Slop.call('seedDocs', { app: needApp(), coll: need(coll, 'coll'), rows, id: o.id }) },
+    'app.seedTable': (table, rows) => { writable(); noDryData(); return Slop.call('seedTable', { app: needApp(), table: need(table, 'table'), rows }) },
     'app.resetDev': async () => {
-      writable(); const app = needApp()
+      writable(); noDryData(); const app = needApp()
       const r = await Slop.call('resetDev', { app })
       Embeds.ready.delete(app); Sync.act = null; Sync.ev.emit('status', Sync.status)
       await Promise.all([...FrameHosts].filter(fh => fh.project === P && fh.embed).map(fh => fh.load({ keepState: false })))
@@ -3018,7 +3028,7 @@ function hostAPI(ctx) {
     // publishing is the person's: the agent checks, and asks with an approval card
     'publish.check': async () => { needApp(); const pf = await Publish.preflight(P); return { ...pf, summary: Publish.lines(pf) } },
     'publish.run': async (o = {}) => {
-      writable(); needApp()
+      writable(); noDryData(); needApp()
       const pf = await Publish.preflight(P)
       if (pf.refs.draft === pf.refs.main) return { published: false, why: 'main is already draft ' + pf.refs.draft }
       if (pf.blockers.length) throw policy('not publishable: ' + pf.blockers.join('; '))
