@@ -351,7 +351,8 @@ defineActor({
         const out = { docs: {}, tables: {} };
         for (const [coll, rows] of Object.entries(docs || {})) {
           if (!Array.isArray(rows)) ctx.fail('invalid_argument', 'docs.' + coll + ' must be a list of objects');
-          out.docs[coll] = await w.importDocs(id, coll, rows, {});
+          // documents are named by their id field when every row has one
+          out.docs[coll] = await w.importDocs(id, coll, rows, rows.length && rows.every((r) => r && typeof r.id === 'string' && r.id) ? { id: 'id' } : {});
         }
         for (const [table, rows] of Object.entries(tables || {})) {
           if (!Array.isArray(rows)) ctx.fail('invalid_argument', 'tables.' + table + ' must be a list of objects');
@@ -402,9 +403,13 @@ defineActor({
         const p = sql.one('SELECT owner, status, title FROM proposals WHERE app = ? AND ref = ?', app, ref);
         if (!p || p.owner !== ctx.visitor.id) ctx.fail('not_found', 'no proposal ' + ref);
         if (p.status !== 'open') ctx.fail('conflict', ref + ' is already ' + p.status);
-        const prop = instanceId(app, ctx.visitor.id, 'prop');
-        const st = await statusOf(ctx, prop, { peek: true });
-        if (st && st.ref === ref) await w.drop(prop);
+        // the ref cannot go while a store follows it: the visitor's prop
+        // instance goes with it, their test instance goes back to draft
+        const prop = instanceId(app, ctx.visitor.id, 'prop'), test = instanceId(app, ctx.visitor.id, 'test');
+        const ps = await statusOf(ctx, prop, { peek: true });
+        if (ps && ps.ref === ref) await w.drop(prop);
+        const ts = await statusOf(ctx, test, { peek: true });
+        if (ts && ts.ref === ref) await w.follow(test, 'draft');
         await w.dropRef(app, ref, { ifAt: snap(ctx, ifAt, 'ifAt') });
         sql.run('UPDATE proposals SET status = ?, closed = ? WHERE app = ? AND ref = ?', status, Date.now(), app, ref);
         addEvent(ctx, app, { kind: status === 'accepted' ? 'accept' : 'reject', who: 'you', ref, n: ifAt, data: { title: p.title } });
