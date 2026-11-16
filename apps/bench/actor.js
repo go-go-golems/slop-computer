@@ -79,7 +79,8 @@ defineActor({
           await w.moveRef(app, 'draft', refs.main, { ifAt: 0 }).catch(() => null); // someone else may have made it
           refs = await w.refs(app);
         }
-        const files = refs.draft != null ? await w.files(app, 'draft') : [];
+        // the tree at the snapshot in refs (the ref may move meanwhile)
+        const files = refs.draft != null ? await w.files(app, String(refs.draft)) : [];
         const all = await allStores(ctx);
         const dev = devId(app, ctx.visitor.id);
         const instances = all.filter((s) => s.app === app).map((s) => s.id);
@@ -122,7 +123,7 @@ defineActor({
         if (!Array.isArray(files)) ctx.fail('invalid_argument', 'files must be a list of {path, text} or {path, sha256, size}');
         const moved = async () => {
           const refs = await w.refs(app);
-          return { conflict: true, n: refs.draft ?? null, files: refs.draft != null ? await w.files(app, 'draft') : [] };
+          return { conflict: true, n: refs.draft ?? null, files: refs.draft != null ? await w.files(app, String(refs.draft)) : [] };
         };
         const dev = devId(app, ctx.visitor.id);
         const devExists = (await statusOf(ctx, dev)) !== null;
@@ -135,7 +136,9 @@ defineActor({
           if (e && e.code === 'conflict') return await moved();
           throw e;
         }
-        return { n: res.n, activated: res.activated || [], files: await w.files(app, 'draft') };
+        // the tree of the snapshot this push made, not of draft (a push from
+        // elsewhere may already have moved it: the page's poll finds that)
+        return { n: res.n, activated: res.activated || [], files: await w.files(app, String(res.n)) };
       },
     },
 
@@ -150,7 +153,7 @@ defineActor({
         const refs = await w.refs(app);
         const st = await statusOf(ctx, devId(app, ctx.visitor.id));
         const out = { refs, dev: st ? { store: st.store || devId(app, ctx.visitor.id), n: st.n, broken: st.broken || '' } : null };
-        if (base !== undefined && (refs.draft ?? null) !== (base ?? null)) out.files = refs.draft != null ? await w.files(app, 'draft') : [];
+        if (base !== undefined && (refs.draft ?? null) !== (base ?? null)) out.files = refs.draft != null ? await w.files(app, String(refs.draft)) : [];
         return out;
       },
     },

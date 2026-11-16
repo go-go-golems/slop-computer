@@ -1,4 +1,4 @@
-/* the bench, built from web/bench: do not edit. source sha256:0ae88711adb23f6c070e6ed3e56c9af2754f56dbffecc5fe096e68fbac75f383 */
+/* the bench, built from web/bench: do not edit. source sha256:b53e74d155f264237d6ce82c56d6e7a1b759748dcb32affbeba74955b7314a8d */
 // Sitebench: a live-site workbench. Built from src/*.js
 "use strict";
 (() => {
@@ -1284,11 +1284,38 @@ function slopAppFiles(title) {
 
 // ===== 04-project.js =====
 // ---------- project model: main files, overlay workspaces, tables, session log, marks, threads ----------
-// Log documents stay under the store's 255,000-character limit: a chunk
-// holds about LOG_CHUNK characters of events; an event over LOG_EVENT is
-// saved apart, in LOG_PIECE pieces (escaped, a piece at most doubles).
-const LOG_CHUNK = 150000, LOG_EVENT = 60000, LOG_PIECE = 100000
-const storedSize = e => { const n = JSON.stringify(e).length; return n > LOG_EVENT ? 64 : n }
+// Log documents stay under the storage limit, 262,144 bytes of UTF-8 JSON
+// (claude.js checkBody): a chunk holds about LOG_CHUNK bytes of events; an
+// event over LOG_EVENT bytes is saved apart, in pieces of at most LOG_PIECE
+// bytes as stored (a piece's text is JSON again: quotes and backslashes
+// cost two bytes, characters their UTF-8 length).
+const LOG_CHUNK = 150000, LOG_EVENT = 60000, LOG_PIECE = 200000
+function utf8Len(s) {
+  let n = 0
+  for (let i = 0; i < s.length; i++) {
+    const c = s.charCodeAt(i)
+    if (c < 0x80) n += 1
+    else if (c < 0x800) n += 2
+    else if (c >= 0xd800 && c < 0xdc00 && i + 1 < s.length) { n += 4; i++ }
+    else n += 3
+  }
+  return n
+}
+const storedSize = e => { const n = utf8Len(JSON.stringify(e)); return n > LOG_EVENT ? 64 : n }
+// json cut where each piece, stored as a string, stays within max bytes; a
+// surrogate pair is never split
+function logPieces(json, max) {
+  const out = []
+  let start = 0, n = 0
+  for (let i = 0; i < json.length; i++) {
+    const c = json.charCodeAt(i), pair = c >= 0xd800 && c < 0xdc00 && i + 1 < json.length
+    const cost = c === 0x22 || c === 0x5c ? 2 : c < 0x20 ? 6 : c < 0x80 ? 1 : c < 0x800 ? 2 : pair ? 4 : 3
+    if (n + cost > max) { out.push(json.slice(start, i)); start = i; n = 0 }
+    n += cost; if (pair) i++
+  }
+  out.push(json.slice(start))
+  return out
+}
 
 class Project {
   constructor(meta) {
@@ -1529,12 +1556,12 @@ class Project {
   // a stub {$ext, n} with the JSON saved in n pieces under logx/.
   stored(e) {
     const json = JSON.stringify(e)
-    if (json.length <= LOG_EVENT) return e
+    if (json.length <= LOG_EVENT / 3 || utf8Len(json) <= LOG_EVENT) return e
     let x = this.ext.get(e)
     if (!x || x.json !== json) {
-      const id = x ? x.id : uid('x'), n = Math.ceil(json.length / LOG_PIECE)
-      for (let k = 0; k < n; k++) Store.save(this.key('logx/' + id + '-' + k), { text: json.slice(k * LOG_PIECE, (k + 1) * LOG_PIECE) })
-      x = { id, json, n }; this.ext.set(e, x)
+      const id = x ? x.id : uid('x'), pieces = logPieces(json, LOG_PIECE)
+      pieces.forEach((text, k) => Store.save(this.key('logx/' + id + '-' + k), { text }))
+      x = { id, json, n: pieces.length }; this.ext.set(e, x)
     }
     return { $ext: x.id, n: x.n }
   }
@@ -1555,7 +1582,7 @@ class Project {
         }
         e.i = this.events.length; this.events.push(e)
       }
-      this.chunks.push({ id: cid, start, size: (data && data.events || []).reduce((n, x) => n + JSON.stringify(x).length, 0) })
+      this.chunks.push({ id: cid, start, size: (data && data.events || []).reduce((n, x) => n + utf8Len(JSON.stringify(x)), 0) })
     }
   }
   // files of main as they were just after event i (-1: before anything)
@@ -1751,7 +1778,7 @@ const Projects = {
     p.refs = o.refs || {}; p.devStatus = o.devStatus || null; p.instances = o.instances || []; p.dev = o.dev
     const tree = o.files || []
     p.tree = new Map(tree.map(f => [f.path, f]))
-    const { texts } = await Slop.readAll(app, 'draft', tree.filter(textish).map(f => f.path))
+    const { texts } = await Slop.readAll(app, p.refs.draft != null ? String(p.refs.draft) : 'draft', tree.filter(textish).map(f => f.path))
     for (const f of tree) {
       if (typeof texts[f.path] === 'string') { p.files.set(f.path, texts[f.path]); p.synced.set(f.path, texts[f.path]) }
       else p.extern.set(f.path, f)
