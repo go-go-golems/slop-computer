@@ -74,5 +74,52 @@ func (s *Door) workshopModule(a *actor.Actor) goja.Value {
 			return out, nil
 		}, func(out any) (goja.Value, error) { return a.ToJS(out), nil })
 	})
+	// embed(store, {dev}) opens a view of store for the visitor, framed by
+	// this app's own page; renewEmbed(view) renews its secret when the
+	// framed page's runtime asks (SLOP3-022 C.1).
+	trusted := func() {
+		if !s.Gov.Trusted(context.Background(), a.App(), "workshop") {
+			a.Throw("permission_denied", a.App()+" is no longer trusted with workshop")
+		}
+	}
+	fail := func(err error) error {
+		ve := verbs.AsError(err)
+		return &actor.Error{Code: ve.Code, Message: ve.Message}
+	}
+	toJS := func(out any) (goja.Value, error) { return a.ToJS(out), nil }
+	_ = o.Set("embed", func(store string, opts goja.Value) goja.Value {
+		trusted()
+		if s.Embed == nil {
+			a.Throw("unavailable", "this server opens no embedded views")
+		}
+		dev := false
+		if m, ok := a.FromJS(opts).(map[string]any); ok {
+			dev, _ = m["dev"].(bool)
+		}
+		p := s.actAs(a, "workshop", true)
+		tool, app := a.Store().ID, a.App()
+		return a.IO(func() (any, error) {
+			out, err := s.Embed(context.Background(), p, store, tool, app, dev)
+			if err != nil {
+				return nil, fail(err)
+			}
+			return out, nil
+		}, toJS)
+	})
+	_ = o.Set("renewEmbed", func(view string) goja.Value {
+		trusted()
+		if s.RenewEmbed == nil {
+			a.Throw("unavailable", "this server opens no embedded views")
+		}
+		p := s.actAs(a, "workshop", true)
+		tool, app := a.Store().ID, a.App()
+		return a.IO(func() (any, error) {
+			out, err := s.RenewEmbed(context.Background(), p, view, tool, app)
+			if err != nil {
+				return nil, fail(err)
+			}
+			return out, nil
+		}, toJS)
+	})
 	return o
 }

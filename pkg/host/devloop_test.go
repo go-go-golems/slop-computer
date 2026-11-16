@@ -1,6 +1,7 @@
 package host
 
 import (
+	"net/url"
 	"strings"
 	"testing"
 )
@@ -14,7 +15,8 @@ func devApp() map[string]string {
 		"app.json":    `{"title":"Jot","actor":"actor.js","type":"jot"}`,
 		"actor.js":    `defineActor({ actions: { tables(ctx) { return use('sql').all("SELECT name FROM sqlite_master WHERE type = 'table' AND name NOT LIKE '\\_%' ESCAPE '\\' ORDER BY name").map(r => r.name); } } });`,
 		"sql/001.sql": `CREATE TABLE notes (id TEXT PRIMARY KEY);`,
-		"index.html":  "<title>jot</title>",
+		"index.html":  "<!doctype html><title>jot</title><main>\n<p>hello</p></main><script src=\"app.js\"></script>",
+		"app.js":      "console.log('jot');",
 	}
 }
 
@@ -181,4 +183,86 @@ func TestWorkshopDevInstances(t *testing.T) {
 	h.fail(admin, "actor.call", map[string]any{"store": "devbench", "action": "drop", "args": map[string]any{"id": "jot-shop"}}, "permission_denied")
 	h.fail(admin, "actor.call", map[string]any{"store": "devbench", "action": "drop", "args": map[string]any{"id": "jot"}}, "permission_denied")
 	h.call(admin, "app.status", map[string]any{"store": "jot-shop"})
+}
+
+const embedBenchActor = `
+const ws = use('workshop');
+defineActor({
+  actions: {
+    embed: { requires: 'view', async run(ctx, { store, dev }) { return await ws.embed(store, { dev }); } },
+    renew: { requires: 'view', async run(ctx, { view }) { return await ws.renewEmbed(view); } },
+  },
+});
+`
+
+// C.1: a tool trusted with workshop opens a view of a store for the
+// visitor, framed by its own page: the sandbox lets the tool's origin frame
+// it and names the tool as the runtime's parent; a dev embed (admin only)
+// adds data-src lines and the probe; tokens are bound to their origin; a
+// renew is for the person and the tool that opened the view.
+func TestEmbeddedViews(t *testing.T) {
+	h := newHarness(t)
+	admin := h.tokenFor("admin@example.com", "read", "write", "admin")
+	bob := h.tokenFor("bob@example.com", "read", "write")
+	bobID := h.call(bob, "whoami", map[string]any{}).(map[string]any)["id"].(string)
+	toolApp(t, h, admin, "devbench", embedBenchActor, "workshop")
+	h.call(admin, "app.trust", map[string]any{"app": "devbench", "module": "workshop"})
+	h.call(admin, "store.new", map[string]any{"id": "jot"})
+	app := devApp()
+	h.call(admin, "files.push", map[string]any{"store": "jot", "files": files(app)})
+	h.call(admin, "files.push", map[string]any{"store": "jot", "files": files(app), "ref": "draft"})
+	h.call(admin, "store.new", map[string]any{"id": "jot-dev", "app": "jot", "type": "jot"})
+	h.call(admin, "app.follow", map[string]any{"store": "jot-dev", "ref": "draft"})
+	h.call(admin, "grant.set", map[string]any{"store": "jot-dev", "subject": bobID, "level": "view"})
+	embed := func(token string, dev bool) map[string]any {
+		return h.call(token, "actor.call", map[string]any{"store": "devbench", "action": "embed", "args": map[string]any{"store": "jot-dev", "dev": dev}}).(map[string]any)
+	}
+	open := func(src string) (string, string, int, string) {
+		u, _ := url.Parse(src)
+		r, body := h.get(u.Host, u.RequestURI())
+		return u.Host, u.Query().Get("parent"), r.StatusCode, r.Header.Get("Content-Security-Policy") + "\n" + body
+	}
+
+	// A dev embed, as an admin.
+	e := embed(admin, true)
+	host, tool, status, page := open(e["src"].(string))
+	if status != 200 || e["dev"] != true || e["secret"] == "" {
+		t.Fatalf("dev embed: %d %v", status, e)
+	}
+	if !strings.HasPrefix(tool, h.cfg.Scheme+"://s") || strings.Contains(tool, host) {
+		t.Fatalf("parent %q is not the tool's own sandbox origin (frame on %s)", tool, host)
+	}
+	for _, want := range []string{"frame-ancestors " + h.cfg.MainURL(), " " + tool + "\n", `"parentOrigin":"` + tool + `"`, "/_slop/probe.js", `<p data-src="index.html:2">hello</p>`} {
+		if !strings.Contains(page, want) {
+			t.Errorf("dev embed page lacks %q:\n%s", want, page)
+		}
+	}
+	// Its files load under the same address; the token works on its origin only.
+	u, _ := url.Parse(e["src"].(string))
+	if r, body := h.get(host, strings.TrimSuffix(u.Path, "/")+"/app.js"); r.StatusCode != 200 || !strings.Contains(body, "jot") {
+		t.Fatalf("app.js under the embed: %d %q", r.StatusCode, body)
+	}
+	toolHost := strings.TrimPrefix(tool, h.cfg.Scheme+"://")
+	if r, _ := h.get(toolHost, u.RequestURI()); r.StatusCode != 404 {
+		t.Fatalf("the token on another origin: %d, want 404", r.StatusCode)
+	}
+	if r, _ := h.get(host, "/e/emb_nope/v/0/"); r.StatusCode != 404 {
+		t.Fatalf("an unknown token: %d, want 404", r.StatusCode)
+	}
+
+	// A plain embed, as a viewer: framed by the tool, no probe, no data-src.
+	e2 := embed(bob, false)
+	_, tool2, status, page := open(e2["src"].(string))
+	if status != 200 || tool2 != tool || strings.Contains(page, "probe.js") || strings.Contains(page, "data-src") || !strings.Contains(page, " "+tool+"\n") {
+		t.Fatalf("plain embed: %d %q\n%s", status, tool2, page)
+	}
+	// A viewer gets no dev embed.
+	h.fail(bob, "actor.call", map[string]any{"store": "devbench", "action": "embed", "args": map[string]any{"store": "jot-dev", "dev": true}}, "not_granted")
+
+	// Renew: for the person and the tool that opened the view.
+	r := h.call(admin, "actor.call", map[string]any{"store": "devbench", "action": "renew", "args": map[string]any{"view": e["view"]}}).(map[string]any)
+	if r["view"] != e["view"] || r["secret"] != e["secret"] {
+		t.Fatalf("renew = %v", r)
+	}
+	h.fail(bob, "actor.call", map[string]any{"store": "devbench", "action": "renew", "args": map[string]any{"view": e["view"]}}, "not_found")
 }
