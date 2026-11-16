@@ -1731,3 +1731,81 @@ Codex's seventh pass on #47 (`b37267a`) found two more P2s. First, the Eval pane
 ### Future
 
 - **Run the agent on a real model**, locally with `--llm pi` or on staging after deploying, and fix the prompt and tool loop on what a real model does.
+
+## Step 23: The agent on a real model (lunaroute/deepseek-4.1-flash)
+
+The user asked me to test the agent on a real model. It took three fixes before it worked. Once it did, the agent built a tags feature into `jot`, across a migration, an actor and the page. It fixed its own bug after I accepted its proposal, verified the fix through the running page on the dev instance, and stopped short of publishing. Getting there exposed two problems on the model path, one ours (Geppetto) and one in the provider path, plus one gap in the agent's guide.
+
+### Prompt Context
+
+**User prompt (verbatim):** "ccan you test it? with lunaroute/deepseek-4.1-flash". Then, mid-turn:
+- "is this working on the backend? how is this rigged up to send to the model and interpret the models response?"
+- "does it use geppetto?"
+- "so it was the claude completion that was broken?"
+- "is it something on our side?"
+
+**Assistant interpretation:** Run the bench's agent on that model locally, find what breaks, and explain the model path.
+
+**Inferred user intent:** Know whether the agent is usable with a cheap real model, and what is broken where.
+
+### What I did
+
+- **Local server on a real model.** `serve --config llm-deepseek.yaml --local` with `llm: pi` and `pi.models` quick/default/complex → `lunaroute/deepseek-4.1-flash`. `listen` and `data` have to be in the YAML: host defaults are computed from the config's `listen` before the flag applies, and I first got "unknown host apps.localhost:18490".
+- **Probes from the page:**
+  - `sample('pong')` worked (2.1 s, `modelTierApplied: quick`), as did a message array, a tool round trip (`"42"`) and streaming.
+  - Any input with an assistant turn failed: "The model provider request failed".
+- **Raw provider error, from a debug binary** (`log.Printf` in `classify`, not committed): `responses api error: status=400 … 239 validation errors … 'loc': 'body.input.1…content.0…type', 'msg': "Input should be 'input_text'", 'input': 'output_text'`.
+  - Geppetto's Responses encoder (`openai_responses/helpers.go`, `buildResponsesMessageParts`) sends history as `{role: assistant, content: [{type: output_text}]}` with no id or status. That is valid only as an output item; strict validators reject it.
+- **A scratch Geppetto copy with a `MarshalJSON`:** an assistant message without an id goes out as string content. I built `rep/bench-gp` against it with `-modfile` (`replace github.com/go-go-golems/geppetto => scratch copy`). The three-turn probe then said "pong".
+- **The agent then failed with "Empty completion".** A probe showed the model writing its tool call as text, `<tool calls>{"name":"eval",…}</tool calls>`, which lunaroute's Responses endpoint did not turn into a `function_call`. The same happened with `:low` thinking. The tool call reached the page as prose, so the turn ended after "I'll start by reading the existing files."
+- **Why Responses at all:** Pi's `models-store.json` declares `lunaroute/deepseek-4.1-flash` (and `-background`) as `api: openai-responses`, `reasoning: true`, while the provider in `models.json` says `openai-completions`. Geppetto's Pi resolver (`providers/pi/resolve.go`) picks the engine from the model's `api`.
+- **A scratch Pi agent dir** (`pi-agent-chat/`): symlinks to every file of `~/.pi/agent`, credentials included (not read by me), except a 0600 copy of `models-store.json` with those two models on `openai-completions`. `pi.agent_dir` points at it. Over Chat Completions, a two-call tool sequence worked (`files.list()`, then reading `app.json`), and so did history.
+- **The agent run:**
+  - In Auto mode, the turn made 9 evals and put migration `002_tags.sql`, `actor.js` (`addTag`/`tags`), `app.json` (actor, user capability), a 200-line `index.html` and a README into a proposal.
+  - I accepted it: draft 12, the dev instance activated it, not broken.
+  - On the page, adding a tag failed: "not enough args to execute query: want 2 got 1". The agent had written `sql.run(q, [note, tag])`; slop's `sql` takes each argument as a separate parameter (`pkg/actor/modules.go:205`).
+  - I added the `sql` call shape to the slop section of the agent's prompt (`76ce1c6` on #48).
+  - A second turn in Main mode fixed `actor.js` (draft 13, dev ok), typed `urgent` into a tag input in the frame, clicked Tag, read it back with SQL, and reported "Draft 13 … Main is still at 1 — nothing published".
+- **My own check:** `select note, tag from tags` on `jot-dev-2915cc` gave `notes/seeded`/`urgent`, and `actor call … tags` gave `["urgent"]`. A freshly loaded frame shows "seeded by the agent · urgent". Screenshot: `various/bench-real-model-deepseek-jot.png`.
+- **The server now runs the normal binary** with the scratch Chat Completions agent dir.
+
+### Why
+
+- **Patching a copy rather than the module cache or `~/.pi`:** both are shared, and the user's Pi setup is theirs to change.
+
+### What worked
+
+- **The whole bench → slop → Geppetto → lunaroute chain, once on Chat Completions:** streaming, tool rounds through the page (`sample.go` sends `tool`, the page runs the eval and posts the result), `modelTier`, and metering.
+- **The agent followed the slop guide:** it used `app.status`/`app.logs`/`app.docs`, read `effects.draft` and the dev status, verified on the dev instance, and did not publish.
+
+### What didn't work
+
+- **`--config` without `listen`** gave "unknown host apps.localhost:18490" (HTTP 421).
+- **The Responses history encoding** (Geppetto) and **tool calls as text** (lunaroute's Responses endpoint for this model): see above.
+- **My first frame read** still showed "no tags yet": that frame had fetched its tags before the agent added one. The page fetches tags once per note per load.
+- **My first `pkill` pattern** didn't match `bench-dbg`/`bench-gp`, and the healthz check could have answered from the old server. I checked `ps` before trusting it.
+
+### What I learned
+
+- **Auto mode in an app project writes a proposal.** The dev instance runs draft, so the agent cannot test proposal code against the running app (a proposal frame has no slop runtime: "Unhandled rejection … reading 'use'"). For app projects, Main should be the default until proposals live on refs (Phase 6).
+- **The prompt must give exact module signatures;** a model guesses the rest.
+- **Token use:** slop's meter showed 987,621 tokens used by `admin@example.com` on the local server, about 20k tokens of prompt per agent round.
+
+### Future
+
+- **Geppetto:** encode assistant history without an item id as string content (PR to go-go-golems/geppetto, then bump slop).
+- **The lunaroute model store:** `deepseek-4.1-flash` as `openai-completions` (the user's Pi config), or a per-model API override in slop's `pi` config.
+- **Default to Main mode for app projects;** auto-continue when a reply announces a step without calling the tool.
+- **Codex round 8 on #47** (overlapping evals on one app) is still to do.
+
+### Technical details
+
+```yaml
+# <scratch>/llm-deepseek.yaml
+listen: 127.0.0.1:18490
+data: <scratch>/lslop/data
+llm: pi
+pi:
+  models: {quick: lunaroute/deepseek-4.1-flash, default: lunaroute/deepseek-4.1-flash, complex: lunaroute/deepseek-4.1-flash}
+  agent_dir: <scratch>/pi-agent-chat
+```
