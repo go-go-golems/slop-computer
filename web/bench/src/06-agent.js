@@ -465,6 +465,24 @@ async function runEval(ctx, code, api, { sid, restore } = {}) {
     if (files.length) effects.files = files
     if (tx.tables.size) effects.tables = [...tx.tables.keys()]
   }
+  // An app project on slop: the writes go to draft now; the dev instance
+  // comes up on them (or says why not) and its frames reload before the
+  // frames are measured. Its new warnings and errors are effects too.
+  if (r.ok && tx.files.size && P.meta.app && ws === 'main' && Slop.on) {
+    const s = await Sync.flush()
+    if (s.error) effects.push = { error: s.error }
+    else {
+      effects.draft = s.n
+      if (s.act) effects.actor = s.act.broken ? { broken: s.act.broken, on: s.act.n } : { on: s.act.n }
+      const want = s.act && !s.act.broken ? s.act.n : null
+      await Promise.all([...FrameHosts].filter(fh => fh.project === P && fh.embed).map(fh => fh.waitVersion(want)))
+    }
+    if (Embeds.ready.has(P.meta.app)) {
+      const l = await Outside.logs(P).catch(() => null)
+      const bad = l ? (l.lines || []).filter(x => x.at >= tx.t0 && (x.level === 'error' || x.level === 'warn')).map(x => x.level + ': ' + x.text) : []
+      if (bad.length) effects.actorLogs = bad.slice(-6)
+    }
+  }
   if (tx.files.size || tx.tables.size) Object.assign(effects, await frameEffects(ctx, before, tx.t0, layouts))
   r.effects = Object.keys(effects).length ? effects : null
   return r
@@ -498,6 +516,9 @@ function effectsLine(e) {
   if (e.rolledBack) parts.push('rolled back ' + e.rolledBack.join(', '))
   for (const f of e.files || []) parts.push(f.change === 'edited' ? f.path + ' +' + f.add + ' −' + f.del : f.change + ' ' + f.path)
   if (e.tables) parts.push('tables ' + e.tables.join(', '))
+  if (e.push) parts.push('push to draft failed: ' + e.push.error.slice(0, 100))
+  if (e.draft != null) parts.push('draft ' + e.draft + (e.actor ? e.actor.broken ? ' · dev instance stays on ' + e.actor.on + ': ' + e.actor.broken.slice(0, 120) : ' · dev ok' : ''))
+  if (e.actorLogs) parts.push(plural(e.actorLogs.length, 'actor warning') + '/errors')
   if (e.fixedIssues) parts.push('fixed ' + plural(e.fixedIssues.length, 'issue'))
   if (e.newIssues) parts.push(plural(e.newIssues.length, 'new issue'))
   if (e.newErrors) parts.push(plural(e.newErrors.length, 'new error'))

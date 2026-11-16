@@ -1,4 +1,4 @@
-/* the bench, built from web/bench: do not edit. source sha256:0023424e39c4b592cb6552f0a6d355e7133efd578970c6141e0c1a30fcac64b2 */
+/* the bench, built from web/bench: do not edit. source sha256:25d05e8e1116cac01ada0a639e8c3f9f2a0b9b1e65f58f042a009ae2f30ee100 */
 // Sitebench: a live-site workbench. Built from src/*.js
 "use strict";
 (() => {
@@ -1090,23 +1090,90 @@ const Sync = {
     const changed = [...sent.keys()], gone = [...P.synced.keys()].filter(p => !P.files.has(p))
     const message = 'bench: ' + [...changed, ...gone.map(p => '-' + p)].slice(0, 6).join(' ') + (changed.length + gone.length > 6 ? ' …' : '')
     try {
-      const r = await Slop.call('sync', { app: P.meta.app, files, message })
+      const r = await Slop.call('sync', { app: P.meta.app, files, message, base: P.refs ? P.refs.draft ?? null : null })
       if (this.P !== P) return
-      P.tree = new Map((r.files || []).map(f => [f.path, f]))
-      for (const [path, text] of sent) P.synced.set(path, text)
-      for (const p of gone) P.synced.delete(p)
-      this.n = r.n; this.act = (r.activated || [])[0] || this.act
-      P.refs = { ...(P.refs || {}), draft: r.n }
-      this.set('synced'); P.ev.emit('sync', r)
+      if (r.conflict) {   // draft moved under us: take what changed there, keep what changed here, push again
+        await Outside.merge(P, r.n, r.files || [])
+        this.again = true
+      } else {
+        P.tree = new Map((r.files || []).map(f => [f.path, f]))
+        for (const [path, text] of sent) P.synced.set(path, text)
+        for (const p of gone) P.synced.delete(p)
+        this.n = r.n; this.act = (r.activated || [])[0] || this.act
+        P.refs = { ...(P.refs || {}), draft: r.n }
+        this.set('synced'); P.ev.emit('sync', r); App.ev.emit('health')
+      }
     } catch (e) {
       this.set('error', (e && e.message) || String(e)); toast('Pushing to draft failed: ' + this.error, 5000)
     } finally { this.busy = false }
     if (this.again) { this.again = false; this.run() }
   },
+  // Push now and wait for it (an eval's effects need the activation).
+  async flush() {
+    clearTimeout(this.timer)
+    for (let i = 0; i < 200 && (this.busy || this.status === 'dirty'); i++) {
+      if (!this.busy) await this.run(); else await sleep(30)
+    }
+    return { n: this.n, act: this.act, error: this.status === 'error' ? this.error : '' }
+  },
   label() {
     const s = { idle: 'ready', dirty: 'unsaved', pushing: 'pushing…', synced: 'draft ' + (this.n ?? '–'), error: 'error' }[this.status] || this.status
     const a = this.act, dev = a ? (a.broken ? 'dev broken' : a.n === this.n ? 'dev ok' : 'dev on ' + a.n) : ''
     return { status: s, dev, title: this.error || (a && a.broken) || '' }
+  }
+}
+
+// Outside: pushes to draft that did not come from this page (a terminal's
+// slop dev or slop push, another person, the agent of another bench), and
+// the dev instance's log. Polled every few seconds while an app project is
+// open. A file changed outside and not here is taken; a file changed here
+// keeps this page's text (the next push writes it): the second push wins,
+// file by file.
+const Outside = {
+  timer: 0, logT: 0,
+  start(P) {
+    clearInterval(this.timer); this.logT = Date.now() - 60000
+    if (P && P.meta.app && Slop.on) this.timer = setInterval(() => this.poll(P), 3000)
+  },
+  async poll(P) {
+    if (Sync.P !== P || document.hidden) return
+    try {
+      if (!Sync.busy && Sync.status !== 'dirty') {
+        const r = await Slop.call('head', { app: P.meta.app, base: P.refs ? P.refs.draft ?? null : null })
+        if (r.files && Sync.P === P && !Sync.busy && Sync.status !== 'dirty') await this.merge(P, r.refs.draft ?? null, r.files)
+        if (r.dev && Sync.P === P && (!Sync.act || Sync.act.n !== r.dev.n || (Sync.act.broken || '') !== r.dev.broken)) { Sync.act = r.dev; Sync.ev.emit('status', Sync.status); App.ev.emit('health') }
+      }
+      if (Embeds.ready.has(P.meta.app)) await this.logs(P)
+    } catch (e) { /* the next poll tries again */ }
+  },
+  // The dev instance's new log lines go to the Console; its broken state to the header.
+  async logs(P) {
+    const r = await Slop.call('logs', { app: P.meta.app })
+    for (const l of (r.lines || []).filter(l => l.at > this.logT)) App.consoleAdd({ t: l.at, level: l.level === 'warn' ? 'warn' : l.level === 'error' ? 'error' : 'log', text: l.text, src: '', frame: 'actor', fid: 'actor' })
+    for (const l of r.lines || []) this.logT = Math.max(this.logT, l.at)
+    // app.logs' broken is the actor's (crashing turns), not a failed
+    // activation: it may add one, never clear one (head's status does)
+    if (Sync.P === P && Sync.act && r.broken && r.broken !== Sync.act.broken) { Sync.act = { ...Sync.act, broken: r.broken }; Sync.ev.emit('status', Sync.status); App.ev.emit('health') }
+    return r
+  },
+  async merge(P, n, tree) {
+    const next = new Map(tree.map(f => [f.path, f]))
+    const mine = p => P.files.has(p) ? P.files.get(p) !== P.synced.get(p) : P.synced.has(p)   // changed here since the last push
+    const take = [], gone = []
+    for (const [p, f] of next) { const cur = P.tree.get(p); if ((!cur || cur.sha256 !== f.sha256) && !mine(p)) take.push(f) }
+    for (const p of P.tree.keys()) if (!next.has(p) && !mine(p)) gone.push(p)
+    const { texts } = take.length ? await Slop.readAll(P.meta.app, String(n), take.filter(textish).map(f => f.path)) : { texts: {} }
+    const changed = [], note = 'pushed outside the bench (draft ' + n + ')'
+    for (const f of take) {
+      if (typeof texts[f.path] === 'string') { P.files.set(f.path, texts[f.path]); P.synced.set(f.path, texts[f.path]); P.extern.delete(f.path); P.log({ kind: 'write', ws: 'main', who: 'push', path: f.path, after: texts[f.path], note }) }
+      else { P.extern.set(f.path, f); P.files.delete(f.path); P.synced.delete(f.path) }
+      changed.push(f.path)
+    }
+    for (const p of gone) { P.files.delete(p); P.synced.delete(p); P.extern.delete(p); P.log({ kind: 'remove', ws: 'main', who: 'push', path: p, note }); changed.push(p) }
+    P.tree = next; P.refs = { ...(P.refs || {}), draft: n }
+    if (Sync.P === P) { Sync.n = n; Sync.ev.emit('status', Sync.status) }
+    if (changed.length) { P.ev.emit('files', 'main', changed); toast('draft ' + n + ': ' + plural(changed.length, 'file') + ' changed outside the bench (' + changed.slice(0, 3).join(', ') + (changed.length > 3 ? ', …' : '') + ')', 4000) }
+    return changed
   }
 }
 
@@ -1760,6 +1827,17 @@ class FrameHost {
   get shown() { return this.headless || (this.el.isConnected && this.el.getClientRects().length > 0) }
   resetData() { this.fx = null; return this.load({ keepState: false }) }
   reloadSoon() { clearTimeout(this.reloadT); this.reloadT = setTimeout(() => this.load({ keepState: true }), 60) }
+  // An embedded frame showing version n (or later) and loaded; resolves
+  // anyway after ms (an activation that failed never reloads the frame).
+  waitVersion(n, ms = 6000) {
+    if (n == null) return Promise.resolve(false)
+    const ok = () => !!this.embed && this.embed.version >= n && this.ready && !this.loading
+    if (ok()) return Promise.resolve(true)
+    return new Promise(res => {
+      const iv = setInterval(() => { if (ok()) { clearInterval(iv); clearTimeout(t); res(true) } }, 40)
+      const t = setTimeout(() => { clearInterval(iv); res(false) }, ms)
+    })
+  }
   setFixture(name) { this.fixture = name || null; this.fx = null; return this.load({ keepState: false }) }
   swap() {
     const n = this.next; if (!n) return
@@ -3133,6 +3211,24 @@ async function runEval(ctx, code, api, { sid, restore } = {}) {
     if (files.length) effects.files = files
     if (tx.tables.size) effects.tables = [...tx.tables.keys()]
   }
+  // An app project on slop: the writes go to draft now; the dev instance
+  // comes up on them (or says why not) and its frames reload before the
+  // frames are measured. Its new warnings and errors are effects too.
+  if (r.ok && tx.files.size && P.meta.app && ws === 'main' && Slop.on) {
+    const s = await Sync.flush()
+    if (s.error) effects.push = { error: s.error }
+    else {
+      effects.draft = s.n
+      if (s.act) effects.actor = s.act.broken ? { broken: s.act.broken, on: s.act.n } : { on: s.act.n }
+      const want = s.act && !s.act.broken ? s.act.n : null
+      await Promise.all([...FrameHosts].filter(fh => fh.project === P && fh.embed).map(fh => fh.waitVersion(want)))
+    }
+    if (Embeds.ready.has(P.meta.app)) {
+      const l = await Outside.logs(P).catch(() => null)
+      const bad = l ? (l.lines || []).filter(x => x.at >= tx.t0 && (x.level === 'error' || x.level === 'warn')).map(x => x.level + ': ' + x.text) : []
+      if (bad.length) effects.actorLogs = bad.slice(-6)
+    }
+  }
   if (tx.files.size || tx.tables.size) Object.assign(effects, await frameEffects(ctx, before, tx.t0, layouts))
   r.effects = Object.keys(effects).length ? effects : null
   return r
@@ -3166,6 +3262,9 @@ function effectsLine(e) {
   if (e.rolledBack) parts.push('rolled back ' + e.rolledBack.join(', '))
   for (const f of e.files || []) parts.push(f.change === 'edited' ? f.path + ' +' + f.add + ' −' + f.del : f.change + ' ' + f.path)
   if (e.tables) parts.push('tables ' + e.tables.join(', '))
+  if (e.push) parts.push('push to draft failed: ' + e.push.error.slice(0, 100))
+  if (e.draft != null) parts.push('draft ' + e.draft + (e.actor ? e.actor.broken ? ' · dev instance stays on ' + e.actor.on + ': ' + e.actor.broken.slice(0, 120) : ' · dev ok' : ''))
+  if (e.actorLogs) parts.push(plural(e.actorLogs.length, 'actor warning') + '/errors')
   if (e.fixedIssues) parts.push('fixed ' + plural(e.fixedIssues.length, 'issue'))
   if (e.newIssues) parts.push(plural(e.newIssues.length, 'new issue'))
   if (e.newErrors) parts.push(plural(e.newErrors.length, 'new error'))
@@ -5650,7 +5749,7 @@ const App = {
   P: null, ws: 'main', mode: 'select', sel: null, logs: [], ev: emitter(), prefs: {}, canvas: null, offs: [], traceTarget: null,
 
   // ---- queries ----
-  health() { let n = 0; for (const fh of FrameHosts) if (!fh.headless && fh.project === this.P) n += fh.issues.length + fh.errors; return n },
+  health() { let n = 0; for (const fh of FrameHosts) if (!fh.headless && fh.project === this.P) n += fh.issues.length + fh.errors; if (this.P && this.P.meta.app && Sync.act && Sync.act.broken) n++; return n },
   hostFor(fid) { return this.canvas ? this.canvas.hostFor(fid) : null },
   hostByFid(fid) { for (const fh of FrameHosts) if (fh.fid === fid) return fh; return null },
   firstHost() { for (const fh of FrameHosts) if (!fh.headless && fh.project === this.P) return fh; return null },
@@ -5725,7 +5824,7 @@ const App = {
       this.ev.on('pins', () => { for (const fh of FrameHosts) if (!fh.headless && fh.project === P) fh.push({ push: 'pins', pins: this.pinsFor(fh.route) }) }),
       this.ev.on('health', () => { this.paintHeader(); Dock.refreshTabs() }),
       ...this.autoMarks(P))
-    Sync.attach(P.meta.app ? P : null)
+    Sync.attach(P.meta.app ? P : null); Outside.start(P)
     this.ev.emit('project', P)
     if (this.canvas) this.canvas.sync()
     this.paintHeader()
@@ -5776,6 +5875,14 @@ const App = {
     const go = async () => { m.close(); const p = await Projects.create({ template: pick, title: name.value.trim() || undefined }); await this.openProject(p.id); toast('New project: ' + p.title) }
     paint()
     const m = modal({ title: 'New project', body: [h('p.note', 'Each project is its own repository: files, tables, proposals, threads and timeline. Try ideas side by side.'), cards, name], actions: [{ label: 'Cancel' }, { label: 'Create', primary: true, run: () => { go(); return false } }] })
+  },
+  async resetDev() {
+    const P = this.P; if (!P || !P.meta.app) return
+    if (!await confirmBox('Reset dev data?', 'Your dev instance of ' + P.meta.app + ' and its data are dropped, and a fresh one runs draft. The app and its other instances are not touched.', 'Reset')) return
+    try { await Slop.call('resetDev', { app: P.meta.app }) } catch (e) { toast('Could not reset: ' + (e.message || e), 5000); return }
+    Embeds.ready.delete(P.meta.app); Sync.act = null; Sync.ev.emit('status', Sync.status)
+    for (const fh of FrameHosts) if (fh.project === P && fh.embed) fh.load({ keepState: false })
+    toast('A fresh dev instance of ' + P.meta.app)
   },
   newAppDialog() {
     const id = h('input.txt', { value: '', placeholder: 'id: lowercase letters, digits and -', style: { width: '100%' } })
@@ -5896,6 +6003,7 @@ const App = {
       for (const a of apps.slice(0, 30)) items.push({ label: '▣ ' + a.id, sub: [a.refs.draft != null ? 'draft ' + a.refs.draft : '', a.refs.main != null ? 'main ' + a.refs.main : 'not published', plural(a.instances.length, 'instance')].filter(Boolean).join(' · '), run: () => this.openProject(a.id) })
       if (!apps.length) items.push({ note: Slop.error || 'Every app you can develop is in the list above.' })
       items.push({ label: 'New slop app…', sub: 'an app store with a page, on draft', run: () => this.newAppDialog() })
+      if (this.P && this.P.meta.app) items.push({ label: 'Reset dev data…', sub: 'drop your dev instance of ' + this.P.meta.app + ' and start a fresh one', run: () => this.resetDev() })
     }
     items.push({ hr: true }, { label: 'New project…', sub: 'from a template', run: () => this.newProjectDialog() }, { label: 'Duplicate', sub: 'try an idea on a copy', run: () => this.duplicate() },
       { label: 'Rename…', run: () => this.rename() }, { label: 'Download project', sub: '.zip with transcripts and timeline', run: () => this.downloadProject() }, { label: 'Import project…', sub: '.zip or .json', run: () => this.importDialog() },
@@ -5912,6 +6020,7 @@ const App = {
   },
   healthMenu(btn) {
     const items = [{ group: 'Checks and errors' }]
+    if (this.P.meta.app && Sync.act && Sync.act.broken) items.push({ label: 'dev instance · activation failed', sub: Sync.act.broken.slice(0, 90), run: () => Dock.open('console') }, { label: 'Reset dev data', sub: 'a fresh dev instance (after a changed migration)', run: () => this.resetDev() })
     for (const fh of FrameHosts) {
       if (fh.headless || fh.project !== this.P) continue
       for (const l of fh.logs.filter(l => l.level === 'error').slice(-3)) items.push({ label: fh.route + ' · error', sub: l.text.slice(0, 70), run: () => Dock.open('console') })

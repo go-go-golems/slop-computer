@@ -6,9 +6,16 @@ import (
 	"crypto/sha256"
 	"encoding/base64"
 	"encoding/hex"
+	"encoding/json"
 	"strings"
 	"testing"
 )
+
+// fmtJSON is v as JSON, for looking for text in a decoded answer.
+func fmtJSON(v any) string {
+	b, _ := json.Marshal(v)
+	return string(b)
+}
 
 // installBench pushes apps/bench as store "bench" and trusts it with the
 // workshop module.
@@ -177,4 +184,73 @@ func TestBenchDevInstance(t *testing.T) {
 		t.Fatalf("renew = %v", r)
 	}
 	h.fail(admin, "actor.call", map[string]any{"store": "bench", "action": "embed", "args": map[string]any{"app": "jot"}}, "not_granted")
+}
+
+// Phase 3: a sync made from a draft that has moved since (a push from a
+// terminal) pushes nothing and answers with the draft as it is; head says
+// so between syncs; logs is the dev instance's log; resetDev drops the dev
+// instance (and only it), and dev makes a fresh one.
+func TestBenchOutsidePushesAndReset(t *testing.T) {
+	h := newHarness(t)
+	admin := h.tokenFor("admin@example.com", "read", "write", "admin")
+	installBench(t, h, admin)
+	act := func(action string, args map[string]any) map[string]any {
+		t.Helper()
+		return h.call(admin, "actor.call", map[string]any{"store": "bench", "action": action, "args": args}).(map[string]any)
+	}
+	app := devApp()
+	app["actor.js"] = `defineActor({ setup(ctx) { console.warn('setup warns'); }, actions: { ping: { requires: 'view', run() { return 'pong'; } } } });`
+	h.call(admin, "store.new", map[string]any{"id": "jot"})
+	h.call(admin, "files.push", map[string]any{"store": "jot", "files": files(app), "ref": "draft"})
+	o := act("open", map[string]any{"app": "jot"})
+	base := num(o["refs"].(map[string]any)["draft"])
+	if r := act("head", map[string]any{"app": "jot", "base": base}); r["files"] != nil {
+		t.Fatalf("head at base = %v", r)
+	}
+
+	// Someone pushes to draft from a terminal.
+	app["README.md"] = "pushed from a terminal"
+	h.call(admin, "files.push", map[string]any{"store": "jot", "files": files(app), "ref": "draft"})
+	if r := act("head", map[string]any{"app": "jot", "base": base}); r["files"] == nil || num(r["refs"].(map[string]any)["draft"]) <= base {
+		t.Fatalf("head after an outside push = %v", r)
+	}
+	s := act("sync", map[string]any{"app": "jot", "base": base, "files": []any{map[string]any{"path": "app.json", "text": app["app.json"]}}})
+	if s["conflict"] != true || num(s["n"]) <= base || len(s["files"].([]any)) != len(app) {
+		t.Fatalf("sync from an old base = %v", s)
+	}
+	if got := h.call(admin, "files.cat", map[string]any{"store": "jot", "at": "draft", "path": "README.md"}); got != "pushed from a terminal" {
+		t.Fatalf("the conflicting sync pushed: README.md = %v", got)
+	}
+
+	// The dev instance: its log, then a reset.
+	dev := act("dev", map[string]any{"app": "jot"})["id"].(string)
+	h.call(admin, "app.status", map[string]any{"store": dev}) // runs setup
+	if l := act("logs", map[string]any{"app": "jot"}); !strings.Contains(fmtJSON(l["lines"]), "setup warns") {
+		t.Fatalf("logs = %v", l)
+	}
+	if r := act("resetDev", map[string]any{"app": "jot"}); r["dropped"] != dev {
+		t.Fatalf("resetDev = %v", r)
+	}
+	h.fail(admin, "app.status", map[string]any{"store": dev}, "not_found")
+	if refs := h.call(admin, "ref.ls", map[string]any{"store": "jot"}).(map[string]any); refs["draft"] == nil {
+		t.Fatalf("the app lost its draft: %v", refs)
+	}
+	if again := act("dev", map[string]any{"app": "jot"}); again["id"] != dev || again["status"].(map[string]any)["ref"] != "draft" {
+		t.Fatalf("dev after the reset = %v", again)
+	}
+
+	// A migration changed after the dev instance applied it: the instance
+	// stays on its version; reset, and the fresh one under the same id
+	// activates draft (the kernel forgets a deleted store's failures).
+	app["sql/001.sql"] = "CREATE TABLE notes (id TEXT PRIMARY KEY, body TEXT);"
+	h.call(admin, "files.push", map[string]any{"store": "jot", "files": files(app), "ref": "draft"})
+	draft := num(h.call(admin, "ref.ls", map[string]any{"store": "jot"}).(map[string]any)["draft"])
+	if st := h.call(admin, "app.status", map[string]any{"store": dev}).(map[string]any); !strings.Contains(st["broken"].(string), "changed after it was applied") {
+		t.Fatalf("a changed migration: %v", st)
+	}
+	act("resetDev", map[string]any{"app": "jot"})
+	st := act("dev", map[string]any{"app": "jot"})["status"].(map[string]any)
+	if st["broken"] != "" || num(st["n"]) != draft {
+		t.Fatalf("the fresh dev instance = %v, want draft %d and not broken", st, draft)
+	}
 }

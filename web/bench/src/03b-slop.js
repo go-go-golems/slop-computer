@@ -70,23 +70,90 @@ const Sync = {
     const changed = [...sent.keys()], gone = [...P.synced.keys()].filter(p => !P.files.has(p))
     const message = 'bench: ' + [...changed, ...gone.map(p => '-' + p)].slice(0, 6).join(' ') + (changed.length + gone.length > 6 ? ' …' : '')
     try {
-      const r = await Slop.call('sync', { app: P.meta.app, files, message })
+      const r = await Slop.call('sync', { app: P.meta.app, files, message, base: P.refs ? P.refs.draft ?? null : null })
       if (this.P !== P) return
-      P.tree = new Map((r.files || []).map(f => [f.path, f]))
-      for (const [path, text] of sent) P.synced.set(path, text)
-      for (const p of gone) P.synced.delete(p)
-      this.n = r.n; this.act = (r.activated || [])[0] || this.act
-      P.refs = { ...(P.refs || {}), draft: r.n }
-      this.set('synced'); P.ev.emit('sync', r)
+      if (r.conflict) {   // draft moved under us: take what changed there, keep what changed here, push again
+        await Outside.merge(P, r.n, r.files || [])
+        this.again = true
+      } else {
+        P.tree = new Map((r.files || []).map(f => [f.path, f]))
+        for (const [path, text] of sent) P.synced.set(path, text)
+        for (const p of gone) P.synced.delete(p)
+        this.n = r.n; this.act = (r.activated || [])[0] || this.act
+        P.refs = { ...(P.refs || {}), draft: r.n }
+        this.set('synced'); P.ev.emit('sync', r); App.ev.emit('health')
+      }
     } catch (e) {
       this.set('error', (e && e.message) || String(e)); toast('Pushing to draft failed: ' + this.error, 5000)
     } finally { this.busy = false }
     if (this.again) { this.again = false; this.run() }
   },
+  // Push now and wait for it (an eval's effects need the activation).
+  async flush() {
+    clearTimeout(this.timer)
+    for (let i = 0; i < 200 && (this.busy || this.status === 'dirty'); i++) {
+      if (!this.busy) await this.run(); else await sleep(30)
+    }
+    return { n: this.n, act: this.act, error: this.status === 'error' ? this.error : '' }
+  },
   label() {
     const s = { idle: 'ready', dirty: 'unsaved', pushing: 'pushing…', synced: 'draft ' + (this.n ?? '–'), error: 'error' }[this.status] || this.status
     const a = this.act, dev = a ? (a.broken ? 'dev broken' : a.n === this.n ? 'dev ok' : 'dev on ' + a.n) : ''
     return { status: s, dev, title: this.error || (a && a.broken) || '' }
+  }
+}
+
+// Outside: pushes to draft that did not come from this page (a terminal's
+// slop dev or slop push, another person, the agent of another bench), and
+// the dev instance's log. Polled every few seconds while an app project is
+// open. A file changed outside and not here is taken; a file changed here
+// keeps this page's text (the next push writes it): the second push wins,
+// file by file.
+const Outside = {
+  timer: 0, logT: 0,
+  start(P) {
+    clearInterval(this.timer); this.logT = Date.now() - 60000
+    if (P && P.meta.app && Slop.on) this.timer = setInterval(() => this.poll(P), 3000)
+  },
+  async poll(P) {
+    if (Sync.P !== P || document.hidden) return
+    try {
+      if (!Sync.busy && Sync.status !== 'dirty') {
+        const r = await Slop.call('head', { app: P.meta.app, base: P.refs ? P.refs.draft ?? null : null })
+        if (r.files && Sync.P === P && !Sync.busy && Sync.status !== 'dirty') await this.merge(P, r.refs.draft ?? null, r.files)
+        if (r.dev && Sync.P === P && (!Sync.act || Sync.act.n !== r.dev.n || (Sync.act.broken || '') !== r.dev.broken)) { Sync.act = r.dev; Sync.ev.emit('status', Sync.status); App.ev.emit('health') }
+      }
+      if (Embeds.ready.has(P.meta.app)) await this.logs(P)
+    } catch (e) { /* the next poll tries again */ }
+  },
+  // The dev instance's new log lines go to the Console; its broken state to the header.
+  async logs(P) {
+    const r = await Slop.call('logs', { app: P.meta.app })
+    for (const l of (r.lines || []).filter(l => l.at > this.logT)) App.consoleAdd({ t: l.at, level: l.level === 'warn' ? 'warn' : l.level === 'error' ? 'error' : 'log', text: l.text, src: '', frame: 'actor', fid: 'actor' })
+    for (const l of r.lines || []) this.logT = Math.max(this.logT, l.at)
+    // app.logs' broken is the actor's (crashing turns), not a failed
+    // activation: it may add one, never clear one (head's status does)
+    if (Sync.P === P && Sync.act && r.broken && r.broken !== Sync.act.broken) { Sync.act = { ...Sync.act, broken: r.broken }; Sync.ev.emit('status', Sync.status); App.ev.emit('health') }
+    return r
+  },
+  async merge(P, n, tree) {
+    const next = new Map(tree.map(f => [f.path, f]))
+    const mine = p => P.files.has(p) ? P.files.get(p) !== P.synced.get(p) : P.synced.has(p)   // changed here since the last push
+    const take = [], gone = []
+    for (const [p, f] of next) { const cur = P.tree.get(p); if ((!cur || cur.sha256 !== f.sha256) && !mine(p)) take.push(f) }
+    for (const p of P.tree.keys()) if (!next.has(p) && !mine(p)) gone.push(p)
+    const { texts } = take.length ? await Slop.readAll(P.meta.app, String(n), take.filter(textish).map(f => f.path)) : { texts: {} }
+    const changed = [], note = 'pushed outside the bench (draft ' + n + ')'
+    for (const f of take) {
+      if (typeof texts[f.path] === 'string') { P.files.set(f.path, texts[f.path]); P.synced.set(f.path, texts[f.path]); P.extern.delete(f.path); P.log({ kind: 'write', ws: 'main', who: 'push', path: f.path, after: texts[f.path], note }) }
+      else { P.extern.set(f.path, f); P.files.delete(f.path); P.synced.delete(f.path) }
+      changed.push(f.path)
+    }
+    for (const p of gone) { P.files.delete(p); P.synced.delete(p); P.extern.delete(p); P.log({ kind: 'remove', ws: 'main', who: 'push', path: p, note }); changed.push(p) }
+    P.tree = next; P.refs = { ...(P.refs || {}), draft: n }
+    if (Sync.P === P) { Sync.n = n; Sync.ev.emit('status', Sync.status) }
+    if (changed.length) { P.ev.emit('files', 'main', changed); toast('draft ' + n + ': ' + plural(changed.length, 'file') + ' changed outside the bench (' + changed.slice(0, 3).join(', ') + (changed.length > 3 ? ', …' : '') + ')', 4000) }
+    return changed
   }
 }
 

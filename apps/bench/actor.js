@@ -104,18 +104,65 @@ defineActor({
 
     // Push the project's tree to draft: files are {path, text} for what
     // changed and {path, sha256, size} for the rest (files not listed are
-    // deleted). The visitor's dev instance, when it exists, comes up on the
-    // new snapshot and says how that went. The answer has the new tree.
+    // deleted). base is the draft the tree was made from: when draft moved
+    // since (a push from a terminal, another person), nothing is pushed and
+    // the answer is {conflict, n, files}, the draft as it is now, for the
+    // page to merge. Otherwise the visitor's dev instance, when it exists,
+    // comes up on the new snapshot and says how that went; the answer has
+    // the new tree.
     sync: {
       requires: 'view',
-      async run(ctx, { app, files, message }) {
+      async run(ctx, { app, files, message, base }) {
         const w = tool(ctx);
         storeId(ctx, app);
         if (!Array.isArray(files)) ctx.fail('invalid_argument', 'files must be a list of {path, text} or {path, sha256, size}');
+        if (base !== undefined) {
+          const refs = await w.refs(app);
+          if ((refs.draft ?? null) !== (base ?? null)) return { conflict: true, n: refs.draft ?? null, files: refs.draft != null ? await w.files(app, 'draft') : [] };
+        }
         const dev = devId(app, ctx.visitor.id);
         const devExists = (await statusOf(ctx, dev)) !== null;
         const res = await w.push(app, files, { ref: 'draft', message: String(message || 'bench').slice(0, 200), activate: devExists ? [dev] : [] });
         return { n: res.n, activated: res.activated || [], files: await w.files(app, 'draft') };
+      },
+    },
+
+    // Where draft is, and the visitor's dev instance on it ({n, broken},
+    // null when there is none; asking brings it up on draft); with base,
+    // also draft's tree when it is not base.
+    head: {
+      requires: 'view',
+      async run(ctx, { app, base }) {
+        const w = tool(ctx);
+        storeId(ctx, app);
+        const refs = await w.refs(app);
+        const st = await statusOf(ctx, devId(app, ctx.visitor.id));
+        const out = { refs, dev: st ? { store: st.store || devId(app, ctx.visitor.id), n: st.n, broken: st.broken || '' } : null };
+        if (base !== undefined && (refs.draft ?? null) !== (base ?? null)) out.files = refs.draft != null ? await w.files(app, 'draft') : [];
+        return out;
+      },
+    },
+
+    // The visitor's dev instance's log (its actor's console, setup and
+    // activation failures): {broken, lines: [{at, level, text}]}.
+    logs: {
+      requires: 'view',
+      async run(ctx, { app }) {
+        storeId(ctx, app);
+        return await tool(ctx).logs(devId(app, ctx.visitor.id)).catch(() => ({ broken: '', lines: [] }));
+      },
+    },
+
+    // Throw away the visitor's dev instance and its data (it runs
+    // unpublished code, so workshop's drop allows it); the next frame makes
+    // a fresh one. For a migration that changed after it was applied.
+    resetDev: {
+      requires: 'view',
+      async run(ctx, { app }) {
+        storeId(ctx, app);
+        const id = devId(app, ctx.visitor.id);
+        if ((await statusOf(ctx, id)) !== null) await tool(ctx).drop(id);
+        return { dropped: id };
       },
     },
 

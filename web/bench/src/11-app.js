@@ -3,7 +3,7 @@ const App = {
   P: null, ws: 'main', mode: 'select', sel: null, logs: [], ev: emitter(), prefs: {}, canvas: null, offs: [], traceTarget: null,
 
   // ---- queries ----
-  health() { let n = 0; for (const fh of FrameHosts) if (!fh.headless && fh.project === this.P) n += fh.issues.length + fh.errors; return n },
+  health() { let n = 0; for (const fh of FrameHosts) if (!fh.headless && fh.project === this.P) n += fh.issues.length + fh.errors; if (this.P && this.P.meta.app && Sync.act && Sync.act.broken) n++; return n },
   hostFor(fid) { return this.canvas ? this.canvas.hostFor(fid) : null },
   hostByFid(fid) { for (const fh of FrameHosts) if (fh.fid === fid) return fh; return null },
   firstHost() { for (const fh of FrameHosts) if (!fh.headless && fh.project === this.P) return fh; return null },
@@ -78,7 +78,7 @@ const App = {
       this.ev.on('pins', () => { for (const fh of FrameHosts) if (!fh.headless && fh.project === P) fh.push({ push: 'pins', pins: this.pinsFor(fh.route) }) }),
       this.ev.on('health', () => { this.paintHeader(); Dock.refreshTabs() }),
       ...this.autoMarks(P))
-    Sync.attach(P.meta.app ? P : null)
+    Sync.attach(P.meta.app ? P : null); Outside.start(P)
     this.ev.emit('project', P)
     if (this.canvas) this.canvas.sync()
     this.paintHeader()
@@ -129,6 +129,14 @@ const App = {
     const go = async () => { m.close(); const p = await Projects.create({ template: pick, title: name.value.trim() || undefined }); await this.openProject(p.id); toast('New project: ' + p.title) }
     paint()
     const m = modal({ title: 'New project', body: [h('p.note', 'Each project is its own repository: files, tables, proposals, threads and timeline. Try ideas side by side.'), cards, name], actions: [{ label: 'Cancel' }, { label: 'Create', primary: true, run: () => { go(); return false } }] })
+  },
+  async resetDev() {
+    const P = this.P; if (!P || !P.meta.app) return
+    if (!await confirmBox('Reset dev data?', 'Your dev instance of ' + P.meta.app + ' and its data are dropped, and a fresh one runs draft. The app and its other instances are not touched.', 'Reset')) return
+    try { await Slop.call('resetDev', { app: P.meta.app }) } catch (e) { toast('Could not reset: ' + (e.message || e), 5000); return }
+    Embeds.ready.delete(P.meta.app); Sync.act = null; Sync.ev.emit('status', Sync.status)
+    for (const fh of FrameHosts) if (fh.project === P && fh.embed) fh.load({ keepState: false })
+    toast('A fresh dev instance of ' + P.meta.app)
   },
   newAppDialog() {
     const id = h('input.txt', { value: '', placeholder: 'id: lowercase letters, digits and -', style: { width: '100%' } })
@@ -249,6 +257,7 @@ const App = {
       for (const a of apps.slice(0, 30)) items.push({ label: '▣ ' + a.id, sub: [a.refs.draft != null ? 'draft ' + a.refs.draft : '', a.refs.main != null ? 'main ' + a.refs.main : 'not published', plural(a.instances.length, 'instance')].filter(Boolean).join(' · '), run: () => this.openProject(a.id) })
       if (!apps.length) items.push({ note: Slop.error || 'Every app you can develop is in the list above.' })
       items.push({ label: 'New slop app…', sub: 'an app store with a page, on draft', run: () => this.newAppDialog() })
+      if (this.P && this.P.meta.app) items.push({ label: 'Reset dev data…', sub: 'drop your dev instance of ' + this.P.meta.app + ' and start a fresh one', run: () => this.resetDev() })
     }
     items.push({ hr: true }, { label: 'New project…', sub: 'from a template', run: () => this.newProjectDialog() }, { label: 'Duplicate', sub: 'try an idea on a copy', run: () => this.duplicate() },
       { label: 'Rename…', run: () => this.rename() }, { label: 'Download project', sub: '.zip with transcripts and timeline', run: () => this.downloadProject() }, { label: 'Import project…', sub: '.zip or .json', run: () => this.importDialog() },
@@ -265,6 +274,7 @@ const App = {
   },
   healthMenu(btn) {
     const items = [{ group: 'Checks and errors' }]
+    if (this.P.meta.app && Sync.act && Sync.act.broken) items.push({ label: 'dev instance · activation failed', sub: Sync.act.broken.slice(0, 90), run: () => Dock.open('console') }, { label: 'Reset dev data', sub: 'a fresh dev instance (after a changed migration)', run: () => this.resetDev() })
     for (const fh of FrameHosts) {
       if (fh.headless || fh.project !== this.P) continue
       for (const l of fh.logs.filter(l => l.level === 'error').slice(-3)) items.push({ label: fh.route + ' · error', sub: l.text.slice(0, 70), run: () => Dock.open('console') })

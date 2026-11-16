@@ -136,6 +136,17 @@ class FrameHost {
   get shown() { return this.headless || (this.el.isConnected && this.el.getClientRects().length > 0) }
   resetData() { this.fx = null; return this.load({ keepState: false }) }
   reloadSoon() { clearTimeout(this.reloadT); this.reloadT = setTimeout(() => this.load({ keepState: true }), 60) }
+  // An embedded frame showing version n (or later) and loaded; resolves
+  // anyway after ms (an activation that failed never reloads the frame).
+  waitVersion(n, ms = 6000) {
+    if (n == null) return Promise.resolve(false)
+    const ok = () => !!this.embed && this.embed.version >= n && this.ready && !this.loading
+    if (ok()) return Promise.resolve(true)
+    return new Promise(res => {
+      const iv = setInterval(() => { if (ok()) { clearInterval(iv); clearTimeout(t); res(true) } }, 40)
+      const t = setTimeout(() => { clearInterval(iv); res(false) }, ms)
+    })
+  }
   setFixture(name) { this.fixture = name || null; this.fx = null; return this.load({ keepState: false }) }
   swap() {
     const n = this.next; if (!n) return
