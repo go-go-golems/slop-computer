@@ -55,11 +55,7 @@ type Manager struct {
 	// manager's actors (tests: the package variable is read by every
 	// running actor, so changing it races). Set it before actors start.
 	TurnLimit time.Duration
-	// Runtime is what actors run on: RuntimeEngine ("" too) or
-	// RuntimeDirect (slop.yaml actors.runtime). Set it before actors start.
-	Runtime string
-
-	engines engineFactory // the engine runtimes' factory, built on first use
+	engines   engineFactory // the engine runtimes' factory, built on first use
 
 	llmMu sync.RWMutex
 	llmB  llm.Backend // the sample backend (SetLLM, LLM)
@@ -97,9 +93,6 @@ func (m *Manager) turnLimit() time.Duration {
 // commits for reactors).
 func New(k *kernel.Kernel) *Manager {
 	m := &Manager{K: k, actors: map[string]*Actor{}, inboxes: map[string]*inbox{}, broken: map[string]string{}, files: map[string]map[string][]byte{}, logs: map[string][]LogLine{}}
-	if k.Cfg != nil {
-		m.Runtime = k.Cfg.Actors.Runtime
-	}
 	k.Activate = m.activate
 	k.OnActivated = m.onActivated
 	k.Subscribe(m.onCommit)

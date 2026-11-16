@@ -42,19 +42,25 @@ func ValidFilePath(p string) bool {
 	return path.Clean(p) == p && !strings.HasPrefix(p, "../") && p != ".." && p != "."
 }
 
+// fileTypes are the types slop names itself. Go's mime package knows only a
+// short built-in list (html, css, js, json, images, pdf, wasm, xml) and
+// takes the rest from the host's mime.types, which the slop image does not
+// have: there a .woff2 was served as application/octet-stream (SLOP3-021).
+var fileTypes = map[string]string{
+	".js": "text/javascript; charset=utf-8", ".mjs": "text/javascript; charset=utf-8",
+	".json": "application/json", ".md": "text/markdown; charset=utf-8",
+	".sql": "application/sql", ".wasm": "application/wasm",
+	".txt": "text/plain; charset=utf-8", ".csv": "text/csv; charset=utf-8",
+	".woff2": "font/woff2", ".woff": "font/woff", ".ttf": "font/ttf", ".otf": "font/otf",
+	".ico": "image/vnd.microsoft.icon",
+	".mp4": "video/mp4", ".webm": "video/webm", ".mp3": "audio/mpeg", ".ogg": "audio/ogg", ".wav": "audio/wav",
+	".zip": "application/zip",
+}
+
 // TypeOf guesses a content type from a file name.
 func TypeOf(name string) string {
-	switch strings.ToLower(path.Ext(name)) {
-	case ".js", ".mjs":
-		return "text/javascript; charset=utf-8"
-	case ".json":
-		return "application/json"
-	case ".md":
-		return "text/markdown; charset=utf-8"
-	case ".sql":
-		return "application/sql"
-	case ".wasm":
-		return "application/wasm"
+	if t, ok := fileTypes[strings.ToLower(path.Ext(name))]; ok {
+		return t
 	}
 	if t := mime.TypeByExtension(path.Ext(name)); t != "" {
 		return t

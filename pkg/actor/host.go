@@ -6,9 +6,9 @@ package actor
 // activation's setup) is one host.Run; module code runs inside those calls
 // and keeps using the VM directly.
 //
-// directHost is the runtime the actor has always had: a bare goja.Runtime
-// driven by the goroutine that calls Run. A later host runs the same calls
-// on a go-go-goja engine runtime, whose event loop owns the VM.
+// The one host is engineHost: a go-go-goja engine runtime, whose event loop
+// owns the VM (enginehost.go). The bare goja runtime driven by the caller's
+// goroutine (directHost, actors.runtime: direct) was removed in SLOP3-021.
 
 import (
 	"context"
@@ -32,25 +32,6 @@ type vmHost interface {
 	// Close releases the runtime. The actor never uses it afterwards.
 	Close(ctx context.Context) error
 }
-
-// directHost is a bare goja runtime, run on the caller's goroutine.
-type directHost struct{ vm *goja.Runtime }
-
-var _ vmHost = (*directHost)(nil)
-
-func newDirectHost() *directHost { return &directHost{vm: goja.New()} }
-
-func (h *directHost) VM() *goja.Runtime { return h.vm }
-
-func (h *directHost) Run(_ context.Context, _ string, fn func(vm *goja.Runtime) error) error {
-	return fn(h.vm)
-}
-
-func (h *directHost) Interrupt(reason any) { h.vm.Interrupt(reason) }
-
-func (h *directHost) ClearInterrupt() { h.vm.ClearInterrupt() }
-
-func (h *directHost) Close(context.Context) error { return nil }
 
 // enter runs fn on the actor's VM through its host (and the manager's
 // Around hook, when one is set).

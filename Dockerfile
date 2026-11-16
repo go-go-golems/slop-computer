@@ -8,7 +8,8 @@ ENV GOWORK=off CGO_ENABLED=1
 COPY go.mod go.sum ./
 RUN go mod download
 COPY . .
-RUN go build -trimpath -ldflags "-s -w" -o /out/slop ./cmd/slop
+# sqlite_fts5: SQLite with FTS5, for apps that declare fts5 tables.
+RUN go build -trimpath -tags sqlite_fts5 -ldflags "-s -w" -o /out/slop ./cmd/slop
 
 FROM debian:bookworm-slim
 ARG VERSION=dev

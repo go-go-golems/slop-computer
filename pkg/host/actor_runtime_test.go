@@ -8,6 +8,8 @@ package host
 import (
 	"context"
 	"fmt"
+	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 	"time"
@@ -36,38 +38,31 @@ defineActor({
 `
 
 func TestActorRuntimeGuarantees(t *testing.T) {
-	for _, rt := range []string{actor.RuntimeDirect, actor.RuntimeEngine} {
-		t.Run(rt, func(t *testing.T) {
-			h := newHarnessWith(t, func(c *config.Config) { c.Actors.Runtime = rt })
-			admin := h.tokenFor("admin@example.com", "read", "write", "admin")
-			h.call(admin, "store.new", map[string]any{"id": "rt"})
-			h.call(admin, "files.push", map[string]any{"store": "rt", "files": files(map[string]string{
-				"app.json": `{"title":"Runtime","actor":"actor.js"}`,
-				"actor.js": runtimeActor,
-			})})
-			g := h.call(admin, "actor.call", map[string]any{"store": "rt", "action": "globals"}).(map[string]any)
-			for k, v := range g {
-				if v != "undefined" {
-					t.Errorf("%s is %v in an actor; want undefined", k, v)
-				}
-			}
-			if a := h.a.Running("rt"); a == nil || a.Runtime() != rt {
-				t.Fatalf("actor runtime = %v, want %s", a, rt)
-			}
-			c := h.call(admin, "actor.call", map[string]any{"store": "rt", "action": "clock"}).(map[string]any)
-			if c["now"] != c["date"] {
-				t.Errorf("Date.now() = %v, ctx.now = %v: want the turn's time", c["date"], c["now"])
-			}
-			h.call(admin, "actor.call", map[string]any{"store": "rt", "action": "say", "args": map[string]any{"text": "hi"}})
-			logs := h.call(admin, "app.logs", map[string]any{"store": "rt"}).(map[string]any)
-			text := ""
-			for _, l := range logs["lines"].([]any) {
-				text += l.(map[string]any)["text"].(string) + "\n"
-			}
-			if !strings.Contains(text, "said hi") || !strings.Contains(text, `{"text":"hi"}`) {
-				t.Errorf("console did not reach app.logs: %q", text)
-			}
-		})
+	h := newHarness(t)
+	admin := h.tokenFor("admin@example.com", "read", "write", "admin")
+	h.call(admin, "store.new", map[string]any{"id": "rt"})
+	h.call(admin, "files.push", map[string]any{"store": "rt", "files": files(map[string]string{
+		"app.json": `{"title":"Runtime","actor":"actor.js"}`,
+		"actor.js": runtimeActor,
+	})})
+	g := h.call(admin, "actor.call", map[string]any{"store": "rt", "action": "globals"}).(map[string]any)
+	for k, v := range g {
+		if v != "undefined" {
+			t.Errorf("%s is %v in an actor; want undefined", k, v)
+		}
+	}
+	c := h.call(admin, "actor.call", map[string]any{"store": "rt", "action": "clock"}).(map[string]any)
+	if c["now"] != c["date"] {
+		t.Errorf("Date.now() = %v, ctx.now = %v: want the turn's time", c["date"], c["now"])
+	}
+	h.call(admin, "actor.call", map[string]any{"store": "rt", "action": "say", "args": map[string]any{"text": "hi"}})
+	logs := h.call(admin, "app.logs", map[string]any{"store": "rt"}).(map[string]any)
+	text := ""
+	for _, l := range logs["lines"].([]any) {
+		text += l.(map[string]any)["text"].(string) + "\n"
+	}
+	if !strings.Contains(text, "said hi") || !strings.Contains(text, `{"text":"hi"}`) {
+		t.Errorf("console did not reach app.logs: %q", text)
 	}
 }
 
@@ -95,30 +90,25 @@ defineActor({
 });
 `
 
-// Actor VM migration phase 6: with actors.runtime unset, actors run on the
-// engine runtime.
-func TestActorRuntimeDefault(t *testing.T) {
+// SLOP3-021: direct was removed; a slop.yaml that still asks for it fails
+// to load with a clear error instead of running actors on the engine.
+func TestActorRuntimeDirectRemoved(t *testing.T) {
 	c := &config.Config{}
 	c.Defaults()
 	if c.Actors.Runtime != actor.RuntimeEngine {
 		t.Fatalf("default actors.runtime = %q, want %q", c.Actors.Runtime, actor.RuntimeEngine)
 	}
-	t.Setenv("SLOP_TEST_ACTORS_RUNTIME", "")
-	h := newHarness(t)
-	admin := h.tokenFor("admin@example.com", "read", "write", "admin")
-	h.call(admin, "store.new", map[string]any{"id": "rt"})
-	h.call(admin, "files.push", map[string]any{"store": "rt", "files": files(map[string]string{
-		"app.json": `{"title":"Runtime","actor":"actor.js"}`,
-		"actor.js": runtimeActor,
-	})})
-	h.call(admin, "actor.call", map[string]any{"store": "rt", "action": "globals"})
-	if a := h.a.Running("rt"); a == nil || a.Runtime() != actor.RuntimeEngine {
-		t.Fatalf("actor runtime = %v, want %s", a, actor.RuntimeEngine)
+	path := filepath.Join(t.TempDir(), "slop.yaml")
+	if err := os.WriteFile(path, []byte("actors:\n  runtime: direct\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := config.Load(path); err == nil || !strings.Contains(err.Error(), "removed") {
+		t.Fatalf("Load with actors.runtime: direct = %v; want an error saying it was removed", err)
 	}
 }
 
 func TestEngineModulePostIsATurn(t *testing.T) {
-	h := newHarnessWith(t, func(c *config.Config) { c.Actors.Runtime = actor.RuntimeEngine })
+	h := newHarness(t)
 	refused := make(chan error, 1)
 	h.a.Register(actor.Module{Name: "later", Class: actor.ClassData, Load: func(s actor.Setup) goja.Value {
 		vm := s.Actor.VM()
@@ -190,51 +180,47 @@ func TestEngineModulePostIsATurn(t *testing.T) {
 // (the panic travels from the engine's loop back to the kernel's turn);
 // three crashed turns in a minute mark the actor broken.
 func TestActorCrashPath(t *testing.T) {
-	for _, rt := range []string{actor.RuntimeDirect, actor.RuntimeEngine} {
-		t.Run(rt, func(t *testing.T) {
-			h := newHarnessWith(t, func(c *config.Config) { c.Actors.Runtime = rt })
-			h.a.TurnLimit = 200 * time.Millisecond
-			h.a.Register(actor.Module{Name: "boom", Class: actor.ClassData, Load: func(s actor.Setup) goja.Value {
-				o := s.Actor.VM().NewObject()
-				_ = o.Set("now", func() goja.Value { panic("boom") })
-				return o
-			}})
-			admin := h.tokenFor("admin@example.com", "read", "write", "admin")
+	h := newHarness(t)
+	h.a.TurnLimit = 200 * time.Millisecond
+	h.a.Register(actor.Module{Name: "boom", Class: actor.ClassData, Load: func(s actor.Setup) goja.Value {
+		o := s.Actor.VM().NewObject()
+		_ = o.Set("now", func() goja.Value { panic("boom") })
+		return o
+	}})
+	admin := h.tokenFor("admin@example.com", "read", "write", "admin")
 
-			// A panic in setup fails the activation and leaves no version.
-			h.call(admin, "store.new", map[string]any{"id": "setupboom"})
-			h.call(admin, "files.push", map[string]any{"store": "setupboom", "files": files(map[string]string{
-				"app.json": `{"title":"Boom","actor":"actor.js"}`,
-				"actor.js": `defineActor({ setup() { use('boom').now(); } });`,
-			})})
-			st := h.call(admin, "app.status", map[string]any{"store": "setupboom"}).(map[string]any)
-			if !strings.Contains(fmt.Sprint(st["broken"]), "panicked") {
-				t.Fatalf("setup panic: status = %v", st)
-			}
+	// A panic in setup fails the activation and leaves no version.
+	h.call(admin, "store.new", map[string]any{"id": "setupboom"})
+	h.call(admin, "files.push", map[string]any{"store": "setupboom", "files": files(map[string]string{
+		"app.json": `{"title":"Boom","actor":"actor.js"}`,
+		"actor.js": `defineActor({ setup() { use('boom').now(); } });`,
+	})})
+	st := h.call(admin, "app.status", map[string]any{"store": "setupboom"}).(map[string]any)
+	if !strings.Contains(fmt.Sprint(st["broken"]), "panicked") {
+		t.Fatalf("setup panic: status = %v", st)
+	}
 
-			// Turns: a panic, then endless loops; three crashes break it.
-			h.call(admin, "store.new", map[string]any{"id": "crash"})
-			h.call(admin, "files.push", map[string]any{"store": "crash", "files": files(map[string]string{
-				"app.json": `{"title":"Crash","actor":"actor.js"}`,
-				"actor.js": `defineActor({ actions: { boom() { use('boom').now(); }, spin() { for (;;) {} }, ok() { return 1; } } });`,
-			})})
-			e := h.fail(admin, "actor.call", map[string]any{"store": "crash", "action": "boom"}, "actor_error")
-			if !strings.Contains(e["message"].(string), "panicked") {
-				t.Fatalf("boom = %v", e)
-			}
-			if got := h.call(admin, "actor.call", map[string]any{"store": "crash", "action": "ok"}); got != 1.0 {
-				t.Fatalf("ok after one crash = %v", got)
-			}
-			start := time.Now()
-			h.fail(admin, "actor.call", map[string]any{"store": "crash", "action": "spin"}, "actor_error")
-			if d := time.Since(start); d < 200*time.Millisecond || d > 2*time.Second {
-				t.Errorf("spin interrupted after %v, want about 200ms", d)
-			}
-			h.fail(admin, "actor.call", map[string]any{"store": "crash", "action": "spin"}, "actor_error")
-			e = h.fail(admin, "actor.call", map[string]any{"store": "crash", "action": "ok"}, "actor_error")
-			if !strings.Contains(e["message"].(string), "broken") {
-				t.Fatalf("after three crashes: %v", e)
-			}
-		})
+	// Turns: a panic, then endless loops; three crashes break it.
+	h.call(admin, "store.new", map[string]any{"id": "crash"})
+	h.call(admin, "files.push", map[string]any{"store": "crash", "files": files(map[string]string{
+		"app.json": `{"title":"Crash","actor":"actor.js"}`,
+		"actor.js": `defineActor({ actions: { boom() { use('boom').now(); }, spin() { for (;;) {} }, ok() { return 1; } } });`,
+	})})
+	e := h.fail(admin, "actor.call", map[string]any{"store": "crash", "action": "boom"}, "actor_error")
+	if !strings.Contains(e["message"].(string), "panicked") {
+		t.Fatalf("boom = %v", e)
+	}
+	if got := h.call(admin, "actor.call", map[string]any{"store": "crash", "action": "ok"}); got != 1.0 {
+		t.Fatalf("ok after one crash = %v", got)
+	}
+	start := time.Now()
+	h.fail(admin, "actor.call", map[string]any{"store": "crash", "action": "spin"}, "actor_error")
+	if d := time.Since(start); d < 200*time.Millisecond || d > 2*time.Second {
+		t.Errorf("spin interrupted after %v, want about 200ms", d)
+	}
+	h.fail(admin, "actor.call", map[string]any{"store": "crash", "action": "spin"}, "actor_error")
+	e = h.fail(admin, "actor.call", map[string]any{"store": "crash", "action": "ok"}, "actor_error")
+	if !strings.Contains(e["message"].(string), "broken") {
+		t.Fatalf("after three crashes: %v", e)
 	}
 }
