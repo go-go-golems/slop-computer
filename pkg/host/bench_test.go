@@ -290,3 +290,61 @@ func TestBenchDevData(t *testing.T) {
 	}
 	h.fail(admin, "actor.call", map[string]any{"store": "bench", "action": "sql", "args": map[string]any{"app": "jot", "sql": "DELETE FROM notes"}}, "invalid_argument") // read-only
 }
+
+// Phase 5: the bench's preflight says what publishing would do and what
+// blocks it; publish moves main only from where the preflight saw it;
+// activate brings a production instance up now; publishing the previous
+// snapshot rolls back.
+func TestBenchPublish(t *testing.T) {
+	h := newHarness(t)
+	admin := h.tokenFor("admin@example.com", "read", "write", "admin")
+	installBench(t, h, admin)
+	act := func(action string, args map[string]any) map[string]any {
+		t.Helper()
+		return h.call(admin, "actor.call", map[string]any{"store": "bench", "action": action, "args": args}).(map[string]any)
+	}
+	strs := func(v any) string { return fmtJSON(v) }
+	app := devApp()
+	h.call(admin, "store.new", map[string]any{"id": "jot"})
+	h.call(admin, "files.push", map[string]any{"store": "jot", "files": files(app), "ref": "draft"})
+
+	// The first publish: everything is new, nothing serves main yet.
+	pf := act("preflight", map[string]any{"app": "jot"})
+	d1 := num(pf["refs"].(map[string]any)["draft"])
+	if pf["refs"].(map[string]any)["main"] != nil || len(pf["added"].([]any)) != len(app) || strs(pf["migrations"]) != `["sql/001.sql"]` || len(pf["blockers"].([]any)) != 0 || len(pf["production"].([]any)) != 0 {
+		t.Fatalf("first preflight = %v", pf)
+	}
+	if r := act("publish", map[string]any{"app": "jot", "n": d1, "ifAt": 0}); num(r["from"]) != 0 {
+		t.Fatalf("first publish = %v", r)
+	}
+	h.call(admin, "store.new", map[string]any{"id": "jot-1", "app": "jot", "type": "jot"})
+	h.call(admin, "app.status", map[string]any{"store": "jot-1"}) // runs main, applies 001
+
+	// A changed migration blocks.
+	bad := devApp()
+	bad["sql/001.sql"] = "CREATE TABLE notes (id TEXT PRIMARY KEY, extra TEXT);"
+	h.call(admin, "files.push", map[string]any{"store": "jot", "files": files(bad), "ref": "draft"})
+	if pf = act("preflight", map[string]any{"app": "jot"}); !strings.Contains(strs(pf["blockers"]), "sql/001.sql changed") {
+		t.Fatalf("a changed migration: %v", pf)
+	}
+
+	// A new migration is listed; a stale ifAt is refused; then publish,
+	// activate and roll back.
+	good := devApp()
+	good["sql/002.sql"] = "CREATE TABLE tags (note TEXT);"
+	h.call(admin, "files.push", map[string]any{"store": "jot", "files": files(good), "ref": "draft"})
+	pf = act("preflight", map[string]any{"app": "jot"})
+	d2 := num(pf["refs"].(map[string]any)["draft"])
+	if strs(pf["migrations"]) != `["sql/002.sql"]` || len(pf["blockers"].([]any)) != 0 || !strings.Contains(strs(pf["production"]), `"jot-1"`) {
+		t.Fatalf("second preflight = %v", pf)
+	}
+	h.fail(admin, "actor.call", map[string]any{"store": "bench", "action": "publish", "args": map[string]any{"app": "jot", "n": d2, "ifAt": 0}}, "conflict")
+	act("publish", map[string]any{"app": "jot", "n": d2, "ifAt": d1})
+	if a := act("activate", map[string]any{"store": "jot-1"}); num(a["n"]) != d2 || a["broken"] != "" {
+		t.Fatalf("activate = %v", a)
+	}
+	act("publish", map[string]any{"app": "jot", "n": d1, "ifAt": d2}) // roll back
+	if refs := h.call(admin, "ref.ls", map[string]any{"store": "jot"}).(map[string]any); num(refs["main"]) != d1 {
+		t.Fatalf("after the rollback, main = %v", refs)
+	}
+}

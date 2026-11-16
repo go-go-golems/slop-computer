@@ -1,4 +1,4 @@
-/* the bench, built from web/bench: do not edit. source sha256:22c8de4951e559ecb35207c630be6b115288e4f3a7ae549578ccb70fa6d812ee */
+/* the bench, built from web/bench: do not edit. source sha256:fa921f009d36df1e57d57cf01b3abedf473a5b9323a0bf6778018d061d09ed88 */
 // Sitebench: a live-site workbench. Built from src/*.js
 "use strict";
 (() => {
@@ -1197,6 +1197,39 @@ const Embeds = {
   async open(P) { await this.dev(P); return await Slop.call('embed', { app: P.meta.app }) },
   // The page slop serves with the runtime: app.json's page (index.html).
   entry(P) { try { return JSON.parse(P.read('app.json') || '{}').page || 'index.html' } catch (e) { return 'index.html' } }
+}
+
+// Publishing (Phase 5): main moves to a draft snapshot, only if main is
+// still where the preflight saw it; production instances follow on their
+// next view (or now: activate). Publishing main's previous snapshot again is
+// the rollback.
+const Publish = {
+  async preflight(P) { await Sync.flush(); return await Slop.call('preflight', { app: P.meta.app }) },
+  async run(P, pf, who = 'you', note = '') {
+    const n = pf.refs.draft, at = pf.refs.main ?? 0
+    const r = await Slop.call('publish', { app: P.meta.app, n, ifAt: at })
+    P.refs = { ...(P.refs || {}), main: n }
+    P.mark({ label: 'Published draft ' + n + ' to main', note: (note ? note + ' · ' : '') + (at ? 'main was ' + at : 'first publish') + (pf.migrations.length ? ' · migrations: ' + pf.migrations.join(', ') : ''), by: who, kind: 'milestone' })
+    Slop.refresh().catch(() => { })
+    return { n, from: r.from ?? at }
+  },
+  async rollback(P, to, from, who = 'you') {
+    await Slop.call('publish', { app: P.meta.app, n: to, ifAt: from })
+    P.refs = { ...(P.refs || {}), main: to }
+    P.mark({ label: 'Rolled main back to ' + to, note: 'from ' + from, by: who, kind: 'milestone' })
+    Slop.refresh().catch(() => { })
+  },
+  // A preflight as lines, for the dialog and the agent's approval card.
+  lines(pf) {
+    const d = pf.refs.draft, m = pf.refs.main
+    const out = [d === m ? 'main is already draft ' + d + ': nothing to publish' : 'draft ' + d + ' → main' + (m != null ? ' (now ' + m + ')' : ' (first publish)')]
+    if (pf.added.length || pf.changed.length || pf.removed.length) out.push('files: ' + [...pf.added.map(p => '+' + p), ...pf.changed.map(p => '~' + p), ...pf.removed.map(p => '-' + p)].slice(0, 30).join(' '))
+    if (pf.migrations.length) out.push('new migrations run on every production instance: ' + pf.migrations.join(', '))
+    out.push(pf.dev ? (pf.dev.broken ? 'your dev instance failed on it: ' + pf.dev.broken : pf.dev.n === d ? 'your dev instance runs draft ' + d + ': ok' : 'your dev instance is on ' + pf.dev.n + ', not draft ' + d) : 'no dev instance of yours has run this draft')
+    out.push(pf.production.length ? 'production: ' + pf.production.map(x => x.store + ' @' + x.n + (x.broken ? ' (broken)' : '')).join(', ') : 'no production instance yet: nothing serves main')
+    for (const b of pf.blockers) out.push('BLOCKED: ' + b)
+    return out
+  }
 }
 
 // A new slop app: the smallest tree slop runs, a page and its manifest.
@@ -2818,7 +2851,7 @@ const Sandbox = {
   drop(sid) { if (this.worker) this.worker.postMessage({ type: 'drop', sid }) }
 }
 
-const LONG_CALLS = new Set(['agents.delegate', 'llm', 'ui.approve', 'ui.ask', 'session.waitFor', 'scenarios.run', 'scenarios.runAll'])
+const LONG_CALLS = new Set(['agents.delegate', 'llm', 'ui.approve', 'ui.ask', 'session.waitFor', 'scenarios.run', 'scenarios.runAll', 'publish.run'])
 // signatures: a parameter ending in ? is optional. Used to check calls and to say how to call a verb.
 const API_SIGS = {
   'files.list': 'prefix?', 'files.read': 'path', 'files.exists': 'path', 'files.lines': 'path, from?, to?', 'files.write': 'path, text',
@@ -2840,7 +2873,8 @@ const API_SIGS = {
   'session.mark': 'label, {kind, why}?', 'session.marks': '', 'session.events': '{kind, path, since, limit}?', 'session.diff': 'markLabelOrIndex', 'session.workspace': '',
   'lib.def': 'name, fn, {description}?', 'lib.list': '', 'lib.remove': 'name', 'lib.source': 'name', 'log': '...values',
   'app.info': '', 'app.status': '', 'app.logs': '{limit}?', 'app.docs': 'coll', 'app.doc': 'path', 'app.sql': 'query, args?',
-  'app.seedDocs': 'coll, rows, {id}?', 'app.seedTable': 'table, rows', 'app.resetDev': ''
+  'app.seedDocs': 'coll, rows, {id}?', 'app.seedTable': 'table, rows', 'app.resetDev': '',
+  'publish.check': '', 'publish.run': '{note}?'
 }
 function checkArgs(name, args) {
   const sig = API_SIGS[name]; if (sig == null || sig.startsWith('...')) return null
@@ -2951,6 +2985,18 @@ function hostAPI(ctx) {
       Embeds.ready.delete(app); Sync.act = null; Sync.ev.emit('status', Sync.status)
       await Promise.all([...FrameHosts].filter(fh => fh.project === P && fh.embed).map(fh => fh.load({ keepState: false })))
       return r
+    },
+    // publishing is the person's: the agent checks, and asks with an approval card
+    'publish.check': async () => { needApp(); const pf = await Publish.preflight(P); return { ...pf, summary: Publish.lines(pf) } },
+    'publish.run': async (o = {}) => {
+      writable(); needApp()
+      const pf = await Publish.preflight(P)
+      if (pf.refs.draft === pf.refs.main) return { published: false, why: 'main is already draft ' + pf.refs.draft }
+      if (pf.blockers.length) throw policy('not publishable: ' + pf.blockers.join('; '))
+      const ok = await approvalCard(ctx, 'Publish draft ' + pf.refs.draft + ' of ' + P.meta.app + ' to main?', [o.note ? String(o.note) : '', ...Publish.lines(pf)].filter(Boolean).join('\n'))
+      if (!ok) throw Object.assign(new Error('the person declined to publish'), { kind: 'approval' })
+      const r = await Publish.run(P, pf, who, o.note ? String(o.note) : '')
+      return { published: true, n: r.n, from: r.from, rollback: 'publishing ' + r.from + ' again rolls back; the person can do it from the rollout dialog' }
     },
     // data: in a proposal, the first write to a table copies it into the proposal; main's rows change only on accept
     'data.tables': () => [...P.tablesIn(ws()).values()].map(t => ({ name: t.name, cols: t.cols, count: t.rows.length, ...(ws() !== 'main' && P.ownsTable(t.name, ws()) ? { proposalCopy: true } : {}) })),
@@ -3328,7 +3374,7 @@ data.* (Sitebench's own tables) are refused here: they are not this app's data.
 Working rules for slop apps:
 - After writing actor.js or a migration, look at effects.actor and app.logs() before going on.
 - Keep the person's production data out of it: seed the dev instance (app.seedDocs, app.seedTable) to try things.
-- Say which draft your change made; publishing it is the person's call.`
+- Say which draft your change made; publishing it is the person's call. publish.check() -> what publishing would do ({refs, added, changed, removed, migrations, blockers, production, dev, summary}); publish.run({note}?) asks the person with an approval card and publishes only if they approve. Run publish.check first, and never edit a migration that main has run.`
 }
 
 const API_GUIDE = `You are the coding agent inside Sitebench, an IDE where a person builds real websites (HTML, CSS, JS files plus small data tables) and watches them run live in frames on a canvas.
@@ -5932,6 +5978,29 @@ const App = {
     paint()
     const m = modal({ title: 'New project', body: [h('p.note', 'Each project is its own repository: files, tables, proposals, threads and timeline. Try ideas side by side.'), cards, name], actions: [{ label: 'Cancel' }, { label: 'Create', primary: true, run: () => { go(); return false } }] })
   },
+  async publishDialog() {
+    const P = this.P; if (!P || !P.meta.app) return
+    let pf
+    try { pf = await Publish.preflight(P) } catch (e) { toast('Could not check ' + P.meta.app + ': ' + (e.message || e), 5000); return }
+    const nothing = pf.refs.draft === pf.refs.main, blocked = pf.blockers.length > 0
+    const lines = Publish.lines(pf).map(l => h('div', { style: { margin: '2px 0', color: /^BLOCKED/.test(l) ? 'var(--bad, #c00)' : '' } }, l))
+    modal({ title: 'Publish ' + P.meta.app, wide: true, body: [h('p.note', 'Publishing moves main to this draft. Production instances run it on their next view; a migration runs on each. You can roll back.'), h('div.mono', { style: { fontSize: '12px' } }, lines)],
+      actions: [{ label: 'Cancel' }, ...(nothing || blocked ? [] : [{ label: 'Publish draft ' + pf.refs.draft, primary: true, run: async () => {
+        try { const r = await Publish.run(P, pf); toast('Published draft ' + r.n + ' to main'); this.rolloutDialog(r.n, r.from) }
+        catch (e) { toast('Not published: ' + (e.message || e), 6000) }
+      } }])] })
+  },
+  async rolloutDialog(n, from) {
+    const P = this.P; if (!P || !P.meta.app) return
+    let pf; try { pf = await Slop.call('preflight', { app: P.meta.app }) } catch (e) { return }
+    const list = h('div.mono', { style: { fontSize: '12px' } })
+    const paint = rows => { clear(list); for (const x of rows) list.append(h('div', { style: { display: 'flex', gap: '8px', alignItems: 'center', margin: '3px 0' } }, h('span', { style: { flex: 1 } }, x.store + ' @' + x.n + (x.broken ? ' · broken: ' + x.broken.slice(0, 80) : x.n === n ? ' · on ' + n : ' · activates on its next view')),
+      x.n === n ? null : h('button.btn.sm', { on: { click: async () => { try { Object.assign(x, await Slop.call('activate', { store: x.store })); paint(rows) } catch (e) { toast(e.message || String(e)) } } } }, 'Activate now'))) }
+    paint(pf.production)
+    if (!pf.production.length) list.append(h('div', 'No production instance follows main yet. Mount the app or make an instance (slop store new <id> --app ' + P.meta.app + ').'))
+    modal({ title: 'Published draft ' + n, wide: true, body: [h('p.note', 'Instances that follow main:'), list],
+      actions: [{ label: from ? 'Roll back to ' + from : 'Close', danger: !!from, run: async () => { if (!from) return; try { await Publish.rollback(P, from, n); toast('main is back at ' + from) } catch (e) { toast('Not rolled back: ' + (e.message || e), 6000) } } }, ...(from ? [{ label: 'Done', primary: true }] : [])] })
+  },
   async resetDev() {
     const P = this.P; if (!P || !P.meta.app) return
     if (!await confirmBox('Reset dev data?', 'Your dev instance of ' + P.meta.app + ' and its data are dropped, and a fresh one runs draft. The app and its other instances are not touched.', 'Reset')) return
@@ -6017,12 +6086,13 @@ const App = {
       modes: h('div.seg.modes', [['select', 'Select', 'V'], ['play', 'Play', 'P'], ['comment', 'Comment', 'C']].map(([m, l, k]) => h('button', { 'data-m': m, title: l + ' (' + k + ')', on: { click: () => this.setMode(m) } }, l))),
       health: h('button.pill', { title: 'Layout, contrast and a11y checks, plus page errors', on: { click: e => this.healthMenu(e.currentTarget) } }),
       agent: h('button.pill.hide-s', { title: 'Claude', on: { click: () => Dock.open('agent') } }),
-      store: h('button.pill.hide-s', { on: { click: () => { Store.flush(); if (this.P && this.P.meta.app) Sync.run() } } })
+      store: h('button.pill.hide-s', { on: { click: () => { Store.flush(); if (this.P && this.P.meta.app) Sync.run() } } }),
+      publish: h('button.btn.primary', { title: 'Publish draft to main: what people use', style: { display: 'none' }, on: { click: () => this.publishDialog() } }, 'Publish')
     }
     const H = this.hdr
     return h('header.bar', h('div.brand', 'Sitebench', h('i', 'live site workbench')),
       h('div.rel', H.proj), h('div.rel', H.ws), H.modes, h('span.sp'),
-      h('div.rel', H.health), H.agent, H.store,
+      h('div.rel', H.health), H.agent, H.store, H.publish,
       h('button.btn.hide-s', { title: 'Bookmark this moment on the timeline', on: { click: () => this.addMark() } }, '+ Mark'),
       h('div.rel', h('button.btn', { on: { click: e => this.layoutMenu(e.currentTarget) } }, 'Layout')),
       h('button.ibtn', { title: 'Theme', on: { click: () => this.theme({ auto: 'dark', dark: 'light', light: 'auto' }[this.prefs.theme || 'auto']) } }, '◐'))
@@ -6037,6 +6107,7 @@ const App = {
     H.health.className = 'pill' + (n ? ' bad' : ''); clear(H.health).append(h('b', String(n)), h('span', n === 1 ? 'issue' : 'issues'))
     const busy = Agent.anyBusy()
     H.agent.className = 'pill hide-s' + (busy ? ' busy' : ''); clear(H.agent).append(h('b', busy ? 'Working' : Agent.sample ? 'Idle' : Agent.ready ? 'Off' : '…'), h('span', 'Claude'))
+    H.publish.style.display = P.meta.app && Slop.on ? '' : 'none'
     if (P.meta.app) {
       // An app project: where draft is, and the visitor's dev instance on it.
       const l = Sync.label(), bad = Sync.status === 'error' || (Sync.act && Sync.act.broken)

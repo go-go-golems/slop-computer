@@ -70,7 +70,7 @@ const Sandbox = {
   drop(sid) { if (this.worker) this.worker.postMessage({ type: 'drop', sid }) }
 }
 
-const LONG_CALLS = new Set(['agents.delegate', 'llm', 'ui.approve', 'ui.ask', 'session.waitFor', 'scenarios.run', 'scenarios.runAll'])
+const LONG_CALLS = new Set(['agents.delegate', 'llm', 'ui.approve', 'ui.ask', 'session.waitFor', 'scenarios.run', 'scenarios.runAll', 'publish.run'])
 // signatures: a parameter ending in ? is optional. Used to check calls and to say how to call a verb.
 const API_SIGS = {
   'files.list': 'prefix?', 'files.read': 'path', 'files.exists': 'path', 'files.lines': 'path, from?, to?', 'files.write': 'path, text',
@@ -92,7 +92,8 @@ const API_SIGS = {
   'session.mark': 'label, {kind, why}?', 'session.marks': '', 'session.events': '{kind, path, since, limit}?', 'session.diff': 'markLabelOrIndex', 'session.workspace': '',
   'lib.def': 'name, fn, {description}?', 'lib.list': '', 'lib.remove': 'name', 'lib.source': 'name', 'log': '...values',
   'app.info': '', 'app.status': '', 'app.logs': '{limit}?', 'app.docs': 'coll', 'app.doc': 'path', 'app.sql': 'query, args?',
-  'app.seedDocs': 'coll, rows, {id}?', 'app.seedTable': 'table, rows', 'app.resetDev': ''
+  'app.seedDocs': 'coll, rows, {id}?', 'app.seedTable': 'table, rows', 'app.resetDev': '',
+  'publish.check': '', 'publish.run': '{note}?'
 }
 function checkArgs(name, args) {
   const sig = API_SIGS[name]; if (sig == null || sig.startsWith('...')) return null
@@ -203,6 +204,18 @@ function hostAPI(ctx) {
       Embeds.ready.delete(app); Sync.act = null; Sync.ev.emit('status', Sync.status)
       await Promise.all([...FrameHosts].filter(fh => fh.project === P && fh.embed).map(fh => fh.load({ keepState: false })))
       return r
+    },
+    // publishing is the person's: the agent checks, and asks with an approval card
+    'publish.check': async () => { needApp(); const pf = await Publish.preflight(P); return { ...pf, summary: Publish.lines(pf) } },
+    'publish.run': async (o = {}) => {
+      writable(); needApp()
+      const pf = await Publish.preflight(P)
+      if (pf.refs.draft === pf.refs.main) return { published: false, why: 'main is already draft ' + pf.refs.draft }
+      if (pf.blockers.length) throw policy('not publishable: ' + pf.blockers.join('; '))
+      const ok = await approvalCard(ctx, 'Publish draft ' + pf.refs.draft + ' of ' + P.meta.app + ' to main?', [o.note ? String(o.note) : '', ...Publish.lines(pf)].filter(Boolean).join('\n'))
+      if (!ok) throw Object.assign(new Error('the person declined to publish'), { kind: 'approval' })
+      const r = await Publish.run(P, pf, who, o.note ? String(o.note) : '')
+      return { published: true, n: r.n, from: r.from, rollback: 'publishing ' + r.from + ' again rolls back; the person can do it from the rollout dialog' }
     },
     // data: in a proposal, the first write to a table copies it into the proposal; main's rows change only on accept
     'data.tables': () => [...P.tablesIn(ws()).values()].map(t => ({ name: t.name, cols: t.cols, count: t.rows.length, ...(ws() !== 'main' && P.ownsTable(t.name, ws()) ? { proposalCopy: true } : {}) })),
@@ -580,7 +593,7 @@ data.* (Sitebench's own tables) are refused here: they are not this app's data.
 Working rules for slop apps:
 - After writing actor.js or a migration, look at effects.actor and app.logs() before going on.
 - Keep the person's production data out of it: seed the dev instance (app.seedDocs, app.seedTable) to try things.
-- Say which draft your change made; publishing it is the person's call.`
+- Say which draft your change made; publishing it is the person's call. publish.check() -> what publishing would do ({refs, added, changed, removed, migrations, blockers, production, dev, summary}); publish.run({note}?) asks the person with an approval card and publishes only if they approve. Run publish.check first, and never edit a migration that main has run.`
 }
 
 const API_GUIDE = `You are the coding agent inside Sitebench, an IDE where a person builds real websites (HTML, CSS, JS files plus small data tables) and watches them run live in frames on a canvas.

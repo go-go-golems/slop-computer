@@ -130,6 +130,29 @@ const App = {
     paint()
     const m = modal({ title: 'New project', body: [h('p.note', 'Each project is its own repository: files, tables, proposals, threads and timeline. Try ideas side by side.'), cards, name], actions: [{ label: 'Cancel' }, { label: 'Create', primary: true, run: () => { go(); return false } }] })
   },
+  async publishDialog() {
+    const P = this.P; if (!P || !P.meta.app) return
+    let pf
+    try { pf = await Publish.preflight(P) } catch (e) { toast('Could not check ' + P.meta.app + ': ' + (e.message || e), 5000); return }
+    const nothing = pf.refs.draft === pf.refs.main, blocked = pf.blockers.length > 0
+    const lines = Publish.lines(pf).map(l => h('div', { style: { margin: '2px 0', color: /^BLOCKED/.test(l) ? 'var(--bad, #c00)' : '' } }, l))
+    modal({ title: 'Publish ' + P.meta.app, wide: true, body: [h('p.note', 'Publishing moves main to this draft. Production instances run it on their next view; a migration runs on each. You can roll back.'), h('div.mono', { style: { fontSize: '12px' } }, lines)],
+      actions: [{ label: 'Cancel' }, ...(nothing || blocked ? [] : [{ label: 'Publish draft ' + pf.refs.draft, primary: true, run: async () => {
+        try { const r = await Publish.run(P, pf); toast('Published draft ' + r.n + ' to main'); this.rolloutDialog(r.n, r.from) }
+        catch (e) { toast('Not published: ' + (e.message || e), 6000) }
+      } }])] })
+  },
+  async rolloutDialog(n, from) {
+    const P = this.P; if (!P || !P.meta.app) return
+    let pf; try { pf = await Slop.call('preflight', { app: P.meta.app }) } catch (e) { return }
+    const list = h('div.mono', { style: { fontSize: '12px' } })
+    const paint = rows => { clear(list); for (const x of rows) list.append(h('div', { style: { display: 'flex', gap: '8px', alignItems: 'center', margin: '3px 0' } }, h('span', { style: { flex: 1 } }, x.store + ' @' + x.n + (x.broken ? ' · broken: ' + x.broken.slice(0, 80) : x.n === n ? ' · on ' + n : ' · activates on its next view')),
+      x.n === n ? null : h('button.btn.sm', { on: { click: async () => { try { Object.assign(x, await Slop.call('activate', { store: x.store })); paint(rows) } catch (e) { toast(e.message || String(e)) } } } }, 'Activate now'))) }
+    paint(pf.production)
+    if (!pf.production.length) list.append(h('div', 'No production instance follows main yet. Mount the app or make an instance (slop store new <id> --app ' + P.meta.app + ').'))
+    modal({ title: 'Published draft ' + n, wide: true, body: [h('p.note', 'Instances that follow main:'), list],
+      actions: [{ label: from ? 'Roll back to ' + from : 'Close', danger: !!from, run: async () => { if (!from) return; try { await Publish.rollback(P, from, n); toast('main is back at ' + from) } catch (e) { toast('Not rolled back: ' + (e.message || e), 6000) } } }, ...(from ? [{ label: 'Done', primary: true }] : [])] })
+  },
   async resetDev() {
     const P = this.P; if (!P || !P.meta.app) return
     if (!await confirmBox('Reset dev data?', 'Your dev instance of ' + P.meta.app + ' and its data are dropped, and a fresh one runs draft. The app and its other instances are not touched.', 'Reset')) return
@@ -215,12 +238,13 @@ const App = {
       modes: h('div.seg.modes', [['select', 'Select', 'V'], ['play', 'Play', 'P'], ['comment', 'Comment', 'C']].map(([m, l, k]) => h('button', { 'data-m': m, title: l + ' (' + k + ')', on: { click: () => this.setMode(m) } }, l))),
       health: h('button.pill', { title: 'Layout, contrast and a11y checks, plus page errors', on: { click: e => this.healthMenu(e.currentTarget) } }),
       agent: h('button.pill.hide-s', { title: 'Claude', on: { click: () => Dock.open('agent') } }),
-      store: h('button.pill.hide-s', { on: { click: () => { Store.flush(); if (this.P && this.P.meta.app) Sync.run() } } })
+      store: h('button.pill.hide-s', { on: { click: () => { Store.flush(); if (this.P && this.P.meta.app) Sync.run() } } }),
+      publish: h('button.btn.primary', { title: 'Publish draft to main: what people use', style: { display: 'none' }, on: { click: () => this.publishDialog() } }, 'Publish')
     }
     const H = this.hdr
     return h('header.bar', h('div.brand', 'Sitebench', h('i', 'live site workbench')),
       h('div.rel', H.proj), h('div.rel', H.ws), H.modes, h('span.sp'),
-      h('div.rel', H.health), H.agent, H.store,
+      h('div.rel', H.health), H.agent, H.store, H.publish,
       h('button.btn.hide-s', { title: 'Bookmark this moment on the timeline', on: { click: () => this.addMark() } }, '+ Mark'),
       h('div.rel', h('button.btn', { on: { click: e => this.layoutMenu(e.currentTarget) } }, 'Layout')),
       h('button.ibtn', { title: 'Theme', on: { click: () => this.theme({ auto: 'dark', dark: 'light', light: 'auto' }[this.prefs.theme || 'auto']) } }, '◐'))
@@ -235,6 +259,7 @@ const App = {
     H.health.className = 'pill' + (n ? ' bad' : ''); clear(H.health).append(h('b', String(n)), h('span', n === 1 ? 'issue' : 'issues'))
     const busy = Agent.anyBusy()
     H.agent.className = 'pill hide-s' + (busy ? ' busy' : ''); clear(H.agent).append(h('b', busy ? 'Working' : Agent.sample ? 'Idle' : Agent.ready ? 'Off' : '…'), h('span', 'Claude'))
+    H.publish.style.display = P.meta.app && Slop.on ? '' : 'none'
     if (P.meta.app) {
       // An app project: where draft is, and the visitor's dev instance on it.
       const l = Sync.label(), bad = Sync.status === 'error' || (Sync.act && Sync.act.broken)
