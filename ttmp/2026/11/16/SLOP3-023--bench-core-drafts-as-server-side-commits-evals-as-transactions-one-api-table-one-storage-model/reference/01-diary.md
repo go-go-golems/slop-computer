@@ -367,3 +367,81 @@ Mid-rewrite, the user asked how big the bench's files are and whether to modular
 
 ### Technical details
 - Layers: `LAYERS = ['lib', 'core', 'server', 'model', 'frames', 'agent', 'ui', 'main.js']`; `layerOf(file)` is the index of the file's top folder.
+
+## Step 6: The model and frames layers
+
+With the bottom layers in place, I wrote the project model and the frames layer for the new design. A project is now its Draft plus the person's records on the server. A frame now always shows one of the person's instances (dev, test or prop), so the in-browser page builder, the mock data, the playhead and the probe's `window.site` mode are gone. Scenarios run on the test instance, reset and seeded with their fixture. Both layers pass the import check, including the layer rule.
+
+### Prompt Context
+
+**User prompt (verbatim):** see Steps 2 and 5.
+
+**Assistant interpretation:** Phases 2 and 4 on the client, written to section 6's rules.
+
+**Inferred user intent:** A model with one source of truth, and frames that show what really runs.
+
+**Commit (code):** 825040b — "Bench source: the model layer — project, timeline, templates (SLOP3-023)"; 696018e — "Bench source: the frames layer — every frame is an instance (SLOP3-023)"
+
+### What I did
+- **`model/project.js`** has two parts.
+  - `Project`, with workspaces named by ref (`draft`, `proposal/<id>`):
+    - files: `draftOf`, `view`, `read`, `entry`, `list`, `write`, `remove`;
+    - proposals: `propose`, `changes`, `accept` (one commit over the proposal's base, by `Tx.copy` for files kept by hash), `reject`, `close`;
+    - the timeline: `log` (numbered by the server through an outbox), `addEvent` (commit events from the answer), `mark`;
+    - threads: `newThread`, `loadThread`, `saveThread` (messages sent from the first one that changed, compared as JSON); the canvas.
+  - `Projects`: `open`, `create`, `forget`, `recent`.
+- **`model/timeline.js`:** `snapshotAt`, `versions` (listings only), `blame` (texts by hash, cached per path and head), `why`, `since`, `restore`.
+- **`model/templates.js`:** two working app templates (a page with the db; a page with an actor and a SQL migration). I checked the runtime's `collection().get()` (`.docs`) and `add()` in `pkg/doors/pages/assets/claude.js`.
+- **`core/draft.js`:** `Tx.copy`, `Draft.listingOf`, `Draft.text`; a test for copy (6 tests pass).
+- **`frames/`:**
+  - `host.js`: FrameHost is embed-only, with `FrameHost.ui` hooks and recording;
+  - `probe.js`: embedded-only;
+  - `layout.js`: diffs, plus Snaps through the actor;
+  - `streams.js`;
+  - `scenarios.js`: `Fixtures.apply`, `runScenario`, `runAllScenarios`.
+- **`core/scenario.js`:** specs. Fixtures are `{docs, tables}`; the `data` and `store` steps became `sql` and `docs`.
+- **Actor:** `snaps.doc`; test instances may follow a proposal.
+
+### Why
+- **`FrameHost.ui` hooks:** the frame host used `App` for twelve things. Hooks with no-op defaults keep `frames/` below `ui/`, as the layer rule requires.
+- **One snapshot document per row, CSS inline:** the old CSS deduplication by hash existed to fit 256 KB documents. The actor's limit is 4 MiB.
+- **A reset before every scenario:** the old runs used a private copy of the mock data. The equivalent for a real app is fresh instance data.
+
+### What worked
+- `node tools/imports.mjs` reports nothing for `lib`, `core`, `server`, `model` and `frames`.
+- `node --test test/draft.test.mjs`: 6 pass.
+
+### What didn't work
+- **The import tool imported a local name.**
+  - Symptom: `server/publish.js: uses why from model/timeline.js, a higher layer`, with `import { why }` written into `publish.js`, which only has a local `const why`.
+  - Cause: the tool resolved names against other modules' exports before checking local declarations.
+  - Fix: real scope resolution. A probe module with an undefined `zzz`, a shadowing `why` and a block-scoped `Slop` is now reported correctly.
+- **Every `--write` rewrote the unmigrated `NN-*.js` files.** Each run added lib imports to them. I restored them with `git checkout`, and the tool now only reports files outside a layer.
+- **The extraction script for `frames/layout.js` stopped on its own assertion.** `'cssText' not in render` was meant to prove the old CSS cache was gone, but the drawing script sets `d.style.cssText`. I dropped that check.
+
+### What I learned
+- An import tool that only approximates scoping is worse than none: its mistakes look like real imports. Hoisting and the scope chain are 60 lines.
+
+### What was tricky to build
+- **Accepting a proposal over its base, not over draft's head.** The commit's `base` is the proposal's base snapshot. The server then merges per file with everything that reached draft since, and a conflict means both changed a file.
+  - Files kept by hash need `Tx.copy`, because the Tx used to carry text only.
+- **Proposal Drafts are made lazily** (`draftOf`) and dropped on close. Each Draft's events are wired to the project once (`watch`).
+
+### What warrants a second pair of eyes
+- **The outbox in `Project.log`:** events show at once with `seq: null` and get their number when saved; a failed batch is put back and retried.
+  - Sorting by `seq ?? Infinity` keeps unsaved events last.
+- **Every scenario resets the test instance.** That's correct, but costs a store drop and create per scenario. Measure it on staging.
+
+### What should be done in the future
+- `compareModal` (DOM, in the old snapshots file) and the recording dialog move to `ui/`.
+
+### Code review instructions
+- `src/model/project.js` (accept, log/flushEvents, saveThread).
+- `src/model/timeline.js`.
+- `src/frames/host.js` (load, swap, `FrameHost.ui`).
+- `src/frames/scenarios.js` (`Fixtures.apply`, `runScenario`).
+- `node tools/imports.mjs` must report nothing for these layers.
+
+### Technical details
+- An embed's URL for a page: `new URL(route, e.src)` with `sbn=<nonce>` and the route's hash.
+- The test instance follows `draft` or the proposal given (actor `instance`: dev → draft; test → ref or draft; prop → ref).
