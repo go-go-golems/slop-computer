@@ -448,15 +448,26 @@ async function runEval(ctx, code, api, { sid, restore } = {}) {
     try { layouts.set(f.id, { route: fh.route, layout: await fh.call('layout', [300], 1200) }) } catch { if (fh.layoutMap) layouts.set(f.id, { route: fh.route, layout: fh.layoutMap }) }
   }))
   ctx.tx = { files: new Map(), tables: new Map(), t0: now() }
-  const r = await Sandbox.run(code, api, { sid, restore, lib: libEntries(P, ws).map(l => ({ name: l.name, source: l.source })) })
-  const tx = ctx.tx; ctx.tx = null; ctx.scratch = null; ctx.txStack = []
+  // An app project's writes reach draft (and its dev instance runs them)
+  // only once the eval has committed: held until then, and a rollback
+  // leaves nothing to push.
+  const held = !!(P.meta.app && ws === 'main')
+  if (held) Sync.hold()
+  let r, tx
   const effects = {}
-  if (!r.ok && (tx.files.size || tx.tables.size)) {
-    const opts = { who: ctx.who, thread: ctx.thread, note: 'rolled back: the eval failed' }
-    for (const [path, snap] of tx.files) P.revert(path, ws, snap, opts)
-    for (const [name, snap] of tx.tables) P.restoreTable(name, snap, ctx.who, ws)
-    effects.rolledBack = [...tx.files.keys(), ...[...tx.tables.keys()].map(t => 'table ' + t)]
-  } else {
+  try {
+    r = await Sandbox.run(code, api, { sid, restore, lib: libEntries(P, ws).map(l => ({ name: l.name, source: l.source })) })
+  } finally {
+    tx = ctx.tx; ctx.tx = null; ctx.scratch = null; ctx.txStack = []
+    if (!r || (!r.ok && (tx.files.size || tx.tables.size))) {
+      const opts = { who: ctx.who, thread: ctx.thread, note: 'rolled back: the eval failed' }
+      for (const [path, snap] of tx.files) P.revert(path, ws, snap, opts)
+      for (const [name, snap] of tx.tables) P.restoreTable(name, snap, ctx.who, ws)
+      effects.rolledBack = [...tx.files.keys(), ...[...tx.tables.keys()].map(t => 'table ' + t)]
+    }
+    if (held) Sync.release()
+  }
+  if (!effects.rolledBack) {
     const files = []
     for (const [path, snap] of tx.files) {
       const cur = P.read(path, ws); if (cur === snap.text) continue

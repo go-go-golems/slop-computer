@@ -47,17 +47,26 @@ const textish = f => !BINARY_EXT.test(f.path) && f.size <= 240000
 // text, the rest by the hash the server gave them. One push at a time; edits
 // during a push are picked up by the next.
 const Sync = {
-  P: null, status: 'idle', error: '', n: null, act: null, timer: 0, busy: false, again: false, ev: emitter(),
+  P: null, status: 'idle', error: '', n: null, act: null, timer: 0, busy: false, again: false, holds: 0, ev: emitter(),
   set(s, err = '') { this.status = s; this.error = err; this.ev.emit('status', s, err) },
   attach(P) { clearTimeout(this.timer); this.P = P; this.n = P && P.refs ? P.refs.draft : null; this.act = P && P.devStatus ? { n: P.devStatus.n, broken: P.devStatus.broken } : null; this.set(P ? 'synced' : 'idle') },
   schedule(P) {
     if (P !== this.P) return
-    clearTimeout(this.timer); this.timer = setTimeout(() => this.run(), 300)
+    clearTimeout(this.timer); if (!this.holds) this.timer = setTimeout(() => this.run(), 300)
     if (this.status !== 'error') this.set('dirty')
+  },
+  // While an eval runs, nothing is pushed: its writes may still roll back.
+  // Releasing the last hold pushes whatever then differs from draft.
+  hold() { this.holds++; clearTimeout(this.timer) },
+  release() {
+    this.holds = Math.max(0, this.holds - 1)
+    if (this.holds || !this.P) return
+    if (this.pending(this.P)) this.schedule(this.P)
+    else if (this.status === 'dirty') this.set('synced')
   },
   async run() {
     const P = this.P
-    if (!P || !P.meta.app) return
+    if (!P || !P.meta.app || this.holds) return
     if (this.busy || Outside.merging) { this.again = true; return }
     this.busy = true; this.set('pushing')
     const sent = new Map(), files = []
@@ -104,7 +113,7 @@ const Sync = {
     let tried = false
     for (let i = 0; i < 400; i++) {
       if (this.busy || Outside.merging) { await sleep(30); continue }
-      if (!P || P !== this.P || !P.meta.app || !this.pending(P) || (tried && this.status === 'error')) break
+      if (!P || P !== this.P || !P.meta.app || this.holds || !this.pending(P) || (tried && this.status === 'error')) break
       tried = true
       await this.run()
     }
