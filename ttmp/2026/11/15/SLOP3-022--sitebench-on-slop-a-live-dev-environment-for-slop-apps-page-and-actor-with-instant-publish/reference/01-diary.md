@@ -1922,3 +1922,45 @@ The user merged geppetto#450, then had me bump the toolchain, merge Geppetto's D
 
 - **After #49 merges and deploys,** staging (slop.yolo) gets the fix with its own Pi config. Check there that `lunaroute/*` models on Responses work for the bench.
 - **Still open:** the 10-round cap per sample call (the bench should continue), and Codex round 8 on #47.
+
+## Step 26: overlapping evals on one app (Codex round 8 on #47)
+
+The user merged #47, #48 and #49. I removed their worktrees and branches. Then I fixed the one Codex finding still open from #47's last review, on a new branch from main.
+
+### Prompt Context
+
+**User prompt (verbatim):** "all 3 PRs merged"
+
+**Assistant interpretation:** Clean up after the merges, check main, and carry on with the open work: the round-8 finding first.
+
+### What I did
+
+- **The finding:** "Avoid acknowledging edits while another eval holds the project".
+  - Two evals on the same app's main workspace both hold P. The first to end releases its hold and calls `Sync.flush(P)`.
+  - `flush` broke out as soon as `held(P)`, and its "not in draft" message also required `!held(P)`.
+  - So runEval reported the old draft as `effects.draft`, with no error.
+- **The fix** (`03b-slop.js`): `flush(P, { own = 0, wait = true })`.
+  - `others()` is `syncHolds > own`. Other evals' holds are waited for, up to FLUSH_WAIT, and then: "another eval on this app is still running after 60 s: these edits reach draft when it ends".
+  - The caller's own hold is never waited for: in-eval `publish.check`/`publish.run` pass `own: 1` when `ws() === 'main'`, matching runEval's rule for when it holds.
+  - `App.openProject` passes `wait: false`, so switching projects never blocks on an eval.
+- **Checked through `window.__SB` in the bench on the local server** (jot):
+
+  | Case | Result |
+  |---|---|
+  | another eval holds; this write is committed; that hold ends after 3 s | waited 3,038 ms, draft 14 → 15, no error, nothing pending |
+  | `own: 1` | returned in 0 ms, edit pending, no error |
+  | `wait: false` | returned in 0 ms |
+  | a hold that never ends | the error above after 60 s, draft unchanged, `act` null |
+
+  Each case cleaned up its check file.
+- **Tests:** `go test ./pkg/host -run 'TestBench|TestBuildOutputsFresh'` passes.
+- **Cleanup after the merges:** removed the `bench`, `gbump` and `s22` worktrees and their local branches. All four branch tips are ancestors of origin/main; `-D` was needed because `-d` compares against the user's checkout (`task/favicon`).
+
+### What was tricky
+
+- **`flush` has three callers that want different things** (runEval after its release; an eval publishing from inside itself; a project switch). One rule for "held" could not serve all three, so the caller says which holds are its own and whether to wait.
+
+### Future
+
+- **Deploy:** `publish-image` for main (`084eaa2`) opens a GitOps PR. Merging it deploys staging, then `make deploy-apps` pushes the bench.
+- **The 10-round cap** per sample call (the bench should continue).
