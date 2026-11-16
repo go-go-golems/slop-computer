@@ -1,4 +1,4 @@
-.PHONY: lint fmt-check test build run-local runtime runtime-test admin conformance blocks blocks-push pinup pinup-push deploy-apps
+.PHONY: lint fmt-check test build run-local runtime runtime-test admin conformance blocks blocks-push pinup pinup-push deploy-apps bench
 
 SLOP ?= slop
 
@@ -41,6 +41,11 @@ runtime-test:
 # app, at /office).
 admin:
 	cd web/admin && npm ci --no-audit --no-fund && node build.mjs && node build.mjs --app ../../apps/backoffice
+
+# The bench (SLOP3-022): web/bench (Sitebench) → apps/bench/{app.js,
+# index.html,sandbox.js}, beside its app.json and actor.js.
+bench:
+	cd web/bench && npm ci --no-audit --no-fund && node build.mjs
 
 # The runtime conformance page on a running --local server, with the app
 # pushed and mounted (see web/runtime/conformance/run.mjs); needs playwright

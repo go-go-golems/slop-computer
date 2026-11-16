@@ -1,0 +1,6 @@
+{
+  "title": "Bench",
+  "type": "bench",
+  "page": "index.html",
+  "capabilities": { "db": {}, "user": {}, "sample": {}, "downloads": true }
+}
