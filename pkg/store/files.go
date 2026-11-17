@@ -55,6 +55,10 @@ var fileTypes = map[string]string{
 	".ico": "image/vnd.microsoft.icon",
 	".mp4": "video/mp4", ".webm": "video/webm", ".mp3": "audio/mpeg", ".ogg": "audio/ogg", ".wav": "audio/wav",
 	".zip": "application/zip",
+	// TypeScript (SLOP3-024). The operating system's database is no help:
+	// it says Qt Linguist or MPEG transport stream, or nothing at all.
+	".ts": "text/typescript; charset=utf-8", ".mts": "text/typescript; charset=utf-8",
+	".cts": "text/typescript; charset=utf-8", ".tsx": "text/tsx; charset=utf-8",
 }
 
 // TypeOf guesses a content type from a file name.

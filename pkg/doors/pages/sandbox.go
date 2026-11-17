@@ -152,19 +152,24 @@ func (s *Door) serveSandbox(w http.ResponseWriter, r *http.Request) {
 	man, _ := s.appManifest(ctx, as, n)
 	entry := man.Entry()
 	rest := m[2]
+	code := newAppCode(as, n, man, r.URL.Path, rest)
 	if rest != "" && rest != entry {
 		if strings.HasSuffix(rest, "/") {
 			rest += "index.html"
 		}
-		f, err := as.SnapshotFile(ctx, n, rest)
-		if err != nil {
-			notFound(w)
-			return
-		}
 		// public: the sandbox serves an app's files to anyone who has its
 		// origin (the label is the capability), so a shared cache adds no
 		// exposure; a snapshot's bytes never change
-		s.writeStoreBytes(w, r, storeBytes{st: as, f: f, vis: public, mut: immutable})
+		b := storeBytes{st: as, vis: public, mut: immutable, code: code}
+		f, err := as.SnapshotFile(ctx, n, rest)
+		if err != nil {
+			if !s.serveSourceMap(w, r, b, rest) {
+				notFound(w)
+			}
+			return
+		}
+		b.f = f
+		s.writeStoreBytes(w, r, b)
 		return
 	}
 	f, err := as.SnapshotFile(ctx, n, entry)
@@ -199,6 +204,9 @@ func (s *Door) serveSandbox(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("Cache-Control", cachePrivate)
 	w.Header().Set("X-Content-Type-Options", "nosniff")
 	var extra []string
+	if tag, _ := code.importMap(); tag != "" {
+		extra = append(extra, tag)
+	}
 	if emb != nil && emb.dev {
 		extra = append(extra, `<script src="`+assetURL("probe.js")+`"></script>`) // after the boot data it reads
 	}

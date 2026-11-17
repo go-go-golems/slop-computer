@@ -36,7 +36,19 @@ type Slop struct {
 	Platform []string        `json:"platform,omitempty"` // stores.create, mounts.set, grants.set
 	Modules  []string        `json:"modules,omitempty"`  // Go modules the actor uses once an admin trusts the app with them
 	Verbs    *Verbs          `json:"verbs,omitempty"`    // command-line verbs (SLOP3-016)
+	Imports  *Imports        `json:"imports,omitempty"`  // bare import names: vendored packages (SLOP3-024)
 }
+
+// Imports maps bare import names to files in the tree: what slop vendor
+// writes for the packages it adds. Pages get page as an import map; the
+// actor's require finds actor's names after slop's own modules.
+type Imports struct {
+	Page  map[string]string `json:"page,omitempty"`
+	Actor map[string]string `json:"actor,omitempty"`
+}
+
+// MaxImports is how many names each side of Imports may map.
+const MaxImports = 256
 
 // Verbs declares an app's command-line verbs: JavaScript files in its tree,
 // scanned by the CLI with go-go-goja's jsverbs and run as the person, on one
@@ -53,6 +65,16 @@ type Read struct {
 }
 
 var aliasRe = regexp.MustCompile(`^[a-z][a-z0-9-]{0,15}$`)
+
+// importName is a bare import name: a package (lit, @lit/context) and maybe
+// a subpath (preact/hooks, lit/decorators.js). Relative names (./x) and URLs
+// are never mapped.
+var importName = regexp.MustCompile(`^(@[a-z0-9][a-z0-9._~-]*/)?[a-z0-9][a-z0-9._~-]*(/[A-Za-z0-9._~@-]+)*$`)
+
+// inTree reports a relative path inside the tree.
+func inTree(p string) bool {
+	return !strings.HasPrefix(p, "/") && path.Clean(p) == p && !strings.HasPrefix(p, "..")
+}
 
 // Platform capabilities an app may ask for.
 var Platform = map[string]bool{"stores.create": true, "mounts.set": true, "grants.set": true}
@@ -73,8 +95,23 @@ func Parse(raw []byte) (*Manifest, error) {
 	}
 	m.Caps = caps
 	for _, f := range []struct{ name, v string }{{"page", m.Page}, {"notFound", m.NotFound}, {"actor", m.Actor}} {
-		if f.v != "" && (strings.HasPrefix(f.v, "/") || path.Clean(f.v) != f.v || strings.HasPrefix(f.v, "..")) {
+		if f.v != "" && !inTree(f.v) {
 			return nil, fmt.Errorf("app.json: %s must be a relative path in the tree", f.name)
+		}
+	}
+	if im := m.Slop.Imports; im != nil {
+		for side, names := range map[string]map[string]string{"page": im.Page, "actor": im.Actor} {
+			if len(names) > MaxImports {
+				return nil, fmt.Errorf("app.json: slop.imports.%s: at most %d names", side, MaxImports)
+			}
+			for name, p := range names {
+				if !importName.MatchString(name) {
+					return nil, fmt.Errorf("app.json: slop.imports.%s: %q is not a bare import name", side, name)
+				}
+				if p == "" || !inTree(p) {
+					return nil, fmt.Errorf("app.json: slop.imports.%s: %s: %q is not a relative path in the tree", side, name, p)
+				}
+			}
 		}
 	}
 	for _, p := range m.Slop.Platform {

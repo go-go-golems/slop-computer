@@ -12,6 +12,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"path"
 	"strconv"
 	"strings"
 	"sync"
@@ -25,6 +26,7 @@ import (
 	"github.com/go-go-golems/slop-computer/pkg/rt"
 	"github.com/go-go-golems/slop-computer/pkg/store"
 	"github.com/go-go-golems/slop-computer/pkg/sysdb"
+	"github.com/go-go-golems/slop-computer/pkg/tscompile"
 )
 
 // Limits of one actor.
@@ -267,7 +269,7 @@ func (a *Actor) load(files map[string][]byte, entry string, src []byte) error {
 			panic(a.vm.NewTypeError("defineActor takes an object"))
 		}
 		a.def = obj
-		return goja.Undefined()
+		return obj // so a declaration can say defineActor<D>(def: D): D (SLOP3-024)
 	})
 	_ = g.Set("use", func(name string) goja.Value { return a.module(name) })
 	_ = g.Set("require", a.requirer(files, entry))
@@ -292,6 +294,12 @@ func (a *Actor) load(files map[string][]byte, entry string, src []byte) error {
 	err := a.limited("actor.js took too long to load", func() error {
 		a.loading = true
 		defer func() { a.loading = false }()
+		if tscompile.Is(entry) {
+			// A TypeScript entry is a module like the files it requires: its
+			// compiled form may refer to module.exports (SLOP3-024).
+			_, err := a.vm.RunScript("load", "require("+strconv.Quote("./"+path.Base(entry))+")")
+			return err
+		}
 		_, err := a.vm.RunScript(entry, string(src))
 		return err
 	})
@@ -357,7 +365,31 @@ func (a *Actor) readShape() error {
 	return nil
 }
 
-// requirer gives actor.js CommonJS require of other .js files in its tree.
+// codeFile lists the extensions of the files an actor may require (and the
+// manager reads): JavaScript, CommonJS bundles (slop vendor --actor),
+// TypeScript, JSON and the migrations.
+var codeFile = map[string]bool{".js": true, ".cjs": true, ".json": true, ".sql": true,
+	".ts": true, ".tsx": true, ".mts": true, ".cts": true}
+
+// TsconfigActor is the tsconfig that governs how an actor's TypeScript
+// compiles (the pages' is tsconfig.json).
+const TsconfigActor = "tsconfig.actor.json"
+
+// resolveFile is the file a require of p (a path in the tree) loads: p
+// itself when it names its extension, otherwise p.ts or p.js.
+func resolveFile(files map[string][]byte, p string) string {
+	if ext := path.Ext(p); codeFile[ext] && ext != ".sql" {
+		return p
+	}
+	if _, ok := files[p+".ts"]; ok {
+		return p + ".ts"
+	}
+	return p + ".js"
+}
+
+// requirer gives actor.js CommonJS require of other files in its tree:
+// JavaScript, compiled TypeScript and JSON; names the app has vendored
+// (slop.imports.actor) resolve to their bundles.
 func (a *Actor) requirer(files map[string][]byte, entry string) func(string) goja.Value {
 	cache := map[string]goja.Value{}
 	var req func(from, name string) goja.Value
@@ -371,13 +403,13 @@ func (a *Actor) requirer(files map[string][]byte, entry string) func(string) goj
 			panic(a.vm.NewGoError(fail("not_found", "%s is not available to %s", name, a.run.App)))
 		}
 		p := name
-		if strings.HasPrefix(name, "./") || strings.HasPrefix(name, "../") {
+		if vendored, ok := a.actorImport(name); ok {
+			p = vendored
+		} else if strings.HasPrefix(name, "./") || strings.HasPrefix(name, "../") {
 			dir := from[:strings.LastIndex(from, "/")+1]
 			p = cleanPath(dir + name)
 		}
-		if !strings.HasSuffix(p, ".js") && !strings.HasSuffix(p, ".json") {
-			p += ".js"
-		}
+		p = resolveFile(files, p)
 		if v, ok := cache[p]; ok {
 			return v
 		}
@@ -392,6 +424,13 @@ func (a *Actor) requirer(files map[string][]byte, entry string) func(string) goj
 			}
 			cache[p] = v
 			return v
+		}
+		if tscompile.Is(p) {
+			out, err := tscompile.Compile(p, src, tscompile.Actor, files[TsconfigActor])
+			if err != nil {
+				panic(a.syntaxError(err.Error()))
+			}
+			src = out.Code
 		}
 		fn, err := a.vm.RunScript(p, "(function (module, exports, require) {"+string(src)+"\n})")
 		if err != nil {
@@ -410,6 +449,28 @@ func (a *Actor) requirer(files map[string][]byte, entry string) func(string) goj
 		return cache[p]
 	}
 	return func(name string) goja.Value { return req(entry, name) }
+}
+
+// syntaxError is a JavaScript SyntaxError: what a file that does not
+// compile throws where it is required.
+func (a *Actor) syntaxError(msg string) *goja.Object {
+	ctor, _ := goja.AssertConstructor(a.vm.Get("SyntaxError"))
+	o, err := ctor(nil, a.vm.ToValue(msg))
+	if err != nil {
+		return a.vm.NewGoError(errors.New(msg))
+	}
+	return o
+}
+
+// actorImport is the file a bare name the app has vendored for its actor
+// maps to (slop.imports.actor).
+func (a *Actor) actorImport(name string) (string, bool) {
+	m := a.run.Manifest
+	if m == nil || m.Slop.Imports == nil {
+		return "", false
+	}
+	p, ok := m.Slop.Imports.Actor[name]
+	return p, ok
 }
 
 func cleanPath(p string) string {
