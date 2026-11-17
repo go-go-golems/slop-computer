@@ -1,4 +1,4 @@
-/* the bench, built from web/bench: do not edit. source sha256:92b5ded02bdf5bb8c7d7fbf15a5fc0dcd6b26b397ad9007f474cf686338ffdc4 */
+/* the bench, built from web/bench: do not edit. source sha256:14c08adda13eb3dead7f884ffd1b579c1bad6af7f1cd243cef02369c9a7ed1a6 */
 // slop's dev probe (SLOP3-022): the bench's PROBE from web/bench/src/frames/probe.js,
 // which the sandbox adds to dev embeds only, after the runtime. It answers the
 // tool that framed the view (the boot data's parentOrigin) and nothing else.
