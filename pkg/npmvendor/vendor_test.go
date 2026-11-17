@@ -8,6 +8,7 @@ import (
 	"crypto/sha512"
 	"encoding/base64"
 	"encoding/json"
+	"fmt"
 	"net/http"
 	"net/http/httptest"
 	"os"
@@ -18,6 +19,7 @@ import (
 
 	"github.com/dop251/goja"
 
+	"github.com/go-go-golems/slop-computer/pkg/apps"
 	"github.com/go-go-golems/slop-computer/pkg/store"
 )
 
@@ -332,5 +334,210 @@ func TestHandMappedNamesStay(t *testing.T) {
 	}
 	if got := read(t, dir, "app.json"); got != `{"slop": {"imports": {"page":{"mine":"vendor/mine.js"}}}}` {
 		t.Fatalf("after rm: %s", got)
+	}
+}
+
+// peerNotes are the warnings about peers the app does not map.
+func peerNotes(res *Result) []string {
+	var out []string
+	for _, w := range res.Warnings {
+		if strings.Contains(w, "its peer") {
+			out = append(out, w)
+		}
+	}
+	return out
+}
+
+// A peer stays an import in the bundles, so the app's one copy is what the
+// package uses. The peer may be vendored after the package or before it,
+// and a note names the command until it is.
+func TestPeersStayImports(t *testing.T) {
+	reg := newRegistry(t)
+	both := func(m, c string) map[string]any { return map[string]any{"import": m, "require": c} }
+	reg.add(t, "core", "1.0.0", map[string]any{"exports": map[string]any{".": both("./index.mjs", "./index.cjs"), "./extra": both("./extra.mjs", "./extra.cjs")}}, pkgFiles{
+		"index.mjs": `export const id = {};`, "index.cjs": `exports.id = {};`,
+		"extra.mjs": `export const extra = "core extra";`, "extra.cjs": `exports.extra = "core extra";`,
+	})
+	reg.add(t, "ui", "1.0.0", map[string]any{"peerDependencies": map[string]any{"core": "^1"}, "exports": map[string]any{".": both("./index.mjs", "./index.cjs")}}, pkgFiles{
+		"index.mjs": `import { id } from "core"; import { extra } from "core/extra"; export const same = x => x === id; export { extra };`,
+		"index.cjs": `const core = require("core"); exports.same = x => x === core.id; exports.extra = require("core/extra").extra;`,
+	})
+	dir := appDir(t, appJSON)
+	add := func(o Options) *Result {
+		t.Helper()
+		o.Dir, o.Registry = dir, &Registry{URL: reg.srv.URL}
+		res, err := Add(context.Background(), o)
+		if err != nil {
+			t.Fatal(err)
+		}
+		return res
+	}
+
+	// The package first: its bundle imports the peer, which is not in it.
+	notes := peerNotes(add(Options{Spec: "ui"}))
+	if len(notes) != 1 || notes[0] != "ui's page bundles import its peer core (core, core/extra), and the app does not map it yet: slop vendor add core core core/extra" {
+		t.Fatalf("notes = %q", notes)
+	}
+	if ui := read(t, dir, "vendor/ui@1.0.0/ui.js"); !strings.Contains(ui, `from "core"`) || !strings.Contains(ui, `from "core/extra"`) || strings.Contains(ui, "core extra") {
+		t.Fatalf("core was bundled into ui:\n%s", ui)
+	}
+	// Then the peer, one name at a time: the note names what is still
+	// missing, and its command (an add keeps the names already there).
+	add(Options{Spec: "core", Entries: []string{"core/extra"}})
+	if notes := peerNotes(add(Options{Spec: "ui"})); len(notes) != 1 || !strings.HasSuffix(notes[0], "its peer core, and the app does not map it yet: slop vendor add core") {
+		t.Fatalf("notes with core/extra mapped = %q", notes)
+	}
+	add(Options{Spec: "core"})
+	if notes := peerNotes(add(Options{Spec: "ui"})); len(notes) != 0 {
+		t.Fatalf("notes once core is mapped = %q", notes)
+	}
+
+	// The actor side, the peer first: ui's require("core") is the app's copy.
+	add(Options{Spec: "core", Entries: []string{"core", "core/extra"}, Actor: true})
+	if notes := peerNotes(add(Options{Spec: "ui", Actor: true})); len(notes) != 0 {
+		t.Fatalf("actor notes = %q", notes)
+	}
+	var app struct {
+		Slop struct{ Imports imports } `json:"slop"`
+	}
+	if err := json.Unmarshal([]byte(read(t, dir, "app.json")), &app); err != nil {
+		t.Fatal(err)
+	}
+	vm := goja.New()
+	loaded := map[string]goja.Value{}
+	var require func(goja.FunctionCall) goja.Value
+	require = func(c goja.FunctionCall) goja.Value {
+		name := c.Argument(0).String()
+		if v, ok := loaded[name]; ok {
+			return v
+		}
+		file, ok := app.Slop.Imports.Actor[name]
+		if !ok {
+			panic(vm.NewGoError(fmt.Errorf("the app does not map %s", name)))
+		}
+		module, exports := vm.NewObject(), vm.NewObject()
+		_ = module.Set("exports", exports)
+		fn, err := vm.RunString("(function (module, exports, require) {" + read(t, dir, file) + "\n})")
+		if err != nil {
+			panic(vm.NewGoError(err))
+		}
+		call, _ := goja.AssertFunction(fn)
+		if _, err := call(goja.Undefined(), module, exports, vm.ToValue(require)); err != nil {
+			panic(vm.NewGoError(err))
+		}
+		loaded[name] = module.Get("exports")
+		return loaded[name]
+	}
+	_ = vm.Set("require", require)
+	if v, err := vm.RunString(`const ui = require("ui"); ui.same(require("core").id) + " " + ui.extra`); err != nil || v.String() != "true core extra" {
+		t.Fatalf("ui and core in goja: %v %v", v, err)
+	}
+	// Each re-add kept the package's files (the new version's are written
+	// before the old version's go, and a file in both stays).
+	if st, err := Check(dir); err != nil || len(st) != 2 || len(st[0].Problems)+len(st[1].Problems) != 0 {
+		t.Fatalf("check = %+v %v", st, err)
+	}
+}
+
+// An optional dependency that cannot be had is left out with a note,
+// together with what was placed for it; a required one fails the add.
+func TestOptionalDependencies(t *testing.T) {
+	reg := newRegistry(t)
+	reg.addMini(t)
+	js := func(s string) pkgFiles { return pkgFiles{"index.js": s} }
+	main := func(m map[string]any) map[string]any { m["main"] = "index.js"; return m }
+	// notar's metadata is there, its tarball is not.
+	reg.add(t, "notar", "1.0.0", main(map[string]any{}), js(`exports.x = 1;`))
+	delete(reg.tarballs, "-/notar-1.0.0.tgz")
+	// half's first dependency is placed before its second turns out not to exist.
+	reg.add(t, "other", "1.0.0", main(map[string]any{}), js(`exports.y = 1;`))
+	reg.add(t, "half", "1.0.0", main(map[string]any{"dependencies": map[string]any{"other": "^1", "zz-gone": "^1"}}), js(`exports.z = 1;`))
+	reg.add(t, "host", "1.0.0", main(map[string]any{
+		"dependencies":         map[string]any{"dep": "^2"},
+		"optionalDependencies": map[string]any{"notar": "^1", "half": "^1"},
+	}), js(`exports.twice = require("dep").twice;`))
+	reg.add(t, "needy", "1.0.0", main(map[string]any{"dependencies": map[string]any{"notar": "^1"}}), js(`exports.x = require("notar").x;`))
+
+	dir := appDir(t, appJSON)
+	res, err := Add(context.Background(), Options{Dir: dir, Spec: "host", Registry: &Registry{URL: reg.srv.URL}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	skipped := 0
+	for _, w := range res.Warnings {
+		if strings.HasPrefix(w, "skipped the optional dependency half: ") && strings.Contains(w, "zz-gone") ||
+			strings.HasPrefix(w, "skipped the optional dependency notar: ") && strings.Contains(w, "404") {
+			skipped++
+		}
+	}
+	var lock Lock
+	_ = json.Unmarshal([]byte(read(t, dir, LockFile)), &lock)
+	if p := lock.Packages["host"]; skipped != 2 || p == nil || len(p.Dependencies) != 1 || p.Dependencies["dep"] != "dep@2.1.0" {
+		t.Fatalf("warnings = %q, lock = %s", res.Warnings, read(t, dir, LockFile))
+	}
+	for _, gone := range []string{"half", "other", "notar"} {
+		if _, err := os.Stat(filepath.Join(dir, "vendor/host@1.0.0/types/node_modules", gone)); !os.IsNotExist(err) {
+			t.Errorf("%s was left in: %v", gone, err)
+		}
+	}
+	if _, err := Add(context.Background(), Options{Dir: appDir(t, appJSON), Spec: "needy", Registry: &Registry{URL: reg.srv.URL}}); err == nil || !strings.Contains(err.Error(), "404") {
+		t.Fatalf("a required dependency without its tarball: %v", err)
+	}
+}
+
+// snapshot is every file under dir and its contents.
+func snapshot(t *testing.T, dir string) map[string]string {
+	t.Helper()
+	out := map[string]string{}
+	err := filepath.WalkDir(dir, func(p string, d os.DirEntry, err error) error {
+		if err != nil || d.IsDir() {
+			return err
+		}
+		b, err := os.ReadFile(p)
+		rel, _ := filepath.Rel(dir, p)
+		out[filepath.ToSlash(rel)] = string(b)
+		return err
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	return out
+}
+
+// An add that the new app.json would refuse (here, an upgrade that adds an
+// entry point to an app at the import limit) changes nothing: the
+// installed version, its files, the lock and app.json stay.
+func TestRefusedAddChangesNothing(t *testing.T) {
+	reg := newRegistry(t)
+	reg.addMini(t)
+	names := map[string]string{}
+	for i := range apps.MaxImports - 1 {
+		names[fmt.Sprintf("n%d", i)] = fmt.Sprintf("lib/n%d.js", i)
+	}
+	raw, _ := json.Marshal(map[string]any{"slop": map[string]any{"imports": map[string]any{"page": names}}})
+	dir := appDir(t, string(raw))
+	o := Options{Dir: dir, Spec: "mini", Registry: &Registry{URL: reg.srv.URL}}
+	if _, err := Add(context.Background(), o); err != nil {
+		t.Fatal(err) // at the limit
+	}
+	before := snapshot(t, dir)
+	reg.add(t, "mini", "1.1.0", map[string]any{"exports": map[string]any{".": "./index.mjs", "./hooks": "./hooks.mjs"}}, pkgFiles{
+		"index.mjs": `export const v = "1.1";`, "hooks.mjs": `export { v } from "./index.mjs";`,
+	})
+	o.Entries = []string{"mini", "mini/hooks"}
+	_, err := Add(context.Background(), o)
+	if err == nil || !strings.Contains(err.Error(), "nothing changed") || !strings.Contains(err.Error(), fmt.Sprintf("at most %d names", apps.MaxImports)) {
+		t.Fatalf("one name over the limit: %v", err)
+	}
+	after := snapshot(t, dir)
+	for p := range before {
+		if after[p] != before[p] {
+			t.Errorf("%s changed or went", p)
+		}
+	}
+	for p := range after {
+		if _, ok := before[p]; !ok {
+			t.Errorf("%s was written", p)
+		}
 	}
 }

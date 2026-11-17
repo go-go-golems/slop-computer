@@ -4,6 +4,7 @@ import (
 	"archive/tar"
 	"bytes"
 	"compress/gzip"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"io"
@@ -93,14 +94,16 @@ type output struct {
 
 // bundle builds entry points out of the node_modules under work: for pages,
 // ES modules with code splitting (entries of one package share one copy of
-// its code); for the actor, one CommonJS file per entry, for goja.
-func bundle(work string, pkg string, entries []string, actor bool) ([]output, error) {
+// its code); for the actor, one CommonJS file per entry, for goja. Imports
+// of the peers (and their subpaths) stay imports, which the app resolves to
+// its own copy; external lists those the output makes.
+func bundle(work string, pkg string, entries []string, actor bool, peers []string) ([]output, []string, error) {
 	seen := map[string]string{}
 	points := []api.EntryPoint{}
 	for _, e := range entries {
 		n := outName(pkg, e)
 		if other, dup := seen[n]; dup {
-			return nil, fmt.Errorf("%s and %s would both be written to %s", other, e, n)
+			return nil, nil, fmt.Errorf("%s and %s would both be written to %s", other, e, n)
 		}
 		seen[n] = e
 		points = append(points, api.EntryPoint{InputPath: e, OutputPath: n})
@@ -108,6 +111,10 @@ func bundle(work string, pkg string, entries []string, actor bool) ([]output, er
 	base := api.BuildOptions{
 		AbsWorkingDir: work, Bundle: true, Write: false, Outdir: filepath.Join(work, "out"),
 		Charset: api.CharsetUTF8, LegalComments: api.LegalCommentsEndOfFile, LogLevel: api.LogLevelSilent,
+		Metafile: true,
+	}
+	for _, p := range peers {
+		base.External = append(base.External, p, p+"/*")
 	}
 	var builds []api.BuildOptions
 	if actor {
@@ -127,6 +134,7 @@ func bundle(work string, pkg string, entries []string, actor bool) ([]output, er
 		builds = append(builds, o)
 	}
 	var out []output
+	ext := map[string]bool{}
 	for _, o := range builds {
 		r := api.Build(o)
 		if len(r.Errors) > 0 {
@@ -134,17 +142,35 @@ func bundle(work string, pkg string, entries []string, actor bool) ([]output, er
 			for _, m := range r.Errors {
 				msgs = append(msgs, m.Text)
 			}
-			return nil, fmt.Errorf("bundling %s: %s", pkg, strings.Join(msgs, "; "))
+			return nil, nil, fmt.Errorf("bundling %s: %s", pkg, strings.Join(msgs, "; "))
 		}
 		for _, f := range r.OutputFiles {
 			rel, err := filepath.Rel(o.Outdir, f.Path)
 			if err != nil {
-				return nil, err
+				return nil, nil, err
 			}
 			out = append(out, output{filepath.ToSlash(rel), f.Contents})
 		}
+		var meta struct {
+			Outputs map[string]struct {
+				Imports []struct {
+					Path     string `json:"path"`
+					External bool   `json:"external"`
+				} `json:"imports"`
+			} `json:"outputs"`
+		}
+		if err := json.Unmarshal([]byte(r.Metafile), &meta); err != nil {
+			return nil, nil, fmt.Errorf("bundling %s: the metafile: %v", pkg, err)
+		}
+		for _, f := range meta.Outputs {
+			for _, im := range f.Imports {
+				if im.External {
+					ext[im.Path] = true
+				}
+			}
+		}
 	}
-	return out, nil
+	return out, sortedKeys(ext), nil
 }
 
 // declarations copies the packages' declaration files (and their

@@ -67,6 +67,29 @@ type Result struct {
 
 var packageName = regexp.MustCompile(`^(@[a-z0-9][a-z0-9._~-]*/)?[a-z0-9][a-z0-9._~-]*$`)
 
+// packageOf is the package an import name is in: preact/hooks → preact,
+// @preact/signals-core → @preact/signals-core.
+func packageOf(spec string) string {
+	parts := strings.SplitN(spec, "/", 3)
+	if strings.HasPrefix(spec, "@") && len(parts) > 1 {
+		return parts[0] + "/" + parts[1]
+	}
+	return parts[0]
+}
+
+// addCommand is the slop vendor command that maps names, import names of
+// the package pkg (an add keeps the names the package already has).
+func addCommand(pkg string, names []string, actor bool) string {
+	cmd := "slop vendor add "
+	if actor {
+		cmd += "--actor "
+	}
+	if len(names) == 1 && names[0] == pkg {
+		return cmd + pkg
+	}
+	return cmd + pkg + " " + strings.Join(names, " ")
+}
+
 // splitSpec splits name@range (a scoped name keeps its leading @).
 func splitSpec(spec string) (string, string) {
 	if i := strings.LastIndex(spec, "@"); i > 0 {
@@ -102,10 +125,11 @@ func Add(ctx context.Context, o Options) (*Result, error) {
 	if reg == nil {
 		reg = &Registry{URL: DefaultRegistry}
 	}
-	installs, warnings, err := reg.resolveAll(ctx, name, rng)
+	t, err := reg.resolveAll(ctx, name, rng)
 	if err != nil {
 		return nil, err
 	}
+	installs, warnings := t.installs, t.warnings
 	work, err := os.MkdirTemp("", "slop-vendor-*")
 	if err != nil {
 		return nil, err
@@ -148,19 +172,22 @@ func Add(ctx context.Context, o Options) (*Result, error) {
 	pkg := &Package{Version: root.meta.Version, Integrity: root.meta.Dist.Integrity, Dependencies: deps,
 		Page: map[string]string{}, Actor: map[string]string{}, Files: map[string]string{}}
 	var files []output
+	var pageExternal, actorExternal []string
 	for _, side := range []struct {
-		entries map[string]bool
-		actor   bool
-		names   map[string]string
-		ext     string
-	}{{pageEntries, false, pkg.Page, ".js"}, {actorEntries, true, pkg.Actor, ".cjs"}} {
+		entries  map[string]bool
+		actor    bool
+		names    map[string]string
+		ext      string
+		external *[]string
+	}{{pageEntries, false, pkg.Page, ".js", &pageExternal}, {actorEntries, true, pkg.Actor, ".cjs", &actorExternal}} {
 		if len(side.entries) == 0 {
 			continue
 		}
-		outs, err := bundle(work, name, sortedKeys(side.entries), side.actor)
+		outs, external, err := bundle(work, name, sortedKeys(side.entries), side.actor, t.peers)
 		if err != nil {
 			return nil, err
 		}
+		*side.external = external
 		for _, f := range outs {
 			files = append(files, output{dir + "/" + f.name, f.data})
 		}
@@ -188,12 +215,55 @@ func Add(ctx context.Context, o Options) (*Result, error) {
 		return nil, fmt.Errorf("the app would hold %d files; a store's tree holds at most %d", count+len(files), maxTreeFiles)
 	}
 
-	res := &Result{Name: name, Version: root.meta.Version, Page: pkg.Page, Actor: pkg.Actor, Warnings: warnings}
+	// Everything is prepared and checked before any file changes: a refused
+	// add (an app.json that no longer parses, too many names) leaves the
+	// installed version as it was.
+	for _, f := range files {
+		sum := sha256.Sum256(f.data)
+		pkg.Files[f.name] = hex.EncodeToString(sum[:])
+	}
 	managed := []string{dir + "/"}
 	if old != nil {
-		res.Removed = removeFiles(o.Dir, old.Files)
 		managed = append(managed, "vendor/"+name+"@"+old.Version+"/")
 	}
+	if lock.Registry == "" || reg.URL != DefaultRegistry {
+		lock.Registry = reg.URL
+	}
+	lock.Packages[name] = pkg
+	prep, err := prepare(appRaw, lock, managed)
+	if err != nil {
+		return nil, err
+	}
+	// A peer is the app's to provide: the bundles import it, and it
+	// resolves once the app maps it (vendored before this package or after).
+	for _, side := range []struct {
+		external []string
+		mapped   map[string]string
+		actor    bool
+		what     string
+	}{{pageExternal, prep.im.Page, false, "page bundles import"}, {actorExternal, prep.im.Actor, true, "actor bundles require"}} {
+		missing := map[string][]string{} // peer package → its import names the app does not map
+		for _, spec := range side.external {
+			if _, ok := side.mapped[spec]; !ok {
+				missing[packageOf(spec)] = append(missing[packageOf(spec)], spec)
+			}
+		}
+		for _, peer := range sortedKeys(missing) {
+			names := missing[peer]
+			what := peer
+			if len(names) > 1 || names[0] != peer {
+				what += " (" + strings.Join(names, ", ") + ")"
+			}
+			yet := "the app does not map it yet"
+			if side.actor {
+				yet = "the app does not map it for the actor yet"
+			}
+			warnings = append(warnings, fmt.Sprintf("%s's %s its peer %s, and %s: %s", name, side.what, what, yet, addCommand(peer, names, side.actor)))
+		}
+	}
+
+	// The new files first, then the old ones go (not those the new version
+	// writes again), then app.json, the lock and the tsconfig.
 	for _, f := range files {
 		p := filepath.Join(o.Dir, filepath.FromSlash(f.name))
 		if err := os.MkdirAll(filepath.Dir(p), 0o755); err != nil {
@@ -202,15 +272,12 @@ func Add(ctx context.Context, o Options) (*Result, error) {
 		if err := os.WriteFile(p, f.data, 0o644); err != nil {
 			return nil, err
 		}
-		sum := sha256.Sum256(f.data)
-		pkg.Files[f.name] = hex.EncodeToString(sum[:])
 	}
-	res.Written = len(files)
-	if lock.Registry == "" || reg.URL != DefaultRegistry {
-		lock.Registry = reg.URL
+	res := &Result{Name: name, Version: root.meta.Version, Page: pkg.Page, Actor: pkg.Actor, Written: len(files), Warnings: warnings}
+	if old != nil {
+		res.Removed = removeFiles(o.Dir, old.Files, pkg.Files)
 	}
-	lock.Packages[name] = pkg
-	return res, save(o.Dir, appRaw, lock, managed)
+	return res, prep.commit(o.Dir)
 }
 
 // Remove takes a vendored package out of the app at dir.
@@ -227,9 +294,13 @@ func Remove(dir, name string) (*Result, error) {
 	if !ok {
 		return nil, fmt.Errorf("%s is not vendored here", name)
 	}
-	res := &Result{Name: name, Version: pkg.Version, Removed: removeFiles(dir, pkg.Files)}
 	delete(lock.Packages, name)
-	return res, save(dir, appRaw, lock, []string{"vendor/" + name + "@" + pkg.Version + "/"})
+	prep, err := prepare(appRaw, lock, []string{"vendor/" + name + "@" + pkg.Version + "/"})
+	if err != nil {
+		return nil, err
+	}
+	res := &Result{Name: name, Version: pkg.Version, Removed: removeFiles(dir, pkg.Files, nil)}
+	return res, prep.commit(dir)
 }
 
 // Status is one vendored package as Check finds it.
@@ -300,14 +371,24 @@ func loadLock(dir string) (*Lock, error) {
 	return lock, nil
 }
 
-// save writes the lock, the tsconfig of declarations and app.json's
-// slop.imports. Names that point into a folder slop vendor manages (one in
-// the lock, or in managed: folders just replaced or removed) are derived
-// from the lock; names the app mapped itself are kept.
-func save(dir string, appRaw []byte, lock *Lock, managed []string) error {
+// prepared is what an add or remove writes besides the packages' files:
+// app.json, the lock and the tsconfig of declarations (or, with nothing
+// vendored, their removal).
+type prepared struct {
+	writes map[string][]byte
+	drop   []string
+	im     imports // app.json's new slop.imports
+}
+
+// prepare computes app.json's slop.imports, the lock and the tsconfig from
+// the lock, and checks that the new app.json parses. Names that point into
+// a folder slop vendor manages (one in the lock, or in managed: folders
+// just replaced or removed) are derived from the lock; names the app mapped
+// itself are kept. Nothing is written.
+func prepare(appRaw []byte, lock *Lock, managed []string) (*prepared, error) {
 	man, err := apps.Parse(appRaw)
 	if err != nil {
-		return err
+		return nil, err
 	}
 	for name, pkg := range lock.Packages {
 		managed = append(managed, "vendor/"+name+"@"+pkg.Version+"/")
@@ -347,28 +428,34 @@ func save(dir string, appRaw []byte, lock *Lock, managed []string) error {
 	}
 	newApp, err := setImports(appRaw, im)
 	if err != nil {
-		return err
+		return nil, err
 	}
 	if _, err := apps.Parse(newApp); err != nil {
-		return fmt.Errorf("the new app.json does not parse: %v", err)
+		return nil, fmt.Errorf("refused, nothing changed: the new %v", err)
 	}
 	lockJSON, err := json.MarshalIndent(lock, "", "  ")
 	if err != nil {
-		return err
+		return nil, err
 	}
 	tsconfig, _ := json.MarshalIndent(map[string]any{
 		"//":              "Written by slop vendor: the declarations of the vendored packages. Extend it from tsconfig.json.",
 		"compilerOptions": map[string]any{"paths": paths},
 	}, "", "  ")
-	writes := map[string][]byte{apps.File: newApp, LockFile: append(lockJSON, '\n'), TsconfigFile: append(tsconfig, '\n')}
+	p := &prepared{writes: map[string][]byte{apps.File: newApp, LockFile: append(lockJSON, '\n'), TsconfigFile: append(tsconfig, '\n')}, im: im}
 	if len(lock.Packages) == 0 {
-		delete(writes, LockFile)
-		delete(writes, TsconfigFile)
-		for _, p := range []string{LockFile, TsconfigFile} {
-			_ = os.Remove(filepath.Join(dir, filepath.FromSlash(p)))
-		}
+		delete(p.writes, LockFile)
+		delete(p.writes, TsconfigFile)
+		p.drop = []string{LockFile, TsconfigFile}
 	}
-	for p, b := range writes {
+	return p, nil
+}
+
+// commit writes what prepare computed.
+func (pr *prepared) commit(dir string) error {
+	for _, p := range pr.drop {
+		_ = os.Remove(filepath.Join(dir, filepath.FromSlash(p)))
+	}
+	for p, b := range pr.writes {
 		full := filepath.Join(dir, filepath.FromSlash(p))
 		if err := os.MkdirAll(filepath.Dir(full), 0o755); err != nil {
 			return err
@@ -380,13 +467,13 @@ func save(dir string, appRaw []byte, lock *Lock, managed []string) error {
 	return nil
 }
 
-// removeFiles deletes files the lock recorded (only under vendor/) and
-// the folders they leave empty.
-func removeFiles(dir string, files map[string]string) int {
+// removeFiles deletes files the lock recorded (only under vendor/, and
+// not those in keep) and the folders they leave empty.
+func removeFiles(dir string, files, keep map[string]string) int {
 	n := 0
 	dirs := map[string]bool{}
 	for p := range files {
-		if !strings.HasPrefix(path.Clean(p), "vendor/") {
+		if _, kept := keep[p]; kept || !strings.HasPrefix(path.Clean(p), "vendor/") {
 			continue
 		}
 		if os.Remove(filepath.Join(dir, filepath.FromSlash(p))) == nil {

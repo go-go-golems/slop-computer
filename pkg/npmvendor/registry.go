@@ -216,15 +216,29 @@ type install struct {
 	tgz  []byte
 }
 
+// tree is what resolveAll found.
+type tree struct {
+	installs []*install // sorted by directory
+	warnings []string
+	// peers are the packages' peer dependencies: the app provides them, so
+	// bundles leave them as imports (the import map, or the actor's
+	// require, resolves them to the app's one copy).
+	peers []string
+}
+
 // resolveAll places a package and its dependencies the way npm does: each
 // at the top of node_modules unless a different version is already there,
-// in which case under the package that needs it.
-func (r *Registry) resolveAll(ctx context.Context, name, spec string) ([]*install, []string, error) {
+// in which case under the package that needs it. Each tarball is fetched
+// and checked as its package is placed. An optional dependency that cannot
+// be had (its metadata, a version, its tarball, or the same for one of its
+// own dependencies) is left out with a note, with everything placed for it.
+func (r *Registry) resolveAll(ctx context.Context, name, spec string) (*tree, error) {
 	placed := map[string]*install{}
+	var order []string // placed directories, in the order they were placed
 	cache := map[string]*packument{}
 	var warnings []string
-	var visit func(name, spec, from string, optional bool) error
-	visit = func(name, spec, from string, optional bool) error {
+	var visit func(name, spec, from string) error
+	visit = func(name, spec, from string) error {
 		// The copy the package at from would load: its own node_modules,
 		// then each enclosing package's, then the top.
 		shadowed := false
@@ -244,10 +258,6 @@ func (r *Registry) resolveAll(ctx context.Context, name, spec string) ([]*instal
 		if !ok {
 			var err error
 			if p, err = r.packument(ctx, name); err != nil {
-				if optional {
-					warnings = append(warnings, "skipped the optional dependency "+name+": "+err.Error())
-					return nil
-				}
 				return err
 			}
 			cache[name] = p
@@ -256,56 +266,54 @@ func (r *Registry) resolveAll(ctx context.Context, name, spec string) ([]*instal
 		if err != nil {
 			return err
 		}
+		tgz, err := r.tarball(ctx, meta)
+		if err != nil {
+			return err
+		}
 		dir := name
 		if _, taken := placed[dir]; taken || shadowed {
 			dir = join(from, name)
 		}
-		in := &install{dir: dir, meta: meta}
-		placed[dir] = in
+		placed[dir] = &install{dir: dir, meta: meta, tgz: tgz}
+		order = append(order, dir)
 		for _, dep := range sortedKeys(meta.Dependencies) {
-			if err := visit(dep, meta.Dependencies[dep], dir, false); err != nil {
+			if err := visit(dep, meta.Dependencies[dep], dir); err != nil {
 				return err
 			}
 		}
 		for _, dep := range sortedKeys(meta.OptionalDependencies) {
-			if _, also := meta.Dependencies[dep]; !also {
-				if err := visit(dep, meta.OptionalDependencies[dep], dir, true); err != nil {
-					warnings = append(warnings, "skipped the optional dependency "+dep+": "+err.Error())
+			if _, also := meta.Dependencies[dep]; also {
+				continue
+			}
+			mark := len(order)
+			if err := visit(dep, meta.OptionalDependencies[dep], dir); err != nil {
+				// Nothing placed since mark is used by anything else yet:
+				// the walk is depth first.
+				for _, d := range order[mark:] {
+					delete(placed, d)
 				}
+				order = order[:mark]
+				warnings = append(warnings, "skipped the optional dependency "+dep+": "+err.Error())
 			}
 		}
 		return nil
 	}
-	if err := visit(name, spec, "", false); err != nil {
-		return nil, nil, err
+	if err := visit(name, spec, ""); err != nil {
+		return nil, err
 	}
-	out := make([]*install, 0, len(placed))
+	peers := map[string]bool{}
+	t := &tree{warnings: warnings}
 	for _, d := range sortedKeys(placed) {
-		out = append(out, placed[d])
-	}
-	// A peer the tree does not hold is the app's to vendor.
-	for _, in := range out {
-		for _, peer := range sortedKeys(in.meta.PeerDependencies) {
-			found := false
-			for _, d := range ancestors(in.dir) {
-				if _, ok := placed[join(d, peer)]; ok {
-					found = true
-					break
-				}
-			}
-			if !found {
-				warnings = append(warnings, fmt.Sprintf("%s wants %s %s as a peer: vendor it too if the app uses it", in.meta.Name, peer, in.meta.PeerDependencies[peer]))
+		in := placed[d]
+		t.installs = append(t.installs, in)
+		for peer := range in.meta.PeerDependencies {
+			if peer != name {
+				peers[peer] = true
 			}
 		}
 	}
-	for _, in := range out {
-		tgz, err := r.tarball(ctx, in.meta)
-		if err != nil {
-			return nil, nil, err
-		}
-		in.tgz = tgz
-	}
-	return out, warnings, nil
+	t.peers = sortedKeys(peers)
+	return t, nil
 }
 
 // ancestors are the package directories whose node_modules a package at dir
