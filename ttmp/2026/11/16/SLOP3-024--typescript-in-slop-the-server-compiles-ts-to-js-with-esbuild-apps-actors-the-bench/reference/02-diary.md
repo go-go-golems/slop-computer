@@ -337,3 +337,75 @@ The branch builds on #52. Two things in the design were wrong and are corrected:
   - compiled files: `"<sha256>.<Version>.<tsconfig digest or 0>"`;
   - source maps: `"<sha256>.map.<Version>.<digest>"`;
   - pages with the import map: `"<sha256>.im<digest>"`.
+
+## Step 5: Phase 0b, `slop vendor` (PR #54)
+
+`slop vendor` is built and tested against a fake registry, then against npm's real registry on a local server. Real Preact with hooks ran in a browser, and real zod validated an actor's arguments in goja. The CLI's eval command also gained `--ts`; it is in #53. In testing, `--store` read the draft's snapshot as `float64` while the client decodes `json.Number`, so it never saw the draft. That is fixed.
+
+### Prompt Context
+**User prompt (verbatim):** see Step 3 ("ok, then build that. an agent cannot do that, it's CLI. Update the design doc."), and mid-step: "howfar are we?"
+**Assistant interpretation:** Build `slop vendor` in the CLI only, and give a status update while working.
+**Inferred user intent:** Packages for TypeScript apps, with the supply chain in a person's hands.
+**Commit (code):** ca613a5 (`slop eval --ts`, on #53); 07a1326 and 9b9ee52 on `task/slop3-024-vendor`, PR #54.
+
+### What I did
+- **`pkg/npmvendor`:**
+  - `registry.go`: metadata, tarballs, `checkIntegrity`, `pick` (dist-tags, exact versions, ranges), and `resolveAll`, which places packages as npm does and notes missing peers;
+  - `build.go`: `unpack`, `outName`, `bundle` (ESM with splitting, or CommonJS per entry), and `declarations`;
+  - `appjson.go`: `setImports`, which edits only `slop.imports` with a small JSON scanner;
+  - `vendor.go`: `Add`, `Remove`, `Check`, the lock, and `save`.
+- **`cmd/slop/cmds/vendor.go`:** `slop vendor` (list and check), `add` (`--actor`, `--registry`), `rm`, and `--dir`/`--store` (`onApp`: pull the draft, run, push back with `ifAt`).
+- **Tests:** `pkg/npmvendor/vendor_test.go`, with a fake registry.
+- **A probe first:** esbuild resolves bare package names as entry points through `exports`, and with splitting two entries share one chunk.
+- **Real runs:**
+  - `slop vendor add preact@10.24.3 preact preact/hooks preact/jsx-runtime` in a copy of the demo app; `tsc` against `vendor/tsconfig.vendor.json`; push; Playwright clicks.
+  - `slop vendor --store tsdemo add --actor zod@3.23.8`, then a second `--store` add; an actor validating with zod; `slop call` with good and bad arguments.
+
+### Why
+- **The `app.json` edit is textual and minimal:** the file is written by hand, and re-serializing it would reorder and reformat it.
+- **Declarations go in a `node_modules` tree under `types/`,** so that a vendored package's declarations resolve its dependencies' declarations as they would from npm. The app's tsconfig needs `paths` only for the top-level names.
+- **`--store` pulls, changes and pushes with `ifAt`,** because `files.commit` isn't on main yet (#51). `ifAt` keeps a draft that moved from being overwritten.
+
+### What worked
+- **Tests:** 5 tests in `pkg/npmvendor`, then 6 with `TestHandMappedNamesStay`. `go test -tags sqlite_fts5 ./...` passes in all 24 packages, `golangci-lint` reports 0 issues, and `-race` passes.
+- **Real Preact:**
+  - 26 files in 0.43 s;
+  - `tsc` passes, and catches a planted error with `Argument of type 'string' is not assignable to parameter of type 'StateUpdater<number>'`;
+  - in the browser, three clicks took "clicked 0 times" to "clicked 3 times"; the page loaded one chunk, and the console had no errors.
+- **Real zod:**
+  - `--store` pushed the draft from 2 to 3, and the second add from 3 to 4;
+  - `slop call tsdemo greet '{"name": "Zod"}'` returned `{"by": "actor.ts (zod), checked by zod", "text": "Hello, Zod!"}`;
+  - `{"name": 5}` failed with `actor_error: Error: invalid arguments: name Expected string, received number at run (actor.ts:10:33(22))`.
+
+### What didn't work
+- **The first `--store` check of the draft listed only preact.** `ref.ls`'s number arrived as `json.Number` (the client uses `UseNumber`), not `float64`, so `onApp` took `main`. Pulling with `--at draft`, `--at 3` and `--at main` showed that the draft was right and that the check was reading `main`. `onApp` now re-decodes the refs into `map[string]int64`.
+- **My expected strings for one-line `app.json` files** lacked the space after `"imports":` that `insertMember` writes. I updated the expectations.
+- **Lint:** De Morgan (QF1001) in `declarations`, fixed with `isDeclaration`.
+- **`go get` marked `semver/v3` as `// indirect`.** `go mod tidy` fixed it, in its own commit.
+- **A design flaw I caught before the real runs:** `save` dropped every name under `vendor/`, which would have deleted names mapped by hand (blocks-site keeps hand-vendored files in `vendor/`). Now only names in folders the lock manages are rewritten.
+
+### What I learned
+- **The CLI's `eval` is hand-written** (`evalCmd` in `extra.go`) and replaces the generated command, so new verb fields need flags there.
+- **The client decodes numbers as `json.Number`** throughout (`client.go`, `folder.go`, `dev.go`'s `toInt`).
+
+### What was tricky to build
+- **Placing dependencies:** a dependency is placed beside the package that needs it when any nearer copy has another version, not only when the top slot is taken. Otherwise the nearer copy would shadow it.
+- **Editing `app.json` in place:** a member scanner over valid JSON, with indentation taken from the file. A one-line `slop` object stays on one line.
+
+### What warrants a second pair of eyes
+- **Trust:** tarball URLs come from the registry's metadata and are checked against the same metadata's integrity hash. Trusting the registry is the trust boundary, as with npm.
+- **`--actor` bundles each entry separately,** so two entries of one package each carry their own copy. That's fine for stateless libraries; a note in the docs may be due.
+- **`removeFiles` deletes only paths under `vendor/`** that the lock recorded.
+
+### What should be done in the future
+- Phase 1: declarations, `slop types` (which also writes the `extends`), and TypeScript templates and guide as the default.
+- Maybe `slop vendor` notes for packages that need Node's APIs.
+
+### Code review instructions
+- **Start with:** `pkg/npmvendor/vendor.go` (`Add`, `save`), `registry.go` (`resolveAll`, `checkIntegrity`), `build.go` (`unpack`, `bundle`) and `appjson.go`.
+- **Run:** `go test -tags sqlite_fts5 ./pkg/npmvendor -count=1 -v`
+
+### Technical details
+- **Output names:** a package's root becomes the last segment of its name (`@lit/context` → `context.js`); a subpath becomes its remaining path with the extension dropped and `/` turned into `-`.
+- **ES-module chunks** are named `chunk-[hash].js`.
+- **Lock:** `{registry, packages: {name: {version, integrity, dependencies: {dir: name@version}, page, actor, files: {path: sha256}}}}`.

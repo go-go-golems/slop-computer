@@ -27,3 +27,7 @@ Decisions (2026-11-16): new apps default to TS; packages only via slop vendor (C
 ## 2026-11-16
 
 Phase 0 implemented (PR #53, on #52): pkg/tscompile; pages compile .ts/.tsx with maps and an import map from slop.imports.page; actors load TS and slop.imports.actor names; slop eval --ts; TS app verbs via jsverbs hooks. Browser-checked on a local server. Design corrected: slop modules via use() only; names under slop.imports. Diary step 4.
+
+## 2026-11-16
+
+Phase 0b implemented (PR #54, on #53): slop vendor (pkg/npmvendor, CLI only) — registry fetch with integrity, npm-style placement, esbuild bundles (ESM+splitting / CJS --actor), declarations, vendor.json, tsconfig.vendor.json, slop.imports edited in place; --store via pull/push ifAt. Real Preact (browser, hooks) and zod (actor) verified. slop eval --ts in #53. Diary step 5.

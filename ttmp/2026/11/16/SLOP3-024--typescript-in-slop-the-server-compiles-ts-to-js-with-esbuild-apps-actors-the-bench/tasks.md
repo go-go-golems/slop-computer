@@ -21,13 +21,13 @@ The phases follow the design (design-doc/01, section 10).
 - [x] `slop.imports` in `app.json`: validate; inject an import map (from `imports.page`) into served HTML; bare names in the actor's `require` (from `imports.actor`)
 - [x] Tests (design §10, phase 0), including the stack-trace check from scripts/03
 
-## Phase 0b: `slop vendor` (CLI only)
+## Phase 0b: `slop vendor` (CLI only) (PR #54)
 
-- [ ] Registry metadata and tarballs checked against `dist.integrity`; semver ranges; dependencies
-- [ ] `api.Build` over a temporary node_modules: ESM with splitting (pages), CJS (`--actor`)
-- [ ] Declarations copied; `vendor/vendor.json`; `imports` in `app.json`; folder form and `--store` (commits to the draft)
-- [ ] `slop vendor` (list + verify), `slop vendor rm`
-- [ ] Tests: a fixture registry, a package with a dependency and subpath exports, a corrupted tarball refused, the output loading in a page and an actor
+- [x] Registry metadata and tarballs checked against `dist.integrity`; semver ranges; dependencies
+- [x] `api.Build` over a temporary node_modules: ESM with splitting (pages), CJS (`--actor`)
+- [x] Declarations copied; `vendor/vendor.json`; `imports` in `app.json`; folder form and `--store` (commits to the draft)
+- [x] `slop vendor` (list + verify), `slop vendor rm`
+- [x] Tests: a fixture registry, a package with a dependency and subpath exports, a corrupted tarball refused, the output loading in a page and an actor
 
 ## Phase 1: declarations
 

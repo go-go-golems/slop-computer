@@ -38,7 +38,7 @@ WhenToUse: Before implementing any part of SLOP3-024, or when touching how slop 
 
 **The server compiles, slop's APIs come with types, and the bench checks.**
 
-Status: decided, 2026-11-16 (section 11 lists the decisions). Phase 0 is in PR #53, on top of #52. The evidence was gathered against slop-computer `main` at 407a3f9. The goja source-map loader from section 4.4 shipped first, as a separate fix (PR #52).
+Status: decided, 2026-11-16 (section 11 lists the decisions). Phase 0 is in PR #53 (on top of #52), and phase 0b (`slop vendor`) is in PR #54 (on top of #53). The evidence was gathered against slop-computer `main` at 407a3f9. The goja source-map loader from section 4.4 shipped first, as a separate fix (PR #52).
 
 ## 1. Summary
 
@@ -370,11 +370,12 @@ app.json                                "slop": {"imports": {"page": {"preact": 
   - `slop.imports.actor` maps names to CommonJS bundles (`slop vendor add --actor zod@3.23.8`), and `require('zod')` finds them after slop's own modules.
   - CommonJS output can't be split, so each actor entry point is bundled whole.
   - A package that needs Node's APIs (`fs`, `net`) doesn't work in goja, vendored or not.
-- **The checker.** `slop types` turns `vendor/vendor.json` into `tsconfig` `paths`. So `'preact/hooks'` gets the vendored declarations, in the editor and in the bench.
+- **The checker.** `slop vendor` also writes `vendor/tsconfig.vendor.json`, whose `paths` map each name to its declarations. The app's `tsconfig.json` extends it (`"extends": "./vendor/tsconfig.vendor.json"`), so `'preact/hooks'` gets the vendored declarations, in the editor and in the bench. The server ignores `extends`, and these `paths` don't change what a file compiles to.
 
 **Other subcommands:**
 
 - `slop vendor` alone lists the packages, and checks every file against its recorded sha256.
+- Names the person mapped by hand in `slop.imports`, even to files under `vendor/`, are kept. Only names that point into a folder `slop vendor` manages are rewritten.
 - `slop vendor rm preact` removes a package.
 - Adding a different version replaces the old one, and the change shows up as an ordinary diff.
 
@@ -556,7 +557,7 @@ tsconfig.json         pages: lib ES2022 + DOM; page.d.ts; excludes the actor ent
 tsconfig.actor.json   the actor: lib ES2020, no DOM; actor.d.ts and modules.d.ts; the actor entry
 ```
 
-Both turn on `strict`, `isolatedModules`, `allowImportingTsExtensions` and `noEmit`, the settings `web/runtime/tsconfig.json` already uses. `slop types` also writes `paths` for the vendored packages, from `vendor/vendor.json` (section 4.7). `isolatedModules` makes the checker reject what a per-file transform cannot compile: `const enum` across files, namespace merging, and `export =`. The limits of section 4 thus show up as type errors with an explanation, not as surprises at runtime.
+Both turn on `strict`, `isolatedModules`, `allowImportingTsExtensions` and `noEmit`, the settings `web/runtime/tsconfig.json` already uses. For vendored packages, the pages' `tsconfig.json` extends `vendor/tsconfig.vendor.json`, which `slop vendor` writes (section 4.7). `isolatedModules` makes the checker reject what a per-file transform cannot compile: `const enum` across files, namespace merging, and `export =`. The limits of section 4 thus show up as type errors with an explanation, not as surprises at runtime.
 
 By convention, files only the actor uses live under `server/`, which the pages' program leaves out. A file that both the page and the actor use belongs to both programs (pinboard, for example, has `core.js`). Such a file may therefore use neither the DOM nor the actor's globals, a discipline worth having anyway.
 
