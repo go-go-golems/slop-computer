@@ -256,6 +256,8 @@ The browser has three views of each round:
 - **Each persona's timeline:** the pi session (thinking folded, messages, every benchdrive command and its output), with the screenshot taken after each command beside it. You can watch the app evolve.
 - **The diary, and a gallery of all the screenshots.**
 
+**Mine the bench agent's evals too.** The personas show what people meet; the agent's own threads show where its API misleads it. `scripts/06-api-mining/mine.mjs` writes every eval step of the round's apps to JSONL, and `analyze.py` groups the failures and counts evals per turn. In the first three rounds this found a cap that cut 60 of 97 turns at 9 evals, a misdocumented return shape behind seven failures, and a regression in `lib.def` (analysis/03).
+
 Collect the struggles with `grep -h "STRUGGLE:" <round>/*/diary.md`, then read each diary once in full. The grep finds what a persona named. The full read finds what it didn't notice, such as an agent reply that was wrong but sounded right.
 
 Sort what you find into kinds:

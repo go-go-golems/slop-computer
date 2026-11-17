@@ -83,3 +83,9 @@
 - [visual audit] the agent pill disappeared in my first 1000 px header fix (hide-s); FIXED (markbtn only).
 - [bench] long turns: a running reply now says "Working for N: <phase>" and suggests Stop after 4 min.
 - [kenji r3] "model provider request failed" on the first ask (lunaroute); a re-send worked.
+- [harness, kenji r3] frame-click into a frame panned out of view times out; a person would pan (Fit works). benchdrive: scroll/pan the frame into view first (next round).
+- [design, sam r3] a proposal's preview runs on its own empty data, so the page looked empty while the draft had rows (again, after r2's note). Consider seeding a proposal's preview from the dev data (or offering to), not only explaining it.
+- [app or harness, sam r3] clicking a "shipped" label didn't toggle its radio: either the agent's markup doesn't associate the label (an app a11y bug the guide could cover) or frame-click hit a span. Check the markup.
+- [bench agent, grace r3] "today is 17 November" (eval Date, UTC) vs the page's "Printed on 16 November" (local, near midnight). FIXED: each turn's context gives the person's local time and zone.
+- [app, grace r3] a Print button and a changed date on the A4 "paper" frame: does the printer get the button? The guide could say: print views hide controls (@media print).
+- [harness, kenji r3] look truncates long agent replies ('… 71 more lines'); add a way to read the last reply whole (next round).
