@@ -1,4 +1,4 @@
-/* the bench, built from web/bench: do not edit. source sha256:14c08adda13eb3dead7f884ffd1b579c1bad6af7f1cd243cef02369c9a7ed1a6 */
+/* the bench, built from web/bench: do not edit. source sha256:3424200ed938aa3e50fbad7fa9b1466f92a93290fd59a8c40765a3ce96e53e64 */
 // The bench: a live dev environment for slop apps. Built from web/bench/src.
 (() => {
   // src/lib/util.js
@@ -1414,6 +1414,9 @@
           }
           break;
         }
+        case "print":
+          if (!this.headless) toast("Printing does not work inside the bench's frame. It works when the app is open in its own browser tab (after Publish, at its web address).", 7e3);
+          break;
         case "log": {
           const l = { t: now(), level: m.level, text: m.text, src: m.src || "", frame: this.route, fid: this.fid };
           this.logs.push(l);
@@ -9516,6 +9519,19 @@ return { files: list.map(f => f.path), issues }`;
         else toast("Not accepted: " + (r.error || r.status), 6e3);
         paintChat();
       }
+      function stepsEl(m) {
+        const steps = m.steps || [];
+        if (!steps.length || m.status === "running") return steps.map(stepEl);
+        const files2 = [...new Set(steps.flatMap((s) => (s.effects && s.effects.files || []).map((f) => f.path)))], bad = steps.filter((s) => s.status === "error").length;
+        const d = h(
+          "details.steps",
+          { open: Prefs.get("stepsOpen", false) },
+          h("summary.note", plural(steps.length, "step") + (files2.length ? " \xB7 changed " + files2.slice(0, 4).join(", ") + (files2.length > 4 ? " +" + (files2.length - 4) : "") : " \xB7 nothing changed") + (bad ? " \xB7 " + bad + " failed" : "")),
+          steps.map(stepEl)
+        );
+        d.addEventListener("toggle", () => Prefs.set("stepsOpen", d.open));
+        return d;
+      }
       function msgEl(m, i, t) {
         if (m.role === "user") return h("div.msg.user", h("div.who", m.from ? "From the " + m.from : "You", h("span", fmtTime(m.t)), m.ctx && m.ctx.sel ? h("span.tag", m.ctx.sel.tag + " " + m.ctx.sel.src) : null), h("div.body", m.text));
         const prop = m.ws && m.ws !== "draft" ? P().proposals.get(m.ws) : null;
@@ -9533,7 +9549,7 @@ return { files: list.map(f => f.path), issues }`;
               toast("Marked on the timeline");
             } } }, "\u2606 mark")
           ),
-          (m.steps || []).map(stepEl),
+          stepsEl(m),
           (m.panels || []).map((id) => {
             const pn = Panels.get(P(), id);
             return pn ? panelEl(P(), pn, { inline: true }) : null;

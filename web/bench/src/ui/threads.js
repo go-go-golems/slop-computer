@@ -13,6 +13,7 @@ import { Agent } from '../agent/agent.js';
 import { App } from './app.js';
 import { Dock } from './dock.js';
 import { Panels, panelEl } from './panels.js';
+import { Prefs } from '../server/records.js';
 import { Sandbox } from '../agent/sandbox.js';
 import { effectsLine } from '../agent/effects.js';
 import { fmtAgo, fmtTime, now, plural } from '../lib/util.js';
@@ -116,13 +117,26 @@ export const THREADS = {
       else toast('Not accepted: ' + (r.error || r.status), 6000)
       paintChat()
     }
+    // a finished reply's evals fold into one line, so its words come first (people who do not code
+    // skipped past "eval 1, styles.css:55 +5", and the proof sat in the middle of them: round 4);
+    // open or closed, the last choice is the default
+    function stepsEl(m) {
+      const steps = m.steps || []
+      if (!steps.length || m.status === 'running') return steps.map(stepEl)
+      const files = [...new Set(steps.flatMap(s => ((s.effects && s.effects.files) || []).map(f => f.path)))], bad = steps.filter(s => s.status === 'error').length
+      const d = h('details.steps', { open: Prefs.get('stepsOpen', false) },
+        h('summary.note', plural(steps.length, 'step') + (files.length ? ' · changed ' + files.slice(0, 4).join(', ') + (files.length > 4 ? ' +' + (files.length - 4) : '') : ' · nothing changed') + (bad ? ' · ' + bad + ' failed' : '')),
+        steps.map(stepEl))
+      d.addEventListener('toggle', () => Prefs.set('stepsOpen', d.open))
+      return d
+    }
     function msgEl(m, i, t) {
       if (m.role === 'user') return h('div.msg.user', h('div.who', m.from ? 'From the ' + m.from : 'You', h('span', fmtTime(m.t)), m.ctx && m.ctx.sel ? h('span.tag', m.ctx.sel.tag + ' ' + m.ctx.sel.src) : null), h('div.body', m.text))
       const prop = m.ws && m.ws !== 'draft' ? P().proposals.get(m.ws) : null
       return h('div.msg.agent',
         h('div.who', 'Claude', h('span', fmtTime(m.t)), m.model ? h('span', m.model) : null, m.status === 'running' ? h('span.dot.busy') : null, h('span.sp'),
           h('button.link.note', { title: 'Bookmark this reply on the timeline', on: { click: () => { P().mark({ label: (m.text || 'reply').split('\n')[0].slice(0, 40), by: 'you', thread: t.id }); toast('Marked on the timeline') } } }, '☆ mark')),
-        (m.steps || []).map(stepEl),
+        stepsEl(m),
         (m.panels || []).map(id => { const pn = Panels.get(P(), id); return pn ? panelEl(P(), pn, { inline: true }) : null }),
         m.auto ? h('div.note', 'Claude ended without a reply; the bench says what happened:') : null,
         m.text ? renderMarkdown(m.text, file => P().read(file, 'draft') !== null || (!!prop && prop.status === 'open' && P().read(file, m.ws) !== null)) : null,

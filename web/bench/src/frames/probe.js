@@ -16,6 +16,8 @@ export function PROBE(CFG) {
   for (const l of ['log', 'info', 'warn', 'error']) { const o = console[l].bind(console); console[l] = (...a) => { o(...a); post({ ev: 'log', level: l, text: a.map(fmt).join(' ').slice(0, 2000) }) } }
   addEventListener('error', e => post({ ev: 'log', level: 'error', text: e.message, src: e.filename && !/^about:/.test(e.filename) ? e.filename.split('/').pop() + (e.lineno ? ':' + e.lineno : '') : '' }))
   addEventListener('unhandledrejection', e => post({ ev: 'log', level: 'error', text: 'Unhandled rejection: ' + fmt(e.reason && e.reason.message || e.reason) }))
+  // print() does nothing in a sandboxed frame: say so instead of nothing (a florist pressed Print twice, round 4)
+  try { window.print = () => post({ ev: 'print' }) } catch (e) { /* not writable: the page prints as it can */ }
 
   let mode = CFG.mode || 'select', pins = CFG.pins || [], selected = null, recording = !!CFG.record
   // a file of the app, from a URL of an embedded view (/e/<token>/v/<n>/<path>)

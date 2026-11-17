@@ -1,4 +1,4 @@
-/* the bench, built from web/bench: do not edit. source sha256:14c08adda13eb3dead7f884ffd1b579c1bad6af7f1cd243cef02369c9a7ed1a6 */
+/* the bench, built from web/bench: do not edit. source sha256:3424200ed938aa3e50fbad7fa9b1466f92a93290fd59a8c40765a3ce96e53e64 */
 // slop's dev probe (SLOP3-022): the bench's PROBE from web/bench/src/frames/probe.js,
 // which the sandbox adds to dev embeds only, after the runtime. It answers the
 // tool that framed the view (the boot data's parentOrigin) and nothing else.
@@ -27,6 +27,8 @@ function PROBE(CFG) {
   for (const l of ['log', 'info', 'warn', 'error']) { const o = console[l].bind(console); console[l] = (...a) => { o(...a); post({ ev: 'log', level: l, text: a.map(fmt).join(' ').slice(0, 2000) }) } }
   addEventListener('error', e => post({ ev: 'log', level: 'error', text: e.message, src: e.filename && !/^about:/.test(e.filename) ? e.filename.split('/').pop() + (e.lineno ? ':' + e.lineno : '') : '' }))
   addEventListener('unhandledrejection', e => post({ ev: 'log', level: 'error', text: 'Unhandled rejection: ' + fmt(e.reason && e.reason.message || e.reason) }))
+  // print() does nothing in a sandboxed frame: say so instead of nothing (a florist pressed Print twice, round 4)
+  try { window.print = () => post({ ev: 'print' }) } catch (e) { /* not writable: the page prints as it can */ }
 
   let mode = CFG.mode || 'select', pins = CFG.pins || [], selected = null, recording = !!CFG.record
   // a file of the app, from a URL of an embedded view (/e/<token>/v/<n>/<path>)
