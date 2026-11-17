@@ -6,6 +6,7 @@ require (
 	github.com/bmatcuk/doublestar/v4 v4.10.3
 	github.com/dop251/goja v0.0.0-20261103151521-97b96e1e55f5
 	github.com/dop251/goja_nodejs v0.0.0-20260918173711-b481721df8a2
+	github.com/evanw/esbuild v0.25.12
 	github.com/go-go-golems/geppetto v0.14.1
 	github.com/go-go-golems/glazed v1.4.3
 	github.com/go-go-golems/go-go-goja v0.10.8-0.20261108231830-9d7ede7027c7
