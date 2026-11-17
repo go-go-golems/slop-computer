@@ -1,4 +1,4 @@
-/* the bench, built from web/bench: do not edit. source sha256:e59eb4d23fe770e3af87b81a9b29a146a70a0a1fbc5e74ff3c9656b653fd480e */
+/* the bench, built from web/bench: do not edit. source sha256:8797cac51ec0130fea894ba203db74e9323296d3080284a834cc67b5cc16854c */
 // The bench: a live dev environment for slop apps. Built from web/bench/src.
 (() => {
   // src/lib/util.js
@@ -3754,6 +3754,7 @@ run then).
     }
     return " \u2014 the line: `" + text.trim().slice(0, 160) + "`" + unknown.map((u) => ". " + u.name + " is not in the API (did you mean " + u.hint + "?)").join("");
   }
+  var FAKED_EVAL = /\[evals?\b[^\]\n]{0,12}\n?[\s\S]{0,400}?\bawait\s+(files|app|frames|scenarios|fixtures|session|types|lib|ui|publish)\.\w+\(|```(js|javascript|ts)?\s*\n[\s\S]{0,600}?\bawait\s+(files|app|frames|scenarios|fixtures|session|types|lib|ui|publish)\.\w+\(/;
 
   // src/agent/eval.js
   var AgentUI = {
@@ -3914,7 +3915,7 @@ A step with a key its kind does not take is an error (the scenario does not run)
   };
   var INTRO = `You are the coding agent inside the bench, where a person builds a slop app (pages, an optional actor, SQL migrations) and watches it run live in frames on a canvas.
 
-You act through ONE tool, eval. Each call runs a JavaScript async function body in a QuickJS sandbox: no DOM, no network, no window, no Intl (toLocaleString ignores locales; the person's local date and zone are at the top of Current state). Use await, and \`return\` the value you want back (the last expression is not returned automatically). console.log output comes back too.
+You act through ONE tool, eval. Code runs only when you call it: code written into your reply runs nothing (the "[evals: \u2026]" lines in the history are the bench's notes of past calls, not a format to write), and you report only results a call returned. Each call runs a JavaScript async function body in a QuickJS sandbox: no DOM, no network, no window, no Intl (toLocaleString ignores locales; the person's local date and zone are at the top of Current state). Use await, and \`return\` the value you want back (the last expression is not returned automatically). console.log output comes back too.
 
 Your evals share a scope: top-level \`const\`/\`let\`/\`function\`/\`class\` declarations persist to your later evals in this thread (and across reloads, if they are JSON). Read once, keep the result in a variable, use it next time. vars() lists them; forget('name') drops one, forget() all.
 
@@ -4226,7 +4227,7 @@ Markdown files (README.md, notes, specs) render in the Docs panel. Keep README.m
         delete msg.note;
         this.ev.emit("text", th.id);
       }
-      let msgs = this.messages(P, th, o.ws, text, head), res = null, prev = "";
+      let msgs = this.messages(P, th, o.ws, text, head), res = null, prev = "", faked = false;
       for (let call = 0; ; call++) {
         const before = msg.steps.length;
         res = await this.sample(msgs, { tools: [tool], onText: ({ text: t }) => {
@@ -4234,6 +4235,17 @@ Markdown files (README.md, notes, specs) render in the Docs panel. Keep README.m
           this.ev.emit("text", th.id);
         }, signal: o.signal, modelTier: th.tier || "default", cache: false, ...th.model ? { model: th.model } : {} });
         const made = msg.steps.length - before, left = o.budget.max - o.budget.used;
+        if (!made && !faked && FAKED_EVAL.test(res && res.text || "") && left > 0 && !(o.signal && o.signal.aborted)) {
+          faked = true;
+          msg.text = prev;
+          this.ev.emit("text", th.id);
+          msgs = [
+            ...msgs,
+            { role: "assistant", content: "(a reply with eval code written as text)" },
+            { role: "user", content: "(From the bench, not the person: your last reply wrote eval code as text instead of calling the eval tool, so none of it ran and nothing it described happened. Call the eval tool to run code, and report only results you saw in its output.)" }
+          ];
+          continue;
+        }
         if (made < CALL_EVALS || left <= 0 || call >= MAX_CONTINUES || o.signal && o.signal.aborted) break;
         prev = (prev ? prev + "\n\n" : "") + (res && res.text || "").trim();
         msg.text = prev;

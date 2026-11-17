@@ -22,3 +22,7 @@ export function notAFunctionHint(error, code, api) {
   }
   return ' — the line: `' + text.trim().slice(0, 160) + '`' + unknown.map(u => '. ' + u.name + ' is not in the API (did you mean ' + u.hint + '?)').join('')
 }
+
+// A reply that holds bench API calls as code: evals written as text, never run (a model imitating the
+// history's "[evals: …]"). Page code (claude.use, db.doc) is not matched.
+export const FAKED_EVAL = /\[evals?\b[^\]\n]{0,12}\n?[\s\S]{0,400}?\bawait\s+(files|app|frames|scenarios|fixtures|session|types|lib|ui|publish)\.\w+\(|```(js|javascript|ts)?\s*\n[\s\S]{0,600}?\bawait\s+(files|app|frames|scenarios|fixtures|session|types|lib|ui|publish)\.\w+\(/

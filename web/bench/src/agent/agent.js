@@ -11,6 +11,7 @@
 // Owns: turns in flight. Public API: Agent (init, send, stop, delegate,
 // busy, anyBusy, compact, sample, ev 'ready' | 'turn' | 'step' | 'text').
 import { AgentUI, makeContext, runEval } from './eval.js';
+import { FAKED_EVAL } from './hints.js';
 import { FrameHost, FrameHosts } from '../frames/host.js';
 import { MAX_DEPTH, ROLES } from './roles.js';
 import { Types } from './types.js';
@@ -203,11 +204,20 @@ export const Agent = {
     // has no tools). A call that used them all, with turn budget left, is continued: the model sees
     // what it did in this turn and a note from the bench. 60 of 97 turns in the persona reviews
     // stopped at exactly 9 evals, mid-task, and the person had to say "continue".
-    let msgs = this.messages(P, th, o.ws, text, head), res = null, prev = ''
+    let msgs = this.messages(P, th, o.ws, text, head), res = null, prev = '', faked = false
     for (let call = 0; ; call++) {
       const before = msg.steps.length
       res = await this.sample(msgs, { tools: [tool], onText: ({ text: t }) => { msg.text = (prev ? prev + '\n\n' : '') + t; this.ev.emit('text', th.id) }, signal: o.signal, modelTier: th.tier || 'default', cache: false, ...(th.model ? { model: th.model } : {}) })
       const made = msg.steps.length - before, left = o.budget.max - o.budget.used
+      // evals written as text: a model imitating the history's "[evals: …]" wrote code into its reply,
+      // never called the tool, and reported results it invented (round 4: "written and verified", and
+      // nothing landed). Its text is dropped, and it is told once that nothing ran.
+      if (!made && !faked && FAKED_EVAL.test((res && res.text) || '') && left > 0 && !(o.signal && o.signal.aborted)) {
+        faked = true; msg.text = prev; this.ev.emit('text', th.id)
+        msgs = [...msgs, { role: 'assistant', content: '(a reply with eval code written as text)' },
+          { role: 'user', content: '(From the bench, not the person: your last reply wrote eval code as text instead of calling the eval tool, so none of it ran and nothing it described happened. Call the eval tool to run code, and report only results you saw in its output.)' }]
+        continue
+      }
       if (made < CALL_EVALS || left <= 0 || call >= MAX_CONTINUES || (o.signal && o.signal.aborted)) break
       prev = (prev ? prev + '\n\n' : '') + ((res && res.text) || '').trim()
       msg.text = prev; this.ev.emit('text', th.id)

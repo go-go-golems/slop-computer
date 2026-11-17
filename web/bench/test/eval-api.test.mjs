@@ -139,3 +139,11 @@ test('lib.def analysis: free names and parameters of a saved function', async ()
   for (const n of ['rows', 'week', 'first', 'rest', 'a', 'c', 'message']) assert.ok(!free.includes(n), n + ' is declared')
   assert.equal(paramsOf(fn).length, 3)
 })
+
+test('FAKED_EVAL: eval code written as text, not page code or plain words', async () => {
+  const { FAKED_EVAL } = await import('../src/agent/hints.js')
+  assert.ok(FAKED_EVAL.test("Reading first.\n\n[eval #1\n```\nconst p = await files.read('index.html');\n```\n]\n\nConfirmed."), 'the round-4 reply')
+  assert.ok(FAKED_EVAL.test("Now:\n```js\nawait files.replace('main.ts', 'a', 'b')\n```"), 'a fenced API call')
+  assert.ok(!FAKED_EVAL.test('I changed index.html: Export CSV now builds the file from rows.'), 'plain words')
+  assert.ok(!FAKED_EVAL.test("In your page:\n```js\nconst db = await claude.use('db')\n```"), 'page code')
+})
