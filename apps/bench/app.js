@@ -1,4 +1,4 @@
-/* the bench, built from web/bench: do not edit. source sha256:723a7583909c37825af1d661a28e875afc7514a9a233ba36c9b817378ef9de62 */
+/* the bench, built from web/bench: do not edit. source sha256:2715cf869eaf8b20f428a26cfc09f092716f268c4db8d55117fc860c314eec08 */
 // The bench: a live dev environment for slop apps. Built from web/bench/src.
 (() => {
   // src/lib/util.js
@@ -3905,6 +3905,9 @@ Markdown files (README.md, notes, specs) render in the Docs panel. Keep README.m
 - Start with what the person will see: a page they can look at and try, then the server code and tests behind it. Someone who does not program judges progress by the page.
 - Tell the person everything they need to use what you made: a code or password you chose, which page to open, where to click, that a result appears below the fold.
 - Questions about the bench itself are part of the job: how to try a change safely (a proposal), how to keep it (Accept in the chat or the Review tab), how to undo it (Reject; the Timeline restores earlier versions), how to see the data (the Data view), how to publish (Publish in the header). Answer them plainly.
+- Data you add to try things (rows, documents, test sign-ups) goes in the test instance (scenarios and fixtures), not the dev instance the person looks at: test rows in dev show up on their page and come along when they publish. If you must add some to dev, remove it and say so.
+- A scenario passes only if it checks what the person cares about: the numbers or words on the page, the rows in the data. Make each one fail once on purpose (change the expected value) to show it can, then put it back.
+- Keep the app's README.md true: when the app's purpose or files change, update it in the same turn.
 - Finish with a short summary in Markdown (short paragraphs, bullets, \`code\`; no big headings): what you changed, where, and anything left to do. Cite places as \`file:line\` (for example \`styles.css:73\`): they become links that open the file.`;
   function guide(P, api) {
     return INTRO + "\n\n" + appGuide(P) + "\n\nThe API (each call returns a Step; await it to run):\n" + api.reference(NOTES) + "\n\n" + RULES;
@@ -6210,7 +6213,7 @@ Markdown files (README.md, notes, specs) render in the Docs panel. Keep README.m
     setWs(ws) {
       if (ws !== "draft" && (!this.proposal(ws) || this.proposal(ws).status !== "open")) ws = "draft";
       this.ws = ws;
-      if (this.P) Records.set("ws|" + this.P.app, ws);
+      if (this.P) Prefs.set("ws|" + this.P.app, ws);
       if (ws === "draft" && this.canvas) this.canvas.compare = false;
       this.ev.emit("ws", ws);
       if (this.canvas) this.canvas.sync();
@@ -6298,7 +6301,7 @@ Markdown files (README.md, notes, specs) render in the Docs panel. Keep README.m
       if (Types.wants(head)) Types.check(P, head, { timeoutMs: 3e4 }).catch(() => {
       });
       this.ev.emit("project", P);
-      const was = Records.get("ws|" + P.app, "draft");
+      const was = Prefs.get("ws|" + P.app, "draft");
       if (was !== "draft" && (P.proposals.get(was) || {}).status === "open") this.setWs(was);
       if (this.canvas) this.canvas.sync();
       this.paintHeader();
@@ -6946,7 +6949,7 @@ Markdown files (README.md, notes, specs) render in the Docs panel. Keep README.m
         const p = P(), n = await promptBox("New scenario", "A name (letters, digits, -). You can also record one from a frame's \u22EF menu.", "add-a-note");
         if (!n) return;
         const page2 = Instances.entry(p), path = SCEN_DIR + n.replace(/[^\w-]+/g, "-") + ".json";
-        if (p.read(path, App.ws) === null) p.write(path, JSON.stringify({ description: "", page: page2, steps: [{ waitFor: "body" }, { expect: "h1" }] }, null, 2) + "\n", App.ws);
+        if (p.read(path, App.ws) === null) p.write(path, JSON.stringify({ description: "What this scenario proves (edit me)", page: page2, steps: [{ waitFor: "body" }, { expect: "h1", text: "The words the page must show (edit me)", exact: true }] }, null, 2) + "\n", App.ws);
         App.reveal(path, 1);
       }
       async function newFixture() {

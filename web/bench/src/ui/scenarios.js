@@ -81,7 +81,7 @@ export const SCENARIOS = {
     async function newScenario() {
       const p = P(), n = await promptBox('New scenario', 'A name (letters, digits, -). You can also record one from a frame\'s ⋯ menu.', 'add-a-note'); if (!n) return
       const page = Instances.entry(p), path = SCEN_DIR + n.replace(/[^\w-]+/g, '-') + '.json'
-      if (p.read(path, App.ws) === null) p.write(path, JSON.stringify({ description: '', page, steps: [{ waitFor: 'body' }, { expect: 'h1' }] }, null, 2) + '\n', App.ws)
+      if (p.read(path, App.ws) === null) p.write(path, JSON.stringify({ description: 'What this scenario proves (edit me)', page, steps: [{ waitFor: 'body' }, { expect: 'h1', text: 'The words the page must show (edit me)', exact: true }] }, null, 2) + '\n', App.ws) // fails until it checks something: a new stub that passed at once proved nothing (a persona review)
       App.reveal(path, 1)
     }
     async function newFixture() {

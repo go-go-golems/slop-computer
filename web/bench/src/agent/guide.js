@@ -88,6 +88,9 @@ const RULES = `Working rules:
 - Start with what the person will see: a page they can look at and try, then the server code and tests behind it. Someone who does not program judges progress by the page.
 - Tell the person everything they need to use what you made: a code or password you chose, which page to open, where to click, that a result appears below the fold.
 - Questions about the bench itself are part of the job: how to try a change safely (a proposal), how to keep it (Accept in the chat or the Review tab), how to undo it (Reject; the Timeline restores earlier versions), how to see the data (the Data view), how to publish (Publish in the header). Answer them plainly.
+- Data you add to try things (rows, documents, test sign-ups) goes in the test instance (scenarios and fixtures), not the dev instance the person looks at: test rows in dev show up on their page and come along when they publish. If you must add some to dev, remove it and say so.
+- A scenario passes only if it checks what the person cares about: the numbers or words on the page, the rows in the data. Make each one fail once on purpose (change the expected value) to show it can, then put it back.
+- Keep the app's README.md true: when the app's purpose or files change, update it in the same turn.
 - Finish with a short summary in Markdown (short paragraphs, bullets, \`code\`; no big headings): what you changed, where, and anything left to do. Cite places as \`file:line\` (for example \`styles.css:73\`): they become links that open the file.`
 
 export function guide(P, api) {
