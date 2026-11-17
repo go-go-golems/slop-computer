@@ -152,7 +152,7 @@ func (s *Door) serveSandbox(w http.ResponseWriter, r *http.Request) {
 	man, _ := s.appManifest(ctx, as, n)
 	entry := man.Entry()
 	rest := m[2]
-	code := newAppCode(as, n, man, r.URL.Path, rest)
+	code := newAppCode(as, n, man, prefixBase(r.URL.Path, rest))
 	if rest != "" && rest != entry {
 		if strings.HasSuffix(rest, "/") {
 			rest += "index.html"

@@ -18,6 +18,7 @@ func tsApp(caps string) []any {
 		"app.json":         `{"title":"TS",` + caps + `"slop":{"imports":{"page":{"preact":"vendor/preact.js","preact/jsx-runtime":"vendor/jsx-runtime.js"}}}}`,
 		"index.html":       `<!doctype html><html><head><title>t</title></head><body><script type="module" src="main.ts"></script></body></html>`,
 		"about.html":       `<!doctype html><html><head><title>a</title></head><body>about</body></html>`,
+		"docs/index.html":  `<!doctype html><html><head><title>d</title></head><body>docs</body></html>`,
 		"main.ts":          "import { slug } from './lib/text.ts'\nexport const title: string = slug('Hello World')\n",
 		"lib/text.ts":      "export const slug = (s: string): string => s.toLowerCase().replace(/[^a-z0-9]+/g, '-')\n",
 		"hello.tsx":        "export const Hello = ({ name }: { name: string }) => <p>Hello {name}</p>\n",
@@ -74,6 +75,11 @@ func checkTSFiles(t *testing.T, h *harness, host, base string) {
 	importMap := `<script type="importmap">{"imports":{"preact":"` + base + `vendor/preact.js","preact/jsx-runtime":"` + base + `vendor/jsx-runtime.js"}}</script>`
 	if _, body := get("about.html"); !strings.Contains(body, importMap) {
 		t.Fatalf("about.html has no import map %s:\n%s", importMap, body)
+	}
+	// A directory's page, by its slash: the map resolves against the app's
+	// root, not the directory.
+	if r, body := get("docs/"); r.StatusCode != 200 || !strings.Contains(body, importMap) {
+		t.Fatalf("docs/ (%d) has no import map %s:\n%s", r.StatusCode, importMap, body)
 	}
 }
 

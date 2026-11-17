@@ -64,7 +64,7 @@ func (s *Door) servePreview(w http.ResponseWriter, r *http.Request, label string
 	case strings.HasSuffix(r.URL.Path, "/"):
 		name += "/index.html"
 	}
-	code := newAppCode(st, pv.N, man, "/", "") // a preview's host serves the app at its root
+	code := newAppCode(st, pv.N, man, "/") // a preview's host serves the app at its root
 	f, err := st.SnapshotFile(ctx, pv.N, name)
 	if err != nil && s.serveSourceMap(w, r, storeBytes{st: st, vis: private, mut: noStore, code: code}, name) {
 		return

@@ -37,16 +37,25 @@ type appCode struct {
 	base string // the URL path of the app's root, ending in "/"; "" when unknown
 }
 
-// newAppCode is the appCode of a request whose path ends in rest (the
-// file's path in the app). The app's root is the path before rest.
-func newAppCode(st *store.Store, n int64, man *apps.Manifest, urlPath, rest string) *appCode {
-	c := &appCode{st: st, n: n, man: man}
-	if strings.HasSuffix(urlPath, rest) {
-		if base := strings.TrimSuffix(urlPath, rest); strings.HasSuffix(base, "/") {
-			c.base = base
-		}
+// newAppCode is the appCode of a snapshot whose app is served at base, the
+// URL path of its root ("/notes/"; "" when unknown: no import map then).
+// Each route knows its base: the static host's matched mount, the
+// sandbox's /v/<n>/ prefix, a preview's root.
+func newAppCode(st *store.Store, n int64, man *apps.Manifest, base string) *appCode {
+	if !strings.HasSuffix(base, "/") {
+		base = ""
 	}
-	return c
+	return &appCode{st: st, n: n, man: man, base: base}
+}
+
+// prefixBase is the part of urlPath before rest, when urlPath ends in it
+// and that part ends in a slash; "" otherwise. Only for paths whose rest
+// keeps its trailing slash (the sandbox's /v/<n>/<rest>).
+func prefixBase(urlPath, rest string) string {
+	if base, ok := strings.CutSuffix(urlPath, rest); ok && strings.HasSuffix(base, "/") {
+		return base
+	}
+	return ""
 }
 
 // tsconfig is the snapshot's tsconfig.json (nil when it has none).
