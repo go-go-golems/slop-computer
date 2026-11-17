@@ -1,4 +1,4 @@
-/* the bench, built from web/bench: do not edit. source sha256:2fd0a16bd7faf50fce056769f7eac554740fbc488e503e4c9534865bd8e3677a */
+/* the bench, built from web/bench: do not edit. source sha256:2c5dac4b34b2350c77c653cac03b4eea68c44d40a1e4ba362e32ff2356c2e0c1 */
 // The bench: a live dev environment for slop apps. Built from web/bench/src.
 (() => {
   // src/lib/util.js
@@ -4294,13 +4294,15 @@ Markdown files (README.md, notes, specs) render in the Docs panel. Keep README.m
           ];
           continue;
         }
-        if (made < CALL_EVALS || o.signal && o.signal.aborted) break;
-        if (left <= 0 || call >= MAX_CONTINUES) {
+        if (o.signal && o.signal.aborted) break;
+        const silent = made > 0 && !(res && res.text || "").trim();
+        if (made < CALL_EVALS && !silent) break;
+        if (silent || left <= 0 || call >= MAX_CONTINUES) {
           prev = (prev ? prev + "\n\n" : "") + (res && res.text || "").trim();
           const fin = fitPrompt([
             ...msgs,
             { role: "assistant", content: this.renderMsg({ ...msg, text: res && res.text || "" }, true) || "(evals)" },
-            { role: "user", content: "(From the bench, not the person: this turn has used all its evals. Reply to the person now, without evals: what you changed, what you checked and how, what is not done or not verified yet, and any temporary code (probes, console.log) still in the files. They can send a message to let you go on.)" }
+            { role: "user", content: "(From the bench, not the person: " + (silent && left > 0 && call < MAX_CONTINUES ? "your last call ran evals and then said nothing." : "this turn has used all its evals.") + " Reply to the person now, without evals: what you changed, what you checked and how, what is not done or not verified yet, and any temporary code (probes, console.log) still in the files. They can send a message to let you go on.)" }
           ]);
           try {
             res = await this.sample(fin.msgs, { onText: ({ text: t }) => {

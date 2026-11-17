@@ -223,13 +223,17 @@ export const Agent = {
           { role: 'user', content: '(From the bench, not the person: your last reply wrote eval code as text instead of calling the eval tool, so none of it ran and nothing it described happened. Call the eval tool to run code, and report only results you saw in its output.)' }]
         continue
       }
-      if (made < CALL_EVALS || (o.signal && o.signal.aborted)) break
-      // out of evals or continuations mid-work: one more call without the tool, for a report to the person
-      // (a turn ended on "Now verifying the refactor live —" after 27 evals, and the person had nothing: round 4)
-      if (left <= 0 || call >= MAX_CONTINUES) {
+      if (o.signal && o.signal.aborted) break
+      // a call that ran evals and then said nothing ends the turn on a half sentence (round 5: 27 evals, then
+      // only "Feature 2 it is — … makes 'exactly one winn"): it gets the same report call as a spent turn
+      const silent = made > 0 && !((res && res.text) || '').trim()
+      if (made < CALL_EVALS && !silent) break
+      // out of evals or continuations mid-work, or silent: one more call without the tool, for a report to the
+      // person (a turn ended on "Now verifying the refactor live —" after 27 evals, and the person had nothing: round 4)
+      if (silent || left <= 0 || call >= MAX_CONTINUES) {
         prev = (prev ? prev + '\n\n' : '') + ((res && res.text) || '').trim()
         const fin = fitPrompt([...msgs, { role: 'assistant', content: this.renderMsg({ ...msg, text: (res && res.text) || '' }, true) || '(evals)' },
-          { role: 'user', content: '(From the bench, not the person: this turn has used all its evals. Reply to the person now, without evals: what you changed, what you checked and how, what is not done or not verified yet, and any temporary code (probes, console.log) still in the files. They can send a message to let you go on.)' }])
+          { role: 'user', content: '(From the bench, not the person: ' + (silent && left > 0 && call < MAX_CONTINUES ? 'your last call ran evals and then said nothing.' : 'this turn has used all its evals.') + ' Reply to the person now, without evals: what you changed, what you checked and how, what is not done or not verified yet, and any temporary code (probes, console.log) still in the files. They can send a message to let you go on.)' }])
         try {
           res = await this.sample(fin.msgs, { onText: ({ text: t }) => { msg.text = (prev ? prev + '\n\n' : '') + t; this.ev.emit('text', th.id) }, signal: o.signal, modelTier: th.tier || 'default', cache: false, ...(th.model ? { model: th.model } : {}) })
         } catch (e) { if (o.signal && o.signal.aborted) throw e; res = { text: '(The turn used all its evals before Claude could report; send a message to go on.)' } }
