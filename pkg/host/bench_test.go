@@ -93,7 +93,7 @@ func TestBenchFiles(t *testing.T) {
 	// A clean commit: the change list, a removal, the new listing, the event.
 	c := act("commit", map[string]any{"app": "jot", "ref": "draft", "base": n1, "message": "edit",
 		"changes": []any{map[string]any{"path": "README.md", "text": "mine"}, map[string]any{"path": "app.js", "delete": true}},
-		"event": map[string]any{"who": "agent", "thread": "th1", "note": "eval 1"}})
+		"event":   map[string]any{"who": "agent", "thread": "th1", "note": "eval 1"}})
 	n2 := num(c["n"])
 	if n2 <= n1 || num(c["at"]) != n1 || c["merged"] != false || !strings.Contains(fmtJSON(c["files"]), "README.md") || strings.Contains(fmtJSON(c["files"]), `"app.js"`) {
 		t.Fatalf("commit = %v", c)
@@ -196,7 +196,7 @@ func TestBenchInstances(t *testing.T) {
 		t.Fatalf("activated = %v", c["activated"])
 	}
 	st := act("status", map[string]any{"app": "jot"})
-	if dev := st["dev"].(map[string]any); dev["id"] != id || num(dev["n"]) != num(c["n"]) || st["test"] != nil || st["prop"] != nil {
+	if dev := st["dev"].(map[string]any); dev["id"] != id || num(dev["n"]) != num(c["n"]) || st["test"] != nil || len(st["props"].([]any)) != 0 {
 		t.Fatalf("status = %v", st)
 	}
 
@@ -271,8 +271,36 @@ func TestBenchProposals(t *testing.T) {
 	if prop["ref"] != ref || test["ref"] != ref || num(prop["n"]) != num(c["n"]) {
 		t.Fatalf("prop %v, test %v", prop, test)
 	}
+	// A second proposal has a prop instance of its own, so two proposals
+	// shown side by side each show their own: its commits activate it alone,
+	// and each embed runs its proposal's snapshot.
+	p2 := act("propose", map[string]any{"app": "jot", "title": "Smaller buttons"})
+	ref2 := p2["ref"].(string)
+	prop2 := act("instance", map[string]any{"app": "jot", "kind": "prop", "ref": ref2})
+	c2 := act("commit", map[string]any{"app": "jot", "ref": ref2, "base": draft, "changes": []any{map[string]any{"path": "README.md", "text": "the other"}}})
+	if a := fmtJSON(c2["activated"]); prop2["id"] == prop["id"] || !strings.Contains(a, `"store":"`+prop2["id"].(string)+`"`) || strings.Contains(a, prop["id"].(string)) {
+		t.Fatalf("a second proposal's instance %v (the first's %v), activated %v", prop2, prop, a)
+	}
+	h.call(admin, "mount.set", map[string]any{"host": h.cfg.Hosts.Live[0], "path": "/bench", "store": "bench"})
+	page, v := personView(t, h, "admin@example.com", "/bench")
+	embed := func(ref string) map[string]any {
+		return result(t, rpc(page, v, "slop.call", map[string]any{"action": "embed", "args": map[string]any{"app": "jot", "kind": "prop", "ref": ref}}))
+	}
+	if e1, e2 := embed(ref), embed(ref2); num(e1["version"]) != num(c["n"]) || num(e2["version"]) != num(c2["n"]) {
+		t.Fatalf("the embeds run %v and %v, not %d and %d", e1["version"], e2["version"], num(c["n"]), num(c2["n"]))
+	}
+	if props := act("status", map[string]any{"app": "jot"})["props"].([]any); len(props) != 2 || props[0].(map[string]any)["ref"] != ref || props[1].(map[string]any)["ref"] != ref2 {
+		t.Fatalf("status props = %v", props)
+	}
+	h.fail(admin, "actor.call", map[string]any{"store": "bench", "action": "embed", "args": map[string]any{"app": "jot", "kind": "prop", "ref": "draft"}}, "invalid_argument")
 	list := h.call(admin, "actor.call", map[string]any{"store": "bench", "action": "proposals", "args": map[string]any{"app": "jot"}}).([]any)
-	if len(list) != 1 || list[0].(map[string]any)["status"] != "open" || num(list[0].(map[string]any)["n"]) != num(c["n"]) {
+	var first map[string]any
+	for _, x := range list {
+		if x.(map[string]any)["ref"] == ref {
+			first = x.(map[string]any)
+		}
+	}
+	if len(list) != 2 || first == nil || first["status"] != "open" || num(first["n"]) != num(c["n"]) {
 		t.Fatalf("proposals = %v", list)
 	}
 	// Closing from a stale position is refused; from the right one, the ref
@@ -285,6 +313,9 @@ func TestBenchProposals(t *testing.T) {
 	h.fail(admin, "app.status", map[string]any{"store": prop["id"]}, "not_found")
 	if st := h.call(admin, "app.status", map[string]any{"store": test["id"], "peek": true}).(map[string]any); st["ref"] != "draft" {
 		t.Fatalf("the test instance follows %v", st["ref"])
+	}
+	if st := h.call(admin, "app.status", map[string]any{"store": prop2["id"], "peek": true}).(map[string]any); st["ref"] != ref2 {
+		t.Fatalf("the other proposal's instance follows %v", st["ref"])
 	}
 	h.fail(admin, "actor.call", map[string]any{"store": "bench", "action": "closeProposal", "args": map[string]any{"app": "jot", "ref": ref, "status": "rejected", "ifAt": 0}}, "conflict")
 	evs := act("project", map[string]any{"app": "jot"})["events"].([]any)

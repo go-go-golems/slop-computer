@@ -239,6 +239,8 @@ func TestEmbeddedViews(t *testing.T) {
 	h.call(admin, "mount.set", map[string]any{"host": h.cfg.Hosts.Live[0], "path": "/devbench", "store": "devbench"})
 	h.call(admin, "store.new", map[string]any{"id": "jot"})
 	app := devApp()
+	app["about.html"] = "<!doctype html>\n<p>about</p>\n" // another page
+	app["part.html"] = "<li>a fragment</li>\n"            // HTML the app fetches and inserts
 	h.push(admin, map[string]any{"store": "jot", "files": files(app)})
 	h.push(admin, map[string]any{"store": "jot", "files": files(app), "ref": "draft"})
 	h.call(admin, "store.new", map[string]any{"id": "jot-dev", "app": "jot", "type": "jot"})
@@ -278,6 +280,22 @@ func TestEmbeddedViews(t *testing.T) {
 	if r, body := h.get(host, strings.TrimSuffix(u.Path, "/")+"/app.js"); r.StatusCode != 200 || !strings.Contains(body, "jot") {
 		t.Fatalf("app.js under the embed: %d %q", r.StatusCode, body)
 	}
+	// Another page of the app is served as the entry is (a bench frame on
+	// about.html has the probe); a fragment is served as stored.
+	under := func(e map[string]any, p string) string {
+		v, _ := url.Parse(e["src"].(string))
+		v.Path = strings.TrimSuffix(v.Path, "/") + "/" + p
+		return v.String()
+	}
+	_, _, status, about := open(under(e, "about.html"))
+	for _, want := range []string{`"parentOrigin":"` + tool + `"`, "/_slop/claude.js", "/_slop/probe.js", `<p data-src="about.html:2">about</p>`} {
+		if status != 200 || !strings.Contains(about, want) {
+			t.Errorf("about.html under the dev embed (%d) lacks %q:\n%s", status, want, about)
+		}
+	}
+	if r, body := h.get(host, strings.TrimSuffix(u.Path, "/")+"/part.html"); r.StatusCode != 200 || body != app["part.html"] {
+		t.Fatalf("part.html under the embed: %d %q", r.StatusCode, body)
+	}
 	toolHost := strings.TrimPrefix(tool, h.cfg.Scheme+"://")
 	if r, _ := h.get(toolHost, u.RequestURI()); r.StatusCode != 404 {
 		t.Fatalf("the token on another origin: %d, want 404", r.StatusCode)
@@ -291,6 +309,9 @@ func TestEmbeddedViews(t *testing.T) {
 	_, tool2, status, page := open(e2["src"].(string))
 	if status != 200 || tool2 != tool || strings.Contains(page, "probe.js") || strings.Contains(page, "data-src") || !strings.Contains(page, " "+tool+"\n") {
 		t.Fatalf("plain embed: %d %q\n%s", status, tool2, page)
+	}
+	if _, _, status, about := open(under(e2, "about.html")); status != 200 || !strings.Contains(about, "/_slop/claude.js") || strings.Contains(about, "probe.js") || strings.Contains(about, "data-src") {
+		t.Fatalf("about.html under the plain embed: %d\n%s", status, about)
 	}
 	// A viewer gets no dev embed.
 	if out := call(bobPage, bobTool, "embed", map[string]any{"store": "jot-dev", "dev": true}); errCode(out) != "not_granted" {

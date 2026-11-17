@@ -24,10 +24,10 @@ const kindOf = o => {
 
 export const APP = {
   'app.info': {
-    sig: '', doc: '{app, refs: {draft, main, proposal/…}, entry, workspace, instances: {dev, test, prop}}',
+    sig: '', doc: '{app, refs: {draft, main, proposal/…}, entry, workspace, instances: {dev, test, props: [one per proposal]}}',
     run: ctx => {
       const P = ctx.project, st = Watch.status || {}
-      return { app: P.app, refs: P.refs, entry: Instances.entry(P), workspace: ctx.ws, instances: { dev: st.dev || null, test: st.test || null, prop: st.prop || null } }
+      return { app: P.app, refs: P.refs, entry: Instances.entry(P), workspace: ctx.ws, instances: { dev: st.dev || null, test: st.test || null, props: st.props || [] } }
     }
   },
   'app.status': { sig: '', doc: 'where the refs are and what each instance runs: {refs, dev, test, prop} ({id, ref, n, broken})', run: ctx => Slop.call('status', { app: ctx.project.app }) },

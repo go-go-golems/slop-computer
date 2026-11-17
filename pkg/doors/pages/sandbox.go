@@ -9,6 +9,7 @@ import (
 	"encoding/json"
 	"io/fs"
 	"net/http"
+	"path"
 	"regexp"
 	"slices"
 	"strconv"
@@ -161,11 +162,17 @@ func (s *Door) serveSandbox(w http.ResponseWriter, r *http.Request) {
 			notFound(w)
 			return
 		}
-		// public: the sandbox serves an app's files to anyone who has its
-		// origin (the label is the capability), so a shared cache adds no
-		// exposure; a snapshot's bytes never change
-		s.writeStoreBytes(w, r, storeBytes{st: as, f: f, vis: public, mut: immutable})
-		return
+		if !isDocument(as, f, rest) {
+			// public: the sandbox serves an app's files to anyone who has its
+			// origin (the label is the capability), so a shared cache adds no
+			// exposure; a snapshot's bytes never change
+			s.writeStoreBytes(w, r, storeBytes{st: as, f: f, vis: public, mut: immutable})
+			return
+		}
+		// Another page of the app (about.html) is served as the entry is:
+		// with the runtime, so it can call the app's actor, and in a dev
+		// embed with the probe the bench's frames talk to.
+		entry = rest
 	}
 	f, err := as.SnapshotFile(ctx, n, entry)
 	if err != nil {
@@ -221,7 +228,20 @@ func (s *Door) appManifest(ctx context.Context, as *store.Store, n int64) (*apps
 var (
 	headOpen = regexp.MustCompile(`(?i)<head[^>]*>`)
 	doctype  = regexp.MustCompile(`(?i)^\s*<!doctype[^>]*>`)
+	docStart = regexp.MustCompile(`(?i)^\s*(<!doctype|<html[\s>]|<head[\s>])`)
 )
+
+// isDocument reports whether a file of an app is an HTML page: a .html file
+// that starts as a document does (a doctype, <html> or <head>). Other files,
+// and HTML fragments the app fetches and inserts itself, are served as
+// stored.
+func isDocument(as *store.Store, f store.File, name string) bool {
+	if ext := strings.ToLower(path.Ext(name)); ext != ".html" && ext != ".htm" {
+		return false
+	}
+	b, err := as.ReadFile(f)
+	return err == nil && docStart.Match(b)
+}
 
 // inject puts the boot data, the runtime and any extra tags first in a
 // page's head.

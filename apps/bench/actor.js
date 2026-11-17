@@ -22,7 +22,8 @@ const PROPOSAL = /^proposal\/[a-z0-9][a-z0-9-]{0,40}$/;
 // How many bytes of file text one read answers with; the page asks again
 // for the rest.
 const READ_BUDGET = 4 << 20;
-// Instances: what each kind follows (prop: the proposal it was pointed at).
+// Instances: what each kind follows (prop: its proposal; there is one per
+// proposal, see instanceOf).
 const KINDS = { dev: 'draft', test: 'draft', prop: '' };
 
 function tool(ctx) {
@@ -74,6 +75,15 @@ function instanceId(app, person, kind) {
   return app.slice(0, 63 - tail.length) + tail;
 }
 
+// The store id of the visitor's instance of a kind. dev and test are one
+// each per app; prop is one per proposal (<app>-prop-<proposal id>-<person>),
+// so proposals shown side by side each run their own code on their own data.
+function instanceOf(ctx, app, kind, ref) {
+  if (kindOf(ctx, kind) !== 'prop') return instanceId(app, ctx.visitor.id, kind);
+  if (!PROPOSAL.test(ref || '')) ctx.fail('invalid_argument', 'a prop instance is a proposal\'s: pass its ref');
+  return instanceId(app, ctx.visitor.id, 'prop-' + ref.slice('proposal/'.length));
+}
+
 async function allStores(ctx) {
   return await tool(ctx).stores({ all: ctx.visitor.audience === 'admin' });
 }
@@ -119,8 +129,9 @@ function ownThread(ctx, id) {
 // (peeked, so nothing activates by being asked).
 async function followers(ctx, app, ref) {
   const out = [];
-  for (const kind of Object.keys(KINDS)) {
-    const id = instanceId(app, ctx.visitor.id, kind);
+  const ids = ['dev', 'test'].map((kind) => instanceId(app, ctx.visitor.id, kind));
+  if (PROPOSAL.test(ref)) ids.push(instanceOf(ctx, app, 'prop', ref));
+  for (const id of ids) {
     const st = await statusOf(ctx, id, { peek: true });
     if (st && st.app === app && st.ref === ref) out.push(id);
   }
@@ -252,25 +263,31 @@ defineActor({
     // ---- instances: the visitor's dev, test and prop stores of an app ----
 
     // Where the app's refs are and what the visitor's instances run (peeked:
-    // nothing activates by being asked): {refs, dev, test, prop}, each
-    // instance {id, ref, n, next, broken} or null when it does not exist.
+    // nothing activates by being asked): {refs, dev, test, props}, each
+    // instance {id, ref, n, next, broken}; dev and test are null when they
+    // do not exist, props lists the open proposals' instances that do.
     status: {
       requires: 'view',
       async run(ctx, { app }) {
         storeId(ctx, app);
-        const out = { refs: await tool(ctx).refs(app) };
-        for (const kind of Object.keys(KINDS)) {
-          const id = instanceId(app, ctx.visitor.id, kind);
+        const out = { refs: await tool(ctx).refs(app), props: [] };
+        const peek = async (id) => {
           const st = await statusOf(ctx, id, { peek: true });
-          out[kind] = st && st.app === app ? { id, ref: st.ref || '', n: st.n || 0, next: st.next || 0, broken: st.broken || '' } : null;
+          return st && st.app === app ? { id, ref: st.ref || '', n: st.n || 0, next: st.next || 0, broken: st.broken || '' } : null;
+        };
+        for (const kind of ['dev', 'test']) out[kind] = await peek(instanceId(app, ctx.visitor.id, kind));
+        for (const p of sql.all('SELECT ref FROM proposals WHERE app = ? AND owner = ? AND status = ? ORDER BY created', app, ctx.visitor.id, 'open')) {
+          const st = await peek(instanceOf(ctx, app, 'prop', p.ref));
+          if (st) out.props.push(st);
         }
         return out;
       },
     },
     // The visitor's instance of a kind, made the first time: a store that
     // runs the app at a ref (dev: draft; test: draft or the proposal given;
-    // prop: the proposal given), with its own data, typed as the app's manifest says so the
-    // app's typed mounts serve it. Asking brings it up on its ref.
+    // prop: the proposal given, one instance per proposal), with its own
+    // data, typed as the app's manifest says so the app's typed mounts
+    // serve it. Asking brings it up on its ref.
     instance: {
       requires: 'view',
       async run(ctx, { app, kind, ref }) {
@@ -280,7 +297,7 @@ defineActor({
         // dev follows draft; test follows draft or the proposal given; prop a proposal
         const follow = kind === 'dev' ? 'draft' : ref || KINDS[kind];
         if (!follow || !(follow === 'draft' || PROPOSAL.test(follow))) ctx.fail('invalid_argument', 'a prop instance follows a proposal ref: pass ref');
-        const id = instanceId(app, ctx.visitor.id, kind);
+        const id = instanceOf(ctx, app, kind, follow);
         let status = await statusOf(ctx, id);
         if (!status) {
           const refs = await w.refs(app);
@@ -302,9 +319,9 @@ defineActor({
     // workshop's drop allows it); the next use makes a fresh one.
     reset: {
       requires: 'view',
-      async run(ctx, { app, kind }) {
+      async run(ctx, { app, kind, ref }) {
         storeId(ctx, app);
-        const id = instanceId(app, ctx.visitor.id, kindOf(ctx, kind));
+        const id = instanceOf(ctx, app, kind, ref);
         if ((await statusOf(ctx, id, { peek: true })) !== null) await tool(ctx).drop(id);
         return { dropped: id };
       },
@@ -315,9 +332,9 @@ defineActor({
     // through renew below.
     embed: {
       requires: 'view',
-      async run(ctx, { app, kind }) {
+      async run(ctx, { app, kind, ref }) {
         storeId(ctx, app);
-        return await tool(ctx).embed(instanceId(app, ctx.visitor.id, kindOf(ctx, kind)), { dev: true });
+        return await tool(ctx).embed(instanceOf(ctx, app, kind, ref), { dev: true });
       },
     },
     renew: {
@@ -336,9 +353,9 @@ defineActor({
     // failures): {broken, lines: [{at, level, text}]}.
     logs: {
       requires: 'view',
-      async run(ctx, { app, kind }) {
+      async run(ctx, { app, kind, ref }) {
         storeId(ctx, app);
-        return await tool(ctx).logs(instanceId(app, ctx.visitor.id, kindOf(ctx, kind))).catch(() => ({ broken: '', lines: [] }));
+        return await tool(ctx).logs(instanceOf(ctx, app, kind, ref)).catch(() => ({ broken: '', lines: [] }));
       },
     },
     // An instance's data: its documents, its SQL (read-only), and seeding it
@@ -346,31 +363,31 @@ defineActor({
     // visitor's own instances only, never a production one.
     docs: {
       requires: 'view',
-      async run(ctx, { app, kind, coll }) {
+      async run(ctx, { app, kind, ref, coll }) {
         storeId(ctx, app);
-        return await tool(ctx).docs(instanceId(app, ctx.visitor.id, kindOf(ctx, kind)), text(coll, 200));
+        return await tool(ctx).docs(instanceOf(ctx, app, kind, ref), text(coll, 200));
       },
     },
     doc: {
       requires: 'view',
-      async run(ctx, { app, kind, path }) {
+      async run(ctx, { app, kind, ref, path }) {
         storeId(ctx, app);
-        return await tool(ctx).doc(instanceId(app, ctx.visitor.id, kindOf(ctx, kind)), text(path, 400));
+        return await tool(ctx).doc(instanceOf(ctx, app, kind, ref), text(path, 400));
       },
     },
     sql: {
       requires: 'view',
-      async run(ctx, { app, kind, query, args }) {
+      async run(ctx, { app, kind, ref, query, args }) {
         storeId(ctx, app);
-        return await tool(ctx).sql(instanceId(app, ctx.visitor.id, kindOf(ctx, kind)), text(query, 20000), Array.isArray(args) ? args : []);
+        return await tool(ctx).sql(instanceOf(ctx, app, kind, ref), text(query, 20000), Array.isArray(args) ? args : []);
       },
     },
     seed: {
       requires: 'view',
-      async run(ctx, { app, kind, docs, tables }) {
+      async run(ctx, { app, kind, ref, docs, tables }) {
         const w = tool(ctx);
         storeId(ctx, app);
-        const id = instanceId(app, ctx.visitor.id, kindOf(ctx, kind));
+        const id = instanceOf(ctx, app, kind, ref);
         const out = { docs: {}, tables: {} };
         for (const [coll, rows] of Object.entries(docs || {})) {
           if (!Array.isArray(rows)) ctx.fail('invalid_argument', 'docs.' + coll + ' must be a list of objects');
@@ -415,7 +432,7 @@ defineActor({
     },
     // Close a proposal (accepted: its changes were committed to draft;
     // rejected): its ref goes, if it still points at ifAt, and the visitor's
-    // prop instance with it when it follows that ref.
+    // prop instance of it with it.
     closeProposal: {
       requires: 'view',
       async run(ctx, { app, ref, status, ifAt }) {
@@ -427,11 +444,11 @@ defineActor({
         const p = sql.one('SELECT owner, status, title FROM proposals WHERE app = ? AND ref = ?', app, ref);
         if (!p || p.owner !== ctx.visitor.id) ctx.fail('not_found', 'no proposal ' + ref);
         if (p.status !== 'open') ctx.fail('conflict', ref + ' is already ' + p.status);
-        // the ref cannot go while a store follows it: the visitor's prop
-        // instance goes with it, their test instance goes back to draft
-        const prop = instanceId(app, ctx.visitor.id, 'prop'), test = instanceId(app, ctx.visitor.id, 'test');
+        // the ref cannot go while a store follows it: the proposal's prop
+        // instance goes with it, the visitor's test instance goes back to draft
+        const prop = instanceOf(ctx, app, 'prop', ref), test = instanceId(app, ctx.visitor.id, 'test');
         const ps = await statusOf(ctx, prop, { peek: true });
-        if (ps && ps.ref === ref) await w.drop(prop);
+        if (ps && ps.app === app) await w.drop(prop);
         const ts = await statusOf(ctx, test, { peek: true });
         if (ts && ts.ref === ref) await w.follow(test, 'draft');
         await w.dropRef(app, ref, { ifAt: snap(ctx, ifAt, 'ifAt') });

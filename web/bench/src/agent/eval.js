@@ -100,7 +100,7 @@ async function afterCommit(ctx, c, before, t0) {
   if (!up.length) return out
   await Promise.all([...FrameHosts].filter(fh => fh.project === P && fh.ws === ctx.ws && fh.kind !== 'test').map(fh => fh.waitVersion(c.n)))
   try {
-    const l = await Slop.call('logs', { app: P.app, kind: showing(ctx.ws).kind })
+    const l = await Slop.call('logs', { app: P.app, ...showing(ctx.ws) })
     const bad = (l.lines || []).filter(x => x.at >= t0 && (x.level === 'error' || x.level === 'warn')).map(x => x.level + ': ' + x.text)
     if (bad.length) out.actorLogs = bad.slice(-6)
   } catch { }

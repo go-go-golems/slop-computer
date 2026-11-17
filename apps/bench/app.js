@@ -1,4 +1,4 @@
-/* the bench, built from web/bench: do not edit. source sha256:da3d38d807d381ad24002642e7446cb003b25e75ab659629fb939c87e3077a19 */
+/* the bench, built from web/bench: do not edit. source sha256:1ca237ceb73a26d9545f531313b495f73b6130d9d5878f5bc288d2c63b9aad62 */
 // The bench: a live dev environment for slop apps. Built from web/bench/src.
 (() => {
   // src/lib/util.js
@@ -7,6 +7,17 @@
   var clamp = (v, a, b) => Math.max(a, Math.min(b, v));
   var sleep = (ms) => new Promise((r) => setTimeout(r, ms));
   var clone = (v) => v == null ? v : JSON.parse(JSON.stringify(v));
+  function lock() {
+    let tail = Promise.resolve();
+    return {
+      run(fn) {
+        const p = tail.then(() => fn());
+        tail = p.catch(() => {
+        });
+        return p;
+      }
+    };
+  }
   function debounce(fn, ms) {
     let t;
     const d = (...a) => {
@@ -1050,9 +1061,12 @@
   // src/server/instances.js
   var Instances = {
     ready: /* @__PURE__ */ new Map(),
-    // app|kind → {ref, p: a promise of {id, kind, ref, n, broken}}
+    // app|kind (prop: app|prop|ref) → {ref, p: a promise of {id, kind, ref, n, broken}}
+    key(P, kind, ref) {
+      return P.app + "|" + kind + (kind === "prop" ? "|" + ref : "");
+    },
     ensure(P, kind, ref) {
-      const k = P.app + "|" + kind, cur = this.ready.get(k);
+      const k = this.key(P, kind, ref), cur = this.ready.get(k);
       if (cur && (!ref || cur.ref === ref)) return cur.p;
       const p = Slop.call("instance", { app: P.app, kind, ref: kind === "dev" ? void 0 : ref });
       this.ready.set(k, { ref, p });
@@ -1064,16 +1078,16 @@
     // a view of the instance for a frame: {src, view, origin, …}
     async embed(P, kind, ref) {
       await this.ensure(P, kind, ref);
-      return await Slop.call("embed", { app: P.app, kind });
+      return await Slop.call("embed", { app: P.app, kind, ref: kind === "prop" ? ref : void 0 });
     },
     // the view of a frame that reloaded or went away (best effort: it expires anyway)
     close(e) {
       if (e && e.view) Slop.call("close", { view: e.view }).catch(() => {
       });
     },
-    async reset(P, kind) {
-      const r = await Slop.call("reset", { app: P.app, kind });
-      this.ready.delete(P.app + "|" + kind);
+    async reset(P, kind, ref) {
+      const r = await Slop.call("reset", { app: P.app, kind, ref: kind === "prop" ? ref : void 0 });
+      this.ready.delete(this.key(P, kind, ref));
       return r;
     },
     // the page slop serves with the runtime: app.json's page
@@ -1659,10 +1673,10 @@
   var APP = {
     "app.info": {
       sig: "",
-      doc: "{app, refs: {draft, main, proposal/\u2026}, entry, workspace, instances: {dev, test, prop}}",
+      doc: "{app, refs: {draft, main, proposal/\u2026}, entry, workspace, instances: {dev, test, props: [one per proposal]}}",
       run: (ctx) => {
         const P = ctx.project, st = Watch.status || {};
-        return { app: P.app, refs: P.refs, entry: Instances.entry(P), workspace: ctx.ws, instances: { dev: st.dev || null, test: st.test || null, prop: st.prop || null } };
+        return { app: P.app, refs: P.refs, entry: Instances.entry(P), workspace: ctx.ws, instances: { dev: st.dev || null, test: st.test || null, props: st.props || [] } };
       }
     },
     "app.status": { sig: "", doc: "where the refs are and what each instance runs: {refs, dev, test, prop} ({id, ref, n, broken})", run: (ctx) => Slop.call("status", { app: ctx.project.app }) },
@@ -2646,36 +2660,50 @@
   }
 
   // src/frames/scenarios.js
+  var turns = /* @__PURE__ */ new Map();
+  function onTestInstance(P, fn) {
+    if (!turns.has(P.app)) turns.set(P.app, lock());
+    return turns.get(P.app).run(fn);
+  }
   var Fixtures = {
     current: null,
     ev: emitter(),
     // Reset the test instance of ws to a fixture's data (null: empty). read:
     // how to read the fixture file (default: the person's view of ws; an eval
     // passes its transaction's, which has its own writes).
-    async apply(P, name, ws = "draft", read2 = (path) => P.read(path, ws)) {
-      let spec = null;
-      if (name) {
-        const text = read2(fixturePath(name));
-        if (text === null) throw Object.assign(new Error("no fixture " + fixturePath(name)), { kind: "missing" });
-        spec = JSON.parse(text);
-        const bad = checkFixture(spec);
-        if (bad) throw Object.assign(new Error(fixturePath(name) + ": " + bad), { kind: "invalid" });
-      }
-      await Instances.reset(P, "test");
-      await Instances.ensure(P, "test", ws === "draft" ? void 0 : ws);
-      if (spec) await Slop.call("seed", { app: P.app, kind: "test", docs: spec.docs || {}, tables: spec.tables || {} });
-      this.current = name || null;
-      for (const fh of FrameHosts) if (fh.project === P && fh.kind === "test") fh.load({ keepState: false });
-      this.ev.emit("applied", this.current);
-      return { fixture: this.current, ws };
+    apply(P, name, ws = "draft", read2) {
+      return onTestInstance(P, () => applyFixture(P, name, ws, read2));
     }
   };
-  async function runScenario(P, spec, { ws = "draft", name = "unsaved", onStep, signal, who = "you", thread, keep = true, read: read2 } = {}) {
+  async function applyFixture(P, name, ws, read2 = (path) => P.read(path, ws)) {
+    let spec = null;
+    if (name) {
+      const text = read2(fixturePath(name));
+      if (text === null) throw Object.assign(new Error("no fixture " + fixturePath(name)), { kind: "missing" });
+      spec = JSON.parse(text);
+      const bad = checkFixture(spec);
+      if (bad) throw Object.assign(new Error(fixturePath(name) + ": " + bad), { kind: "invalid" });
+    }
+    await Instances.reset(P, "test");
+    await Instances.ensure(P, "test", ws === "draft" ? void 0 : ws);
+    if (spec) await Slop.call("seed", { app: P.app, kind: "test", docs: spec.docs || {}, tables: spec.tables || {} });
+    Fixtures.current = name || null;
+    for (const fh of FrameHosts) if (fh.project === P && fh.kind === "test") fh.load({ keepState: false });
+    Fixtures.ev.emit("applied", Fixtures.current);
+    return { fixture: Fixtures.current, ws };
+  }
+  async function runScenario(P, spec, opts = {}) {
     const bad = checkScenario(spec);
     if (bad) throw Object.assign(new Error(bad), { kind: "invalid" });
+    return onTestInstance(P, () => {
+      if (opts.signal && opts.signal.aborted) throw Object.assign(new Error("cancelled"), { kind: "cancelled" });
+      return runHolding(P, spec, opts);
+    });
+  }
+  async function runHolding(P, spec, { ws = "draft", name = "unsaved", onStep, signal, who = "you", thread, keep = true, read: read2 } = {}) {
     const [w, hgt] = spec.size || [375, 720], t0 = now();
     const res = { name, ws, ok: true, steps: [], snaps: [], page: spec.page || "index.html", fixture: spec.fixture || null, t: t0 };
-    await Fixtures.apply(P, spec.fixture || null, ws, read2);
+    await applyFixture(P, spec.fixture || null, ws, read2);
     const fh = await Headless.fresh(P, res.page, { kind: "test", ref: ws === "draft" ? null : ws, w, h: hgt });
     const timeout = (s) => clamp(+s.timeout || +spec.timeout || 2e3, 100, 15e3);
     const poll = async (s, test) => {
@@ -3476,7 +3504,7 @@ run then).
     if (!up.length) return out;
     await Promise.all([...FrameHosts].filter((fh) => fh.project === P && fh.ws === ctx.ws && fh.kind !== "test").map((fh) => fh.waitVersion(c.n)));
     try {
-      const l = await Slop.call("logs", { app: P.app, kind: showing(ctx.ws).kind });
+      const l = await Slop.call("logs", { app: P.app, ...showing(ctx.ws) });
       const bad = (l.lines || []).filter((x) => x.at >= t0 && (x.level === "error" || x.level === "warn")).map((x) => x.level + ": " + x.text);
       if (bad.length) out.actorLogs = bad.slice(-6);
     } catch {
@@ -3616,7 +3644,7 @@ Markdown files (README.md, notes, specs) render in the Docs panel. Keep README.m
         const t = view.read(p);
         return p + (t === null ? " (kept by hash)" : " (" + t.split("\n").length + " lines)");
       }).join(", ");
-      const inst = ["dev", "test", "prop"].filter((k) => st[k]).map((k) => k + " " + st[k].ref + " @" + st[k].n + (st[k].broken ? " BROKEN: " + st[k].broken.slice(0, 160) : "")).join("; ") || "none yet";
+      const inst = [...["dev", "test"].filter((k) => st[k]).map((k) => [k, st[k]]), ...(st.props || []).map((s2) => ["prop", s2])].map(([k, s2]) => k + " " + s2.ref + " @" + s2.n + (s2.broken ? " BROKEN: " + s2.broken.slice(0, 160) : "")).join("; ") || "none yet";
       const frames = P.board().frames.map((f) => {
         const v = FrameHost.ui.hostFor(f.id);
         return f.id + (f.label ? ' "' + f.label + '"' : "") + " " + (v ? v.route : f.route) + " " + f.w + "x" + f.h + " at " + f.x + "," + f.y + (v && v.errors ? " " + v.errors + " errors" : "") + (v && v.issues.length ? " " + v.issues.length + " issues" : "");

@@ -36,7 +36,8 @@ export const Agent = {
   context(P, ws, th) {
     const view = P.view(ws), st = Watch.status || {}
     const files = view.list().map(p => { const t = view.read(p); return p + (t === null ? ' (kept by hash)' : ' (' + t.split('\n').length + ' lines)') }).join(', ')
-    const inst = ['dev', 'test', 'prop'].filter(k => st[k]).map(k => k + ' ' + st[k].ref + ' @' + st[k].n + (st[k].broken ? ' BROKEN: ' + st[k].broken.slice(0, 160) : '')).join('; ') || 'none yet'
+    const inst = [...['dev', 'test'].filter(k => st[k]).map(k => [k, st[k]]), ...(st.props || []).map(s => ['prop', s])]
+      .map(([k, s]) => k + ' ' + s.ref + ' @' + s.n + (s.broken ? ' BROKEN: ' + s.broken.slice(0, 160) : '')).join('; ') || 'none yet'
     const frames = P.board().frames.map(f => {
       const v = FrameHost.ui.hostFor(f.id)
       return f.id + (f.label ? ' "' + f.label + '"' : '') + ' ' + (v ? v.route : f.route) + ' ' + f.w + 'x' + f.h + ' at ' + f.x + ',' + f.y + (v && v.errors ? ' ' + v.errors + ' errors' : '') + (v && v.issues.length ? ' ' + v.issues.length + ' issues' : '')

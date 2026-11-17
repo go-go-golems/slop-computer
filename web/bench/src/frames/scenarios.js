@@ -6,7 +6,9 @@
 // and made again, so its migrations run on empty tables) and seeded with
 // the scenario's fixture, if it names one; then the steps run in a fresh
 // headless frame of it. Fixtures.current says which fixture the instance
-// holds now (canvas frames of the test instance show that).
+// holds now (canvas frames of the test instance show that). Runs and
+// fixtures take turns on the instance: each holds it from its reset to its
+// last step.
 //
 // Owns: the test instance's state. Public API: Fixtures (current, apply),
 // runScenario, runAllScenarios, scenarioSummary. Specs: core/scenario.js.
@@ -15,40 +17,62 @@ import { Instances } from '../server/instances.js';
 import { Slop } from '../server/slop.js';
 import { Snaps } from './layout.js';
 import { checkFixture, checkScenario, fixturePath, scenarioList, stepLabel } from '../core/scenario.js';
-import { clamp, emitter, now, plural, sleep } from '../lib/util.js';
+import { clamp, emitter, lock, now, plural, sleep } from '../lib/util.js';
+
+// The test instance is one per person and app, and a scenario run or a
+// fixture applied resets it, so they take turns: a proposal card's check,
+// the scenarios panel and an agent's tests.* calls can overlap, and each
+// would otherwise run on the others' data or code.
+const turns = new Map()   // app → lock
+function onTestInstance(P, fn) {
+  if (!turns.has(P.app)) turns.set(P.app, lock())
+  return turns.get(P.app).run(fn)
+}
 
 export const Fixtures = {
   current: null, ev: emitter(),
   // Reset the test instance of ws to a fixture's data (null: empty). read:
   // how to read the fixture file (default: the person's view of ws; an eval
   // passes its transaction's, which has its own writes).
-  async apply(P, name, ws = 'draft', read = path => P.read(path, ws)) {
-    let spec = null
-    if (name) {
-      const text = read(fixturePath(name))
-      if (text === null) throw Object.assign(new Error('no fixture ' + fixturePath(name)), { kind: 'missing' })
-      spec = JSON.parse(text)
-      const bad = checkFixture(spec)
-      if (bad) throw Object.assign(new Error(fixturePath(name) + ': ' + bad), { kind: 'invalid' })
-    }
-    await Instances.reset(P, 'test')
-    await Instances.ensure(P, 'test', ws === 'draft' ? undefined : ws)
-    if (spec) await Slop.call('seed', { app: P.app, kind: 'test', docs: spec.docs || {}, tables: spec.tables || {} })
-    this.current = name || null
-    for (const fh of FrameHosts) if (fh.project === P && fh.kind === 'test') fh.load({ keepState: false })
-    this.ev.emit('applied', this.current)
-    return { fixture: this.current, ws }
+  apply(P, name, ws = 'draft', read) {
+    return onTestInstance(P, () => applyFixture(P, name, ws, read))
   }
+}
+// Fixtures.apply, by a caller that holds the test instance.
+async function applyFixture(P, name, ws, read = path => P.read(path, ws)) {
+  let spec = null
+  if (name) {
+    const text = read(fixturePath(name))
+    if (text === null) throw Object.assign(new Error('no fixture ' + fixturePath(name)), { kind: 'missing' })
+    spec = JSON.parse(text)
+    const bad = checkFixture(spec)
+    if (bad) throw Object.assign(new Error(fixturePath(name) + ': ' + bad), { kind: 'invalid' })
+  }
+  await Instances.reset(P, 'test')
+  await Instances.ensure(P, 'test', ws === 'draft' ? undefined : ws)
+  if (spec) await Slop.call('seed', { app: P.app, kind: 'test', docs: spec.docs || {}, tables: spec.tables || {} })
+  Fixtures.current = name || null
+  for (const fh of FrameHosts) if (fh.project === P && fh.kind === 'test') fh.load({ keepState: false })
+  Fixtures.ev.emit('applied', Fixtures.current)
+  return { fixture: Fixtures.current, ws }
 }
 
 // Run one scenario: reset and seed the test instance, a fresh frame of it,
-// the steps in order, a snapshot where it fails (and where asked).
-export async function runScenario(P, spec, { ws = 'draft', name = 'unsaved', onStep, signal, who = 'you', thread, keep = true, read } = {}) {
+// the steps in order, a snapshot where it fails (and where asked). It waits
+// its turn on the test instance.
+export async function runScenario(P, spec, opts = {}) {
   const bad = checkScenario(spec)
   if (bad) throw Object.assign(new Error(bad), { kind: 'invalid' })
+  return onTestInstance(P, () => {
+    if (opts.signal && opts.signal.aborted) throw Object.assign(new Error('cancelled'), { kind: 'cancelled' })
+    return runHolding(P, spec, opts)
+  })
+}
+// runScenario's run, while it holds the test instance.
+async function runHolding(P, spec, { ws = 'draft', name = 'unsaved', onStep, signal, who = 'you', thread, keep = true, read } = {}) {
   const [w, hgt] = spec.size || [375, 720], t0 = now()
   const res = { name, ws, ok: true, steps: [], snaps: [], page: spec.page || 'index.html', fixture: spec.fixture || null, t: t0 }
-  await Fixtures.apply(P, spec.fixture || null, ws, read)
+  await applyFixture(P, spec.fixture || null, ws, read)
   const fh = await Headless.fresh(P, res.page, { kind: 'test', ref: ws === 'draft' ? null : ws, w, h: hgt })
   const timeout = s => clamp(+s.timeout || +spec.timeout || 2000, 100, 15000)
   // checks retry until they pass or time out: pages render after data arrives

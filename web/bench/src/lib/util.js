@@ -9,6 +9,18 @@ export const now = () => Date.now()
 export const clamp = (v, a, b) => Math.max(a, Math.min(b, v))
 export const sleep = ms => new Promise(r => setTimeout(r, ms))
 export const clone = v => v == null ? v : JSON.parse(JSON.stringify(v))
+// A queue of async jobs: run(fn) starts fn once the jobs queued before it
+// have settled, and returns fn's promise.
+export function lock() {
+  let tail = Promise.resolve()
+  return {
+    run(fn) {
+      const p = tail.then(() => fn())
+      tail = p.catch(() => { })
+      return p
+    }
+  }
+}
 export function debounce(fn, ms) { let t; const d = (...a) => { clearTimeout(t); t = setTimeout(() => fn(...a), ms) }; d.flush = (...a) => { clearTimeout(t); fn(...a) }; return d }
 export function fmtTime(t) { const d = new Date(t); return d.toTimeString().slice(0, 8) }
 export function fmtAgo(t) {

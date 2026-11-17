@@ -3,9 +3,10 @@
 //
 // An instance is a store that runs the app at a ref, with its own data: dev
 // (follows draft; the canvas shows it), test (follows draft; seeded with a
-// fixture for scenarios) and prop (follows the proposal under review). One
-// of each per person and app, made the first time a frame needs it; reset()
-// throws one and its data away.
+// fixture for scenarios) and prop (follows a proposal under review). One dev
+// and one test per person and app, and one prop per proposal, so proposals
+// shown side by side each run their own; each is made the first time a
+// frame needs it, and reset() throws one and its data away.
 //
 // Watch polls, while an app is open, where its refs are (the drafts follow
 // them), what the instances run, and the dev instance's new log lines,
@@ -18,9 +19,10 @@ import { Slop } from './slop.js';
 import { emitter } from '../lib/util.js';
 
 export const Instances = {
-  ready: new Map(),     // app|kind → {ref, p: a promise of {id, kind, ref, n, broken}}
+  ready: new Map(),     // app|kind (prop: app|prop|ref) → {ref, p: a promise of {id, kind, ref, n, broken}}
+  key(P, kind, ref) { return P.app + '|' + kind + (kind === 'prop' ? '|' + ref : '') },
   ensure(P, kind, ref) {
-    const k = P.app + '|' + kind, cur = this.ready.get(k)
+    const k = this.key(P, kind, ref), cur = this.ready.get(k)
     if (cur && (!ref || cur.ref === ref)) return cur.p
     const p = Slop.call('instance', { app: P.app, kind, ref: kind === 'dev' ? undefined : ref })
     this.ready.set(k, { ref, p })
@@ -30,13 +32,13 @@ export const Instances = {
   // a view of the instance for a frame: {src, view, origin, …}
   async embed(P, kind, ref) {
     await this.ensure(P, kind, ref)
-    return await Slop.call('embed', { app: P.app, kind })
+    return await Slop.call('embed', { app: P.app, kind, ref: kind === 'prop' ? ref : undefined })
   },
   // the view of a frame that reloaded or went away (best effort: it expires anyway)
   close(e) { if (e && e.view) Slop.call('close', { view: e.view }).catch(() => { }) },
-  async reset(P, kind) {
-    const r = await Slop.call('reset', { app: P.app, kind })
-    this.ready.delete(P.app + '|' + kind)
+  async reset(P, kind, ref) {
+    const r = await Slop.call('reset', { app: P.app, kind, ref: kind === 'prop' ? ref : undefined })
+    this.ready.delete(this.key(P, kind, ref))
     return r
   },
   // the page slop serves with the runtime: app.json's page
