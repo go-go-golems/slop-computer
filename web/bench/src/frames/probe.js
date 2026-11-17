@@ -301,6 +301,14 @@ export function PROBE(CFG) {
       btn.form.dispatchEvent(new (window.SubmitEvent || Event)('submit', { bubbles: true, cancelable: true, submitter: btn }))
     }
   }, true)
+  // outside Play the app is not in use: the bench's mode keys (P, V, C, Escape) go up to the bench, which
+  // otherwise never sees them once a frame has focus ("the P key didn't take", round 5)
+  addEventListener('keydown', e => {
+    if (mode === 'play' || e.metaKey || e.ctrlKey || e.altKey) return
+    const t = e.target
+    if (t && t.closest && t.closest('input, textarea, select, [contenteditable]')) return
+    if (/^(p|v|c|escape)$/i.test(e.key)) { e.preventDefault(); post({ ev: 'modekey', key: e.key }) }
+  }, true)
   addEventListener('keydown', e => {
     if (mode !== 'play' || e.key !== 'Enter' || !e.target.form || e.target.tagName === 'TEXTAREA') return
     const f = e.target.form

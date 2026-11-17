@@ -156,6 +156,9 @@ export class FrameHost {
         if (p) { this.pend.delete(m.id); m.ok ? p.res(m.value) : p.rej(Object.assign(new Error(m.error), { kind: 'frame' })) }
         break
       }
+      case 'modekey':
+        if (!this.headless) document.dispatchEvent(new KeyboardEvent('keydown', { key: String(m.key || '') }))
+        break
       case 'print':
         if (!this.headless) toast('Printing does not work inside the bench\'s frame. It works when the app is open in its own browser tab (after Publish, at its web address).', 7000)
         break

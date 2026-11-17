@@ -1,4 +1,4 @@
-/* the bench, built from web/bench: do not edit. source sha256:5eafb1524c568d8b23746fc0d07d5e05d4610d5e3996dfca2bbaf3f343781056 */
+/* the bench, built from web/bench: do not edit. source sha256:be366d039280aad02b352a33163c8e97bd8c90dcf7ecad7a20ca187165579d18 */
 // slop's dev probe (SLOP3-022): the bench's PROBE from web/bench/src/frames/probe.js,
 // which the sandbox adds to dev embeds only, after the runtime. It answers the
 // tool that framed the view (the boot data's parentOrigin) and nothing else.
@@ -311,6 +311,14 @@ function PROBE(CFG) {
       if (!btn.form.reportValidity()) return
       btn.form.dispatchEvent(new (window.SubmitEvent || Event)('submit', { bubbles: true, cancelable: true, submitter: btn }))
     }
+  }, true)
+  // outside Play the app is not in use: the bench's mode keys (P, V, C, Escape) go up to the bench, which
+  // otherwise never sees them once a frame has focus ("the P key didn't take", round 5)
+  addEventListener('keydown', e => {
+    if (mode === 'play' || e.metaKey || e.ctrlKey || e.altKey) return
+    const t = e.target
+    if (t && t.closest && t.closest('input, textarea, select, [contenteditable]')) return
+    if (/^(p|v|c|escape)$/i.test(e.key)) { e.preventDefault(); post({ ev: 'modekey', key: e.key }) }
   }, true)
   addEventListener('keydown', e => {
     if (mode !== 'play' || e.key !== 'Enter' || !e.target.form || e.target.tagName === 'TEXTAREA') return

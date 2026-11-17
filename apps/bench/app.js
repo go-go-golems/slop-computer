@@ -1,4 +1,4 @@
-/* the bench, built from web/bench: do not edit. source sha256:5eafb1524c568d8b23746fc0d07d5e05d4610d5e3996dfca2bbaf3f343781056 */
+/* the bench, built from web/bench: do not edit. source sha256:be366d039280aad02b352a33163c8e97bd8c90dcf7ecad7a20ca187165579d18 */
 // The bench: a live dev environment for slop apps. Built from web/bench/src.
 (() => {
   // src/lib/util.js
@@ -1414,6 +1414,9 @@
           }
           break;
         }
+        case "modekey":
+          if (!this.headless) document.dispatchEvent(new KeyboardEvent("keydown", { key: String(m.key || "") }));
+          break;
         case "print":
           if (!this.headless) toast("Printing does not work inside the bench's frame. It works when the app is open in its own browser tab (after Publish, at its web address).", 7e3);
           break;
