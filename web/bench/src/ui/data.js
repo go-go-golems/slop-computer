@@ -74,7 +74,12 @@ export const DATA = {
       if (S.coll) {
         if (!S.docs) return
         if (!S.docs.length) { grid.appendChild(h('p.empty', 'No documents in ' + S.coll + '.')); return }
-        grid.appendChild(h('div.rows', { style: { padding: '6px 10px' } }, S.docs.slice(0, 300).map(d => h('div', h('b.mono', d.path), h('span.mono.note', { style: { flex: 1, whiteSpace: 'pre-wrap' } }, JSON.stringify(d.body))))))
+        // a table, a column per field: a list of JSON lines could not be counted or scanned by someone who
+        // works in spreadsheets (round 3)
+        const docs = S.docs.slice(0, 300), keys = [...new Set(docs.flatMap(d => d.body && typeof d.body === 'object' ? Object.keys(d.body) : []))]
+        grid.appendChild(h('p.note', { style: { padding: '6px 10px 0' } }, S.docs.length + ' document' + (S.docs.length === 1 ? '' : 's') + ' in ' + S.coll + (S.docs.length > 300 ? ' (the first 300 shown)' : '')))
+        grid.appendChild(h('table.grid.ro', h('thead', h('tr', h('th', 'id'), keys.map(k => h('th', k)))),
+          h('tbody', docs.map(d => h('tr', h('td.mono', d.path.split('/').pop()), keys.map(k => h('td', cell(d.body ? d.body[k] : undefined))))))))
         return
       }
       if (!S.rows) return

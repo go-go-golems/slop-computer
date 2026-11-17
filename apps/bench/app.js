@@ -1,4 +1,4 @@
-/* the bench, built from web/bench: do not edit. source sha256:35ea0c072001ea608eb11e24e66f7f6618e16b139be10895216477c38f3e9927 */
+/* the bench, built from web/bench: do not edit. source sha256:247146373bd366a9491a319970a7b87e47452fb0f336c3d13da4afb8c8b18bd0 */
 // The bench: a live dev environment for slop apps. Built from web/bench/src.
 (() => {
   // src/lib/util.js
@@ -8810,7 +8810,13 @@ return { files: list.map(f => f.path), issues }`;
             grid.appendChild(h("p.empty", "No documents in " + S.coll + "."));
             return;
           }
-          grid.appendChild(h("div.rows", { style: { padding: "6px 10px" } }, S.docs.slice(0, 300).map((d) => h("div", h("b.mono", d.path), h("span.mono.note", { style: { flex: 1, whiteSpace: "pre-wrap" } }, JSON.stringify(d.body))))));
+          const docs = S.docs.slice(0, 300), keys = [...new Set(docs.flatMap((d) => d.body && typeof d.body === "object" ? Object.keys(d.body) : []))];
+          grid.appendChild(h("p.note", { style: { padding: "6px 10px 0" } }, S.docs.length + " document" + (S.docs.length === 1 ? "" : "s") + " in " + S.coll + (S.docs.length > 300 ? " (the first 300 shown)" : "")));
+          grid.appendChild(h(
+            "table.grid.ro",
+            h("thead", h("tr", h("th", "id"), keys.map((k) => h("th", k)))),
+            h("tbody", docs.map((d) => h("tr", h("td.mono", d.path.split("/").pop()), keys.map((k) => h("td", cell(d.body ? d.body[k] : void 0))))))
+          ));
           return;
         }
         if (!S.rows) return;
@@ -9518,15 +9524,16 @@ return { files: list.map(f => f.path), issues }`;
             " ",
             m.summary || 'working in "' + prop.title + '"',
             m.summary && m.status !== "running" ? h("div.note", "These changes are in a proposal: a copy of your app. Your app does not change until you accept them. What you type into its preview stays with the preview: accepting takes the changes, not that test data.") : null,
+            // real buttons, Accept first and filled: as grey links at the foot of a reply they were missed (round 3)
             h(
-              "span",
-              { style: { display: "inline-flex", gap: "8px", marginLeft: "6px" } },
-              App.ws !== prop.ref ? h("button.link", { on: { click: () => App.setWs(prop.ref) } }, "Show it") : null,
-              h("button.link", { on: { click: () => {
+              "div",
+              { style: { display: "flex", gap: "6px", marginTop: "6px", flexWrap: "wrap" } },
+              m.summary && m.status !== "running" ? h("button.btn.sm.primary", { title: "Take these changes into your app", on: { click: () => acceptProp(prop) } }, "Accept the changes") : null,
+              h("button.btn.sm", { on: { click: () => {
                 App.setWs(prop.ref);
                 Dock.open("review");
-              } } }, "Review"),
-              m.summary && m.status !== "running" ? h("button.link", { on: { click: () => acceptProp(prop) } }, "Accept") : null
+              } } }, "Review them"),
+              App.ws !== prop.ref ? h("button.btn.sm", { on: { click: () => App.setWs(prop.ref) } }, "Show it") : null
             )
           ] : prop.status === "discarded" ? h("span.note", "Nothing in the app changed in this turn.") : h("span", 'The proposal "' + prop.title + '" was ' + prop.status + ".")) : null
         );

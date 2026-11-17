@@ -134,10 +134,11 @@ export const THREADS = {
         prop ? h('div.ctx', prop.status === 'open'
           ? [h('span.tag.ws', 'proposal'), ' ', m.summary || 'working in "' + prop.title + '"',
             m.summary && m.status !== 'running' ? h('div.note', 'These changes are in a proposal: a copy of your app. Your app does not change until you accept them. What you type into its preview stays with the preview: accepting takes the changes, not that test data.') : null,
-            h('span', { style: { display: 'inline-flex', gap: '8px', marginLeft: '6px' } },
-              App.ws !== prop.ref ? h('button.link', { on: { click: () => App.setWs(prop.ref) } }, 'Show it') : null,
-              h('button.link', { on: { click: () => { App.setWs(prop.ref); Dock.open('review') } } }, 'Review'),
-              m.summary && m.status !== 'running' ? h('button.link', { on: { click: () => acceptProp(prop) } }, 'Accept') : null)]
+            // real buttons, Accept first and filled: as grey links at the foot of a reply they were missed (round 3)
+            h('div', { style: { display: 'flex', gap: '6px', marginTop: '6px', flexWrap: 'wrap' } },
+              m.summary && m.status !== 'running' ? h('button.btn.sm.primary', { title: 'Take these changes into your app', on: { click: () => acceptProp(prop) } }, 'Accept the changes') : null,
+              h('button.btn.sm', { on: { click: () => { App.setWs(prop.ref); Dock.open('review') } } }, 'Review them'),
+              App.ws !== prop.ref ? h('button.btn.sm', { on: { click: () => App.setWs(prop.ref) } }, 'Show it') : null)]
           // a proposal closed because the turn changed nothing: its title is the person's message, so
           // '"…" was discarded' read as "your message was discarded" (a persona review found it)
           : prop.status === 'discarded' ? h('span.note', 'Nothing in the app changed in this turn.')
