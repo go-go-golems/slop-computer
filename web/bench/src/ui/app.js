@@ -301,6 +301,8 @@ export const App = {
       actions: [{ label: from ? 'Roll back to ' + from : 'Close', danger: !!from, run: async () => { if (!from) return; try { await Publish.rollback(P, from, n); toast('main is back at ' + from) } catch (e) { toast('Not rolled back: ' + (e.message || e), 6000) } } }, ...(from ? [{ label: 'Done', primary: true }] : [])]
     })
   },
+  // the dev instance's data changed under the frames (a seed): show it
+  reloadDev() { for (const fh of FrameHosts) if (fh.project === this.P && fh.kind === 'dev') fh.load({ keepState: true }) },
   async resetDev() {
     const P = this.P
     if (!await confirmBox('Reset dev data?', 'Your dev instance of ' + P.app + ' and its data are dropped, and a fresh one runs draft. The app and its other instances are not touched.', 'Reset')) return

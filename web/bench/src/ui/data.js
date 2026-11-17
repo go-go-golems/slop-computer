@@ -81,7 +81,7 @@ export const DATA = {
       const fx = fixtureList(P(), App.ws)
       popMenu(btn, [{ group: 'Fixtures (' + FIX_DIR + ')' }, ...fx.map(f => ({
         label: f.name, sub: f.error || f.parts.join(', ') || 'empty', disabled: !!f.error, run: async () => {
-          try { await Slop.call('seed', { app: P().app, kind: 'dev', docs: f.spec.docs || {}, tables: f.spec.tables || {} }); toast('Seeded the dev instance from ' + f.name); loadTables() } catch (e) { toast('Not seeded: ' + (e.message || e), 5000) }
+          try { await Slop.call('seed', { app: P().app, kind: 'dev', docs: f.spec.docs || {}, tables: f.spec.tables || {} }); toast('Seeded the dev instance from ' + f.name + '; the frames reload'); App.reloadDev(); loadTables() } catch (e) { toast('Not seeded: ' + (e.message || e), 5000) }
         }
       })), ...(fx.length ? [] : [{ note: 'No fixtures yet: save rows as one, or write fixtures/<name>.json.' }])])
     }

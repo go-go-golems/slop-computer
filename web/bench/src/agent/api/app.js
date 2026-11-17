@@ -44,7 +44,12 @@ export const APP = {
   'app.sql': { sig: 'query, args?, {kind}?', doc: 'rows (read-only SQL on the instance\'s tables)', run: (ctx, query, args, o) => Slop.call('sql', { app: ctx.project.app, kind: kindOf(o), query, args: args || [] }) },
   'app.seed': {
     sig: '{docs, tables}', doc: 'adds data to the dev instance: docs {coll: [rows]} (a row\'s id field names its document), tables {name: [rows]} (tables a migration made)', writes: 'dev',
-    run: (ctx, spec) => Slop.call('seed', { app: ctx.project.app, kind: 'dev', docs: spec.docs || {}, tables: spec.tables || {} })
+    run: async (ctx, spec) => {
+      const r = await Slop.call('seed', { app: ctx.project.app, kind: 'dev', docs: spec.docs || {}, tables: spec.tables || {} })
+      // the frames show the new data (a persona saw "No shipments yet" after a seed)
+      await Promise.all([...FrameHosts].filter(fh => fh.project === ctx.project && fh.kind === 'dev').map(fh => fh.load({ keepState: true })))
+      return r
+    }
   },
   'app.reset': {
     sig: '{why}', doc: 'asks the person with an approval card, then drops ALL the dev instance\'s data (what they entered too) for a fresh one on draft. Only when a migration changed in a way old rows cannot follow; never to clean up test data', writes: 'dev', long: true,

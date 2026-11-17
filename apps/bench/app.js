@@ -1,4 +1,4 @@
-/* the bench, built from web/bench: do not edit. source sha256:446482620ff3ae249e1b7b6988d5f927f2bd7e0a8897510d8e4e27df8fff363a */
+/* the bench, built from web/bench: do not edit. source sha256:9beadd898fd7b7853f427bfe7ce4776916c4e8f790bf077a8f789fd2a024b4ec */
 // The bench: a live dev environment for slop apps. Built from web/bench/src.
 (() => {
   // src/lib/util.js
@@ -1696,7 +1696,11 @@
       sig: "{docs, tables}",
       doc: "adds data to the dev instance: docs {coll: [rows]} (a row's id field names its document), tables {name: [rows]} (tables a migration made)",
       writes: "dev",
-      run: (ctx, spec) => Slop.call("seed", { app: ctx.project.app, kind: "dev", docs: spec.docs || {}, tables: spec.tables || {} })
+      run: async (ctx, spec) => {
+        const r = await Slop.call("seed", { app: ctx.project.app, kind: "dev", docs: spec.docs || {}, tables: spec.tables || {} });
+        await Promise.all([...FrameHosts].filter((fh) => fh.project === ctx.project && fh.kind === "dev").map((fh) => fh.load({ keepState: true })));
+        return r;
+      }
     },
     "app.reset": {
       sig: "{why}",
@@ -6562,6 +6566,10 @@ Markdown files (README.md, notes, specs) render in the Docs panel. Keep README.m
         } }, ...from ? [{ label: "Done", primary: true }] : []]
       });
     },
+    // the dev instance's data changed under the frames (a seed): show it
+    reloadDev() {
+      for (const fh of FrameHosts) if (fh.project === this.P && fh.kind === "dev") fh.load({ keepState: true });
+    },
     async resetDev() {
       const P = this.P;
       if (!await confirmBox("Reset dev data?", "Your dev instance of " + P.app + " and its data are dropped, and a fresh one runs draft. The app and its other instances are not touched.", "Reset")) return;
@@ -8709,7 +8717,8 @@ return { files: list.map(f => f.path), issues }`;
           run: async () => {
             try {
               await Slop.call("seed", { app: P().app, kind: "dev", docs: f.spec.docs || {}, tables: f.spec.tables || {} });
-              toast("Seeded the dev instance from " + f.name);
+              toast("Seeded the dev instance from " + f.name + "; the frames reload");
+              App.reloadDev();
               loadTables();
             } catch (e) {
               toast("Not seeded: " + (e.message || e), 5e3);
@@ -8982,7 +8991,7 @@ return { files: list.map(f => f.path), issues }`;
             App.setWs(p.ref);
             App.compare(true);
           } } }, "Compare"),
-          h("button.btn.sm.primary", { disabled: !n, on: { click: () => accept(P, p, list.filter((x) => pick[x.path]).map((x) => x.path)) } }, "Accept " + (n === all ? "all" : n)),
+          h("button.btn.sm.primary", { disabled: !n, on: { click: () => accept(P, p, list.filter((x) => pick[x.path]).map((x) => x.path), list.filter((x) => !pick[x.path]).map((x) => x.path)) } }, "Accept " + (n === all ? "all" : n + " of " + all)),
           h("button.btn.sm.danger", { on: { click: async () => {
             if (!all || await confirmBox('Reject "' + p.title + '"?', "Its " + plural(all, "change") + " are discarded with the proposal. The timeline keeps its commits.", "Reject")) {
               await P.reject(p.ref);
@@ -9002,10 +9011,14 @@ return { files: list.map(f => f.path), issues }`;
           } } });
           files2.appendChild(h(
             "div",
+            h("label", { title: "Include this file when you accept" }, cb),
+            text ? h("button.link", { style: { padding: 0 }, on: { click: (e) => {
+              e.preventDefault();
+              S.shown[key] = !shown;
+              paint();
+            } } }, x.path) : h("span", x.path),
             h(
-              "label",
-              cb,
-              h("span", x.path),
+              "span",
               h("span.note", !x.existed ? "new" : !x.entry ? "deleted" : st ? "+" + st.add + " \u2212" + st.del : "replaced (kept by hash)"),
               h("span.sp"),
               text ? h("button.link.note", { on: { click: (e) => {
@@ -9027,7 +9040,8 @@ return { files: list.map(f => f.path), issues }`;
         if (all) c.appendChild(checksPanel(P, p));
         return c;
       }
-      async function accept(P, p, paths) {
+      async function accept(P, p, paths, left = []) {
+        if (left.length && !await confirmBox("Accept " + paths.length + " of " + (paths.length + left.length) + " files?", "Left out, and discarded with the proposal: " + left.join(", ") + ". Files that belong together (a migration and the code that uses it) should go in together.", "Accept " + paths.length)) return;
         const r = await P.accept(p.ref, paths, "you").catch((e) => ({ status: "failed", error: e.message }));
         if (r.status === "committed") {
           toast("Accepted " + plural(paths.length, "change") + " into draft " + r.n + (r.merged ? " (merged with what changed since)" : ""));
