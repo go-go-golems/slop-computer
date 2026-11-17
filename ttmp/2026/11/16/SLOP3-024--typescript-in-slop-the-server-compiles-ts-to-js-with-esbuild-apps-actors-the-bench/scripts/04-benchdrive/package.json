@@ -1,0 +1,1 @@
+{"name":"benchdrive","version":"0.1.0","private":true,"type":"module","bin":{"benchdrive":"./benchdrive.mjs"},"dependencies":{"playwright":"^1.66.0-alpha-2026-11-09"}}
