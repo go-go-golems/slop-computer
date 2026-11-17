@@ -1,4 +1,4 @@
-/* the bench, built from web/bench: do not edit. source sha256:602b3c7183f12d620b40519ad93b89e32975f27c1e8d22f975efdd24ccc09cce */
+/* the bench, built from web/bench: do not edit. source sha256:2fd0a16bd7faf50fce056769f7eac554740fbc488e503e4c9534865bd8e3677a */
 // The bench: a live dev environment for slop apps. Built from web/bench/src.
 (() => {
   // src/lib/util.js
@@ -6812,7 +6812,14 @@ Markdown files (README.md, notes, specs) render in the Docs panel. Keep README.m
       clear(H.store).append(h("b", l.edits || l.draft), h("span", l.dev || "no dev instance"));
     },
     projectMenu(btn) {
-      const recent = Projects.recent(), items = [{ label: "New app\u2026", sub: "start one from a template", run: () => this.newAppDialog() }, { label: "Import app\u2026", sub: "a .zip of an app's files", run: () => this.importDialog() }, { hr: true }, { group: "Recent" }];
+      const recent = Projects.recent(), items = [
+        { label: "New app\u2026", sub: "start one from a template", run: () => this.newAppDialog() },
+        { label: "Import app\u2026", sub: "a .zip of an app's files", run: () => this.importDialog() },
+        // also here, not only in the header: a persona looked for it in the menus (round 5)
+        ...this.P ? [{ label: "Publish " + this.P.app + "\u2026", sub: "draft to main: what people use", run: () => this.publishDialog() }] : [],
+        { hr: true },
+        { group: "Recent" }
+      ];
       for (const id of recent) {
         const a = Slop.app(id);
         items.push({ label: id, sub: a ? [a.refs.draft != null ? "draft " + a.refs.draft : "", a.refs.main != null ? "main " + a.refs.main : "not published"].filter(Boolean).join(" \xB7 ") : "", on: this.P && id === this.P.app, run: () => {

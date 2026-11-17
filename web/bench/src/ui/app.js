@@ -363,7 +363,9 @@ export const App = {
   },
   projectMenu(btn) {
     // New app first: below a long list of apps it was out of sight (a persona working by eye, round 3)
-    const recent = Projects.recent(), items = [{ label: 'New app…', sub: 'start one from a template', run: () => this.newAppDialog() }, { label: 'Import app…', sub: 'a .zip of an app\'s files', run: () => this.importDialog() }, { hr: true }, { group: 'Recent' }]
+    const recent = Projects.recent(), items = [{ label: 'New app…', sub: 'start one from a template', run: () => this.newAppDialog() }, { label: 'Import app…', sub: 'a .zip of an app\'s files', run: () => this.importDialog() },
+      // also here, not only in the header: a persona looked for it in the menus (round 5)
+      ...(this.P ? [{ label: 'Publish ' + this.P.app + '…', sub: 'draft to main: what people use', run: () => this.publishDialog() }] : []), { hr: true }, { group: 'Recent' }]
     for (const id of recent) { const a = Slop.app(id); items.push({ label: id, sub: a ? [a.refs.draft != null ? 'draft ' + a.refs.draft : '', a.refs.main != null ? 'main ' + a.refs.main : 'not published'].filter(Boolean).join(' · ') : '', on: this.P && id === this.P.app, run: () => { if (!this.P || id !== this.P.app) this.openProject(id) } }) }
     items.push({ group: 'Apps on this server' })
     const apps = Slop.apps.filter(a => !recent.includes(a.id))
