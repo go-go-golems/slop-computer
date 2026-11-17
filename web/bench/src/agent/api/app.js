@@ -46,9 +46,12 @@ export const APP = {
   'app.addresses': { sig: '', doc: '{urls: [{url, kind}]}: where the published app is on the web (the mounts serving it); none means an administrator has not given it an address yet. Tell the person their link after a publish.', run: ctx => Slop.call('addresses', { app: ctx.project.app }) },
   'app.status': { sig: '', doc: 'where the refs are and what each instance runs: {refs, dev, test, prop} ({id, ref, n, broken})', run: ctx => Slop.call('status', { app: ctx.project.app }) },
   'app.logs': {
-    sig: '{limit, kind}?', doc: '{broken, lines: [{at, level, text}]}: the instance\'s actor console, setup and activation failures',
+    sig: '{limit, kind}?', doc: '{broken, lines: [{at, level, text}]}: the instance\'s actor console, setup and activation failures (kind: dev, test, or prop for the proposal this eval writes to)',
     run: async (ctx, o = {}) => {
-      const r = await Slop.call('logs', { app: ctx.project.app, kind: kindOf(o) })
+      // kind 'prop': the proposal this eval writes to (a proposal's preview instance; round 4 asked for it)
+      const prop = o && o.kind === 'prop'
+      if (prop && !/^proposal\//.test(ctx.ws || '')) throw Object.assign(new Error('kind prop is the proposal this eval writes to, and it writes to ' + (ctx.ws || 'draft')), { kind: 'invalid' })
+      const r = await Slop.call('logs', prop ? { app: ctx.project.app, kind: 'prop', ref: ctx.ws } : { app: ctx.project.app, kind: kindOf(o) })
       return { broken: r.broken || '', lines: (r.lines || []).slice(-clamp(+o.limit || 50, 1, 300)) }
     }
   },

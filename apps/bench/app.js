@@ -1,4 +1,4 @@
-/* the bench, built from web/bench: do not edit. source sha256:78c02aa9182508d9462c3239429e5f39a1972886cf92879610214b673bdde3ca */
+/* the bench, built from web/bench: do not edit. source sha256:612714dd2fd03e5a18c84c9bf7a39f32bd3ecc3e8eb1c530c346579e1e238a19 */
 // The bench: a live dev environment for slop apps. Built from web/bench/src.
 (() => {
   // src/lib/util.js
@@ -1699,9 +1699,11 @@
     "app.status": { sig: "", doc: "where the refs are and what each instance runs: {refs, dev, test, prop} ({id, ref, n, broken})", run: (ctx) => Slop.call("status", { app: ctx.project.app }) },
     "app.logs": {
       sig: "{limit, kind}?",
-      doc: "{broken, lines: [{at, level, text}]}: the instance's actor console, setup and activation failures",
+      doc: "{broken, lines: [{at, level, text}]}: the instance's actor console, setup and activation failures (kind: dev, test, or prop for the proposal this eval writes to)",
       run: async (ctx, o = {}) => {
-        const r = await Slop.call("logs", { app: ctx.project.app, kind: kindOf(o) });
+        const prop = o && o.kind === "prop";
+        if (prop && !/^proposal\//.test(ctx.ws || "")) throw Object.assign(new Error("kind prop is the proposal this eval writes to, and it writes to " + (ctx.ws || "draft")), { kind: "invalid" });
+        const r = await Slop.call("logs", prop ? { app: ctx.project.app, kind: "prop", ref: ctx.ws } : { app: ctx.project.app, kind: kindOf(o) });
         return { broken: r.broken || "", lines: (r.lines || []).slice(-clamp(+o.limit || 50, 1, 300)) };
       }
     },
@@ -2178,6 +2180,7 @@
 
   // src/agent/api/frames.js
   var frameOf = (ctx, id) => {
+    if (id && typeof id === "object") id = id.id;
     const P = ctx.project, f = id ? P.frame(id) : P.board().frames[0];
     if (!f) throw missing("no frame " + id + ". Frames: " + (P.board().frames.map((x) => x.id + " " + x.route).join(", ") || "none"));
     return f;

@@ -27,7 +27,17 @@ export function rewrite(code, reserved) {
       const ids = []; for (const d of st.declarations) collectPattern(d.id, ids)
       // a top-level name that is also an API name hides the API for the whole eval
       // (const [info, app] = await par([app.info(), …]): "app is not initialized")
-      if (ids.some(n => reserved.has(n))) { shadows.push(...ids.filter(n => reserved.has(n))); continue }
+      const hit = ids.filter(n => reserved.has(n))
+      if (hit.length) {
+        // a namespace (files, app, frames …) is refused outright. A flat name (s, id, help, sleep) is refused
+        // only when the eval uses it before its declaration ends (const [info, id] = await par([id(…)]): the
+        // dead zone); otherwise the declaration stays a local of this eval, not kept, and the API is untouched
+        // after it (agents named a variable s 21 times, and every one was refused: round 4)
+        const ns = reserved.ns || new Set(), before = code.slice(0, st.start) + code.slice(st.declarations[0].id.end, st.end)
+        const early = hit.filter(n => ns.has(n) || new RegExp('(^|[^\\w$.])' + n.replace(/\$/g, '\\$') + '(?![\\w$])').test(before))
+        if (early.length) shadows.push(...early)
+        continue
+      }
       if (!ids.length) continue
       names.push(...ids)
       // the keyword becomes ";": the assignment that follows may start with "(" (a destructuring

@@ -1,4 +1,4 @@
-/* the bench, built from web/bench: do not edit. source sha256:78c02aa9182508d9462c3239429e5f39a1972886cf92879610214b673bdde3ca */
+/* the bench, built from web/bench: do not edit. source sha256:612714dd2fd03e5a18c84c9bf7a39f32bd3ecc3e8eb1c530c346579e1e238a19 */
 // slop's dev probe (SLOP3-022): the bench's PROBE from web/bench/src/frames/probe.js,
 // which the sandbox adds to dev embeds only, after the runtime. It answers the
 // tool that framed the view (the boot data's parentOrigin) and nothing else.
@@ -139,7 +139,7 @@ function PROBE(CFG) {
     for (const at of el.attributes) if (/^(data-(?!src)|href$|type$|name$|alt$|role$|aria-|disabled$|placeholder$|for$|title$)/.test(at.name)) a[at.name] = at.value.slice(0, 120)
     if ('value' in el && /^(INPUT|SELECT|TEXTAREA)$/.test(el.tagName)) a.value = String(el.value).slice(0, 120)
     if (el.type === 'checkbox' || el.type === 'radio') a.checked = el.checked
-    return Object.keys(a).length ? a : undefined
+    return a // always an object: c.attrs['data-x'] on an element without attributes threw (round 4)
   }
   // settle: no DOM changes for a moment (a page renders after its data arrives)
   let lastMut = performance.now()

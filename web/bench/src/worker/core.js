@@ -134,7 +134,11 @@ async function __exec(t, x, rc) {
     case 'par': {
       if (Array.isArray(t.kids)) return Promise.all(t.kids.map(k => __exec(k, x, rc)))
       const ks = Object.keys(t.kids), vs = await Promise.all(ks.map(k => __exec(t.kids[k], x, rc)))
-      return Object.fromEntries(ks.map((k, i) => [k, vs[i]]))
+      // named results that also destructure as a list, in key order: const [status, logs] = await par({ status, logs })
+      // failed twice in round 4 ("value is not iterable")
+      const out = Object.fromEntries(ks.map((k, i) => [k, vs[i]]))
+      Object.defineProperty(out, Symbol.iterator, { value: function* () { yield* vs }, enumerable: false })
+      return out
     }
     case 'alt': {
       const key = __isStep(t.router) ? await __exec(t.router, x, rc) : await t.router(x, { input: rc.input })

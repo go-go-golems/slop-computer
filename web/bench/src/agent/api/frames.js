@@ -15,6 +15,8 @@ import { clamp, plural, sleep } from '../../lib/util.js';
 import { missing } from './files.js';
 
 const frameOf = (ctx, id) => {
+  // what frames.open returned works as well as its id (round 4: "no frame [object Object]")
+  if (id && typeof id === 'object') id = id.id
   const P = ctx.project, f = id ? P.frame(id) : P.board().frames[0]
   if (!f) throw missing('no frame ' + id + '. Frames: ' + (P.board().frames.map(x => x.id + ' ' + x.route).join(', ') || 'none'))
   return f

@@ -67,7 +67,7 @@ function apiShape(api) {
 }
 const CORE_NAMES = ['step', 'id', 'seq', 'par', 'alt', 'loop', 'dyn', 'llm', 'delegate', 's', 'monoid', 'help', 'tx', 'setTimeout', 'clearTimeout']
 const PRELUDE_NAMES = ['__call', '__API', '__SIGS', '__ROLES', '__DOCS', '__PASS', '__lev', '__near', '__ns', '__names', '__lib', '__declare', '__keep', '__kind', 'vars', 'forget', 'lib', '__fmt', 'console', 'sleep', '__snapshot', '__restore', '__libSet', '__libLoad', '__host', '__log', '__eid', 'globalThis', 'undefined', 'NaN', 'Infinity', 'eval', 'arguments', ...CORE_NAMES]
-function reservedFor(api) { const { ns, flat } = apiShape(api); return new Set([...Object.keys(ns), ...flat, ...PRELUDE_NAMES, ...(CORE.match(/^(?:function|const|class) (__\w+)/gm) || []).map(x => x.split(' ')[1])]) }
+function reservedFor(api) { const { ns, flat } = apiShape(api); return Object.assign(new Set([...Object.keys(ns), ...flat, ...PRELUDE_NAMES, ...(CORE.match(/^(?:function|const|class) (__\w+)/gm) || []).map(x => x.split(' ')[1])]), { ns: new Set([...Object.keys(ns), 'lib', 'console']) }) }
 
 // ---------- the prelude, evaluated once per session ----------
 // verbs that stay direct calls returning promises; every other module verb returns a Step

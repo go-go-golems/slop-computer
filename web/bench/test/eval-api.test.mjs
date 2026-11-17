@@ -126,6 +126,12 @@ test('rewrite: a top-level declaration of an API name is reported', async () => 
   assert.deepEqual(rewrite('const [info, app] = await par([app.info()])', reserved).shadows, ['app'])
   assert.deepEqual(rewrite('const frames = await frames.list()\nfunction files() {}', reserved).shadows, ['frames', 'files'])
   assert.deepEqual(rewrite('const fileList = await files.list()\nconst f = x => { const files = 1; return files }', reserved).shadows, [], 'a nested name is fine')
+  const ns = Object.assign(new Set(['files', 'app', 's', 'id']), { ns: new Set(['files', 'app']) })
+  const loc = rewrite('const s = await app.status()\nreturn s.ok', ns)
+  assert.deepEqual(loc.shadows, [], 'a flat name used after its declaration is a local')
+  assert.ok(!loc.names.includes('s') && /const s = /.test(loc.code), 'kept as a local const: ' + loc.code)
+  assert.deepEqual(rewrite('const [a, id] = await par([id(1)])', ns).shadows, ['id'], 'used in its own declaration: refused')
+  assert.deepEqual(rewrite('const files = 1', ns).shadows, ['files'], 'a namespace: refused')
 })
 
 test('lib.def analysis: free names and parameters of a saved function', async () => {

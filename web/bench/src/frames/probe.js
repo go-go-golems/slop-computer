@@ -128,7 +128,7 @@ export function PROBE(CFG) {
     for (const at of el.attributes) if (/^(data-(?!src)|href$|type$|name$|alt$|role$|aria-|disabled$|placeholder$|for$|title$)/.test(at.name)) a[at.name] = at.value.slice(0, 120)
     if ('value' in el && /^(INPUT|SELECT|TEXTAREA)$/.test(el.tagName)) a.value = String(el.value).slice(0, 120)
     if (el.type === 'checkbox' || el.type === 'radio') a.checked = el.checked
-    return Object.keys(a).length ? a : undefined
+    return a // always an object: c.attrs['data-x'] on an element without attributes threw (round 4)
   }
   // settle: no DOM changes for a moment (a page renders after its data arrives)
   let lastMut = performance.now()
