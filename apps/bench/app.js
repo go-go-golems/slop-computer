@@ -1,4 +1,4 @@
-/* the bench, built from web/bench: do not edit. source sha256:e16bb7158074e62dde59204b02e83711e5fd24cce5732ec1b3979cda332ff598 */
+/* the bench, built from web/bench: do not edit. source sha256:4dad2e57ebf9f83e4ff09568c9889da7ab22bfbc8dfc7a0459cc8b2c57dd6f33 */
 // The bench: a live dev environment for slop apps. Built from web/bench/src.
 (() => {
   // src/lib/util.js
@@ -3686,6 +3686,24 @@ run then).
     }
   };
 
+  // src/agent/hints.js
+  function notAFunctionHint(error, code, api) {
+    if (!error || !/not a function|is not a function/.test(error.message || "") || !error.line) return "";
+    const text = String(code || "").split("\n")[error.line - 1];
+    if (text == null) return "";
+    const names = api && api.names ? api.names() : [];
+    const unknown = [];
+    for (const m of text.matchAll(/\b([a-z][A-Za-z]*)\.([A-Za-z]+)\s*\(/g)) {
+      const name = m[1] + "." + m[2];
+      const ns = names.filter((n) => n.startsWith(m[1] + "."));
+      if (ns.length && !names.includes(name) && !unknown.some((u) => u.name === name)) {
+        const close2 = names.filter((n) => n.endsWith("." + m[2]) || n.startsWith(m[1] + "." + m[2].slice(0, 3))).slice(0, 4);
+        unknown.push({ name, hint: close2.length ? close2.join(", ") : ns.slice(0, 6).join(", ") });
+      }
+    }
+    return " \u2014 the line: `" + text.trim().slice(0, 160) + "`" + unknown.map((u) => ". " + u.name + " is not in the API (did you mean " + u.hint + "?)").join("");
+  }
+
   // src/agent/eval.js
   var AgentUI = {
     ws: () => "draft",
@@ -3753,6 +3771,7 @@ run then).
       ctx.tx = null;
     }
     if (ctx.logs.length) r.logs = [...r.logs || [], ...ctx.logs.map((text) => ({ level: "log", text }))];
+    if (!r.ok && r.error) r.error.message += notAFunctionHint(r.error, code, ctx.api);
     const effects = {};
     if (!r.ok) {
       if (tx.changes.size) effects.rolledBack = tx.paths();

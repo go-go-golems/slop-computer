@@ -90,3 +90,32 @@ test('files kept by hash: listed, copied and removed, not read', async () => {
   assert.deepEqual(srv.commits[0].changes, [{ path: 'img/logo.png', sha256: sha('PNG-BYTES'), size: 9 }, { path: 'logo.png', delete: true }])
   assert.equal(srv.snaps[2].get('img/logo.png'), 'PNG-BYTES')
 })
+
+// "not a function (line N)" names the line and the calls on it the API
+// lacks (an agent retried app.sql five times without knowing).
+test('notAFunctionHint names the unknown call', async () => {
+  const { notAFunctionHint } = await import('../src/agent/hints.js')
+  const fake = { names: () => ['app.status', 'app.info', 'sql.query', 'files.read', 'frames.text'] }
+  const code = 'const st = await app.status()\nconst rows = await app.sql("SELECT 1")\nreturn rows'
+  const h = notAFunctionHint({ message: 'not a function', line: 2 }, code, fake)
+  assert.match(h, /the line: `const rows = await app\.sql\("SELECT 1"\)`/)
+  assert.match(h, /app\.sql is not in the API \(did you mean .*app\.status/)
+  assert.equal(notAFunctionHint({ message: 'boom', line: 2 }, code, fake), '')
+  assert.equal(notAFunctionHint({ message: 'not a function', line: 1 }, code, fake), ' — the line: `const st = await app.status()`')
+})
+
+// The session's declarations are rewritten into assignments; a destructuring
+// one is wrapped in parentheses, which continued the line before it when
+// that line had no semicolon: "TypeError: not a function (line 2)" for
+// const mt = await files.read('main.ts') / const [ih, css] = await … (a
+// persona review's agent failed five evals on it).
+test('rewrite: a destructuring declaration after a line without a semicolon', async () => {
+  const { rewrite } = await import('../src/worker/rewrite.js')
+  const code = "const mt = await read('main.ts')\nconst [ih, css] = await Promise.all([read('a'), read('b')])\nclass C {}\nreturn mt + ih + css"
+  const rw = rewrite(code, new Set(['read']))
+  assert.deepEqual(rw.names.sort(), ['C', 'css', 'ih', 'mt'])
+  assert.equal(rw.code.split('\n').length, code.split('\n').length, 'lines keep their numbers')
+  // the session's names are variables the rewritten code assigns
+  const fn = new Function('read', 'let ' + rw.names.join(', ') + '; return (async () => {\n' + rw.code + '\n})()')
+  assert.equal(await fn(async p => p.toUpperCase()), 'MAIN.TSAB')
+})

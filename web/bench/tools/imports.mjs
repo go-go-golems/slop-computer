@@ -16,7 +16,7 @@ import { join, relative, dirname } from 'node:path';
 import { parse } from 'acorn';
 
 const ROOT = new URL('../src/', import.meta.url).pathname;
-const SKIP = new Set(['worker/worker.js', 'worker/core.js', 'checker/checker.js']);
+const SKIP = new Set(['worker/worker.js', 'worker/core.js', 'checker/checker.js', 'worker/rewrite.js']);
 // globals of a page (and of the bench's own window.claude runtime)
 const GLOBALS = new Set(('window document navigator location history console localStorage sessionStorage fetch URL URLSearchParams Blob File FileReader ' +
   'TextEncoder TextDecoder crypto performance requestAnimationFrame cancelAnimationFrame setTimeout clearTimeout setInterval clearInterval queueMicrotask ' +

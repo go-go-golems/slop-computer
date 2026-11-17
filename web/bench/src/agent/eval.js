@@ -26,6 +26,7 @@ import { Types } from './types.js';
 import { fileEffects, frameEffects, framesBefore } from './effects.js';
 import { h, modal, toast } from '../lib/dom.js';
 import { libEntries } from './api/lib.js';
+import { notAFunctionHint } from './hints.js';
 import { now } from '../lib/util.js';
 
 // What only the page can do, set by the shell (ui/app.js): the workspace
@@ -72,6 +73,7 @@ export async function runEval(ctx, code, { sid, restore, timeoutMs } = {}) {
     ctx.tx = null
   }
   if (ctx.logs.length) r.logs = [...(r.logs || []), ...ctx.logs.map(text => ({ level: 'log', text }))]
+  if (!r.ok && r.error) r.error.message += notAFunctionHint(r.error, code, ctx.api)
   const effects = {}
   if (!r.ok) {
     if (tx.changes.size) effects.rolledBack = tx.paths()
