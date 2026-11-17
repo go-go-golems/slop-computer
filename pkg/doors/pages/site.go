@@ -114,7 +114,9 @@ func (s *Door) serveStatic(w http.ResponseWriter, r *http.Request) {
 	case strings.HasSuffix(r.URL.Path, "/"):
 		name = strings.TrimSuffix(name, "/") + "/index.html"
 	}
-	code := newAppCode(as, res.run.N, res.run.Manifest, r.URL.Path, rest)
+	// The mount's base, not the URL minus rest: the match drops a trailing
+	// slash (/ts/docs/ has rest "docs").
+	code := newAppCode(as, res.run.N, res.run.Manifest, res.m.Base+"/")
 	if f, err := as.SnapshotFile(ctx, res.run.N, name); err == nil {
 		s.writeStoreBytes(w, r, storeBytes{st: as, f: f, vis: public, mut: moving, code: code}) // anyone may read (checked above)
 		return
