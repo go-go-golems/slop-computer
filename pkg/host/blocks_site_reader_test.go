@@ -12,7 +12,7 @@ import (
 func installBlocksSite(t *testing.T, h *harness, admin string) {
 	t.Helper()
 	h.call(admin, "store.new", map[string]any{"id": "blocks-site"})
-	h.call(admin, "files.push", map[string]any{"store": "blocks-site", "files": appDir(t, "blocks-site")})
+	h.push(admin, map[string]any{"store": "blocks-site", "files": appDir(t, "blocks-site")})
 	if st := h.call(admin, "app.status", map[string]any{"store": "blocks-site"}).(map[string]any); st["broken"] != "" {
 		t.Fatalf("blocks-site is broken: %v", st)
 	}

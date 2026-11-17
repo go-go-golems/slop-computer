@@ -8,12 +8,24 @@ import (
 
 	"github.com/go-go-golems/slop-computer/pkg/actor"
 	"github.com/go-go-golems/slop-computer/pkg/doors/web"
-	"github.com/go-go-golems/slop-computer/pkg/verbs"
 )
 
 // workshopFuncs is the workshop module: what a review or publishing tool
-// needs, called as the visitor. push writes to the draft ref unless told
-// otherwise: mounts serve main, and only publish moves it.
+// needs, called as the visitor. commit and push write to the draft ref
+// unless told otherwise: mounts serve main, and only publish moves it.
+//
+// Every ref write states where the ref is, so it cannot overwrite a write
+// it did not see (SLOP3-023):
+//
+//   - commit(store, changes, {base, message, ref, activate}): the changes
+//     [{path, text} | {path, data} | {path, sha256, size} | {path, delete:
+//     true}] over snapshot base (required; 0: the ref does not exist yet),
+//     merged per path when the ref moved since; conflict when a changed
+//     path changed there too (extra.conflicts), and nothing is written.
+//   - push(store, files, {ifAt, message, ref, activate}): the whole tree.
+//   - moveRef(store, ref, n, {ifAt}), publish(store, n, {ifAt}) (moves
+//     main) and dropRef(store, ref, {ifAt}): ifAt is where the ref points
+//     now (0: it does not exist yet).
 var workshopFuncs = []modFunc{
 	{JS: "stores", Verb: "store.ls"}, // stores({all: true}): every store, for admins
 	{JS: "snapshots", Verb: "snap.ls", Pos: []string{"store"}},
@@ -21,17 +33,19 @@ var workshopFuncs = []modFunc{
 	{JS: "files", Verb: "files.ls", Pos: []string{"store", "at"}},
 	{JS: "read", Verb: "files.cat", Pos: []string{"store", "at", "path"}},
 	{JS: "log", Verb: "log.show", Pos: []string{"store", "after", "limit"}},
+	{JS: "commit", Verb: "files.commit", Pos: []string{"store", "changes"}, Default: map[string]any{"ref": "draft"}},
 	{JS: "push", Verb: "files.push", Pos: []string{"store", "files"}, Default: map[string]any{"ref": "draft"}},
 	{JS: "moveRef", Verb: "ref.move", Pos: []string{"store", "ref", "n"}},
 	{JS: "publish", Verb: "ref.move", Pos: []string{"store", "n"}, Fixed: map[string]any{"ref": "main"}},
+	{JS: "dropRef", Verb: "ref.rm", Pos: []string{"store", "ref"}},
 	{JS: "follow", Verb: "app.follow", Pos: []string{"store", "ref"}},
 	{JS: "status", Verb: "app.status", Pos: []string{"store"}},
 	{JS: "preview", Verb: "preview.url", Pos: []string{"store", "at", "parent"}},
 
 	// SLOP3-022, a dev loop: instances that run a ref of an app
 	// (newStore(id, {app, type}), then follow), their state, logs and
-	// data, and seeding them from fixtures. push takes {activate: [ids]}
-	// and publish takes {ifAt: n}; drop is workshopModule's own.
+	// data, and seeding them from fixtures. commit and push take
+	// {activate: [ids]}; drop is workshopModule's own.
 	{JS: "newStore", Verb: "store.new", Pos: []string{"id"}},
 	{JS: "logs", Verb: "app.logs", Pos: []string{"store"}},
 	{JS: "restart", Verb: "app.restart", Pos: []string{"store"}},
@@ -58,8 +72,7 @@ func (s *Door) workshopModule(a *actor.Actor) goja.Value {
 			ctx := web.WithPrincipal(context.Background(), p)
 			out, err := s.Verbs.Call(ctx, p, "app.status", map[string]any{"store": id})
 			if err != nil {
-				ve := verbs.AsError(err)
-				return nil, &actor.Error{Code: ve.Code, Message: ve.Message}
+				return nil, verbFail(err)
 			}
 			var st struct{ Store, App, Ref string }
 			b, _ := json.Marshal(out)
@@ -68,8 +81,7 @@ func (s *Door) workshopModule(a *actor.Actor) goja.Value {
 				return nil, &actor.Error{Code: "permission_denied", Message: "drop removes only instances that run unpublished code (another store's app, at a ref other than main); " + id + " runs " + st.App + "@" + st.Ref}
 			}
 			if out, err = s.Verbs.Call(ctx, p, "store.rm", map[string]any{"id": id}); err != nil {
-				ve := verbs.AsError(err)
-				return nil, &actor.Error{Code: ve.Code, Message: ve.Message}
+				return nil, verbFail(err)
 			}
 			return out, nil
 		}, func(out any) (goja.Value, error) { return a.ToJS(out), nil })
@@ -81,10 +93,6 @@ func (s *Door) workshopModule(a *actor.Actor) goja.Value {
 		if !s.Gov.Trusted(context.Background(), a.App(), "workshop") {
 			a.Throw("permission_denied", a.App()+" is no longer trusted with workshop")
 		}
-	}
-	fail := func(err error) error {
-		ve := verbs.AsError(err)
-		return &actor.Error{Code: ve.Code, Message: ve.Message}
 	}
 	toJS := func(out any) (goja.Value, error) { return a.ToJS(out), nil }
 	_ = o.Set("embed", func(store string, opts goja.Value) goja.Value {
@@ -101,7 +109,7 @@ func (s *Door) workshopModule(a *actor.Actor) goja.Value {
 		return a.IO(func() (any, error) {
 			out, err := s.Embed(context.Background(), p, store, tool, app, dev)
 			if err != nil {
-				return nil, fail(err)
+				return nil, verbFail(err)
 			}
 			return out, nil
 		}, toJS)
@@ -116,7 +124,7 @@ func (s *Door) workshopModule(a *actor.Actor) goja.Value {
 		return a.IO(func() (any, error) {
 			out, err := s.RenewEmbed(context.Background(), p, view, tool, app)
 			if err != nil {
-				return nil, fail(err)
+				return nil, verbFail(err)
 			}
 			return out, nil
 		}, toJS)
@@ -133,7 +141,7 @@ func (s *Door) workshopModule(a *actor.Actor) goja.Value {
 		return a.IO(func() (any, error) {
 			out, err := s.CloseEmbed(context.Background(), p, view, tool, app)
 			if err != nil {
-				return nil, fail(err)
+				return nil, verbFail(err)
 			}
 			return out, nil
 		}, toJS)

@@ -22,7 +22,7 @@ func TestCatalogCuratorApp(t *testing.T) {
 	admin := h.tokenFor("admin@example.com", "read", "write", "admin")
 	live := deployCatalogData(t, h, admin)
 	h.call(admin, "store.new", map[string]any{"id": "catalog-curator"})
-	h.call(admin, "files.push", map[string]any{"store": "catalog-curator", "files": appDir(t, "catalog-curator")})
+	h.push(admin, map[string]any{"store": "catalog-curator", "files": appDir(t, "catalog-curator")})
 	h.call(admin, "bind.set", map[string]any{"store": "catalog-curator", "alias": "catalog", "target": "catalog-data"})
 	// Without the grant to store:catalog-curator, the binding reads nothing.
 	h.fail(admin, "actor.call", map[string]any{"store": "catalog-curator", "action": "catalog"}, "permission_denied")

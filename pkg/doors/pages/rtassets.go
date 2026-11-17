@@ -171,36 +171,19 @@ func (s *Door) rpcArtifactPublish(ctx context.Context, v *rt.View, raw json.RawM
 	who := viewWho(v)
 	who.Code = authz.CodeRightOf(s.viewPrincipal(ctx, v))
 	_, err = st.Do(ctx, who, func(t *store.Turn) error {
-		cur, err := st.Ref(ctx, "main")
-		if err != nil || cur != int64(v.Version) {
-			return rtErr("conflict", "a newer version was published")
-		}
-		files, err := st.SnapshotFiles(ctx, cur)
+		cur, err := t.RefAt("main")
 		if err != nil {
 			return err
 		}
-		keep := map[string]bool{entry: true}
-		for _, f := range files {
-			keep[f.Path] = true
-			if f.Path != entry {
-				if _, err := t.PutBlob("tree", f.Path, f.SHA256, f.Size, f.Type); err != nil {
-					return err
-				}
-			}
+		if cur == 0 || cur != int64(v.Version) {
+			return rtErr("conflict", "a newer version was published")
+		}
+		// main's files with the page's entry replaced
+		if err := t.ResetTree(cur); err != nil {
+			return err
 		}
 		if _, err := t.PutFile("tree", entry, []byte(a.HTML), "text/html; charset=utf-8"); err != nil {
 			return err
-		}
-		tree, err := t.TreeFiles()
-		if err != nil {
-			return err
-		}
-		for _, f := range tree {
-			if !keep[f.Path] {
-				if _, err := t.RemoveFile("tree", f.Path); err != nil {
-					return err
-				}
-			}
 		}
 		n, err = t.Snapshot("published from the page", "main")
 		return err

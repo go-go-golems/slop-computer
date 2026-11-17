@@ -92,11 +92,11 @@ func TestTypeScriptPages(t *testing.T) {
 	admin := h.tokenFor("admin@example.com", "read", "write", "admin")
 	live, static := h.cfg.Hosts.Live[0], h.cfg.Hosts.Static[0]
 	h.call(admin, "store.new", map[string]any{"id": "tsapp"})
-	h.call(admin, "files.push", map[string]any{"store": "tsapp", "files": tsApp(`"capabilities":{"db":{}},`)})
+	h.push(admin, map[string]any{"store": "tsapp", "files": tsApp(`"capabilities":{"db":{}},`)})
 	h.call(admin, "mount.set", map[string]any{"host": live, "path": "/ts", "store": "tsapp"})
 	h.call(admin, "grant.set", map[string]any{"store": "tsapp", "subject": "@guest", "level": "interact"})
 	h.call(admin, "store.new", map[string]any{"id": "tssite"})
-	h.call(admin, "files.push", map[string]any{"store": "tssite", "files": tsApp("")})
+	h.push(admin, map[string]any{"store": "tssite", "files": tsApp("")})
 	h.call(admin, "mount.set", map[string]any{"host": static, "path": "/ts", "store": "tssite"})
 	h.call(admin, "grant.set", map[string]any{"store": "tssite", "subject": "@guest", "level": "view"})
 

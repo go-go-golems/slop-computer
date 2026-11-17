@@ -12,7 +12,7 @@ func TestStoreTypeJoinsTypedMount(t *testing.T) {
 	member := h.tokenFor("member@example.com", "read", "write")
 	live := h.cfg.Hosts.Live[0]
 	h.call(admin, "store.new", map[string]any{"id": "orrery"})
-	h.call(admin, "files.push", map[string]any{"store": "orrery", "files": files(map[string]string{
+	h.push(admin, map[string]any{"store": "orrery", "files": files(map[string]string{
 		"app.json":   `{"title":"Orrery","capabilities":{"db":{}}}`,
 		"index.html": `<!doctype html><title>o</title>orrery`,
 	})})

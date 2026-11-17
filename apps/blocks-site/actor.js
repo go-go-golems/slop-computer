@@ -95,8 +95,11 @@ async function publish(ctx, to, live) {
     const a = c.src.assets.get(id);
     if (a) files.push({ path: 'media/' + id, sha256: a.sha256, size: a.size, type: a.type });
   }
-  const snap = await w.push(to, files, { message: `${s.pages.length} pages from ${s.source} (rev ${c.rev})` });
-  if (live) await w.publish(to, snap.n);
+  // where draft and main are now: the push and the publish apply only if
+  // nobody moved them in between (ifAt)
+  const refs = await w.refs(to);
+  const snap = await w.push(to, files, { message: `${s.pages.length} pages from ${s.source} (rev ${c.rev})`, ifAt: refs.draft ?? 0 });
+  if (live) await w.publish(to, snap.n, { ifAt: refs.main ?? 0 });
   const rec = { to, n: snap.n, live: !!live, at: Date.now(), by: ctx.visitor.id, pages: s.pages.length, rev: c.rev };
   db.doc('site/published').set(rec);
   return Object.assign({ files: files.length }, rec);

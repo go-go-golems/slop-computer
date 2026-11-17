@@ -35,7 +35,7 @@ func TestActorTypesDrift(t *testing.T) {
 	h := newHarness(t)
 	admin := h.tokenFor("admin@example.com", "read", "write", "admin")
 	h.call(admin, "store.new", map[string]any{"id": "shape"})
-	h.call(admin, "files.push", map[string]any{"store": "shape", "files": files(map[string]string{
+	h.push(admin, map[string]any{"store": "shape", "files": files(map[string]string{
 		"app.json": `{"title":"Shape","actor":"actor.js","slop":{"secrets":["k"]}}`,
 		"actor.js": shapeActor,
 	})})

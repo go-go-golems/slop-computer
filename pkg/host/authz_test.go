@@ -67,11 +67,11 @@ func TestAdminPowerNeedsTheAdminScope(t *testing.T) {
 		h.fail(tok, "grant.ls", map[string]any{"store": "mias"}, "not_found") // no admin level on a stranger's store
 	}
 	h.fail(write, "mount.set", map[string]any{"host": h.cfg.Hosts.Live[0], "path": "/x", "store": "mias"}, "permission_denied")
-	h.fail(write, "files.push", map[string]any{"store": "app", "files": files(map[string]string{"app.json": `{"title":"A"}`, "index.html": "x"})}, "permission_denied")
+	h.fail(write, "files.push", map[string]any{"store": "app", "ifAt": 0, "files": files(map[string]string{"app.json": `{"title":"A"}`, "index.html": "x"})}, "permission_denied")
 
 	h.call(full, "people.ls", map[string]any{})
 	h.call(full, "grant.ls", map[string]any{"store": "mias"})
-	h.call(full, "files.push", map[string]any{"store": "app", "files": files(map[string]string{"app.json": `{"title":"A"}`, "index.html": "x"})})
+	h.push(full, map[string]any{"store": "app", "files": files(map[string]string{"app.json": `{"title":"A"}`, "index.html": "x"})})
 }
 
 // A read token holds its person's levels and cannot change anything: an

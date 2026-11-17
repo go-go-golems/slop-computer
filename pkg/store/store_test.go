@@ -273,6 +273,135 @@ func TestFilesAndSnapshots(t *testing.T) {
 	}
 }
 
+// SLOP3-023: inside a turn, SnapshotFiles reads through the turn (it sees
+// a snapshot the turn made), ResetTree makes the tree equal to a snapshot
+// writing only what differs, RemoveRef drops a ref and keeps its
+// snapshots, and refs have checked names.
+func TestTurnSnapshotsAndRefs(t *testing.T) {
+	ctx := context.Background()
+	s := openTest(t)
+	treeOf := func(t *Turn) string {
+		fs, err := t.TreeFiles()
+		if err != nil {
+			panic(err)
+		}
+		var b strings.Builder
+		for _, f := range fs {
+			fmt.Fprintf(&b, "%s=%s ", f.Path, f.SHA256[:6])
+		}
+		return b.String()
+	}
+	put := func(t *Turn, p, text string) {
+		if _, err := t.PutFile("tree", p, []byte(text), ""); err != nil {
+			panic(err)
+		}
+	}
+	var n1, n2 int64
+	var tree1 string
+	if _, err := s.Do(ctx, me, func(t *Turn) error {
+		put(t, "a.txt", "a")
+		put(t, "b.txt", "b")
+		var err error
+		if n1, err = t.Snapshot("one", "draft"); err != nil {
+			return err
+		}
+		tree1 = treeOf(t)
+		// read through the turn: the snapshot made above is visible
+		fs, err := t.SnapshotFiles(n1)
+		if err != nil || len(fs) != 2 || fs[0].Path != "a.txt" {
+			return fmt.Errorf("SnapshotFiles(%d) in the turn = %v, %v", n1, fs, err)
+		}
+		if fs, _ := t.SnapshotFiles(0); len(fs) != 0 {
+			return fmt.Errorf("SnapshotFiles(0) = %v", fs)
+		}
+		if ok, _ := t.HasSnapshot(n1); !ok {
+			return errors.New("HasSnapshot(n1) = false")
+		}
+		if ok, _ := t.HasSnapshot(n1 + 1); ok {
+			return errors.New("HasSnapshot(n1+1) = true")
+		}
+		put(t, "a.txt", "a2")
+		if _, err := t.RemoveFile("tree", "b.txt"); err != nil {
+			return err
+		}
+		put(t, "c.txt", "c")
+		n2, err = t.Snapshot("two", "draft")
+		return err
+	}); err != nil {
+		t.Fatal(err)
+	}
+
+	// ResetTree(n1): a.txt back, b.txt back, c.txt gone; ResetTree(n1)
+	// again writes nothing; ResetTree(0) empties the tree.
+	c, err := s.Do(ctx, me, func(t *Turn) error {
+		if err := t.ResetTree(n1); err != nil {
+			return err
+		}
+		if got := treeOf(t); got != tree1 {
+			return fmt.Errorf("tree after ResetTree(%d) = %q, want %q", n1, got, tree1)
+		}
+		return nil
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(c.Changes) != 3 { // put a.txt, put b.txt, remove c.txt
+		t.Fatalf("ResetTree changes = %+v", c.Changes)
+	}
+	if c, err := s.Do(ctx, me, func(t *Turn) error { return t.ResetTree(n1) }); err != nil || c != nil {
+		t.Fatalf("a tree already at n1: commit %+v, %v", c, err)
+	}
+	if _, err := s.Do(ctx, me, func(t *Turn) error {
+		if err := t.ResetTree(0); err != nil {
+			return err
+		}
+		if got := treeOf(t); got != "" {
+			return fmt.Errorf("tree after ResetTree(0) = %q", got)
+		}
+		return nil
+	}); err != nil {
+		t.Fatal(err)
+	}
+
+	// Ref names.
+	for _, ok := range []string{"main", "draft", "proposal/p8k2x1", "a.b-c_d", "x/1/2/3"} {
+		if !ValidRefName(ok) {
+			t.Errorf("ValidRefName(%q) = false", ok)
+		}
+	}
+	for _, bad := range []string{"", "1", "42", "Main", "-x", ".x", "x/", "/x", "x//y", "x/.y", "x y", "a/b/c/d/e", strings.Repeat("x", 64)} {
+		if ValidRefName(bad) {
+			t.Errorf("ValidRefName(%q) = true", bad)
+		}
+	}
+	if _, err := s.Do(ctx, me, func(t *Turn) error { return t.MoveRef("Draft", n1) }); err == nil || !strings.Contains(err.Error(), "ref name") {
+		t.Fatalf("MoveRef to a bad name: %v", err)
+	}
+
+	// RemoveRef: the ref goes, its snapshots stay; a second remove is false.
+	c, err = s.Do(ctx, me, func(t *Turn) error {
+		if ok, err := t.RemoveRef("draft"); err != nil || !ok {
+			return fmt.Errorf("RemoveRef = %v, %v", ok, err)
+		}
+		if ok, err := t.RemoveRef("draft"); err != nil || ok {
+			return fmt.Errorf("RemoveRef again = %v, %v", ok, err)
+		}
+		return nil
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(c.Changes) != 1 || c.Changes[0].Kind != "ref" || c.Changes[0].Op != "remove" {
+		t.Fatalf("RemoveRef changes = %+v", c.Changes)
+	}
+	if refs, _ := s.Refs(ctx); len(refs) != 0 {
+		t.Fatalf("refs = %v", refs)
+	}
+	if fs, _ := s.SnapshotFiles(ctx, n2); len(fs) != 2 {
+		t.Fatalf("snapshot %d after RemoveRef = %v", n2, fs)
+	}
+}
+
 // An export round trip keeps BLOB cells as BLOBs, byte for byte (through
 // JSON, as import.folder receives a bundle).
 func TestExportKeepsBlobs(t *testing.T) {

@@ -35,9 +35,9 @@ type Caps struct {
 }
 
 // ContractCaps are the capability names a manifest may declare. permissions
-// is built in and never declared; self is the old name of artifact.
+// is built in and never declared.
 var ContractCaps = map[string]bool{"artifact": true, "assets": true, "comments": true, "db": true, "downloads": true,
-	"files": true, "mcp": true, "room": true, "sample": true, "self": true, "user": true, "slop": true}
+	"files": true, "mcp": true, "room": true, "sample": true, "user": true, "slop": true}
 
 var topicRe = regexp.MustCompile(`^[a-z][a-z0-9_.-]{0,47}$`)
 
@@ -59,9 +59,6 @@ func ParseManifest(raw []byte, slopPermissions map[string]string) (Caps, error) 
 	for name, cfg := range m.Capabilities {
 		if !ContractCaps[name] {
 			return c, fmt.Errorf("capabilities: unknown capability %q", name)
-		}
-		if name == "self" {
-			name = "artifact"
 		}
 		c.Declared[name] = true
 		switch name {

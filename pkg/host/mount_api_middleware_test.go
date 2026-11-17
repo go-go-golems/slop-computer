@@ -45,7 +45,7 @@ func TestMountAPIMiddleware(t *testing.T) {
 	readToken := h.tokenFor("rita@example.com", "read")
 	live := h.cfg.Hosts.Live[0]
 	h.call(admin, "store.new", map[string]any{"id": "mw"})
-	h.call(admin, "files.push", map[string]any{"store": "mw", "files": files(map[string]string{
+	h.push(admin, map[string]any{"store": "mw", "files": files(map[string]string{
 		"app.json":         `{"title":"MW","actor":"actor.js"}`,
 		"actor.js":         middlewareActor,
 		"sql/001_hits.sql": "CREATE TABLE hits (id INTEGER PRIMARY KEY, at INTEGER);",

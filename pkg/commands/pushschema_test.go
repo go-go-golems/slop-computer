@@ -21,3 +21,15 @@ func TestPushFilesSchema(t *testing.T) {
 		}
 	}
 }
+
+// files.commit's changes are the union the verb enforces.
+func TestFileChangeSchema(t *testing.T) {
+	v := verbs.Def[FilesCommitIn, any]{Name: "x"}.Verb()
+	changes, _ := v.Input.Properties.Get("changes")
+	ts := verbs.TypeScript(changes, "")
+	for _, want := range []string{"text: string;", "data: string;", "sha256: string;\n  size: number;", "delete: true;", "})[]"} {
+		if !strings.Contains(ts, want) {
+			t.Errorf("changes in TypeScript lacks %q:\n%s", want, ts)
+		}
+	}
+}

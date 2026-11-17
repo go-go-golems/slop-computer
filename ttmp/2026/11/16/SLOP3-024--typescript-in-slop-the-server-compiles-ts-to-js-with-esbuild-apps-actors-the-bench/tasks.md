@@ -10,7 +10,7 @@ The phases follow the design (design-doc/01, section 10).
 - [x] Decide: packages and .tsx (decided 2026-11-16: packages only through `slop vendor`, run by a person with the CLI; the server never fetches, the agent cannot add packages; .tsx in phase 0) (design §4.7, §11)
 - [x] Fix first: goja runtimes for app code read no files for source maps (PR #52, `pkg/jsrt`; merged 2026-11-17)
 
-## Phase 0: the server compiles (PR #53)
+## Phase 0: the server compiles (PR #53, merged)
 
 - [x] `.ts`, `.mts`, `.cts` in `fileTypes` (pkg/store/files.go): `text/typescript; charset=utf-8`
 - [x] `pkg/tscompile`: esbuild (pinned) `api.Transform` with the page/actor/eval profiles; in-memory LRU by (sha256, profile, esbuild version); singleflight; GOMAXPROCS semaphore; 4 MB cap
@@ -21,7 +21,7 @@ The phases follow the design (design-doc/01, section 10).
 - [x] `slop.imports` in `app.json`: validate; inject an import map (from `imports.page`) into served HTML; bare names in the actor's `require` (from `imports.actor`)
 - [x] Tests (design §10, phase 0), including the stack-trace check from scripts/03
 
-## Phase 0b: `slop vendor` (CLI only) (PR #54)
+## Phase 0b: `slop vendor` (CLI only) (PR #54, merged)
 
 - [x] Registry metadata and tarballs checked against `dist.integrity`; semver ranges; dependencies
 - [x] `api.Build` over a temporary node_modules: ESM with splitting (pages), CJS (`--actor`)
@@ -29,15 +29,17 @@ The phases follow the design (design-doc/01, section 10).
 - [x] `slop vendor` (list + verify), `slop vendor rm`
 - [x] Tests: a fixture registry, a package with a dependency and subpath exports, a corrupted tarball refused, the output loading in a page and an actor
 
-## Phase 1: declarations
+## Phase 1: declarations (PR #55)
 
-- [ ] `page.d.ts` from web/runtime's build (`tsc --emitDeclarationOnly`), embedded, freshness-checked
-- [ ] `actor.d.ts` by hand (globals, Ctx, Action, ActorOf), with a Go drift test against `ctxObject`
-- [ ] JSON Schema → TypeScript converter in pkg/verbs (golden tests); `modules.d.ts` per app (bridged modules' existing declarations + verb-backed modules from their verbs' schemas, `Pos` as positional parameters) (notes §7.2)
-- [ ] `FileChange` schema as a `oneOf` union (part of notes §7.3)
-- [ ] The `app.types` verb; `slop types <app> [dir]` writing `.slop/types/` and the two tsconfig files; `slop dev` refreshes them
-- [ ] A fixture TypeScript app checked by `tsc` in CI against the generated declarations
-- [ ] TypeScript templates as the default for new apps; the agent's guide to match (TS, extensions in imports, vendored packages; ask the person for new ones)
+- [x] `page.d.ts` from web/runtime's build (declarations of `src/types.ts`, emitted with the TypeScript API), in `pkg/apptypes`, freshness-checked
+- [x] `actor.d.ts` by hand (globals, Ctx, the definition, ActorOf, every built-in `use()` module), with a drift test against the runtime (`TestActorTypesDrift`)
+- [x] JSON Schema → TypeScript converter in pkg/verbs (golden tests); `modules.d.ts` per app (bridged modules' existing declarations + verb-backed modules from their verbs' schemas, `Pos` as positional parameters) (notes §7.2)
+- [x] The push manifest (`files.push`, `import.files`) as a `oneOf` union; `files.commit`'s `FileChange` follows once SLOP3-023 (#51) merges (part of notes §7.3)
+- [x] The `app.types` verb; `slop types <app> [dir]` writing `.slop/types/` and the two tsconfig files; `slop dev` refreshes them
+- [x] A fixture TypeScript app checked by `tsc` against the generated declarations (`TestAppTypes`; CI runs `make test-ci`, which installs TypeScript)
+- [ ] TypeScript templates as the default for new apps; the agent's guide to match (TS, extensions in imports, vendored packages; ask the person for new ones). Waits for SLOP3-023 (#51): the templates and guide are in its rewrite of web/bench
+- [ ] `files.commit`'s `FileChange` as a `oneOf` union, once #51 merges
+- [ ] Annotate web/runtime's `db`, `user`, `comments` and `room` namespaces: page.d.ts has them as `any` or open records today
 
 ## Phase 2: typed actor actions
 

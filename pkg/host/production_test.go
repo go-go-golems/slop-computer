@@ -19,7 +19,7 @@ func TestStaticNotFoundPage(t *testing.T) {
 	admin := h.tokenFor("admin@example.com", "read", "write", "admin")
 	static := h.cfg.Hosts.Static[0]
 	h.call(admin, "store.new", map[string]any{"id": "lab"})
-	h.call(admin, "files.push", map[string]any{"store": "lab", "files": files(map[string]string{
+	h.push(admin, map[string]any{"store": "lab", "files": files(map[string]string{
 		"app.json":             `{"title": "Lab", "notFound": "404.html"}`,
 		"index.html":           `<h1>Lab</h1>`,
 		"404.html":             `<h1>Nothing here</h1>`,
@@ -55,7 +55,7 @@ func TestPresenceLeavesWithStream(t *testing.T) {
 	admin := h.tokenFor("admin@example.com", "read", "write", "admin")
 	live := h.cfg.Hosts.Live[0]
 	h.call(admin, "store.new", map[string]any{"id": "board"})
-	h.call(admin, "files.push", map[string]any{"store": "board", "files": files(map[string]string{
+	h.push(admin, map[string]any{"store": "board", "files": files(map[string]string{
 		"app.json":   `{"title":"Board","type":"board","capabilities":{"room":{}}}`,
 		"index.html": `<!doctype html><title>b</title>board`,
 	})})
@@ -94,7 +94,7 @@ func TestGuestsPerHourConfig(t *testing.T) {
 	admin := h.tokenFor("admin@example.com", "read", "write", "admin")
 	live := h.cfg.Hosts.Live[0]
 	h.call(admin, "store.new", map[string]any{"id": "open"})
-	h.call(admin, "files.push", map[string]any{"store": "open", "files": files(map[string]string{
+	h.push(admin, map[string]any{"store": "open", "files": files(map[string]string{
 		"app.json": `{"title":"Open","capabilities":{"db":{}}}`, "index.html": "<!doctype html><title>o</title>"})})
 	h.call(admin, "grant.set", map[string]any{"store": "open", "subject": "@guest", "level": "interact"})
 	h.call(admin, "mount.set", map[string]any{"host": live, "path": "/open", "store": "open"})

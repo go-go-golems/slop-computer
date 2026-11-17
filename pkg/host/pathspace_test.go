@@ -26,7 +26,7 @@ import (
 func pageApp(h *harness, admin, storeID, path, dbCfg string) {
 	h.t.Helper()
 	h.call(admin, "store.new", map[string]any{"id": storeID})
-	h.call(admin, "files.push", map[string]any{"store": storeID, "files": files(map[string]string{
+	h.push(admin, map[string]any{"store": storeID, "files": files(map[string]string{
 		"app.json":   `{"title":"` + storeID + `","capabilities":{"db":` + dbCfg + `}}`,
 		"index.html": `<!doctype html><html><head><title>p</title></head><body>page</body></html>`,
 	})})
@@ -417,7 +417,7 @@ func TestAliasGrantReopens(t *testing.T) {
 func pushApp(h *harness, admin, storeID, path string, fs map[string]string) {
 	h.t.Helper()
 	h.call(admin, "store.new", map[string]any{"id": storeID})
-	h.call(admin, "files.push", map[string]any{"store": storeID, "files": files(fs)})
+	h.push(admin, map[string]any{"store": storeID, "files": files(fs)})
 	if path != "" {
 		h.call(admin, "mount.set", map[string]any{"host": h.cfg.Hosts.Live[0], "path": path, "store": storeID})
 		h.call(admin, "grant.set", map[string]any{"store": storeID, "subject": "@guest", "level": "interact"})
@@ -635,7 +635,7 @@ func TestMountAliasTemplate(t *testing.T) {
 	h.call(admin, "store.new", map[string]any{"id": "crm"})
 	h.call(admin, "docs.set", map[string]any{"store": "crm", "path": "contacts/c1", "data": map[string]any{"name": "Ada"}})
 	h.call(admin, "store.new", map[string]any{"id": "dash"})
-	h.call(admin, "files.push", map[string]any{"store": "dash", "files": files(map[string]string{
+	h.push(admin, map[string]any{"store": "dash", "files": files(map[string]string{
 		"app.json":   `{"title":"d","type":"dashboard","capabilities":{"db":{}}}`,
 		"index.html": `<!doctype html><title>d</title>`,
 	})})

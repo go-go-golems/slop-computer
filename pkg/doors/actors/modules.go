@@ -18,6 +18,21 @@ import (
 // to that person, and the system log records via app:<app>. Functions
 // return promises, so no verb runs while the turn holds its transaction.
 
+// verbFail is a verb's error as JavaScript sees it: an Error with the
+// verb's code and message, and its details (verbs.Error.Extra, such as a
+// conflict's at and conflicts) as e.extra.
+func verbFail(err error) *actor.Error {
+	ve := verbs.AsError(err)
+	e := &actor.Error{Code: ve.Code, Message: ve.Message}
+	if ve.Extra != nil {
+		// through JSON: typed details become plain objects and arrays
+		if b, jerr := json.Marshal(ve.Extra); jerr == nil {
+			_ = json.Unmarshal(b, &e.Extra)
+		}
+	}
+	return e
+}
+
 // A modFunc is one function of a verb-backed module.
 type modFunc struct {
 	JS      string         // group.name in JavaScript ("people.setRole")
@@ -44,7 +59,7 @@ func (s *Door) Install(m *actor.Manager) {
 		return s.platformModule(a)
 	})
 	const systemDoc = "People, grants, links, mounts, policy, LLM budgets, comps, secrets and the system log, as the visitor."
-	const workshopDoc = "Stores, snapshots, refs and files of any store the visitor may read; push to draft, publish, run drafts in dev instances (create, seed, read, drop)."
+	const workshopDoc = "Stores, snapshots, refs and files of any store the visitor may read; commit or push to draft, publish, run drafts in dev instances (create, seed, read, drop)."
 	m.Register(actor.Module{Name: "system", Class: actor.ClassTrusted, Doc: systemDoc,
 		TypeScript: moduleTypeScript(s.Verbs, "SystemModule", "use('system'): "+systemDoc, systemFuncs, systemExtraTS),
 		Load:       func(st actor.Setup) goja.Value { return s.systemModule(st.Actor) }})
@@ -147,8 +162,7 @@ func (s *Door) callVerb(a *actor.Actor, module string, f modFunc, args map[strin
 	if confirm {
 		// Refuse what the verb would refuse before asking anyone to allow it.
 		if err := s.Verbs.Check(p, name, args); err != nil {
-			ve := verbs.AsError(err)
-			a.Throw(ve.Code, ve.Message)
+			a.ThrowError(verbFail(err))
 		}
 		title := a.App()
 		if m := a.Manifest(); m != nil && m.Title != "" {
@@ -162,8 +176,7 @@ func (s *Door) callVerb(a *actor.Actor, module string, f modFunc, args map[strin
 	return a.IO(func() (any, error) {
 		out, err := s.Verbs.Call(web.WithPrincipal(context.Background(), p), p, name, args)
 		if err != nil {
-			ve := verbs.AsError(err)
-			return nil, &actor.Error{Code: ve.Code, Message: ve.Message}
+			return nil, verbFail(err)
 		}
 		return out, nil
 	}, func(out any) (goja.Value, error) { return a.ToJS(out), nil })

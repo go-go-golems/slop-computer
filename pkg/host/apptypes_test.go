@@ -58,7 +58,7 @@ func TestAppTypes(t *testing.T) {
 	admin := h.tokenFor("admin@example.com", "read", "write", "admin")
 	app := tsnotes(t)
 	h.call(admin, "store.new", map[string]any{"id": "tsnotes"})
-	h.call(admin, "files.push", map[string]any{"store": "tsnotes", "files": files(app)})
+	h.push(admin, map[string]any{"store": "tsnotes", "files": files(app)})
 
 	types := func() map[string]string {
 		out := map[string]string{}
@@ -108,7 +108,16 @@ func TestAppTypes(t *testing.T) {
 			}
 		}
 	}
+	// Reactors, type-checked only (following the system log needs the
+	// system module): a system: key gets a system log entry, which has no
+	// store; any other key a commit of the store's log.
+	const reactors = `export const on: Reactors = {
+  'table:notes'(ctx, commit) { return commit.store + commit.epoch },
+  'system:grant'(ctx, entry) { return entry.rev + (entry.summary ?? '') },
+}
+`
 	write(app)
+	write(map[string]string{"server/reactors.ts": reactors})
 	for name, text := range decl {
 		write(map[string]string{client.TypesDir + "/" + name: text})
 	}
@@ -126,13 +135,15 @@ func TestAppTypes(t *testing.T) {
 		"main.ts": strings.Replace(app["main.ts"], "{ text: 'from the page' }", "{ txt: 'from the page' }", 1),
 		"actor.ts": strings.Replace(strings.Replace(app["actor.ts"], "return { id: lastRowid }", "return { id: String(lastRowid) }", 1),
 			"use('workshop')", "use('system')", 1),
+		"server/reactors.ts": strings.Replace(reactors, "entry.rev", "entry.store", 1),
 	})
 	pages, okPages := check("tsconfig.json")
 	actorOut, okActor := check("tsconfig.actor.json")
 	if okPages || !strings.Contains(pages, "'txt' does not exist") {
 		t.Errorf("the page's mistake:\n%s", pages)
 	}
-	if okActor || !strings.Contains(actorOut, `"system"' is not assignable`) || !strings.Contains(actorOut, "Type 'string' is not assignable to type 'number'") {
+	if okActor || !strings.Contains(actorOut, `"system"' is not assignable`) || !strings.Contains(actorOut, "Type 'string' is not assignable to type 'number'") ||
+		!strings.Contains(actorOut, "Property 'store' does not exist on type 'SystemEntry'") {
 		t.Errorf("the actor's mistakes:\n%s", actorOut)
 	}
 }

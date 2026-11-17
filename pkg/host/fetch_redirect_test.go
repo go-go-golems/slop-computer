@@ -37,7 +37,7 @@ func TestFetchRedirects(t *testing.T) {
 	h := newHarness(t)
 	admin := h.tokenFor("admin@example.com", "read", "write", "admin")
 	h.call(admin, "store.new", map[string]any{"id": "fx"})
-	h.call(admin, "files.push", map[string]any{"store": "fx", "files": files(map[string]string{
+	h.push(admin, map[string]any{"store": "fx", "files": files(map[string]string{
 		"app.json": `{"title":"F","actor":"actor.js","slop":{"fetch":["` + allowed.URL + `"]}}`,
 		"actor.js": `const fetch = use('fetch');
 defineActor({ actions: { async get(ctx, { url }) { const r = await fetch(url); return r.json(); } } });`,

@@ -16,7 +16,7 @@ func TestCatalogShelfApp(t *testing.T) {
 	admin := h.tokenFor("admin@example.com", "read", "write", "admin")
 	live := deployCatalogData(t, h, admin)
 	h.call(admin, "store.new", map[string]any{"id": "catalog-shelf"})
-	h.call(admin, "files.push", map[string]any{"store": "catalog-shelf", "files": appDir(t, "catalog-shelf")})
+	h.push(admin, map[string]any{"store": "catalog-shelf", "files": appDir(t, "catalog-shelf")})
 	h.call(admin, "bind.set", map[string]any{"store": "catalog-shelf", "alias": "catalog", "target": "catalog-data"})
 	h.call(admin, "grant.set", map[string]any{"store": "catalog-data", "subject": "store:catalog-shelf", "level": "view"})
 	h.call(admin, "grant.set", map[string]any{"store": "catalog-shelf", "subject": "@guest", "level": "view"})

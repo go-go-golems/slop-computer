@@ -528,3 +528,91 @@ The person asked me to address the Codex review of #54 before going on with #51'
 
 ### Technical details
 - The note's format: `<pkg>'s page bundles import its peer <peer> (<names>), and the app does not map it yet: slop vendor add <peer> <names…>`. The actor's note says "require" and "for the actor".
+
+## Step 8: Phase 1, declarations for apps (PR #55); #51 merged with main
+
+The person answered "yes." to starting phase 1, and while I was reading the code they merged #53 and #54. Phase 1 went onto main as PR #55. An app now gets three declaration files from `app.types`:
+- **`page.d.ts`**, `window.claude`, built from `web/runtime`'s own types;
+- **`actor.d.ts`**, the actor runtime, written by hand and checked against the runtime;
+- **`modules.d.ts`**, the Go modules the app can load, partly generated from the verbs' JSON Schemas.
+
+`slop types` writes them into `.slop/types/` with two `tsconfig` files, and `slop dev` refreshes them. A fixture app is checked with `tsc` in `go test`. The TypeScript templates and the agent's guide wait for #51, which holds `web/bench`'s rewrite. Before starting, I merged main into #51 and resolved its conflicts with #53.
+
+### Prompt Context
+**User prompts (verbatim):** "yes." (to: start phase 1 now, stacked on #54, or after the merges), then "#54 and #53 merged" (sent mid-turn).
+**Assistant interpretation:** Start phase 1 now. With #53 and #54 merged, branch from main instead of #54. Keep #51 mergeable after #53, since I had offered the manual merge.
+**Inferred user intent:** Keep SLOP3-024 moving while the earlier PRs land.
+**Commits:**
+- 1391d9b on `task/slop3-023-core`: "Merge main (#52, #53, #54) into the bench core".
+- 3d7df87 and 9583c06 on `task/slop3-024-types` (PR #55).
+
+### What I did
+- **#51 merged with main.** `sandbox.go`'s non-entry branch now keeps #53's handling (compiled TypeScript, the source-map fallback, the import map in derived HTML) and #51's (an HTML document goes down the entry path). Tests from main that called `files.push` directly now use #51's `h.push`, which supplies `ifAt`.
+- **The converter, `verbs.TypeScript`:** JSON Schema to TypeScript for what verbs reflect to.
+  - It handles objects, maps, arrays, tuples, enums, consts, primitives, and `oneOf`/`anyOf` unions. Descriptions become doc comments; anything else is `unknown`.
+  - Its golden file type-checks with `tsc`.
+- **The push manifest:** `files.push` and `import.files` declare it as a union, through a `JSONSchemaExtend` hook: `{path, text} | {path, data} | {path, sha256, size}`.
+- **Workshop and system:** declarations generated from their verbs (`moduleTypeScript`), the way `modArgs` calls them, with the hand-written functions (`drop`, `embed`, `call`) declared alongside.
+- **`ModulesTypeScript(app, declared)`** on the actor manager. Two older declarations needed fixes along the way:
+  - `buffer` is now valid as an interface plus a value;
+  - go-go-goja's `events` had `export =` together with `export { X }`, which TypeScript refuses; it is rewritten as a namespace merged with the class.
+- **`pkg/apptypes`:**
+  - `actor.d.ts` declares the globals, `Ctx`, the definition, `ActorOf`, and every built-in `use()` module. `TestActorTypesDrift` checks it against the runtime.
+  - `page.d.ts` comes from `web/runtime/src/types.ts`, emitted by the runtime's build through the TypeScript API.
+- **`app.types`, `slop types`, and the `slop dev` refresh.** CI's test command is now `make test-ci`.
+- **The fixture app** is `pkg/host/testdata/tsnotes`, checked by `TestAppTypes`.
+
+### Why
+- **`actor.d.ts` by hand, with a drift test:** the actor's surface is Go code that builds JavaScript objects, so there is nothing to generate from. The test compares the property names the runtime has with the declaration's members, and caught both members I removed on purpose (`needAudience`, `rowsWritten`).
+- **`page.d.ts` from the implementation's own types:** a hand-written copy would drift. Where the runtime is untyped, the declaration is honest and loose.
+- **Modules renamed `slop:page/…`:** names like `db`, `query` and `util` could meet a package an app vendors.
+- **`pkg/apptypes`:** `pkg/commands` cannot import the pages door, and the verb should not depend on it.
+
+### What worked
+- **tsc on the fixture:** both programs pass. The planted mistakes are caught: a misspelled argument (`'txt' does not exist`), a wrong result type (`string` for `number`), and `use('system')` when only workshop is declared and granted.
+- **A sample page:** checked against `page.d.ts`, it catches a `Date` result that arrives as a string, and an unknown capability.
+- **The sample actor:** checked against `actor.d.ts` and `modules.d.ts`. Returning `{rows}` from a route is an error there; the runtime would send it as an empty body.
+- **Full suites:** `go test -tags sqlite_fts5 ./...` passes in all 24 packages, and `golangci-lint` reports 0 issues; `pnpm check` and `pnpm test` (17) pass in `web/runtime`.
+- **The CI install:** the npm step, run in a clean copy, writes no lockfile and installs TypeScript 5.9.3.
+
+### What didn't work
+- **The first `modules.d.ts` failed `tsc`:**
+  - `buffer`: "Class static side 'typeof Buffer' incorrectly extends base class static side". Fixed by declaring an interface and a value.
+  - `events`: "An export assignment cannot be used in a module with other exported elements". Fixed with `fixExportAssignment`.
+- **`tsc` on the golden file picked up a stray `@types/node`** in `/home/manuel/node_modules`, outside the repo. `types: []` keeps it out, and the generated `tsconfig` files set it too.
+- **The print test failed:** `app.trust` needs an app (an `app.json`), and main's harness has no `h.push`.
+- **Two wrong expectations in `TestPushFilesSchema`:** the generated `})[]` and the indentation were right, and the test was wrong.
+- **Lint:** staticcheck QF1003 (an if/else on one character) in `paren`, now a tagged switch.
+- **A test run that tested nothing:** `-run TestDevLoop` matched no test and passed in 0.03 s. The test is `TestSlopDev`.
+
+### What I learned
+- **TS globs skip dot directories,** so the pages' `include` never picks up `.slop/types/actor.d.ts`. That matters: its `console` would clash with the DOM's.
+- **`satisfies ActorOf<Actions>`** gives handlers their parameter types by context, as the design hoped.
+
+### What was tricky to build
+- **Overloads for verb-backed functions:**
+  - **The obstacle:** TypeScript forbids a required parameter after an optional one, and a function can take either an object or positions.
+  - **The fix:** each function gets an object form and, when it has positions, a positional form whose parameters turn optional from the first optional one. A needed option after an optional position drops the positional form.
+
+### What warrants a second pair of eyes
+- **CI now runs `make test-ci`,** which runs `npm install` before the tests. It can't be tried before the PR runs, but the step itself works in a clean copy.
+- **`page.d.ts`'s `db`, `user`, `comments` and `room` are loose.** There's a task to annotate them in `web/runtime`.
+- **`modules.d.ts` follows today's grants:** a module granted later appears at the next `slop types` or `slop dev`.
+
+### What should be done in the future
+- **After #51 merges:**
+  - TypeScript templates as the default for new apps, and the agent's guide;
+  - `files.commit`'s `FileChange` as a union.
+- **Phase 2:** typed actions (`args` schemas, `actions.d.ts`, `FromSchema`).
+
+### Code review instructions
+- **Read:**
+  - `pkg/verbs/typescript.go`;
+  - `pkg/doors/actors/modtypes.go`;
+  - `pkg/actor/types.go`;
+  - `pkg/apptypes/actor.d.ts`;
+  - `web/runtime/src/types.ts` and `build.mjs`;
+  - `pkg/commands/actors.go` (`app.types`);
+  - `pkg/client/types.go`;
+  - `pkg/host/apptypes_test.go`.
+- **Run:** `make runtime && go test -tags sqlite_fts5 ./pkg/host -run 'TestAppTypes|TestActorTypesDrift|TestSlopDev' -count=1 -v`

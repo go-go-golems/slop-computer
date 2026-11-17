@@ -38,7 +38,7 @@ WhenToUse: Before implementing any part of SLOP3-024, or when touching how slop 
 
 **The server compiles, slop's APIs come with types, and the bench checks.**
 
-Status: decided, 2026-11-16 (section 11 lists the decisions). Phase 0 is in PR #53, and phase 0b (`slop vendor`) is in PR #54 (on top of #53); both have had their Codex review findings fixed. The evidence was gathered against slop-computer `main` at 407a3f9. The goja source-map loader from section 4.4 shipped first, as a separate fix (PR #52).
+Status: decided, 2026-11-16 (section 11 lists the decisions). Phases 0 and 0b are merged (PRs #53 and #54). Phase 1 is in PR #55, except the TypeScript templates and the agent's guide, which follow SLOP3-023 (#51). The evidence was gathered against slop-computer `main` at 407a3f9. The goja source-map loader from section 4.4 shipped first, as a separate fix (PR #52).
 
 ## 1. Summary
 
@@ -419,7 +419,13 @@ interface Claude {
 }
 ```
 
-The file is embedded in the binary beside `claude.js`, under a freshness check like the existing `TestBuildOutputsFresh`.
+The file is embedded in the binary, under a freshness check like the existing `TestBuildOutputsFresh`.
+
+**As built (PR #55):**
+- `web/runtime/src/types.ts` names `window.claude`'s type from the implementation's own types: `Capabilities`, `JsonOf`, `ActionsOf`, and `use<Actions>('slop')`.
+- The runtime's build emits its declarations with the TypeScript API into one file of ambient modules. The modules are renamed under `slop:page/` so they cannot meet an app's package names, and the file declares the global `claude`.
+- The file is `pkg/apptypes/page.d.ts`, beside the hand-written `actor.d.ts`.
+- Where the runtime's implementation is untyped, the declaration is too (`db`, `user`, `comments` and `room` come out as `any` or open records). Annotating them in `web/runtime` improves `page.d.ts` with no other change.
 
 ### 5.2 The actor API: `actor.d.ts`
 
@@ -568,6 +574,15 @@ tsconfig.actor.json   the actor: lib ES2020, no DOM; actor.d.ts and modules.d.ts
 ```
 
 Both turn on `strict`, `isolatedModules`, `allowImportingTsExtensions` and `noEmit`, the settings `web/runtime/tsconfig.json` already uses. For vendored packages, the pages' `tsconfig.json` extends `vendor/tsconfig.vendor.json`, which `slop vendor` writes (section 4.7). `isolatedModules` makes the checker reject what a per-file transform cannot compile: `const enum` across files, namespace merging, and `export =`. The limits of section 4 thus show up as type errors with an explanation, not as surprises at runtime.
+
+**As built (PR #55):**
+- **`app.types {app, at?}`** returns the three files, each with a header naming the app, ref and snapshot. The trusted modules come from the draft's `app.json`, else main's.
+- **`modules.d.ts`** declares the catalog modules the app can load now (decided as `use()` decides), and the `SlopModules` and `SlopRequire` entries for `use()` and `require()`.
+- **`slop types`** writes the two `tsconfig` files only when they are missing:
+  - `tsconfig.json` (the pages) lists `page.d.ts` and includes every `.ts`/`.tsx` file except the actor entry, `server/` and `vendor/`;
+  - `tsconfig.actor.json` lists `actor.d.ts`, `modules.d.ts` and the entry, and includes `server/`.
+  - Both extend `vendor/tsconfig.vendor.json` when it exists.
+- **The check:** `TestAppTypes` runs `tsc` over a fixture app. CI's test command, `make test-ci`, installs the runtime's TypeScript first.
 
 By convention, files only the actor uses live under `server/`, which the pages' program leaves out. A file that both the page and the actor use belongs to both programs (pinboard, for example, has `core.js`). Such a file may therefore use neither the DOM nor the actor's globals, a discipline worth having anyway.
 

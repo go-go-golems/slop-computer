@@ -165,7 +165,9 @@ func manifestType(dir string) string {
 
 // devPush pushes the folder to draft, activating the instance, and prints
 // the outcome when the instance follows draft; it returns the new snapshot
-// and whether it printed.
+// and whether it printed. The folder replaces draft as it is when the push
+// is made (Push reads it for ifAt): a write landing between that read and
+// the push is a conflict, and the loop retries.
 func (c *Client) devPush(dir string, o DevOptions) (int64, bool, error) {
 	res, err := c.Push(o.App, dir, map[string]any{"ref": "draft", "message": "slop dev", "activate": []string{o.Instance}})
 	if err != nil {

@@ -20,7 +20,7 @@ func TestJournalExample(t *testing.T) {
 	admin := h.tokenFor("admin@example.com", "read", "write", "admin")
 	bob := h.tokenFor("bob@example.com")
 	h.call(admin, "store.new", map[string]any{"id": "journal"})
-	h.call(admin, "files.push", map[string]any{"store": "journal", "files": exampleFiles(t, "journal")})
+	h.push(admin, map[string]any{"store": "journal", "files": exampleFiles(t, "journal")})
 	if st := h.call(admin, "app.status", map[string]any{"store": "journal"}).(map[string]any); st["broken"] != "" {
 		t.Fatalf("status = %v", st)
 	}
@@ -101,7 +101,7 @@ func TestJournalExample(t *testing.T) {
 			m["text"] = strings.Replace(m["text"].(string), "sql.one('SELECT count(*) AS n FROM published_posts');", "throw new Error('smoke says no');", 1)
 		}
 	}
-	h.call(admin, "files.push", map[string]any{"store": "journal", "files": broken})
+	h.push(admin, map[string]any{"store": "journal", "files": broken})
 	s := h.call(admin, "app.status", map[string]any{"store": "journal"}).(map[string]any)
 	if s["n"] != 1.0 || !strings.Contains(s["broken"].(string), "smoke says no") {
 		t.Fatalf("after a failing smoke: %v", s)
@@ -117,7 +117,7 @@ func TestReactorExactlyOnce(t *testing.T) {
 	h := newHarness(t)
 	admin := h.tokenFor("admin@example.com", "read", "write", "admin")
 	h.call(admin, "store.new", map[string]any{"id": "counter"})
-	h.call(admin, "files.push", map[string]any{"store": "counter", "files": files(map[string]string{
+	h.push(admin, map[string]any{"store": "counter", "files": files(map[string]string{
 		"app.json": `{"title":"Counter","actor":"actor.js"}`,
 		"actor.js": `const db = use('db');
 defineActor({ on: { 'doc:items/*'(ctx, commit) {
@@ -159,7 +159,7 @@ func TestGuestbookExample(t *testing.T) {
 	admin := h.tokenFor("admin@example.com", "read", "write", "admin")
 	live := h.cfg.Hosts.Live[0]
 	h.call(admin, "store.new", map[string]any{"id": "guestbook"})
-	h.call(admin, "files.push", map[string]any{"store": "guestbook", "files": exampleFiles(t, "guestbook")})
+	h.push(admin, map[string]any{"store": "guestbook", "files": exampleFiles(t, "guestbook")})
 	h.call(admin, "store.new", map[string]any{"id": "guestbook-main", "app": "guestbook", "type": "guestbook"})
 	h.call(admin, "grant.set", map[string]any{"store": "guestbook-main", "subject": "@guest", "level": "interact"})
 	h.call(admin, "mount.set", map[string]any{"host": live, "path": "/guestbook", "store": "guestbook-main"})

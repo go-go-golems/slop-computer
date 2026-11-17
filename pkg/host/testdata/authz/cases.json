@@ -43,7 +43,7 @@
       "name": "6. AI for members, more for subscribers: one @member cell reaches subscribers, who get the larger allotment",
       "steps": [
         {"as": "admin", "verb": "store.new", "args": {"id": "journal"}},
-        {"as": "admin", "verb": "files.push", "args": {"store": "journal", "files": {"app.json": "{\"title\":\"Journal\",\"capabilities\":{\"sample\":{},\"db\":{}}}", "index.html": "<!doctype html><title>j</title>"}}},
+        {"as": "admin", "verb": "files.push", "args": {"store": "journal", "ifAt": 0, "files": {"app.json": "{\"title\":\"Journal\",\"capabilities\":{\"sample\":{},\"db\":{}}}", "index.html": "<!doctype html><title>j</title>"}}},
         {"as": "admin", "verb": "policy.set", "args": {"app": "journal", "capability": "sample", "audience": "@member", "value": "on"}},
         {"as": "admin", "verb": "llm.set", "args": {"subject": "@member", "value": "on", "budget": 500000}},
         {"as": "admin", "verb": "llm.set", "args": {"subject": "@subscriber", "value": "on", "budget": 5000000}},

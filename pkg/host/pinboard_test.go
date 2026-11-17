@@ -19,10 +19,10 @@ func TestPinboardApp(t *testing.T) {
 	admin := h.tokenFor("admin@example.com", "read", "write", "admin")
 	live := h.cfg.Hosts.Live[0]
 	h.call(admin, "store.new", map[string]any{"id": "pinboard"})
-	h.call(admin, "files.push", map[string]any{"store": "pinboard", "files": appDir(t, "pinboard")})
+	h.push(admin, map[string]any{"store": "pinboard", "files": appDir(t, "pinboard")})
 	h.call(admin, "mount.set", map[string]any{"host": live, "path": "/pb/:id", "storeParam": "id", "type": "pinboard", "createApp": "pinboard"})
 	h.call(admin, "store.new", map[string]any{"id": "pinboard-home"})
-	h.call(admin, "files.push", map[string]any{"store": "pinboard-home", "files": appDir(t, "pinboard-home")})
+	h.push(admin, map[string]any{"store": "pinboard-home", "files": appDir(t, "pinboard-home")})
 	h.call(admin, "grant.set", map[string]any{"store": "pinboard-home", "subject": "@member", "level": "view"})
 	h.call(admin, "mount.set", map[string]any{"host": live, "path": "/boards", "store": "pinboard-home"})
 

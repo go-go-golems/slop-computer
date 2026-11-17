@@ -110,8 +110,26 @@ interface Commit {
   summary?: string;
   changes: Change[];
 }
-/** A reactor: "table:notes", "doc:inbox/*", …; "system:<kind>" receives entries of the system log. */
+/** A reactor of the store's log: "table:notes", "doc:inbox/*", …. */
 type Reactor = (ctx: Ctx, event: Commit & Record<string, unknown>) => Awaitable<unknown>;
+/** One change of a system log entry: before and after are JSON text. */
+interface SystemChange { kind: string; key: string; op: string; before?: string; after?: string }
+/** An entry of the system log (grants, links, policy, …): no store and no epoch. */
+interface SystemEntry {
+  rev: number;
+  at: number;
+  principal: string;
+  via: string;
+  summary?: string;
+  changes?: SystemChange[];
+}
+/** A reactor of the system log: "system:<kind>" receives its entries. */
+type SystemReactor = (ctx: Ctx, entry: SystemEntry) => Awaitable<unknown>;
+/** Reactors by event: a "system:" key gets the system log's entries, any other key the store's commits. */
+interface Reactors {
+  [event: `system:${string}`]: SystemReactor;
+  [event: string]: Reactor;
+}
 
 interface EveryDef {
   /** A cron spec ("0 3 * * *"). */
@@ -127,7 +145,7 @@ interface ActorDef {
   /** Routes on the store's mounts: "GET /api/items/:id". */
   http?: Record<string, Route>;
   /** Reactions to log events, one turn each. */
-  on?: Record<string, Reactor>;
+  on?: Reactors;
   /** Recurring alarms. */
   every?: Record<string, EveryDef>;
   /** Handlers of one-off alarms set with use('alarm').at(). */

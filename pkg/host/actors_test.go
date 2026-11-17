@@ -61,7 +61,7 @@ func TestActors(t *testing.T) {
 	admin := h.tokenFor("admin@example.com", "read", "write", "admin")
 	bob := h.tokenFor("bob@example.com")
 	h.call(admin, "store.new", map[string]any{"id": "tracker"})
-	h.call(admin, "files.push", map[string]any{"store": "tracker", "files": files(map[string]string{
+	h.push(admin, map[string]any{"store": "tracker", "files": files(map[string]string{
 		"app.json":          `{"title":"Tracker","actor":"actor.js","type":"tracker","capabilities":{"db":{}},"slop":{"reads":{"catalog":{"type":"catalog"}}}}`,
 		"actor.js":          trackerActor,
 		"index.html":        "<!doctype html><title>t</title>",
@@ -134,7 +134,7 @@ func TestActors(t *testing.T) {
 
 	// HTTP routes on a live mount: public, and level-checked.
 	h.call(admin, "store.new", map[string]any{"id": "api"})
-	h.call(admin, "files.push", map[string]any{"store": "api", "files": files(map[string]string{
+	h.push(admin, map[string]any{"store": "api", "files": files(map[string]string{
 		"app.json": `{"title":"API","actor":"actor.js"}`,
 		"actor.js": `defineActor({ http: { 'GET /hello/:name': { level: 'public', run: (ctx, req) => ({ json: { hi: req.params.name, q: req.query.x } }) },
 		  'GET /secret': { run: () => ({ text: 'no' }) } } });`,
@@ -159,7 +159,7 @@ func TestActors(t *testing.T) {
 	}
 
 	// A version whose migration fails leaves the store on the old one.
-	h.call(admin, "files.push", map[string]any{"store": "tracker", "prune": false, "files": files(map[string]string{
+	h.commit(admin, map[string]any{"store": "tracker", "changes": files(map[string]string{
 		"sql/002_bad.sql": "CREATE TABLE _nope (x);",
 	})})
 	st = h.call(admin, "app.status", map[string]any{"store": "tracker"}).(map[string]any)
@@ -170,7 +170,7 @@ func TestActors(t *testing.T) {
 		t.Fatalf("old version still runs: %v", n)
 	}
 	// A good version activates.
-	h.call(admin, "files.push", map[string]any{"store": "tracker", "prune": false, "files": files(map[string]string{
+	h.commit(admin, map[string]any{"store": "tracker", "changes": files(map[string]string{
 		"sql/002_bad.sql": "ALTER TABLE tasks ADD COLUMN done INTEGER DEFAULT 0;",
 	})})
 	st = h.call(admin, "app.status", map[string]any{"store": "tracker"}).(map[string]any)
@@ -197,7 +197,7 @@ func TestPageCallsAction(t *testing.T) {
 	admin := h.tokenFor("admin@example.com", "read", "write", "admin")
 	live := h.cfg.Hosts.Live[0]
 	h.call(admin, "store.new", map[string]any{"id": "votes"})
-	h.call(admin, "files.push", map[string]any{"store": "votes", "files": files(map[string]string{
+	h.push(admin, map[string]any{"store": "votes", "files": files(map[string]string{
 		"app.json":   `{"title":"Votes","actor":"actor.js","capabilities":{"db":{}}}`,
 		"actor.js":   `const db = use('db'); defineActor({ actions: { vote: { requires: 'interact', run(ctx, { pick }) { db.doc('votes/' + ctx.visitor.id.replace(/[^a-z0-9_]/gi, '')).set({ pick }); return { ok: true, guest: ctx.visitor.guest }; } } } });`,
 		"index.html": "<!doctype html><title>v</title>",
@@ -230,7 +230,7 @@ func TestViewsOpenOnFallbackVersion(t *testing.T) {
 	admin := h.tokenFor("admin@example.com", "read", "write", "admin")
 	live := h.cfg.Hosts.Live[0]
 	h.call(admin, "store.new", map[string]any{"id": "fb"})
-	h.call(admin, "files.push", map[string]any{"store": "fb", "files": files(map[string]string{
+	h.push(admin, map[string]any{"store": "fb", "files": files(map[string]string{
 		"app.json": `{"title":"F","capabilities":{"db":{}}}`, "index.html": "<!doctype html><title>f</title>",
 		"sql/001_ok.sql": "CREATE TABLE items (id INTEGER PRIMARY KEY);"})})
 	h.call(admin, "grant.set", map[string]any{"store": "fb", "subject": "@guest", "level": "view"})
@@ -239,7 +239,7 @@ func TestViewsOpenOnFallbackVersion(t *testing.T) {
 	if st, v := openView(g, live, "/fb", ""); st != 200 {
 		t.Fatalf("first version: %d %v", st, v)
 	}
-	h.call(admin, "files.push", map[string]any{"store": "fb", "prune": false, "files": files(map[string]string{"sql/002_bad.sql": "CREATE TABLE _nope (x);"})})
+	h.commit(admin, map[string]any{"store": "fb", "changes": files(map[string]string{"sql/002_bad.sql": "CREATE TABLE _nope (x);"})})
 	if st := h.call(admin, "app.status", map[string]any{"store": "fb"}).(map[string]any); st["n"] != 1.0 || st["broken"] == "" {
 		t.Fatalf("status after a bad version: %v", st)
 	}
@@ -254,7 +254,7 @@ func TestNothingUsableAfterFirstActivationFails(t *testing.T) {
 	h := newHarness(t)
 	admin := h.tokenFor("admin@example.com", "read", "write", "admin")
 	h.call(admin, "store.new", map[string]any{"id": "nogo"})
-	h.call(admin, "files.push", map[string]any{"store": "nogo", "files": files(map[string]string{
+	h.push(admin, map[string]any{"store": "nogo", "files": files(map[string]string{
 		"app.json":        `{"title":"N","actor":"actor.js"}`,
 		"actor.js":        `defineActor({ actions: { count(ctx) { return sql.query('SELECT count(*) AS n FROM items')[0].n; } } });`,
 		"index.html":      "x",
