@@ -1028,3 +1028,147 @@ Most struggles were fixable, and while the round ran I fixed them in the worktre
 - **Round 1:** 4 personas; 53 `STRUGGLE:` lines (maya 15, devon 11, priya 13, sam 14).
 - **The findings list:** `various/persona-review-2026-11-17/findings.md`.
 - **Persona exit times:** devon 22:15:00, priya 22:15:06, maya 22:18:20, sam 22:20:49 (local time).
+
+## Step 13: Round 2: six personas, harder goals and a legacy app; what they found
+
+Round 2 ran six personas on the bench from 9cbe08a, with the round-1 fixes. The bench's own agent moved to glm-5.3, and the personas' models were mixed:
+
+| Persona | Model, thinking | Goal |
+|---|---|---|
+| Maya | glm-5.3-flash, medium | rerun: the bakery preorder page |
+| Devon | glm-5.3, high | rerun: the TypeScript kanban |
+| Sam | deepseek-4.1-flash, medium | rerun: the shipments dashboard |
+| Rosa (new) | glm-5.3, medium | inherits the legacy inventory app |
+| Kenji (new) | deepseek-4.1-flash, high | a live meetup poll |
+| Aisha (new) | glm-5.3-flash, medium | shift sign-ups with a waitlist and a privacy rule |
+
+Rosa's app has deliberately messy code: globals, inline `onclick`, quantities and prices stored as text, actions without schemas, and a planted bug (`toFixed(2)` returns a string, so the total concatenates: "0179.8819.50").
+
+Five personas answered "yes" (Maya, Devon, Rosa, Kenji, Aisha), where round 1 had one. The struggle counts were maya 6, devon 7, rosa 8, kenji 9, aisha 1, and Sam 6 so far; Sam was still running when this was written.
+
+The round found four more bugs in the bench and the sample backend that no test had caught, and I fixed them during the round. Eleven commits, 29f2eb7..c4f7117, all with tests where a test could reach them.
+
+### Prompt Context
+**User prompts (verbatim):** see Step 12. Also, mid-round: "how are things going?" (answered with a status report).
+**Assistant interpretation:** Continue the rounds, harder each time, fixing between and during them; keep the diary and transcripts.
+**Inferred user intent:** As in Step 12.
+**Commit (code):**
+- 29f2eb7 — Select mode says how to press a button (Play)
+- 3fe5457 — a tool call written as text is retried; proposals say their data stays
+- 23ebd79 — the bench tells a member that only admins create apps
+- 8185257 — fix the eval session's rewrite (ASI); name the line in "not a function"
+- 7cd102f — app.reset asks first; the guide forbids reset as cleanup
+- 7e465da — Review takes a file in or out only by its checkbox; partial accepts ask; seeds reload
+- 28c9c3b — the guide: say only what the effects show
+- cd978d0 — delete one row of an instance's data (workshop.exec, the Data view, app.exec)
+- 8a68886 — scenario text checks read whole texts; an over-budget turn replies
+- a78152c — the guide: live updates through room moments or onSnapshot, not polling
+- c4f7117 — an administrator gives a published app its web address from the bench
+
+### What I did
+- **Before the round:**
+  - Rebuilt the server: `OnDeleted`, the gepp nudge, `workshop.mounts`.
+  - Set the tiers to glm-5.3 (quick: glm-5.3-flash at low; default: glm-5.3 at medium; complex: glm-5.3 at high), and restarted the server and the daemon.
+  - Pushed the bench and the `inventory` fixture.
+  - Probed with benchdrive, which found the boot bug (Step 12).
+  - Launched with `run.sh` (round.json, recording on).
+- **During the round:**
+  - Watched struggles through a monitor.
+  - For each surprising one, read the persona's recorded steps (`steps.jsonl`) and screenshot, the agent's thread (`smoke/thread-errors.mjs` reads the failed eval steps through `__SB` without touching the persona's tab), or reproduced it with a probe persona on an app of its own.
+- **Three findings, reproduced:**
+  - **The eval session's rewrite (Aisha's agent failed five evals with `TypeError: not a function (line 2)`).** Reproduced with the exact code in the Eval view, then read `rewrite()` in `worker/worker.js`:
+    - A top-level `const [ih, css] = await Promise.all(…)` becomes `([ih, css] = …)`.
+    - After `const mt = await files.read('main.ts')` with no semicolon, that line continues the previous one as a call, `files.read('main.ts')(…)`.
+    - The removed keyword is now `;`.
+    - The rewrite moved to `worker/rewrite.js` so a Node test can run it; on the old rewrite the test fails with `TypeError: read(...) is not a function`.
+  - **glm-5.3 writes tool calls as text** (Maya's turn ended with `<tool_call>eval … </tool_call>` as its reply). gepp now tells the model and runs the round again, at most twice (`TestToolCallAsTextIsRetried`).
+  - **Review's file names unticked their files** (Devon: "Accept 9" dropped `actor.ts`, and the draft broke with "no such table: items"). The name was inside the checkbox's `<label>`. Now:
+    - only the checkbox includes or excludes a file;
+    - a partial accept asks first, naming what will be discarded;
+    - the button says "Accept 9 of 10".
+- **Other fixes:**
+  - **Scenarios' text checks** read `info().text`, cut at 120 characters. The probe now has `texts()`, and older probes fall back.
+  - **"exceeds local context budget"** now gives one last round without tools to reply (`TestOverBudgetTurnReplies`).
+  - **`app.reset` shows an approval card.** Two agents had wiped the person's data to "clean up".
+  - **Deleting single rows:** `workshop.exec` (with drop's rule, now shared as `unpublished`), the Data view's ✕ per row, and `app.exec`.
+  - **Seeds reload the dev frames.**
+  - **The publish dialog** offers "Give it a web address" to admins: `workshop.mountApp`, which mounts `/<app>` on the first live host, is idempotent and refuses a taken path; `TestBenchPutOnline`.
+  - **The `me` action:** the New app dialog tells members that only admins build (D9).
+  - **The guide:**
+    - say only what effects show;
+    - remove test rows with `app.exec`, never by a reset;
+    - live updates through `room.emit`/`room.on` with the topic declared, or `onSnapshot`, never polling.
+- **For round 3, not yet live:**
+  - **benchdrive:**
+    - `read` and `edit`;
+    - `type code` needs `--replace`;
+    - dialogs are accepted and reported;
+    - `ask` returns after 150 s and `wait` follows the turn;
+    - `frame-type` picks `<select>` options and reports hidden fields;
+    - per-persona accounts.
+  - **New personas (Lena, Theo, Grace)** and the `members` fixture (document database, duplicates).
+  - **`boot-smoke.mjs`.**
+  - **`design-doc/02-proposal-frames-as-different-people.md`.**
+- **A member's account:** opening the bench needed `slop grant set bench @member interact` and `slop policy set bench sample @member on` on the review server, and then Create failed: "only admins change app code (this store holds app.json; decision D9)".
+
+### Why
+- **Fixing while personas ran without redeploying** kept round 2 on one build. The same personas on round 3 test the fixes.
+- **`mountApp` and not `mount.set` in the workshop:** the bench gets one narrow action (its own app, `/<app>`, the first live host, never over another store), and `mount.set`'s admin rule still decides who.
+
+### What worked
+- **The verdicts.** For example:
+  - Devon: "I proved it by hand-editing a call site to `column: 'oops'` and getting `Type '"oops"' is not assignable to type '"todo" | "doing" | "done"'`. The bench type-checks every edit, mine included."
+  - Rosa: "all three of the owner's complaints are fixed, the data survived, and the fix is published … proven by a permanent scenario test that cross-checks the page against SQL's SUM(Qty*Prc)."
+  - Aisha: "All four rules I asked for work and I tested each one by hand."
+- **The recording:** 658 commands recorded with 462 screenshots. The transcript browser shows each persona's session with the bench after each command.
+- **Tests:** the full Go suite and lint pass, and the 33 bench Node tests pass at c4f7117. CI was green on 0e3977b.
+
+### What didn't work
+- **The member probe:** "You do not have access to this." at the bench until the grant; then "only admins change app code (… decision D9)" from Create.
+- **The persona shell's command timeout.** pi's bash tool gives up after 180 s, and the old daemon's `ask` waits up to 15 minutes. Devon's and Kenji's next commands queued behind running turns: Devon at 03:29 with "Command timed out after 180 seconds"; Sam's `ask` took 777928 ms.
+- **The 120-character text check** made Sam's agent conclude "plain text checks only reach roughly the top ~1,000 characters". Its guess at the limit was wrong, but the conclusion that checks missed rows was right.
+- **My own mistakes:**
+  - A `sed` that put an unescaped `'` into `agent/api/app.js`. The build failed, but `node build.mjs | tail -1` hid it, and the commit went in; I amended it before pushing. Build chains now use `set -o pipefail`.
+  - Two commits left the rebuilt `pkg/doors/pages/assets/probe.js` unstaged, so CI's `TestBuildOutputsFresh` failed ("probe.js is stale"). Fixed in 0e3977b; I now stage `apps pkg web` and check `git status` after each commit.
+  - My first members fixture used a document API that doesn't exist (`collection.add`, `count`, `all`).
+  - My first round-2 monitor died on zsh's `nomatch`.
+
+### What I learned
+- **The same few barriers recur across personas and models:**
+  - proposals (every non-programmer);
+  - Select versus Play (Priya, Maya, Kenji);
+  - "where is my link" (Maya twice, Aisha, Kenji);
+  - long silent turns.
+- **The model shapes the bugs found.** glm-5.3 writes without semicolons, which surfaced the rewrite bug, and writes tool calls as text; deepseek ends turns silently. Rotating models finds different classes of bugs.
+- **Frames as one person is now the main gap** for multi-person apps (Kenji's two voters, Aisha's privacy check). That's a server design decision, so it's a proposal (design-doc/02), not built.
+
+### What was tricky to build
+- **The rewrite fix.** Replacing `const` with `;` is safe in all three rewritten forms (identifier, destructuring, class), and keeps line numbers. A leading `;` is an empty statement even at the start of the code, and the error lines still match the person's code.
+- **The over-budget round.** It is allowed only after round 0 and only once, within a 160 KiB allowance, so a single huge first prompt still fails as before.
+- **`mountApp`'s guards.** It checks that the store is an app (`App == Store`), that main exists, that there's a live host, and that the path is free; the same mount again returns `existed: true`.
+
+### What warrants a second pair of eyes
+- **`workshop.exec`** lets the bench write SQL on instances of unpublished code as the visitor. The `unpublished` rule is drop's, but writes are new, and admin-only through `sql.exec`.
+- **`workshop.mountApp`** expands what a trusted workshop app can do. It is scoped to its own app's `/<app>` path, but it is still a platform-level change.
+- **The gepp nudges** (silent end, text calls, over budget) add messages marked "From the system, not the person"; check they can't loop. Each has a counter or a flag.
+
+### What should be done in the future
+- A decision on design-doc/02 (frames as different people).
+- Progress text during long turns, so a person doesn't watch "Working" for 13 minutes.
+- Round 3, with the fixes and the new harness live.
+
+### Code review instructions
+- **Start with:**
+  - `web/bench/src/worker/rewrite.js`;
+  - `pkg/llm/gepp/sample.go` (`nudgeTextCall`, `nudgeFull`, `wrapped`);
+  - `pkg/doors/actors/modworkshop.go` (`unpublished`, `exec`, `mountApp`);
+  - `web/bench/src/ui/review.js` (`accept`);
+  - `web/bench/src/frames/scenarios.js` (`expectStep`).
+- **Validate:**
+  - `GOWORK=off go test -tags sqlite_fts5 ./pkg/host -run 'TestBench|TestWorkshopDevInstances'`
+  - `GOWORK=off go test ./pkg/llm/gepp`
+  - `cd web/bench && node --test test/*.test.mjs`
+
+### Technical details
+- **Round 2:** started 03:28:35 UTC; Devon, Maya, Aisha, Rosa and Kenji exited 0 at 03:50–04:13 UTC.
+- **The archive:** `various/persona-review-2026-11-17/r2/`, with screenshots shrunk to 1120 px at JPEG quality 55 (the originals were 66 MB).

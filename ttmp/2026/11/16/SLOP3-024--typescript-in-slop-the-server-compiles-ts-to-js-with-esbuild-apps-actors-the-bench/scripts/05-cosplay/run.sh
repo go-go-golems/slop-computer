@@ -34,6 +34,8 @@ for spec in "$@"; do
   pmodel=${pmodel:-$model} pthinking=${pthinking:-$thinking}
   dir=$round/$name; mkdir -p "$dir"
   brief=$here/personas/$name.md
+  # a persona named *-visual works by eye: screenshots and pointer commands only
+  prompt=$here/persona-prompt.md; case $name in *-visual) prompt=$here/persona-prompt-visual.md;; esac
   [ -f "$brief" ] || { echo "no brief $brief"; exit 1; }
   [ $first = 1 ] || sleep "${STAGGER:-8}"; first=0
   msg="Begin. Your benchdrive name is $name. The app you work on has the id \"$app\". Write your diary in diary.md here."
@@ -41,7 +43,7 @@ for spec in "$@"; do
       --no-context-files --no-skills --no-mcp --no-prompt-templates \
       --no-extensions -e "${LUNAROUTE_EXT:-$HOME/.pi/agent/npm/node_modules/@lunaroute/pi-extension}" \
       --tools bash,read,write,edit \
-      --append-system-prompt "$(cat "$here/persona-prompt.md" "$brief")" \
+      --append-system-prompt "$(cat "$prompt" "$brief")" \
       --session-dir "$dir/session" \
       "$msg" > "$dir/pi.out" 2> "$dir/pi.err"
     echo "$name exited $? at $(date +%T) ($pmodel, thinking $pthinking)" >> "$round/done.log" ) &

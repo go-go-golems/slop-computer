@@ -33,6 +33,8 @@ const HELP = `benchdrive <you> <command> [args]   (you = your persona name, e.g.
   ask <message>             send to Claude in the Agent chat, wait for the reply
   edit <old> <new>          change text in the file open in the Code view (old must occur once)
   read [from] [to]          the file open in the Code view, numbered lines (80 at a time)
+  see <file.png>            what the screen shows, with a grid to aim by (for working by eye)
+  click-at <x> <y>, dblclick-at <x> <y>, drag <x1> <y1> <x2> <y2>, scroll-at <x> <y> <dy>, keys <text>
   frame-text [n]            the text of the app's page(s) on the canvas
   frame-shot <file.png> [n] screenshot of an app frame on the canvas
   frame-click <text|sel> [n]  click inside the app's own page (in Play mode, as a user of the app)
@@ -321,6 +323,44 @@ class Persona {
       if (nw === '') await this.page.keyboard.press('Delete'); else await this.page.keyboard.insertText(nw)
       return `Edited line ${v.slice(0, at).split('\n').length} of the open file: ${JSON.stringify(cut(old, 60))} → ${JSON.stringify(cut(nw, 60))}`
     })
+  }
+
+  // ---- eyes and hands: for a persona that works by looking, not by reading the page as text ----
+  // see: a screenshot with a faint labelled grid every 100 px (to aim click-at); the answer is only where it went
+  async see(file) {
+    if (!file) throw new Fail('usage: see <file.png>   (then look at the file; aim with the grid: x across, y down)')
+    await this.page.evaluate(() => {
+      const W = innerWidth, H = innerHeight, d = document.createElement('div')
+      d.id = '__bd_grid'; d.style.cssText = 'position:fixed;inset:0;pointer-events:none;z-index:2147483647'
+      let svg = '<svg xmlns="http://www.w3.org/2000/svg" width="' + W + '" height="' + H + '">'
+      for (let x = 100; x < W; x += 100) svg += '<line x1="' + x + '" y1="0" x2="' + x + '" y2="' + H + '" stroke="rgba(255,0,128,.22)"/><text x="' + (x + 2) + '" y="11" font-size="10" fill="rgba(200,0,100,.8)">' + x + '</text>'
+      for (let y = 100; y < H; y += 100) svg += '<line x1="0" y1="' + y + '" x2="' + W + '" y2="' + y + '" stroke="rgba(255,0,128,.22)"/><text x="2" y="' + (y - 2) + '" font-size="10" fill="rgba(200,0,100,.8)">' + y + '</text>'
+      d.innerHTML = svg + '</svg>'; document.body.appendChild(d)
+    })
+    try { await this.page.screenshot({ path: file }) } finally { await this.page.evaluate(() => { const g = document.getElementById('__bd_grid'); if (g) g.remove() }).catch(() => { }) }
+    const v = this.page.viewportSize()
+    return [`Saved what the screen shows (${v.width}×${v.height}, grid every 100 px) to ${file}. Look at it.`]
+  }
+  async pointer(fn, what) {
+    await this.bench()
+    if (this.dialogs) this.dialogs.length = 0
+    await fn(this.page.mouse)
+    await sleep(700)
+    const out = [what]
+    for (const d of this.dialogs || []) out.push('A dialog appeared: ' + d + ' (you clicked OK).')
+    return [...out, 'Take another look (see) to know what changed.']
+  }
+  clickAt(x, y) { if (isNaN(+x) || isNaN(+y)) throw new Fail('usage: click-at <x> <y>'); return this.pointer(m => m.click(+x, +y), `Clicked at (${+x}, ${+y}).`) }
+  dblclickAt(x, y) { if (isNaN(+x) || isNaN(+y)) throw new Fail('usage: dblclick-at <x> <y>'); return this.pointer(m => m.dblclick(+x, +y), `Double-clicked at (${+x}, ${+y}).`) }
+  drag(x1, y1, x2, y2) {
+    if ([x1, y1, x2, y2].some(v => isNaN(+v))) throw new Fail('usage: drag <x1> <y1> <x2> <y2>')
+    return this.pointer(async m => { await m.move(+x1, +y1); await m.down(); await m.move(+x2, +y2, { steps: 12 }); await m.up() }, `Dragged from (${+x1}, ${+y1}) to (${+x2}, ${+y2}).`)
+  }
+  scrollAt(x, y, dy) { if ([x, y, dy].some(v => isNaN(+v))) throw new Fail('usage: scroll-at <x> <y> <dy>   (dy > 0 scrolls down)'); return this.pointer(async m => { await m.move(+x, +y); await m.wheel(0, +dy) }, `Scrolled ${+dy} px at (${+x}, ${+y}).`) }
+  async keys(text) {
+    if (text == null || text === '') throw new Fail('usage: keys <text>   (types where the cursor is; click-at a field first)')
+    await this.bench(); await this.page.keyboard.type(text, { delay: 8 }); await sleep(300)
+    return [`Typed ${JSON.stringify(cut(text, 80))} where the cursor is. Take another look (see).`]
   }
 
   async shot(file) {
@@ -667,7 +707,7 @@ function nearby(arg, all, within) {
 // cmd, args, ok, out) and <dir>/<persona>/shots/<n>.jpg (the bench after
 // the command; nothing after look, frame-text and wait-free reads).
 const RECORD = process.env.BENCHDRIVE_RECORD || ''
-const READS = new Set(['look', 'frame-text', 'shot', 'frame-shot'])
+const READS = new Set(['look', 'frame-text', 'shot', 'frame-shot', 'see'])
 async function record(P, persona, cmd, args, ok, out, ms, where) {
   const root = where || RECORD
   if (!root || !path.isAbsolute(root)) return
@@ -691,6 +731,8 @@ async function serve(port) {
     look: P => P.look(), shot: (P, a) => P.shot(a[0]), click: (P, a) => { const i = a.indexOf('--in'); return i >= 0 ? P.click(a.slice(0, i).join(' '), a[i + 1]) : P.click(a.join(' ')) },
     type: (P, a) => { const r = a.indexOf('--replace'); P.replaceOk = r >= 0; const b = r >= 0 ? a.filter((_, i) => i !== r) : a; return P.type(b[0], b.slice(1).join(' ')).finally(() => { P.replaceOk = false }) }, key: (P, a) => P.key(a[0]),
     read: (P, a) => P.read(a[0], a[1]),
+    see: (P, a) => P.see(a[0]), 'click-at': (P, a) => P.clickAt(a[0], a[1]), 'dblclick-at': (P, a) => P.dblclickAt(a[0], a[1]),
+    drag: (P, a) => P.drag(a[0], a[1], a[2], a[3]), 'scroll-at': (P, a) => P.scrollAt(a[0], a[1], a[2]), keys: (P, a) => P.keys(a.join(' ')),
     'new-app': (P, a) => P.newApp(a[0], a.slice(1).join(' ')), 'open-app': (P, a) => P.openApp(a[0]),
     ask: (P, a) => P.ask(a.join(' ')), 'frame-text': (P, a) => P.frameText(a[0]), 'frame-shot': (P, a) => P.frameShot(a[0], a[1]),
     'frame-click': (P, a) => P.frameClick(a[0], a[1]), 'frame-type': (P, a) => P.frameType(a[0], a[1], a[2]),

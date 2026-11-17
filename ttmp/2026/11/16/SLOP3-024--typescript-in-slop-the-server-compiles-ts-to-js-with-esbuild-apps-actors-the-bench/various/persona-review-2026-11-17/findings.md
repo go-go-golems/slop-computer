@@ -63,3 +63,9 @@
 - [feature] All canvas frames share one visitor identity: two voters, or a host and an audience member, cannot be tested (kenji r2). Needs frames as different simulated people.
 - [bench] A new frame lands off-screen; clicking it timed out until "Fit" (kenji r2). Check: scroll a new frame into view.
 - [bench?] Two "This week" panes with different numbers (sam r2): which is the app? Check his screenshots.
+- [BUG, scenarios] { expect, text } compared against the probe's description, cut at 120 chars: checks on a table missed rows past the first few (sam r2, found by its agent). FIXED 8a68886 (probe texts()).
+- [BUG, sample] "Tool conversation exceeds local context budget" mid-answer (sam r2). FIXED 8a68886: one last round without tools to reply.
+- [bench] Agent turns of 3–13 minutes on glm-5.3 (devon, sam r2): long; the person sees only "Working". Consider progress text, or nudging smaller evals.
+- [bench, from rosa r2] No way to delete one row of dev data. FIXED cd978d0 (workshop.exec, Data view ✕, app.exec).
+- [bench] Members (non-admin) get "only admins change app code … D9" from Create. FIXED (me action; the New app dialog says so first).
+- [design] Frames as different people (kenji, aisha r2; priya r1): proposal design-doc/02, for a decision.
