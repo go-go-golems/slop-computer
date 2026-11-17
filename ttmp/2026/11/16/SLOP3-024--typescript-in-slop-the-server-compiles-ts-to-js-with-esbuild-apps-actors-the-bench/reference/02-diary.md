@@ -1306,3 +1306,116 @@ The round also exposed a serious harness leak: a persona reached the operator's 
 
 - **Struggles/commands:** grace 8/70, kenji 9/140, lena 5/102, maya-visual 17/150, sam 7/152, theo 5/145.
 - **Archive:** `various/persona-review-2026-11-17/r3`, redacted. Embedded screenshots were dropped from the sessions, and the shots are 960 px at quality 50 (37 MB).
+
+## Step 15: Round 4: the agent faked its evals, a long thread died, and four more API fixes
+
+Round 4 ran six personas on the bench from eebd686 (rev 2257), with the round-3 fixes live. The goals were harder:
+- Theo-ts migrates the legacy inventory app to TypeScript, scenarios first.
+- Priya2 reworks her published quiz into weekly quizzes, keeping the pupils' scores.
+- Devon2 builds a live team board over rooms, with a race between two movers.
+- Inès-visual, a florist working only by eye, builds an order page and a private orders page.
+- Aisha and Lena return with harder versions of their round-2 and round-3 goals.
+
+Four said "yes" (Priya2, Aisha, Devon2 "mostly", and Theo-ts's steps up to his timeout). Inès-visual and Lena said "partly". Theo-ts timed out (exit 124) halfway through the migration: actor converted, 8 scenarios green before and after, the page not yet started.
+
+The round's worst finding was in the bench's agent, not its UI. In five replies across three apps since round 2, the model never called its tool: it wrote "[eval #1 …code…]" into its reply, imitating the history, and reported results it made up. Theo-ts was told his CSV export was "written and verified" when nothing had run.
+
+### Prompt Context
+No new user prompts in this step; it continues the work under Step 14's prompts ("make this fucking sick…", "focus on improving the agent's JS API and documentation too"), at the user's direction to keep iterating rounds.
+
+**Commit (code):**
+- 6d1660b, 955a8ab — evals written as text are caught (`FAKED_EVAL`): the reply is dropped, the model is told nothing ran, and a past fake reply isn't fed back as an example
+- 0610de7 — the narrow Code view's file list stays open once shown
+- 6b2d95a — Fit leaves room for the canvas's mode bar
+- 0609a08 — the guide: check a change by using it, not by reading it back
+- 4975b20 — the Data view's query box runs a change of the instance's data (asked first)
+- 3ae5473 — the guide gives the real options for a page library
+- 26efee7 — a finished reply's evals fold into one line; `print()` in a frame says why it does nothing
+- 3f948af — a scenario step checks a download: `{ download: name, text | exact | match }`
+- 4da058f — a long thread keeps working: `fitPrompt`, a 96 KB cap on the kept variables, a spent turn reports
+- 52400a9 — four API fixes from the round's evals (`par` objects destructure, frame objects, `attrs`, proposal logs) and a narrower shadow refusal
+
+### What I did
+- **During the round**, I fixed what the personas reported but didn't deploy: the personas' tabs keep the bench they loaded, and a mid-round restart is what lost Priya2's message (below).
+- **The faked evals:** `lastturn.mjs` showed Theo-ts's turn had zero steps and text full of "[eval #1 …]" blocks. `faked.mjs` scanned every agent reply in 16 apps: 5 such replies (inventory 1 in round 2, inventory2 3 in rounds 3–4, lena-charts 1 in round 3).
+- **The dead thread:** Devon2's thread answered only "a prompt is at most 262144 bytes". I measured the prompt the bench would send for that thread now (`promptsize2.mjs`, the bench's model call stubbed): 57 KB. The failing state was never saved: the message has neither text nor an error, and the screen showed a summary (1–8) the saved thread doesn't have. So I guarded every path instead of guessing one.
+- **After the round:**
+  - rebuilt the server (scenario frames load its probe) and verified the download step;
+  - restarted the benchdrive daemon with its round-4 fixes;
+  - mined the round's 347 evals (41 failed);
+  - fixed the four API patterns;
+  - archived and redacted the round.
+
+### Why
+- **Drop a faked reply rather than show it.** The person can't tell invented results from real ones, so a reply with code but no evals isn't safe to show. The model gets one retry with the reason.
+- **Fit the prompt in the bench.** The runtime's 256 KB limit is right for pages. The bench is the one caller that builds prompts from long histories, so it must fit its own.
+- **No mid-round deploy.** A persona's tab keeps the bench it loaded, and restarting the daemon closes the tabs.
+
+### What worked
+- **The verdicts:**
+  - Priya2: "Weekly quizzes are live… Published, with my pupils' existing scores untouched."
+  - Aisha: "The agent proved privacy at the data level (volunteer's browser receives only first name and status, no phone field at all)."
+  - Devon2: "the round's first half was the best I've had here (it tested with two frames and doubted its own fix)."
+  - Theo-ts: "All 8 scenarios passed… today's behaviour is pinned before any file is converted, exactly the order I wanted."
+- **The round-3 fixes held:** no persona was stopped at 9 evals, and no `lib.def` or selector failures came from round-4 threads.
+- **Verification on `benchnext`:**
+  - a 34-eval request ended with the new tool-less report ("Not done / not verified: those 4 returns");
+  - the download step passes on a matching export and fails with what was downloaded;
+  - `par({…})` destructures both ways;
+  - `const s = 42` stays local and the API `s` is intact in the next eval.
+- **Tests:** 39 Node tests pass.
+
+### What didn't work
+- **The faked evals** went unnoticed for two rounds. The personas reported "it said done but nothing changed", and I read that as a proposal problem until Theo-ts's turn showed zero steps.
+- **My mid-round daemon restart** (to fix `openApp`) closed every tab. benchdrive reopened Priya2's on the shared account's last app, and her "build it" message went to another app's agent. benchdrive now remembers each persona's app.
+- **Lena's library:** the guide line from round 3 ("the person can't add one from the bench") led the agent to call a CDN library impossible, then possible, then refuse it. Pages can load a pinned CDN script (their CSP sets only `frame-ancestors`); the guide now gives the three real options.
+- **Inès-visual's "Accept does nothing":** her clicks landed about 23 px above the button. A person sees the pointer turn into a hand; a screenshot doesn't. benchdrive's `click-at` now says when nothing clickable was under the point.
+- **The exact trigger of Devon2's 256 KB prompt** is not known. The guard records the part sizes (`promptCut`) when it trips.
+
+### What I learned
+- **A model imitates its history's format.** "[evals: …]" notes of past calls became a template for fake calls. The history now replaces such a reply with a plain note.
+- **"Read it back" isn't a check.** Theo-ts found two bugs in code the agent had "confirmed" by reading its own writes.
+- **A refusal can be too broad.** Agents named a variable `s` 21 times, and every one was refused, because `s` is a flat API name.
+
+### What was tricky to build
+- **`FAKED_EVAL`** must match API calls in fenced code or "[eval" blocks, but not page code a reply shows the person (`claude.use`, `db.doc`). It matches only bench namespaces after `await`.
+- **The narrower shadow rule:** a declaration of a flat name stays a local `const` (not rewritten into the kept scope), so the API is untouched in later evals. It's refused only when the name is used before its declaration ends (the dead zone that broke `const [info, app] = await par([app.info()])`). Namespaces are still refused outright.
+- **`fitPrompt`** cuts the largest turns in the middle, never the person's current message first, and counts UTF-8 bytes, not characters.
+
+### What warrants a second pair of eyes
+- **The tool-less final call** in `turn()` costs one more model call per spent turn.
+- **The download recorder** in `probe.js` wraps `URL.createObjectURL` and `HTMLAnchorElement.prototype.click` in every frame.
+- **The Data view's writes** go through the workshop's `exec`, which refuses the published app's instance; the confirm names the instance kind.
+
+### What should be done in the future
+- **Decisions for the user:**
+  - frames as different people (design-doc/02). Devon2 is the fourth persona to hit it: "both frames are the same visitor ('admin'), so 'moved by admin' doesn't prove the name is the mover's".
+  - CDN scripts in app pages: allow, as now, or restrict to vendored packages.
+- Round 5 on this bench: Theo-ts finishes the page migration; a persona whose goal needs two people.
+
+### Code review instructions
+- **Start with:**
+  - `web/bench/src/agent/agent.js` (the turn loop: the faked-eval retry, the final report, `fitPrompt`);
+  - `web/bench/src/agent/hints.js` (`FAKED_EVAL`, `fitPrompt`);
+  - `web/bench/src/worker/rewrite.js` (the shadow rule);
+  - `web/bench/src/frames/probe.js` (downloads, `print`);
+  - `web/bench/src/frames/scenarios.js` (the download step).
+- **Validate:**
+  - `cd web/bench && node --test test/*.test.mjs`
+  - `node scripts/06-api-mining/faked.mjs <apps…>` on a review server
+
+### Technical details
+- **Round 4:** started 05:35 UTC. Exits:
+
+  | Persona | Model, thinking | Exit | Time (UTC) |
+  |---|---|---|---|
+  | Lena | deepseek-4.1-flash, medium | 0 | 06:03 |
+  | Priya2 | glm-5.3-flash, medium | 0 | 06:05 |
+  | Aisha | glm-5.3, medium | 0 | 06:06 |
+  | Inès-visual | deepseek-4.1-flash, medium | 0 | 06:16 |
+  | Devon2 | deepseek-4.1-flash, high | 0 | 06:22 |
+  | Theo-ts | glm-5.3, high | 124 | 06:35 |
+
+- **Struggles/commands:** aisha 4/112, devon2 12/149, ines-visual 10/179, lena 10/74, priya2 3/117, theo-ts 7/246.
+- **Archive:** `various/persona-review-2026-11-17/r4`, redacted. Shots are 1120 px at quality 55 (PNGs 256 colours), and embedded screenshots were dropped from the sessions (52 MB). The scan found no standalone link token and no operator identity. One `lr_` match is inside a base64 `thinkingSignature`.
+- **Evals mined:** 347 (41 failed); `scripts/06-api-mining/steps-r4.jsonl`.

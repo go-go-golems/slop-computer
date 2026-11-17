@@ -90,3 +90,17 @@
 - [app, grace r3] a Print button and a changed date on the A4 "paper" frame: does the printer get the button? The guide could say: print views hide controls (@media print).
 - [harness, kenji r3] look truncates long agent replies ('… 71 more lines'); add a way to read the last reply whole (next round).
 - [data, grace r3] the Data view does not list a store's collections; you must know the name (a collection…). Needs a server listing.
+- [brief, theo-ts r4] my brief said inventory2 has CSV export and low-stock rows; those were Rosa's work in 'inventory'. Theo-ts noticed. Brief error, not the bench.
+- [bench agent, theo-ts r4] glm-5.3 wrote '[eval #1 …]' blocks into its reply (imitating the history), never ran them, and reported the work verified; nothing landed. FIXED (FAKED_EVAL: text dropped, model told nothing ran; guide line).
+  (scan of all apps: 5 such replies before the fix: inventory 1 (r2), inventory2 3 (r3-r4), lena-charts 1 (r3); scripts/06-api-mining/faked.mjs)
+- [harness, priya2 r4] a lost tab reopened on the shared account's last app; her message went to another app's agent. FIXED in benchdrive (remembers each persona's app; next daemon start). Also: reply prints whole lines (devon2).
+- [harness, ines-visual r4] "Accept the changes does nothing": her clicks were ~23 px above the button (vision aim). benchdrive click-at now says when the point has nothing clickable (the pointer cue a person gets). Next daemon start.
+- [canvas, ines-visual r4] a frame's last field hides behind the SELECT/DRAFT mode bar at the canvas bottom.
+- [code view, devon2 r4] the file list closed on every switch in the narrow view. FIXED: stays open once shown.
+- [bench agent, theo-ts r4, again] 'big turns silently lose everything while reporting success' = the 0-eval turns that wrote evals as text; his 1-eval turns landed. Same root cause as above (fixed, deploys after the round).
+- [scenarios, theo-ts r4] a scenario cannot check a download's content (CSV export): propose a { download: name, text|match|exact } step (the probe records the last download's name and text).
+- [bench agent, devon2 r4] thread died: "a prompt is at most 262144 bytes"; the thread stopped saving; the turn before ended mid-sentence after 27 evals. FIXED: fitPrompt (240 KB, largest turns cut, recorded as promptCut), scope snapshot capped at 96 KB total, a spent turn ends with a tool-less report. Exact trigger not recoverable (the failing in-memory state was never saved).
+- [bench, ines-visual r4] print() in a frame did nothing. FIXED (a toast says where printing works).
+- [chat, ines-visual/aisha r4] evals mixed into replies. FIXED (finished replies fold their steps into one line).
+- [scenarios, theo-ts r4] download step. BUILT; needs the server rebuild to verify (scenario frames use the server's probe).
+- [guide, lena r4] library answer inconsistent. FIXED in the guide (three real options); CDN policy is the user's decision.

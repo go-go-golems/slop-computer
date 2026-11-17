@@ -69,7 +69,7 @@ export function summarize() {
         r.steps = qa('details.step', m).map(d => ({ sum: lines(q('summary', d)).join(' · '), ask: !!q('.ask', d), bad: d.classList.contains('bad'), extra: d.open ? [...d.children].filter(c => c.tagName !== 'SUMMARY' && !c.matches('.ask')).flatMap(lines).slice(0, 12) : [] }))
         r.body = []
         for (const c of m.children) {
-          if (c === who || c.matches('details.step')) continue
+          if (c === who || c.matches('details.step') || c.matches('details.steps')) continue
           if (c.matches('.approval')) { r.approval = lines(c); continue }
           r.body.push(...lines(c))
         }

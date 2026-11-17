@@ -97,7 +97,7 @@ function fmtAgent(V, budget = 22) {
   L.push(`Composer: ${V.draft ? JSON.stringify(cut(V.draft, 100)) : '(empty)'} · ${(V.segs || []).join(' · ')} · model ${V.model || '?'} · [${V.action || ''}]` + (V.chips.length ? ' · context: ' + V.chips.join(', ') : ''))
   return L
 }
-function fmtMsg(m, maxBody = 8) {
+function fmtMsg(m, maxBody = 8, width = 200) {
   const L = []
   if (m.role === 'user') { L.push(`  ${m.who}: ${cut(m.body.join(' '), 300)}`); return L }
   L.push(`  ${m.who}${m.running ? ' (working…)' : ''}:`)
@@ -107,7 +107,7 @@ function fmtMsg(m, maxBody = 8) {
     if (s.ask) L.push('    → waiting for you: Run this eval? [Run] [Skip]')
   }
   const b = m.body
-  for (const l of b.slice(0, maxBody)) L.push('    ' + cut(l, 200))
+  for (const l of b.slice(0, maxBody)) L.push('    ' + cut(l, width))
   if (b.length > maxBody) L.push(`    (… ${b.length - maxBody} more lines)`)
   if (m.approval) L.push('    → waiting for you: ' + m.approval.join(' · '))
   return L
@@ -221,6 +221,20 @@ class Persona {
     const bf = await this.bench(60000)
     await bf.waitForFunction(() => document.querySelector('header.bar .projbtn')?.textContent || document.querySelector('.modal') || document.querySelector('.boot'), null, { timeout: 60000 })
     await this.settle(bf, { min: 1500, max: 15000 })
+    // a tab that was lost (a daemon restart, a crash) comes back on this persona's own app, not on the
+    // app the shared account opened last (a persona's next message went to another app's agent)
+    if (this.app) {
+      const cur = await bf.evaluate(() => (document.querySelector('header.bar .projbtn .pcode') || {}).textContent || '').catch(() => '')
+      if (cur !== this.app) {
+        await bf.evaluate(id => window.__SB && window.__SB.App.openProject(id), this.app).catch(() => { })
+        await this.settle(bf, { min: 2000, max: 15000 })
+        this.reopened = this.app
+      }
+    }
+  }
+  // the app this persona is on, remembered after each command
+  async rememberApp() {
+    try { const bf = await this.bench(3000); const id = await bf.evaluate(() => (document.querySelector('header.bar .projbtn .pcode') || {}).textContent || ''); if (id) this.app = id } catch { }
   }
   // the bench's own page: the sandboxed frame inside the shell
   async bench(timeout = 15000) {
@@ -296,7 +310,7 @@ class Persona {
     if (!V) throw new Fail('The Agent view is not open: view Agent first.')
     const m = [...V.msgs].reverse().find(x => x.role === 'agent')
     if (!m) return ['No reply from Claude yet in this thread.']
-    return fmtMsg(m, 400)
+    return fmtMsg(m, 400, 4000) // whole lines too (a persona: "reply truncates every long line")
   }
   async look() { const bf = await this.bench(); return [...(await this.lookLines(bf)).lines, ...(await this.shellDialog())] }
   // the page around the bench (the shell: Share, sign-in) has dialogs of its own
@@ -360,7 +374,32 @@ class Persona {
     for (const d of this.dialogs || []) out.push('A dialog appeared: ' + d + ' (you clicked OK).')
     return [...out, 'Take another look (see) to know what changed.']
   }
-  clickAt(x, y) { if (isNaN(+x) || isNaN(+y)) throw new Fail('usage: click-at <x> <y>'); return this.pointer(m => m.click(+x, +y), `Clicked at (${+x}, ${+y}).`) }
+  // what is under a screen point, through the shell's frame, the bench's and a canvas frame (zoomed):
+  // a person sees the pointer turn into a hand over something clickable; a screenshot does not show it
+  async hitAt(x, y) {
+    let f = this.page.mainFrame(), lx = x, ly = y
+    for (let d = 0; d < 5; d++) {
+      const el = (await f.evaluateHandle(([x, y]) => document.elementFromPoint(x, y), [lx, ly]).catch(() => null))?.asElement()
+      if (!el) return null
+      const info = await el.evaluate(e => {
+        const r = e.getBoundingClientRect(), b = e.closest('button, a[href], [role=button], input, select, textarea, label, summary, [onclick], [tabindex]')
+        return { tag: e.tagName, x: r.left, y: r.top, w: r.width, cw: e.clientWidth || r.width, clickable: !!b, cursor: getComputedStyle(e).cursor }
+      }).catch(() => null)
+      if (!info) return null
+      if (info.tag !== 'IFRAME') return info
+      const cf = await el.contentFrame(); if (!cf) return info
+      const k = info.cw ? info.w / info.cw : 1 // a canvas frame is scaled by the zoom
+      lx = (lx - info.x) / k; ly = (ly - info.y) / k; f = cf
+    }
+    return null
+  }
+  async clickAt(x, y) {
+    if (isNaN(+x) || isNaN(+y)) throw new Fail('usage: click-at <x> <y>')
+    await this.bench()
+    const hit = await this.hitAt(+x, +y).catch(() => null)
+    const cue = hit && !hit.clickable && hit.cursor !== 'pointer' ? ' (The pointer was an arrow there, not a hand: nothing clickable at that exact spot.)' : ''
+    return this.pointer(m => m.click(+x, +y), `Clicked at (${+x}, ${+y}).${cue}`)
+  }
   dblclickAt(x, y) { if (isNaN(+x) || isNaN(+y)) throw new Fail('usage: dblclick-at <x> <y>'); return this.pointer(m => m.dblclick(+x, +y), `Double-clicked at (${+x}, ${+y}).`) }
   drag(x1, y1, x2, y2) {
     if ([x1, y1, x2, y2].some(v => isNaN(+v))) throw new Fail('usage: drag <x1> <y1> <x2> <y2>')
@@ -508,8 +547,8 @@ class Persona {
     return this.act(async bf => {
       if (await bf.locator('.modal').count()) throw new Fail('A dialog is open; close it first (click Cancel or key Escape).')
       await bf.locator('header.bar .projbtn').click()
-      // the apps are the items before the menu's first rule
-      const labels = await bf.locator('.menu').evaluate(m => { const r = []; for (const c of m.children) { if (c.tagName === 'HR') break; const t = c.querySelector('.t'); if (t) r.push(t.textContent.trim()) } return r })
+      // the apps: every item in the Recent and "Apps on this server" groups (New app… and Import app… come first)
+      const labels = await bf.locator('.menu').evaluate(m => { const r = []; let inApps = false; for (const c of m.children) { if (c.classList.contains('grp') || /^(Recent|Apps on this server)$/.test((c.textContent || '').trim())) { inApps = /^(Recent|Apps on this server)$/.test((c.textContent || '').trim()); continue } if (c.tagName === 'HR') { inApps = false; continue } const t = c.querySelector('.t'); if (inApps && t) r.push(t.textContent.trim()) } return r })
       const i = labels.findIndex(l => l === id)
       if (i < 0) { await this.page.keyboard.press('Escape'); throw new Fail(`"${id}" is not in the project menu. Apps it lists: ${labels.join(', ') || '(none)'}. (To make one: new-app <id> <template>)`) }
       await bf.locator('.menu button').filter({ has: bf.locator('.t', { hasText: new RegExp('^' + id.replace(/[.*+?^${}()|[\]\\]/g, '\\$&') + '$') }) }).first().click()
@@ -690,7 +729,7 @@ class Persona {
       return this.finishTurn(bf, { ...p, timeoutS: (Date.now() - p.t0) / 1000 + Math.min(+s || 120, ASK_WAIT), verb: 'Following your last message to Claude.' })
     }
     return this.act(async () => { await sleep(Math.min(+s || 5, 600) * 1000); return `Waited ${+s || 5} s.` }, { settle: { min: 300, max: 3000 } }) }
-  async close() { if (this.ctx) await this.ctx.close(); this.page = null; return ['Closed your browser tab.'] }
+  async close() { if (this.ctx) await this.ctx.close(); this.page = null; this.app = null; return ['Closed your browser tab.'] }
 }
 
 function fmtDur(s) { return s < 60 ? s + ' s' : Math.floor(s / 60) + ' min ' + (s % 60) + ' s' }
@@ -786,7 +825,10 @@ async function serve(port) {
           return fn(P, args || [])
         })
         console.log(new Date().toISOString(), persona, cmd, (Date.now() - t0) + 'ms')
-        const text = [].concat(out).join('\n')
+        await P.run(() => P.rememberApp()).catch(() => { })
+        const reopened = P.reopened ? `(Your browser tab had closed; it was opened again on ${P.reopened}.)\n` : ''
+        P.reopened = null
+        const text = reopened + [].concat(out).join('\n')
         await P.run(() => record(P, persona, cmd, args || [], true, text, Date.now() - t0, where)).catch(() => { })
         reply(200, text)
       } catch (e) {

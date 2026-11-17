@@ -8,7 +8,7 @@ for (let i = 0; i < 60 && !f; i++) { for (const fr of p.frames()) { try { if (aw
 await f.evaluate(() => window.__SB.App.openProject('smoke6')); await p.waitForTimeout(5000)
 await f.getByText('Eval', { exact: true }).first().click(); await p.waitForTimeout(800)
 const ta = f.locator('textarea.txt.mono').first()
-for (const code of ["await lib.def('addOne', async n => n + 1, { description: 'adds one' })\nreturn await lib.addOne(2)", "const WEEK = 3\nawait lib.def('weekly', async n => n * WEEK, { description: 'x' })\nreturn 1"]) {
+for (const code of ["const s = 42\nreturn s + 1", "return typeof s === 'number' ? 'LEAKED: ' + s : 'api kept: ' + typeof s"]) {
   await ta.fill(code); await ta.press('Control+Enter'); await p.waitForTimeout(3500)
   const out = await f.evaluate(() => { const ta = document.querySelector('textarea.txt.mono'); const v = ta.closest('.view') || ta.parentElement.parentElement; const t = v.innerText; const i = t.indexOf('Running') >= 0 ? 0 : 0; return t.slice(t.indexOf('What the agent is told'), t.indexOf('What the agent is told') + 500) })
   console.log('### ' + code.split('\n')[0] + '\n' + out.slice(0, 900) + '\n')

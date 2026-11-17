@@ -56,6 +56,23 @@ Rounds 1 and 2 gave 520 steps, 52 of them failed. The first apps of round 3 gave
 
 The table's `doc` strings already reached the agent in the guide's reference, but `help()` showed only signatures, and no entry said what a call returns unless its doc happened to.
 
+## Round 4
+
+Round 4 gave 347 evals, 41 of them failed. The round-3 patterns were gone from the round's own threads (the `collectPattern` and selector failures left in the data are from round-3 threads in the same apps). Four new patterns, and one that wasn't in the evals at all:
+
+| Pattern | Evals | What the agent did | The fix |
+|---|---|---|---|
+| Evals written as text | 5 replies, 3 apps | Wrote "[eval #1 …code…]" into its reply, imitating the history, never called the tool, and reported results it invented | A reply with bench API calls as code and no evals is dropped, and the model told once that nothing ran; past fakes are replaced in the history (6d1660b, 955a8ab) |
+| `par` with an object, destructured as a list | 2 | `const [status, logs] = await par({ status: app.status(), logs: app.logs() })` | The named result also iterates its values in key order (52400a9) |
+| A frame object as a frame id | 1 | `frames.label(f2, …)` with `f2` from `frames.open`: "no frame [object Object]" | Frame arguments take the object |
+| `attrs` missing | 2 | `c.attrs['data-title']` on elements without listed attributes | `attrs` is always an object, as documented |
+| A proposal's logs | 1 | `app.logs({ kind: 'prop' })`: "kind is dev or test" | `kind: 'prop'` reads the proposal the eval writes to |
+| A flat API name declared | 21 declarations of `s` over all rounds | `const s = await app.status()` refused as a shadow | A flat name stays a local of the eval unless used before its declaration ends; namespaces are still refused |
+
+Two failures were about limits, not the API. A long thread died on the runtime's 256 KB prompt limit, and a turn that spent its 30 evals ended mid-sentence. The bench now fits its prompts (`fitPrompt`) and ends a spent turn with one tool-less call for a report (4da058f).
+
+`faked.mjs` finds replies with evals written as text in any set of apps; `promptsize2.mjs` measures the prompt a thread's next turn would send, with the model call stubbed.
+
 ## How agents use the API
 
 The 25 most used calls, over rounds 1 to 3:
