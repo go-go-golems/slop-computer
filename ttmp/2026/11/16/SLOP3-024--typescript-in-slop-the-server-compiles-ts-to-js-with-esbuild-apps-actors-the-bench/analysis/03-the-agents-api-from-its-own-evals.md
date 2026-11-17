@@ -73,6 +73,24 @@ Two failures were about limits, not the API. A long thread died on the runtime's
 
 `faked.mjs` finds replies with evals written as text in any set of apps; `promptsize2.mjs` measures the prompt a thread's next turn would send, with the model call stubbed.
 
+## Round 5
+
+622 evals, 74 failed (some from earlier rounds' threads in the same apps). The round-4 fixes showed in the data: no faked evals, no turn left without a report.
+
+| Pattern | Evals | What the agent did | The fix |
+|---|---|---|---|
+| Fixtures that couldn't load | 6 | `__rowid` in rows saved from the Data view; ids clashing with migration-seeded rows | A scenario's fixture replaces its tables' rows; `__` keys dropped (7d36f65) |
+| TypeScript without `ts: true` | 2 | `catch (e: any)`, `const SAMPLE: [string, string, number][]` | A failed parse of typed-looking code runs again with its types stripped, and the step says so (7c0d36a) |
+| `.items` results used as arrays | 1 (and in every round) | `layout.filter(…)` | Non-enumerable array methods on a result with an `items` array |
+| Options in the args' place | 1 | `app.sql(q, { kind: 'test' })` | `app.sql`/`app.exec` take them |
+| SVG elements | 1 | `frames.click` on an SVG rect: "el.click is not a function" | A dispatched click |
+| A declaration list without values | 1 | `let applied, rowsNow;`: a syntax error from the rewrite | Edits at one position in the right order (23447b2) |
+| A namespace declared in its own statement | 3 | `const [readme, types] = await Promise.all([…, types.check()])` | Refused, correctly: it uses the API it hides |
+
+Two agent behaviours weren't API problems:
+- **Results from another workspace.** The agent ran scenarios in its proposal, where it had edited fixtures, and reported failures the person couldn't see on draft. Results now name their workspace.
+- **A silent call.** A call that ran evals and returned no text left a 27-eval turn with half a sentence. It now gets the report call.
+
 ## How agents use the API
 
 The 25 most used calls, over rounds 1 to 3:

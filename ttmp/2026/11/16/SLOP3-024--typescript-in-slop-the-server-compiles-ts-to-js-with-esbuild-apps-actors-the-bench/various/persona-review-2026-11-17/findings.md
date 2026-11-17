@@ -104,3 +104,21 @@
 - [chat, ines-visual/aisha r4] evals mixed into replies. FIXED (finished replies fold their steps into one line).
 - [scenarios, theo-ts r4] download step. BUILT; needs the server rebuild to verify (scenario frames use the server's probe).
 - [guide, lena r4] library answer inconsistent. FIXED in the guide (three real options); CDN policy is the user's decision.
+- [chat, devon3 r5] a reply saved while running (round 4's failed turn) showed 'Working for 56 min', no Stop. FIXED (f? see git): on load, a running reply older than 15 min shows as interrupted.
+- [harness, lena2 r5] a text persona on glm-5.3 cannot read screenshots; chart goals need a deepseek (vision) persona. Not a bench issue.
+- [canvas, lena2 + aisha2 r5] the P key did nothing once a frame had focus (two personas). FIXED (probe forwards mode keys outside Play); verify after the server rebuild.
+- [fixtures, theo-ts2 r5] fixtures saved from the Data view carried __rowid (my regression), and dev-captured rows clashed with migration-seeded ids. FIXED: seed replace for scenarios, __ keys dropped, Save as fixture strips __rowid (TestBenchSeedReplace).
+- [scenarios, theo-ts2 r5] the agent's results (its proposal) contradicted Run all (draft). FIXED: results carry their workspace; the reference says to name it.
+- [agent, rosa2 r5] a 7-minute turn of self-corrected probe failures, visible only as progress lines (the running timer shows; the steps fold after). Watch.
+- [harness, devon3 r5] 6+ minute turns: lunaroute throttling with 6 personas plus their bench agents; the chat shows 'Working for N: phase', benchdrive's header line does not. Not a bench change.
+- [canvas, lena2/rosa2/aisha2 r5] Select as the first mode tripped three personas. FIXED: first visit is Play (a chosen mode is remembered).
+- [publish, lena2 r5] looked for Publish in the menus. FIXED: "Publish <app>…" in the project menu.
+- [agent API, lena2 r5] canvas-drawn content (Chart.js) is invisible to every agent tool; overlapping labels at 375 px were caught only by the person. PROPOSAL: frames.look(frameId, selector?, question) — the probe exports a <canvas> (toDataURL) or the frame's DOM as an image, and a vision-capable sample answers the question.
+- [agent, devon3 r5] a 27-eval turn left only its opening half sentence (last call silent, < 9 evals). FIXED: a silent call after evals gets the tool-less report call.
+- [agent accuracy, rosa2 r5] the agent's summary of which scenario files it changed was wrong once; she checked three files by hand. No direct fix; evidence in the UI (folded steps listing changed files) helps.
+- [canvas, devon3 r5 + aisha r4] 'Add did nothing': a required field refused silently. FIXED: the probe reports invalid fields (console + notice); verify after the rebuild.
+- [code view, ines2-visual r5] a stray key saved into index.html (<body> → <bdy>) and broke the shop; History didn't say which version was safe. FIXED: an edit of ≤3 keys offers Undo (verified on benchnext).
+- [canvas, ines2-visual r5] frames the agent opened landed off screen. FIXED: frames.open brings the frame into view (verified).
+- [publish, ines2-visual r5] a dark "Roll back to 7" beside Done. FIXED: "Undo this publish…", plain, confirmed.
+- [guide, devon3 r5] symbol-only buttons with no item name; a silent 4 s confirm timeout. Guide line.
+- [guide, aisha2 r5] a raw action error reached volunteers. Guide line.

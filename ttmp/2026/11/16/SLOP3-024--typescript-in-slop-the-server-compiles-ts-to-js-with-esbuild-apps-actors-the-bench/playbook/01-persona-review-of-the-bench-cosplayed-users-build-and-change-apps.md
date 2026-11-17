@@ -277,6 +277,8 @@ Before fixing a surprising struggle, check whether it's the harness: benchdrive 
 For each round:
 
 - **Don't restart the daemon mid-round.** It closes every persona's tab, and a turn in flight is lost. benchdrive reopens a lost tab on the persona's own app (since round 4; before, it opened the shared account's last app, and a persona's message went to another app's agent). Fixes found mid-round go to `benchnext` until the round ends.
+- **Verify probe changes in a real frame** after rebuilding the server (frames load the server's probe): `scripts/06-api-mining/probe-check.mjs` writes a test page into a smoke app's entry page (only the entry page gets the runtime), in its own eval (writes commit at an eval's end), and restores it.
+- **Give a migration persona time:** glm-5.3 on high thinking timed out twice at 4200 s with six personas throttled together.
 - **Check for faked evals:** `node scripts/06-api-mining/faked.mjs <apps…>` counts agent replies that wrote eval code as text with no evals behind them. A persona's "it said done, but nothing changed" is the symptom.
 - **Archive it:** copy the round's folder to `various/persona-review-<date>/r<N>/`, with diaries, pi sessions, `steps.jsonl`, shots and the daemon's log, plus `round.json`. Shrink the screenshots (1120 px wide, JPEG quality 55 roughly halves a round). Then run `OPERATOR_NAME=… OPERATOR_EMAIL=… OPERATOR_ID=… redact.py <archived round>`: it replaces any output of the operator's CLI and masks the operator's identity and standalone link tokens. A `k_` inside a pi session's `thinkingSignature` is base64, not a token.
 - **Update the findings:** each finding, fixed (with its commit) or open.

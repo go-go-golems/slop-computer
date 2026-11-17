@@ -1419,3 +1419,136 @@ No new user prompts in this step; it continues the work under Step 14's prompts 
 - **Struggles/commands:** aisha 4/112, devon2 12/149, ines-visual 10/179, lena 10/74, priya2 3/117, theo-ts 7/246.
 - **Archive:** `various/persona-review-2026-11-17/r4`, redacted. Shots are 1120 px at quality 55 (PNGs 256 colours), and embedded screenshots were dropped from the sessions (52 MB). The scan found no standalone link token and no operator identity. One `lr_` match is inside a base64 `thinkingSignature`.
 - **Evals mined:** 347 (41 failed); `scripts/06-api-mining/steps-r4.jsonl`.
+
+## Step 16: Round 5: the round-4 fixes held, my own regression broke fixtures, and the bench defaults changed
+
+Round 5 ran six personas on the bench from 52400a9 (rev 3077), with every round-4 fix live. The goals were chosen to test those fixes:
+- **Theo-ts2** finishes the TypeScript migration and pins the CSV with a download step.
+- **Devon3** keeps one long thread on purpose.
+- **Lena2** asks again for a chart library.
+- **Inès2-visual** prints and keeps her work.
+- **Aisha2** gets a CSV roster with a test of the file.
+- **Rosa2** inherits the patched members app.
+
+Five said "yes" (Lena2, Rosa2, Aisha2, Devon3, Inès2-visual "nearly all of it"). Theo-ts2 timed out again (exit 124) after pinning the CSV byte for byte and accepting 9 green scenarios, before he could convert the page.
+
+The round-4 fixes held:
+- Devon3: "The long thread did hold — four features in."
+- Lena2 got one consistent answer about libraries and chose Chart.js.
+- Aisha2's roster scenario "actually opens the downloaded file and checks it".
+
+The worst finding was mine. My round-3 Data view change (rows read with `__rowid` so a row can be deleted) leaked into every fixture saved from the Data view. Theo's agent then called his suite "never green" and rewrote his fixtures, while he had watched it pass.
+
+### Prompt Context
+No new user prompts in this step; it continues under Step 14's prompts.
+
+**Commit (code):**
+- 36816e1 — a reply left running by a closed tab shows as interrupted
+- 46d49e3 — the mode keys work while a frame has focus
+- 7d36f65 — a scenario's fixture is the data its tables hold; fixtures carry no `__rowid` (`TestBenchSeedReplace`)
+- 892d503 — scenario results say which workspace they ran on
+- 147131f — a first visit to the bench is in Play mode
+- 515155a — Publish is in the project menu too
+- 116a339 — a call that ran evals and said nothing gets the report call
+- 19de5e6 — a form the browser refused says which field and why
+- 9f1be48, 7114a11 — guide lines: plain-word errors on pages; symbol buttons name their item
+- da027fd — a small hand edit in the Code view offers Undo
+- c26cc42 — a frame the agent opens off screen is brought into view
+- 585b286 — after publishing, Done is the main button; undoing a publish asks first
+- 7c0d36a — four API fixes from the round's evals (TypeScript retried, `{kind}` in the args' place, array methods on `.items` results, SVG clicks)
+- 23447b2 — the eval rewrite: a declaration list with no value, or a pattern before a comma
+
+### What I did
+- **During the round:** fixed what the personas reported, built and tested each fix (39–40 Node tests), and checked some on `benchnext`:
+  - the Undo offer: one key, Undo, file restored (the first try caught a toast that let clicks through);
+  - the frame reveal: a frame opened at 6000,4000 is in view;
+  - `layout.filter`;
+  - `app.sql(q, {kind})`.
+- **Theo-ts2's contradiction:**
+  - `lastthread.mjs` showed the agent's runs were in its proposal, after it had edited fixtures there, while Theo ran draft.
+  - The fixtures he had saved from the Data view carried `__rowid`.
+  - Rows captured from dev clashed with the rows the migrations seed into a fresh test instance.
+  - The fixes:
+    - `seed` with `replace` for scenarios;
+    - `__` keys dropped;
+    - "Save as fixture" strips `__rowid`;
+    - the workspace on every run result.
+- **Devon3's lost turn:** `lastthread-end.mjs` showed a 27-eval reply whose whole text was its opening half sentence. The last call made fewer than 9 evals and returned nothing, so round 4's spent-turn report never ran.
+- **After the round:**
+  - rebuilt the server at 7c0d36a and verified the probe fixes in a real frame (`probe-check.mjs`): an SVG click, `Not sent: "Owner": Please fill out this field.`, P from a focused frame, a first visit in Play;
+  - verified the TypeScript retry through a real agent turn (`tsretry.mjs`), and the agent remarked that it expected a rejection;
+  - mined the round's 622 evals;
+  - fixed the rewrite bug they showed;
+  - archived and redacted the round.
+
+### Why
+- **Play as the first mode:**
+  - three personas (Lena2, Rosa2, Aisha2) clicked their own page in Select mode and picked elements;
+  - Select is a developer's tool, so a developer chooses it once and the bench remembers it.
+- **Undo instead of a read-only editor:** a stray key in the Code view broke a non-coder's shop, but a read-only editor would slow every developer. A small burst of keys is the signature of an accident, and the offer appears only then.
+- **A fixture replaces a test table's rows:** the guide always said a fixture is "the data the test instance starts from". Dev seeding from the Data view stays additive, as its button says.
+
+### What worked
+- **Every round-4 fix that this round exercised did its job:**
+  - Devon3's thread held through four features, though his reconnect still showed round 4's half-saved reply until the fix above;
+  - Lena2 got one consistent answer;
+  - the download step pinned Theo's CSV and Aisha's roster;
+  - no faked evals were reported.
+- **The verdicts:**
+  - Rosa2: "No member or payment went missing… That's the kind of volunteer work I can hand to the next person."
+  - Devon3: "I got the short-lines answer I asked for: version column, one guarded UPDATE, first commit wins".
+  - Aisha2: "Each was proven able to fail on purpose."
+- **Verifying the probe in a real frame** turned up four flaws in my own test before it was right (a frame found by another page's `#add`; a non-entry page with no runtime; writes that commit at an eval's end; a field focused by `reportValidity`). Each was in the script, not the fix.
+
+### What didn't work
+- **My regression, again.** The `__rowid` column from my round-3 delete feature went unnoticed for a round. It broke fixture loading, and an agent built a confident wrong story on it ("never green").
+- **Theo-ts2 timed out a second time.** A migration with glm-5.3 on high thinking, throttled with five other personas, doesn't fit 70 minutes.
+- **Lena2 couldn't check her chart herself.** She's a text persona on glm-5.3, and the agent can't see canvas pixels either, so overlapping labels at 375 px were caught only because she insisted.
+
+### What I learned
+- **A wrong number from the bench becomes a wrong story from the agent.** The fixture failures were real, and the agent explained them convincingly but wrongly. Saying which workspace a result came from is as important as the result.
+- **Defaults are design.** Select as the first mode was right for the developer who built the bench and wrong for three of six personas.
+- **Two edits at one position need an order.** The rewrite's bug had been there since round 2 and waited for the right declaration.
+
+### What was tricky to build
+- **The Undo offer** has to know the file as it was before a burst of typing, which ends after 4 s of quiet, while the editor saves every 300 ms.
+- **The mode keys** must not steal keys from the app (Play) or from a field. The test showed `reportValidity()` focusing the invalid field, which correctly kept P from switching modes.
+
+### What warrants a second pair of eyes
+- **`seed`'s `replace`** deletes a table's rows through `exec` before importing. A fixture naming a parent table with foreign keys could fail. It's scenarios only.
+- **The array methods on `.items` results** are non-enumerable properties added in the sandbox: invisible in JSON, and present only on objects with an `items` array.
+- **The TypeScript retry** runs a failed parse again only when the code looks typed (a pattern on annotations).
+
+### What should be done in the future
+- **Decisions for the user** (unchanged, with more evidence):
+  - frames as different people;
+  - CDN scripts in app pages;
+  - and now a vision tier for `frames.look` (canvas content is invisible to the agent).
+- Give migration personas more time, or a lighter thinking level.
+
+### Code review instructions
+- **Start with:**
+  - `web/bench/src/agent/agent.js` (the silent-call report, the TypeScript retry);
+  - `apps/bench/actor.js` (`seed`'s `replace`);
+  - `web/bench/src/worker/rewrite.js` (the edit order);
+  - `web/bench/src/worker/worker.js` (`__arr`);
+  - `web/bench/src/ui/code.js` (the Undo offer).
+- **Validate:**
+  - `cd web/bench && node --test test/*.test.mjs` (40)
+  - `GOWORK=off go test ./pkg/host/ -run TestBench`
+  - `scripts/06-api-mining/probe-check.mjs` on a review server
+
+### Technical details
+- **Round 5:** started 06:58 UTC; personas allowed 4200 s. Exits:
+
+  | Persona | Model, thinking | Exit | Time (UTC) |
+  |---|---|---|---|
+  | Lena2 | glm-5.3, medium | 0 | 07:08 |
+  | Rosa2 | deepseek-4.1-flash, medium | 0 | 07:16 |
+  | Aisha2 | glm-5.3-flash, medium | 0 | 07:23 |
+  | Devon3 | deepseek-4.1-flash, high | 0 | 07:30 |
+  | Inès2-visual | deepseek-4.1-flash, medium | 0 | 07:30 |
+  | Theo-ts2 | glm-5.3, high | 124 | 08:03 |
+
+- **Evals mined:** 622 (74 failed): 491 from the finished apps and 131 from inventory2. Some failures are from earlier rounds' threads in the same apps.
+- **Archive:** `various/persona-review-2026-11-17/r5`, redacted (57 MB). No standalone link token and no operator identity.
