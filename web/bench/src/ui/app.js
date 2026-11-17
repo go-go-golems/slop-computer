@@ -266,9 +266,11 @@ export const App = {
     const lines = Publish.lines(pf).map(l => h('div', { style: { margin: '2px 0', color: /^BLOCKED/.test(l) ? 'var(--bad, #c00)' : '' } }, l))
     modal({
       title: 'Publish ' + P.app, wide: true,
-      body: [h('p.note', 'Publishing moves main to this draft. Production instances run it on their next view; a migration runs on each. You can roll back.'), h('div.mono', { style: { fontSize: '12px' } }, lines)],
+      // plain words first (a persona review: "moves main to this draft … production instances" lost a baker); the technical lines under Details
+      body: [h('p', pf.refs.main ? 'Publishing makes this version the one people use. Anyone who has the app open gets it the next time they load it. If something goes wrong, you can roll back to the version before.' : 'Publishing makes this version the one people use. This is the first publish: nobody uses the app yet.'),
+        h('details', { open: blocked }, h('summary.note', blocked ? 'Why it can\'t be published yet' : 'Details'), h('div.mono', { style: { fontSize: '12px', marginTop: '6px' } }, lines))],
       actions: [{ label: 'Cancel' }, ...(nothing || blocked ? [] : [{
-        label: 'Publish draft ' + pf.refs.draft, primary: true, run: async () => {
+        label: 'Publish', title: 'Publish draft ' + pf.refs.draft, primary: true, run: async () => {
           try { const r = await Publish.run(P, pf); toast('Published draft ' + r.n + ' to main'); this.rolloutDialog(r.n, r.from) } catch (e) { toast('Not published: ' + (e.message || e), 6000) }
         }
       }])]

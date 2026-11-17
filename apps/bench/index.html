@@ -1,4 +1,4 @@
-<!-- /* the bench, built from web/bench: do not edit. source sha256:9541841dbaeb422489e4f5c8344982757261c1a713c7c6c5de07db64df0301f9 */ -->
+<!-- /* the bench, built from web/bench: do not edit. source sha256:49eeded9f6810bd515a1273434107a9e16252b9103551a25c3989ce11af45eb5 */ -->
 <!DOCTYPE html>
 <html lang="en">
 <head>
@@ -95,6 +95,8 @@ select.sel { height: 28px; padding: 0 4px; background: var(--bg); }
 .menu .note { padding: 6px 14px 8px; max-width: 320px; }
 .menu button.danger { color: var(--accent); }
 @media (max-width: 1100px) { .bar .pill span, .brand i { display: none; } }
+/* a 900-1000 px window: the header overflowed (Layout cut, the theme toggle off-screen; a visual audit) */
+@media (max-width: 1000px) { .bar .hide-s, .bar .pcode { display: none; } .bar { gap: 6px; } .brand { padding-right: 8px; } }
 @media (max-width: 820px) { .bar .seg.modes > button { padding: 0 7px; } .bar .hide-s { display: none; } }
 
 /* dock: tiles, tabs, gutters, drag and drop (form-skate) */

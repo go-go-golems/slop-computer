@@ -1,4 +1,4 @@
-/* the bench, built from web/bench: do not edit. source sha256:9541841dbaeb422489e4f5c8344982757261c1a713c7c6c5de07db64df0301f9 */
+/* the bench, built from web/bench: do not edit. source sha256:49eeded9f6810bd515a1273434107a9e16252b9103551a25c3989ce11af45eb5 */
 // The bench: a live dev environment for slop apps. Built from web/bench/src.
 (() => {
   // src/lib/util.js
@@ -6507,9 +6507,14 @@ Markdown files (README.md, notes, specs) render in the Docs panel. Keep README.m
       modal({
         title: "Publish " + P.app,
         wide: true,
-        body: [h("p.note", "Publishing moves main to this draft. Production instances run it on their next view; a migration runs on each. You can roll back."), h("div.mono", { style: { fontSize: "12px" } }, lines)],
+        // plain words first (a persona review: "moves main to this draft … production instances" lost a baker); the technical lines under Details
+        body: [
+          h("p", pf.refs.main ? "Publishing makes this version the one people use. Anyone who has the app open gets it the next time they load it. If something goes wrong, you can roll back to the version before." : "Publishing makes this version the one people use. This is the first publish: nobody uses the app yet."),
+          h("details", { open: blocked }, h("summary.note", blocked ? "Why it can't be published yet" : "Details"), h("div.mono", { style: { fontSize: "12px", marginTop: "6px" } }, lines))
+        ],
         actions: [{ label: "Cancel" }, ...nothing || blocked ? [] : [{
-          label: "Publish draft " + pf.refs.draft,
+          label: "Publish",
+          title: "Publish draft " + pf.refs.draft,
           primary: true,
           run: async () => {
             try {
