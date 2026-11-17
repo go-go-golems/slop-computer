@@ -98,6 +98,7 @@ export const App = {
   setWs(ws) {
     if (ws !== 'draft' && (!this.proposal(ws) || this.proposal(ws).status !== 'open')) ws = 'draft'
     this.ws = ws
+    if (this.P) Records.set('ws|' + this.P.app, ws) // a reload comes back to it
     if (ws === 'draft' && this.canvas) this.canvas.compare = false
     this.ev.emit('ws', ws)
     if (this.canvas) this.canvas.sync()
@@ -154,6 +155,9 @@ export const App = {
     const head = headView(P.draftOf('draft'))
     if (Types.wants(head)) Types.check(P, head, { timeoutMs: 30000 }).catch(() => { })
     this.ev.emit('project', P)
+    // the workspace the person was in, if its proposal is still open
+    const was = Records.get('ws|' + P.app, 'draft')
+    if (was !== 'draft' && (P.proposals.get(was) || {}).status === 'open') this.setWs(was)
     if (this.canvas) this.canvas.sync()
     this.paintHeader()
     return true

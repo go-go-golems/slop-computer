@@ -1,4 +1,4 @@
-/* the bench, built from web/bench: do not edit. source sha256:0bd84a66cca4c1fb2d752c028e67b42184843a0d43233f941a57822737e28dae */
+/* the bench, built from web/bench: do not edit. source sha256:f70e4f293fe26ea9468bf4ce33ed43621757e567ac3e4338506ba362406fa313 */
 // The bench: a live dev environment for slop apps. Built from web/bench/src.
 (() => {
   // src/lib/util.js
@@ -3035,9 +3035,9 @@
   };
 
   // src/agent/types.js
-  var devKey = (st) => {
-    const dev = st && st.dev;
-    return dev ? dev.n + (dev.broken ? ":broken" : "") : "none";
+  var devKey = (st, ref = "draft") => {
+    const inst = !st ? null : ref === "draft" ? st.dev : (st.props || []).find((p) => p.ref === ref);
+    return inst ? inst.n + (inst.broken ? ":broken" : "") : "none";
   };
   var CODE = /\.(ts|tsx|mts|cts)$/;
   var RELEVANT = (p) => CODE.test(p) || p === "app.json" || p === "tsconfig.json" || p === "vendor/tsconfig.vendor.json";
@@ -3115,16 +3115,18 @@
         send();
       });
     },
-    // The app's declarations ({name: text}), fetched once per app until invalidated.
-    declarations(P) {
-      const key = P.app + "|" + devKey(this.status(P));
+    // The declarations ({name: text}) for a ref of the app: its actions are
+    // those of the instance running that ref (a proposal's actor may differ
+    // from draft's). Cached per app, ref and the version that instance runs.
+    declarations(P, ref = "draft") {
+      const pre = P.app + "|" + ref + "|", key = pre + devKey(this.status(P), ref);
       let d = this.decl.get(key);
       if (!d) {
-        d = Slop.call("types", { app: P.app }).then((r) => Object.fromEntries((r.files || []).map((f) => [f.path, f.text])));
+        d = Slop.call("types", { app: P.app, ...ref !== "draft" ? { ref } : {} }).then((r) => Object.fromEntries((r.files || []).map((f) => [f.path, f.text])));
         d.catch(() => {
           if (this.decl.get(key) === d) this.decl.delete(key);
         });
-        for (const k of this.decl.keys()) if (k.startsWith(P.app + "|")) this.decl.delete(k);
+        for (const k of [...this.decl.keys()]) if (k.startsWith(pre)) this.decl.delete(k);
         this.decl.set(key, d);
       }
       return d;
@@ -3134,11 +3136,11 @@
     },
     // Type errors in a view: {diags: [{file, line, col, code, message,
     // program}], ms} or {skipped: why}.
-    async check(P, view, { timeoutMs = 2e3 } = {}) {
+    async check(P, view, { timeoutMs = 2e3, ref = "draft" } = {}) {
       const files2 = this.filesOf(view);
       let decl;
       try {
-        decl = await this.declarations(P);
+        decl = await this.declarations(P, ref);
       } catch (e) {
         return { skipped: "no declarations from the server: " + (e.message || e) };
       }
@@ -3148,10 +3150,10 @@
       return { diags: r.diags, ms: r.ms };
     },
     // The type at a position in a file of the view: {text, doc} or null.
-    async info(P, view, path, pos) {
+    async info(P, view, path, pos, ref = "draft") {
       let decl;
       try {
-        decl = await this.declarations(P);
+        decl = await this.declarations(P, ref);
       } catch {
         return null;
       }
@@ -3197,7 +3199,7 @@
       run: async (ctx, o = {}) => {
         const view = ctx.tx || headView(ctx.draft);
         if (!Types.wants(view)) return { errors: [], count: 0, note: "the app has no TypeScript files" };
-        const r = await Types.check(ctx.project, view, { timeoutMs: 2e4 });
+        const r = await Types.check(ctx.project, view, { timeoutMs: 2e4, ref: ctx.draft.ref });
         if (r.skipped) return { skipped: r.skipped };
         const errors = r.diags.filter((d) => !o.file || d.file === o.file).map((d) => ({ file: d.file, line: d.line, col: d.col, message: d.message, program: d.program }));
         return { errors: errors.slice(0, 50), count: errors.length };
@@ -3365,8 +3367,8 @@ li { padding: .25rem 0; }
   var APP_TEMPLATES = [
     {
       id: "blank",
-      name: "Page",
-      blurb: "One page that keeps its data in the app's document database.",
+      name: "Simple page",
+      blurb: "One page. What people type into it is saved, without any server code. Good for a form, a list or a notebook.",
       frames: [{ route: "index.html", w: 1024, h: 700 }, { route: "index.html", w: 375, h: 700 }],
       files: ({ title }) => ({
         "app.json": JSON.stringify({ title: esc(title), page: "index.html", capabilities: { db: {} } }, null, 2) + "\n",
@@ -3421,11 +3423,12 @@ publishing moves \`main\`, which production instances run.
     },
     {
       id: "actor",
-      name: "Page and actor",
-      blurb: "A page that calls its actor, which keeps rows in SQL (a migration in sql/).",
+      name: "Page with server code",
+      blurb: "A page plus code that runs on the server (an actor) and keeps a table of rows (SQL). Good when many people share the same data, or for rules people must not get around.",
       frames: [{ route: "index.html", w: 1024, h: 700 }, { route: "index.html", w: 375, h: 700 }],
       files: ({ title }) => ({
-        "app.json": JSON.stringify({ title: esc(title), page: "index.html", actor: "actor.ts", capabilities: { user: {} } }, null, 2) + "\n",
+        // the profile scope: ctx.visitor.name is the person's name (without it, "")
+        "app.json": JSON.stringify({ title: esc(title), page: "index.html", actor: "actor.ts", capabilities: { user: { scopes: ["profile"] } } }, null, 2) + "\n",
         "actor.ts": `// The app's server half: actions the page calls, rows in SQL. Each action
 // declares its arguments' JSON Schema (checked before run: a wrong shape is
 // refused) and its result's; defineAction types run from them, and the
@@ -3461,7 +3464,7 @@ defineActor({
       run(ctx, { text }) {
         const t = text.trim()
         if (!t) ctx.fail('invalid_argument', 'text is empty')
-        sql.run('INSERT INTO items (text, by, at) VALUES (?, ?, ?)', t, ctx.visitor.name || ctx.visitor.id || 'someone', Date.now())
+        sql.run('INSERT INTO items (text, by, at) VALUES (?, ?, ?)', t, ctx.visitor.name || 'someone', Date.now())
         return { added: t }
       },
     }),
@@ -3697,7 +3700,7 @@ run then).
     const line = firstLine(code), t0 = now();
     const before = parent ? null : await framesBefore(P, ctx.ws);
     const tx = parent ? parent.child({ label: "eval" }) : d.begin({ label: "eval", event: { who: ctx.who, thread: ctx.thread, note: line } });
-    const typesBefore = !parent && Types.wants(tx) ? Types.check(P, tx, { timeoutMs: 15e3 }) : null;
+    const typesBefore = !parent && Types.wants(tx) ? Types.check(P, tx, { timeoutMs: 15e3, ref: d.ref }) : null;
     ctx.tx = tx;
     ctx.stack = [];
     ctx.logs = [];
@@ -3726,7 +3729,7 @@ run then).
         Object.assign(effects, await afterCommit(ctx, c, before, t0));
         if (typesBefore || Types.wants(tx)) {
           if (c.activated.length) Types.invalidate(P);
-          const t = Types.diff(typesBefore ? await typesBefore : { diags: [] }, await Types.check(P, tx));
+          const t = Types.diff(typesBefore ? await typesBefore : { diags: [] }, await Types.check(P, tx, { ref: d.ref }));
           if (t.skipped || t.new.length || t.fixed) effects.types = t;
         }
       } else {
@@ -3858,6 +3861,8 @@ Markdown files (README.md, notes, specs) render in the Docs panel. Keep README.m
 - Mark milestones with session.mark("short label"); mark decisions and guesses with their kind, so the person can audit them later.
 - When you will need something again (a file list, rows, frame ids), keep it in a top-level variable. When a helper will be useful in later sessions, save it with lib.def.
 - In a proposal, say what you changed so the person can judge it. Say which draft your change made; publishing is the person's call.
+- Do not name your variables after the API's namespaces (files, app, frames, tests, session, ui, lib, types, \u2026): const [info, files] = \u2026 makes files a variable for the whole eval, and files.list() then fails.
+- Talk to the person in their words, not the bench's internals: "your proposal "Add a heading"" (its title), not proposal/mwk3\u2026; "the preview of your proposal", not "the prop instance"; "the draft", not "draft 14". Explain a term the first time a person who does not program would meet it (a proposal: a copy of the app with your changes, which they look at and accept or reject).
 - Finish with a short summary in Markdown (short paragraphs, bullets, \`code\`; no big headings): what you changed, where, and anything left to do. Cite places as \`file:line\` (for example \`styles.css:73\`): they become links that open the file.`;
   function guide(P, api) {
     return INTRO + "\n\n" + appGuide(P) + "\n\nThe API (each call returns a Step; await it to run):\n" + api.reference(NOTES) + "\n\n" + RULES;
@@ -4164,6 +4169,7 @@ Markdown files (README.md, notes, specs) render in the Docs panel. Keep README.m
           }
         }
         msg.summary = changed2.length ? plural(changed2.length, "file") + ' changed in "' + P.proposals.get(ws).title + '"' : "";
+        if (msg.status === "done" && !(msg.text || "").trim() && msg.steps.length) msg.text = autoSummary(msg, changed2, ws === "draft" ? null : (P.proposals.get(ws) || {}).title), msg.auto = true;
         P.log({ kind: "turn", who: "agent", ref: ws, thread: th.id, ok: msg.status === "done", note: (msg.text || msg.error || "").split("\n")[0].slice(0, 140), evals: msg.steps.length });
         P.saveThread(th);
         P.ev.emit("threads");
@@ -4250,6 +4256,15 @@ Markdown files (README.md, notes, specs) render in the Docs panel. Keep README.m
       if (t) t.abort.abort();
     }
   };
+  function autoSummary(msg, changed2, proposal) {
+    const files2 = /* @__PURE__ */ new Set(), bad = msg.steps.filter((st) => st.status === "error").length;
+    for (const st of msg.steps) for (const f of st.effects && st.effects.files || []) files2.add(f.path);
+    const parts = [];
+    if (files2.size) parts.push("Changed " + [...files2].slice(0, 6).join(", ") + (files2.size > 6 ? " and " + (files2.size - 6) + " more" : "") + (proposal ? ' in the proposal "' + proposal + '" (a copy of your app: look at it, then accept it to keep the changes)' : " in the draft") + ".");
+    else parts.push("Looked at the app; nothing was changed.");
+    if (bad) parts.push(plural(bad, "step") + " failed along the way.");
+    return parts.join(" ");
+  }
 
   // src/ui/dock.js
   var Views = {};
@@ -6146,6 +6161,7 @@ Markdown files (README.md, notes, specs) render in the Docs panel. Keep README.m
     setWs(ws) {
       if (ws !== "draft" && (!this.proposal(ws) || this.proposal(ws).status !== "open")) ws = "draft";
       this.ws = ws;
+      if (this.P) Records.set("ws|" + this.P.app, ws);
       if (ws === "draft" && this.canvas) this.canvas.compare = false;
       this.ev.emit("ws", ws);
       if (this.canvas) this.canvas.sync();
@@ -6232,6 +6248,8 @@ Markdown files (README.md, notes, specs) render in the Docs panel. Keep README.m
       if (Types.wants(head)) Types.check(P, head, { timeoutMs: 3e4 }).catch(() => {
       });
       this.ev.emit("project", P);
+      const was = Records.get("ws|" + P.app, "draft");
+      if (was !== "draft" && (P.proposals.get(was) || {}).status === "open") this.setWs(was);
       if (this.canvas) this.canvas.sync();
       this.paintHeader();
       return true;
@@ -7998,7 +8016,7 @@ Markdown files (README.md, notes, specs) render in the Docs panel. Keep README.m
           }
           return;
         }
-        const r = await Types.check(p, view, { timeoutMs: 2e4 });
+        const r = await Types.check(p, view, { timeoutMs: 2e4, ref: App.ws });
         if (r.skipped || P() !== p) return;
         S.tdiags = r.diags;
         paintCode();
@@ -8013,7 +8031,7 @@ Markdown files (README.md, notes, specs) render in the Docs panel. Keep README.m
           }
           return;
         }
-        const i = await Types.info(p, typeView(), path, ta.selectionStart);
+        const i = await Types.info(p, typeView(), path, ta.selectionStart, App.ws);
         if (S.cur !== path) return;
         S.tinfo = i ? i.text : "";
         paintFoot();
@@ -8112,7 +8130,7 @@ Markdown files (README.md, notes, specs) render in the Docs panel. Keep README.m
         open2(p);
       }
       Watch.ev.on("status", (st) => {
-        const k = devKey(st);
+        const k = App.ws + "|" + devKey(st, App.ws);
         if (k !== S.devKey) {
           S.devKey = k;
           typesSoon();
@@ -8473,7 +8491,7 @@ return { files: list.map(f => f.path), issues }`;
       const P = () => App.P;
       const tl = h("div.tlist"), head = h("div.toolbar"), grid = h("div.scroll");
       const el = h("div", h("div.dview", tl, h("div.cmain", head, grid)));
-      const call = (action, args) => Slop.call(action, { app: P().app, kind: S.kind, ...args });
+      const call = (action, args) => Slop.call(action, { app: P().app, kind: S.kind, ...S.kind === "prop" ? { ref: App.ws } : {}, ...args });
       async function loadTables() {
         const my = ++S.seq;
         try {
@@ -8516,7 +8534,8 @@ return { files: list.map(f => f.path), issues }`;
         clear(head);
         clear(grid);
         if (!P()) return;
-        tl.appendChild(h("div.seg.sm", { style: { margin: "6px" } }, [["dev", "Dev"], ["test", "Test"]].map(([k, l]) => h("button" + (S.kind === k ? ".on" : ""), { title: k === "dev" ? "Your dev instance: what the canvas shows" : "Your test instance: where the last scenario ran", on: { click: () => {
+        const kinds = [["dev", "Draft", "Your dev instance: the draft, what the canvas shows on draft"], ...App.ws !== "draft" ? [["prop", "Proposal", "The proposal's preview: what the canvas shows while you look at the proposal"]] : [], ["test", "Test", "Your test instance: where the last scenario ran"]];
+        tl.appendChild(h("div.seg.sm", { style: { margin: "6px" } }, kinds.map(([k, l, t]) => h("button" + (S.kind === k ? ".on" : ""), { title: t, on: { click: () => {
           S.kind = k;
           S.cur = null;
           S.rows = null;
@@ -8625,6 +8644,16 @@ return { files: list.map(f => f.path), issues }`;
         S.coll = "";
         S.kind = "dev";
         later();
+      });
+      App.ev.on("ws", (ws) => {
+        const k = ws === "draft" ? "dev" : "prop";
+        if (S.kind !== "test" && S.kind !== k) {
+          S.kind = k;
+          S.cur = null;
+          S.rows = null;
+          S.docs = null;
+          later();
+        }
       });
       App.ev.on("scenarios", () => {
         if (S.kind === "test") later();
@@ -9178,6 +9207,15 @@ return { files: list.map(f => f.path), issues }`;
         paintChat();
         paintChips();
       }
+      async function acceptProp(prop) {
+        const r = await P().accept(prop.ref, null, "you").catch((e) => ({ status: "failed", error: e.message }));
+        if (r.status === "committed") {
+          toast('Accepted "' + prop.title + '": the changes are in your draft now');
+          if (App.ws === prop.ref) App.setWs("draft");
+        } else if (r.status === "conflict") toast("Not accepted: the draft also changed " + r.conflicts.join(", ") + ". Open Review to sort it out.", 8e3);
+        else toast("Not accepted: " + (r.error || r.status), 6e3);
+        paintChat();
+      }
       function msgEl(m, i, t) {
         if (m.role === "user") return h("div.msg.user", h("div.who", m.from ? "From the " + m.from : "You", h("span", fmtTime(m.t)), m.ctx && m.ctx.sel ? h("span.tag", m.ctx.sel.tag + " " + m.ctx.sel.src) : null), h("div.body", m.text));
         const prop = m.ws && m.ws !== "draft" ? P().proposals.get(m.ws) : null;
@@ -9200,6 +9238,7 @@ return { files: list.map(f => f.path), issues }`;
             const pn = Panels.get(P(), id);
             return pn ? panelEl(P(), pn, { inline: true }) : null;
           }),
+          m.auto ? h("div.note", "Claude ended without a reply; the bench says what happened:") : null,
           m.text ? renderMarkdown(m.text, (file) => P().read(file, "draft") !== null || !!prop && prop.status === "open" && P().read(file, m.ws) !== null) : m.status === "running" && !(m.steps || []).length ? h("div.body.note", m.note || "Thinking\u2026") : null,
           m.error ? h("div.note", { style: { color: "var(--accent)" } }, m.error) : null,
           m.approval ? h(
@@ -9208,10 +9247,22 @@ return { files: list.map(f => f.path), issues }`;
             m.approval.detail ? h("pre", m.approval.detail) : null,
             h("div", { style: { display: "flex", gap: "6px" } }, h("button.btn.sm.primary", { on: { click: () => m.approval && m.approval.decide(true) } }, "Approve"), h("button.btn.sm", { on: { click: () => m.approval && m.approval.decide(false) } }, "Decline"))
           ) : null,
-          prop ? h("div.ctx", prop.status === "open" ? [h("span.tag.ws", "proposal"), " ", m.summary || 'working in "' + prop.title + '"', " ", h("button.link", { on: { click: () => {
-            App.setWs(prop.ref);
-            Dock.open("review");
-          } } }, "Review")] : h("span", '"' + prop.title + '" was ' + prop.status)) : null
+          prop ? h("div.ctx", prop.status === "open" ? [
+            h("span.tag.ws", "proposal"),
+            " ",
+            m.summary || 'working in "' + prop.title + '"',
+            m.summary && m.status !== "running" ? h("div.note", "These changes are in a proposal: a copy of your app. Your app does not change until you accept them.") : null,
+            h(
+              "span",
+              { style: { display: "inline-flex", gap: "8px", marginLeft: "6px" } },
+              App.ws !== prop.ref ? h("button.link", { on: { click: () => App.setWs(prop.ref) } }, "Show it") : null,
+              h("button.link", { on: { click: () => {
+                App.setWs(prop.ref);
+                Dock.open("review");
+              } } }, "Review"),
+              m.summary && m.status !== "running" ? h("button.link", { on: { click: () => acceptProp(prop) } }, "Accept") : null
+            )
+          ] : prop.status === "discarded" ? h("span.note", "Nothing in the app changed in this turn.") : h("span", 'The proposal "' + prop.title + '" was ' + prop.status + ".")) : null
         );
       }
       let raf = 0;

@@ -11,7 +11,7 @@ export const TYPES = {
     run: async (ctx, o = {}) => {
       const view = ctx.tx || headView(ctx.draft)
       if (!Types.wants(view)) return { errors: [], count: 0, note: 'the app has no TypeScript files' }
-      const r = await Types.check(ctx.project, view, { timeoutMs: 20000 })
+      const r = await Types.check(ctx.project, view, { timeoutMs: 20000, ref: ctx.draft.ref })
       if (r.skipped) return { skipped: r.skipped }
       const errors = r.diags.filter(d => !o.file || d.file === o.file).map(d => ({ file: d.file, line: d.line, col: d.col, message: d.message, program: d.program }))
       return { errors: errors.slice(0, 50), count: errors.length }

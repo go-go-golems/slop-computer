@@ -29,6 +29,10 @@ type failure struct{ code, message string }
 
 func (f *failure) Error() string { return f.message }
 
+// nudgeReply asks a model that ended silently after using its tools for
+// its reply.
+const nudgeReply = "(From the system, not the person: you ended without replying. Reply to the person now, in a few plain sentences: what you did, what changed, and what they should do next. Do not call tools.)"
+
 var (
 	errEmpty      = &failure{"empty_completion", "Empty completion"}
 	errRounds     = &failure{"upstream_error", "Tool round limit reached"}
@@ -121,6 +125,7 @@ func (c *call) run(ctx context.Context) error {
 	if c.r.MaxRounds == 0 {
 		rounds = 5
 	}
+	nudged := false // asked once for a reply after a silent end
 	for round := 0; round < rounds; round++ {
 		if contextBytes(t) > maxContextBytes {
 			return errContext
@@ -129,7 +134,7 @@ func (c *call) run(ctx context.Context) error {
 		if err != nil {
 			return err
 		}
-		offersTools := round < rounds-1 && len(c.r.Tools) > 0 // the last round offers no tools
+		offersTools := round < rounds-1 && len(c.r.Tools) > 0 && !nudged // the last round, and the reply asked for, offer none
 		if c.r.Meter != nil {
 			// Hold this round's cost before the provider is contacted
 			// (SLOP3-007): one token per byte of context is conservative,
@@ -181,6 +186,18 @@ func (c *call) run(ctx context.Context) error {
 		calls := toolblocks.ExtractPendingToolCalls(t)
 		if len(calls) == 0 || budget.remaining <= 0 {
 			if strings.TrimSpace(c.visible) == "" {
+				// A model that used its tools and then stopped without a
+				// word leaves the person with a row of results and no
+				// answer (a persona review of the bench saw it often):
+				// it is asked once, without tools, for its reply.
+				if round > 0 && !nudged && len(calls) == 0 && budget.remaining > 0 {
+					nudged = true
+					turns.AppendBlock(t, turns.NewUserTextBlock(nudgeReply))
+					if round == rounds-1 {
+						rounds++
+					}
+					continue
+				}
 				return errEmpty
 			}
 			final := s.text

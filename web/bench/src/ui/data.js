@@ -25,7 +25,8 @@ export const DATA = {
     const P = () => App.P
     const tl = h('div.tlist'), head = h('div.toolbar'), grid = h('div.scroll')
     const el = h('div', h('div.dview', tl, h('div.cmain', head, grid)))
-    const call = (action, args) => Slop.call(action, { app: P().app, kind: S.kind, ...args })
+    // prop: the open proposal's preview instance (what the canvas shows while you look at a proposal)
+    const call = (action, args) => Slop.call(action, { app: P().app, kind: S.kind, ...(S.kind === 'prop' ? { ref: App.ws } : {}), ...args })
 
     async function loadTables() {
       const my = ++S.seq
@@ -48,7 +49,8 @@ export const DATA = {
     function paint() {
       clear(tl); clear(head); clear(grid)
       if (!P()) return
-      tl.appendChild(h('div.seg.sm', { style: { margin: '6px' } }, [['dev', 'Dev'], ['test', 'Test']].map(([k, l]) => h('button' + (S.kind === k ? '.on' : ''), { title: k === 'dev' ? 'Your dev instance: what the canvas shows' : 'Your test instance: where the last scenario ran', on: { click: () => { S.kind = k; S.cur = null; S.rows = null; S.docs = null; loadTables() } } }, l))))
+      const kinds = [['dev', 'Draft', 'Your dev instance: the draft, what the canvas shows on draft'], ...(App.ws !== 'draft' ? [['prop', 'Proposal', 'The proposal\'s preview: what the canvas shows while you look at the proposal']] : []), ['test', 'Test', 'Your test instance: where the last scenario ran']]
+      tl.appendChild(h('div.seg.sm', { style: { margin: '6px' } }, kinds.map(([k, l, t]) => h('button' + (S.kind === k ? '.on' : ''), { title: t, on: { click: () => { S.kind = k; S.cur = null; S.rows = null; S.docs = null; loadTables() } } }, l))))
       tl.appendChild(h('div.fi.dir', 'Tables'))
       for (const t of S.tables) tl.appendChild(h('button.fi' + (t === S.cur && !S.query && !S.coll ? '.on' : ''), { on: { click: () => { S.cur = t; S.query = ''; S.coll = ''; loadRows() } } }, t))
       if (!S.tables.length) tl.appendChild(h('div.note', { style: { padding: '0 10px' } }, 'No tables: the app has no migrations, or this instance has not run yet.'))
@@ -98,6 +100,8 @@ export const DATA = {
     }
     const later = debounce(() => { if (Dock.visible('data')) loadTables() }, 300)
     App.ev.on('project', () => { S.cur = null; S.query = ''; S.coll = ''; S.kind = 'dev'; later() })
+    // the data follows the workspace: a proposal's preview while you look at it, the draft's otherwise
+    App.ev.on('ws', ws => { const k = ws === 'draft' ? 'dev' : 'prop'; if (S.kind !== 'test' && S.kind !== k) { S.kind = k; S.cur = null; S.rows = null; S.docs = null; later() } })
     App.ev.on('scenarios', () => { if (S.kind === 'test') later() })
     return { el, show: loadTables }
   }

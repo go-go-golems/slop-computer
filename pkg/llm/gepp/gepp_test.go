@@ -453,3 +453,30 @@ func TestMeterHoldsToolDefinitions(t *testing.T) {
 	assert.GreaterOrEqual(t, m.ests[0].InputTokens-plain.ests[0].InputTokens, defs, "round 0 offers the tool: its definition is held")
 	assert.Less(t, m.ests[1].InputTokens-plain.ests[0].InputTokens, defs+int64(200), "the last round offers no tools: only its grown context")
 }
+
+// A model that used its tools and then ended without a word is asked once,
+// without tools, for its reply; one that is silent again is an error.
+func TestSilentEndAsksForAReply(t *testing.T) {
+	exec := func(context.Context, llm.Event) (llm.ToolResult, error) {
+		return llm.ToolResult{Value: json.RawMessage(`1`)}, nil
+	}
+	b, p := setup(t, nil,
+		toolCalls("", [3]string{"call_1", "get_weather", `{"city":"Oslo"}`}),
+		text(),
+		text("It is 17 degrees in Oslo."))
+	rec := &recorder{}
+	require.NoError(t, b.Sample(context.Background(), req("weather?", llm.Options{}, weather), rec.emit, exec))
+	assert.Equal(t, "It is 17 degrees in Oslo.", *rec.last("result").Result.FinalText)
+	require.Len(t, p.bodies, 3)
+	assert.NotContains(t, p.bodies[2], "tools", "the reply is asked for without tools")
+	assert.Contains(t, fmt.Sprint(p.bodies[2]["messages"]), "you ended without replying")
+
+	b, _ = setup(t, nil,
+		toolCalls("", [3]string{"call_1", "get_weather", `{"city":"Oslo"}`}),
+		text(),
+		text())
+	rec = &recorder{}
+	require.NoError(t, b.Sample(context.Background(), req("weather?", llm.Options{}, weather), rec.emit, exec))
+	require.NotNil(t, rec.last("error").Error)
+	assert.Equal(t, "empty_completion", rec.last("error").Error.Code)
+}

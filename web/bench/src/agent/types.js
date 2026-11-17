@@ -18,10 +18,11 @@
 // (wants, check, info, transpile, invalidate, diff).
 import { Slop } from '../server/slop.js';
 
-// What the declarations depend on: the version the dev instance runs.
-export const devKey = st => {
-  const dev = st && st.dev
-  return dev ? dev.n + (dev.broken ? ':broken' : '') : 'none'
+// What the declarations of a ref depend on: the version its instance runs
+// (draft: the dev instance; a proposal: its own instance, in status.props).
+export const devKey = (st, ref = 'draft') => {
+  const inst = !st ? null : ref === 'draft' ? st.dev : (st.props || []).find(p => p.ref === ref)
+  return inst ? inst.n + (inst.broken ? ':broken' : '') : 'none'
 }
 
 const CODE = /\.(ts|tsx|mts|cts)$/
@@ -79,14 +80,16 @@ export const Types = {
     })
   },
 
-  // The app's declarations ({name: text}), fetched once per app until invalidated.
-  declarations(P) {
-    const key = P.app + '|' + devKey(this.status(P))
+  // The declarations ({name: text}) for a ref of the app: its actions are
+  // those of the instance running that ref (a proposal's actor may differ
+  // from draft's). Cached per app, ref and the version that instance runs.
+  declarations(P, ref = 'draft') {
+    const pre = P.app + '|' + ref + '|', key = pre + devKey(this.status(P), ref)
     let d = this.decl.get(key)
     if (!d) {
-      d = Slop.call('types', { app: P.app }).then(r => Object.fromEntries((r.files || []).map(f => [f.path, f.text])))
+      d = Slop.call('types', { app: P.app, ...(ref !== 'draft' ? { ref } : {}) }).then(r => Object.fromEntries((r.files || []).map(f => [f.path, f.text])))
       d.catch(() => { if (this.decl.get(key) === d) this.decl.delete(key) })
-      for (const k of this.decl.keys()) if (k.startsWith(P.app + '|')) this.decl.delete(k)
+      for (const k of [...this.decl.keys()]) if (k.startsWith(pre)) this.decl.delete(k)
       this.decl.set(key, d)
     }
     return d
@@ -95,19 +98,19 @@ export const Types = {
 
   // Type errors in a view: {diags: [{file, line, col, code, message,
   // program}], ms} or {skipped: why}.
-  async check(P, view, { timeoutMs = 2000 } = {}) {
+  async check(P, view, { timeoutMs = 2000, ref = 'draft' } = {}) {
     const files = this.filesOf(view)
     let decl
-    try { decl = await this.declarations(P) } catch (e) { return { skipped: 'no declarations from the server: ' + (e.message || e) } }
+    try { decl = await this.declarations(P, ref) } catch (e) { return { skipped: 'no declarations from the server: ' + (e.message || e) } }
     const r = await this.post({ type: 'check', files, decl }, timeoutMs)
     if (r.timeout) return { skipped: this.state === 'ready' ? 'the check took longer than ' + Math.round(timeoutMs / 1000) + ' s' : 'the checker was still loading' }
     if (!r.ok) return { skipped: r.error || 'the checker failed' }
     return { diags: r.diags, ms: r.ms }
   },
   // The type at a position in a file of the view: {text, doc} or null.
-  async info(P, view, path, pos) {
+  async info(P, view, path, pos, ref = 'draft') {
     let decl
-    try { decl = await this.declarations(P) } catch { return null }
+    try { decl = await this.declarations(P, ref) } catch { return null }
     const r = await this.post({ type: 'info', files: this.filesOf(view), decl, path, pos }, 3000)
     return r.ok && r.text ? { text: r.text, doc: r.doc || '' } : null
   },

@@ -82,6 +82,8 @@ const RULES = `Working rules:
 - Mark milestones with session.mark("short label"); mark decisions and guesses with their kind, so the person can audit them later.
 - When you will need something again (a file list, rows, frame ids), keep it in a top-level variable. When a helper will be useful in later sessions, save it with lib.def.
 - In a proposal, say what you changed so the person can judge it. Say which draft your change made; publishing is the person's call.
+- Do not name your variables after the API's namespaces (files, app, frames, tests, session, ui, lib, types, …): const [info, files] = … makes files a variable for the whole eval, and files.list() then fails.
+- Talk to the person in their words, not the bench's internals: "your proposal \"Add a heading\"" (its title), not proposal/mwk3…; "the preview of your proposal", not "the prop instance"; "the draft", not "draft 14". Explain a term the first time a person who does not program would meet it (a proposal: a copy of the app with your changes, which they look at and accept or reject).
 - Finish with a short summary in Markdown (short paragraphs, bullets, \`code\`; no big headings): what you changed, where, and anything left to do. Cite places as \`file:line\` (for example \`styles.css:73\`): they become links that open the file.`
 
 export function guide(P, api) {

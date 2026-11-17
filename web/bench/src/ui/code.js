@@ -195,14 +195,14 @@ export const CODE = {
       if (!p || S.snap) return
       const view = typeView()
       if (!Types.wants(view)) { if (S.tdiags) { S.tdiags = null; paintCode(); paintFoot() } return }
-      const r = await Types.check(p, view, { timeoutMs: 20000 })
+      const r = await Types.check(p, view, { timeoutMs: 20000, ref: App.ws })
       if (r.skipped || P() !== p) return
       S.tdiags = r.diags; paintCode(); paintFoot()
     }, 500)
     const infoSoon = debounce(async () => {
       const p = P(), path = S.cur
       if (!p || !path || S.snap || !/\.(ts|tsx|mts|cts)$/.test(path) || !S.tdiags) { if (S.tinfo) { S.tinfo = ''; paintFoot() } return }
-      const i = await Types.info(p, typeView(), path, ta.selectionStart)
+      const i = await Types.info(p, typeView(), path, ta.selectionStart, App.ws)
       if (S.cur !== path) return
       S.tinfo = i ? i.text : ''; paintFoot()
     }, 300)
@@ -257,7 +257,7 @@ export const CODE = {
       P().write(p, tpl, App.ws); open(p)
     }
     // the dev instance came up on new code: its actions, and so the types, may differ
-    Watch.ev.on('status', st => { const k = devKey(st); if (k !== S.devKey) { S.devKey = k; typesSoon() } })
+    Watch.ev.on('status', st => { const k = App.ws + '|' + devKey(st, App.ws); if (k !== S.devKey) { S.devKey = k; typesSoon() } })
     App.ev.on('project', () => { S.tabs = []; S.cur = null; S.pending = null; S.snap = null; S.tdiags = null; S.tinfo = ''; paintTabs(); paintList(); load(); refreshChanged(); typesSoon() })
     App.ev.on('ws', () => { commit(); S.bkey = ''; S.bdata = null; paintList(); load(true); refreshChanged(); if (S.cur) loadVersions(); typesSoon() })
     const changedSoon = debounce(refreshChanged, 400)

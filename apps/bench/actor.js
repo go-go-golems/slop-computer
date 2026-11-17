@@ -278,15 +278,22 @@ defineActor({
 
     // The app's TypeScript declarations (app.types: page.d.ts, actor.d.ts,
     // modules.d.ts, actions.d.ts), for the page's type checker (SLOP3-024
-    // phase 3). The actions are the visitor's dev instance's, which runs
-    // draft, when it exists; else the app store's.
+    // phase 3). The actions are those of the instance that runs the ref
+    // being checked: the visitor's dev instance for draft, the proposal's
+    // own instance for a proposal (its actor may have other actions than
+    // draft's), falling back to the dev instance, then the app store's.
     types: {
       requires: 'view',
-      args: args({ app: S.store }, ['app']),
-      async run(ctx, { app }) {
-        const dev = instanceId(app, ctx.visitor.id, 'dev');
-        const st = await statusOf(ctx, dev, { peek: true });
-        const r = await tool(ctx).types(app, st && st.app === app ? { instance: dev } : {});
+      args: args({ app: S.store, ref: S.ref }, ['app']),
+      async run(ctx, { app, ref }) {
+        const ids = [instanceId(app, ctx.visitor.id, 'dev')];
+        if (ref && ref !== 'draft') ids.unshift(instanceOf(ctx, app, 'prop', ref));
+        let instance = '';
+        for (const id of ids) {
+          const st = await statusOf(ctx, id, { peek: true });
+          if (st && st.app === app) { instance = id; break; }
+        }
+        const r = await tool(ctx).types(app, instance ? { instance } : {});
         return { n: r.n, instance: r.instance, files: r.files };
       },
     },

@@ -253,6 +253,9 @@ export const Agent = {
         if (!changed.length) { th.proposal = null; if (AgentUI.ws() === ws) AgentUI.setWs('draft') }
       }
       msg.summary = changed.length ? plural(changed.length, 'file') + ' changed in "' + P.proposals.get(ws).title + '"' : ''
+      // A turn that ran evals but said nothing leaves the person with a row of
+      // ticks (a persona review found it): the bench says what happened.
+      if (msg.status === 'done' && !(msg.text || '').trim() && msg.steps.length) msg.text = autoSummary(msg, changed, ws === 'draft' ? null : (P.proposals.get(ws) || {}).title), msg.auto = true
       P.log({ kind: 'turn', who: 'agent', ref: ws, thread: th.id, ok: msg.status === 'done', note: (msg.text || msg.error || '').split('\n')[0].slice(0, 140), evals: msg.steps.length })
       P.saveThread(th); P.ev.emit('threads')
       this.ev.emit('turn', th.id)
@@ -316,4 +319,16 @@ export const Agent = {
     }
   },
   stop(tid) { const t = this.turns.get(tid); if (t) t.abort.abort() }
+}
+
+// What a turn did, in words, from its evals' effects: for a turn whose
+// model ended without a reply.
+function autoSummary(msg, changed, proposal) {
+  const files = new Set(), bad = msg.steps.filter(st => st.status === 'error').length
+  for (const st of msg.steps) for (const f of (st.effects && st.effects.files) || []) files.add(f.path)
+  const parts = []
+  if (files.size) parts.push('Changed ' + [...files].slice(0, 6).join(', ') + (files.size > 6 ? ' and ' + (files.size - 6) + ' more' : '') + (proposal ? ' in the proposal "' + proposal + '" (a copy of your app: look at it, then accept it to keep the changes)' : ' in the draft') + '.')
+  else parts.push('Looked at the app; nothing was changed.')
+  if (bad) parts.push(plural(bad, 'step') + ' failed along the way.')
+  return parts.join(' ')
 }

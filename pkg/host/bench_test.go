@@ -579,3 +579,49 @@ if (slop) {
 		t.Fatalf("tsc on the bench's actions:\n%s", out)
 	}
 }
+
+// The page's checker checks a proposal against its own instance's actions:
+// a proposal whose actor renames an action gets declarations with the new
+// name, while draft's keep the old (a persona review found the proposal
+// checked against draft's actor, "types ok" over a call to a missing action).
+func TestBenchTypesFollowRef(t *testing.T) {
+	h := newHarness(t)
+	admin := h.tokenFor("admin@example.com", "read", "write", "admin")
+	installBench(t, h, admin)
+	act := func(action string, args map[string]any) map[string]any {
+		t.Helper()
+		return h.call(admin, "actor.call", map[string]any{"store": "bench", "action": action, "args": args}).(map[string]any)
+	}
+	app := devApp()
+	app["actor.js"] = `defineActor({ actions: { list: { requires: 'view', run() { return []; } } } });`
+	h.call(admin, "store.new", map[string]any{"id": "jot"})
+	h.push(admin, map[string]any{"store": "jot", "files": files(app), "ref": "draft"})
+	draft := h.refAt(admin, "jot", "draft")
+	act("instance", map[string]any{"app": "jot", "kind": "dev"})
+	ref := act("propose", map[string]any{"app": "jot", "title": "Board"})["ref"].(string)
+	act("commit", map[string]any{"app": "jot", "ref": ref, "base": draft, "changes": []any{map[string]any{"path": "actor.js",
+		"text": `defineActor({ actions: { board: { requires: 'view', run() { return []; } } } });`}}})
+	act("instance", map[string]any{"app": "jot", "kind": "prop", "ref": ref})
+
+	actionsOf := func(args map[string]any) string {
+		t.Helper()
+		for _, f := range act("types", args)["files"].([]any) {
+			if m := f.(map[string]any); m["path"] == "actions.d.ts" {
+				return m["text"].(string)
+			}
+		}
+		t.Fatalf("types(%v) has no actions.d.ts", args)
+		return ""
+	}
+	if a := actionsOf(map[string]any{"app": "jot"}); !strings.Contains(a, "  list(") || strings.Contains(a, "board(") {
+		t.Fatalf("draft's actions.d.ts:\n%s", a)
+	}
+	if a := actionsOf(map[string]any{"app": "jot", "ref": ref}); !strings.Contains(a, "  board(") || strings.Contains(a, "list(") {
+		t.Fatalf("the proposal's actions.d.ts:\n%s", a)
+	}
+	// a proposal without an instance yet falls back to the dev instance
+	other := act("propose", map[string]any{"app": "jot", "title": "Other"})["ref"].(string)
+	if a := actionsOf(map[string]any{"app": "jot", "ref": other}); !strings.Contains(a, "  list(") {
+		t.Fatalf("a proposal without an instance:\n%s", a)
+	}
+}

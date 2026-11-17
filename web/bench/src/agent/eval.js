@@ -61,7 +61,7 @@ export async function runEval(ctx, code, { sid, restore, timeoutMs } = {}) {
   const before = parent ? null : await framesBefore(P, ctx.ws)
   const tx = parent ? parent.child({ label: 'eval' }) : d.begin({ label: 'eval', event: { who: ctx.who, thread: ctx.thread, note: line } })
   // the types before the eval: checked while it runs (the files are taken now)
-  const typesBefore = !parent && Types.wants(tx) ? Types.check(P, tx, { timeoutMs: 15000 }) : null
+  const typesBefore = !parent && Types.wants(tx) ? Types.check(P, tx, { timeoutMs: 15000, ref: d.ref }) : null
   ctx.tx = tx; ctx.stack = []; ctx.logs = []
   let r
   try {
@@ -85,8 +85,8 @@ export async function runEval(ctx, code, { sid, restore, timeoutMs } = {}) {
       if (c.activated.length) effects.instances = c.activated.map(a => ({ store: a.store, n: a.n, broken: a.broken || a.error || undefined }))
       Object.assign(effects, await afterCommit(ctx, c, before, t0))
       if (typesBefore || Types.wants(tx)) {
-        if (c.activated.length) Types.invalidate(P) // actions.d.ts follows the dev instance's actor
-        const t = Types.diff(typesBefore ? await typesBefore : { diags: [] }, await Types.check(P, tx))
+        if (c.activated.length) Types.invalidate(P) // actions.d.ts follows the ref's instance's actor
+        const t = Types.diff(typesBefore ? await typesBefore : { diags: [] }, await Types.check(P, tx, { ref: d.ref }))
         if (t.skipped || t.new.length || t.fixed) effects.types = t
       }
     } else {

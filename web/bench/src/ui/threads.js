@@ -100,6 +100,13 @@ export const THREADS = {
       try { const r = await Agent.compact(P(), t, { force: true }); toast(r ? 'Summarized messages 1–' + r.upTo : 'Too short to summarize') } catch (e) { toast('Could not summarize: ' + e.message) }
       paintChat(); paintChips()
     }
+    async function acceptProp(prop) {
+      const r = await P().accept(prop.ref, null, 'you').catch(e => ({ status: 'failed', error: e.message }))
+      if (r.status === 'committed') { toast('Accepted "' + prop.title + '": the changes are in your draft now'); if (App.ws === prop.ref) App.setWs('draft') }
+      else if (r.status === 'conflict') toast('Not accepted: the draft also changed ' + r.conflicts.join(', ') + '. Open Review to sort it out.', 8000)
+      else toast('Not accepted: ' + (r.error || r.status), 6000)
+      paintChat()
+    }
     function msgEl(m, i, t) {
       if (m.role === 'user') return h('div.msg.user', h('div.who', m.from ? 'From the ' + m.from : 'You', h('span', fmtTime(m.t)), m.ctx && m.ctx.sel ? h('span.tag', m.ctx.sel.tag + ' ' + m.ctx.sel.src) : null), h('div.body', m.text))
       const prop = m.ws && m.ws !== 'draft' ? P().proposals.get(m.ws) : null
@@ -108,11 +115,22 @@ export const THREADS = {
           h('button.link.note', { title: 'Bookmark this reply on the timeline', on: { click: () => { P().mark({ label: (m.text || 'reply').split('\n')[0].slice(0, 40), by: 'you', thread: t.id }); toast('Marked on the timeline') } } }, '☆ mark')),
         (m.steps || []).map(stepEl),
         (m.panels || []).map(id => { const pn = Panels.get(P(), id); return pn ? panelEl(P(), pn, { inline: true }) : null }),
+        m.auto ? h('div.note', 'Claude ended without a reply; the bench says what happened:') : null,
         m.text ? renderMarkdown(m.text, file => P().read(file, 'draft') !== null || (!!prop && prop.status === 'open' && P().read(file, m.ws) !== null)) : m.status === 'running' && !(m.steps || []).length ? h('div.body.note', m.note || 'Thinking…') : null,
         m.error ? h('div.note', { style: { color: 'var(--accent)' } }, m.error) : null,
         m.approval ? h('div.approval', h('b', m.approval.title), m.approval.detail ? h('pre', m.approval.detail) : null,
           h('div', { style: { display: 'flex', gap: '6px' } }, h('button.btn.sm.primary', { on: { click: () => m.approval && m.approval.decide(true) } }, 'Approve'), h('button.btn.sm', { on: { click: () => m.approval && m.approval.decide(false) } }, 'Decline'))) : null,
-        prop ? h('div.ctx', prop.status === 'open' ? [h('span.tag.ws', 'proposal'), ' ', m.summary || 'working in "' + prop.title + '"', ' ', h('button.link', { on: { click: () => { App.setWs(prop.ref); Dock.open('review') } } }, 'Review')] : h('span', '"' + prop.title + '" was ' + prop.status)) : null)
+        prop ? h('div.ctx', prop.status === 'open'
+          ? [h('span.tag.ws', 'proposal'), ' ', m.summary || 'working in "' + prop.title + '"',
+            m.summary && m.status !== 'running' ? h('div.note', 'These changes are in a proposal: a copy of your app. Your app does not change until you accept them.') : null,
+            h('span', { style: { display: 'inline-flex', gap: '8px', marginLeft: '6px' } },
+              App.ws !== prop.ref ? h('button.link', { on: { click: () => App.setWs(prop.ref) } }, 'Show it') : null,
+              h('button.link', { on: { click: () => { App.setWs(prop.ref); Dock.open('review') } } }, 'Review'),
+              m.summary && m.status !== 'running' ? h('button.link', { on: { click: () => acceptProp(prop) } }, 'Accept') : null)]
+          // a proposal closed because the turn changed nothing: its title is the person's message, so
+          // '"…" was discarded' read as "your message was discarded" (a persona review found it)
+          : prop.status === 'discarded' ? h('span.note', 'Nothing in the app changed in this turn.')
+          : h('span', 'The proposal "' + prop.title + '" was ' + prop.status + '.')) : null)
     }
     let raf = 0
     function paintChat() {

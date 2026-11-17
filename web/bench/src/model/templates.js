@@ -48,7 +48,7 @@ li { padding: .25rem 0; }
 
 export const APP_TEMPLATES = [
   {
-    id: 'blank', name: 'Page', blurb: 'One page that keeps its data in the app\'s document database.',
+    id: 'blank', name: 'Simple page', blurb: 'One page. What people type into it is saved, without any server code. Good for a form, a list or a notebook.',
     frames: [{ route: 'index.html', w: 1024, h: 700 }, { route: 'index.html', w: 375, h: 700 }],
     files: ({ title }) => ({
       'app.json': JSON.stringify({ title: esc(title), page: 'index.html', capabilities: { db: {} } }, null, 2) + '\n',
@@ -102,10 +102,11 @@ publishing moves \`main\`, which production instances run.
     }),
   },
   {
-    id: 'actor', name: 'Page and actor', blurb: 'A page that calls its actor, which keeps rows in SQL (a migration in sql/).',
+    id: 'actor', name: 'Page with server code', blurb: 'A page plus code that runs on the server (an actor) and keeps a table of rows (SQL). Good when many people share the same data, or for rules people must not get around.',
     frames: [{ route: 'index.html', w: 1024, h: 700 }, { route: 'index.html', w: 375, h: 700 }],
     files: ({ title }) => ({
-      'app.json': JSON.stringify({ title: esc(title), page: 'index.html', actor: 'actor.ts', capabilities: { user: {} } }, null, 2) + '\n',
+      // the profile scope: ctx.visitor.name is the person's name (without it, "")
+      'app.json': JSON.stringify({ title: esc(title), page: 'index.html', actor: 'actor.ts', capabilities: { user: { scopes: ['profile'] } } }, null, 2) + '\n',
       'actor.ts': `// The app's server half: actions the page calls, rows in SQL. Each action
 // declares its arguments' JSON Schema (checked before run: a wrong shape is
 // refused) and its result's; defineAction types run from them, and the
@@ -141,7 +142,7 @@ defineActor({
       run(ctx, { text }) {
         const t = text.trim()
         if (!t) ctx.fail('invalid_argument', 'text is empty')
-        sql.run('INSERT INTO items (text, by, at) VALUES (?, ?, ?)', t, ctx.visitor.name || ctx.visitor.id || 'someone', Date.now())
+        sql.run('INSERT INTO items (text, by, at) VALUES (?, ?, ?)', t, ctx.visitor.name || 'someone', Date.now())
         return { added: t }
       },
     }),
