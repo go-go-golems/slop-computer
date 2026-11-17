@@ -83,7 +83,10 @@ func (c *Client) Types(app, dir string, tsconfigs bool) ([]string, error) {
 func Tsconfigs(actor string, vendored bool) map[string][]byte {
 	options := func(target string, lib []string) map[string]any {
 		return map[string]any{
-			"target": target, "lib": lib, "module": "ESNext", "moduleResolution": "Bundler",
+			// moduleDetection force: every file is a module, as pages
+			// (<script type="module">) and actor files are, so top-level
+			// await and file-local names work without an import.
+			"target": target, "lib": lib, "module": "ESNext", "moduleResolution": "Bundler", "moduleDetection": "force",
 			"strict": true, "isolatedModules": true, "allowImportingTsExtensions": true,
 			"noEmit": true, "skipLibCheck": true, "types": []string{},
 		}

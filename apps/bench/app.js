@@ -1,4 +1,4 @@
-/* the bench, built from web/bench: do not edit. source sha256:1ca237ceb73a26d9545f531313b495f73b6130d9d5878f5bc288d2c63b9aad62 */
+/* the bench, built from web/bench: do not edit. source sha256:65df6eb0909f14717ee7bf62dd50af9eb84792bf7993e4bb10afa69e2890d266 */
 // The bench: a live dev environment for slop apps. Built from web/bench/src.
 (() => {
   // src/lib/util.js
@@ -3159,7 +3159,7 @@
 
   // src/model/templates.js
   var esc = (s) => String(s).replace(/[<&"]/g, "");
-  var page = (title, body, script) => `<!doctype html>
+  var page = (title, body) => `<!doctype html>
 <html lang="en">
 <head>
 <meta charset="utf-8">
@@ -3171,12 +3171,14 @@
 <main>
 ${body}
 </main>
-<script type="module">
-${script}
-<\/script>
+<script type="module" src="main.ts"><\/script>
 </body>
 </html>
 `;
+  var TYPES = `Files are TypeScript; the server compiles them (types are stripped, not
+checked). To check them, pull the app and run \`slop types <app>\`: it writes
+the declarations into \`.slop/types/\` and the tsconfig files, then
+\`tsc -p tsconfig.json\` checks the pages`;
   var STYLES = `body { font: 16px/1.5 system-ui, sans-serif; margin: 0; color: #1a1a1a; }
 main { max-width: 40rem; margin: 3rem auto; padding: 0 1rem; }
 form { display: flex; gap: .5rem; margin: 1rem 0; }
@@ -3194,26 +3196,47 @@ li { padding: .25rem 0; }
         "app.json": JSON.stringify({ title: esc(title), page: "index.html", capabilities: { db: {} } }, null, 2) + "\n",
         "index.html": page(esc(title), `<h1>${esc(title)}</h1>
 <form id="add"><input name="text" placeholder="Something to remember" required><button>Add</button></form>
-<ul id="list"></ul>`, `const db = await window.claude.use('db')
-const list = document.getElementById('list')
-async function show() {
-  const snap = await db.collection('notes').get()
-  list.replaceChildren(...snap.docs.map(d => Object.assign(document.createElement('li'), { textContent: d.data().text })))
+<ul id="list"></ul>`),
+        "main.ts": `// The page: notes in the app's document database.
+interface Note {
+  text: string
+  at: number
 }
-document.getElementById('add').addEventListener('submit', async e => {
+
+const db = await claude.use('db')
+const list = document.querySelector<HTMLUListElement>('#list')!
+const form = document.querySelector<HTMLFormElement>('#add')!
+
+async function show() {
+  if (!db) return
+  const snap = await db.collection('notes').get()
+  list.replaceChildren(...snap.docs.map((d: { data(): Note }) => {
+    const li = document.createElement('li')
+    li.textContent = d.data().text
+    return li
+  }))
+}
+
+form.addEventListener('submit', async e => {
   e.preventDefault()
-  const text = e.target.text.value.trim()
-  if (!text) return
-  await db.collection('notes').add({ text, at: Date.now() })
-  e.target.reset()
+  const input = form.elements.namedItem('text') as HTMLInputElement
+  const text = input.value.trim()
+  if (!text || !db) return
+  const note: Note = { text, at: Date.now() }
+  await db.collection('notes').add(note)
+  form.reset()
   await show()
 })
-await show()`),
+await show()
+`,
         "styles.css": STYLES,
         "README.md": `# ${esc(title)}
 
-A slop app: \`app.json\` is its manifest, \`index.html\` its page. The page
-keeps notes in the app's document database (\`window.claude.use('db')\`).
+A slop app: \`app.json\` is its manifest, \`index.html\` its page, and
+\`main.ts\` the page's script. It keeps notes in the app's document database
+(\`claude.use('db')\`).
+
+${TYPES}.
 
 Edits in the bench go to the \`draft\` ref and your dev instance runs them;
 publishing moves \`main\`, which production instances run.
@@ -3226,29 +3249,45 @@ publishing moves \`main\`, which production instances run.
       blurb: "A page that calls its actor, which keeps rows in SQL (a migration in sql/).",
       frames: [{ route: "index.html", w: 1024, h: 700 }, { route: "index.html", w: 375, h: 700 }],
       files: ({ title }) => ({
-        "app.json": JSON.stringify({ title: esc(title), page: "index.html", actor: "actor.js", capabilities: { user: {} } }, null, 2) + "\n",
-        "actor.js": `// The app's server half: actions the page calls, rows in SQL.
-const sql = use('sql');
+        "app.json": JSON.stringify({ title: esc(title), page: "index.html", actor: "actor.ts", capabilities: { user: {} } }, null, 2) + "\n",
+        "api.ts": `// The contract between the page and the actor: types only. Both sides
+// import it with \`import type\`, so a change here is checked on both.
+export type Item = {
+  id: number
+  text: string
+  by: string
+  at: number
+}
+
+export interface Actions {
+  list(args: {}): Item[]
+  add(args: { text: string }): { added: string }
+}
+`,
+        "actor.ts": `// The app's server half: actions the page calls, rows in SQL.
+import type { Actions, Item } from './api.ts'
+
+const sql = use('sql')
 
 defineActor({
   actions: {
     list: {
       requires: 'view',
       run(ctx) {
-        return sql.all('SELECT id, text, by, at FROM items ORDER BY at DESC LIMIT 100');
+        return sql.all('SELECT id, text, by, at FROM items ORDER BY at DESC LIMIT 100') as Item[]
       },
     },
     add: {
       requires: 'interact',
       run(ctx, { text }) {
-        const t = String(text || '').trim().slice(0, 500);
-        if (!t) ctx.fail('invalid_argument', 'text is empty');
-        sql.run('INSERT INTO items (text, by, at) VALUES (?, ?, ?)', t, ctx.visitor.name || ctx.visitor.id, Date.now());
-        return { added: t };
+        const t = String(text || '').trim().slice(0, 500)
+        if (!t) ctx.fail('invalid_argument', 'text is empty')
+        sql.run('INSERT INTO items (text, by, at) VALUES (?, ?, ?)', t, ctx.visitor.name || ctx.visitor.id || 'someone', Date.now())
+        return { added: t }
       },
     },
   },
-});
+} satisfies ActorOf<Actions>)
 `,
         "sql/001_items.sql": `-- The app's rows. A migration runs once per instance; change the schema
 -- with a new file (sql/002_\u2026.sql), never by editing this one after it ran.
@@ -3261,24 +3300,44 @@ CREATE TABLE items (
 `,
         "index.html": page(esc(title), `<h1>${esc(title)}</h1>
 <form id="add"><input name="text" placeholder="Add an item" required><button>Add</button></form>
-<ul id="list"></ul>`, `const slop = await window.claude.use('slop')
-const list = document.getElementById('list')
+<ul id="list"></ul>`),
+        "main.ts": `// The page: it calls the actor's actions, typed by the contract in api.ts.
+import type { Actions } from './api.ts'
+
+const slop = await claude.use<Actions>('slop')
+const list = document.querySelector<HTMLUListElement>('#list')!
+const form = document.querySelector<HTMLFormElement>('#add')!
+
 async function show() {
+  if (!slop) return
   const rows = await slop.actions.list({})
-  list.replaceChildren(...rows.map(r => Object.assign(document.createElement('li'), { textContent: r.text + ' \xB7 ' + r.by })))
+  list.replaceChildren(...rows.map(r => {
+    const li = document.createElement('li')
+    li.textContent = r.text + ' \xB7 ' + r.by
+    return li
+  }))
 }
-document.getElementById('add').addEventListener('submit', async e => {
+
+form.addEventListener('submit', async e => {
   e.preventDefault()
-  await slop.actions.add({ text: e.target.text.value })
-  e.target.reset()
+  if (!slop) return
+  const input = form.elements.namedItem('text') as HTMLInputElement
+  await slop.actions.add({ text: input.value })
+  form.reset()
   await show()
 })
-await show()`),
+await show()
+`,
         "styles.css": STYLES,
         "README.md": `# ${esc(title)}
 
-A slop app with an actor: \`index.html\` calls the actions in \`actor.js\`,
-which keeps rows in SQL (\`sql/001_items.sql\`).
+A slop app with an actor: the page (\`index.html\`, \`main.ts\`) calls the
+actions in \`actor.ts\`, which keeps rows in SQL (\`sql/001_items.sql\`).
+\`api.ts\` is their contract: the actor implements it
+(\`satisfies ActorOf<Actions>\`), and the page calls it
+(\`claude.use<Actions>('slop')\`).
+
+${TYPES}, and \`tsc -p tsconfig.actor.json\` the actor.
 
 Edits in the bench go to the \`draft\` ref and your dev instance runs them;
 publishing moves \`main\`, which production instances run (their migrations
@@ -3591,12 +3650,15 @@ Subagents. delegate(role, task, { output, evals, proposal }) runs another Claude
     return `How this app runs (the app store "${P.app}" on a slop server):
 - Workspaces. draft is where the app is developed; main is what people use, and only the person publishes it. A proposal (proposal/<id>) is a copy of draft the person reviews and accepts onto draft (or rejects). session.workspace() says where your writes go.
 - Instances run the app on data of their own. The canvas frames show the person's dev instance, which follows draft (a proposal is shown on their prop instance); scenarios run on their test instance, reset and seeded per run. Production instances follow main.
-- app.json is the manifest: { "title", "page": "${Instances.entry(P)}" (the entry page), "actor": "actor.js"?, "capabilities": { "db": {}, "user": {}, \u2026 }, "type"? }. Read it first, and README.md.
-- Only the entry page gets the runtime; other .html files are served as plain files. Build one page and navigate inside it (hash routes: location.hash).
-- Pages use window.claude: const db = await window.claude.use('db'), then db.doc('notes/a').set({\u2026}), (await db.doc('notes/a').get()).data(), (await db.collection('notes').get()).docs, db.collection('notes').add({\u2026}), onSnapshot(\u2026). const slop = await window.claude.use('slop'); await slop.actions.<name>(args) calls the actor. Capabilities the manifest does not declare are null.
-- actor.js: defineActor({ actions: { name: { requires: 'view' | 'interact' | 'admin', async run(ctx, args) { \u2026 } } }, setup(ctx) { \u2026 } }). ctx.visitor is {id, name, level}. use('sql') runs SQL on the instance's own tables, synchronously, each argument a separate parameter (never an array): sql.all(query, ...args) -> rows, sql.one(query, ...args) -> row or null, sql.run(query, ...args).
+- app.json is the manifest: { "title", "page": "${Instances.entry(P)}" (the entry page), "actor": "actor.ts"?, "capabilities": { "db": {}, "user": {}, \u2026 }, "type"? }. Read it first, and README.md.
+- Write TypeScript (.ts; .tsx for JSX): the server compiles it when it serves a page or loads the actor. It strips the types and does not check them, so write them with care: the person checks them with slop types and tsc. Apps written in .js keep working; do not convert one unless asked.
+- Imports name the file with its extension: import { fmt } from './lib/fmt.ts', import type { Actions } from './api.ts'. There is no npm and no node_modules: a package is available only when the person has vendored it (vendor/, named in app.json's slop.imports). If a package would help, ask the person to add it with slop vendor; never copy a package's code into the app.
+- Only the entry page gets the runtime; other .html files are served as plain files. Build one page and navigate inside it (hash routes: location.hash). Its script is a file: <script type="module" src="main.ts"><\/script>.
+- Pages use claude (window.claude): const db = await claude.use('db'), then db.doc('notes/a').set({\u2026}), (await db.doc('notes/a').get()).data(), (await db.collection('notes').get()).docs, db.collection('notes').add({\u2026}), onSnapshot(\u2026). Capabilities the manifest does not declare are null: check before use.
+- The contract: api.ts holds the types the page and the actor share (types only, imported with import type): export interface Actions { add(args: { text: string }): { id: number } }. The actor implements it: defineActor({ \u2026 } satisfies ActorOf<Actions>); the page calls it: const slop = await claude.use<Actions>('slop'); await slop.actions.add({ text }). Results arrive as JSON (a Date becomes a string). Change api.ts first when an action changes, then both sides.
+- actor.ts: defineActor({ actions: { name: { requires: 'view' | 'interact' | 'admin', async run(ctx, args) { \u2026 } } }, setup(ctx) { \u2026 } }). ctx.visitor is {id, name, level}. use('sql') runs SQL on the instance's own tables, synchronously, each argument a separate parameter (never an array): sql.all(query, ...args) -> rows, sql.one(query, ...args) -> row or null, sql.run(query, ...args). Files only the actor uses go under server/.
 - sql/NNN_name.sql are migrations, applied once per instance, in order. Never edit one that has run; add a new file. app.reset() gives you a fresh dev instance when you must.
-- After writing actor.js or a migration, look at effects.instances and effects.actorLogs (or app.logs()) before going on.
+- After writing the actor or a migration, look at effects.instances and effects.actorLogs (or app.logs()) before going on.
 Markdown files (README.md, notes, specs) render in the Docs panel. Keep README.md current when you change pages, the actor or migrations.`;
   }
   var RULES = `Working rules:
