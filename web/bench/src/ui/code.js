@@ -185,7 +185,7 @@ export const CODE = {
       if (!keepSnap && S.snap) S.snap = null
       if (!S.tabs.includes(path)) S.tabs.push(path)
       const same = S.cur === path
-      S.cur = path; S.bkey = ''; S.bdata = null; cv.classList.remove('showfiles')
+      S.cur = path; S.bkey = ''; S.bdata = null // the list, once shown, stays until Files hides it (it closed on every switch: round 4)
       paintTabs(); paintList(); load(same)
       if (!same) loadVersions()
       if (line) goto(line)

@@ -1,4 +1,4 @@
-/* the bench, built from web/bench: do not edit. source sha256:2e5e7f97362158adc32e39064c35726beec7375be485f334c76d4fb7dd318aed */
+/* the bench, built from web/bench: do not edit. source sha256:4c4fa6a8956823062974e83a8c8bd7c2d8a09f51968f7531d49ad6c4ee3c921b */
 // The bench: a live dev environment for slop apps. Built from web/bench/src.
 (() => {
   // src/lib/util.js
@@ -8216,7 +8216,6 @@ Markdown files (README.md, notes, specs) render in the Docs panel. Keep README.m
         S.cur = path;
         S.bkey = "";
         S.bdata = null;
-        cv.classList.remove("showfiles");
         paintTabs();
         paintList();
         load(same);
