@@ -96,8 +96,11 @@ func (c *Client) sendMissing(store string, err error, data map[string][]byte) (b
 	return true, flush()
 }
 
-// Push replaces a store's tree with a folder and snapshots it. Only the
-// blobs the server lacks are sent.
+// Push replaces the tree of a store's ref (args["ref"], default main) with
+// a folder and snapshots it (files.push). Only the blobs the server lacks
+// are sent. Without args["ifAt"], the ref is read first and the push
+// applies only if it is still there: a write that lands in between is
+// answered with conflict, not overwritten.
 func (c *Client) Push(store, dir string, args map[string]any) (any, error) {
 	files, data, err := ReadDir(dir)
 	if err != nil {
@@ -105,6 +108,12 @@ func (c *Client) Push(store, dir string, args map[string]any) (any, error) {
 	}
 	if args == nil {
 		args = map[string]any{}
+	}
+	if _, ok := args["ifAt"]; !ok {
+		ref, _ := args["ref"].(string)
+		if args["ifAt"], err = c.RefAt(store, ref); err != nil {
+			return nil, err
+		}
 	}
 	args["store"], args["files"] = store, files
 	res, err := c.Call("files.push", args)
@@ -115,6 +124,21 @@ func (c *Client) Push(store, dir string, args map[string]any) (any, error) {
 		return c.Call("files.push", args)
 	}
 	return res, err
+}
+
+// RefAt is the snapshot a store's ref (default main) points at, 0 when the
+// ref does not exist: the ifAt of a push or ref move made from what is
+// there now.
+func (c *Client) RefAt(store, ref string) (int64, error) {
+	if ref == "" {
+		ref = "main"
+	}
+	res, err := c.Call("ref.ls", map[string]any{"store": store})
+	if err != nil {
+		return 0, err
+	}
+	refs, _ := res.(map[string]any)
+	return toInt(refs[ref]), nil
 }
 
 // Pull writes a store's tree (at a snapshot or ref, or the working tree)

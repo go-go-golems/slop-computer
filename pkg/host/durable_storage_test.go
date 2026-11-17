@@ -103,7 +103,7 @@ func TestDurableStorage(t *testing.T) {
 	h := newHarness(t)
 	admin := h.tokenFor("admin@example.com", "read", "write", "admin")
 	h.call(admin, "store.new", map[string]any{"id": "obj"})
-	h.call(admin, "files.push", map[string]any{"store": "obj", "files": files(map[string]string{
+	h.push(admin, map[string]any{"store": "obj", "files": files(map[string]string{
 		"app.json":      `{"title":"Obj","actor":"actor.js","capabilities":{"db":{}}}`,
 		"actor.js":      storageActor,
 		"index.html":    "<!doctype html><title>o</title>",

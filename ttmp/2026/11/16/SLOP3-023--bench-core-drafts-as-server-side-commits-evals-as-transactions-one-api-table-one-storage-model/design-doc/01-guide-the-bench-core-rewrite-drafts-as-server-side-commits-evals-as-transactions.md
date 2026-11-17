@@ -12,14 +12,16 @@ DocType: design-doc
 Intent: long-term
 Owners: []
 RelatedFiles:
-    - Path: web/bench/src/03b-slop.js
-      Note: Sync, Outside, Embeds, Publish — the client-side replication this design removes
-    - Path: web/bench/src/04-project.js
-      Note: Project model (files, overlays, tables, timeline) and app-project bookkeeping (tree, synced, extern)
-    - Path: web/bench/src/06-agent.js
-      Note: host API, runEval (the eval transaction), Agent.turn and delegate
+    - Path: web/bench/src/core/draft.js
+      Note: Draft and Tx — an app ref's files as the server has them, changed by files.commit (replaced 03b-slop.js's Sync and Outside)
+    - Path: web/bench/src/core/api.js
+      Note: the host API as one declared table and the one dispatcher (replaced 06-agent.js's API_SIGS, checkArgs and hand-placed guards)
+    - Path: web/bench/src/agent/eval.js
+      Note: runEval — one eval as one Tx (replaced 06-agent.js's rollback)
+    - Path: web/bench/src/model/project.js
+      Note: the project on Drafts, proposals as refs, threads and the timeline from the actor (replaced 04-project.js)
     - Path: apps/bench/actor.js
-      Note: the bench's server half; sync/head/preflight/publish actions
+      Note: the bench's server half; commit, instances by kind, proposals as refs, project storage in SQL
     - Path: pkg/commands/files.go
       Note: files.push (manifest push with ifAt) and ref.move — the server verbs underneath
     - Path: pkg/store/files.go
@@ -32,6 +34,14 @@ WhenToUse: "Before changing how the bench stores, syncs or commits anything; bef
 ---
 
 # Guide: the bench core rewrite — drafts as server-side commits, evals as transactions
+
+> **Status (2026-11-16): implemented** on branch `task/slop3-023-core`. The diary is `reference/01-diary.md` (steps 1–9) and the server half's is `reference/02-diary-server-phase-files-commit.md`. Remaining: a scripted smoke test, and a run on staging. The code departs from this design in four places:
+> - The Draft core is `web/bench/src/core/draft.js`, not `03c-draft.js`. Section 6's layout replaced the numbered files.
+> - API entries have no `needs: 'app'`, since every project is an app now.
+> - API entries have no `dry: 'refuse'` flag. A dry run refuses every entry whose `writes` is not `files`, which follows from what a dry run can capture.
+> - Threads stayed in `model/project.js`; there is no `model/threads.js`.
+>
+> The examples below that show `needs` or `dry` describe the design as first written.
 
 This guide is for an engineer who is new to slop and to the bench. It explains what the bench is, how it works today, why most of the bugs found in its code reviews come from one design decision, and how we will replace that decision. It ends with a phased implementation plan and the tests that should hold the new design in place.
 
@@ -55,7 +65,7 @@ The rewrite removes the replica:
 - **The calls the agent can make are declared once,** in one table that drives validation, permissions, timeouts and the agent's own documentation.
 - **Everything the bench stores about a project** (conversations, timeline, proposals) lives in server-side tables and refs, not in size-limited browser documents.
 
-The rest of this guide builds up to that in order: the slop concepts (section 2), the bench as it is (section 3), the evidence (section 4), the design (section 5), the plan (section 6) and the tests (section 7).
+The rest of this guide builds up to that in order: the slop concepts (section 2), the bench as it is (section 3), the evidence (section 4), the design (section 5), how the source is organized (section 6), the plan (section 7) and the tests (section 8).
 
 ## 2. Slop concepts you need
 
@@ -441,7 +451,7 @@ Two smaller server additions:
 
 ### 5.2 Browser: the Draft core
 
-All of the app-file logic moves into one module, `web/bench/src/03c-draft.js`. Its server calls go through an injected `call(name, args)` function, so it can run under Node in tests (section 7). It has three parts.
+All of the app-file logic moves into one module, `web/bench/src/core/draft.js`. Its server calls go through an injected `call(name, args)` function, so it can run under Node in tests (section 8). It has three parts.
 
 **The snapshot cache.** It maps `n → Map(path → entry)`. An entry is one of three shapes, never spread over parallel maps:
 
@@ -569,7 +579,7 @@ This changes four things:
 - **Rollback is free.** The undo log (`touchFile`, `P.revert`, the saved snapshots) goes away.
 - **In-eval transactions become nested `Tx` objects.** `tx.begin()` inside an eval opens a child transaction, `tx.commit()` folds it, and `tx.rollback()` aborts it.
 - **A dry run is a transaction that is never committed.** `dry.end()` returns its changes; `dry.apply(id, paths)` copies selected changes into the parent; `dry.discard` drops it. `ctx.scratch` and its special cases go away.
-- **Frames show committed state only.** That's already true for app projects today, since frames show the dev instance. What changes is that an eval's own reads see its uncommitted writes through `tx.read`, while its frame checks see draft. An agent that writes and then checks frames in the same eval will check the old version. The API guide says so: write in one eval, check in the next. Section 8 discusses previews of a transaction as a later option.
+- **Frames show committed state only.** That's already true for app projects today, since frames show the dev instance. What changes is that an eval's own reads see its uncommitted writes through `tx.read`, while its frame checks see draft. An agent that writes and then checks frames in the same eval will check the old version. The API guide says so: write in one eval, check in the next. Section 9 discusses previews of a transaction as a later option.
 
 **Table writes.** The dev instance's real data (`app.sql`, `app.seed*`) is not part of the file transaction. Those calls act on the dev instance immediately, as they do today, and are refused inside dry runs (declared in the table below). The mock `tables` of non-app projects go away (section 5.6).
 
@@ -644,7 +654,174 @@ What changes for the timeline:
 
 **What stays in the browser:** `localStorage` for UI preferences (dock layout, theme), and nothing else.
 
-## 6. Implementation plan
+## 6. Restructuring the source: layers, modules, documentation
+
+The design above changes what the bench does. This section changes how its source is organized, so that the next engineer can find, read and change any part of it without first reading all of it. The two go together: most of the review findings in section 4 were possible because any file could reach any state, and the rewrite touches more than half of the files anyway.
+
+### 6.1 What is wrong with the current layout
+
+`web/bench/build.mjs` concatenates `src/NN-*.js` in filename order into one function. Every top-level name in every file is visible to every other file, and nothing records who uses what. Running a dependency count over the files (which top-level names each file uses from the others) shows the shape:
+
+| Observation | Measured | Consequence |
+|---|---|---|
+| `App` (`11-app.js`), the page shell, is used by 13 of the other 19 files | `App.P`, `App.ws`, `App.hostFor`, `App.canvas`, `App.sel` | Any code can ask "what is open now?" at any time. Review findings "Persist eval results to the project that started the run" and "Flush the previous project's edits before detaching it" are exactly this |
+| `06-agent.js` is 972 lines, 98 KB | the sandbox bridge, ~100 host-API functions, `runEval`, the prompt text, Agent turns and delegation | Five concerns that change for different reasons share one file; the host API's rules are spread through it (section 4, group D) |
+| The average line is 80–100 bytes; many are 250–400 | one-line methods with several statements | Hard to read, and hard to review: a diff hunk is one enormous line |
+| Nothing can run outside a browser | every file assumes `document`, `window.claude` and the other globals | The Draft core needed an `eval` with stubbed globals to be tested under Node |
+| No file says what it owns | a one-line banner comment per file | A newcomer reads 7,000 lines to learn where a concept lives |
+
+None of this is a matter of taste. Each row is a way a bug was introduced or a review was made harder.
+
+### 6.2 Principles
+
+1. **Layers, with dependencies in one direction.** The source is split into layers. A module imports only from its own layer or the layers below it. The page shell is at the top, and it is the only module that knows "what is open now".
+2. **One concept per module, named after it.** A module owns one concept (the Draft, the project, the frame host, the eval) and is named after it. It stays under about 400 lines; a module that grows past that is two concepts.
+3. **Explicit imports and exports.** No globals. A module's imports are its complete list of dependencies, and its exports are its public API.
+4. **No ambient state below the shell.** Functions below `ui/` take what they act on as parameters: a project `P`, an eval context `ctx`, a Draft. They never read "the current project".
+5. **Pass capabilities down; never import up.** When a lower layer needs something only the page can do (focus a frame on the canvas, show a toast, open a view), the upper layer passes it in as a function or an object (`ctx.ui.focusFrame(id)`). The lower layer depends on that interface, not on the page.
+6. **Pure core.** `core/` touches no DOM, no `window`, no network. It receives I/O as injected functions (`call`, `hash`), so it runs under Node and is tested there.
+7. **Typed results and errors.** An operation that can end in several ways returns an object with a `status` field (`committed | folded | conflict | failed`), not a flag or a string. Errors carry a `kind` (`invalid`, `policy`, `missing`, `conflict`, …) the caller can branch on.
+8. **Rules as data.** A set of rules that applies to many items lives in one table (the host API's signatures, guards and timeouts; the agent roles; the scenario step kinds). Validation, documentation and UI are derived from the table.
+9. **Code that reads top to bottom.** One statement per line in new and rewritten code; lines under about 120 characters; early returns instead of nested conditions; named intermediate values instead of long expressions. Comments say why, not what.
+10. **Documented where it lives.** Every module starts with a header comment; every folder has a `README.md`; the agent's API reference is generated from the API table.
+
+### 6.3 The layout
+
+```text
+web/bench/
+  build.mjs            bundles src/main.js (esbuild) → apps/bench/app.js;
+                       src/worker/ → apps/bench/sandbox.js; the probe → pkg/doors/pages/assets/probe.js
+  tools/imports.mjs    checks (or --write: rewrites) every module's imports and the layer rules
+  test/                node --test *.test.mjs (core, model); smoke/ drives a real server
+  src/
+    main.js            boot: Slop.init, then App.boot
+    lib/               util.js (ids, time, emitter, debounce, …), dom.js (h, $, modal, toast, menus),
+                       text.js (diffs, highlighting, markdown, YAML)
+    core/              draft.js (Draft, Tx), api.js (defineAPI, signatures, dispatch),
+                       scenario.js (fixture and scenario specs: checks, step labels)
+    server/            slop.js (actor calls, Drafts registry), instances.js (instances, Watch),
+                       publish.js, records.js (Prefs, Records)
+    model/             project.js (Project, Projects), timeline.js (events, versions, blame, why),
+                       threads.js (thread records, message saving), templates.js (new-app templates)
+    frames/            probe.js (runs inside frames), host.js (FrameHost, Headless),
+                       layout.js (layout maps, diffs, Snaps), scenarios.js (fixtures on the test instance, runs)
+    agent/             sandbox.js (the worker bridge), api/*.js (the host API, one file per namespace),
+                       eval.js (runEval, effects), agent.js (turns, delegation, summaries),
+                       roles.js, guide.js (the agent's instructions; the API reference is generated)
+    ui/                app.js (the shell: header, project menu, wiring), dock.js, canvas.js,
+                       code.js, data.js, history.js, threads.js, review.js, panels.js,
+                       scenarios.js, archive.js
+    worker/            worker.js, core.js: the sandbox side, built separately into sandbox.js
+```
+
+The layers and what each may import:
+
+```text
+  main ──▶ ui ──▶ agent ──▶ frames ──▶ model ──▶ server ──▶ core ──▶ lib
+                                                                      ▲
+  every layer may import lib; nothing imports main or ui except main ─┘
+```
+
+| Layer | Owns | May use the DOM | Tested |
+|---|---|---|---|
+| `lib/` | helpers with no bench concepts | `dom.js`, `text.js` only | by use |
+| `core/` | the Draft and transactions; the API table machinery; spec checks | no | Node (`test/*.test.mjs`) |
+| `server/` | everything that calls the bench actor | no | Node, with a fake actor |
+| `model/` | the project and what the bench records about it | no | Node, with a fake actor |
+| `frames/` | iframes of instances, the probe, layouts, scenario runs | yes | browser smoke |
+| `agent/` | the sandbox, the host API, evals, the agent | yes (approval cards, through `ctx.ui`) | browser smoke; the API table in Node |
+| `ui/` | views, the dock, the canvas, the shell | yes | browser smoke |
+
+`tools/imports.mjs` enforces the table: a module that imports from a higher layer fails the check, and so does a name that resolves to nothing (a `ReferenceError` waiting to happen). `build.mjs` runs the check before it bundles.
+
+### 6.4 Anatomy of a module
+
+Every module has the same three parts. Here is `core/draft.js`, shortened:
+
+```js
+// core/draft.js — an app ref's files as the server has them, and transactions
+// that change them (SLOP3-023).
+//
+// Owns: the snapshot cache (listings by n, texts by hash), Tx (a buffer of
+// changes over a base), and the person's live edits.
+// Does not own: where the files are shown (ui/code.js), what a commit means for
+// the timeline (model/timeline.js).
+// Public API: Draft (open, refresh, read, list, begin, edit, settle, …), Tx,
+// textish. Results are typed: {status: committed | folded | conflict | failed}.
+import { emitter } from '../lib/util.js';
+
+export const textish = f => !BINARY_EXT.test(f.path) && f.size <= TEXT_MAX
+
+export class Tx { … }
+export class Draft { … }
+```
+
+1. **The header comment** says what the module is, what it owns, what it deliberately does not own (and where that lives), and its public API in one line.
+2. **The imports** are the module's complete dependencies. They are maintained by `node tools/imports.mjs --write`, which also sorts them, so they are never stale.
+3. **The body** exports only what other modules use. A helper used by one module stays unexported in it.
+
+### 6.5 How the shell hands state down
+
+The shell (`ui/app.js`) holds the open project and the selection. Everything below it gets them as arguments. Two examples show the pattern.
+
+An eval context carries the project, the transaction and a small `ui` interface the shell implements:
+
+```js
+// ui/app.js builds it; agent/ only ever reads ctx
+const ctx = {
+  project: P, draft: P.draftOf(ws), tx, who: 'agent', thread: th.id, mode: th.mode,
+  ui: {                                   // what only the page can do
+    hostFor: fid => App.canvas.hostFor(fid),
+    focusFrame: fid => App.canvas.focusFrame(fid),
+    openView: name => Dock.open(name),
+    selection: () => App.sel,
+    notify: text => toast(text),
+  },
+}
+```
+
+A view receives its project when it is shown, instead of reading `App.P` whenever it repaints:
+
+```js
+// ui/history.js
+export function historyView({ project, onOpenFile }) { … }   // the shell passes both
+```
+
+The rule that makes this work: below `ui/`, `App` is never named. The import check makes a slip visible immediately.
+
+### 6.6 Documentation
+
+- **Module headers** (section 6.4) are the first thing to read in a file.
+- **One `README.md` per folder** says what the layer is for, lists its modules with one line each, and states the layer's rules (for example `core/README.md`: "no DOM, no network; I/O is injected; every module has a test").
+- **`web/bench/README.md`** is the map: the layers diagram, how to build, how to test, where to start reading.
+- **The agent's API reference is generated** from the host-API table: each entry's `sig` and `doc` become a line of the prompt and of the API panel in the Eval view, so the reference cannot drift from the code.
+- **This guide** describes the design and links to the folders; it does not repeat what the READMEs say.
+
+### 6.7 Tooling
+
+| Command | What it does |
+|---|---|
+| `node tools/imports.mjs` | checks every module's imports against what it uses, and the layer rules; exits 1 on a difference |
+| `node tools/imports.mjs --write` | rewrites the import lines to exactly what each module uses |
+| `node --test test/` | the Node tests (core and model) |
+| `node build.mjs` (or `make bench`) | runs the import check, bundles with esbuild, writes the probe |
+| `go test ./pkg/host -run Bench` | the bench actor against a real server, and that the committed build is fresh |
+
+### 6.8 How we get there
+
+The restructuring happens in the same branch as the rewrite, layer by layer from the bottom, so each layer is in its final form before anything is built on it:
+
+1. `lib/`: split `01-util.js` into `util.js`, `dom.js` and `text.js` (moved, with exports).
+2. `core/`: `draft.js` (written, tested), then `api.js` and `scenario.js`.
+3. `server/` and `model/`: written new for the design (sections 5.2 and 5.6).
+4. `frames/`: the frame host loses the in-browser page builder (frames always show an instance); the probe and layout code move with exports.
+5. `agent/`: `06-agent.js` split into the sandbox bridge, the API table by namespace, the eval, the agent and its roles, and the prompt.
+6. `ui/`: the views move and take their project as a parameter; the shell is the last module written.
+7. `README.md` files, the generated API reference, and the old `NN-*.js` files deleted.
+
+Code moved without a behavior change keeps its form, and gets the line-length and one-statement rules when it is next changed for a reason. Rewritten code follows every rule from the start.
+
+## 7. Implementation plan
 
 Four phases, each one PR. Each phase leaves the bench working. We may wipe the bench's stored projects and threads at any phase (the bench reached staging on 2026-11-16, with no real users). App stores, which hold the actual apps, are never touched.
 
@@ -674,7 +851,7 @@ Four phases, each one PR. Each phase leaves the bench working. We may wipe the b
 ### Phase 2: the Draft core and the switch-over
 
 **Code:**
-- `web/bench/src/03c-draft.js`: `Draft`, `Tx`, the snapshot cache, `toWire`.
+- `web/bench/src/core/draft.js`: `Draft`, `Tx`, the snapshot cache, `toWire`.
 - `runEval` on transactions (section 5.4); `tx.*` and `dry.*` remapped to nested transactions.
 - `Agent.delegate` passes `parentTx`.
 - The code view commits through a per-file `Tx`.
@@ -687,7 +864,7 @@ Four phases, each one PR. Each phase leaves the bench working. We may wipe the b
 - `P.revert` for app files, `touchFile` and `ctx.scratch`;
 - the actor's `sync` and `head` merge answers.
 
-**Tests:** the Node property test (section 7.2), plus a browser smoke test through `window.__SB`:
+**Tests:** the Node property test (section 8.2), plus a browser smoke test through `window.__SB`:
 - an eval commits and its frames reload;
 - a failed eval writes nothing;
 - delegation folds;
@@ -734,13 +911,13 @@ Four phases, each one PR. Each phase leaves the bench working. We may wipe the b
 
 **Done when:** a project's whole history survives a reload and a second browser.
 
-## 7. Testing strategy
+## 8. Testing strategy
 
-### 7.1 Server
+### 8.1 Server
 
 `files.commit` is the one place concurrency is decided, so its tests carry the design. Write them beside the existing push tests (`pkg/host/devloop_test.go`) and the snapshot tests (`TestFilesAndSnapshots`, `pkg/store/store_test.go`). For the concurrency test, start two goroutines committing against the same `base`. They are serialized by `Store.Do`, so assert that both land when their paths are disjoint, and that exactly one lands when they share a path.
 
-### 7.2 The Draft core under Node
+### 8.2 The Draft core under Node
 
 The Draft core is pure once `call` is injected. A fake server implements `commit`, `files` and `head` with the same rules as section 5.1, in memory, with random delays. A property test then runs random programs:
 
@@ -761,11 +938,11 @@ The invariants checked after every step:
 
 These four invariants cover every finding in group A. Under today's design they could not be written down, because no state records "committed".
 
-### 7.3 In the browser
+### 8.3 In the browser
 
 Keep a short smoke script that drives the real bench through `window.__SB` on a local server (`make run-local`), as SLOP3-022 did. Its one end-to-end case: create an app, run an eval that writes two files, check `effects.draft` and that the dev frame shows the change, run a failing eval and check that nothing changed, then publish.
 
-## 8. Decisions and open questions
+## 9. Decisions and open questions
 
 These need a decision before or during implementation:
 
@@ -775,9 +952,9 @@ These need a decision before or during implementation:
 - **Several developers on one app.** `draft` is one ref per app. With per-file merge, two developers committing to it is safe, but they see each other's work as soon as it commits. Per-developer refs (`draft/<user>`) are possible later. This design does not prevent them.
 - **The event stream.** Polling `head` is enough for phase 2. A stream needs a server-sent-events channel from the page door. That decision belongs with the temporary dev link work (SLOP3-022 `hm4w`), which wants the same "ref moved" notification.
 
-## 9. Reference
+## 10. Reference
 
-### 9.1 APIs
+### 10.1 APIs
 
 | Name | Where | Today | After |
 |---|---|---|---|
@@ -787,14 +964,14 @@ These need a decision before or during implementation:
 | `workshop.*` | `pkg/doors/actors/modworkshop.go:17` | `push`, `files`, `read`, `publish`, … | adds `commit` |
 | bench actor `sync`, `head` | `apps/bench/actor.js:118`, `:148` | push manifest, merge answers | removed; `commit` and a plain `head` |
 | `Sync`, `Outside` | `web/bench/src/03b-slop.js:55`, `:170` | replica and merge | removed |
-| `Draft`, `Tx` | new, `web/bench/src/03c-draft.js` | — | section 5.2 |
+| `Draft`, `Tx` | new, `web/bench/src/core/draft.js` | — | section 5.2 |
 | `runEval` | `web/bench/src/06-agent.js:476` | undo log, holds, flush | section 5.4 |
 | `hostAPI`, `API_SIGS`, `LONG_CALLS` | `web/bench/src/06-agent.js:117`, `:75`, `:73` | spread out | one table (section 5.5) |
 | worker `LONG` | `web/bench/src/worker.js:242` | separate list | sent by the page |
 | `Store` | `web/bench/src/03-store.js:3` | project data in documents | preferences only |
 | timeline storage | `web/bench/src/04-project.js:1-34`, `:255` | chunks and pieces | actor SQL `events` |
 
-### 9.2 Files to read first
+### 10.2 Files to read first
 
 1. `pkg/store/files.go` (snapshots, refs, the tree) and `pkg/store/turn.go` (`Do`).
 2. `pkg/commands/files.go`: `push` (`:334`) and `ref.move` (`:227`).
@@ -812,7 +989,7 @@ GOWORK=off go test -tags sqlite_fts5 ./pkg/store ./pkg/host \
 
 Then start a local server (`make run-local`, a development server on `*.localhost:18300`), run `make deploy-apps` against it, open `/bench`, and watch `Sync`'s state in the console through `window.__SB.Sync` while you edit a file. Seeing the four maps change is the fastest way to understand why we are removing them.
 
-### 9.3 Related tickets
+### 10.3 Related tickets
 
 - SLOP3-022: the bench (phases 0–5). Its diary steps 14–28 record the review rounds summarized in section 4. Its tasks hold the follow-ups this design enables: the temporary dev link (`hm4w`), first-publish URLs (`ltcr`), agent screenshots of frames (`6q5p`) and the 10-round cap (`28ip`).
 - SLOP3-009: the typed verb table on the server, the model for section 5.5.

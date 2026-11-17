@@ -45,7 +45,7 @@ func TestBridgedModules(t *testing.T) {
 	h := newHarness(t)
 	admin := h.tokenFor("admin@example.com", "read", "write", "admin")
 	h.call(admin, "store.new", map[string]any{"id": "br"})
-	h.call(admin, "files.push", map[string]any{"store": "br", "files": files(map[string]string{
+	h.push(admin, map[string]any{"store": "br", "files": files(map[string]string{
 		"app.json": `{"title":"Bridged","actor":"actor.js"}`,
 		"actor.js": bridgedActor,
 	})})

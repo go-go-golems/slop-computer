@@ -41,7 +41,7 @@ func TestActorRuntimeGuarantees(t *testing.T) {
 	h := newHarness(t)
 	admin := h.tokenFor("admin@example.com", "read", "write", "admin")
 	h.call(admin, "store.new", map[string]any{"id": "rt"})
-	h.call(admin, "files.push", map[string]any{"store": "rt", "files": files(map[string]string{
+	h.push(admin, map[string]any{"store": "rt", "files": files(map[string]string{
 		"app.json": `{"title":"Runtime","actor":"actor.js"}`,
 		"actor.js": runtimeActor,
 	})})
@@ -135,7 +135,7 @@ func TestEngineModulePostIsATurn(t *testing.T) {
 	}})
 	admin := h.tokenFor("admin@example.com", "read", "write", "admin")
 	h.call(admin, "store.new", map[string]any{"id": "post"})
-	h.call(admin, "files.push", map[string]any{"store": "post", "files": files(map[string]string{
+	h.push(admin, map[string]any{"store": "post", "files": files(map[string]string{
 		"app.json": `{"title":"Post","actor":"actor.js","capabilities":{"db":{}}}`,
 		"actor.js": postActor,
 	})})
@@ -191,7 +191,7 @@ func TestActorCrashPath(t *testing.T) {
 
 	// A panic in setup fails the activation and leaves no version.
 	h.call(admin, "store.new", map[string]any{"id": "setupboom"})
-	h.call(admin, "files.push", map[string]any{"store": "setupboom", "files": files(map[string]string{
+	h.push(admin, map[string]any{"store": "setupboom", "files": files(map[string]string{
 		"app.json": `{"title":"Boom","actor":"actor.js"}`,
 		"actor.js": `defineActor({ setup() { use('boom').now(); } });`,
 	})})
@@ -202,7 +202,7 @@ func TestActorCrashPath(t *testing.T) {
 
 	// Turns: a panic, then endless loops; three crashes break it.
 	h.call(admin, "store.new", map[string]any{"id": "crash"})
-	h.call(admin, "files.push", map[string]any{"store": "crash", "files": files(map[string]string{
+	h.push(admin, map[string]any{"store": "crash", "files": files(map[string]string{
 		"app.json": `{"title":"Crash","actor":"actor.js"}`,
 		"actor.js": `defineActor({ actions: { boom() { use('boom').now(); }, spin() { for (;;) {} }, ok() { return 1; } } });`,
 	})})

@@ -119,7 +119,7 @@ func TestShareLinks(t *testing.T) {
 	admin := h.tokenFor("admin@example.com", "read", "write", "admin")
 	live := h.cfg.Hosts.Live[0]
 	h.call(admin, "store.new", map[string]any{"id": "notes"})
-	h.call(admin, "files.push", map[string]any{"store": "notes", "files": files(map[string]string{
+	h.push(admin, map[string]any{"store": "notes", "files": files(map[string]string{
 		"app.json": `{"title":"Notes","capabilities":{"db":{}}}`, "index.html": "<!doctype html><title>n</title>"})})
 	h.call(admin, "mount.set", map[string]any{"host": live, "path": "/notes", "store": "notes"})
 
@@ -209,7 +209,7 @@ func TestGuestClaim(t *testing.T) {
 	live := h.cfg.Hosts.Live[0]
 	for _, id := range []string{"pad", "club"} {
 		h.call(admin, "store.new", map[string]any{"id": id})
-		h.call(admin, "files.push", map[string]any{"store": id, "files": files(map[string]string{
+		h.push(admin, map[string]any{"store": id, "files": files(map[string]string{
 			"app.json": `{"title":"` + id + `","capabilities":{"db":{}}}`, "index.html": "<!doctype html><title>x</title>"})})
 		h.call(admin, "mount.set", map[string]any{"host": live, "path": "/" + id, "store": id})
 	}
@@ -274,7 +274,7 @@ func TestGuestLimitAndSweep(t *testing.T) {
 	admin := h.tokenFor("admin@example.com", "read", "write", "admin")
 	live := h.cfg.Hosts.Live[0]
 	h.call(admin, "store.new", map[string]any{"id": "open"})
-	h.call(admin, "files.push", map[string]any{"store": "open", "files": files(map[string]string{
+	h.push(admin, map[string]any{"store": "open", "files": files(map[string]string{
 		"app.json": `{"title":"Open","capabilities":{"db":{}}}`, "index.html": "<!doctype html><title>o</title>"})})
 	h.call(admin, "grant.set", map[string]any{"store": "open", "subject": "@guest", "level": "interact"})
 	h.call(admin, "mount.set", map[string]any{"host": live, "path": "/open", "store": "open"})
@@ -487,7 +487,7 @@ func TestGuestSessionsLastWhileUsed(t *testing.T) {
 	admin := h.tokenFor("admin@example.com", "read", "write", "admin")
 	live := h.cfg.Hosts.Live[0]
 	h.call(admin, "store.new", map[string]any{"id": "open"})
-	h.call(admin, "files.push", map[string]any{"store": "open", "files": files(map[string]string{
+	h.push(admin, map[string]any{"store": "open", "files": files(map[string]string{
 		"app.json": `{"title":"Open","capabilities":{"db":{}}}`, "index.html": "<!doctype html><title>o</title>"})})
 	h.call(admin, "grant.set", map[string]any{"store": "open", "subject": "@guest", "level": "interact"})
 	h.call(admin, "mount.set", map[string]any{"host": live, "path": "/open", "store": "open"})

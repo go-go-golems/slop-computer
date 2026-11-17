@@ -76,11 +76,13 @@ defineActor({
       },
     },
 
-    // Push files onto snapshot n: put adds or replaces files ({path, text}
+    // Change files of snapshot n: put adds or replaces files ({path, text}
     // or {path, data} in base64), remove deletes paths, replace makes put
-    // the whole tree (a folder push). The rest of the tree is kept by hash.
-    // The result is a new snapshot on draft; main, which visitors see, does
-    // not move until someone publishes.
+    // the whole tree (a folder push). The result is a new snapshot on
+    // draft; main, which visitors see, does not move until someone
+    // publishes. Puts and removes are a commit over n: when draft moved
+    // since, they apply over it, unless it changed the same files
+    // (conflict). A replace is made over draft as it is now.
     push: {
       requires: 'admin',
       async run(ctx, { store, n, put, remove, replace, message }) {
@@ -93,13 +95,16 @@ defineActor({
         const files = (Array.isArray(put) ? put : []).map((f) => (f.data != null
           ? { path: clean(f.path), data: String(f.data) }
           : { path: clean(f.path), text: String(f.text == null ? '' : f.text) }));
-        const gone = new Set([...(Array.isArray(remove) ? remove : []).map(clean), ...files.map((f) => f.path)]);
-        const kept = replace ? [] : (await w.files(store, String(n)))
-          .filter((f) => !gone.has(f.path))
-          .map((f) => ({ path: f.path, sha256: f.sha256, size: f.size, type: f.type }));
-        if (!files.length && !(Array.isArray(remove) && remove.length)) ctx.fail('invalid_argument', 'nothing to push');
-        const what = replace ? 'a folder' : [...files.map((f) => f.path), ...(remove || []).map((p) => '−' + p)].slice(0, 4).join(', ');
-        return await w.push(store, [...kept, ...files], { message: text(message, 200) || `${what} (onto #${n})` });
+        const putting = new Set(files.map((f) => f.path));
+        const gone = [...new Set((Array.isArray(remove) ? remove : []).map(clean))].filter((p) => !putting.has(p));
+        if (!files.length && !gone.length) ctx.fail('invalid_argument', 'nothing to push');
+        if (replace) {
+          const refs = await w.refs(store);
+          return await w.push(store, files, { ifAt: refs.draft ?? 0, message: text(message, 200) || `a folder (onto #${n})` });
+        }
+        const what = [...files.map((f) => f.path), ...gone.map((p) => '−' + p)].slice(0, 4).join(', ');
+        const changes = [...files, ...gone.map((path) => ({ path, delete: true }))];
+        return await w.commit(store, changes, { base: Number(n) || 0, message: text(message, 200) || `${what} (onto #${n})` });
       },
     },
 
@@ -146,7 +151,9 @@ defineActor({
     publish: {
       requires: 'admin',
       async run(ctx, { store, n }) {
-        const out = await tool(ctx).publish(store, Number(n));
+        const w = tool(ctx);
+        const refs = await w.refs(store);
+        const out = await w.publish(store, Number(n), { ifAt: refs.main ?? 0 });
         for (const d of db.collection('threads').where('store', '==', store).get().docs) {
           const t = d.data();
           if (t.status !== 'open') continue;

@@ -29,7 +29,7 @@ func TestAppCodeOpensNoFiles(t *testing.T) {
 	h := newHarness(t)
 	admin := h.tokenFor("admin@example.com", "read", "write", "admin")
 	h.call(admin, "store.new", map[string]any{"id": "maps"})
-	h.call(admin, "files.push", map[string]any{"store": "maps", "files": files(map[string]string{
+	h.push(admin, map[string]any{"store": "maps", "files": files(map[string]string{
 		"app.json": `{"title":"Maps","actor":"actor.js","type":"maps"}`,
 		"actor.js": "const lib = require('./lib.js'); defineActor({ actions: { entry() { return new Error('x').stack }, required() { return lib.where() }, viaEval() { return eval(" + byFile + ") } } })\n" + url + "\n",
 		"lib.js":   "exports.where = () => new Error('x').stack\n" + url + "\n",

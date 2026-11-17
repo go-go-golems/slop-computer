@@ -3,10 +3,10 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>Sitebench</title>
+<title>Bench</title>
 <style>
-/* Sitebench: the Form Skate workbench look (Kiln's Swiss rules: white ground, #1a1a1a ink, Arial in two weights,
-   1 px rules, red only for trouble and selection) wrapped around a shop-next style canvas of live frames. */
+/* The bench: the Form Skate workbench look (Kiln's Swiss rules: white ground, #1a1a1a ink, Arial in two weights,
+   1 px rules, red only for trouble and selection) around a canvas of live frames of the app's instances. */
 :root {
   --bg: #ffffff; --fill: #f6f6f6; --fill-2: #e6e6e6; --ink: #1a1a1a; --ink-2: #737373;
   --accent: #e2001a; --hair: #d6d6d6; --rule: #ededed; --code-bg: #fbfbfb; --sel: rgba(226, 0, 26, 0.10);
@@ -132,7 +132,6 @@ body.dragging-view iframe, body.resizing-x iframe, body.resizing-y iframe, body.
 .drop-hint.marker { background: var(--accent); border: 0; }
 .drag-ghost { position: fixed; z-index: 61; pointer-events: none; background: var(--ink); color: var(--bg); padding: 4px 10px; font-weight: 700; font-size: var(--fs-s); white-space: nowrap; }
 .drag-ghost small { font-weight: 400; opacity: .75; font-size: var(--fs-xs); }
-.picker { flex: 1; overflow: auto; padding: 20px; display: flex; flex-direction: column; gap: 14px; }
 .pgrid { display: grid; grid-template-columns: repeat(auto-fill, minmax(160px, 1fr)); gap: 8px; }
 .pgrid button { background: none; border: 1px solid var(--hair); text-align: left; padding: 10px 12px; display: flex; flex-direction: column; gap: 3px; border-radius: 0; min-height: 60px; }
 .pgrid button:hover { border-color: var(--ink); }
@@ -156,7 +155,7 @@ body.dragging-view iframe, body.resizing-x iframe, body.resizing-y iframe, body.
 .rows > div, .rows > button { display: flex; gap: 8px; align-items: baseline; padding: 4px 0; border-top: 1px solid var(--rule); background: none; border-left: 0; border-right: 0; border-bottom: 0; width: 100%; text-align: left; }
 .rows > :first-child { border-top: 0; }
 
-/* canvas (shop-next app side) */
+/* canvas */
 .cv { position: relative; flex: 1; min-height: 0; overflow: hidden; background: var(--canvas); background-image: radial-gradient(var(--dot) 1px, transparent 1px); background-size: 20px 20px; touch-action: none; }
 .cv.panning { cursor: grabbing; }
 .world { position: absolute; left: 0; top: 0; transform-origin: 0 0; }
@@ -208,7 +207,6 @@ body.dragging-view iframe, body.resizing-x iframe, body.resizing-y iframe, body.
 .code textarea { background: transparent; color: transparent; caret-color: var(--accent); resize: none; overflow: auto; outline: none; -webkit-text-fill-color: transparent; border-radius: 0; }
 .code textarea::selection { background: var(--sel); -webkit-text-fill-color: transparent; }
 .code textarea[readonly] { caret-color: transparent; }
-.lnhi { background: var(--sel); display: inline-block; min-width: 100%; }
 .tk-k { color: var(--tok-key); font-weight: 700; } .tk-s { color: var(--tok-str); } .tk-n { color: var(--tok-num); }
 .tk-c { color: var(--tok-com); font-style: italic; }
 .y-k { color: var(--a1); } .y-s { color: var(--a3); } .y-n { color: var(--a2); } .y-b { color: var(--a4); font-weight: 700; } .y-p { color: var(--ink-2); } .y-c { color: var(--tok-com); font-style: italic; } .tk-t { color: var(--tok-tag); font-weight: 700; } .tk-a { color: var(--tok-attr); }
@@ -348,7 +346,7 @@ button.tag:hover { border-color: var(--ink); }
 .tcards small { color: var(--ink-2); font-size: var(--fs-xs); }
 #toast { position: fixed; bottom: 18px; left: 50%; transform: translateX(-50%); background: var(--ink); color: var(--bg); padding: 7px 14px; font-size: var(--fs-s); z-index: 90; pointer-events: none; max-width: calc(100% - 32px); }
 .boot { flex: 1; display: grid; place-items: center; color: var(--ink-2); }
-/* fixtures, recording, snapshots, scenarios, data in proposals */
+/* fixtures, recording, snapshots, scenarios */
 .frm > .fh .tag.fx { color: var(--a4); border-color: var(--a4); cursor: pointer; font-size: 10px; padding: 0 4px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; flex: 0 1 auto; min-width: 28px; max-width: 110px; }
 .frm > .fh .meta { overflow: hidden; text-overflow: ellipsis; min-width: 0; flex: 0 1 auto; }
 .recbar { position: absolute; left: 0; right: 0; bottom: 0; display: flex; align-items: center; gap: 8px; padding: 6px 8px; background: var(--bg); border-top: 2px solid var(--accent); font-size: 11.5px; z-index: 3; }
@@ -359,11 +357,6 @@ button.tag:hover { border-color: var(--ink); }
 .snapstrip .snap { background: none; border: 0; padding: 0; display: flex; flex-direction: column; gap: 2px; align-items: flex-start; border-radius: 0; cursor: pointer; }
 .snapstrip .snap:hover > div:first-child { outline: 2px solid var(--a1); }
 .snapstrip .ph { background: var(--canvas); border: 1px solid var(--hair); }
-.tlist .fi.mod::after, .flist .fi.mod::after { content: '●'; color: var(--a1); font-size: 8px; margin-left: auto; }
-table.grid tr.mod td { background: color-mix(in srgb, var(--a1) 9%, transparent); }
-.rowdiff { font: 400 11.5px/1.5 var(--code); padding: 4px 0 6px 22px; }
-.rowdiff .rd { white-space: pre-wrap; word-break: break-word; }
-.rowdiff .add { color: var(--good); } .rowdiff .del { color: var(--accent); } .rowdiff .chg { color: var(--a1); }
 .ovcard .checks { border-top: 1px solid var(--hair); margin-top: 8px; padding-top: 2px; }
 .toolbar.sub { padding: 6px 0; min-height: 0; border: 0; }
 .checks .lyt { padding: 3px 0; }
@@ -448,12 +441,6 @@ table.grid tr.mod td { background: color-mix(in srgb, var(--a1) 9%, transparent)
 .plegend { display: flex; gap: 10px; font-size: var(--fs-xs); color: var(--ink-2); }
 .plegend i { display: inline-block; width: 10px; height: 2px; margin-right: 4px; vertical-align: middle; }
 .plegend i.s1 { background: var(--series-1); } .plegend i.s2 { background: var(--series-2); } .plegend i.s3 { background: var(--series-3); }
-/* playhead */
-.frm.past > .fb { outline-style: dashed; outline-color: var(--a4); }
-.frm.past > .fh .tag.fx { color: var(--a4); border-color: var(--a4); }
-.chip.past { background: var(--a4) !important; color: #000 !important; border-color: var(--a4) !important; }
-.tlsvg .ph-line { stroke: var(--a4); stroke-width: 2; }
-.tlsvg .ph-knob { fill: var(--a4); }
 /* blame */
 .eblame { width: 150px; flex: none; overflow: hidden; border-right: 1px solid var(--hair); position: relative; background: var(--bg); }
 .eblame .bin { padding: 10px 0 40px; font: 400 10.5px/18px var(--sans, system-ui); cursor: pointer; }
@@ -464,7 +451,7 @@ table.grid tr.mod td { background: color-mix(in srgb, var(--a1) 9%, transparent)
 </style>
 </head>
 <body>
-<div id="app"><div class="boot">Loading Sitebench…</div></div>
+<div id="app"><div class="boot">Loading the bench…</div></div>
 <script src="app.js"></script>
 </body>
 </html>

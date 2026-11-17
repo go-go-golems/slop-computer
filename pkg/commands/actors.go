@@ -22,6 +22,9 @@ func actorErr(err error) error {
 	var ae *actor.Error
 	if errors.As(err, &ae) {
 		e := &verbs.Error{Code: ae.Code, Message: ae.Message}
+		if ae.Extra != nil {
+			e.Extra = ae.Extra // an action that rethrows a verb's error keeps its details
+		}
 		if ae.Confirm != "" {
 			e.Message += "; allow it with: slop confirm approve " + ae.Confirm + ", then repeat the call"
 			e.Extra = map[string]any{"confirm": ae.Confirm}

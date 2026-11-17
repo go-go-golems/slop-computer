@@ -67,7 +67,7 @@ func TestBlocksSiteLibs(t *testing.T) {
 		}
 	}
 	h.call(admin, "store.new", map[string]any{"id": "bslibs"})
-	h.call(admin, "files.push", map[string]any{"store": "bslibs", "files": files(m)})
+	h.push(admin, map[string]any{"store": "bslibs", "files": files(m)})
 	h.call(admin, "store.new", map[string]any{"id": "t-site", "app": "bslibs"})
 	h.call(admin, "bind.set", map[string]any{"store": "t-site", "alias": "source", "target": "ws-weft"})
 	h.fail(admin, "actor.call", map[string]any{"store": "t-site", "action": "render", "args": map[string]any{}}, "permission_denied")

@@ -24,19 +24,19 @@ func fmtJSON(v any) string {
 func installBench(t *testing.T, h *harness, admin string) {
 	t.Helper()
 	h.call(admin, "store.new", map[string]any{"id": "bench", "type": "bench"})
-	h.call(admin, "files.push", map[string]any{"store": "bench", "files": appDir(t, "bench")})
+	h.push(admin, map[string]any{"store": "bench", "files": appDir(t, "bench")})
 	if st := h.call(admin, "app.status", map[string]any{"store": "bench"}).(map[string]any); st["broken"] != "" {
 		t.Fatalf("the bench is broken: %v", st)
 	}
 	h.call(admin, "app.trust", map[string]any{"app": "bench", "module": "workshop"})
 }
 
-// Phase 1: the bench lists the app stores the visitor may develop, opens
-// one (its draft starts as main), reads its files, pushes edits to draft
-// (changed files as text, the rest by hash; main never moves; the dev
-// instance, once there is one, comes up on each push), and creates new
-// app stores on draft.
-func TestBenchProjects(t *testing.T) {
+// The bench (SLOP3-022, SLOP3-023): files at snapshot numbers, commits of
+// change lists against a base (merged per file on the server; a conflict
+// comes back as a value and writes nothing), each commit on the person's
+// timeline; the person's instances by kind; proposals as refs; the
+// person's records in the bench's SQL.
+func TestBenchFiles(t *testing.T) {
 	h := newHarness(t)
 	admin := h.tokenFor("admin@example.com", "read", "write", "admin")
 	installBench(t, h, admin)
@@ -49,15 +49,13 @@ func TestBenchProjects(t *testing.T) {
 	png, _ := base64.StdEncoding.DecodeString(onePNG)
 	sum := sha256.Sum256(png)
 	pngSum := hex.EncodeToString(sum[:])
-	h.call(admin, "files.push", map[string]any{"store": "jot", "files": append(files(app), map[string]any{"path": "logo.png", "sha256": pngSum, "size": len(png)}),
+	h.push(admin, map[string]any{"store": "jot", "files": append(files(app), map[string]any{"path": "logo.png", "sha256": pngSum, "size": len(png)}),
 		"blobs": map[string]any{pngSum: onePNG}})
-	app["logo.png"] = "" // in the tree; pushed back by hash
 
 	// apps: jot is there, the bench and instances are not.
 	h.call(admin, "store.new", map[string]any{"id": "jot-prod", "app": "jot", "type": "jot"})
-	apps := h.call(admin, "actor.call", map[string]any{"store": "bench", "action": "apps", "args": map[string]any{}}).([]any)
 	var jot map[string]any
-	for _, a := range apps {
+	for _, a := range h.call(admin, "actor.call", map[string]any{"store": "bench", "action": "apps", "args": map[string]any{}}).([]any) {
 		m := a.(map[string]any)
 		if m["id"] == "bench" || m["id"] == "jot-prod" {
 			t.Fatalf("apps lists %v", m["id"])
@@ -66,152 +64,106 @@ func TestBenchProjects(t *testing.T) {
 			jot = m
 		}
 	}
-	if jot == nil || jot["refs"].(map[string]any)["main"] == nil || len(jot["instances"].([]any)) != 1 || jot["dev"] != "" {
+	if jot == nil || jot["refs"].(map[string]any)["main"] == nil || len(jot["instances"].([]any)) != 1 {
 		t.Fatalf("jot in apps = %v", jot)
 	}
 
-	// open: draft is made from main; the tree lists every file.
+	// open: draft is made from main; the visitor's instance ids.
 	o := act("open", map[string]any{"app": "jot"})
 	refs := o["refs"].(map[string]any)
-	if refs["draft"] == nil || refs["draft"] != refs["main"] {
-		t.Fatalf("open refs = %v", refs)
-	}
-	sha, size := map[string]string{}, map[string]any{}
-	for _, f := range o["files"].([]any) {
-		m := f.(map[string]any)
-		sha[m["path"].(string)], size[m["path"].(string)] = m["sha256"].(string), m["size"]
-	}
-	if len(sha) != len(app) || !strings.HasPrefix(o["dev"].(string), "jot-dev-") || o["devStatus"] != nil {
+	if refs["draft"] == nil || refs["draft"] != refs["main"] || !strings.HasPrefix(o["mine"].(map[string]any)["dev"].(string), "jot-dev-") {
 		t.Fatalf("open = %v", o)
 	}
-
-	// read: text files as text, binary ones named.
-	r := act("read", map[string]any{"app": "jot", "at": "draft", "paths": []any{"index.html", "logo.png"}})
-	if r["texts"].(map[string]any)["index.html"] != app["index.html"] || len(r["binary"].([]any)) != 1 {
-		t.Fatalf("read = %v", r)
+	n1 := num(refs["draft"])
+	if r := act("head", map[string]any{"app": "jot", "ref": "draft"}); num(r["n"]) != n1 {
+		t.Fatalf("head = %v", r)
+	}
+	// The bench reads at numbers and commits to draft and proposals only.
+	h.fail(admin, "actor.call", map[string]any{"store": "bench", "action": "head", "args": map[string]any{"app": "jot", "ref": "main"}}, "invalid_argument")
+	h.fail(admin, "actor.call", map[string]any{"store": "bench", "action": "files", "args": map[string]any{"app": "jot", "at": "draft"}}, "invalid_argument")
+	listing := h.call(admin, "actor.call", map[string]any{"store": "bench", "action": "files", "args": map[string]any{"app": "jot", "at": n1}}).([]any)
+	if len(listing) != len(app)+1 || !strings.Contains(fmtJSON(listing), pngSum) {
+		t.Fatalf("files = %v", listing)
+	}
+	rd := act("read", map[string]any{"app": "jot", "at": n1, "paths": []any{"index.html", "logo.png"}})
+	if rd["texts"].(map[string]any)["index.html"] != app["index.html"] || fmtJSON(rd["binary"]) != `["logo.png"]` {
+		t.Fatalf("read = %v", rd)
 	}
 
-	// sync: one file changed, one removed, one new and empty (a "New file"
-	// in the Code panel), the rest (the binary too) by hash and size.
-	push := []any{map[string]any{"path": "notes.txt", "text": ""}}
-	for p := range app {
-		switch p {
-		case "index.html":
-			push = append(push, map[string]any{"path": p, "text": "<!doctype html><title>jot</title><main><p>edited</p></main>"})
-		case "app.js":
-		default:
-			push = append(push, map[string]any{"path": p, "sha256": sha[p], "size": size[p]})
-		}
+	// A clean commit: the change list, a removal, the new listing, the event.
+	c := act("commit", map[string]any{"app": "jot", "ref": "draft", "base": n1, "message": "edit",
+		"changes": []any{map[string]any{"path": "README.md", "text": "mine"}, map[string]any{"path": "app.js", "delete": true}},
+		"event":   map[string]any{"who": "agent", "thread": "th1", "note": "eval 1"}})
+	n2 := num(c["n"])
+	if n2 <= n1 || num(c["at"]) != n1 || c["merged"] != false || !strings.Contains(fmtJSON(c["files"]), "README.md") || strings.Contains(fmtJSON(c["files"]), `"app.js"`) {
+		t.Fatalf("commit = %v", c)
 	}
-	s := act("sync", map[string]any{"app": "jot", "files": push, "message": "bench: index.html -app.js"})
-	n := num(s["n"])
-	if n <= num(refs["draft"]) || len(s["files"].([]any)) != len(app) || len(s["activated"].([]any)) != 0 {
-		t.Fatalf("sync = %v", s)
+	if e := c["event"].(map[string]any); e["kind"] != "commit" || num(e["n"]) != n2 || e["who"] != "agent" || e["thread"] != "th1" || fmtJSON(e["paths"]) != `["README.md","app.js"]` {
+		t.Fatalf("the commit's event = %v", e)
 	}
-	if got := h.call(admin, "files.cat", map[string]any{"store": "jot", "at": "draft", "path": "notes.txt"}); got != "" {
-		t.Fatalf("draft notes.txt = %q", got)
+	// Someone commits elsewhere; a commit from the older base merges over it.
+	h.commit(admin, map[string]any{"store": "jot", "ref": "draft", "changes": []any{map[string]any{"path": "b.txt", "text": "outside"}}})
+	m := act("commit", map[string]any{"app": "jot", "ref": "draft", "base": n2, "changes": []any{map[string]any{"path": "README.md", "text": "mine again"}}})
+	if m["merged"] != true || !strings.Contains(fmtJSON(m["files"]), "b.txt") {
+		t.Fatalf("a commit over someone else's = %v", m)
 	}
-	if got := h.call(admin, "files.cat", map[string]any{"store": "jot", "at": "draft", "path": "index.html"}); !strings.Contains(got.(string), "edited") {
-		t.Fatalf("draft index.html = %v", got)
+	// Both change the same file: a conflict, as a value, and nothing written.
+	h.commit(admin, map[string]any{"store": "jot", "ref": "draft", "changes": []any{map[string]any{"path": "README.md", "text": "theirs"}}})
+	at := h.refAt(admin, "jot", "draft")
+	k := act("commit", map[string]any{"app": "jot", "ref": "draft", "base": num(m["n"]), "changes": []any{map[string]any{"path": "README.md", "text": "mine, third"}}})
+	if fmtJSON(k["conflict"]) != fmt.Sprintf(`{"at":%d,"paths":["README.md"]}`, at) || h.refAt(admin, "jot", "draft") != at {
+		t.Fatalf("a conflicting commit = %v", k)
 	}
-	if got := h.call(admin, "files.cat", map[string]any{"store": "jot", "at": "main", "path": "index.html"}); got != app["index.html"] {
-		t.Fatalf("main moved: %v", got)
+	// A file kept by hash (a copy of logo.png, as files.copy and accepting
+	// a proposal send it) arrives as that blob, not as text.
+	cp := act("commit", map[string]any{"app": "jot", "ref": "draft", "base": at,
+		"changes": []any{map[string]any{"path": "img/copy.png", "sha256": pngSum, "size": len(png), "type": "image/png"}}})
+	if !strings.Contains(fmtJSON(cp["files"]), `"path":"img/copy.png","sha256":"`+pngSum+`"`) {
+		t.Fatalf("a commit of a file kept by hash = %v", cp)
 	}
-	if got := h.call(admin, "files.cat", map[string]any{"store": "jot", "at": "draft", "path": "logo.png", "as": "base64"}).(map[string]any); got["sha256"] != sha["logo.png"] {
-		t.Fatalf("the binary file changed: %v", got)
+	// A change that is none of the kinds fails; it does not become a file.
+	h.fail(admin, "actor.call", map[string]any{"store": "bench", "action": "commit", "args": map[string]any{"app": "jot", "ref": "draft", "base": num(cp["n"]),
+		"changes": []any{map[string]any{"path": "x.txt"}}}}, "invalid_argument")
+	h.fail(admin, "actor.call", map[string]any{"store": "bench", "action": "commit", "args": map[string]any{"app": "jot", "ref": "draft", "base": num(cp["n"]),
+		"changes": []any{map[string]any{"text": "no path"}}}}, "invalid_argument")
+	// The timeline has the three bench commits, numbered.
+	p := act("project", map[string]any{"app": "jot"})
+	evs := p["events"].([]any)
+	if len(evs) != 3 || num(evs[0].(map[string]any)["seq"]) != 1 || num(evs[2].(map[string]any)["seq"]) != 3 || p["meta"] != nil {
+		t.Fatalf("project = %v", p)
 	}
-
-	// With a dev instance, a sync reports where it is.
-	dev := o["dev"].(string)
-	h.call(admin, "store.new", map[string]any{"id": dev, "app": "jot", "type": "jot"})
-	h.call(admin, "app.follow", map[string]any{"store": dev, "ref": "draft"})
-	push = []any{
-		map[string]any{"path": "sql/002.sql", "text": "CREATE TABLE tags (note TEXT);"},
-		map[string]any{"path": "index.html", "text": "<!doctype html><title>jot</title><main><p>again</p></main>"},
-	}
-	for _, f := range s["files"].([]any) { // the tree the last sync answered with
-		if m := f.(map[string]any); m["path"] != "index.html" {
-			push = append(push, map[string]any{"path": m["path"], "sha256": m["sha256"], "size": m["size"]})
-		}
-	}
-	s = act("sync", map[string]any{"app": "jot", "files": push})
-	acts := s["activated"].([]any)
-	if len(acts) != 1 || acts[0].(map[string]any)["store"] != dev || num(acts[0].(map[string]any)["n"]) != num(s["n"]) || acts[0].(map[string]any)["broken"] != "" {
-		t.Fatalf("sync with a dev instance = %v", s)
-	}
-
-	// create: a new app store, only on draft.
-	c := act("create", map[string]any{"id": "fresh", "files": []any{
-		map[string]any{"path": "app.json", "text": `{"title":"Fresh","page":"index.html"}`},
-		map[string]any{"path": "index.html", "text": "<!doctype html><title>fresh</title>"},
-	}})
-	if c["app"] != "fresh" {
-		t.Fatalf("create = %v", c)
-	}
-	if refs := h.call(admin, "ref.ls", map[string]any{"store": "fresh"}).(map[string]any); refs["draft"] == nil || refs["main"] != nil {
-		t.Fatalf("fresh refs = %v", refs)
-	}
-	h.fail(admin, "actor.call", map[string]any{"store": "bench", "action": "open", "args": map[string]any{"app": "Not An Id"}}, "invalid_argument")
 }
 
-// Phase 2: the bench makes the visitor's dev instance of an app (typed as
-// its draft's app.json says, following draft; the same one next time) and
-// frames a dev view of it, for a person on the bench's page, never for a
-// token.
-func TestBenchDevInstance(t *testing.T) {
+// A new app: a store, its first files committed to draft; no main yet.
+func TestBenchCreate(t *testing.T) {
+	h := newHarness(t)
+	admin := h.tokenFor("admin@example.com", "read", "write", "admin")
+	installBench(t, h, admin)
+	r := h.call(admin, "actor.call", map[string]any{"store": "bench", "action": "create", "args": map[string]any{"id": "fresh", "type": "fresh",
+		"files": []any{map[string]any{"path": "app.json", "text": `{"title":"Fresh","page":"index.html"}`}, map[string]any{"path": "index.html", "text": "<p>hi</p>"}}}}).(map[string]any)
+	refs := h.call(admin, "ref.ls", map[string]any{"store": "fresh"}).(map[string]any)
+	if num(r["n"]) == 0 || num(refs["draft"]) != num(r["n"]) || refs["main"] != nil {
+		t.Fatalf("create = %v, refs %v", r, refs)
+	}
+	if got := h.call(admin, "files.cat", map[string]any{"store": "fresh", "at": "draft", "path": "index.html"}); got != "<p>hi</p>" {
+		t.Fatalf("index.html = %v", got)
+	}
+	// The first snapshot opens the creator's timeline.
+	p := h.call(admin, "actor.call", map[string]any{"store": "bench", "action": "project", "args": map[string]any{"app": "fresh"}}).(map[string]any)
+	evs := p["events"].([]any)
+	if len(evs) != 1 || evs[0].(map[string]any)["kind"] != "commit" || evs[0].(map[string]any)["ref"] != "draft" || num(evs[0].(map[string]any)["n"]) != num(r["n"]) {
+		t.Fatalf("the new app's timeline = %v", evs)
+	}
+	h.fail(admin, "actor.call", map[string]any{"store": "bench", "action": "create", "args": map[string]any{"id": "bad", "files": []any{map[string]any{"path": "a.txt", "delete": true}}}}, "invalid_argument")
+}
+
+// The visitor's instances: dev follows draft and comes up on each commit;
+// embeds of it for the page; its log; a reset drops it (and only it).
+func TestBenchInstances(t *testing.T) {
 	h := newHarness(t)
 	admin := h.tokenFor("admin@example.com", "read", "write", "admin")
 	installBench(t, h, admin)
 	h.call(admin, "mount.set", map[string]any{"host": h.cfg.Hosts.Live[0], "path": "/bench", "store": "bench"})
-	h.call(admin, "store.new", map[string]any{"id": "jot"})
-	h.call(admin, "files.push", map[string]any{"store": "jot", "files": files(devApp()), "ref": "draft"})
-
-	d := h.call(admin, "actor.call", map[string]any{"store": "bench", "action": "dev", "args": map[string]any{"app": "jot"}}).(map[string]any)
-	id, st := d["id"].(string), d["status"].(map[string]any)
-	if !strings.HasPrefix(id, "jot-dev-") || st["app"] != "jot" || st["ref"] != "draft" || st["broken"] != "" {
-		t.Fatalf("dev = %v", d)
-	}
-	for _, x := range h.call(admin, "store.ls", map[string]any{"all": true}).([]any) {
-		if m := x.(map[string]any); m["id"] == id && m["type"] != "jot" {
-			t.Fatalf("the dev instance's type is %q, not app.json's", m["type"])
-		}
-	}
-	if again := h.call(admin, "actor.call", map[string]any{"store": "bench", "action": "dev", "args": map[string]any{"app": "jot"}}).(map[string]any); again["id"] != id {
-		t.Fatalf("a second dev = %v", again)
-	}
-
-	page, v := personView(t, h, "admin@example.com", "/bench")
-	e := result(t, rpc(page, v, "slop.call", map[string]any{"action": "embed", "args": map[string]any{"app": "jot"}}))
-	if src, _ := e["src"].(string); !strings.Contains(src, "/e/emb_") || e["dev"] != true || e["secret"] == "" {
-		t.Fatalf("embed = %v", e)
-	}
-	if r := result(t, rpc(page, v, "slop.call", map[string]any{"action": "renew", "args": map[string]any{"view": e["view"]}})); r["view"] != e["view"] {
-		t.Fatalf("renew = %v", r)
-	}
-	h.fail(admin, "actor.call", map[string]any{"store": "bench", "action": "embed", "args": map[string]any{"app": "jot"}}, "not_granted")
-
-	// Closing: the view and its frame address end; a token closes nothing.
-	h.fail(admin, "actor.call", map[string]any{"store": "bench", "action": "close", "args": map[string]any{"view": e["view"]}}, "not_granted")
-	if c := result(t, rpc(page, v, "slop.call", map[string]any{"action": "close", "args": map[string]any{"view": e["view"]}})); c["closed"] != e["view"] {
-		t.Fatalf("close = %v", c)
-	}
-	if out := rpc(page, v, "slop.call", map[string]any{"action": "renew", "args": map[string]any{"view": e["view"]}}); errCode(out) != "not_found" {
-		t.Fatalf("renew after close = %v", out)
-	}
-	u, _ := url.Parse(e["src"].(string))
-	if r, _ := h.get(u.Host, u.RequestURI()); r.StatusCode != 404 {
-		t.Fatalf("the closed embed's address answers %d", r.StatusCode)
-	}
-}
-
-// Phase 3: a sync made from a draft that has moved since (a push from a
-// terminal) pushes nothing and answers with the draft as it is; head says
-// so between syncs; logs is the dev instance's log; resetDev drops the dev
-// instance (and only it), and dev makes a fresh one.
-func TestBenchOutsidePushesAndReset(t *testing.T) {
-	h := newHarness(t)
-	admin := h.tokenFor("admin@example.com", "read", "write", "admin")
-	installBench(t, h, admin)
 	act := func(action string, args map[string]any) map[string]any {
 		t.Helper()
 		return h.call(admin, "actor.call", map[string]any{"store": "bench", "action": action, "args": args}).(map[string]any)
@@ -219,63 +171,170 @@ func TestBenchOutsidePushesAndReset(t *testing.T) {
 	app := devApp()
 	app["actor.js"] = `defineActor({ setup(ctx) { console.warn('setup warns'); }, actions: { ping: { requires: 'view', run() { return 'pong'; } } } });`
 	h.call(admin, "store.new", map[string]any{"id": "jot"})
-	h.call(admin, "files.push", map[string]any{"store": "jot", "files": files(app), "ref": "draft"})
-	o := act("open", map[string]any{"app": "jot"})
-	base := num(o["refs"].(map[string]any)["draft"])
-	if r := act("head", map[string]any{"app": "jot", "base": base}); r["files"] != nil {
-		t.Fatalf("head at base = %v", r)
+	h.push(admin, map[string]any{"store": "jot", "files": files(app), "ref": "draft"})
+	draft := h.refAt(admin, "jot", "draft")
+
+	d := act("instance", map[string]any{"app": "jot", "kind": "dev"})
+	id := d["id"].(string)
+	if !strings.HasPrefix(id, "jot-dev-") || d["ref"] != "draft" || num(d["n"]) != draft || d["broken"] != "" {
+		t.Fatalf("instance dev = %v", d)
+	}
+	for _, x := range h.call(admin, "store.ls", map[string]any{"all": true}).([]any) {
+		if m := x.(map[string]any); m["id"] == id && m["type"] != "jot" {
+			t.Fatalf("the dev instance's type is %q, not app.json's", m["type"])
+		}
+	}
+	if again := act("instance", map[string]any{"app": "jot", "kind": "dev"}); again["id"] != id {
+		t.Fatalf("a second instance = %v", again)
+	}
+	h.fail(admin, "actor.call", map[string]any{"store": "bench", "action": "instance", "args": map[string]any{"app": "jot", "kind": "prod"}}, "invalid_argument")
+	h.fail(admin, "actor.call", map[string]any{"store": "bench", "action": "instance", "args": map[string]any{"app": "jot", "kind": "prop"}}, "invalid_argument")
+
+	// A commit brings the dev instance up on the new snapshot.
+	c := act("commit", map[string]any{"app": "jot", "ref": "draft", "base": draft, "changes": []any{map[string]any{"path": "README.md", "text": "x"}}})
+	if a := fmtJSON(c["activated"]); !strings.Contains(a, `"store":"`+id+`"`) || !strings.Contains(a, fmt.Sprintf(`"n":%d`, num(c["n"]))) {
+		t.Fatalf("activated = %v", c["activated"])
+	}
+	st := act("status", map[string]any{"app": "jot"})
+	if dev := st["dev"].(map[string]any); dev["id"] != id || num(dev["n"]) != num(c["n"]) || st["test"] != nil || len(st["props"].([]any)) != 0 {
+		t.Fatalf("status = %v", st)
 	}
 
-	// Someone pushes to draft from a terminal.
-	app["README.md"] = "pushed from a terminal"
-	h.call(admin, "files.push", map[string]any{"store": "jot", "files": files(app), "ref": "draft"})
-	if r := act("head", map[string]any{"app": "jot", "base": base}); r["files"] == nil || num(r["refs"].(map[string]any)["draft"]) <= base {
-		t.Fatalf("head after an outside push = %v", r)
+	// Embeds are for the page (a person's view), not tokens.
+	page, v := personView(t, h, "admin@example.com", "/bench")
+	e := result(t, rpc(page, v, "slop.call", map[string]any{"action": "embed", "args": map[string]any{"app": "jot", "kind": "dev"}}))
+	if src, _ := e["src"].(string); !strings.Contains(src, "/e/emb_") || e["dev"] != true || e["secret"] == "" {
+		t.Fatalf("embed = %v", e)
 	}
-	s := act("sync", map[string]any{"app": "jot", "base": base, "files": []any{map[string]any{"path": "app.json", "text": app["app.json"]}}})
-	if s["conflict"] != true || num(s["n"]) <= base || len(s["files"].([]any)) != len(app) {
-		t.Fatalf("sync from an old base = %v", s)
+	if r := result(t, rpc(page, v, "slop.call", map[string]any{"action": "renew", "args": map[string]any{"view": e["view"]}})); r["view"] != e["view"] {
+		t.Fatalf("renew = %v", r)
 	}
-	if got := h.call(admin, "files.cat", map[string]any{"store": "jot", "at": "draft", "path": "README.md"}); got != "pushed from a terminal" {
-		t.Fatalf("the conflicting sync pushed: README.md = %v", got)
+	h.fail(admin, "actor.call", map[string]any{"store": "bench", "action": "embed", "args": map[string]any{"app": "jot", "kind": "dev"}}, "not_granted")
+	if c := result(t, rpc(page, v, "slop.call", map[string]any{"action": "close", "args": map[string]any{"view": e["view"]}})); c["closed"] != e["view"] {
+		t.Fatalf("close = %v", c)
+	}
+	u, _ := url.Parse(e["src"].(string))
+	if r, _ := h.get(u.Host, u.RequestURI()); r.StatusCode != 404 {
+		t.Fatalf("the closed embed's address answers %d", r.StatusCode)
 	}
 
-	// The dev instance: its log, then a reset.
-	dev := act("dev", map[string]any{"app": "jot"})["id"].(string)
-	h.call(admin, "app.status", map[string]any{"store": dev}) // runs setup
-	if l := act("logs", map[string]any{"app": "jot"}); !strings.Contains(fmtJSON(l["lines"]), "setup warns") {
+	// Its log, then a reset: the instance goes, the app keeps its draft.
+	if l := act("logs", map[string]any{"app": "jot", "kind": "dev"}); !strings.Contains(fmtJSON(l["lines"]), "setup warns") {
 		t.Fatalf("logs = %v", l)
 	}
-	if r := act("resetDev", map[string]any{"app": "jot"}); r["dropped"] != dev {
-		t.Fatalf("resetDev = %v", r)
+	if r := act("reset", map[string]any{"app": "jot", "kind": "dev"}); r["dropped"] != id {
+		t.Fatalf("reset = %v", r)
 	}
-	h.fail(admin, "app.status", map[string]any{"store": dev}, "not_found")
+	h.fail(admin, "app.status", map[string]any{"store": id}, "not_found")
 	if refs := h.call(admin, "ref.ls", map[string]any{"store": "jot"}).(map[string]any); refs["draft"] == nil {
 		t.Fatalf("the app lost its draft: %v", refs)
 	}
-	if again := act("dev", map[string]any{"app": "jot"}); again["id"] != dev || again["status"].(map[string]any)["ref"] != "draft" {
-		t.Fatalf("dev after the reset = %v", again)
-	}
-
-	// A migration changed after the dev instance applied it: the instance
-	// stays on its version; reset, and the fresh one under the same id
-	// activates draft (the kernel forgets a deleted store's failures).
+	// A migration changed after the instance applied it: it stays broken
+	// until a reset, and the fresh one runs draft.
+	act("instance", map[string]any{"app": "jot", "kind": "dev"})
 	app["sql/001.sql"] = "CREATE TABLE notes (id TEXT PRIMARY KEY, body TEXT);"
-	h.call(admin, "files.push", map[string]any{"store": "jot", "files": files(app), "ref": "draft"})
-	draft := num(h.call(admin, "ref.ls", map[string]any{"store": "jot"}).(map[string]any)["draft"])
-	if st := h.call(admin, "app.status", map[string]any{"store": dev}).(map[string]any); !strings.Contains(st["broken"].(string), "changed after it was applied") {
+	h.push(admin, map[string]any{"store": "jot", "files": files(app), "ref": "draft"})
+	if st := h.call(admin, "app.status", map[string]any{"store": id}).(map[string]any); !strings.Contains(st["broken"].(string), "changed after it was applied") {
 		t.Fatalf("a changed migration: %v", st)
 	}
-	act("resetDev", map[string]any{"app": "jot"})
-	st := act("dev", map[string]any{"app": "jot"})["status"].(map[string]any)
-	if st["broken"] != "" || num(st["n"]) != draft {
-		t.Fatalf("the fresh dev instance = %v, want draft %d and not broken", st, draft)
+	act("reset", map[string]any{"app": "jot", "kind": "dev"})
+	if d := act("instance", map[string]any{"app": "jot", "kind": "dev"}); d["broken"] != "" || num(d["n"]) != h.refAt(admin, "jot", "draft") {
+		t.Fatalf("the fresh dev instance = %v", d)
 	}
 }
 
-// Phase 4: the agent's app.* verbs read and seed the visitor's dev
-// instance, never the app store or a production instance.
-func TestBenchDevData(t *testing.T) {
+// Proposals: a ref at draft's snapshot that commits go to; the visitor's
+// prop and test instances can run it; closing removes the ref (only from
+// where the page saw it) and moves those instances off it.
+func TestBenchProposals(t *testing.T) {
+	h := newHarness(t)
+	admin := h.tokenFor("admin@example.com", "read", "write", "admin")
+	installBench(t, h, admin)
+	act := func(action string, args map[string]any) map[string]any {
+		t.Helper()
+		return h.call(admin, "actor.call", map[string]any{"store": "bench", "action": action, "args": args}).(map[string]any)
+	}
+	h.call(admin, "store.new", map[string]any{"id": "jot"})
+	h.push(admin, map[string]any{"store": "jot", "files": files(devApp()), "ref": "draft"})
+	draft := h.refAt(admin, "jot", "draft")
+	p := act("propose", map[string]any{"app": "jot", "title": "Bigger buttons", "thread": "th1"})
+	ref := p["ref"].(string)
+	if !strings.HasPrefix(ref, "proposal/") || num(p["base"]) != draft || h.refAt(admin, "jot", ref) != draft {
+		t.Fatalf("propose = %v", p)
+	}
+	c := act("commit", map[string]any{"app": "jot", "ref": ref, "base": draft, "changes": []any{map[string]any{"path": "README.md", "text": "proposed"}}})
+	if h.refAt(admin, "jot", ref) != num(c["n"]) || h.refAt(admin, "jot", "draft") != draft {
+		t.Fatalf("a proposal commit moved draft: %v", c)
+	}
+	prop := act("instance", map[string]any{"app": "jot", "kind": "prop", "ref": ref})
+	test := act("instance", map[string]any{"app": "jot", "kind": "test", "ref": ref})
+	if prop["ref"] != ref || test["ref"] != ref || num(prop["n"]) != num(c["n"]) {
+		t.Fatalf("prop %v, test %v", prop, test)
+	}
+	// A second proposal has a prop instance of its own, so two proposals
+	// shown side by side each show their own: its commits activate it alone,
+	// and each embed runs its proposal's snapshot.
+	p2 := act("propose", map[string]any{"app": "jot", "title": "Smaller buttons"})
+	ref2 := p2["ref"].(string)
+	prop2 := act("instance", map[string]any{"app": "jot", "kind": "prop", "ref": ref2})
+	c2 := act("commit", map[string]any{"app": "jot", "ref": ref2, "base": draft, "changes": []any{map[string]any{"path": "README.md", "text": "the other"}}})
+	if a := fmtJSON(c2["activated"]); prop2["id"] == prop["id"] || !strings.Contains(a, `"store":"`+prop2["id"].(string)+`"`) || strings.Contains(a, prop["id"].(string)) {
+		t.Fatalf("a second proposal's instance %v (the first's %v), activated %v", prop2, prop, a)
+	}
+	h.call(admin, "mount.set", map[string]any{"host": h.cfg.Hosts.Live[0], "path": "/bench", "store": "bench"})
+	page, v := personView(t, h, "admin@example.com", "/bench")
+	embed := func(ref string) map[string]any {
+		return result(t, rpc(page, v, "slop.call", map[string]any{"action": "embed", "args": map[string]any{"app": "jot", "kind": "prop", "ref": ref}}))
+	}
+	if e1, e2 := embed(ref), embed(ref2); num(e1["version"]) != num(c["n"]) || num(e2["version"]) != num(c2["n"]) {
+		t.Fatalf("the embeds run %v and %v, not %d and %d", e1["version"], e2["version"], num(c["n"]), num(c2["n"]))
+	}
+	if props := act("status", map[string]any{"app": "jot"})["props"].([]any); len(props) != 2 || props[0].(map[string]any)["ref"] != ref || props[1].(map[string]any)["ref"] != ref2 {
+		t.Fatalf("status props = %v", props)
+	}
+	h.fail(admin, "actor.call", map[string]any{"store": "bench", "action": "embed", "args": map[string]any{"app": "jot", "kind": "prop", "ref": "draft"}}, "invalid_argument")
+	list := h.call(admin, "actor.call", map[string]any{"store": "bench", "action": "proposals", "args": map[string]any{"app": "jot"}}).([]any)
+	var first map[string]any
+	for _, x := range list {
+		if x.(map[string]any)["ref"] == ref {
+			first = x.(map[string]any)
+		}
+	}
+	if len(list) != 2 || first == nil || first["status"] != "open" || num(first["n"]) != num(c["n"]) {
+		t.Fatalf("proposals = %v", list)
+	}
+	// Closing from a stale position is refused; from the right one, the ref
+	// goes, the prop instance with it, and the test instance follows draft.
+	h.fail(admin, "actor.call", map[string]any{"store": "bench", "action": "closeProposal", "args": map[string]any{"app": "jot", "ref": ref, "status": "accepted", "ifAt": draft}}, "conflict")
+	act("closeProposal", map[string]any{"app": "jot", "ref": ref, "status": "rejected", "ifAt": num(c["n"])})
+	if refs := h.call(admin, "ref.ls", map[string]any{"store": "jot"}).(map[string]any); refs[ref] != nil {
+		t.Fatalf("the proposal ref is still there: %v", refs)
+	}
+	h.fail(admin, "app.status", map[string]any{"store": prop["id"]}, "not_found")
+	if st := h.call(admin, "app.status", map[string]any{"store": test["id"], "peek": true}).(map[string]any); st["ref"] != "draft" {
+		t.Fatalf("the test instance follows %v", st["ref"])
+	}
+	if st := h.call(admin, "app.status", map[string]any{"store": prop2["id"], "peek": true}).(map[string]any); st["ref"] != ref2 {
+		t.Fatalf("the other proposal's instance follows %v", st["ref"])
+	}
+	h.fail(admin, "actor.call", map[string]any{"store": "bench", "action": "closeProposal", "args": map[string]any{"app": "jot", "ref": ref, "status": "rejected", "ifAt": 0}}, "conflict")
+	evs := act("project", map[string]any{"app": "jot"})["events"].([]any)
+	if last := evs[len(evs)-1].(map[string]any); last["kind"] != "reject" || last["ref"] != ref {
+		t.Fatalf("the last event = %v", last)
+	}
+	// An agent's proposal that ended empty is discarded: the ref goes, the
+	// timeline does not mention it.
+	e := act("propose", map[string]any{"app": "jot", "title": "Nothing came of it"})
+	act("closeProposal", map[string]any{"app": "jot", "ref": e["ref"], "status": "discarded", "ifAt": draft})
+	if after := act("project", map[string]any{"app": "jot"})["events"].([]any); len(after) != len(evs) {
+		t.Fatalf("discarding logged %v", after[len(evs):])
+	}
+	h.fail(admin, "actor.call", map[string]any{"store": "bench", "action": "closeProposal", "args": map[string]any{"app": "jot", "ref": ref, "status": "closed", "ifAt": 0}}, "invalid_argument")
+}
+
+// An instance's data: seeding it (documents named by id, table rows),
+// reading it; the app store and other instances are untouched.
+func TestBenchInstanceData(t *testing.T) {
 	h := newHarness(t)
 	admin := h.tokenFor("admin@example.com", "read", "write", "admin")
 	installBench(t, h, admin)
@@ -284,29 +343,92 @@ func TestBenchDevData(t *testing.T) {
 		return h.call(admin, "actor.call", map[string]any{"store": "bench", "action": action, "args": args})
 	}
 	h.call(admin, "store.new", map[string]any{"id": "jot"})
-	h.call(admin, "files.push", map[string]any{"store": "jot", "files": files(devApp()), "ref": "draft"})
-	dev := act("dev", map[string]any{"app": "jot"}).(map[string]any)["id"].(string)
-
-	act("seedDocs", map[string]any{"app": "jot", "coll": "pins", "id": "slug", "rows": []any{
-		map[string]any{"slug": "a", "title": "First"}, map[string]any{"slug": "b", "title": "Second"}}})
-	if docs := act("docs", map[string]any{"app": "jot", "coll": "pins"}).([]any); len(docs) != 2 {
+	h.push(admin, map[string]any{"store": "jot", "files": files(devApp()), "ref": "draft"})
+	test := act("instance", map[string]any{"app": "jot", "kind": "test"}).(map[string]any)["id"].(string)
+	act("seed", map[string]any{"app": "jot", "kind": "test",
+		"docs":   map[string]any{"pins": []any{map[string]any{"id": "a", "title": "First"}, map[string]any{"id": "b", "title": "Second"}}},
+		"tables": map[string]any{"notes": []any{map[string]any{"id": "n1"}, map[string]any{"id": "n2"}}}})
+	if docs := act("docs", map[string]any{"app": "jot", "kind": "test", "coll": "pins"}).([]any); len(docs) != 2 {
 		t.Fatalf("docs = %v", docs)
 	}
-	if d := act("doc", map[string]any{"app": "jot", "path": "pins/b"}).(map[string]any); !strings.Contains(fmtJSON(d), "Second") {
+	if d := act("doc", map[string]any{"app": "jot", "kind": "test", "path": "pins/b"}).(map[string]any); !strings.Contains(fmtJSON(d), "Second") {
 		t.Fatalf("doc = %v", d)
 	}
-	act("seedTable", map[string]any{"app": "jot", "table": "notes", "rows": []any{map[string]any{"id": "n1"}, map[string]any{"id": "n2"}}})
-	if rows := act("sql", map[string]any{"app": "jot", "sql": "SELECT count(*) AS n FROM notes"}); !strings.Contains(fmtJSON(rows), `"n":2`) {
+	if rows := act("sql", map[string]any{"app": "jot", "kind": "test", "query": "SELECT count(*) AS n FROM notes"}); !strings.Contains(fmtJSON(rows), `"n":2`) {
 		t.Fatalf("sql = %v", rows)
 	}
-	// The data went to the dev instance only.
 	if docs := h.call(admin, "docs.ls", map[string]any{"store": "jot", "coll": "pins"}).([]any); len(docs) != 0 {
 		t.Fatalf("the app store got the seeded documents: %v", docs)
 	}
-	if docs := h.call(admin, "docs.ls", map[string]any{"store": dev, "coll": "pins"}).([]any); len(docs) != 2 {
-		t.Fatalf("the dev instance has %v", docs)
+	if docs := h.call(admin, "docs.ls", map[string]any{"store": test, "coll": "pins"}).([]any); len(docs) != 2 {
+		t.Fatalf("the test instance has %v", docs)
 	}
-	h.fail(admin, "actor.call", map[string]any{"store": "bench", "action": "sql", "args": map[string]any{"app": "jot", "sql": "DELETE FROM notes"}}, "invalid_argument") // read-only
+	h.fail(admin, "actor.call", map[string]any{"store": "bench", "action": "sql", "args": map[string]any{"app": "jot", "kind": "test", "query": "DELETE FROM notes"}}, "invalid_argument") // read-only
+}
+
+// The person's records: the project's meta, threads with their messages
+// (saved again from where they changed), events from the page, layout
+// snapshots; forget drops them all.
+func TestBenchRecords(t *testing.T) {
+	h := newHarness(t)
+	admin := h.tokenFor("admin@example.com", "read", "write", "admin")
+	installBench(t, h, admin)
+	act := func(action string, args map[string]any) any {
+		t.Helper()
+		return h.call(admin, "actor.call", map[string]any{"store": "bench", "action": action, "args": args})
+	}
+	h.call(admin, "store.new", map[string]any{"id": "jot"})
+	act("saveProject", map[string]any{"app": "jot", "meta": map[string]any{"boards": []any{map[string]any{"id": "b1"}}}})
+	act("saveThread", map[string]any{"id": "th1", "app": "jot", "meta": map[string]any{"title": "First"},
+		"from": 1, "messages": []any{map[string]any{"role": "user", "text": "hi"}, map[string]any{"role": "agent", "text": "draft"}}})
+	act("saveThread", map[string]any{"id": "th1", "app": "jot", "meta": map[string]any{"title": "First"},
+		"from": 2, "messages": []any{map[string]any{"role": "agent", "text": "final"}, map[string]any{"role": "user", "text": "thanks"}}})
+	th := act("thread", map[string]any{"id": "th1"}).(map[string]any)
+	if fmtJSON(th["messages"]) != `[{"role":"user","text":"hi"},{"role":"agent","text":"final"},{"role":"user","text":"thanks"}]` || th["meta"].(map[string]any)["title"] != "First" {
+		t.Fatalf("thread = %v", th)
+	}
+	h.fail(admin, "actor.call", map[string]any{"store": "bench", "action": "saveThread", "args": map[string]any{"id": "th1", "app": "other"}}, "invalid_argument")
+	logged := act("logEvents", map[string]any{"app": "jot", "events": []any{map[string]any{"kind": "msg", "ref": "draft", "n": 1, "thread": "th1", "note": "hi"}, map[string]any{"kind": "mark", "ref": "draft", "n": 1, "label": "M"}}}).([]any)
+	if len(logged) != 2 || num(logged[1].(map[string]any)["seq"]) != 2 || logged[1].(map[string]any)["label"] != "M" || logged[1].(map[string]any)["ref"] != "draft" || num(logged[1].(map[string]any)["n"]) != 1 {
+		t.Fatalf("logEvents = %v", logged)
+	}
+	logBad := func(events ...any) {
+		t.Helper()
+		h.fail(admin, "actor.call", map[string]any{"store": "bench", "action": "logEvents", "args": map[string]any{"app": "jot", "events": events}}, "invalid_argument")
+	}
+	logBad(map[string]any{"kind": "commit", "ref": "draft", "n": 1})
+	// Every event is on a ref with that ref's snapshot; 0 and null are not one.
+	logBad(map[string]any{"kind": "mark", "label": "no snapshot"})
+	logBad(map[string]any{"kind": "mark", "ref": "draft", "n": 0})
+	logBad(map[string]any{"kind": "mark", "n": 3})
+	// A batch with one bad event writes none of it.
+	logBad(map[string]any{"kind": "mark", "ref": "draft", "n": 2, "label": "fine"}, map[string]any{"kind": "mark", "ref": "draft"})
+	// Two tabs seeing the same outside change log it once: the second is
+	// answered with the event already there.
+	outside := map[string]any{"kind": "outside", "who": "push", "ref": "draft", "n": 7, "paths": []any{"a.txt"}}
+	first := act("logEvents", map[string]any{"app": "jot", "events": []any{outside}}).([]any)
+	again := act("logEvents", map[string]any{"app": "jot", "events": []any{outside}}).([]any)
+	if num(first[0].(map[string]any)["seq"]) != 3 || num(again[0].(map[string]any)["seq"]) != 3 {
+		t.Fatalf("outside twice = %v, %v", first, again)
+	}
+	if older := act("events", map[string]any{"app": "jot", "before": 2}).([]any); len(older) != 1 || older[0].(map[string]any)["kind"] != "msg" {
+		t.Fatalf("events before 2 = %v", older)
+	}
+	act("saveSnap", map[string]any{"id": "sn1", "app": "jot", "meta": map[string]any{"route": "index.html", "w": 375}, "doc": map[string]any{"html": "<p>x</p>"}})
+	if list := act("snaps", map[string]any{"app": "jot"}).([]any); len(list) != 1 || list[0].(map[string]any)["route"] != "index.html" {
+		t.Fatalf("snaps = %v", list)
+	}
+	if s := act("snap", map[string]any{"id": "sn1"}).(map[string]any); s["doc"].(map[string]any)["html"] != "<p>x</p>" {
+		t.Fatalf("snap = %v", s)
+	}
+	p := act("project", map[string]any{"app": "jot"}).(map[string]any)
+	if p["meta"] == nil || len(p["threads"].([]any)) != 1 || num(p["threads"].([]any)[0].(map[string]any)["count"]) != 3 || len(p["events"].([]any)) != 3 {
+		t.Fatalf("project = %v", p)
+	}
+	act("forget", map[string]any{"app": "jot"})
+	if p := act("project", map[string]any{"app": "jot"}).(map[string]any); p["meta"] != nil || len(p["threads"].([]any)) != 0 || len(p["events"].([]any)) != 0 {
+		t.Fatalf("after forget = %v", p)
+	}
 }
 
 // Phase 5: the bench's preflight says what publishing would do and what
@@ -324,7 +446,7 @@ func TestBenchPublish(t *testing.T) {
 	strs := func(v any) string { return fmtJSON(v) }
 	app := devApp()
 	h.call(admin, "store.new", map[string]any{"id": "jot"})
-	h.call(admin, "files.push", map[string]any{"store": "jot", "files": files(app), "ref": "draft"})
+	h.push(admin, map[string]any{"store": "jot", "files": files(app), "ref": "draft"})
 
 	// The first publish: everything is new, nothing serves main yet.
 	pf := act("preflight", map[string]any{"app": "jot"})
@@ -341,7 +463,7 @@ func TestBenchPublish(t *testing.T) {
 	// A changed migration blocks.
 	bad := devApp()
 	bad["sql/001.sql"] = "CREATE TABLE notes (id TEXT PRIMARY KEY, extra TEXT);"
-	h.call(admin, "files.push", map[string]any{"store": "jot", "files": files(bad), "ref": "draft"})
+	h.push(admin, map[string]any{"store": "jot", "files": files(bad), "ref": "draft"})
 	if pf = act("preflight", map[string]any{"app": "jot"}); !strings.Contains(strs(pf["blockers"]), "sql/001.sql changed") {
 		t.Fatalf("a changed migration: %v", pf)
 	}
@@ -350,7 +472,7 @@ func TestBenchPublish(t *testing.T) {
 	// activate and roll back.
 	good := devApp()
 	good["sql/002.sql"] = "CREATE TABLE tags (note TEXT);"
-	h.call(admin, "files.push", map[string]any{"store": "jot", "files": files(good), "ref": "draft"})
+	h.push(admin, map[string]any{"store": "jot", "files": files(good), "ref": "draft"})
 	pf = act("preflight", map[string]any{"app": "jot"})
 	d2 := num(pf["refs"].(map[string]any)["draft"])
 	if strs(pf["migrations"]) != `["sql/002.sql"]` || len(pf["blockers"].([]any)) != 0 || !strings.Contains(strs(pf["production"]), `"jot-1"`) {
@@ -376,12 +498,12 @@ func TestBenchPublish(t *testing.T) {
 	// 002 is blocked, though main alone would call it new.
 	other := devApp()
 	other["sql/002.sql"] = "CREATE TABLE labels (note TEXT);"
-	h.call(admin, "files.push", map[string]any{"store": "jot", "files": files(other), "ref": "draft"})
+	h.push(admin, map[string]any{"store": "jot", "files": files(other), "ref": "draft"})
 	if pf = act("preflight", map[string]any{"app": "jot"}); !strings.Contains(strs(pf["blockers"]), "sql/002.sql differs from the one that ran on") || !strings.Contains(strs(pf["blockers"]), "jot-1") || strs(pf["migrations"]) != `["sql/002.sql"]` {
 		t.Fatalf("a migration that ran before the rollback: %v", pf)
 	}
 	// The same 002 again is fine: jot-1 has it already.
-	h.call(admin, "files.push", map[string]any{"store": "jot", "files": files(good), "ref": "draft"})
+	h.push(admin, map[string]any{"store": "jot", "files": files(good), "ref": "draft"})
 	if pf = act("preflight", map[string]any{"app": "jot"}); len(pf["blockers"].([]any)) != 0 {
 		t.Fatalf("the migration that ran, unchanged: %v", pf["blockers"])
 	}

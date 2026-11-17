@@ -21,7 +21,7 @@ const whoActor = `defineActor({ actions: { who: { requires: 'view', run(ctx) { r
 func privacyApp(t *testing.T, h *harness, admin, id, caps string) {
 	t.Helper()
 	h.call(admin, "store.new", map[string]any{"id": id})
-	h.call(admin, "files.push", map[string]any{"store": id, "files": files(map[string]string{
+	h.push(admin, map[string]any{"store": id, "files": files(map[string]string{
 		"app.json":   `{"title":"P","actor":"actor.js","capabilities":` + caps + `}`,
 		"actor.js":   whoActor,
 		"index.html": "<!doctype html><title>p</title>",

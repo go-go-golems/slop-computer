@@ -203,7 +203,7 @@ func TestDiffProperty(t *testing.T) {
 func TestManifest(t *testing.T) {
 	perms := map[string]string{"versions:push": ""}
 	c, err := ParseManifest([]byte(`{"title":"x","capabilities":{"db":{"rules":[{"path":"votes","read":"view","write":"owner"},{"path":"votes/{self}","write":"interact"}]},
-		"user":{"scopes":["profile"]},"room":{"topics":{"ops":"interact"}},"downloads":true,"self":{},"slop":{"permissions":["versions:push"]}}}`), perms)
+		"user":{"scopes":["profile"]},"room":{"topics":{"ops":"interact"}},"downloads":true,"artifact":{},"slop":{"permissions":["versions:push"]}}}`), perms)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -218,7 +218,7 @@ func TestManifest(t *testing.T) {
 	}
 	for _, bad := range []string{`{"capabilities":{"teleport":{}}}`, `{"capabilities":{"room":{"topics":{"Bad":"interact"}}}}`,
 		`{"capabilities":{"room":{"topics":{"x":"view"}}}}`, `{"capabilities":{"slop":{"permissions":["users:write"]}}}`,
-		`{"capabilities":{"user":{"scopes":["phone"]}}}`} {
+		`{"capabilities":{"user":{"scopes":["phone"]}}}`, `{"capabilities":{"self":{}}}`} {
 		if _, err := ParseManifest([]byte(bad), perms); err == nil {
 			t.Errorf("%s must be refused", bad)
 		}

@@ -176,6 +176,41 @@ func (h *harness) fail(token, verb string, args map[string]any, code string) map
 	return e
 }
 
+// refAt is where a store's ref (default main) points, 0 when it does not
+// exist: the ifAt or base of a write made over what is there now.
+func (h *harness) refAt(token string, store any, ref any) int64 {
+	h.t.Helper()
+	name, _ := ref.(string)
+	if name == "" {
+		name = "main"
+	}
+	refs, _ := h.call(token, "ref.ls", map[string]any{"store": store}).(map[string]any)
+	if n, ok := refs[name].(float64); ok {
+		return int64(n)
+	}
+	return 0
+}
+
+// push is files.push over the ref as it is now: args without ifAt get the
+// ref's current snapshot. Tests of the precondition itself pass ifAt.
+func (h *harness) push(token string, args map[string]any) any {
+	h.t.Helper()
+	if _, ok := args["ifAt"]; !ok {
+		args["ifAt"] = h.refAt(token, args["store"], args["ref"])
+	}
+	return h.call(token, "files.push", args)
+}
+
+// commit is files.commit over the ref as it is now: args without base get
+// the ref's current snapshot.
+func (h *harness) commit(token string, args map[string]any) any {
+	h.t.Helper()
+	if _, ok := args["base"]; !ok {
+		args["base"] = h.refAt(token, args["store"], args["ref"])
+	}
+	return h.call(token, "files.commit", args)
+}
+
 // get fetches a path on a host without following redirects.
 func (h *harness) get(host, path string) (*http.Response, string) {
 	h.t.Helper()

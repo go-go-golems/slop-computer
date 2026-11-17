@@ -44,7 +44,7 @@ func TestActorSampleTools(t *testing.T) {
 	h.a.SetLLM(&llm.Fake{})
 	admin := h.tokenFor("admin@example.com", "read", "write", "admin")
 	h.call(admin, "store.new", map[string]any{"id": "tools"})
-	h.call(admin, "files.push", map[string]any{"store": "tools", "files": files(map[string]string{
+	h.push(admin, map[string]any{"store": "tools", "files": files(map[string]string{
 		"app.json": `{"title":"Tools","actor":"actor.js","capabilities":{"sample":{},"db":{}}}`,
 		"actor.js": toolsActor,
 	})})

@@ -28,7 +28,7 @@ defineActor({
 func catalogApp(t *testing.T, h *harness, admin, id string) {
 	t.Helper()
 	h.call(admin, "store.new", map[string]any{"id": id})
-	h.call(admin, "files.push", map[string]any{"store": id, "files": files(map[string]string{
+	h.push(admin, map[string]any{"store": id, "files": files(map[string]string{
 		"app.json":          `{"title":"Cat","actor":"actor.js"}`,
 		"actor.js":          catalogActor,
 		"sql/001_items.sql": "CREATE TABLE items (id INTEGER PRIMARY KEY, name TEXT);",
@@ -152,7 +152,7 @@ func TestModuleInterceptor(t *testing.T) {
 			return o
 		}})
 	h.call(admin, "store.new", map[string]any{"id": "pr"})
-	h.call(admin, "files.push", map[string]any{"store": "pr", "files": files(map[string]string{
+	h.push(admin, map[string]any{"store": "pr", "files": files(map[string]string{
 		"app.json": `{"title":"Probe","actor":"actor.js"}`,
 		"actor.js": `const p = use('probe');
 defineActor({ actions: {

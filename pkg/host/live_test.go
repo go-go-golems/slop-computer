@@ -18,7 +18,7 @@ func TestLiveHostViews(t *testing.T) {
 	admin := h.tokenFor("admin@example.com", "read", "write", "admin")
 	live := h.cfg.Hosts.Live[0]
 	h.call(admin, "store.new", map[string]any{"id": "board"})
-	h.call(admin, "files.push", map[string]any{"store": "board", "files": files(map[string]string{
+	h.push(admin, map[string]any{"store": "board", "files": files(map[string]string{
 		"app.json":   `{"title":"Board","type":"board","capabilities":{"db":{},"user":{"scopes":["profile"]},"room":{}}}`,
 		"index.html": `<!doctype html><html><head><title>b</title></head><body>board</body></html>`,
 		"app.css":    `body{}`,
@@ -155,7 +155,7 @@ func TestLiveStoreFilesIsolated(t *testing.T) {
 	admin := h.tokenFor("admin@example.com", "read", "write", "admin")
 	live, static := h.cfg.Hosts.Live[0], h.cfg.Hosts.Static[0]
 	h.call(admin, "store.new", map[string]any{"id": "pub"})
-	h.call(admin, "files.push", map[string]any{"store": "pub", "files": files(map[string]string{
+	h.push(admin, map[string]any{"store": "pub", "files": files(map[string]string{
 		"index.html": "<!doctype html><script>fetch('/_site/me')</script>",
 		"pic.svg":    `<svg xmlns="http://www.w3.org/2000/svg"><script>alert(1)</script></svg>`})})
 	h.call(admin, "files.put", map[string]any{"store": "pub", "zone": "assets", "path": "up.html", "text": "<script>alert(1)</script>"})
@@ -180,7 +180,7 @@ func TestGuestGrantFilesNotPublic(t *testing.T) {
 	admin := h.tokenFor("admin@example.com", "read", "write", "admin")
 	live := h.cfg.Hosts.Live[0]
 	h.call(admin, "store.new", map[string]any{"id": "priv"})
-	h.call(admin, "files.push", map[string]any{"store": "priv", "files": files(map[string]string{
+	h.push(admin, map[string]any{"store": "priv", "files": files(map[string]string{
 		"app.json": `{"title":"P","capabilities":{"db":{}}}`, "index.html": "<!doctype html><title>p</title>", "pic.png": "png"})})
 	h.call(admin, "mount.set", map[string]any{"host": live, "path": "/priv", "store": "priv"})
 	l := h.call(admin, "link.new", map[string]any{"store": "priv", "level": "view", "days": 1}).(map[string]any)

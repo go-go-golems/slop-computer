@@ -52,7 +52,7 @@ func TestTypeScriptActor(t *testing.T) {
 		"index.html":      "<!doctype html><title>t</title>",
 	}
 	h.call(admin, "store.new", map[string]any{"id": "tsactor"})
-	h.call(admin, "files.push", map[string]any{"store": "tsactor", "files": files(app)})
+	h.push(admin, map[string]any{"store": "tsactor", "files": files(app)})
 	if st := h.call(admin, "app.status", map[string]any{"store": "tsactor"}).(map[string]any); st["broken"] != "" {
 		t.Fatalf("status = %v", st)
 	}
@@ -77,7 +77,7 @@ func TestTypeScriptActor(t *testing.T) {
 
 	// A version that does not compile is refused; the app stays on the last one.
 	app["lib/rows.ts"] = strings.Replace(tsRows, "check(): number {", "check(): number {{", 1)
-	h.call(admin, "files.push", map[string]any{"store": "tsactor", "files": files(app)})
+	h.push(admin, map[string]any{"store": "tsactor", "files": files(app)})
 	st := h.call(admin, "app.status", map[string]any{"store": "tsactor"}).(map[string]any)
 	if broken, _ := st["broken"].(string); st["n"] != 1.0 || !strings.Contains(broken, "SyntaxError: lib/rows.ts:10:1: Expected identifier but found end of file") || strings.Contains(broken, "GoError") {
 		t.Fatalf("status after a broken push = %v", st)

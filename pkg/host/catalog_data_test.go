@@ -42,7 +42,7 @@ func deployCatalogData(t *testing.T, h *harness, admin string) string {
 	t.Helper()
 	live := h.cfg.Hosts.Live[0]
 	h.call(admin, "store.new", map[string]any{"id": "catalog-data"})
-	h.call(admin, "files.push", map[string]any{"store": "catalog-data", "files": appDir(t, "catalog-data")})
+	h.push(admin, map[string]any{"store": "catalog-data", "files": appDir(t, "catalog-data")})
 	if st := h.call(admin, "app.status", map[string]any{"store": "catalog-data"}).(map[string]any); st["broken"] != "" {
 		t.Fatalf("status = %v", st)
 	}
