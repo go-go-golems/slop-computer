@@ -20,6 +20,15 @@ import { hlJS, hlYAML, renderMarkdown } from '../lib/text.js';
 import { libEntries } from '../agent/api/lib.js';
 import { saveFile, slug, transcriptMd } from './archive.js';
 
+// "Working for 2 min 5 s: writing its next step (3 steps done)"; refreshed every second
+function elapsedText(since, steps, note) {
+  const s = Math.max(0, Math.round((Date.now() - since) / 1000))
+  const d = s < 60 ? s + ' s' : Math.floor(s / 60) + ' min ' + (s % 60) + ' s'
+  const what = note || (steps ? 'writing its next step (' + plural(steps, 'step') + ' done)' : 'reading your app and planning')
+  return 'Working for ' + d + ': ' + what + (s >= 240 ? '. A long one: you can Stop it and ask for a smaller step.' : '.')
+}
+setInterval(() => { for (const e of document.querySelectorAll('.elapsed')) e.textContent = elapsedText(+e.dataset.since, +e.dataset.steps, e.dataset.note) }, 1000)
+
 const MODELS = [
   { v: 'quick', label: 'Quick' }, { v: 'default', label: 'Default' }, { v: 'complex', label: 'Complex' },
   { v: 'm:claude-haiku-5-5', label: 'Haiku 5.5' }, { v: 'm:claude-sonnet-5-5', label: 'Sonnet 5.5' }, { v: 'm:claude-opus-5-5', label: 'Opus 5.5' }
@@ -116,7 +125,9 @@ export const THREADS = {
         (m.steps || []).map(stepEl),
         (m.panels || []).map(id => { const pn = Panels.get(P(), id); return pn ? panelEl(P(), pn, { inline: true }) : null }),
         m.auto ? h('div.note', 'Claude ended without a reply; the bench says what happened:') : null,
-        m.text ? renderMarkdown(m.text, file => P().read(file, 'draft') !== null || (!!prop && prop.status === 'open' && P().read(file, m.ws) !== null)) : m.status === 'running' && !(m.steps || []).length ? h('div.body.note', m.note || 'Thinking…') : null,
+        m.text ? renderMarkdown(m.text, file => P().read(file, 'draft') !== null || (!!prop && prop.status === 'open' && P().read(file, m.ws) !== null)) : null,
+        // a running turn says how long and what it is doing (persona reviews: 9-13 minute turns showed only "Working")
+        m.status === 'running' ? h('div.note.elapsed', { 'data-since': String(m.t || Date.now()), 'data-steps': String((m.steps || []).length), 'data-note': m.note || '' }, elapsedText(m.t || Date.now(), (m.steps || []).length, m.note)) : null,
         m.error ? h('div.note', { style: { color: 'var(--accent)' } }, m.error) : null,
         m.approval ? h('div.approval', h('b', m.approval.title), m.approval.detail ? h('pre', m.approval.detail) : null,
           h('div', { style: { display: 'flex', gap: '6px' } }, h('button.btn.sm.primary', { on: { click: () => m.approval && m.approval.decide(true) } }, 'Approve'), h('button.btn.sm', { on: { click: () => m.approval && m.approval.decide(false) } }, 'Decline'))) : null,

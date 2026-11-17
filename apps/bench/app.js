@@ -1,4 +1,4 @@
-/* the bench, built from web/bench: do not edit. source sha256:6fbfdaacb107dc89589f908353a74f7491539062454aa208dfcff7f739450e01 */
+/* the bench, built from web/bench: do not edit. source sha256:02cdadebb5d5999adeadc2aa98c90d3488bf7039c2550f29a56f21b579eae8d9 */
 // The bench: a live dev environment for slop apps. Built from web/bench/src.
 (() => {
   // src/lib/util.js
@@ -9187,6 +9187,15 @@ return { files: list.map(f => f.path), issues }`;
   };
 
   // src/ui/threads.js
+  function elapsedText(since, steps, note) {
+    const s = Math.max(0, Math.round((Date.now() - since) / 1e3));
+    const d = s < 60 ? s + " s" : Math.floor(s / 60) + " min " + s % 60 + " s";
+    const what = note || (steps ? "writing its next step (" + plural(steps, "step") + " done)" : "reading your app and planning");
+    return "Working for " + d + ": " + what + (s >= 240 ? ". A long one: you can Stop it and ask for a smaller step." : ".");
+  }
+  setInterval(() => {
+    for (const e of document.querySelectorAll(".elapsed")) e.textContent = elapsedText(+e.dataset.since, +e.dataset.steps, e.dataset.note);
+  }, 1e3);
   var MODELS = [
     { v: "quick", label: "Quick" },
     { v: "default", label: "Default" },
@@ -9417,7 +9426,9 @@ return { files: list.map(f => f.path), issues }`;
             return pn ? panelEl(P(), pn, { inline: true }) : null;
           }),
           m.auto ? h("div.note", "Claude ended without a reply; the bench says what happened:") : null,
-          m.text ? renderMarkdown(m.text, (file) => P().read(file, "draft") !== null || !!prop && prop.status === "open" && P().read(file, m.ws) !== null) : m.status === "running" && !(m.steps || []).length ? h("div.body.note", m.note || "Thinking\u2026") : null,
+          m.text ? renderMarkdown(m.text, (file) => P().read(file, "draft") !== null || !!prop && prop.status === "open" && P().read(file, m.ws) !== null) : null,
+          // a running turn says how long and what it is doing (persona reviews: 9-13 minute turns showed only "Working")
+          m.status === "running" ? h("div.note.elapsed", { "data-since": String(m.t || Date.now()), "data-steps": String((m.steps || []).length), "data-note": m.note || "" }, elapsedText(m.t || Date.now(), (m.steps || []).length, m.note)) : null,
           m.error ? h("div.note", { style: { color: "var(--accent)" } }, m.error) : null,
           m.approval ? h(
             "div.approval",
