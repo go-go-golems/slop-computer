@@ -28,3 +28,7 @@ Review of #51: commits pass files kept by hash through the actor (it had rebuilt
 ## 2026-11-16
 
 Events are on one ref with their snapshot (NOT NULL, checked by the actor and the page); restoreTo/changesSince take a snapshot; marks belong to a workspace; session.diff sees the eval's writes. SLOP3-024 notes §7 hold the type/API follow-ups. Diary step 11.
+
+## 2026-11-16
+
+Second review of #51 fixed in 1cd5a2b: every HTML document of an app gets the runtime (and in a dev embed the probe), not only the entry; one prop instance per proposal; scenario runs and fixtures take turns on the test instance. Diary step 12.

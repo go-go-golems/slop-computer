@@ -885,3 +885,75 @@ The person said "ye" to doing the shape change in #51 now and recording the rest
 - `web/bench/src/model/project.js` `headOf`, `log`, `flushEvents`.
 - `web/bench/src/model/timeline.js` `snapshotAt`, `restoreTo`, `changesSince`.
 - `web/bench/test/timeline.test.mjs`.
+
+## Step 12: Second review of #51 — other pages, a prop instance per proposal, scenario runs take turns
+
+The person asked about the open findings on #51 and had me finish #54's review first. Codex's second review of #51 (at 678e5a4) had three P2 findings, and all three were real. They are fixed in 1cd5a2b. Every HTML page of an app now gets the runtime, and in a dev embed the probe. Each proposal has its own prop instance. Scenario runs and fixtures take turns on the test instance.
+
+### Prompt Context
+
+**User prompts (verbatim):** "what about the findings on #51", then, while I was starting on it, "Actually first address code review issues on https://github.com/go-go-golems/slop-computer/pull/54".
+
+**Assistant interpretation:** Fix #54's findings first (SLOP3-024, diary step 7 there), then #51's three open findings.
+
+**Inferred user intent:** Get the open PRs ready to merge.
+
+**Commit:** 1cd5a2b — "Bench: other pages get the probe, a prop instance per proposal, scenario runs take turns", pushed to `task/slop3-023-core`.
+
+### What I did
+- **Non-entry pages (`frames/host.js:73`):**
+  - **The cause:** the sandbox served every file except the entry as stored (`pkg/doors/pages/sandbox.go`). So a frame on `about.html` never got the probe, and the page had no runtime either.
+  - **The fix:** `isDocument` picks out a `.html` file that starts the way a document does (a doctype, `<html>` or `<head>`). Such a file now goes down the entry's path: boot data and runtime, plus `instrument` and the probe in a dev embed. HTML fragments and other files are still served as stored.
+- **Proposal embeds (`server/instances.js:33`):** a prop instance is now one per proposal.
+  - `instanceOf(ctx, app, kind, ref)` in the actor gives `<app>-prop-<proposal id>-<person>` for prop, and the usual id for dev and test.
+  - Every instance action takes `ref`: `instance`, `reset`, `embed`, `logs`, `docs`, `doc`, `sql` and `seed`.
+  - `followers` activates the proposal's own instance on a commit, and `closeProposal` drops it.
+  - `status` reports `props`, one for each open proposal that has an instance. The agent's `app.info` and its context line follow.
+  - The page keys `Instances` by proposal, and `afterCommit` asks for the proposal instance's logs with its ref.
+- **Scenario runs (`frames/scenarios.js:52`):**
+  - `lock()` in `lib/util.js` is a queue of async jobs. `frames/scenarios.js` keeps one per app.
+  - `runScenario` holds it from the reset to its last step, and `Fixtures.apply` waits its turn.
+  - A run cancelled while waiting stops before it resets.
+- **Rebuilt `apps/bench`** with `make bench`. Besides `app.js`, only the source stamps changed.
+- **gofmt** also realigned an existing line in `bench_test.go`.
+
+### Why
+- **Fix the sandbox, not the bench:** a multi-page app's other pages had no runtime anywhere, so they couldn't call their actor. The bench's frames were just where it showed.
+- **An instance per proposal, not an embed pinned to a snapshot:** the embed URL already pins the page's code (`/v/<n>/`). But actor calls and data go to the instance, which runs whatever ref it follows, so two proposals can't share one.
+- **A lock on the page, not on the server:** every overlap the review names happens within one bench page (two proposal cards, the scenarios panel, an agent's `tests.*` calls).
+
+### What worked
+- **Each new test fails on the old code:**
+  - `TestEmbeddedViews` checks `about.html` under a dev and a plain embed, and a fragment as stored. On the old sandbox, `about.html` lacks `parentOrigin`, `claude.js`, `probe.js` and `data-src`.
+  - In `TestBenchProposals`, with two proposals on the old actor, both got `jot-prop-0c465e`.
+  - `web/bench/test/scenarios.test.mjs` overlaps two runs. On the old code, run `a` sees `b`'s fixture: "expected sql … count 1, got 2 rows".
+- **Full suite:** `npm test` passes 25 of 25. `golangci-lint` reports 0 issues, and `go test -tags sqlite_fts5 ./...` passes in all 22 packages.
+- **Replied** on the three threads (discussion_r4594014960, …5261, …5423).
+
+### What didn't work
+- **`TestBenchProposals` got a 404 on `/bench`:** the bench page is mounted only in `TestBenchInstances`, so the test now mounts it before opening a person's view.
+- **The first Node test read `scenarios/fixtures/…`:** fixtures live under `fixtures/`.
+
+### What I learned
+- **`frames/scenarios.js` loads in Node** with only `addEventListener` stubbed. `Slop.call` and `Headless.fresh` can be replaced on their exported objects, so the scenario runner is testable without a browser.
+
+### What was tricky to build
+- **Non-entry HTML without breaking fragments:**
+  - **The obstacle:** `insertHead` prepends its tags to a page that has no `<head>`, so an app's fetched fragment would have gained boot data and scripts.
+  - **The fix:** `isDocument` accepts only a file that starts the way a document does. `docStart` is anchored, unlike `headOpen`, which also matches `<header>`.
+
+### What warrants a second pair of eyes
+- **More stores:** a person now has one store per proposal they open in the bench. Closing a proposal drops its store; an open proposal that is never closed keeps its store, as the single prop store used to.
+- **Two bench tabs of the same person** still share the test instance. The lock covers one page only.
+- **Merging with #53:** #53 changes the same non-entry branch in `serveSandbox` (`newAppCode`, the source-map fallback). Whichever merges second needs a small manual merge: an HTML document goes down the entry path, which #53's import-map tag then covers.
+
+### What should be done in the future
+- **A browser check** of two proposals side by side in the canvas matrix, and of a frame on a second page. This step has the Go and Node tests above, but no browser run.
+
+### Code review instructions
+- **Read:**
+  - `pkg/doors/pages/sandbox.go` (`isDocument` and the non-entry branch);
+  - `apps/bench/actor.js` (`instanceOf`, `followers`, `status`, `closeProposal`);
+  - `web/bench/src/server/instances.js`;
+  - `web/bench/src/frames/scenarios.js` (`onTestInstance`, `applyFixture`, `runHolding`).
+- **Run:** `go test -tags sqlite_fts5 ./pkg/host -run 'TestEmbeddedViews|TestBench' -count=1` and `cd web/bench && node --test test/scenarios.test.mjs`
