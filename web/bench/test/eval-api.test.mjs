@@ -127,3 +127,15 @@ test('rewrite: a top-level declaration of an API name is reported', async () => 
   assert.deepEqual(rewrite('const frames = await frames.list()\nfunction files() {}', reserved).shadows, ['frames', 'files'])
   assert.deepEqual(rewrite('const fileList = await files.list()\nconst f = x => { const files = 1; return files }', reserved).shadows, [], 'a nested name is fine')
 })
+
+test('lib.def analysis: free names and parameters of a saved function', async () => {
+  // these lived in worker.js beside a collectPattern that moved out with rewrite: lib.def failed
+  // "collectPattern is not defined" in every eval that saved a function (round 3)
+  const acorn = await import('acorn')
+  const { freeNames, paramsOf } = await import('../src/worker/rewrite.js')
+  const fn = acorn.parse('(async ({ rows, week = 1 }, [first], ...rest) => { const { a, b: [c] } = rows; try { x() } catch ({ message }) { return message } return WEEK_START + a + c + first + rest.length })', { ecmaVersion: 'latest' }).body[0].expression
+  const free = freeNames(fn)
+  assert.ok(free.includes('WEEK_START') && free.includes('x'), 'outer names are free: ' + free)
+  for (const n of ['rows', 'week', 'first', 'rest', 'a', 'c', 'message']) assert.ok(!free.includes(n), n + ' is declared')
+  assert.equal(paramsOf(fn).length, 3)
+})

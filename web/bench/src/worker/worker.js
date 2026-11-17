@@ -6,7 +6,7 @@
 // Engine 2 (fallback): this worker's own JS realm, scope kept in a plain object. A capability boundary, not a sandbox.
 import { getQuickJS, shouldInterruptAfterDeadline } from '@tootallnate/quickjs-emscripten'
 import * as acorn from 'acorn'
-import { rewrite } from './rewrite.js'
+import { freeNames, paramsOf, rewrite } from './rewrite.js'
 /* global __CORE_SRC__ */
 const CORE = __CORE_SRC__          // src/core.js, inlined by the build
 
@@ -127,34 +127,7 @@ function prefixFor(rw) {
   return (rw.names.length ? '__declare(' + rw.names.map(n => JSON.stringify(n)).join(',') + ');' : '') + rw.keep.map(n => '__keep(' + JSON.stringify(n) + ', ' + n + ');').join('')
 }
 
-// ---------- lib.def: refuse code that won't survive being rebuilt from its source ----------
-function freeNames(node) {
-  const declared = new Set(), refs = new Set()
-  const visit = (n, parent, key) => {
-    if (!n || typeof n.type !== 'string') return
-    if (n.type === 'Identifier') {
-      if (parent) {
-        if (parent.type === 'MemberExpression' && key === 'property' && !parent.computed) return
-        if ((parent.type === 'Property' || parent.type === 'MethodDefinition' || parent.type === 'PropertyDefinition') && key === 'key' && !parent.computed && !parent.shorthand) return
-        if (['LabeledStatement', 'BreakStatement', 'ContinueStatement'].includes(parent.type)) return
-      }
-      refs.add(n.name); return
-    }
-    if (n.type === 'VariableDeclarator') collectPattern(n.id, []).forEach(x => declared.add(x))
-    if (n.type === 'FunctionDeclaration' || n.type === 'FunctionExpression' || n.type === 'ArrowFunctionExpression') { if (n.id) declared.add(n.id.name); for (const p of n.params) collectPattern(p, []).forEach(x => declared.add(x)) }
-    if ((n.type === 'ClassDeclaration' || n.type === 'ClassExpression') && n.id) declared.add(n.id.name)
-    if (n.type === 'CatchClause' && n.param) collectPattern(n.param, []).forEach(x => declared.add(x))
-    for (const k of Object.keys(n)) {
-      if (k === 'type' || k === 'start' || k === 'end') continue
-      const v = n[k]
-      if (Array.isArray(v)) { for (const c of v) if (c && typeof c.type === 'string') visit(c, n, k) }
-      else if (v && typeof v.type === 'string') visit(v, n, k)
-    }
-  }
-  visit(node, null, null)
-  return [...refs].filter(x => !declared.has(x))
-}
-function paramsOf(fn) { return fn.params.map(p => p.type === 'Identifier' ? p.name : p.type === 'AssignmentPattern' && p.left.type === 'Identifier' ? p.left.name + '?' : p.type === 'RestElement' ? '...' + (p.argument.name || 'rest') : p.type === 'ObjectPattern' ? '{' + collectPattern(p, []).join(', ') + '}' : '[…]') }
+// ---------- lib.def: refuse code that won't survive being rebuilt from its source (freeNames, paramsOf: rewrite.js) ----------
 function checkLib(name, source, api) {
   if (!/^[A-Za-z_$][\w$]{0,40}$/.test(name || '')) return { problem: 'lib.def: names are identifiers, like checkAll' }
   if (['def', 'list', 'remove', 'source'].includes(name)) return { problem: 'lib.def: "' + name + '" is taken by lib itself' }

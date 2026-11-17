@@ -1,14 +1,14 @@
 // worker/rewrite.js — the eval session's top-level declarations, rewritten
 // into assignments the session keeps (worker.js runs the result).
 //
-// Pure: acorn only. Public API: rewrite.
+// Pure: acorn only. Public API: rewrite, freeNames, paramsOf, collectPattern (lib.def uses the last three).
 import * as acorn from 'acorn'
 
 // ---------- persistent top-level declarations: rewrite them into assignments the session keeps ----------
 // const/let/var x = … becomes x = … (a global of the session); function f(){} stays where it is (so it still hoists)
 // and is copied out by __keep at the top; class C {} becomes C = class C {}. Every edit stays on its own line,
 // so error line numbers still match the code as written. Names the API uses are left local.
-function collectPattern(p, out) {
+export function collectPattern(p, out) {
   if (!p) return out
   if (p.type === 'Identifier') out.push(p.name)
   else if (p.type === 'ObjectPattern') for (const q of p.properties) collectPattern(q.type === 'RestElement' ? q.argument : q.value, out)
@@ -56,3 +56,32 @@ export function rewrite(code, reserved) {
   for (const e of edits) out = out.slice(0, e.at) + e.text + out.slice(e.at + e.del)
   return { code: out, names, keep, shadows: [...new Set(shadows)] }
 }
+
+// the names a function uses but does not declare (a saved lib function is rebuilt from its source alone)
+export function freeNames(node) {
+  const declared = new Set(), refs = new Set()
+  const visit = (n, parent, key) => {
+    if (!n || typeof n.type !== 'string') return
+    if (n.type === 'Identifier') {
+      if (parent) {
+        if (parent.type === 'MemberExpression' && key === 'property' && !parent.computed) return
+        if ((parent.type === 'Property' || parent.type === 'MethodDefinition' || parent.type === 'PropertyDefinition') && key === 'key' && !parent.computed && !parent.shorthand) return
+        if (['LabeledStatement', 'BreakStatement', 'ContinueStatement'].includes(parent.type)) return
+      }
+      refs.add(n.name); return
+    }
+    if (n.type === 'VariableDeclarator') collectPattern(n.id, []).forEach(x => declared.add(x))
+    if (n.type === 'FunctionDeclaration' || n.type === 'FunctionExpression' || n.type === 'ArrowFunctionExpression') { if (n.id) declared.add(n.id.name); for (const p of n.params) collectPattern(p, []).forEach(x => declared.add(x)) }
+    if ((n.type === 'ClassDeclaration' || n.type === 'ClassExpression') && n.id) declared.add(n.id.name)
+    if (n.type === 'CatchClause' && n.param) collectPattern(n.param, []).forEach(x => declared.add(x))
+    for (const k of Object.keys(n)) {
+      if (k === 'type' || k === 'start' || k === 'end') continue
+      const v = n[k]
+      if (Array.isArray(v)) { for (const c of v) if (c && typeof c.type === 'string') visit(c, n, k) }
+      else if (v && typeof v.type === 'string') visit(v, n, k)
+    }
+  }
+  visit(node, null, null)
+  return [...refs].filter(x => !declared.has(x))
+}
+export function paramsOf(fn) { return fn.params.map(p => p.type === 'Identifier' ? p.name : p.type === 'AssignmentPattern' && p.left.type === 'Identifier' ? p.left.name + '?' : p.type === 'RestElement' ? '...' + (p.argument.name || 'rest') : p.type === 'ObjectPattern' ? '{' + collectPattern(p, []).join(', ') + '}' : '[…]') }
