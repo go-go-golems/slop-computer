@@ -1,4 +1,4 @@
-/* the bench, built from web/bench: do not edit. source sha256:4dad2e57ebf9f83e4ff09568c9889da7ab22bfbc8dfc7a0459cc8b2c57dd6f33 */
+/* the bench, built from web/bench: do not edit. source sha256:446482620ff3ae249e1b7b6988d5f927f2bd7e0a8897510d8e4e27df8fff363a */
 // The bench: a live dev environment for slop apps. Built from web/bench/src.
 (() => {
   // src/lib/util.js
@@ -1699,12 +1699,15 @@
       run: (ctx, spec) => Slop.call("seed", { app: ctx.project.app, kind: "dev", docs: spec.docs || {}, tables: spec.tables || {} })
     },
     "app.reset": {
-      sig: "",
-      doc: "a fresh dev instance on draft, with no data (its migrations run again)",
+      sig: "{why}",
+      doc: "asks the person with an approval card, then drops ALL the dev instance's data (what they entered too) for a fresh one on draft. Only when a migration changed in a way old rows cannot follow; never to clean up test data",
       writes: "dev",
       long: true,
-      run: async (ctx) => {
-        const P = ctx.project, r = await Instances.reset(P, "dev");
+      run: async (ctx, o = {}) => {
+        const P = ctx.project;
+        const ok = await ctx.approve("Reset the dev data of " + P.app + "?", "Every row and document in your dev instance goes, including what you entered yourself. The app's code is not touched." + (o && o.why ? "\nWhy: " + o.why : ""));
+        if (!ok) throw Object.assign(new Error("the person declined the reset"), { kind: "approval" });
+        const r = await Instances.reset(P, "dev");
         await Promise.all([...FrameHosts].filter((fh) => fh.project === P && fh.kind === "dev").map((fh) => fh.load({ keepState: false })));
         return r;
       }
@@ -3924,7 +3927,7 @@ Markdown files (README.md, notes, specs) render in the Docs panel. Keep README.m
 - Start with what the person will see: a page they can look at and try, then the server code and tests behind it. Someone who does not program judges progress by the page.
 - Tell the person everything they need to use what you made: a code or password you chose, which page to open, where to click, that a result appears below the fold.
 - Questions about the bench itself are part of the job: how to try a change safely (a proposal), how to keep it (Accept in the chat or the Review tab), how to undo it (Reject; the Timeline restores earlier versions), how to see the data (the Data view), how to publish (Publish in the header). Answer them plainly.
-- Data you add to try things (rows, documents, test sign-ups) goes in the test instance (scenarios and fixtures), not the dev instance the person looks at: test rows in dev show up on their page and come along when they publish. If you must add some to dev, remove it and say so.
+- Data you add to try things (rows, documents, test sign-ups) goes in the test instance (scenarios and fixtures), not the dev instance the person looks at: test rows in dev show up on their page. If some ended up in dev, remove just those rows through the app's own buttons, or tell the person they are there. Never reset the dev instance to clean up: app.reset drops everything the person entered too.
 - A scenario passes only if it checks what the person cares about: the numbers or words on the page, the rows in the data. Make each one fail once on purpose (change the expected value) to show it can, then put it back.
 - Keep the app's README.md true: when the app's purpose or files change, update it in the same turn.
 - Finish with a short summary in Markdown (short paragraphs, bullets, \`code\`; no big headings): what you changed, where, and anything left to do. Cite places as \`file:line\` (for example \`styles.css:73\`): they become links that open the file.`;

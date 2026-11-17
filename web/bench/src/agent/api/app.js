@@ -47,9 +47,13 @@ export const APP = {
     run: (ctx, spec) => Slop.call('seed', { app: ctx.project.app, kind: 'dev', docs: spec.docs || {}, tables: spec.tables || {} })
   },
   'app.reset': {
-    sig: '', doc: 'a fresh dev instance on draft, with no data (its migrations run again)', writes: 'dev', long: true,
-    run: async ctx => {
-      const P = ctx.project, r = await Instances.reset(P, 'dev')
+    sig: '{why}', doc: 'asks the person with an approval card, then drops ALL the dev instance\'s data (what they entered too) for a fresh one on draft. Only when a migration changed in a way old rows cannot follow; never to clean up test data', writes: 'dev', long: true,
+    run: async (ctx, o = {}) => {
+      const P = ctx.project
+      // it destroys what the person typed into their app: theirs to decide (two persona reviews lost data to it)
+      const ok = await ctx.approve('Reset the dev data of ' + P.app + '?', 'Every row and document in your dev instance goes, including what you entered yourself. The app\'s code is not touched.' + (o && o.why ? '\nWhy: ' + o.why : ''))
+      if (!ok) throw Object.assign(new Error('the person declined the reset'), { kind: 'approval' })
+      const r = await Instances.reset(P, 'dev')
       await Promise.all([...FrameHosts].filter(fh => fh.project === P && fh.kind === 'dev').map(fh => fh.load({ keepState: false })))
       return r
     }
