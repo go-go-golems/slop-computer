@@ -1,4 +1,4 @@
-.PHONY: lint fmt-check test build run-local runtime runtime-test admin conformance blocks blocks-push pinup pinup-push deploy-apps bench
+.PHONY: lint fmt-check test test-ci build run-local runtime runtime-test admin conformance blocks blocks-push pinup pinup-push deploy-apps bench
 
 SLOP ?= slop
 
@@ -14,6 +14,14 @@ TAGS := sqlite_fts5
 
 test:
 	GOWORK=off go test -tags $(TAGS) ./...
+
+# CI's tests: the same, with web/runtime's TypeScript installed so that
+# TestAppTypes checks the fixture app with tsc (SLOP3-024). npm installs
+# what package.json pins and writes no lockfile (a package-lock.json would
+# change web/runtime's source stamp).
+test-ci:
+	npm install --prefix web/runtime --no-save --no-package-lock --no-audit --no-fund
+	GOWORK=off go test -tags $(TAGS) ./... -count=1
 
 # The slop binary (server and CLI). SQLite needs cgo.
 build:

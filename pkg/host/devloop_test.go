@@ -376,6 +376,34 @@ func TestSlopDev(t *testing.T) {
 		}
 	}
 
+	// slop types writes the declarations and the two tsconfigs, never over
+	// the app's own; slop dev refreshes the declarations of an app that has
+	// them, and never pushes them (SLOP3-024).
+	write("tsconfig.json", `{"compilerOptions": {"jsx": "react-jsx"}}`)
+	wrote, err := c.Types("jot", dir, true)
+	if err != nil || strings.Join(wrote, " ") != ".slop/types/page.d.ts .slop/types/actor.d.ts .slop/types/modules.d.ts tsconfig.actor.json" {
+		t.Fatalf("slop types wrote %v (%v)", wrote, err)
+	}
+	if b, _ := os.ReadFile(filepath.Join(dir, "tsconfig.json")); string(b) != `{"compilerOptions": {"jsx": "react-jsx"}}` {
+		t.Fatalf("the app's tsconfig.json was overwritten: %s", b)
+	}
+	if b, _ := os.ReadFile(filepath.Join(dir, "tsconfig.actor.json")); !strings.Contains(string(b), `"actor.js"`) || !strings.Contains(string(b), `".slop/types/modules.d.ts"`) {
+		t.Fatalf("tsconfig.actor.json:\n%s", b)
+	}
+	_ = os.Remove(filepath.Join(dir, ".slop/types/page.d.ts"))
+	var again syncBuf
+	if err := c.Dev(context.Background(), dir, client.DevOptions{App: "jot", Once: true, Out: &again}); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := os.Stat(filepath.Join(dir, ".slop/types/page.d.ts")); err != nil || !strings.Contains(again.String(), "types: .slop/types refreshed") {
+		t.Fatalf("slop dev did not refresh the types (%v):\n%s", err, again.String())
+	}
+	for _, f := range h.call(admin, "files.ls", map[string]any{"store": "jot", "at": "draft"}).([]any) {
+		if p := f.(map[string]any)["path"].(string); strings.HasPrefix(p, ".slop/") {
+			t.Fatalf("slop dev pushed %s", p)
+		}
+	}
+
 	// The loop: a change is pushed and reported, with the instance's log;
 	// a broken migration is reported and the instance stays on its version.
 	var out syncBuf

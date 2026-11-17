@@ -179,9 +179,10 @@ func paren(t string) string {
 		c := t[i]
 		switch {
 		case inStr:
-			if c == '\\' {
+			switch c {
+			case '\\':
 				i++
-			} else if c == '"' {
+			case '"':
 				inStr = false
 			}
 		case c == '"':
