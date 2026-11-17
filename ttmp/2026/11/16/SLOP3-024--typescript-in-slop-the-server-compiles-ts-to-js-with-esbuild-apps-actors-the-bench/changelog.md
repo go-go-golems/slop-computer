@@ -23,3 +23,7 @@ The full design (design-doc/01): the server compiles .ts per file with esbuild (
 ## 2026-11-16
 
 Decisions (2026-11-16): new apps default to TS; packages only via slop vendor (CLI, a person runs it; the server never fetches; the agent cannot add packages); .tsx in phase 0 (TsconfigRaw + vendored JSX runtime via import map). The goja source-map fix shipped first (PR #52). Design: status, §1, new §4.7 slop vendor, app verbs via jsverbs hooks in the CLI, phase 0b, §11 decisions. Tasks updated. Diary step 3.
+
+## 2026-11-16
+
+Phase 0 implemented (PR #53, on #52): pkg/tscompile; pages compile .ts/.tsx with maps and an import map from slop.imports.page; actors load TS and slop.imports.actor names; slop eval --ts; TS app verbs via jsverbs hooks. Browser-checked on a local server. Design corrected: slop modules via use() only; names under slop.imports. Diary step 4.

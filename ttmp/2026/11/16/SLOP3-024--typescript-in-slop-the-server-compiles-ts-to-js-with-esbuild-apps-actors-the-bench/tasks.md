@@ -10,16 +10,16 @@ The phases follow the design (design-doc/01, section 10).
 - [x] Decide: packages and .tsx (decided 2026-11-16: packages only through `slop vendor`, run by a person with the CLI; the server never fetches, the agent cannot add packages; .tsx in phase 0) (design §4.7, §11)
 - [x] Fix first: goja runtimes for app code read no files for source maps (PR #52, `pkg/jsrt`)
 
-## Phase 0: the server compiles
+## Phase 0: the server compiles (PR #53)
 
-- [ ] `.ts`, `.mts`, `.cts` in `fileTypes` (pkg/store/files.go): `text/typescript; charset=utf-8`
-- [ ] `pkg/tscompile`: esbuild (pinned) `api.Transform` with the page/actor/eval profiles; in-memory LRU by (sha256, profile, esbuild version); singleflight; GOMAXPROCS semaphore; 4 MB cap
-- [ ] Pages: compile step in front of `writeStoreBytes` on page hosts (not the trusted host, not uploads; not `.d.ts`; UTF-8 only); `.map` path; compile errors as a module that throws; ETag with profile and version
-- [ ] Actors: the manager's code-file filter; a `.ts` entry in the CommonJS wrapper; `requirer` resolution (`.ts` then `.js`; explicit extensions); `defineActor` returns its argument (the source-map loader is done: PR #52)
-- [ ] App verbs: jsverbs' `SourceTransform`/`RuntimeTransform` hooks in the CLI (as go-go-goja's xgoja does); `slop eval` takes `ts: true` (the CLI sets it for `.ts` files)
-- [ ] `.tsx` (`text/tsx`); the app's `tsconfig.json`/`tsconfig.actor.json` passed as `TsconfigRaw`, their sha256 in the cache key
-- [ ] `imports` in `app.json`: validate; inject an import map (from `imports.page`) into served HTML; bare names in the actor's `require` (from `imports.actor`)
-- [ ] Tests (design §10, phase 0), including the stack-trace check from scripts/03
+- [x] `.ts`, `.mts`, `.cts` in `fileTypes` (pkg/store/files.go): `text/typescript; charset=utf-8`
+- [x] `pkg/tscompile`: esbuild (pinned) `api.Transform` with the page/actor/eval profiles; in-memory LRU by (sha256, profile, esbuild version); singleflight; GOMAXPROCS semaphore; 4 MB cap
+- [x] Pages: compile step in front of `writeStoreBytes` on page hosts (not the trusted host, not uploads; not `.d.ts`; UTF-8 only); `.map` path; compile errors as a module that throws; ETag with profile and version
+- [x] Actors: the manager's code-file filter; a `.ts` entry in the CommonJS wrapper; `requirer` resolution (`.ts` then `.js`; explicit extensions); `defineActor` returns its argument (the source-map loader is done: PR #52)
+- [x] App verbs: jsverbs' `SourceTransform`/`RuntimeTransform` hooks in the CLI (as go-go-goja's xgoja does); `slop eval` takes `ts: true` (the CLI sets it for `.ts` files)
+- [x] `.tsx` (`text/tsx`); the app's `tsconfig.json`/`tsconfig.actor.json` passed as `TsconfigRaw`, their sha256 in the cache key
+- [x] `slop.imports` in `app.json`: validate; inject an import map (from `imports.page`) into served HTML; bare names in the actor's `require` (from `imports.actor`)
+- [x] Tests (design §10, phase 0), including the stack-trace check from scripts/03
 
 ## Phase 0b: `slop vendor` (CLI only)
 

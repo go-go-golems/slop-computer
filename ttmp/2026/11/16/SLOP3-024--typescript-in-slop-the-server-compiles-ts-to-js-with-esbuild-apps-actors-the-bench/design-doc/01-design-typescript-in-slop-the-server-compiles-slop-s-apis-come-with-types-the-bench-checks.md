@@ -38,7 +38,7 @@ WhenToUse: Before implementing any part of SLOP3-024, or when touching how slop 
 
 **The server compiles, slop's APIs come with types, and the bench checks.**
 
-Status: decided, 2026-11-16 (section 11 lists the decisions); implementation is starting. The evidence was gathered against slop-computer `main` at 407a3f9. The goja source-map loader from section 4.4 shipped first, as a separate fix (PR #52).
+Status: decided, 2026-11-16 (section 11 lists the decisions). Phase 0 is in PR #53, on top of #52. The evidence was gathered against slop-computer `main` at 407a3f9. The goja source-map loader from section 4.4 shipped first, as a separate fix (PR #52).
 
 ## 1. Summary
 
@@ -287,7 +287,8 @@ TypeScript changes each step a little:
 3. **`require`** (`requirer`):
    - A path with an extension is loaded as named. A path without one tries `.ts`, then `.js`. Today `requirer` appends `.js` to anything that doesn't end in `.js` or `.json`, which would turn `./x.ts` into `./x.ts.js`.
    - A `.ts` file is compiled before it is wrapped.
-   - Module names still come first, so `import { commit } from 'workshop'` compiles to `require('workshop')`. That is `use('workshop')`, just as `require('database')` is today.
+   - Module names still come first: `import * as yaml from 'yaml'` compiles to `require('yaml')`, the bridged module, just as `require('database')` is today.
+   - Slop's own modules (`workshop`, `sql`, …) are reached with `use()`, as now. `require` never resolved them, and changing that order could break an app that requires a file of the same name. In TypeScript, `use('workshop')` is typed through overloads (section 5.2).
    - A bare name that is not a slop module is looked up in the app's vendored packages for the actor (section 4.7).
 
 Two smaller changes support the types in section 5:
@@ -356,17 +357,17 @@ vendor/preact@10.24.3/jsx-runtime.js
 vendor/preact@10.24.3/chunk-3F2A.js     code the entry points share
 vendor/preact@10.24.3/types/…           the declarations, in the package's own layout
 vendor/vendor.json                      {"preact@10.24.3": {"integrity": "sha512-…", "entries": {…}, "files": {path: sha256}}}
-app.json                                "imports": {"page": {"preact": "vendor/preact@10.24.3/preact.js", "preact/hooks": …}}
+app.json                                "slop": {"imports": {"page": {"preact": "vendor/preact@10.24.3/preact.js", "preact/hooks": …}}}
 ```
 
-**Who reads the mapping.** `app.json`'s `imports` is the one place that maps a name to a file. Three readers use it:
+**Who reads the mapping.** `slop.imports` in `app.json` is the one place that maps a name to a file. It sits under `slop`, with the manifest's other slop-specific fields. Three readers use it:
 
 - **Pages.** Slop already injects tags at the top of every HTML page it serves: the boot data and the runtime script (`inject` in `pkg/doors/pages/sandbox.go`).
-  - It also injects a `<script type="importmap">` built from `imports.page`, with paths resolved against the app's root.
+  - It also injects a `<script type="importmap">` built from `slop.imports.page`, with paths resolved against the app's root.
   - So every page gets the same map, and no page needs its own copy.
   - The map lands before any module script, as browsers require.
 - **The actor.**
-  - `imports.actor` maps names to CommonJS bundles (`slop vendor add --actor zod@3.23.8`), and `require('zod')` finds them after slop's own modules.
+  - `slop.imports.actor` maps names to CommonJS bundles (`slop vendor add --actor zod@3.23.8`), and `require('zod')` finds them after slop's own modules.
   - CommonJS output can't be split, so each actor entry point is bundled whole.
   - A package that needs Node's APIs (`fs`, `net`) doesn't work in goja, vendored or not.
 - **The checker.** `slop types` turns `vendor/vendor.json` into `tsconfig` `paths`. So `'preact/hooks'` gets the vendored declarations, in the editor and in the bench.
@@ -656,7 +657,7 @@ Changes:
   - `defineActor` returning its argument;
   - the source-map loader on every runtime for app code (done: PR #52).
 - `.tsx`, and the app's `tsconfig` files passed to the transform (`TsconfigRaw`), with their sha256 in the cache key.
-- `imports` in `app.json`: the injected import map, and bare names in the actor's `require`.
+- `slop.imports` in `app.json`: the injected import map, and bare names in the actor's `require`.
 - App verbs: jsverbs' `SourceTransform` and `RuntimeTransform` hooks, in the CLI. `slop eval`: `ts: true`.
 
 Tests:
@@ -664,7 +665,7 @@ Tests:
 - a page `.ts` served as JavaScript, with the headers and the ETag;
 - a parse error served as a module that throws;
 - a `.d.ts` file and a binary `.ts` file served as stored;
-- an `actor.ts` that imports `./lib/rows.ts` and `workshop`;
+- an `actor.ts` that imports `./lib/rows.ts`, a bridged module and a vendored bundle;
 - a stack trace with `.ts` positions (from `scripts/03`);
 - a TypeScript app verb, scanned and run;
 - a `.tsx` page with a vendored JSX runtime, through the injected import map;
@@ -674,7 +675,7 @@ Tests:
 
 - Registry metadata and tarballs, checked against `dist.integrity`; version ranges; dependencies.
 - `api.Build` over a temporary `node_modules`: ES modules with splitting for pages, CommonJS for the actor.
-- Copying declarations; `vendor/vendor.json`; `imports` in `app.json`; the folder form and `--store`.
+- Copying declarations; `vendor/vendor.json`; `slop.imports` in `app.json`; the folder form and `--store`.
 - `slop vendor` to list and verify; `rm`.
 - Tests: a fixture registry (a local HTTP server serving tarballs), a package with a dependency and subpath exports, a corrupted tarball refused, and the output loading in a page and an actor.
 

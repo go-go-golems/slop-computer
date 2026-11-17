@@ -244,3 +244,96 @@ This step covers four pieces of work:
   - injects an import map from `imports.page`;
   - the actor's `require` resolves `imports.actor`;
   - `slop types` writes `paths` from `vendor.json`.
+
+## Step 4: Phase 0, slop compiles TypeScript (PR #53)
+
+Phase 0 is built and tested, both in Go tests and in a real browser:
+
+- **`pkg/tscompile`:** a per-file esbuild transform with three profiles and a cache.
+- **Page routes:** they serve `.ts` and `.tsx` compiled, with source maps and an import map.
+- **Actors:** they load TypeScript and resolve vendored names.
+- **`slop eval` and app verbs:** both take TypeScript.
+
+The branch builds on #52. Two things in the design were wrong and are corrected:
+
+- slop's own modules can't be `import`ed;
+- the names live under `slop.imports`.
+
+### Prompt Context
+**User prompt (verbatim):** see Step 3 ("ok, then build that. an agent cannot do that, it's CLI. Update the design doc.")
+**Assistant interpretation:** Implement the design, starting with phase 0, which `slop vendor` relies on (the import map, and `require` resolving vendored names).
+**Inferred user intent:** Real TypeScript support in slop, built in reviewable steps.
+**Commit (code):** ed9e9ee (tscompile), e9c45f4 (pages), 8d81ea3 (actors), 40369cd (eval and verbs), on `task/slop3-024-compile`, PR #53.
+
+### What I did
+- **`pkg/tscompile`:**
+  - `Compile(name, src, profile, tsconfig)`, with an LRU bounded by bytes, `singleflight`, and `GOMAXPROCS` slots;
+  - `Is` for which names compile;
+  - `ErrorModule` for files that don't compile;
+  - `Version` (`esbuild-0.25.12.1`), checked against `go.mod`.
+- **Pages:**
+  - `pkg/doors/pages/code.go` (`appCode`, `codeBytes`, `serveSourceMap`, `writeDerived`, `importMap`);
+  - `storeBytes.code`;
+  - the static host (`site.go`), the sandbox and previews pass an `appCode`.
+- **Manifest and file types:** `slop.imports {page, actor}` in `pkg/apps/manifest.go`; file types in `pkg/store/files.go`.
+- **Actors:**
+  - `codeFile` and `resolveFile`;
+  - the TypeScript entry is loaded through `require`;
+  - `requirer` compiles TypeScript and resolves `actorImport`;
+  - `syntaxError`;
+  - `defineActor` returns its argument.
+- **`slop eval` and app verbs:**
+  - `EvalIn.TS`;
+  - `scanOptions()` in `pkg/appverbs`, with jsverbs' `SourceTransform` and `RuntimeTransform`.
+- **Tests:** in `pkg/tscompile`, `pkg/apps`, `pkg/appverbs`, and `pkg/host` (`typescript_pages_test.go`, `typescript_actors_test.go`).
+- **The browser check:**
+  - built `slop024` and ran it on a copy of the #51 server's data, on port 18491;
+  - wrote a credentials file for that address (the token was never printed);
+  - pushed a demo app (`$S/tsdemo`: `main.tsx`, `lib/text.ts`, `actor.ts`, a small JSX runtime in `vendor/`), mounted it at `/tsdemo` on the live host, and opened it in Playwright.
+
+### Why
+- **`appCode` on routes, not a host check inside `writeStoreBytes`:** the routes that serve an app's pages know the snapshot, the manifest and the app's root URL. Store files (`/_s/`), uploads and actor routes don't, and keep serving bytes as stored.
+- **The import map goes into every HTML page,** not only the injected entry. The sandbox serves other HTML files raw, and so does the static host.
+- **A TypeScript entry runs through `require`,** so its compiled `module.exports` exists. JavaScript entries keep running as scripts, because a JavaScript app may share top-level names between its entry and the files it requires.
+
+### What worked
+- **Tests:** `go test -tags sqlite_fts5 ./...` passes in all 23 packages. `go vet` passes, and `golangci-lint` reports 0 issues. The new code passes under `-race`.
+- **The browser:**
+  - the frame rendered `<div id="hello" data-slug="type-script"><p>Hello, Type Script!</p><small>from actor.ts (type-script)</small></div>`;
+  - the import map was `{"imports":{"mini/jsx-runtime":"/v/1/vendor/mini/jsx-runtime.js"}}`;
+  - `main.tsx` came back `200 text/javascript; charset=utf-8`, starting `import { jsx, jsxs } from "mini/jsx-runtime"`;
+  - `main.tsx.map` came back `200 application/json`;
+  - the console had 0 errors and 0 warnings.
+
+### What didn't work
+- **The actor stack read `lib/lib/rows.ts:9:24`.** goja resolves a map's `sources` relative to the file. The fix is to set `Sourcefile` to the base name for every profile; messages keep the full path, because the code formats them itself.
+- **`mount.set` on the static host failed** with `tsapp runs a live app (capabilities or an actor): mount it on a live host`. The test now uses a second store without capabilities as the site.
+- **A wrong expectation in my test:** esbuild writes `const slug = …; export { slug }`, not `export const`.
+- **A broken version's status first read `actor.ts: GoError: lib/rows.ts:10:1: Expected identifier but found end of file at github.com/…requirer.func8.1 (native)`.** It now throws a JavaScript `SyntaxError`. My expected position (9:2) was also wrong: esbuild reports the unclosed brace at the end of the file (10:1).
+- **Lint:** `nonamedreturns` (twice) and `predeclared` (`max`), all fixed.
+
+### What I learned
+- **`require` reserves only the bridged modules** (`database`, `express`, `fs`, `path`, `yaml`, `crypto`, `events`, `buffer`). `sql` and `workshop` are reached only with `use()`. The design said otherwise, and is now corrected.
+- **The static host serves only sites.** Live apps must be mounted on a live host.
+- **The sandbox injects the runtime only into the app's entry page.** Its other HTML files are served raw.
+
+### What was tricky to build
+- **Keeping one writer of store bytes:** compiled bytes go through `writeDerived`, which uses the same `cacheControl()` and the same nosniff and 304 handling as stored bytes. The ETag names the compiler version and the tsconfig, so a change to either one revalidates.
+
+### What warrants a second pair of eyes
+- **Numbered snapshots are served `immutable`.** After an esbuild upgrade, a browser may keep the older compile of the same source. That is harmless, but it is a deliberate choice.
+- **`/v/0/` in the sandbox resolves to `main` and is still served as `immutable`.** That was so before this change, and compiled files inherit it.
+- **The import-map base comes from the URL path minus the file's path.** If that suffix doesn't match, no map is injected; compiling still works.
+
+### What should be done in the future
+- Phase 0b (`slop vendor`), phase 1 (declarations), and the templates and guide defaulting to TypeScript.
+
+### Code review instructions
+- **Start with:** `pkg/tscompile/tscompile.go`, `pkg/doors/pages/code.go`, the `writeStoreBytes` hunk, and the `requirer` and `load` hunks in `pkg/actor/actor.go`.
+- **Run:** `go test -tags sqlite_fts5 ./pkg/tscompile ./pkg/host -run 'TypeScript|Compile|Profile|TSX|Cache|Errors|Version' -count=1`
+
+### Technical details
+- **ETags:**
+  - compiled files: `"<sha256>.<Version>.<tsconfig digest or 0>"`;
+  - source maps: `"<sha256>.map.<Version>.<digest>"`;
+  - pages with the import map: `"<sha256>.im<digest>"`.
