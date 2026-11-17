@@ -1,4 +1,4 @@
-/* the bench, built from web/bench: do not edit. source sha256:f5270b317a77a82c26663e962f6a45669e0c8d1cb007738eab401a3a9630ab73 */
+/* the bench, built from web/bench: do not edit. source sha256:602b3c7183f12d620b40519ad93b89e32975f27c1e8d22f975efdd24ccc09cce */
 // The bench: a live dev environment for slop apps. Built from web/bench/src.
 (() => {
   // src/lib/util.js
@@ -6255,7 +6255,7 @@ Markdown files (README.md, notes, specs) render in the Docs panel. Keep README.m
   var App = {
     P: null,
     ws: "draft",
-    mode: "select",
+    mode: "play",
     sel: null,
     logs: [],
     ev: emitter(),
@@ -6943,7 +6943,7 @@ Markdown files (README.md, notes, specs) render in the Docs panel. Keep README.m
       await Slop.init();
       this.prefs = Prefs.get("prefs", {});
       this.theme(this.prefs.theme || "auto");
-      this.mode = this.prefs.mode || "select";
+      this.mode = this.prefs.mode || "play";
       const valid = (l) => {
         try {
           let ok = true;

@@ -30,7 +30,7 @@ import { appZip, readArchive, saveFile, slug } from './archive.js';
 import { clone, debounce, emitter, lineOf, now, offsetOfLine, plural } from '../lib/util.js';
 
 export const App = {
-  P: null, ws: 'draft', mode: 'select', sel: null, logs: [], ev: emitter(), prefs: {}, canvas: null, offs: [], traceTarget: null,
+  P: null, ws: 'draft', mode: 'play', sel: null, logs: [], ev: emitter(), prefs: {}, canvas: null, offs: [], traceTarget: null,
   // set by views when they are made: what other views may ask of them
   code: null, docs: null, agentView: null, timeline: null,
 
@@ -452,7 +452,7 @@ export const App = {
     this.wire()
     await Slop.init()
     this.prefs = Prefs.get('prefs', {})
-    this.theme(this.prefs.theme || 'auto'); this.mode = this.prefs.mode || 'select'
+    this.theme(this.prefs.theme || 'auto'); this.mode = this.prefs.mode || 'play' // a first visit uses the app: three personas in round 5 clicked their page in Select mode and picked elements; a chosen mode is remembered
     const valid = l => { try { let ok = true; walkTiles(normalize(clone(l)), t => { t.views = t.views.filter(v => Views[v]); if (!t.views.length) ok = false }); return ok } catch { return false } }
     Dock.set(this.prefs.layout && valid(this.prefs.layout) ? clone(this.prefs.layout) : LAYOUTS.Build(), this.prefs.floats || [])
     const first = Projects.recent().find(id => Slop.app(id)) || (Slop.apps[0] || {}).id
