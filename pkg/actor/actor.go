@@ -191,6 +191,8 @@ type Actor struct {
 	// actions that declare none, which need admin.
 	requires   map[string]rt.Level
 	undeclared []string
+	// schemas: the actions that declare args or result (argschema.go).
+	schemas map[string]*actionSchema
 
 	storage  goja.Value            // use('storage'), built on first use (storage.go)
 	database goja.Value            // use('database'), built on first use (database.go)
@@ -331,12 +333,19 @@ func (a *Actor) readShape() error {
 	// Each action's requires: { requires: 'view' | 'interact' | 'admin' |
 	// 'owner', run }. A plain function, or an object without requires,
 	// needs admin: an action fails closed (decision 4, amended).
-	a.requires, a.undeclared = map[string]rt.Level{}, nil
+	a.requires, a.undeclared, a.schemas = map[string]rt.Level{}, nil, map[string]*actionSchema{}
 	actions, _ := a.def.Get("actions").(*goja.Object)
 	for _, name := range a.groups["actions"] {
 		need, declared := rt.LevelAdmin, false
 		if o, ok := actions.Get(name).(*goja.Object); ok {
 			if _, isFn := goja.AssertFunction(o); !isFn {
+				s, err := readSchema(name, o)
+				if err != nil {
+					return err
+				}
+				if s != nil {
+					a.schemas[name] = s
+				}
 				if v := o.Get("requires"); v != nil && !goja.IsUndefined(v) {
 					l, ok := rt.ParseLevel(v.String())
 					if !ok || l == rt.LevelNone || l == rt.LevelSelf {

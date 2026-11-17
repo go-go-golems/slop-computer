@@ -569,6 +569,11 @@ func (m *Manager) Call(ctx context.Context, storeID, action string, args any, vi
 	if err := a.mayCall(action, vis); err != nil {
 		return nil, err
 	}
+	// Then its args schema, if it declares one: run never sees a wrong shape.
+	args, err = a.checkArgs(action, args)
+	if err != nil {
+		return nil, err
+	}
 	return a.send(ctx, &event{kind: "action", name: action, visitor: vis, via: via,
 		run: func(a *Actor, cx *goja.Object) (goja.Value, error) {
 			f := a.fn("actions", action)
