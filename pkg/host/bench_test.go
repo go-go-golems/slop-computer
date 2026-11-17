@@ -11,6 +11,8 @@ import (
 	"net/url"
 	"strings"
 	"testing"
+
+	"github.com/go-go-golems/slop-computer/pkg/client"
 )
 
 // fmtJSON is v as JSON, for looking for text in a decoded answer.
@@ -509,5 +511,65 @@ func TestBenchPublish(t *testing.T) {
 	}
 	if st := h.call(admin, "app.status", map[string]any{"store": "jot-1", "peek": true, "migrations": true}).(map[string]any); !strings.Contains(fmtJSON(st["applied"]), `"sql/002.sql"`) {
 		t.Fatalf("app.status migrations = %v", st)
+	}
+}
+
+// The bench's actions declare their arguments (SLOP3-024 phase 2): a wrong
+// shape is refused before run, naming the place, and the schemas give the
+// bench a valid actions.d.ts.
+func TestBenchArgs(t *testing.T) {
+	h := newHarness(t)
+	admin := h.tokenFor("admin@example.com", "read", "write", "admin")
+	installBench(t, h, admin)
+	for _, c := range []struct {
+		action string
+		args   map[string]any
+		want   string
+	}{
+		{"files", map[string]any{"app": "jot", "at": "3"}, "files: at /at: got string, want integer"},
+		{"files", map[string]any{"app": "Not An Id", "at": 1}, "at /app: 'Not An Id' does not match pattern"},
+		{"head", map[string]any{"app": "jot", "ref": "main"}, "at /ref:"},
+		{"commit", map[string]any{"app": "jot", "ref": "draft", "base": 1, "changes": []any{}}, "at /changes: minItems"},
+		{"commit", map[string]any{"app": "jot", "ref": "draft", "base": 1, "changes": []any{map[string]any{"text": "no path"}}}, "at /changes/0: missing property 'path'"},
+		{"embed", map[string]any{"app": "jot", "kind": "staging"}, "at /kind:"},
+		{"closeProposal", map[string]any{"app": "jot", "ref": "proposal/x", "status": "merged", "ifAt": 1}, "at /status:"},
+		{"logEvents", map[string]any{"app": "jot", "events": []any{map[string]any{"kind": "note", "ref": "draft", "n": 0}}}, "at /events/0/n: minimum"},
+	} {
+		e := h.fail(admin, "actor.call", map[string]any{"store": "bench", "action": c.action, "args": c.args}, "invalid_argument")
+		if msg, _ := e["message"].(string); !strings.Contains(msg, c.want) {
+			t.Errorf("%s(%v): %q, want %q", c.action, c.args, msg, c.want)
+		}
+	}
+
+	decl := appTypes(h, admin, "bench")
+	actions := decl[client.TypesDir+"/actions.d.ts"]
+	for _, want := range []string{
+		"  files(args: {\n    /** a store id: lowercase letters, digits and - */\n    app: string;\n    at: number;\n",
+		"    kind: \"dev\" | \"test\" | \"prop\";\n",
+		"    status: \"accepted\" | \"rejected\" | \"discarded\";\n",
+		"  apps(args?: Record<string, unknown>): unknown;",
+	} {
+		if !strings.Contains(actions, want) {
+			t.Fatalf("the bench's actions.d.ts lacks %q:\n%s", want, actions)
+		}
+	}
+	tsc := tscPath()
+	if tsc == "" {
+		t.Skip("no tsc: the bench's actions.d.ts is not type-checked")
+	}
+	dir := t.TempDir()
+	writeTree(t, dir, decl)
+	for name, cfg := range client.Tsconfigs("actor.js", false) {
+		writeTree(t, dir, map[string]string{name: string(cfg)})
+	}
+	writeTree(t, dir, map[string]string{"main.ts": `const slop = await claude.use('slop')
+if (slop) {
+  await slop.actions.files({ app: 'jot', at: 3 })
+  await slop.actions.commit({ app: 'jot', ref: 'draft', base: 3, changes: [{ path: 'a', text: 'x' }], event: { who: 'you', thread: null } })
+  await slop.actions.instance({ app: 'jot', kind: 'prop', ref: 'proposal/x' })
+}
+`})
+	if out, ok := tscCheck(tsc, dir, "tsconfig.json"); !ok {
+		t.Fatalf("tsc on the bench's actions:\n%s", out)
 	}
 }
