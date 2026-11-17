@@ -384,6 +384,8 @@ export function PROBE(CFG) {
     },
     count: q => qsa(q).length,
     all: (q, max = 50) => qsa(q).slice(0, max).map(info),
+    // the whole text of each match (info's is cut at 120 characters: a scenario's text check missed rows)
+    texts: (q, max = 20) => qsa(q).slice(0, max).map(el => (el.innerText || el.textContent || '').trim().replace(/\s+/g, ' ').slice(0, 100000)),
     record: on => { recording = !!on; return recording },
     stableSel: t => stableSel(find(t)),
     click: t => { const el = find(t); const m = mode; mode = 'play'; try { el.click() } finally { mode = m } return info(el) },

@@ -24,6 +24,13 @@ import (
 // results (images excluded), as the Node worker does.
 const maxContextBytes = 512 << 10
 
+// wrapAllowance is how far past maxContextBytes a turn may go for its last,
+// tool-less round (nudgeFull).
+const wrapAllowance = 160 << 10
+
+// nudgeFull asks a model whose turn outgrew the budget for its reply.
+const nudgeFull = "(From the system, not the person: this turn has used up its room for tool results. Do not call tools. Reply to the person now: what you did, what changed, what is left to do, and anything they must know.)"
+
 // failure ends a call with a contract error code.
 type failure struct{ code, message string }
 
@@ -129,17 +136,26 @@ func (c *call) run(ctx context.Context) error {
 	if c.r.MaxRounds == 0 {
 		rounds = 5
 	}
-	nudged := false // asked once for a reply after a silent end
-	textCalls := 0  // rounds whose tool call came as text (told so, at most twice)
+	nudged := false  // asked once for a reply after a silent end
+	textCalls := 0   // rounds whose tool call came as text (told so, at most twice)
+	wrapped := false // the conversation outgrew the budget: one last round, no tools, to reply
 	for round := 0; round < rounds; round++ {
-		if contextBytes(t) > maxContextBytes {
-			return errContext
+		if n := contextBytes(t); n > maxContextBytes {
+			// A long turn's tool results outgrew the budget: rather than lose the
+			// turn ("exceeds local context budget" mid-answer, a persona review),
+			// the model gets one round without tools to tell the person what it
+			// did and what is left, within a small allowance.
+			if round == 0 || wrapped || n > maxContextBytes+wrapAllowance {
+				return errContext
+			}
+			wrapped = true
+			turns.AppendBlock(t, turns.NewUserTextBlock(nudgeFull))
 		}
 		perRound, err := budget.next(m.MaxTokens)
 		if err != nil {
 			return err
 		}
-		offersTools := round < rounds-1 && len(c.r.Tools) > 0 && !nudged // the last round, and the reply asked for, offer none
+		offersTools := round < rounds-1 && len(c.r.Tools) > 0 && !nudged && !wrapped // the last round, and a reply asked for, offer none
 		if c.r.Meter != nil {
 			// Hold this round's cost before the provider is contacted
 			// (SLOP3-007): one token per byte of context is conservative,

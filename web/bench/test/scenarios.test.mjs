@@ -64,7 +64,12 @@ test('a fixture applied during a run waits for it; a failed run lets the next on
 // contained in "128": a persona review found a check passing on the wrong
 // number).
 test('expect: text contains, exact and match', async () => {
-  const fh = { call: async (m) => (m === 'count' ? 1 : [{ text: '  Shipped:\n 128 kg ', rect: { w: 10, h: 10 } }]) }
+  const long = 'Row '.repeat(60) + 'Shipped: 128 kg'   // past info's 120 characters
+  const fh = { call: async (m) => (m === 'count' ? 1 : m === 'texts' ? ['  Shipped:\n 128 kg '] : [{ text: '  Shipped:\n 128 kg ', rect: { w: 10, h: 10 } }]) }
+  const deep = { call: async (m) => (m === 'count' ? 1 : m === 'texts' ? [long] : [{ text: long.slice(0, 120), rect: { w: 10, h: 10 } }]) }
+  assert.equal((await expectStep(deep, { expect: 'table', text: '128 kg' })).ok, true, 'text past the first 120 characters')
+  const old = { call: async (m) => { if (m === 'texts') throw new Error('unknown'); return m === 'count' ? 1 : [{ text: 'Shipped: 128 kg', rect: { w: 1, h: 1 } }] } }
+  assert.equal((await expectStep(old, { expect: '#w', text: '128' })).ok, true, 'an older probe without texts')
   assert.equal((await expectStep(fh, { expect: '#w', text: '12' })).ok, true)
   assert.equal((await expectStep(fh, { expect: '#w', text: '12 kg', exact: true })).ok, false)
   assert.equal((await expectStep(fh, { expect: '#w', text: 'shipped: 128 KG', exact: true })).ok, true)

@@ -498,3 +498,20 @@ func TestToolCallAsTextIsRetried(t *testing.T) {
 	assert.Contains(t, fmt.Sprint(p.bodies[1]["messages"]), "wrote a tool call as text")
 	assert.Contains(t, p.bodies[1], "tools", "the retried round still offers the tools")
 }
+
+// A turn whose tool results outgrow the budget gets one round without
+// tools to reply, instead of failing mid-answer.
+func TestOverBudgetTurnReplies(t *testing.T) {
+	big := json.RawMessage(`"` + strings.Repeat("x", 530<<10) + `"`)
+	exec := func(context.Context, llm.Event) (llm.ToolResult, error) { return llm.ToolResult{Value: big}, nil }
+	b, p := setup(t, nil,
+		toolCalls("", [3]string{"call_1", "get_weather", `{"city":"Oslo"}`}),
+		text("I read the forecast; it was long. Oslo is 17 degrees."))
+	rec := &recorder{}
+	require.NoError(t, b.Sample(context.Background(), req("weather?", llm.Options{}, weather), rec.emit, exec))
+	require.NotNil(t, rec.last("result"), "no error: %v", rec.last("error"))
+	assert.Equal(t, "I read the forecast; it was long. Oslo is 17 degrees.", *rec.last("result").Result.FinalText)
+	require.Len(t, p.bodies, 2)
+	assert.NotContains(t, p.bodies[1], "tools")
+	assert.Contains(t, fmt.Sprint(p.bodies[1]["messages"]), "used up its room")
+}

@@ -1,4 +1,4 @@
-/* the bench, built from web/bench: do not edit. source sha256:30035a3aa0bd6a800ac40808f19171acd04d142de58251c9d1871548ebf833bb */
+/* the bench, built from web/bench: do not edit. source sha256:e53e4d993045a465b6fa7db4bc6a49fc5f3e0dbf94a6754cd5783b6fc28c9c9a */
 // The bench: a live dev environment for slop apps. Built from web/bench/src.
 (() => {
   // src/lib/util.js
@@ -2851,7 +2851,8 @@
     }
     if (!n) return { ok: false, got: "nothing matches" };
     const els = await fh.call("all", [s.expect, 20]);
-    const got = () => 'text "' + els.map((e) => e.text).join(" | ").slice(0, 120) + '"';
+    const texts = s.text != null || s.match != null ? await fh.call("texts", [s.expect, 20]).catch(() => els.map((e) => e.text)) : [];
+    const got = () => 'text "' + texts.join(" | ").slice(0, 160) + '"';
     if (s.match != null) {
       let re;
       try {
@@ -2859,11 +2860,11 @@
       } catch (e) {
         return { ok: false, got: "match is not a regular expression: " + e.message };
       }
-      return { ok: els.some((e) => re.test(e.text)), got: got() };
+      return { ok: texts.some((t) => re.test(t)), got: got() };
     }
     if (s.text != null) {
       const norm = (t) => String(t).replace(/\s+/g, " ").trim().toLowerCase(), want = norm(s.text);
-      return { ok: els.some((e) => s.exact ? norm(e.text) === want : e.text.toLowerCase().includes(String(s.text).toLowerCase())), got: got() };
+      return { ok: texts.some((t) => s.exact ? norm(t) === want : t.toLowerCase().includes(String(s.text).toLowerCase())), got: got() };
     }
     if (s.value != null) {
       const v = (els[0].attrs || {}).value;

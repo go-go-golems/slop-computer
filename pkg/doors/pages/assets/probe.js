@@ -1,4 +1,4 @@
-/* the bench, built from web/bench: do not edit. source sha256:30035a3aa0bd6a800ac40808f19171acd04d142de58251c9d1871548ebf833bb */
+/* the bench, built from web/bench: do not edit. source sha256:e53e4d993045a465b6fa7db4bc6a49fc5f3e0dbf94a6754cd5783b6fc28c9c9a */
 // slop's dev probe (SLOP3-022): the bench's PROBE from web/bench/src/frames/probe.js,
 // which the sandbox adds to dev embeds only, after the runtime. It answers the
 // tool that framed the view (the boot data's parentOrigin) and nothing else.
@@ -395,6 +395,8 @@ function PROBE(CFG) {
     },
     count: q => qsa(q).length,
     all: (q, max = 50) => qsa(q).slice(0, max).map(info),
+    // the whole text of each match (info's is cut at 120 characters: a scenario's text check missed rows)
+    texts: (q, max = 20) => qsa(q).slice(0, max).map(el => (el.innerText || el.textContent || '').trim().replace(/\s+/g, ' ').slice(0, 100000)),
     record: on => { recording = !!on; return recording },
     stableSel: t => stableSel(find(t)),
     click: t => { const el = find(t); const m = mode; mode = 'play'; try { el.click() } finally { mode = m } return info(el) },

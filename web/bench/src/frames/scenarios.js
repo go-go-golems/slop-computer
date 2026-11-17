@@ -150,17 +150,19 @@ export async function expectStep(fh, s) {
   }
   if (!n) return { ok: false, got: 'nothing matches' }
   const els = await fh.call('all', [s.expect, 20])
-  const got = () => 'text "' + els.map(e => e.text).join(' | ').slice(0, 120) + '"'
+  // text and match read each match's whole text (all() cuts it at 120 characters; an older probe has no texts)
+  const texts = s.text != null || s.match != null ? await fh.call('texts', [s.expect, 20]).catch(() => els.map(e => e.text)) : []
+  const got = () => 'text "' + texts.join(' | ').slice(0, 160) + '"'
   // text: contains, ignoring case ("12" passes on "128": a number wants exact or match);
   // exact: the whole text, spaces collapsed; match: a regular expression
   if (s.match != null) {
     let re
     try { re = new RegExp(String(s.match)) } catch (e) { return { ok: false, got: 'match is not a regular expression: ' + e.message } }
-    return { ok: els.some(e => re.test(e.text)), got: got() }
+    return { ok: texts.some(t => re.test(t)), got: got() }
   }
   if (s.text != null) {
     const norm = t => String(t).replace(/\s+/g, ' ').trim().toLowerCase(), want = norm(s.text)
-    return { ok: els.some(e => s.exact ? norm(e.text) === want : e.text.toLowerCase().includes(String(s.text).toLowerCase())), got: got() }
+    return { ok: texts.some(t => s.exact ? norm(t) === want : t.toLowerCase().includes(String(s.text).toLowerCase())), got: got() }
   }
   if (s.value != null) { const v = (els[0].attrs || {}).value; return { ok: String(v) === String(s.value), got: 'value "' + v + '"' } }
   return { ok: els.some(e => e.rect.w && e.rect.h), got: 'not visible' }
