@@ -19,3 +19,7 @@ Notes §8: type checking in the bench is a browser worker (measured: 1.26 s cold
 ## 2026-11-16
 
 The full design (design-doc/01): the server compiles .ts per file with esbuild (page/actor/eval profiles, cache by hash); declarations for the page runtime, the actor API, modules generated from verb schemas, and app actions (phase 2: args schemas, validated); checking in the bench worker and with tsc, none on the server for now. Probes: scripts/02 (transform ~2 ms/file), scripts/03 (goja runs the output; stack traces map to .ts). Tasks restructured by phase. Diary steps 1–2.
+
+## 2026-11-16
+
+Decisions (2026-11-16): new apps default to TS; packages only via slop vendor (CLI, a person runs it; the server never fetches; the agent cannot add packages); .tsx in phase 0 (TsconfigRaw + vendored JSX runtime via import map). The goja source-map fix shipped first (PR #52). Design: status, §1, new §4.7 slop vendor, app verbs via jsverbs hooks in the CLI, phase 0b, §11 decisions. Tasks updated. Diary step 3.

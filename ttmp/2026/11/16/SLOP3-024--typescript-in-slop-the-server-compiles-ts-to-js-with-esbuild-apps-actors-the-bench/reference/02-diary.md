@@ -155,3 +155,92 @@ The tasks were restructured by phase.
   - actor and app verbs: CommonJS, es2020, inline map;
   - eval: CommonJS inside the verb's function wrapper.
 - Cache key: (sha256, profile, esbuild version).
+
+## Step 3: The source-map fix (#52), and the decisions on packages and .tsx
+
+The person decided three things: fix the goja issue first, then implement; new apps default to TypeScript. They then asked for an explanation of bundling, npm packages and `.tsx` before any work started. After reading it, they settled packages: `slop vendor`, a command only a person runs with the CLI. The agent can't add packages.
+
+This step covers four pieces of work:
+
+- the fix, as PR #52;
+- the explanation;
+- the design update with the decisions: new §4.7 for `slop vendor`, `.tsx` in phase 0, and app verbs compiled in the CLI through jsverbs' hooks;
+- the tasks restructured to match.
+
+### Prompt Context
+**User prompts (verbatim):**
+- "yes, fix first, then implement, new apps default to TS, \n\nexplain the bundling / npm packages / tsx ? (do this before starting the work, stop, so I can read)"
+- "slop vendor then works for an app?"
+- "ok, then build that. an agent cannot do that, it's CLI. Update the design doc."
+
+**Assistant interpretation:**
+1. Make the fix as its own PR.
+2. Record the decisions in the design: TypeScript as the default; packages only through `slop vendor` in the CLI; `.tsx`.
+3. Then implement phase 0, followed by `slop vendor`.
+
+**Inferred user intent:** Close the security issue before building on goja's source maps. Keep supply-chain decisions in a person's hands.
+
+**Commit (code):** e44a89f, "goja runtimes for app code read no files for source maps" (PR #52, branch `task/goja-sourcemaps`).
+
+### What I did
+- **The fix:**
+  - `pkg/jsrt`: `ForAppCode(vm)` sets `parser.WithSourceMapLoader` to a loader that returns `(nil, nil)`.
+  - It is called in `newHost` (`pkg/actor/enginehost.go`), `runEval` (`pkg/commands/eval.go`) and `Invoker` (`pkg/appverbs/appverbs.go`).
+- **The fix's tests:**
+  - `pkg/jsrt`: a control (plain goja reads the map file) and the fix, for three routes: a script's last line, `eval`, and `new Function`. Inline maps still work.
+  - `pkg/host` `TestAppCodeOpensNoFiles`: an actor's entry, a required file, `eval` in an action, and the eval verb.
+  - `pkg/appverbs` `TestVerbOpensNoFiles`.
+- **The explanation's facts:**
+  - Page hosts set only `frame-ancestors` in their CSP.
+  - blocks-site vendors libraries by hand, with `SHA256SUMS`; pinup builds its packages locally.
+  - esbuild's `TransformOptions` has the `JSX*` fields and `TsconfigRaw`.
+  - `inject` (`sandbox.go`) puts tags at the top of every served page.
+  - The kernel has one `Blobs` store.
+- **Found while updating the design:** go-go-goja already depends on esbuild v0.25.12. Its `pkg/tsscript` and `pkg/xgoja/app/typescript.go` wire TypeScript into jsverbs through `ScanOptions.SourceTransform` and `RuntimeTransform`. `go list -deps ./cmd/...` shows that slop doesn't link esbuild yet.
+- **The design update:**
+  - status, §1, §4.1–4.7, §5.5, §6.2, §7, §9, §10 (a new phase 0b), §11 (now the decisions), and §12;
+  - `tasks.md`.
+
+### Why
+- **The loader returns nothing, rather than turning source maps off:** inline maps are how TypeScript stack traces will work (§4.1), and goja decodes `data:` URLs without calling the loader.
+- **App verbs compile in the CLI:** jsverbs' `RuntimeTransform` needs the original source together with the metadata jsverbs appends to it. Compiling on the server in `app.verbs` would have to reproduce that.
+
+### What worked
+- **Control and fix:** the jsrt tests pass. With the three calls removed, the end-to-end tests fail with stacks such as `at entry (outside.ts:1:0(3))`, `at required (outside.ts:1:0(3))`, `eval verb: … at outside.ts:1:0(2)`, `where: … at outside.ts:1:0(2)`. With the calls restored, they pass.
+- **Full suite:** `go vet ./...` passes, and `go test -tags sqlite_fts5 ./...` passes in all 22 packages.
+
+### What didn't work
+- **The `new Function` control** first failed with `default runtime: the map was not read, so this test checks nothing: "Error: x\n\tat anonymous (<eval>:3:8(7))…"`. `new Function` puts the body on line 3 of the source it builds, and the test map covered only line 1. A map that covers lines 1–4 fixed it.
+- **The app-verb test** first printed help: the verb's path is folder, file, function (`verbs where where`).
+- **`go test ./...` without tags** fails `TestSQLiteHasFTS5`. The Makefile runs `go test -tags $(TAGS)`.
+- **Inserting the import with sed and goimports** left a duplicate and a stray group. The three import blocks were rebuilt with a script.
+
+### What I learned
+- **Wrappers decide reachability.**
+  - `slop eval` wraps its source in `(function(){…\n})()`. Its last line, `})()`, hides a trailing map comment, but `eval` inside the program still reaches the loader.
+  - The actor's `require` wrapper ends in `})`, which goja deliberately skips when it looks for the map line, so required files were reachable directly.
+- **jsverbs' own scan** already parses with `WithDisableSourceMaps`, and goja_nodejs's `require` uses the registry's in-memory loader.
+
+### What was tricky to build
+- **Proving the end-to-end tests detect the bug:** commit, comment the calls out temporarily, run the tests, then `git checkout -- pkg`.
+
+### What warrants a second pair of eyes
+- **No other place** where app code is parsed by goja outside these three runtimes. A search found no `goja.Compile`/`goja.Parse` in slop.
+
+### What should be done in the future
+- **Deploy #52 to staging** once it is merged.
+- **Phase 0, then phase 0b**, per `tasks.md`.
+
+### Code review instructions
+- **#52:** `pkg/jsrt/jsrt.go`, the three call sites, and the three tests.
+- **Run:** `go test -tags sqlite_fts5 ./pkg/jsrt ./pkg/host ./pkg/appverbs -run 'OpensNoFiles|KeepsInline' -count=1`
+
+### Technical details
+- **`slop vendor` (design §4.7):**
+  - fetches registry tarballs and checks them against `dist.integrity`;
+  - bundles with `api.Build` (ESM with splitting; CJS with `--actor`);
+  - writes `vendor/<pkg>@<ver>/`, `vendor/vendor.json`, and `app.json` `imports.page` and `imports.actor`.
+- **The server:**
+  - injects an import map from `imports.page`;
+  - the actor's `require` resolves `imports.actor`;
+  - `slop types` writes `paths` from `vendor.json`.

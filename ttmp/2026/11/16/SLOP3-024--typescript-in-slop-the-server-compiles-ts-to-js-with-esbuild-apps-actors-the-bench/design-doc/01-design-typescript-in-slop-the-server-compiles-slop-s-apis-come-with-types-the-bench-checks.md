@@ -38,7 +38,7 @@ WhenToUse: Before implementing any part of SLOP3-024, or when touching how slop 
 
 **The server compiles, slop's APIs come with types, and the bench checks.**
 
-Status: proposed, 2026-11-16. Nothing here is implemented. The evidence was gathered against slop-computer `main` at 407a3f9.
+Status: decided, 2026-11-16 (section 11 lists the decisions); implementation is starting. The evidence was gathered against slop-computer `main` at 407a3f9. The goja source-map loader from section 4.4 shipped first, as a separate fix (PR #52).
 
 ## 1. Summary
 
@@ -72,6 +72,8 @@ The design has three parts:
    - with ordinary `tsc` on a laptop or in CI.
 
    Serving never waits for a check, and a type error never takes an app down.
+
+Libraries from npm enter an app through `slop vendor`, a CLI command that a person runs (section 4.7). It fetches a package, bundles it once into ordinary files in the app's tree, and maps the package's name to them. The server never fetches packages, and the agent cannot add them; it uses the ones the app already has. `.tsx` works the same way, with a vendored JSX runtime.
 
 Compiling is the small part: a few days of work. The value is in parts 2 and 3. They catch the class of bug that the review of SLOP3-023 found, a value of the wrong shape passed between the page, the actor and the server, before anything runs.
 
@@ -120,10 +122,10 @@ The same holds for every other place that runs code, because every engine slop u
 ## 3. The design at a glance
 
 ```
-             write                compile (server, esbuild)            run
+             write                compile (esbuild)                    run
  person ─┐                 ┌──── page file served ──────────────▶ browser
  agent  ─┼── .ts in the ───┼──── actor file loaded ─────────────▶ goja (server)
- bench  ─┘   app's store   ├──── app verb sources returned ─────▶ goja (CLI)
+ bench  ─┘   app's store   ├──── app verb, in the CLI ──────────▶ goja (CLI)
                            └──── slop eval source ──────────────▶ goja (server)
 
              check (separately; never on the serving path)
@@ -179,6 +181,8 @@ The source maps follow the size of the output:
 - **Pages get linked maps.** Inline maps triple the output (84.6 KB became 258 KB), and a browser fetches a linked map only when its developer tools are open.
 - **Actors get inline maps,** because the server reads them in memory.
 
+The `page` and `actor` profiles also take the settings from the app's own `tsconfig` files that change what a file compiles to (section 4.2).
+
 The actor's target matters because goja implements ES5.1 and most, but not all, of the later editions. A probe (`scripts/03-goja-runs-esbuild-output`) tested this:
 
 - **What it did:** it compiled two TypeScript files with the `actor` profile and ran them in goja, through the same CommonJS wrapper that slop uses.
@@ -197,7 +201,7 @@ Line 9 of `rows.ts` is the line with the `throw`, so goja reads the inline map. 
 
 A file compiles when three things hold:
 
-- its name ends in `.ts`, `.mts` or `.cts`;
+- its name ends in `.ts`, `.tsx`, `.mts` or `.cts`;
 - its name does not end in `.d.ts`;
 - its content is valid UTF-8.
 
@@ -210,12 +214,19 @@ The decision depends on the name and the content, not on the type recorded when 
 
 There is no switch in `app.json`. The extension already says what the file is. A switch would only add a state in which a `.ts` file is served as something the browser refuses to run.
 
-`.tsx` is not compiled in this design. JSX needs a runtime: React's `jsx` function, or a factory the page defines. In practice that means a bare import (`import … from 'react'`), and the browser cannot resolve one without bundling. `.tsx` therefore belongs with bundling and npm packages, which this design leaves out (section 9).
+`.tsx` compiles too. JSX turns into calls to a runtime. With the automatic runtime and `jsxImportSource: "preact"`, `<div>{name}</div>` becomes `jsx("div", {children: name})`, plus `import { jsx } from "preact/jsx-runtime"`. That import is a bare name, which section 4.7 resolves: the JSX runtime is a vendored package like any other.
+
+The JSX settings live in the app's `tsconfig` files, where the editor and the checker read them too. The server reads the same files:
+
+- **What esbuild takes:** its per-file transform accepts a raw `tsconfig` (`TsconfigRaw`), and applies the options that change the output: `jsx`, `jsxImportSource`, `jsxFactory`, `experimentalDecorators`, `useDefineForClassFields` and the like.
+- **Which file:** pages use `tsconfig.json`, and the actor uses `tsconfig.actor.json` (section 5.5).
+- **Caching:** the file's sha256 joins the cache key, so editing it recompiles.
+- **One file only:** `extends` is not followed.
 
 slop's own file-type table gains entries for the three extensions, so the stored type no longer depends on the machine:
 
 ```go
-".ts": "text/typescript; charset=utf-8", // and the same for .mts and .cts
+".ts": "text/typescript; charset=utf-8", // the same for .mts and .cts; .tsx: "text/tsx; charset=utf-8"
 ```
 
 Listings and downloads report the stored type. A compiled response always says `text/javascript; charset=utf-8`, whatever type is stored.
@@ -259,6 +270,8 @@ A failed module request (a 4xx or 5xx status) shows up in the browser console on
 
 This is TypeScript's `allowImportingTsExtensions` style, which `web/runtime/tsconfig.json` already uses. The `tsconfig` that slop writes for an app (section 5.5) turns it on, so the checker accepts these imports and flags the ones without an extension.
 
+A bare name (`'lit'`) resolves through an import map that slop builds from the app's vendored packages and injects into every page (section 4.7).
+
 ### 4.4 Actors
 
 Today an actor loads in three steps:
@@ -275,11 +288,12 @@ TypeScript changes each step a little:
    - A path with an extension is loaded as named. A path without one tries `.ts`, then `.js`. Today `requirer` appends `.js` to anything that doesn't end in `.js` or `.json`, which would turn `./x.ts` into `./x.ts.js`.
    - A `.ts` file is compiled before it is wrapped.
    - Module names still come first, so `import { commit } from 'workshop'` compiles to `require('workshop')`. That is `use('workshop')`, just as `require('database')` is today.
+   - A bare name that is not a slop module is looked up in the app's vendored packages for the actor (section 4.7).
 
 Two smaller changes support the types in section 5:
 
 - **`defineActor` returns its argument.** Today it returns `undefined`. The change costs nothing at runtime, and it makes the declaration `defineActor<D>(def: D): D` true.
-- **goja's source-map loader is set explicitly** on every runtime slop creates for app code: actors, `slop eval`, and app verbs in the CLI. The loader returns no files at all. Inline maps (`data:` URLs) don't go through the loader, so they keep working, as the probe above shows. Slop never needs goja to read a map from anywhere else.
+- **goja's source-map loader is set explicitly** on every runtime slop creates for app code: actors, `slop eval`, and app verbs in the CLI. The loader returns no files at all. Inline maps (`data:` URLs) don't go through the loader, so they keep working, as the probe above shows. Slop never needs goja to read a map from anywhere else. This shipped first, on its own (PR #52, `jsrt.ForAppCode` in `pkg/jsrt`).
 
 An actor's errors then read as they do for JavaScript, with TypeScript positions:
 
@@ -294,7 +308,12 @@ An actor's errors then read as they do for JavaScript, with TypeScript positions
 2. it scans them with go-go-goja's jsverbs for `__verb__(…)` declarations;
 3. it runs the verb in goja, inside the CLI (`pkg/appverbs`).
 
-The simplest place to compile is the server: `app.verbs` returns the compiled JavaScript of each `.ts` source, using the `actor` profile, and the CLI does nothing differently. The scan reads function names, parameters and the `__verb__` calls, and stripping types keeps all three. The plan includes a test on a TypeScript copy of a pinboard verb.
+They compile in the CLI. The CLI is the same binary, so it has esbuild. go-go-goja's jsverbs already has the two hooks this takes, and go-go-goja's own xgoja tool uses them for TypeScript verbs (`pkg/xgoja/app/typescript.go`):
+
+- **`ScanOptions.SourceTransform`** gives the scanner JavaScript to read.
+- **`RuntimeTransform`** compiles a verb file, together with the metadata jsverbs appends to it, before goja runs it.
+
+Slop sets both hooks to its compile package, with the `actor` profile. `app.verbs` returns sources unchanged. The plan includes a test on a TypeScript copy of a pinboard verb.
 
 **`slop eval`** runs a program as the body of a function, which allows a top-level `return`. A TypeScript program is placed inside the same function wrapper first and compiled afterwards, with the `eval` profile, because a bare top-level `return` does not parse outside a function. The CLI marks a source as TypeScript when the file ends in `.ts`, through a new `ts: true` field on the verb's input.
 
@@ -311,7 +330,61 @@ The compile cache lives in memory, in the server process.
 
 esbuild is written in Go, and it never executes the source it compiles. A hostile file can cost time and memory, which these limits bound, since esbuild's time grows linearly with input size.
 
-esbuild adds about 6 MB to a stripped binary. That was measured on a minimal program using only `pkg/api`; slop already links much of the same standard library, so the real increase is somewhat smaller.
+esbuild adds about 6 MB to a stripped binary. That was measured on a minimal program using only `pkg/api`; slop already links much of the same standard library, so the real increase is somewhat smaller. esbuild is already in slop's module graph: go-go-goja requires v0.25.12 for its `tsscript` package. Slop doesn't link it yet, and will use the same version.
+
+### 4.7 Packages: `slop vendor`
+
+**Why packages need a step of their own.** A package from npm is many files, with dependencies of its own. Choosing which file to load follows rules in each `package.json` that only a resolver implements. Section 4.1 compiles one file at a time, so packages need a step before that.
+
+Slop's step is `slop vendor`, a CLI command that a person runs. It bundles a package once, when the package is added, into ordinary files in the app's tree. From then on the package is part of the app like any other file: pinned, reviewed as a diff, and never compiled again.
+
+Apps already handle libraries this way, by hand: `apps/blocks-site/vendor/` holds three libraries copied unchanged, with a `SHA256SUMS` file. `slop vendor` does that copying, plus the bundling a library needs when it has no single-file build.
+
+**What it does.** Take `slop vendor add preact@10.24.3 preact/hooks preact/jsx-runtime`, run in an app's folder:
+
+1. **Fetch.** It fetches `preact`'s metadata from the npm registry, picks the version, downloads the tarball, and checks the tarball against the registry's integrity hash (`dist.integrity`). It does the same for each dependency, choosing the highest version that matches its range.
+2. **Bundle.** It unpacks everything into a temporary `node_modules` and bundles the named entry points with esbuild's `api.Build`, as ES modules with code splitting. Splitting makes `preact`, `preact/hooks` and `preact/jsx-runtime` share one copy of preact's internals; hooks break when there are two.
+3. **Copy the types.** It copies the packages' declaration files.
+4. **Write.** It writes the output under `vendor/preact@10.24.3/`, records everything in `vendor/vendor.json`, and adds the names to `app.json`. It checks the store's limits (5000 files per tree) before writing.
+
+No package script ever runs: slop never runs npm, it only reads tarballs.
+
+```
+vendor/preact@10.24.3/preact.js         one file per entry point, ES modules
+vendor/preact@10.24.3/hooks.js
+vendor/preact@10.24.3/jsx-runtime.js
+vendor/preact@10.24.3/chunk-3F2A.js     code the entry points share
+vendor/preact@10.24.3/types/…           the declarations, in the package's own layout
+vendor/vendor.json                      {"preact@10.24.3": {"integrity": "sha512-…", "entries": {…}, "files": {path: sha256}}}
+app.json                                "imports": {"page": {"preact": "vendor/preact@10.24.3/preact.js", "preact/hooks": …}}
+```
+
+**Who reads the mapping.** `app.json`'s `imports` is the one place that maps a name to a file. Three readers use it:
+
+- **Pages.** Slop already injects tags at the top of every HTML page it serves: the boot data and the runtime script (`inject` in `pkg/doors/pages/sandbox.go`).
+  - It also injects a `<script type="importmap">` built from `imports.page`, with paths resolved against the app's root.
+  - So every page gets the same map, and no page needs its own copy.
+  - The map lands before any module script, as browsers require.
+- **The actor.**
+  - `imports.actor` maps names to CommonJS bundles (`slop vendor add --actor zod@3.23.8`), and `require('zod')` finds them after slop's own modules.
+  - CommonJS output can't be split, so each actor entry point is bundled whole.
+  - A package that needs Node's APIs (`fs`, `net`) doesn't work in goja, vendored or not.
+- **The checker.** `slop types` turns `vendor/vendor.json` into `tsconfig` `paths`. So `'preact/hooks'` gets the vendored declarations, in the editor and in the bench.
+
+**Other subcommands:**
+
+- `slop vendor` alone lists the packages, and checks every file against its recorded sha256.
+- `slop vendor rm preact` removes a package.
+- Adding a different version replaces the old one, and the change shows up as an ordinary diff.
+
+**Where it runs.** There are two forms, and a person runs both:
+
+- **On a folder,** followed by the usual push or `slop dev`.
+- **With `--store <app>`.** It fetches and bundles on the person's machine, then commits the files to the app's draft.
+
+The server never contacts a registry. The agent cannot add packages: it can use the ones an app has, and its guide tells it to ask the person for new ones.
+
+**Per app.** Each app carries its own copy, so a snapshot alone decides what runs, and there is no server-wide version to coordinate. Storage is shared anyway: the server keeps file contents in one store keyed by sha256 (the kernel's `Blobs`), so apps that vendor the same build store it only once.
 
 ## 5. Part 2: types for what slop provides
 
@@ -482,7 +555,7 @@ tsconfig.json         pages: lib ES2022 + DOM; page.d.ts; excludes the actor ent
 tsconfig.actor.json   the actor: lib ES2020, no DOM; actor.d.ts and modules.d.ts; the actor entry
 ```
 
-Both turn on `strict`, `isolatedModules`, `allowImportingTsExtensions` and `noEmit`, the settings `web/runtime/tsconfig.json` already uses. `isolatedModules` makes the checker reject what a per-file transform cannot compile: `const enum` across files, namespace merging, and `export =`. The limits of section 4 thus show up as type errors with an explanation, not as surprises at runtime.
+Both turn on `strict`, `isolatedModules`, `allowImportingTsExtensions` and `noEmit`, the settings `web/runtime/tsconfig.json` already uses. `slop types` also writes `paths` for the vendored packages, from `vendor/vendor.json` (section 4.7). `isolatedModules` makes the checker reject what a per-file transform cannot compile: `const enum` across files, namespace merging, and `export =`. The limits of section 4 thus show up as type errors with an explanation, not as surprises at runtime.
 
 By convention, files only the actor uses live under `server/`, which the pages' program leaves out. A file that both the page and the actor use belongs to both programs (pinboard, for example, has `core.js`). Such a file may therefore use neither the DOM nor the actor's globals, a discipline worth having anyway.
 
@@ -511,7 +584,7 @@ The bench checks with TypeScript's own checker, in a Web Worker. Notes §8 recor
   - 30–90 ms for each check after an edit.
 
   The worker loads only for apps that contain `.ts` files.
-- **Inputs:** the worker holds the workspace's files by path and sha256, plus the declarations from `app.types`. The page sends it changes: head moves, the person's edits, and an eval's writes before they are committed.
+- **Inputs:** the worker holds the workspace's files by path and sha256, which include the vendored packages' declarations, plus the declarations from `app.types`. The page sends it changes: head moves, the person's edits, and an eval's writes before they are committed.
 - **Output:** each eval's effects gain `types: {new: [{file, line, message}], fixed: n}`, the errors the eval introduced and how many it fixed. The list is capped like the existing list of new layout issues.
   - The results inform the agent; they never fail an eval.
   - A check that takes longer than about 2 s is reported as not done.
@@ -540,8 +613,9 @@ TypeScript changes what the agent is told and what it sees.
 - **The guide** (`web/bench/src/agent/guide.js`) tells the agent to write JavaScript. For an app with `.ts` files it says instead:
   - write TypeScript, with extensions in imports;
   - keep the page–actor contract in `api.ts`, or, after phase 2, declare `args` schemas;
+  - use the packages the app has vendored, and ask the person to run `slop vendor` for a new one (the agent cannot);
   - read `types` in the eval effects.
-- **Templates** (`web/bench/src/model/templates.js`) gain TypeScript versions, including the two `tsconfig` files.
+- **Templates** (`web/bench/src/model/templates.js`): new apps start from TypeScript templates, with the two `tsconfig` files (decided, section 11). The JavaScript templates stay available.
 - **Eval results** carry `types` (section 6.2). The agent sees a type error it introduced in the same turn, before the person sees a broken page.
 
 The bench's own source (`web/bench/src`) can move to TypeScript independently, at build time, as notes §6 describes. That does not depend on this design.
@@ -557,8 +631,8 @@ The bench's own source (`web/bench/src`) can move to TypeScript independently, a
 
 ## 9. Not in this design
 
-- **Bundling and npm packages** (`import 'lit'`). These need `api.Build` with a plugin that reads files from the snapshot, a source for the packages, and decisions about their supply chain.
-- **`.tsx` and JSX,** which in practice need bundling.
+- **Bundling at serve time.** The server never builds a module graph and never fetches packages. Packages are bundled once, by `slop vendor`, on the person's machine (section 4.7).
+- **Adding packages from the bench.** The agent cannot fetch packages; only a person with the CLI can.
 - **Type checking on the server** (section 6.3).
 - **Types for the bench's host API** in the agent's eval code. The API table (`web/bench/src/core/api.js`) already generates the agent's reference. Generating declarations from it too would let the checker check eval code against the host API, a natural step after phase 3.
 
@@ -580,8 +654,10 @@ Changes:
   - a TypeScript entry run in the CommonJS wrapper;
   - `requirer`'s resolution;
   - `defineActor` returning its argument;
-  - the source-map loader on every runtime for app code.
-- `app.verbs` and `slop eval`: compile `.ts` sources.
+  - the source-map loader on every runtime for app code (done: PR #52).
+- `.tsx`, and the app's `tsconfig` files passed to the transform (`TsconfigRaw`), with their sha256 in the cache key.
+- `imports` in `app.json`: the injected import map, and bare names in the actor's `require`.
+- App verbs: jsverbs' `SourceTransform` and `RuntimeTransform` hooks, in the CLI. `slop eval`: `ts: true`.
 
 Tests:
 
@@ -591,7 +667,16 @@ Tests:
 - an `actor.ts` that imports `./lib/rows.ts` and `workshop`;
 - a stack trace with `.ts` positions (from `scripts/03`);
 - a TypeScript app verb, scanned and run;
+- a `.tsx` page with a vendored JSX runtime, through the injected import map;
 - a cache hit.
+
+**Phase 0b: `slop vendor` (about a week).**
+
+- Registry metadata and tarballs, checked against `dist.integrity`; version ranges; dependencies.
+- `api.Build` over a temporary `node_modules`: ES modules with splitting for pages, CommonJS for the actor.
+- Copying declarations; `vendor/vendor.json`; `imports` in `app.json`; the folder form and `--store`.
+- `slop vendor` to list and verify; `rm`.
+- Tests: a fixture registry (a local HTTP server serving tarballs), a package with a dependency and subpath exports, a corrupted tarball refused, and the output loading in a page and an actor.
 
 **Phase 1: declarations (about a week).**
 
@@ -602,6 +687,7 @@ Tests:
 - The `FileChange` schema as a union.
 - The `app.types` verb and `slop types`; `slop dev` refreshes the types.
 - A fixture TypeScript app that CI checks with `tsc` against the generated declarations. `web/runtime` already has `typescript` as a dev dependency.
+- TypeScript templates as the default for new apps, and the agent's guide updated to match (section 7).
 
 **Phase 2: typed actions (about a week).**
 
@@ -612,14 +698,16 @@ Tests:
 **Phase 3: checking in the bench (about a week).**
 
 - The checker worker, `types` in eval effects, the Code view's diagnostics, and TypeScript evals.
-- The guide and the templates.
+- The guide's part on reading `types` in eval effects.
 
 The ticket's `tasks.md` follows these phases.
 
-## 11. Decisions needed
+## 11. Decisions (2026-11-16)
 
-1. **Should new apps default to TypeScript** in the bench's templates and the agent's guide? I recommend yes, once phase 1 has shipped, so that new apps start with types. The JavaScript templates stay.
-2. **Bundling and `.tsx`:** do they get a ticket of their own now, or only when an app needs a package?
+1. **New apps default to TypeScript.** The bench's templates and the agent's guide switch in phase 1, once there are declarations to check against. The JavaScript templates stay available.
+2. **Packages come only through `slop vendor`, run by a person with the CLI.** The server never fetches from a registry, and the agent cannot add packages.
+3. **`.tsx` is part of phase 0,** because it needs no bundling.
+4. **The goja source-map fix went first,** on its own (PR #52).
 
 Everything else in this document is a recommendation. An implementer can follow it, or revise it with a reason.
 
@@ -645,6 +733,10 @@ Everything else in this document is a recommendation. An implementer can follow 
 - `pkg/commands/files.go`: `FileChange`. `pkg/commands/actors.go`: `app.modules`.
 - `pkg/appverbs/appverbs.go`, `pkg/commands/eval.go`.
 - `pkg/client/folder.go` and `pkg/client/dev.go`: both skip dot directories.
+- `pkg/doors/pages/sandbox.go`: `inject`, the tags at the top of every served page.
+- `pkg/jsrt` (PR #52): `ForAppCode`, the source-map loader for app code.
+- go-go-goja: `pkg/tsscript` (esbuild wrappers) and `pkg/xgoja/app/typescript.go` (jsverbs' TypeScript hooks).
+- `apps/blocks-site/vendor/`: libraries vendored by hand, with checksums.
 - `web/runtime/`: the page runtime and its `tsconfig.json`.
 
 **TypeScript 7 status:**
