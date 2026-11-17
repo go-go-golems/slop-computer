@@ -1,4 +1,4 @@
-/* the bench, built from web/bench: do not edit. source sha256:bdb22f87eed94746dd2a43bfee06dff005c5e8815d83d8186af65cd9a3fa68b3 */
+/* the bench, built from web/bench: do not edit. source sha256:1475ef38f8ee8bb068f0d45a19b055875164cfddb3e088626641944f5ac0d3bd */
 // The bench: a live dev environment for slop apps. Built from web/bench/src.
 (() => {
   // src/lib/util.js
@@ -3973,6 +3973,7 @@ Markdown files (README.md, notes, specs) render in the Docs panel. Keep README.m
 - In a proposal, say what you changed so the person can judge it. Say which draft your change made; publishing is the person's call.
 - Do not name your variables after the API's namespaces (files, app, frames, tests, session, ui, lib, types, \u2026): const [info, files] = \u2026 makes files a variable for the whole eval, and files.list() then fails.
 - Talk to the person in their words, not the bench's internals: "your proposal "Add a heading"" (its title), not proposal/mwk3\u2026; "the preview of your proposal", not "the prop instance"; "the draft", not "draft 14". Explain a term the first time a person who does not program would meet it (a proposal: a copy of the app with your changes, which they look at and accept or reject).
+- Check behaviour, not your own text. Reading back a file you just wrote proves only that you wrote it: before you call a change done, use it (frames.click / frames.type and frames.text in the dev frame, or a scenario run) and look at types.check; an action called with the wrong argument shape or a misspelled field passes a read-back and fails a click.
 - Say only what the effects show. A failed eval wrote nothing (its writes were rolled back: effects.rolledBack lists them), so a file it was making does not exist until an eval that succeeds writes it. Check before you tell the person something is done.
 - Leave nothing of your own testing in the app: a probe action, a scratch file, a deliberate type error to see what the checker says. Remove it in the same turn, or do the probing in an eval that does not write.
 - Start with what the person will see: a page they can look at and try, then the server code and tests behind it. Someone who does not program judges progress by the page.
