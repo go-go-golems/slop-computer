@@ -48,3 +48,18 @@
 ## Round 2 (personas mixed: glm-5.3-flash, glm-5.3 high, deepseek; bench agent glm-5.3)
 - [harness] look/click show only the first 12 lines of a file; no way to read the rest (rosa). Add `benchdrive read [from] [to]` (scrolling, as a person would) — needs a daemon restart: round 3.
 - [harness] `type code` replaces the whole file; rosa nearly destroyed index.html (recovered with Ctrl+Z). Steer to `edit`; make `type code` refuse without --replace.
+- [bench] Select mode clicks on buttons select instead of press (priya r1, maya r2). FIXED 29f2eb7: a one-time hint names Play (P); the canvas hint says so.
+- [harness] pi's bash tool gives up after 180 s; a long `ask` (glm-5.3, a whole kanban at once) timed out and the persona's next command queued behind it (devon, kenji). Round 3: ask returns after 150 s; `wait` follows the running turn.
+- [harness] confirm() dismissed by Playwright (rosa's delete). Round 3: dialogs accepted and reported. (Real browsers show it: frames are not sandboxed without allow-modals.)
+- [BUG, sample] glm-5.3 wrote its tool call as text (<tool_call>eval …), the turn ended mid-task with markup as the reply (maya r2 step 7). FIXED 3fe5457: told and retried, at most twice.
+- [bench] Test orders entered in a proposal's preview "disappeared" after accepting (maya r2). FIXED 3fe5457: the proposal note and accept toast say the preview's data stays behind.
+- [ci] probe.js left out of two commits; CI's freshness test failed. FIXED 0e3977b; commit apps, pkg and web together.
+- [BUG, bench sandbox] The eval session's declaration rewrite made "const [a, b] = …" into "([a, b] = …)", which continued a previous line without a semicolon as a call: "TypeError: not a function (line 2)"; aisha's agent failed five evals on it (r2). FIXED (rewrite.js; ";" for the keyword; test fails on the old rewrite). Also: "not a function" errors now quote the line.
+- [agent+guide] To clean up test data the agent reset the dev instance, dropping all data (maya r2: preview empty; rosa refused: real stock). Guide/app.reset: never reset to clean up; ask first.
+- [bench?] Scenarios tab said "No scenarios yet" after the agent said it made them; no failed-save notice (sam r2). Investigate: likely in a proposal while the view shows draft, or files rejected by the stricter step check.
+- [bench] Kenji (r2) also met the proposal-to-accept and Select/Play barriers (third and fourth time across personas).
+- [BUG, bench] Clicking a file's name in Review toggled its checkbox (name inside the label); "Accept 9" dropped actor.ts, the draft broke ("no such table: items"), and the left-out change was discarded with the closed proposal (devon r2). FIXED: checkbox only; partial accept asks, naming what is discarded.
+- [bench] After a seed the frames kept old data (sam r2). FIXED: seeds reload the dev frames.
+- [feature] All canvas frames share one visitor identity: two voters, or a host and an audience member, cannot be tested (kenji r2). Needs frames as different simulated people.
+- [bench] A new frame lands off-screen; clicking it timed out until "Fit" (kenji r2). Check: scroll a new frame into view.
+- [bench?] Two "This week" panes with different numbers (sam r2): which is the app? Check his screenshots.

@@ -16,6 +16,7 @@ const HERE = path.dirname(fileURLToPath(import.meta.url))
 const PORT = +(process.env.BENCHDRIVE_PORT || 18499)
 const BENCH = process.env.BENCHDRIVE_URL || 'http://apps.localhost:18492/bench'
 const EMAIL = process.env.BENCHDRIVE_EMAIL || 'admin@example.com'
+const ASK_WAIT = Math.max(20, +process.env.BENCHDRIVE_ASK_WAIT || 150)
 const VIEW_TITLES = ['Agent', 'Eval', 'Canvas', 'Timeline', 'Console', 'Data', 'Scenarios', 'Code', 'Review', 'Docs', 'Inspector', 'Layers', 'Panels']
 
 const HELP = `benchdrive <you> <command> [args]   (you = your persona name, e.g. maya)
@@ -468,7 +469,10 @@ class Persona {
     }, { settle: { min: 1000, max: 10000 } })
   }
 
-  async ask(message, timeoutS = 900) {
+  // ask waits ASK_WAIT seconds at most (a persona's shell gives up on a command after
+  // about 180 s, and its next command would queue behind the wait); a turn still
+  // running then is followed by wait.
+  async ask(message, timeoutS = ASK_WAIT) {
     if (!message) throw new Fail('usage: ask <message>')
     const bf = await this.bench()
     const pre = []
@@ -503,7 +507,8 @@ class Persona {
     return this.finishTurn(bf, { t0, nMsgs, before, pre, timeoutS })
   }
   // wait for the turn to end (or to wait for the person), then report it
-  async finishTurn(bf, { t0, nMsgs, before, pre = [], timeoutS = 900, verb = 'Sent.' }) {
+  async finishTurn(bf, { t0, nMsgs, before, pre = [], timeoutS = ASK_WAIT, verb = 'Sent.' }) {
+    this.pending = null
     // the turn ends: no Stop button, the header's Claude pill no longer "Working"
     let waiting = null
     while (Date.now() - t0 < timeoutS * 1000) {
@@ -526,7 +531,8 @@ class Persona {
     const msgs = (S.views.agent ? S.views.agent.msgs : []).slice(nMsgs)
     const out = [...pre]
     const still = !waiting && Date.now() - t0 >= timeoutS * 1000
-    out.push(`${verb} ${waiting ? 'After ' + fmtDur(secs) + ': ' + waiting : still ? 'Claude is still working after ' + fmtDur(secs) + '; look again later (benchdrive <you> wait 30).' : 'The turn ended after ' + fmtDur(secs) + '.'}`)
+    if (still) this.pending = { t0, nMsgs, before }
+    out.push(`${verb} ${waiting ? 'After ' + fmtDur(secs) + ': ' + waiting : still ? 'Claude is still working after ' + fmtDur(secs) + ' (its progress so far is below). Follow it with: benchdrive <you> wait 120' : 'The turn ended after ' + fmtDur(secs) + '.'}`)
     for (const m of msgs) if (m.role === 'agent') out.push(...fmtMsg(m, 40))
     const toasts = await bf.evaluate(PG.toastsSince, t0).catch(() => [])
     for (const t of toasts) out.push('Notice (shown briefly): ' + t)
@@ -603,12 +609,31 @@ class Persona {
         const fields = await frame.evaluate(() => [...document.querySelectorAll('input, textarea, select')].map(e => e.tagName.toLowerCase() + (e.name ? '[name=' + e.name + ']' : '') + (e.placeholder ? ' "' + e.placeholder + '"' : ''))).catch(() => [])
         throw new Fail(`No field "${sel}" in frame ${i + 1}. Fields there: ${fields.join(', ') || '(none)'}`)
       }
-      await loc.first().fill(text, { timeout: 5000 })
       const notes = S.header && S.header.mode !== 'Play' ? [`(The bench is in ${S.header.mode} mode; click "Play" in the header to use the app as its users would.)`] : []
+      // a field that is there but hidden (a closed <details>, a collapsed panel): say so, not a timeout
+      if (!(await loc.first().isVisible().catch(() => false))) {
+        const where = await loc.first().evaluate(e => { const d = e.closest('details:not([open])'); return d ? 'inside a closed section "' + ((d.querySelector('summary') || {}).textContent || '').trim().slice(0, 60) + '"' : 'hidden on the page' }).catch(() => 'hidden on the page')
+        throw new Fail(`The field ${sel} in frame ${i + 1} is ${where}: open it first (frame-click its heading).`)
+      }
+      // a <select>: pick the option by its value or its label (a persona could not set one)
+      if (await loc.first().evaluate(e => e.tagName === 'SELECT').catch(() => false)) {
+        const opts = await loc.first().evaluate(e => [...e.options].map(o => ({ v: o.value, l: o.label })))
+        const o = opts.find(o => o.v === text || o.l === text) || opts.find(o => o.l.toLowerCase().includes(text.toLowerCase()))
+        if (!o) throw new Fail(`No option "${text}" in ${sel}. Its options: ${opts.map(o => JSON.stringify(o.l)).join(', ')}`)
+        await loc.first().selectOption(o.v, { timeout: 5000 })
+        return [...notes, `Chose "${o.l}" in ${sel} in frame ${i + 1}.`]
+      }
+      await loc.first().fill(text, { timeout: 5000 })
       return [...notes, `Typed ${JSON.stringify(cut(text, 80))} into ${sel} in frame ${i + 1}.`]
     })
   }
-  async wait(s = 5) { return this.act(async () => { await sleep(Math.min(+s || 5, 600) * 1000); return `Waited ${+s || 5} s.` }, { settle: { min: 300, max: 3000 } }) }
+  async wait(s = 5) {
+    // a turn ask left running: follow it until it ends, or for s more seconds
+    if (this.pending) {
+      const bf = await this.bench(), p = this.pending
+      return this.finishTurn(bf, { ...p, timeoutS: (Date.now() - p.t0) / 1000 + Math.min(+s || 120, ASK_WAIT), verb: 'Following your last message to Claude.' })
+    }
+    return this.act(async () => { await sleep(Math.min(+s || 5, 600) * 1000); return `Waited ${+s || 5} s.` }, { settle: { min: 300, max: 3000 } }) }
   async close() { if (this.ctx) await this.ctx.close(); this.page = null; return ['Closed your browser tab.'] }
 }
 

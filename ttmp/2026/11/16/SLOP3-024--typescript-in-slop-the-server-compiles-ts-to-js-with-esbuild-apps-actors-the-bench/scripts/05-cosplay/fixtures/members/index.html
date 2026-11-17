@@ -1,0 +1,18 @@
+<!doctype html>
+<html><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1"><title>Garden members</title>
+<style>body{font-family:Georgia,serif;margin:16px}table{border-collapse:collapse}td,th{padding:4px 8px;border-bottom:1px solid #ccc;text-align:left}</style>
+</head><body>
+<h1>Community garden — members</h1>
+<table id="t"><thead><tr><th>Name</th><th>Email</th><th>Plot</th><th>Paid</th></tr></thead><tbody></tbody></table>
+<script type="module">
+const slop = await window.claude.use('slop')
+const ms = await slop.actions.list({})
+const tb = document.querySelector('#t tbody')
+for (const m of ms) {
+  const b = m.body || m
+  const tr = document.createElement('tr')
+  for (const v of [b.name, b.email || '—', b.plot, Object.keys(b.paid || {}).filter(y => b.paid[y]).join(', ') || 'never']) { const td = document.createElement('td'); td.textContent = v; tr.append(td) }
+  tb.append(tr)
+}
+</script>
+</body></html>
