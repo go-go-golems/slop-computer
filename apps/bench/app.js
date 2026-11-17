@@ -1,4 +1,4 @@
-/* the bench, built from web/bench: do not edit. source sha256:02cdadebb5d5999adeadc2aa98c90d3488bf7039c2550f29a56f21b579eae8d9 */
+/* the bench, built from web/bench: do not edit. source sha256:241631240eb0f9657b0666a8654104a252e2cbf56db9a2e2e6de17df9813538d */
 // The bench: a live dev environment for slop apps. Built from web/bench/src.
 (() => {
   // src/lib/util.js
@@ -6669,7 +6669,7 @@ Markdown files (README.md, notes, specs) render in the Docs panel. Keep README.m
       clear(H.store).append(h("b", l.edits || l.draft), h("span", l.dev || "no dev instance"));
     },
     projectMenu(btn) {
-      const recent = Projects.recent(), items = [{ group: "Recent" }];
+      const recent = Projects.recent(), items = [{ label: "New app\u2026", sub: "start one from a template", run: () => this.newAppDialog() }, { label: "Import app\u2026", sub: "a .zip of an app's files", run: () => this.importDialog() }, { hr: true }, { group: "Recent" }];
       for (const id of recent) {
         const a = Slop.app(id);
         items.push({ label: id, sub: a ? [a.refs.draft != null ? "draft " + a.refs.draft : "", a.refs.main != null ? "main " + a.refs.main : "not published"].filter(Boolean).join(" \xB7 ") : "", on: this.P && id === this.P.app, run: () => {
@@ -6680,7 +6680,6 @@ Markdown files (README.md, notes, specs) render in the Docs panel. Keep README.m
       const apps = Slop.apps.filter((a) => !recent.includes(a.id));
       for (const a of apps.slice(0, 30)) items.push({ label: a.id, sub: [a.refs.draft != null ? "draft " + a.refs.draft : "", a.refs.main != null ? "main " + a.refs.main : "not published", plural(a.instances.length, "instance")].filter(Boolean).join(" \xB7 "), run: () => this.openProject(a.id) });
       if (!apps.length) items.push({ note: Slop.error || "Every app you can develop is listed above." });
-      items.push({ hr: true }, { label: "New app\u2026", sub: "an app store from a template, on draft", run: () => this.newAppDialog() }, { label: "Import app\u2026", sub: "a .zip of an app's files", run: () => this.importDialog() });
       if (this.P) {
         items.push(
           { hr: true },

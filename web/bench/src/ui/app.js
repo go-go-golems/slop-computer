@@ -362,13 +362,13 @@ export const App = {
     clear(H.store).append(h('b', l.edits || l.draft), h('span', l.dev || 'no dev instance'))
   },
   projectMenu(btn) {
-    const recent = Projects.recent(), items = [{ group: 'Recent' }]
+    // New app first: below a long list of apps it was out of sight (a persona working by eye, round 3)
+    const recent = Projects.recent(), items = [{ label: 'New app…', sub: 'start one from a template', run: () => this.newAppDialog() }, { label: 'Import app…', sub: 'a .zip of an app\'s files', run: () => this.importDialog() }, { hr: true }, { group: 'Recent' }]
     for (const id of recent) { const a = Slop.app(id); items.push({ label: id, sub: a ? [a.refs.draft != null ? 'draft ' + a.refs.draft : '', a.refs.main != null ? 'main ' + a.refs.main : 'not published'].filter(Boolean).join(' · ') : '', on: this.P && id === this.P.app, run: () => { if (!this.P || id !== this.P.app) this.openProject(id) } }) }
     items.push({ group: 'Apps on this server' })
     const apps = Slop.apps.filter(a => !recent.includes(a.id))
     for (const a of apps.slice(0, 30)) items.push({ label: a.id, sub: [a.refs.draft != null ? 'draft ' + a.refs.draft : '', a.refs.main != null ? 'main ' + a.refs.main : 'not published', plural(a.instances.length, 'instance')].filter(Boolean).join(' · '), run: () => this.openProject(a.id) })
     if (!apps.length) items.push({ note: Slop.error || 'Every app you can develop is listed above.' })
-    items.push({ hr: true }, { label: 'New app…', sub: 'an app store from a template, on draft', run: () => this.newAppDialog() }, { label: 'Import app…', sub: 'a .zip of an app\'s files', run: () => this.importDialog() })
     if (this.P) {
       items.push({ hr: true }, { label: 'Download ' + this.P.app, sub: '.zip of draft, with transcripts and the timeline', run: () => this.downloadProject() },
         { label: 'Reset dev data…', sub: 'drop your dev instance and start a fresh one', run: () => this.resetDev() },
