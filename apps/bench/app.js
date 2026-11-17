@@ -1,4 +1,4 @@
-/* the bench, built from web/bench: do not edit. source sha256:612714dd2fd03e5a18c84c9bf7a39f32bd3ecc3e8eb1c530c346579e1e238a19 */
+/* the bench, built from web/bench: do not edit. source sha256:5eafb1524c568d8b23746fc0d07d5e05d4610d5e3996dfca2bbaf3f343781056 */
 // The bench: a live dev environment for slop apps. Built from web/bench/src.
 (() => {
   // src/lib/util.js
@@ -5948,6 +5948,10 @@ Markdown files (README.md, notes, specs) render in the Docs panel. Keep README.m
       const r = await Slop.call("thread", { id });
       t.msgs = r.messages;
       t.saved = t.msgs.map((m) => JSON.stringify(m));
+      for (const m of t.msgs) if (m.role === "agent" && m.status === "running" && Date.now() - (m.t || 0) > 15 * 6e4) {
+        m.status = "stopped";
+        m.error = m.error || "Interrupted: the bench was closed or reloaded while this reply ran. Send a message to go on.";
+      }
       return t;
     }
     // Saves the thread's fields and the messages from the first that changed

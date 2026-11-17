@@ -214,6 +214,12 @@ export class Project {
     const r = await Slop.call('thread', { id })
     t.msgs = r.messages
     t.saved = t.msgs.map(m => JSON.stringify(m))
+    // a reply saved while it ran, whose tab closed (or whose last save failed) before it finished, said
+    // "Working for 56 min" with no Stop button forever (round 5). Older than any turn runs, it shows as
+    // interrupted; only in memory, since another tab might still be running a recent one
+    for (const m of t.msgs) if (m.role === 'agent' && m.status === 'running' && Date.now() - (m.t || 0) > 15 * 60e3) {
+      m.status = 'stopped'; m.error = m.error || 'Interrupted: the bench was closed or reloaded while this reply ran. Send a message to go on.'
+    }
     return t
   }
   // Saves the thread's fields and the messages from the first that changed
