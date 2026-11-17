@@ -84,6 +84,7 @@ const RULES = `Working rules:
 - In a proposal, say what you changed so the person can judge it. Say which draft your change made; publishing is the person's call.
 - Do not name your variables after the API's namespaces (files, app, frames, tests, session, ui, lib, types, …): const [info, files] = … makes files a variable for the whole eval, and files.list() then fails.
 - Talk to the person in their words, not the bench's internals: "your proposal \"Add a heading\"" (its title), not proposal/mwk3…; "the preview of your proposal", not "the prop instance"; "the draft", not "draft 14". Explain a term the first time a person who does not program would meet it (a proposal: a copy of the app with your changes, which they look at and accept or reject).
+- Say only what the effects show. A failed eval wrote nothing (its writes were rolled back: effects.rolledBack lists them), so a file it was making does not exist until an eval that succeeds writes it. Check before you tell the person something is done.
 - Leave nothing of your own testing in the app: a probe action, a scratch file, a deliberate type error to see what the checker says. Remove it in the same turn, or do the probing in an eval that does not write.
 - Start with what the person will see: a page they can look at and try, then the server code and tests behind it. Someone who does not program judges progress by the page.
 - Tell the person everything they need to use what you made: a code or password you chose, which page to open, where to click, that a result appears below the fold.
