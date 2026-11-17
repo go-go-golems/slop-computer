@@ -1,4 +1,4 @@
-/* the bench, built from web/bench: do not edit. source sha256:be366d039280aad02b352a33163c8e97bd8c90dcf7ecad7a20ca187165579d18 */
+/* the bench, built from web/bench: do not edit. source sha256:230c269e911470984dce270fb7082dbca2880ca51c3ecf757e5d6c0d5e72c4b1 */
 // The bench: a live dev environment for slop apps. Built from web/bench/src.
 (() => {
   // src/lib/util.js
@@ -2768,7 +2768,7 @@
     }
     await Instances.reset(P, "test");
     await Instances.ensure(P, "test", ws === "draft" ? void 0 : ws);
-    if (spec) await Slop.call("seed", { app: P.app, kind: "test", docs: spec.docs || {}, tables: spec.tables || {} });
+    if (spec) await Slop.call("seed", { app: P.app, kind: "test", docs: spec.docs || {}, tables: spec.tables || {}, replace: true });
     Fixtures.current = name || null;
     for (const fh of FrameHosts) if (fh.project === P && fh.kind === "test") fh.load({ keepState: false });
     Fixtures.ev.emit("applied", Fixtures.current);
@@ -3941,7 +3941,7 @@ run then).
     publish: `Publishing is the person's call. Run publish.check first; publish.run shows them an approval card and publishes only if they approve. Never edit a migration that main has run: add a new one.`,
     frames: `target is a CSS selector or {src: "index.html:12"}. Selectors take :has-text("words") (visible text contains the words; :text() is the same): at the end ('button:has-text("Add")'), followed by more ('article:has-text("Pack boxes") input[name=phone]'), or inside :has ('article:has(h2:has-text("Pack")) button').
 Reads wait until the page has settled (data loaded, DOM quiet). Arranging, labelling and closing frames changes only the canvas: allowed in every mode.`,
-    fixtures: `A fixture (fixtures/<name>.json) is the data the test instance starts from: { description, docs: { coll: [rows] }, tables: { name: [rows] } }. A row's id field names its document; tables are those your migrations make.`,
+    fixtures: `A fixture (fixtures/<name>.json) is the data the test instance starts from: { description, docs: { coll: [rows] }, tables: { name: [rows] } }. A row's id field names its document; tables are those your migrations make. A table the fixture names holds exactly its rows (rows your migrations seeded are replaced), so a fixture captured from dev data loads as it is.`,
     scenarios: `A scenario (scenarios/<name>.json) runs in a fresh frame of your test instance, after it is reset and seeded with the fixture, and passes or fails:
 { description, page: "index.html", size?: [375, 720], fixture?: name, steps: [
   { click: sel }, { type: sel, text }, { go: "#/cart" }, { waitFor: sel }, { wait: ms },
@@ -8978,7 +8978,7 @@ return { files: list.map(f => f.path), issues }`;
           }
         }
         spec.tables = spec.tables || {};
-        spec.tables[S.cur] = S.rows;
+        spec.tables[S.cur] = S.rows.map(({ __rowid, ...r }) => r);
         const bad = checkFixture(spec);
         if (bad) return toast(path + ": " + bad);
         P().write(path, JSON.stringify(spec, null, 2) + "\n", App.ws);

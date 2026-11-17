@@ -466,8 +466,11 @@ defineActor({
     },
     seed: {
       requires: 'view',
-      args: args({ ...INSTANCE.properties, docs: S.rows, tables: S.rows }, INSTANCE.required),
-      async run(ctx, { app, kind, ref, docs, tables }) {
+      args: args({ ...INSTANCE.properties, docs: S.rows, tables: S.rows, replace: { type: 'boolean' } }, INSTANCE.required),
+      // replace: each named table holds exactly the fixture's rows (a scenario's fixture is the data the
+      // test instance starts from; rows its migrations seeded clashed with the fixture's ids). Keys
+      // starting with __ are the bench's (__rowid from the Data view) and are dropped.
+      async run(ctx, { app, kind, ref, docs, tables, replace }) {
         const w = tool(ctx);
         const id = instanceOf(ctx, app, kind, ref);
         const out = { docs: {}, tables: {} };
@@ -476,7 +479,9 @@ defineActor({
           out.docs[coll] = await w.importDocs(id, coll, rows, rows.length && rows.every((r) => r && typeof r.id === 'string' && r.id) ? { id: 'id' } : {});
         }
         for (const [table, rows] of Object.entries(tables || {})) {
-          out.tables[table] = await w.importTable(id, table, rows);
+          if (replace) await w.exec(id, 'DELETE FROM "' + String(table).replace(/"/g, '""') + '"', []);
+          const clean = (rows || []).map((r) => (r && typeof r === 'object' ? Object.fromEntries(Object.entries(r).filter(([k]) => !k.startsWith('__'))) : r));
+          out.tables[table] = clean.length ? await w.importTable(id, table, clean) : { imported: 0 };
         }
         return out;
       },

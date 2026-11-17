@@ -124,7 +124,7 @@ export const DATA = {
       let spec = { description: '', docs: {}, tables: {} }
       if (ex) { try { spec = JSON.parse(ex) } catch { } }
       spec.tables = spec.tables || {}
-      spec.tables[S.cur] = S.rows
+      spec.tables[S.cur] = S.rows.map(({ __rowid, ...r }) => r) // the row id is the Data view's, not the app's (round 5)
       const bad = checkFixture(spec)
       if (bad) return toast(path + ': ' + bad)
       P().write(path, JSON.stringify(spec, null, 2) + '\n', App.ws)

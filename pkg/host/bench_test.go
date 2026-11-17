@@ -709,6 +709,28 @@ func TestBenchExec(t *testing.T) {
 	// (the app store and production instances are refused: TestWorkshopDevInstances)
 }
 
+// Seeding with replace: the named tables hold exactly the fixture's rows,
+// and the bench's own keys (__rowid) are dropped (round 5: fixtures saved
+// from the Data view carried __rowid, and their ids clashed with rows the
+// migrations seeded).
+func TestBenchSeedReplace(t *testing.T) {
+	h := newHarness(t)
+	admin := h.tokenFor("admin@example.com", "read", "write", "admin")
+	installBench(t, h, admin)
+	act := func(action string, args map[string]any) any {
+		t.Helper()
+		return h.call(admin, "actor.call", map[string]any{"store": "bench", "action": action, "args": args})
+	}
+	h.call(admin, "store.new", map[string]any{"id": "jot"})
+	h.push(admin, map[string]any{"store": "jot", "files": files(devApp()), "ref": "draft"})
+	act("instance", map[string]any{"app": "jot", "kind": "test"})
+	act("seed", map[string]any{"app": "jot", "kind": "test", "tables": map[string]any{"notes": []any{map[string]any{"id": "a"}, map[string]any{"id": "b"}}}})
+	act("seed", map[string]any{"app": "jot", "kind": "test", "replace": true, "tables": map[string]any{"notes": []any{map[string]any{"id": "a", "__rowid": 1}, map[string]any{"id": "c", "__rowid": 2}}}})
+	if got := fmtJSON(act("sql", map[string]any{"app": "jot", "kind": "test", "query": "SELECT id FROM notes ORDER BY id", "args": []any{}})); got != `[{"id":"a"},{"id":"c"}]` {
+		t.Fatalf("test notes after a replacing seed = %s", got)
+	}
+}
+
 // An administrator gives a published app its web address from the bench:
 // /<app> on the live host; again is a no-op; a path another store holds
 // is refused; an unpublished app is refused.

@@ -12,7 +12,7 @@ export const NOTES = {
   publish: `Publishing is the person's call. Run publish.check first; publish.run shows them an approval card and publishes only if they approve. Never edit a migration that main has run: add a new one.`,
   frames: `target is a CSS selector or {src: "index.html:12"}. Selectors take :has-text("words") (visible text contains the words; :text() is the same): at the end ('button:has-text("Add")'), followed by more ('article:has-text("Pack boxes") input[name=phone]'), or inside :has ('article:has(h2:has-text("Pack")) button').
 Reads wait until the page has settled (data loaded, DOM quiet). Arranging, labelling and closing frames changes only the canvas: allowed in every mode.`,
-  fixtures: `A fixture (fixtures/<name>.json) is the data the test instance starts from: { description, docs: { coll: [rows] }, tables: { name: [rows] } }. A row's id field names its document; tables are those your migrations make.`,
+  fixtures: `A fixture (fixtures/<name>.json) is the data the test instance starts from: { description, docs: { coll: [rows] }, tables: { name: [rows] } }. A row's id field names its document; tables are those your migrations make. A table the fixture names holds exactly its rows (rows your migrations seeded are replaced), so a fixture captured from dev data loads as it is.`,
   scenarios: `A scenario (scenarios/<name>.json) runs in a fresh frame of your test instance, after it is reset and seeded with the fixture, and passes or fails:
 { description, page: "index.html", size?: [375, 720], fixture?: name, steps: [
   { click: sel }, { type: sel, text }, { go: "#/cart" }, { waitFor: sel }, { wait: ms },

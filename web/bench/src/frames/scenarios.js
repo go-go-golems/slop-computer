@@ -50,7 +50,7 @@ async function applyFixture(P, name, ws, read = path => P.read(path, ws)) {
   }
   await Instances.reset(P, 'test')
   await Instances.ensure(P, 'test', ws === 'draft' ? undefined : ws)
-  if (spec) await Slop.call('seed', { app: P.app, kind: 'test', docs: spec.docs || {}, tables: spec.tables || {} })
+  if (spec) await Slop.call('seed', { app: P.app, kind: 'test', docs: spec.docs || {}, tables: spec.tables || {}, replace: true })
   Fixtures.current = name || null
   for (const fh of FrameHosts) if (fh.project === P && fh.kind === 'test') fh.load({ keepState: false })
   Fixtures.ev.emit('applied', Fixtures.current)
