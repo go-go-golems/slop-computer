@@ -1,4 +1,4 @@
-/* the bench, built from web/bench: do not edit. source sha256:a61570438e2331239004c102a74fdc9d3fcc5fc3519b863561b3eb752fc1496b */
+/* the bench, built from web/bench: do not edit. source sha256:a1a65b9ad37826bb9804a8f9b66223d57f6570efa0d30733f85c23fec3de99fb */
 // The bench: a live dev environment for slop apps. Built from web/bench/src.
 (() => {
   // src/lib/util.js
@@ -1670,6 +1670,19 @@
     if (!READ_KINDS.includes(k)) throw Object.assign(new Error("kind is dev or test"), { kind: "invalid" });
     return k;
   };
+  var onInstance = async (ctx, o, call) => {
+    try {
+      return await call();
+    } catch (e) {
+      if (!/no store/i.test(String(e && e.message))) throw e;
+      await Instances.ensure(ctx.project, kindOf(o));
+      return call();
+    }
+  };
+  var readOnly = (p) => p.catch((e) => {
+    if (/not authorized/i.test(String(e && e.message))) throw Object.assign(new Error("app.sql only reads (SELECT): to change rows of the dev or test instance use app.exec(query, args, {kind})"), { kind: "invalid" });
+    throw e;
+  });
   var APP = {
     "app.info": {
       sig: "",
@@ -1689,14 +1702,14 @@
         return { broken: r.broken || "", lines: (r.lines || []).slice(-clamp(+o.limit || 50, 1, 300)) };
       }
     },
-    "app.docs": { sig: "coll, {kind}?", doc: "the documents of a collection", run: (ctx, coll, o) => Slop.call("docs", { app: ctx.project.app, kind: kindOf(o), coll }) },
-    "app.doc": { sig: "path, {kind}?", doc: 'one document ("coll/id")', run: (ctx, path, o) => Slop.call("doc", { app: ctx.project.app, kind: kindOf(o), path }) },
-    "app.sql": { sig: "query, args?, {kind}?", doc: "rows (read-only SQL on the instance's tables)", run: (ctx, query, args, o) => Slop.call("sql", { app: ctx.project.app, kind: kindOf(o), query, args: args || [] }) },
+    "app.docs": { sig: "coll, {kind}?", ret: "[{path, body}]", doc: "the documents of a collection", run: (ctx, coll, o) => onInstance(ctx, o, () => Slop.call("docs", { app: ctx.project.app, kind: kindOf(o), coll })) },
+    "app.doc": { sig: "path, {kind}?", doc: 'one document ("coll/id")', run: (ctx, path, o) => onInstance(ctx, o, () => Slop.call("doc", { app: ctx.project.app, kind: kindOf(o), path })) },
+    "app.sql": { sig: "query, args?, {kind}?", ret: "[{column: value, \u2026}]: rows as objects", doc: "rows (read-only SQL on the instance's tables)", run: (ctx, query, args, o) => readOnly(onInstance(ctx, o, () => Slop.call("sql", { app: ctx.project.app, kind: kindOf(o), query, args: args || [] }))) },
     "app.exec": {
       sig: "query, args?, {kind}?",
       doc: "runs SQL that may write (INSERT, UPDATE, DELETE) on the dev instance's tables (or the test instance: {kind: 'test'}); for removing the test rows you added, one by one",
       writes: "dev",
-      run: (ctx, query, args, o) => Slop.call("exec", { app: ctx.project.app, kind: kindOf(o), query, args: args || [] })
+      run: (ctx, query, args, o) => onInstance(ctx, o, () => Slop.call("exec", { app: ctx.project.app, kind: kindOf(o), query, args: args || [] }))
     },
     "app.seed": {
       sig: "{docs, tables}",
@@ -1718,6 +1731,7 @@
         const ok = await ctx.approve("Reset the dev data of " + P.app + "?", "Every row and document in your dev instance goes, including what you entered yourself. The app's code is not touched." + (o && o.why ? "\nWhy: " + o.why : ""));
         if (!ok) throw Object.assign(new Error("the person declined the reset"), { kind: "approval" });
         const r = await Instances.reset(P, "dev");
+        await Instances.ensure(P, "dev");
         await Promise.all([...FrameHosts].filter((fh) => fh.project === P && fh.kind === "dev").map((fh) => fh.load({ keepState: false })));
         return r;
       }
@@ -2178,6 +2192,7 @@
     "frames.list": { sig: "", doc: "[{id, label, route, w, h, x, y, errors, issues}]", run: (ctx) => ctx.project.board().frames.map(info) },
     "frames.open": {
       sig: "route, {w, h, x, y, label, new}?",
+      ret: "{id, label, route, w, h, x, y, errors, issues, reused?}",
       doc: "a frame (reuses one showing that page at that size unless new: true)",
       run: (ctx, route, o = {}) => {
         const P = ctx.project, w = o.w || 375, hh = o.h || 720;
@@ -2194,6 +2209,7 @@
     },
     "frames.update": {
       sig: "frameId, {route, w, h, x, y, label}",
+      ret: "{id, label, route, w, h, x, y, errors, issues}",
       run: (ctx, id, o) => {
         const f = frameOf(ctx, id);
         if (o.w != null) f.w = clamp(Math.round(+o.w) || f.w, 240, 2400);
@@ -2214,6 +2230,7 @@
     "frames.label": { sig: "frameId, label?", run: (ctx, id, label2) => FRAMES["frames.update"].run(ctx, id, { label: label2 || null }) },
     "frames.close": {
       sig: "frameId",
+      ret: "{closed, remaining}",
       run: (ctx, id) => {
         const f = frameOf(ctx, id);
         ctx.project.removeFrame(f.id);
@@ -2261,6 +2278,7 @@
     },
     "frames.outline": {
       sig: "frameId?",
+      ret: "a string, one element per line",
       doc: "the DOM as an indented tree, with @file:line for each element",
       run: async (ctx, id) => {
         const nodes = await (await hostOf(ctx, id)).call("outline", [300]);
@@ -2277,13 +2295,13 @@
       }
     },
     "frames.query": { sig: "frameId, selector", doc: "matches, each with attrs (data-*, href, name, value, checked, aria-*)", run: async (ctx, id, sel) => (await hostOf(ctx, id)).call("query", [sel]) },
-    "frames.count": { sig: "frameId, selector", run: async (ctx, id, sel) => {
+    "frames.count": { sig: "frameId, selector", ret: "a number", run: async (ctx, id, sel) => {
       const fh = await hostOf(ctx, id);
       await fh.call("settle", [600], 2e3).catch(() => {
       });
       return fh.call("count", [sel]);
     } },
-    "frames.text": { sig: "frameId?, target?", doc: "visible text", run: async (ctx, id, target) => (await hostOf(ctx, id)).call("text", [target || null]) },
+    "frames.text": { sig: "frameId?, target?", ret: "a string", doc: "visible text", run: async (ctx, id, target) => (await hostOf(ctx, id)).call("text", [target || null]) },
     "frames.click": { sig: "frameId, target", run: async (ctx, id, target) => {
       const r = await (await hostOf(ctx, id)).call("click", [target]);
       await sleep(120);
@@ -2299,13 +2317,14 @@
       }
     },
     "frames.console": { sig: "frameId?", run: async (ctx, id) => (await hostOf(ctx, id)).logs.slice(-30).map((l) => l.level + ": " + l.text + (l.src ? " @" + l.src : "")) },
-    "frames.reload": { sig: "frameId?", run: async (ctx, id) => {
+    "frames.reload": { sig: "frameId?", ret: "{route, errors}", run: async (ctx, id) => {
       const fh = await hostOf(ctx, id);
       await fh.load({ keepState: false });
       return { route: fh.route, errors: fh.errors };
     } },
     "frames.layout": {
       sig: "frameId?, {near}?",
+      ret: "{route, width, height, count, items: [{key, tag, box: [x, y, w, h], text, src, hidden?}]}: an object; the elements are in .items (at most 150)",
       doc: "every rendered element: key, tag, box [x, y, w, h], own text, src",
       run: async (ctx, id, o = {}) => {
         const fh = await hostOf(ctx, id), L = await fh.call("layout", [], 5e3);
@@ -2319,6 +2338,7 @@
     },
     "frames.snapshot": {
       sig: "frameId?, label?",
+      ret: "{id, route, w, ws, label, t}",
       doc: "a frozen copy of the page and its layout",
       run: async (ctx, id, label2) => {
         const m = await Snaps.take(ctx.project, await hostOf(ctx, id), { label: label2 || null, by: ctx.who });
@@ -2329,6 +2349,7 @@
     // draft by default; in draft, against the newest snapshot of the page)
     "frames.compare": {
       sig: "frameId, {with}?",
+      ret: "{frame, from, to, changes, summary}",
       doc: "layout differences against draft (from a proposal), a proposal ref, or a snapshot id",
       run: async (ctx, id, o = {}) => {
         const P = ctx.project, f = frameOf(ctx, id), cur = await layoutIn(P, f, ctx.ws, { headless: true });
@@ -2927,16 +2948,19 @@
     // the dev instance's rows as a fixture: tables by name, docs by collection
     "fixtures.capture": {
       sig: "name, {tables, docs, description}",
-      doc: "saves rows of the dev instance as a fixture",
+      ret: "{path, tables: [names], docs: [collections]}",
+      doc: 'saves rows of the dev instance as a fixture: tables is a list of table names (["orders"]), docs a list of collections; all their rows go in',
       writes: "files",
       pathOf: ([name]) => fixturePath(fileName(name)),
       run: async (ctx, name, o) => {
         const app = ctx.project.app, spec = { description: o.description || "captured from the dev instance", docs: {}, tables: {} };
-        for (const t of o.tables || []) {
+        const names = (v) => Array.isArray(v) ? v : v && typeof v === "object" ? Object.keys(v) : v ? [v] : [];
+        o = { ...o || {}, tables: names((o || {}).tables), docs: names((o || {}).docs) };
+        for (const t of o.tables) {
           if (!/^\w+$/.test(t)) throw invalid3("table names are words: " + t);
           spec.tables[t] = await Slop.call("sql", { app, kind: "dev", query: 'SELECT * FROM "' + t + '"', args: [] });
         }
-        for (const c of o.docs || []) {
+        for (const c of o.docs) {
           spec.docs[c] = (await Slop.call("docs", { app, kind: "dev", coll: c })).map((d) => ({ id: d.path.split("/").pop(), ...d.body }));
         }
         const path = fixturePath(fileName(name));
@@ -2963,7 +2987,7 @@
         last: s.last ? s.last.stale ? "edited since its last run (not run since)" : s.last.ok ? "passed" : "failed at step " + (s.last.failedAt + 1) : void 0
       }))
     },
-    "scenarios.read": { sig: "name", run: (ctx, name) => read(ctx, name) },
+    "scenarios.read": { sig: "name", ret: "the spec {description, page, size?, fixture?, steps}", run: (ctx, name) => read(ctx, name) },
     "scenarios.save": {
       sig: "name, spec",
       writes: "files",
@@ -3374,7 +3398,7 @@
           if (e.internal) continue;
           const ns = name.includes(".") ? name.slice(0, name.indexOf(".")) : "";
           if (!groups.has(ns)) groups.set(ns, []);
-          groups.get(ns).push(name + "(" + e.sig + ")" + (e.doc ? " \u2014 " + e.doc : ""));
+          groups.get(ns).push(name + "(" + e.sig + ")" + (e.ret ? " \u2192 " + e.ret : "") + (e.doc ? " \u2014 " + e.doc : ""));
         }
         return [...groups].map(([ns, lines]) => lines.join("\n") + (notes[ns] ? "\n  " + notes[ns].trim().split("\n").join("\n  ") : "")).join("\n");
       }
@@ -3703,7 +3727,8 @@ run then).
         }, 1e3);
         this.runs.set(id, run);
         const sigs = Object.fromEntries([...api.entries].map(([n, e]) => [n, e.sig]));
-        this.worker.postMessage({ type: "eval", id, code, api: api.names(), sigs, long: api.long(), roles, timeoutMs: clamp(timeoutMs, 1e3, 12e4), sid, restore: restore || null, lib: lib || [] });
+        const docs = Object.fromEntries([...api.entries].map(([n, e]) => [n, [e.ret ? "\u2192 " + e.ret : "", e.doc ? "\u2014 " + e.doc : ""].filter(Boolean).join(" ")]));
+        this.worker.postMessage({ type: "eval", id, code, api: api.names(), sigs, docs, long: api.long(), roles, timeoutMs: clamp(timeoutMs, 1e3, 12e4), sid, restore: restore || null, lib: lib || [] });
       });
     },
     drop(sid) {
@@ -3874,7 +3899,7 @@ run then).
     files: `Paths are relative ("index.html", "css/app.css"). Binary files and files over 240 KB are kept by hash: list, copy and remove them; they cannot be read as text.`,
     app: `kind is 'dev' (default) or 'test' (the instance scenarios ran on). app.seed and app.reset change the dev instance at once: they are not part of the eval's transaction, and dry runs refuse them.`,
     publish: `Publishing is the person's call. Run publish.check first; publish.run shows them an approval card and publishes only if they approve. Never edit a migration that main has run: add a new one.`,
-    frames: `target is a CSS selector or {src: "index.html:12"}; a selector may end in :has-text("words") (e.g. 'button:has-text("Add")').
+    frames: `target is a CSS selector or {src: "index.html:12"}. Selectors take :has-text("words") (visible text contains the words; :text() is the same): at the end ('button:has-text("Add")'), followed by more ('article:has-text("Pack boxes") input[name=phone]'), or inside :has ('article:has(h2:has-text("Pack")) button').
 Reads wait until the page has settled (data loaded, DOM quiet). Arranging, labelling and closing frames changes only the canvas: allowed in every mode.`,
     fixtures: `A fixture (fixtures/<name>.json) is the data the test instance starts from: { description, docs: { coll: [rows] }, tables: { name: [rows] } }. A row's id field names its document; tables are those your migrations make.`,
     scenarios: `A scenario (scenarios/<name>.json) runs in a fresh frame of your test instance, after it is reset and seeded with the fixture, and passes or fails:
@@ -3888,7 +3913,7 @@ A step with a key its kind does not take is an error (the scenario does not run)
   };
   var INTRO = `You are the coding agent inside the bench, where a person builds a slop app (pages, an optional actor, SQL migrations) and watches it run live in frames on a canvas.
 
-You act through ONE tool, eval. Each call runs a JavaScript async function body in a QuickJS sandbox: no DOM, no network, no window. Use await, and \`return\` the value you want back (the last expression is not returned automatically). console.log output comes back too.
+You act through ONE tool, eval. Each call runs a JavaScript async function body in a QuickJS sandbox: no DOM, no network, no window, no Intl (toLocaleString ignores locales; the person's local date and zone are at the top of Current state). Use await, and \`return\` the value you want back (the last expression is not returned automatically). console.log output comes back too.
 
 Your evals share a scope: top-level \`const\`/\`let\`/\`function\`/\`class\` declarations persist to your later evals in this thread (and across reloads, if they are JSON). Read once, keep the result in a variable, use it next time. vars() lists them; forget('name') drops one, forget() all.
 

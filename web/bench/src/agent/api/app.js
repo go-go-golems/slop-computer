@@ -22,6 +22,19 @@ const kindOf = o => {
   return k
 }
 
+// an instance that is not up yet (right after a reset, or never opened) is started, and the call
+// tried once more: agents met "no store <app>-dev-…" after app.reset (persona reviews)
+const onInstance = async (ctx, o, call) => {
+  try { return await call() } catch (e) {
+    if (!/no store/i.test(String(e && e.message))) throw e
+    await Instances.ensure(ctx.project, kindOf(o))
+    return call()
+  }
+}
+
+// app.sql is read-only: SQLite's bare "not authorized" for a write says what to use instead
+const readOnly = p => p.catch(e => { if (/not authorized/i.test(String(e && e.message))) throw Object.assign(new Error('app.sql only reads (SELECT): to change rows of the dev or test instance use app.exec(query, args, {kind})'), { kind: 'invalid' }); throw e })
+
 export const APP = {
   'app.info': {
     sig: '', doc: '{app, refs: {draft, main, proposal/…}, entry, workspace, instances: {dev, test, props: [one per proposal]}}',
@@ -39,12 +52,12 @@ export const APP = {
       return { broken: r.broken || '', lines: (r.lines || []).slice(-clamp(+o.limit || 50, 1, 300)) }
     }
   },
-  'app.docs': { sig: 'coll, {kind}?', doc: 'the documents of a collection', run: (ctx, coll, o) => Slop.call('docs', { app: ctx.project.app, kind: kindOf(o), coll }) },
-  'app.doc': { sig: 'path, {kind}?', doc: 'one document ("coll/id")', run: (ctx, path, o) => Slop.call('doc', { app: ctx.project.app, kind: kindOf(o), path }) },
-  'app.sql': { sig: 'query, args?, {kind}?', doc: 'rows (read-only SQL on the instance\'s tables)', run: (ctx, query, args, o) => Slop.call('sql', { app: ctx.project.app, kind: kindOf(o), query, args: args || [] }) },
+  'app.docs': { sig: 'coll, {kind}?', ret: '[{path, body}]', doc: 'the documents of a collection', run: (ctx, coll, o) => onInstance(ctx, o, () => Slop.call('docs', { app: ctx.project.app, kind: kindOf(o), coll })) },
+  'app.doc': { sig: 'path, {kind}?', doc: 'one document ("coll/id")', run: (ctx, path, o) => onInstance(ctx, o, () => Slop.call('doc', { app: ctx.project.app, kind: kindOf(o), path })) },
+  'app.sql': { sig: 'query, args?, {kind}?', ret: '[{column: value, …}]: rows as objects', doc: 'rows (read-only SQL on the instance\'s tables)', run: (ctx, query, args, o) => readOnly(onInstance(ctx, o, () => Slop.call('sql', { app: ctx.project.app, kind: kindOf(o), query, args: args || [] }))) },
   'app.exec': {
     sig: 'query, args?, {kind}?', doc: 'runs SQL that may write (INSERT, UPDATE, DELETE) on the dev instance\'s tables (or the test instance: {kind: \'test\'}); for removing the test rows you added, one by one', writes: 'dev',
-    run: (ctx, query, args, o) => Slop.call('exec', { app: ctx.project.app, kind: kindOf(o), query, args: args || [] }),
+    run: (ctx, query, args, o) => onInstance(ctx, o, () => Slop.call('exec', { app: ctx.project.app, kind: kindOf(o), query, args: args || [] })),
   },
   'app.seed': {
     sig: '{docs, tables}', doc: 'adds data to the dev instance: docs {coll: [rows]} (a row\'s id field names its document), tables {name: [rows]} (tables a migration made)', writes: 'dev',
@@ -63,6 +76,7 @@ export const APP = {
       const ok = await ctx.approve('Reset the dev data of ' + P.app + '?', 'Every row and document in your dev instance goes, including what you entered yourself. The app\'s code is not touched.' + (o && o.why ? '\nWhy: ' + o.why : ''))
       if (!ok) throw Object.assign(new Error('the person declined the reset'), { kind: 'approval' })
       const r = await Instances.reset(P, 'dev')
+      await Instances.ensure(P, 'dev') // the fresh instance is up before the next call reads it
       await Promise.all([...FrameHosts].filter(fh => fh.project === P && fh.kind === 'dev').map(fh => fh.load({ keepState: false })))
       return r
     }

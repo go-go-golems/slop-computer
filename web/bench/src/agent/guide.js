@@ -10,7 +10,7 @@ export const NOTES = {
   files: `Paths are relative ("index.html", "css/app.css"). Binary files and files over 240 KB are kept by hash: list, copy and remove them; they cannot be read as text.`,
   app: `kind is 'dev' (default) or 'test' (the instance scenarios ran on). app.seed and app.reset change the dev instance at once: they are not part of the eval's transaction, and dry runs refuse them.`,
   publish: `Publishing is the person's call. Run publish.check first; publish.run shows them an approval card and publishes only if they approve. Never edit a migration that main has run: add a new one.`,
-  frames: `target is a CSS selector or {src: "index.html:12"}; a selector may end in :has-text("words") (e.g. 'button:has-text("Add")').
+  frames: `target is a CSS selector or {src: "index.html:12"}. Selectors take :has-text("words") (visible text contains the words; :text() is the same): at the end ('button:has-text("Add")'), followed by more ('article:has-text("Pack boxes") input[name=phone]'), or inside :has ('article:has(h2:has-text("Pack")) button').
 Reads wait until the page has settled (data loaded, DOM quiet). Arranging, labelling and closing frames changes only the canvas: allowed in every mode.`,
   fixtures: `A fixture (fixtures/<name>.json) is the data the test instance starts from: { description, docs: { coll: [rows] }, tables: { name: [rows] } }. A row's id field names its document; tables are those your migrations make.`,
   scenarios: `A scenario (scenarios/<name>.json) runs in a fresh frame of your test instance, after it is reset and seeded with the fixture, and passes or fails:
@@ -25,7 +25,7 @@ A step with a key its kind does not take is an error (the scenario does not run)
 
 const INTRO = `You are the coding agent inside the bench, where a person builds a slop app (pages, an optional actor, SQL migrations) and watches it run live in frames on a canvas.
 
-You act through ONE tool, eval. Each call runs a JavaScript async function body in a QuickJS sandbox: no DOM, no network, no window. Use await, and \`return\` the value you want back (the last expression is not returned automatically). console.log output comes back too.
+You act through ONE tool, eval. Each call runs a JavaScript async function body in a QuickJS sandbox: no DOM, no network, no window, no Intl (toLocaleString ignores locales; the person's local date and zone are at the top of Current state). Use await, and \`return\` the value you want back (the last expression is not returned automatically). console.log output comes back too.
 
 Your evals share a scope: top-level \`const\`/\`let\`/\`function\`/\`class\` declarations persist to your later evals in this thread (and across reloads, if they are JSON). Read once, keep the result in a variable, use it next time. vars() lists them; forget('name') drops one, forget() all.
 

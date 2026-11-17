@@ -43,14 +43,17 @@ export const TESTS = {
   },
   // the dev instance's rows as a fixture: tables by name, docs by collection
   'fixtures.capture': {
-    sig: 'name, {tables, docs, description}', doc: 'saves rows of the dev instance as a fixture', writes: 'files', pathOf: ([name]) => fixturePath(fileName(name)),
+    sig: 'name, {tables, docs, description}', ret: '{path, tables: [names], docs: [collections]}', doc: 'saves rows of the dev instance as a fixture: tables is a list of table names (["orders"]), docs a list of collections; all their rows go in', writes: 'files', pathOf: ([name]) => fixturePath(fileName(name)),
     run: async (ctx, name, o) => {
       const app = ctx.project.app, spec = { description: o.description || 'captured from the dev instance', docs: {}, tables: {} }
-      for (const t of o.tables || []) {
+      // a list of names; an object ({orders: …}) gives its keys (agents passed one twice)
+      const names = v => Array.isArray(v) ? v : v && typeof v === 'object' ? Object.keys(v) : v ? [v] : []
+      o = { ...(o || {}), tables: names((o || {}).tables), docs: names((o || {}).docs) }
+      for (const t of o.tables) {
         if (!/^\w+$/.test(t)) throw invalid('table names are words: ' + t)
         spec.tables[t] = await Slop.call('sql', { app, kind: 'dev', query: 'SELECT * FROM "' + t + '"', args: [] })
       }
-      for (const c of o.docs || []) {
+      for (const c of o.docs) {
         // a document {path: "coll/id", body}: a row with its id
         spec.docs[c] = (await Slop.call('docs', { app, kind: 'dev', coll: c })).map(d => ({ id: d.path.split('/').pop(), ...d.body }))
       }
@@ -70,7 +73,7 @@ export const TESTS = {
       fixture: s.spec && s.spec.fixture || undefined, error: s.error || undefined, last: s.last ? (s.last.stale ? 'edited since its last run (not run since)' : s.last.ok ? 'passed' : 'failed at step ' + (s.last.failedAt + 1)) : undefined
     }))
   },
-  'scenarios.read': { sig: 'name', run: (ctx, name) => read(ctx, name) },
+  'scenarios.read': { sig: 'name', ret: 'the spec {description, page, size?, fixture?, steps}', run: (ctx, name) => read(ctx, name) },
   'scenarios.save': {
     sig: 'name, spec', writes: 'files', pathOf: ([name]) => SCEN_DIR + fileName(name) + '.json',
     run: (ctx, name, spec) => {

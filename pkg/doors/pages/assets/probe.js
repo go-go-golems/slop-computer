@@ -1,4 +1,4 @@
-/* the bench, built from web/bench: do not edit. source sha256:a61570438e2331239004c102a74fdc9d3fcc5fc3519b863561b3eb752fc1496b */
+/* the bench, built from web/bench: do not edit. source sha256:a1a65b9ad37826bb9804a8f9b66223d57f6570efa0d30733f85c23fec3de99fb */
 // slop's dev probe (SLOP3-022): the bench's PROBE from web/bench/src/frames/probe.js,
 // which the sandbox adds to dev embeds only, after the runtime. It answers the
 // tool that framed the view (the boot data's parentOrigin) and nothing else.
@@ -43,16 +43,38 @@ function PROBE(CFG) {
     if (!el) throw new Error('no element matches ' + q)
     return el
   }
-  // CSS selectors, plus a trailing :has-text("words"): elements whose visible text contains the words (innermost first)
-  function qsa(q) {
-    const m = /^(.*?):has-text\((["']?)(.*)\2\)$/.exec(String(q).trim())
-    let list
-    try { list = [...document.querySelectorAll(m ? (m[1].trim() || '*') : q)] } catch (e) { throw new Error('bad selector ' + q) }
-    if (!m) return list
-    const want = m[3].toLowerCase().replace(/\s+/g, ' ').trim()
-    const hits = list.filter(el => (el.innerText || el.textContent || '').toLowerCase().replace(/\s+/g, ' ').includes(want))
-    return hits.filter(el => !hits.some(o => o !== el && el.contains(o)))
+  // qsa:begin — CSS selectors, plus the Playwright-style text forms agents write (persona reviews):
+  //   button:has-text("Add")                  elements whose visible text contains the words (innermost first)
+  //   article:has-text("Pack boxes") input    … then a selector inside each of them
+  //   article:has(h2:has-text("Pack")) input  elements that contain such an element
+  //   :text("Add") is :has-text("Add")
+  function qsa(q, root) {
+    root = root || document
+    q = String(q).trim().replace(/:text\(/g, ':has-text(')
+    const all = sel => { try { return [...root.querySelectorAll(root === document ? sel : ':scope ' + sel)] } catch (e) { throw new Error('bad selector ' + q + ' (CSS, plus :has-text("words"), which may be followed by more selector or sit inside :has(…))') } }
+    const at = q.indexOf(':has-text(')
+    if (at < 0) return q ? all(q) : []
+    // the text argument, quoted or not, up to its closing parenthesis
+    let k = at + 10, quote = q[k] === '"' || q[k] === "'" ? q[k] : '', text = ''
+    if (quote) { const e = q.indexOf(quote, k + 1); if (e < 0) throw new Error('bad selector ' + q); text = q.slice(k + 1, e); k = e + 1 } else { const e = q.indexOf(')', k); if (e < 0) throw new Error('bad selector ' + q); text = q.slice(k, e); k = e }
+    if (q[k] !== ')') throw new Error('bad selector ' + q)
+    const end = k + 1
+    // is it inside a :has( … )? find the innermost unclosed ":has(" before it
+    let depth = 0, hasAt = -1
+    for (let x = at - 1; x >= 0; x--) { if (q[x] === ')') depth++; else if (q[x] === '(') { if (depth) depth--; else { if (q.slice(x - 4, x) === ':has') hasAt = x - 4; break } } }
+    const want = text.toLowerCase().replace(/\s+/g, ' ').trim()
+    const withText = els => { const hits = els.filter(el => (el.innerText || el.textContent || '').toLowerCase().replace(/\s+/g, ' ').includes(want)); return hits.filter(el => !hits.some(o => o !== el && el.contains(o))) }
+    const then = (els, rest) => { rest = rest.trim() ? rest : ''; if (!rest) return els; const out = new Set(); for (const el of els) for (const x of qsa((/^[>+~ ]/.test(rest) ? '' : ' ') + rest, el)) out.add(x); return [...out] }
+    if (hasAt < 0) return then(withText(q.slice(0, at).trim() ? all(q.slice(0, at)) : all('*')), q.slice(end))
+    // base:has(inner) rest — inner holds the :has-text
+    let d = 0, close = -1
+    for (let x = hasAt + 5; x < q.length; x++) { if (q[x] === '(') d++; else if (q[x] === ')') { if (!d) { close = x; break } d-- } }
+    if (close < 0) throw new Error('bad selector ' + q)
+    const base = q.slice(0, hasAt).trim(), inner = q.slice(hasAt + 5, close)
+    const els = all(base || '*').filter(el => qsa(inner, el).length)
+    return then(els.filter(el => !els.some(o => o !== el && el.contains(o))), q.slice(close + 1))
   }
+  // qsa:end
   // a selector a recording can replay: the shortest of several that picks out exactly this element
   function stableSel(el) {
     const uniq = q => { try { const l = qsa(q); return l.length === 1 && l[0] === el } catch (e) { return false } }

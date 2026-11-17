@@ -119,3 +119,11 @@ test('rewrite: a destructuring declaration after a line without a semicolon', as
   const fn = new Function('read', 'let ' + rw.names.join(', ') + '; return (async () => {\n' + rw.code + '\n})()')
   assert.equal(await fn(async p => p.toUpperCase()), 'MAIN.TSAB')
 })
+
+test('rewrite: a top-level declaration of an API name is reported', async () => {
+  const { rewrite } = await import('../src/worker/rewrite.js')
+  const reserved = new Set(['files', 'app', 'frames'])
+  assert.deepEqual(rewrite('const [info, app] = await par([app.info()])', reserved).shadows, ['app'])
+  assert.deepEqual(rewrite('const frames = await frames.list()\nfunction files() {}', reserved).shadows, ['frames', 'files'])
+  assert.deepEqual(rewrite('const fileList = await files.list()\nconst f = x => { const files = 1; return files }', reserved).shadows, [], 'a nested name is fine')
+})

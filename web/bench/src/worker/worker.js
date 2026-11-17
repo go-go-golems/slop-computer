@@ -66,18 +66,20 @@ function apiShape(api) {
   return { ns, flat }
 }
 const CORE_NAMES = ['step', 'id', 'seq', 'par', 'alt', 'loop', 'dyn', 'llm', 'delegate', 's', 'monoid', 'help', 'tx', 'setTimeout', 'clearTimeout']
-const PRELUDE_NAMES = ['__call', '__API', '__SIGS', '__ROLES', '__PASS', '__lev', '__near', '__ns', '__names', '__lib', '__declare', '__keep', '__kind', 'vars', 'forget', 'lib', '__fmt', 'console', 'sleep', '__snapshot', '__restore', '__libSet', '__libLoad', '__host', '__log', '__eid', 'globalThis', 'undefined', 'NaN', 'Infinity', 'eval', 'arguments', ...CORE_NAMES]
+const PRELUDE_NAMES = ['__call', '__API', '__SIGS', '__ROLES', '__DOCS', '__PASS', '__lev', '__near', '__ns', '__names', '__lib', '__declare', '__keep', '__kind', 'vars', 'forget', 'lib', '__fmt', 'console', 'sleep', '__snapshot', '__restore', '__libSet', '__libLoad', '__host', '__log', '__eid', 'globalThis', 'undefined', 'NaN', 'Infinity', 'eval', 'arguments', ...CORE_NAMES]
 function reservedFor(api) { const { ns, flat } = apiShape(api); return new Set([...Object.keys(ns), ...flat, ...PRELUDE_NAMES, ...(CORE.match(/^(?:function|const|class) (__\w+)/gm) || []).map(x => x.split(' ')[1])]) }
 
 // ---------- the prelude, evaluated once per session ----------
 // verbs that stay direct calls returning promises; every other module verb returns a Step
 const DIRECT = new Set(['lib.def', 'lib.list', 'lib.remove', 'lib.source', 'log', 'sleep', 'tx.begin', 'tx.commit', 'tx.rollback', 'dry.begin', 'dry.end', 'dry.apply', 'dry.discard', 'agents.delegate', 'agents.roles', 'llm', 'ui.approve'])
+let DOCS = {} // verb → '→ ret — doc', for help(); set from each eval message
 function preludeSource(api, sigs = {}, roles = []) {
   const { ns, flat } = apiShape(api)
   let src = 'const __call = async (n, a) => { try { return JSON.parse(await __host(n, JSON.stringify(a === undefined ? [] : a))) } catch (e) { if (e && typeof e === "object" && !e.kind) e.kind = e.name; throw e } };\n'
   src += 'const __API = ' + JSON.stringify(api.filter(n => !DIRECT.has(n) || n.startsWith('lib.'))) + ';\n'
   src += 'const __SIGS = ' + JSON.stringify(Object.fromEntries(Object.entries(sigs).filter(([k]) => !DIRECT.has(k)))) + ';\n'
   src += 'const __ROLES = ' + JSON.stringify(roles) + ';\n'
+  src += 'const __DOCS = ' + JSON.stringify(DOCS) + ';\n'
   src += 'const __lev = (a, b) => { const m = []; for (let i = 0; i <= b.length; i++) m[i] = [i]; for (let j = 0; j <= a.length; j++) m[0][j] = j; for (let i = 1; i <= b.length; i++) for (let j = 1; j <= a.length; j++) m[i][j] = Math.min(m[i-1][j] + 1, m[i][j-1] + 1, m[i-1][j-1] + (b[i-1] === a[j-1] ? 0 : 1)); return m[b.length][a.length] };\n'
   src += 'const __near = (k, names) => { let best = null, bd = Math.max(2, Math.floor(k.length / 3)) + 1; for (const n of names) { const d = __lev(k.toLowerCase(), n.toLowerCase()); if (d < bd) { bd = d; best = n } } return best };\n'
   // namespaces answer an unknown verb with the nearest real one, in this namespace or another
@@ -192,6 +194,13 @@ function explain(err, m, known) {
   return err
 }
 
+// an eval that declares an API name at its top level fails before it runs, saying why
+function refuseShadows(rw) {
+  if (!rw.shadows || !rw.shadows.length) return rw
+  const n = rw.shadows.map(x => '`' + x + '`').join(', ')
+  const msg = n + (rw.shadows.length > 1 ? ' are names' : ' is the name') + ' of the bench API, and this eval declares a variable of that name, which hides the API for the whole eval. Rename the variable (fileList, appInfo, frameList, …) and run it again. Nothing ran.'
+  return { ...rw, code: 'throw Object.assign(new TypeError(' + JSON.stringify(msg) + '), { kind: "invalid" })' }
+}
 function cut(s, n) { s = String(s); return s.length > n ? s.slice(0, n) + `… [${s.length - n} more characters cut]` : s }
 
 // ---------- engine 1: QuickJS, one context per session ----------
@@ -218,7 +227,8 @@ function hash(s) { let x = 2166136261; for (let i = 0; i < s.length; i++) { x ^=
 
 async function runQuick(m) {
   // long: the calls that may wait on a person or a model (the page's API table says which)
-  const { id: eid, code, api, timeoutMs = 20000, sid, restore, lib, sigs = {}, roles = [], long = [] } = m
+  const { id: eid, code, api, timeoutMs = 20000, sid, restore, lib, sigs = {}, roles = [], long = [], docs } = m
+  if (docs) DOCS = docs
   const LONG = new Set(long)
   let S = sid ? sessions.get(sid) : null, fresh = false
   if (S && S.api !== api.join(',') + '|' + roles.join(',')) { dropSession(sid); S = null }
@@ -262,7 +272,7 @@ async function runQuick(m) {
   const logFn = vm.newFunction('__log', (lvlH, sH) => { logs.push({ level: vm.getString(lvlH), text: cut(vm.getString(sH), 2000) }) })
   vm.setProp(vm.global, '__log', logFn); logFn.dispose()
 
-  const rw = sid ? rewrite(code, reservedFor(api)) : { code, names: [], keep: [] }
+  const rw = refuseShadows(sid ? rewrite(code, reservedFor(api)) : { code, names: [], keep: [] })
   // line 1 of the person's code is line 2 of eval.js
   const src = '(async () => {' + prefixFor(rw) + '\n' + rw.code + '\n})().then(v => JSON.stringify(v === undefined ? null : v))'
   const snapshot = () => { try { return JSON.parse(evalIn(vm, '__snapshot()')) } catch (e) { return null } }
@@ -324,8 +334,9 @@ async function runPlain({ id: eid, code, api, timeoutMs = 20000, sid, restore, l
     __host: hostP, __log: (level, text) => logs.push({ level, text: cut(text, 2000) }),
     __declare: (...n) => { for (const x of n) { names.add(x); if (!(x in S)) S[x] = undefined } }, __keep: (n, v) => { S[n] = v; names.add(n) }
   }
+  if (arguments[0].docs) DOCS = arguments[0].docs
   const pre = preludeSource(api, arguments[0].sigs, arguments[0].roles).replace(/^const (__names|__declare|__keep) = .*$/gm, '') + CORE + '\n'
-  const rw = sid ? rewrite(code, reservedFor(api)) : { code, names: [], keep: [] }
+  const rw = refuseShadows(sid ? rewrite(code, reservedFor(api)) : { code, names: [], keep: [] })
   for (const n of rw.names) if (!(n in S)) S[n] = undefined
   const libLoad = '__libLoad(' + JSON.stringify((lib || []).map(l => [l.name, l.source])) + ');\n'
   const preludeLines = (pre + libLoad).split('\n').length - 1

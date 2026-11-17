@@ -21,11 +21,14 @@ export function rewrite(code, reserved) {
   let ast
   try { ast = acorn.parse(code, { ecmaVersion: 'latest', sourceType: 'script', allowAwaitOutsideFunction: true, allowReturnOutsideFunction: true }) }
   catch (e) { return { code, names: [], keep: [] } }
-  const edits = [], names = [], keep = []
+  const edits = [], names = [], keep = [], shadows = []
   for (const st of ast.body) {
     if (st.type === 'VariableDeclaration') {
       const ids = []; for (const d of st.declarations) collectPattern(d.id, ids)
-      if (!ids.length || ids.some(n => reserved.has(n))) continue
+      // a top-level name that is also an API name hides the API for the whole eval
+      // (const [info, app] = await par([app.info(), …]): "app is not initialized")
+      if (ids.some(n => reserved.has(n))) { shadows.push(...ids.filter(n => reserved.has(n))); continue }
+      if (!ids.length) continue
       names.push(...ids)
       // the keyword becomes ";": the assignment that follows may start with "(" (a destructuring
       // pattern is wrapped) and would otherwise continue the line before it when that line has no
@@ -39,6 +42,8 @@ export function rewrite(code, reserved) {
         const next = st.declarations[i + 1]
         if (next) { const between = code.slice(d.end, next.start), c = between.indexOf(','); if (c >= 0) edits.push({ at: d.end + c, del: 1, text: ';' }) }
       })
+    } else if ((st.type === 'FunctionDeclaration' || st.type === 'ClassDeclaration') && st.id && reserved.has(st.id.name)) {
+      shadows.push(st.id.name)
     } else if (st.type === 'FunctionDeclaration' && st.id && !reserved.has(st.id.name)) {
       keep.push(st.id.name)
     } else if (st.type === 'ClassDeclaration' && st.id && !reserved.has(st.id.name)) {
@@ -49,5 +54,5 @@ export function rewrite(code, reserved) {
   edits.sort((a, b) => b.at - a.at)
   let out = code
   for (const e of edits) out = out.slice(0, e.at) + e.text + out.slice(e.at + e.del)
-  return { code: out, names, keep }
+  return { code: out, names, keep, shadows: [...new Set(shadows)] }
 }
