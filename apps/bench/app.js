@@ -1,4 +1,4 @@
-/* the bench, built from web/bench: do not edit. source sha256:1475ef38f8ee8bb068f0d45a19b055875164cfddb3e088626641944f5ac0d3bd */
+/* the bench, built from web/bench: do not edit. source sha256:92b5ded02bdf5bb8c7d7fbf15a5fc0dcd6b26b397ad9007f474cf686338ffdc4 */
 // The bench: a live dev environment for slop apps. Built from web/bench/src.
 (() => {
   // src/lib/util.js
@@ -8733,6 +8733,25 @@ return { files: list.map(f => f.path), issues }`;
         if (S.cur) await loadRows();
         else paint();
       }
+      async function runQuery(q) {
+        if (/^\s*(select|with|pragma|explain)\b/i.test(q)) {
+          S.query = q;
+          S.coll = "";
+          loadRows();
+          return;
+        }
+        const where = S.kind === "dev" ? "your dev data" : S.kind === "prop" ? "the proposal's preview data" : "your test data";
+        if (!await confirmBox("Change " + where + "?", q.slice(0, 300), "Run it")) return;
+        try {
+          const r = await call("exec", { query: q, args: [] });
+          toast("Done" + (r && r.changes != null ? ": " + plural(r.changes, "row") + " changed" : ""));
+          S.query = "";
+          loadRows();
+          if (S.kind === "dev") App.reloadDev();
+        } catch (e) {
+          toast("Not run: " + (e.message || e), 6e3);
+        }
+      }
       async function loadRows() {
         const my = ++S.seq;
         const q = S.query || 'SELECT rowid AS __rowid, * FROM "' + S.cur + '" LIMIT 300';
@@ -8797,12 +8816,8 @@ return { files: list.map(f => f.path), issues }`;
           }
         } } }, S.coll ? "collection " + S.coll : "a collection\u2026"));
         tl.appendChild(h("button.fi", { style: { color: "var(--ink-2)" }, on: { click: async () => {
-          const q = await promptBox("Query", "Read-only SQL on this instance", S.query || "SELECT * FROM " + (S.cur || "notes") + " LIMIT 50");
-          if (q) {
-            S.query = q;
-            S.coll = "";
-            loadRows();
-          }
+          const q = await promptBox("Query", "SQL on this instance: SELECT reads; UPDATE, INSERT or DELETE change its data (asked first; never the published app's)", S.query || "SELECT * FROM " + (S.cur || "notes") + " LIMIT 50");
+          if (q) runQuery(q);
         } } }, "SQL query\u2026"));
         put(
           head,

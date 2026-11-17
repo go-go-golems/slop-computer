@@ -37,6 +37,14 @@ export const DATA = {
       if (!S.cur && !S.query && !S.coll) S.cur = S.tables[0] || null
       if (S.cur) await loadRows(); else paint()
     }
+    // a query that writes runs as a change of this instance's data (a developer wanted to make a row stale
+    // by hand to watch his conflict path, round 4); reads stay reads
+    async function runQuery(q) {
+      if (/^\s*(select|with|pragma|explain)\b/i.test(q)) { S.query = q; S.coll = ''; loadRows(); return }
+      const where = S.kind === 'dev' ? 'your dev data' : S.kind === 'prop' ? 'the proposal\'s preview data' : 'your test data'
+      if (!await confirmBox('Change ' + where + '?', q.slice(0, 300), 'Run it')) return
+      try { const r = await call('exec', { query: q, args: [] }); toast('Done' + (r && r.changes != null ? ': ' + plural(r.changes, 'row') + ' changed' : '')); S.query = ''; loadRows(); if (S.kind === 'dev') App.reloadDev() } catch (e) { toast('Not run: ' + (e.message || e), 6000) }
+    }
     async function loadRows() {
       const my = ++S.seq
       // a table's rows carry their rowid, so one can be deleted (a table without one: read-only)
@@ -62,7 +70,7 @@ export const DATA = {
       if (!S.tables.length) tl.appendChild(h('div.note', { style: { padding: '0 10px' } }, 'No tables: the app has no migrations, or this instance has not run yet.'))
       tl.appendChild(h('div.fi.dir', 'Documents'))
       tl.appendChild(h('button.fi' + (S.coll ? '.on' : ''), { on: { click: async () => { const c = await promptBox('Documents', 'A collection of the app\'s db', S.coll || 'notes'); if (c) { S.coll = c; S.query = ''; loadDocs() } } } }, S.coll ? 'collection ' + S.coll : 'a collection…'))
-      tl.appendChild(h('button.fi', { style: { color: 'var(--ink-2)' }, on: { click: async () => { const q = await promptBox('Query', 'Read-only SQL on this instance', S.query || 'SELECT * FROM ' + (S.cur || 'notes') + ' LIMIT 50'); if (q) { S.query = q; S.coll = ''; loadRows() } } } }, 'SQL query…'))
+      tl.appendChild(h('button.fi', { style: { color: 'var(--ink-2)' }, on: { click: async () => { const q = await promptBox('Query', 'SQL on this instance: SELECT reads; UPDATE, INSERT or DELETE change its data (asked first; never the published app\'s)', S.query || 'SELECT * FROM ' + (S.cur || 'notes') + ' LIMIT 50'); if (q) runQuery(q) } } }, 'SQL query…'))
 
       put(head, h('b', S.coll ? 'collection ' + S.coll : S.query ? 'query' : S.cur || ''), h('span.tag', S.kind + ' instance'), h('span.sp'),
         h('div.rel', h('button.btn.sm', { title: 'Add a fixture\'s documents and rows to the dev instance', disabled: S.kind !== 'dev', on: { click: e => seedMenu(e.currentTarget) } }, 'Seed from fixture')),
