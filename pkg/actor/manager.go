@@ -156,7 +156,7 @@ func (m *Manager) appFiles(ctx context.Context, app string, n int64) (map[string
 	out := map[string][]byte{}
 	for _, f := range list {
 		ext := path.Ext(f.Path)
-		if (ext == ".js" || ext == ".json" || ext == ".sql") && f.Size < 4<<20 {
+		if codeFile[ext] && f.Size < 4<<20 {
 			b, err := as.ReadFile(f)
 			if err != nil {
 				return nil, err
