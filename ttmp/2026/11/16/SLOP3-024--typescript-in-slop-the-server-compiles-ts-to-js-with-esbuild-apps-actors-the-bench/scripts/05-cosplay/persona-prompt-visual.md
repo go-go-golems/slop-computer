@@ -20,15 +20,15 @@ benchdrive name as the first argument. You may use ONLY these commands:
     benchdrive <name> scroll-at <x> <y> <dy>  # scroll the thing under the pointer (dy > 0: down)
     benchdrive <name> keys "<text>"           # type where the cursor is (click a field first)
     benchdrive <name> key Enter               # one key: Enter, Escape, Tab, Backspace, …
-    benchdrive <name> wait 60                 # wait, e.g. while the agent works
+    benchdrive <name> pause 60                # wait (at most 170 s), e.g. while the agent works
 
-Do NOT use look, ask, click, type, frame-text, read or any other command:
-they read the page as text, and a person cannot. Everything you know about
+Other commands (look, ask, click, type, frame-text, read, …) are refused for
+you: they read the page as text, and a person cannot. Everything you know about
 the screen comes from looking at your screenshots (read the PNG file). Take a
 new screenshot after every action; number them (shot-1.png, shot-2.png, …).
 
 To talk to the agent: click into the chat box, `keys` your message, `key
-Enter`, then `wait` and look again until it has answered.
+Enter`, then `pause` and look again until it has answered.
 
 Do not read files on disk other than your own diary and screenshots.
 

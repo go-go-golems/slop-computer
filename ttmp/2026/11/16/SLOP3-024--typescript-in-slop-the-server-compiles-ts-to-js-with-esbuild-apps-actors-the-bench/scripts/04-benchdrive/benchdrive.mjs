@@ -41,6 +41,7 @@ const HELP = `benchdrive <you> <command> [args]   (you = your persona name, e.g.
   frame-type <sel> <text> [n] type into a field of the app's own page
   view <name>               open a view: ${VIEW_TITLES.join(', ')}
   wait [seconds]            wait, then say what changed (default 5)
+  pause [seconds]           (personas named *-visual) wait without describing anything, at most 170
   close                     forget this persona's browser tab
 
   benchdrive serve [--port N]   start the daemon (one browser)
@@ -738,6 +739,12 @@ async function serve(port) {
     'frame-click': (P, a) => P.frameClick(a[0], a[1]), 'frame-type': (P, a) => P.frameType(a[0], a[1], a[2]),
     view: (P, a) => P.view(a.join(' ')), edit: (P, a) => P.edit(a[0], a[1]), wait: (P, a) => P.wait(a[0]), close: P => P.close(),
   }
+  const EYES = {
+    see: commands.see, 'click-at': commands['click-at'], 'dblclick-at': commands['dblclick-at'], drag: commands.drag,
+    'scroll-at': commands['scroll-at'], keys: commands.keys,
+    key: async (P, a) => { if (!a[0]) throw new Fail('usage: key <key>'); await P.bench(); await P.page.keyboard.press(a[0]); await sleep(500); return [`Pressed ${a[0]}. Take another look (see).`] },
+    pause: async (P, a) => { const s = Math.min(Math.max(+a[0] || 10, 1), 170); await sleep(s * 1000); return [`Waited ${s} s. Take another look (see).`] },
+  }
   const server = http.createServer((req, res) => {
     let body = ''
     req.on('data', c => { body += c })
@@ -748,7 +755,11 @@ async function serve(port) {
         if (req.url === '/status') return reply(200, `benchdrive pid ${process.pid} on 127.0.0.1:${port}, bench ${BENCH}\npersonas: ${[...personas.keys()].join(', ') || '(none yet)'}`)
         const { persona, cmd, args, record: where, email, name: display } = JSON.parse(body || '{}')
         if (!/^[A-Za-z0-9_-]{1,40}$/.test(persona || '')) return reply(400, 'error: a persona name is letters, digits, - and _')
-        const fn = commands[cmd]
+        // a persona named *-visual works by eye: only the commands that show pixels or move the
+        // pointer, and key/pause answer without describing the page
+        const visual = /-visual$/.test(persona)
+        if (visual && !EYES[cmd]) return reply(422, `A persona that works by eye can use only: ${Object.keys(EYES).join(', ')}.`)
+        const fn = visual ? EYES[cmd] : commands[cmd]
         if (!fn) return reply(400, `error: unknown command "${cmd}".\n\n` + HELP)
         let P = personas.get(persona)
         if (!P) { P = new Persona(persona, browser); personas.set(persona, P) }
@@ -798,7 +809,7 @@ async function main() {
   const [persona, cmd, ...args] = argv
   if (!cmd || cmd === 'help') { console.log(HELP); return }
   // files are written by the daemon: make paths absolute from here
-  if ((cmd === 'shot' || cmd === 'frame-shot') && args[0]) args[0] = path.resolve(args[0])
+  if ((cmd === 'shot' || cmd === 'frame-shot' || cmd === 'see') && args[0]) args[0] = path.resolve(args[0])
   try {
     const r = await call('/cmd', { persona, cmd, args, record: process.env.BENCHDRIVE_RECORD || undefined, email: process.env.BENCHDRIVE_EMAIL || undefined, name: process.env.BENCHDRIVE_NAME || undefined })
     process.stdout.write(r.text)

@@ -69,3 +69,17 @@
 - [bench, from rosa r2] No way to delete one row of dev data. FIXED cd978d0 (workshop.exec, Data view ✕, app.exec).
 - [bench] Members (non-admin) get "only admins change app code … D9" from Create. FIXED (me action; the New app dialog says so first).
 - [design] Frames as different people (kenji, aisha r2; priya r1): proposal design-doc/02, for a decision.
+
+## Round 3 (running)
+- [harness] theo's pi ended "the upstream stream failed before completion" (lunaroute) after 38 commands; resumed with pi --continue.
+- [harness] all personas share admin@example.com: the bench opens on the last app anyone opened (grace: "opened on someone else's app"). Real for a shared account only.
+- [visual audit] 900 px: the header overflows (Layout cut, theme toggle gone), "Panels" tab cut to "Pa".
+- [visual audit] 1280x800: Code editor 180 px × 12 lines (file list 190 px; the 480 px container rule lost to the base rule). FIXED: narrow Code view hides the list behind "Files".
+- [visual audit] Publish dialog wording is platform jargon ("moves main to this draft", "production instances", "migration").
+- [lena] agent sent a bench-only person to `slop vendor`. FIXED in the guide. DECISION for the user: a bench "Add a package" (server-side npm fetch into vendor/) — supply-chain question.
+- [harness, SECURITY] lena (r3) ran the operator's real `slop` CLI from her bash tool: whoami (name, email, user id), store ls, app ls, help; one import failed not_found; nothing written. Fixed: run.sh/resume.sh put a `slop` shim first on PATH and point SLOP_SERVER/CREDENTIALS nowhere; all six restarted with it. Her transcript's CLI outputs get redacted before archiving.
+- [harness] benchdrive `see` saved relative paths in the daemon's cwd (the operator's repo checkout); the client now resolves them like shot. Stray shots moved out.
+- [visual, maya-visual r3] "New app…" was below 20+ apps in the app menu, out of sight. FIXED: first in the menu. (Text personas never hit it.)
+- [visual audit] the agent pill disappeared in my first 1000 px header fix (hide-s); FIXED (markbtn only).
+- [bench] long turns: a running reply now says "Working for N: <phase>" and suggests Stop after 4 min.
+- [kenji r3] "model provider request failed" on the first ask (lunaroute); a re-send worked.

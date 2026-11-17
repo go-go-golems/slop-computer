@@ -137,6 +137,7 @@ A persona that changes an app needs one to exist first: `slop store new --id qui
 | `read [from] [to]`, `edit <old> <new>` | reads the open file 80 lines at a time; changes part of it by selecting and typing |
 | `frame-text`, `frame-click`, `frame-type`, `frame-shot` | the app's own page in the canvas, in Play mode |
 | `shot <file.png>`, `wait [s]`, `close` | a screenshot; wait and report changes; forget the tab |
+| `see <file.png>`, `click-at <x> <y>`, `dblclick-at`, `drag <x1> <y1> <x2> <y2>`, `scroll-at <x> <y> <dy>`, `keys <text>`, `pause [s]` | for a persona that works by eye: a screenshot with a 100 px grid to aim by, then the pointer and keyboard at screen coordinates (see below) |
 
 Each action command prints what changed on screen. An `alert`, `confirm` or `prompt` from the page is accepted, as a person clicks OK, and reported. `type code` refuses unless given `--replace`, because it replaces the whole file; one persona nearly lost a file that way.
 
@@ -197,6 +198,14 @@ Every persona gets the same frame (`scripts/05-cosplay/persona-prompt.md`) aroun
 - **Mark struggles** with a line starting `STRUGGLE:` and a one-line summary.
 - **Stop** when the goal is met and there's nothing more the person would want, when the brief's "gives up when" fires, or after about 50 commands. End with `## Verdict`: did you get what you wanted, the hardest moment, would you come back, and the three struggles that mattered most.
 
+## Personas that work by eye
+
+A text persona reads the bench through `look`, which lists every control by name, so it finds a button wherever it is. A person doesn't. In round 3 a persona working only from screenshots couldn't find "New app…": it sat below twenty apps in the menu, out of sight. No text persona had hit that in three rounds. One visual persona per round catches what the text harness hides: layout, overlap, cut-off text, things out of view.
+
+- **Name it `<name>-visual`.** `run.sh` gives it `persona-prompt-visual.md`, and the daemon refuses it every command but `see`, `click-at`, `dblclick-at`, `drag`, `scroll-at`, `keys`, `key` and `pause`. `key` and `pause` answer without describing the screen. Everything it knows comes from reading its screenshots.
+- **Use a model that sees.** `deepseek-4.1-flash` reads screenshots natively and worked. Avoid a text model with vision added on.
+- **It is slower:** each look is an image. Give it a budget of about 70 commands.
+
 ## Running a round
 
 ```sh
@@ -218,6 +227,8 @@ ROUND_NOTES="what this round is for" ROUND_BENCH="the server's tiers" \
 - **Extensions:** `--no-extensions` alone removes the lunaroute provider, and every persona exits with `No API key found for lunaroute`. Name the extension with `-e`.
 - **App ids:** every persona needs an app id of its own (`name:app-id`), new or a fixture's. Reusing an id from an earlier round resumes that app.
 - **Concurrency:** lunaroute serves up to six at once and throttles (429) above that. A round of six is fine.
+- **The operator's command line is not the persona's.** pi's bash tool runs with your environment. In round 3 a persona found the real `slop` CLI on PATH, signed in as the operator against their default server, and ran `whoami`, `store ls` and an `import` that luckily failed. `run.sh` and `resume.sh` now put a `slop` shim first on PATH that answers "command not found", and point `SLOP_SERVER` and `SLOP_CREDENTIALS` nowhere. Do the same for any other CLI with credentials that a persona might reach.
+- **A persona that stops early** (lunaroute's "the upstream stream failed before completion", or a restart you need) resumes from its pi session: `resume.sh <round> <name> <model> <thinking> ["message"]` continues it with the same prompt and keeps the earlier `pi.out`/`pi.err` as `.N`. Remove its exit line from `done.log` first, so the watcher counts it right.
 - **Watch the start:** watch the first minutes of the daemon's log and the diaries. A persona that cannot sign in or find the chat is a harness bug every persona will hit. Watch with a loop that tolerates folders that don't exist yet (under bash: `shopt -s nullglob`; zsh errors on an empty glob).
 
 ## Fixing during a round
@@ -225,6 +236,8 @@ ROUND_NOTES="what this round is for" ROUND_BENCH="the server's tiers" \
 Read the struggles as they arrive. Most can be fixed while the round runs:
 
 - **Fix in the worktree; don't deploy.** The server stays on one build for the whole round, so its findings stay comparable. The next round tests the fixes.
+- **Check fixes on a second bench.** A bench store of its own on the same server (`benchnext`: `store new --type bench`, push, `app trust … workshop`, `policy set … sample @admin on`, a mount at `/benchnext`) shows a fix in a real browser without touching the bench the personas use.
+- **Audit the bench yourself in a real browser** at a few window sizes (1600×1000, 1280×800, 900×900), light and dark: the main screen, Code with a type error, Review, Data, the Publish dialog. It takes minutes, and it found a 12-line Code editor at laptop width, an overflowing header and jargon in the Publish dialog.
 - **Reproduce first.** Use the CLI or a probe persona (on an app of its own, so you don't disturb a persona), then write a test that fails without the fix. Round 1's actor bug was reproduced in three CLI calls and caught by a test that fails without the fix.
 - **Before deploying a new bench build:**
   - Run a boot smoke: open the bench, create an app, open the Code view. No unit test covers the bench's boot, and round 1's fixes broke it once (`Records.get is not a function`).
@@ -261,7 +274,7 @@ Before fixing a surprising struggle, check whether it's the harness: benchdrive 
 
 For each round:
 
-- **Archive it:** copy the round's folder to `various/persona-review-<date>/r<N>/`, with diaries, pi sessions, `steps.jsonl`, shots and the daemon's log, plus `round.json`. Scan it for link tokens (`k_…`) and credentials first.
+- **Archive it:** copy the round's folder to `various/persona-review-<date>/r<N>/`, with diaries, pi sessions, `steps.jsonl`, shots and the daemon's log, plus `round.json`. Shrink the screenshots (1120 px wide, JPEG quality 55 roughly halves a round). Then run `OPERATOR_NAME=… OPERATOR_EMAIL=… OPERATOR_ID=… redact.py <archived round>`: it replaces any output of the operator's CLI and masks the operator's identity and standalone link tokens. A `k_` inside a pi session's `thinkingSignature` is base64, not a token.
 - **Update the findings:** each finding, fixed (with its commit) or open.
 - **Write a diary step:**
   - the branch, commit and models;
@@ -275,11 +288,14 @@ For each round:
 - **Silent turns.** The bench's agent on `deepseek-4.1-flash` often ended a turn without a word. The sample backend now asks once for the reply, and the bench summarizes the evals when there's still none.
 - **Every check needs a failure first.** A green tick that proves nothing was the ops persona's "most dangerous thing". The fix: scenario checks that can't pass on a substring, steps whose unknown keys are errors, a new stub that fails until it checks something, and a guide rule to show each check failing once.
 - **People ask about the bench itself:** how to undo, how to publish, where the link is. The agent must answer those, and the bench must show the link.
-- **Hand editing and reading long files** needed harness commands (`read`, `edit`), not bench changes.
+- **Hand editing and reading long files** needed harness commands (`read`, `edit`). But the "12 lines" was also real at laptop width, as the visual audit showed.
+- **Rotating models finds different bugs.** glm-5.3 writes code without semicolons, which exposed an ASI bug in the eval session's rewrite, and writes tool calls as text. deepseek ends turns silently. Mix them within a round.
+- **Long turns need a visible clock.** Turns of 9 to 13 minutes that showed only "Working" made three personas think the bench had hung. A running reply now says how long it has worked and on what.
+- **Multi-person apps can't be tried on one account.** A poll's second voter or a privacy rule between volunteers needs frames as different people (design-doc/02).
 
 ## Costs and limits
 
 - **Model calls.** lunaroute is free here; the limit is its rate. A round of six personas runs 20 to 40 minutes.
 - **A model is not a person.** Personas understate confusion (the model knows what "commit" means) and overstate patience. Read "it went fine" from a non-programmer as weak evidence.
 - **Accounts.** By default every persona signs in as the local admin: they share the Recent list, layouts and each app's threads, and nothing about sharing or roles can be tested. `BENCHDRIVE_EMAIL` per persona gives each its own account. Whether a non-admin account can use the bench is itself a finding.
-- **The harness can lie.** If `look` misses part of the screen, the persona reports a missing feature that's there. Check a surprising struggle in a real browser before fixing the bench.
+- **The harness can lie both ways.** If `look` misses part of the screen, the persona reports a missing feature that's there. If `look` lists something that is out of sight, the persona finds what a person wouldn't. Check a surprising struggle in a real browser, and keep one visual persona per round.

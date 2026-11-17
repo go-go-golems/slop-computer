@@ -28,6 +28,9 @@ cat > "$round/round.json" <<JSON
 {"model": "$model", "thinking": "$thinking", "bench": "${ROUND_BENCH:-}", "notes": $(printf '%s' "${ROUND_NOTES:-}" | python3 -c 'import json,sys; print(json.dumps(sys.stdin.read()))'), "started": "$(date -u +%FT%TZ)", "personas": [$(IFS=,; echo "${names[*]}")], "specs": $(printf '%s\n' "$@" | python3 -c 'import json,sys; print(json.dumps(sys.stdin.read().split()))')}
 JSON
 export BENCHDRIVE_RECORD=$round
+# Personas have the bench, not the operator's slop command line: a shim named
+# slop comes first on PATH, and the CLI's server and credentials point nowhere.
+export PATH="$here/shim:$PATH" SLOP_SERVER=http://127.0.0.1:9 SLOP_CREDENTIALS=/nonexistent
 first=1
 for spec in "$@"; do
   IFS=: read -r name app pmodel pthinking <<<"$spec"
