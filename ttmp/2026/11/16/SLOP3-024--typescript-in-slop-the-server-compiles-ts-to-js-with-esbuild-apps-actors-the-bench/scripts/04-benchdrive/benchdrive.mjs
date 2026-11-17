@@ -33,6 +33,7 @@ const HELP = `benchdrive <you> <command> [args]   (you = your persona name, e.g.
   ask <message>             send to Claude in the Agent chat, wait for the reply
   edit <old> <new>          change text in the file open in the Code view (old must occur once)
   read [from] [to]          the file open in the Code view, numbered lines (80 at a time)
+  reply                     Claude's last reply in full (look shows only its first lines)
   see <file.png>            what the screen shows, with a grid to aim by (for working by eye)
   click-at <x> <y>, dblclick-at <x> <y>, drag <x1> <y1> <x2> <y2>, scroll-at <x> <y> <dy>, keys <text>
   frame-text [n]            the text of the app's page(s) on the canvas
@@ -289,6 +290,14 @@ class Persona {
   }
 
   // ---- commands ----
+  // the last reply from Claude, whole (look shows its first lines)
+  async reply() {
+    const bf = await this.bench(), S = await this.snap(bf), V = S.views.agent
+    if (!V) throw new Fail('The Agent view is not open: view Agent first.')
+    const m = [...V.msgs].reverse().find(x => x.role === 'agent')
+    if (!m) return ['No reply from Claude yet in this thread.']
+    return fmtMsg(m, 400)
+  }
   async look() { const bf = await this.bench(); return [...(await this.lookLines(bf)).lines, ...(await this.shellDialog())] }
   // the page around the bench (the shell: Share, sign-in) has dialogs of its own
   async shellDialog() {
@@ -635,7 +644,13 @@ class Persona {
         const labels = await frame.evaluate(() => [...document.querySelectorAll('button, a, input[type=submit], [role=button], label')].map(e => (e.innerText || e.value || '').trim()).filter(Boolean).slice(0, 30)).catch(() => [])
         throw new Fail(`Nothing called "${arg}" in frame ${i + 1}. Clickable there: ${labels.map(l => '"' + cut(l, 40) + '"').join(', ') || '(nothing)'}`)
       }
-      await loc.first().click({ timeout: 5000 })
+      // a frame panned out of sight on the canvas: press Fit, as a person would, and try again
+      try { await loc.first().click({ timeout: 5000 }) } catch (e) {
+        if (!/Timeout/i.test(String(e && e.message))) throw e
+        await bf.getByRole('button', { name: 'Fit', exact: true }).first().click({ timeout: 3000 }).catch(() => { })
+        await sleep(600); await loc.first().click({ timeout: 5000 })
+        notes.push('(The frame was out of view; Fit was pressed to show the whole canvas.)')
+      }
       return [...notes, `Clicked "${arg}" in frame ${i + 1}.`]
     })
   }
@@ -708,7 +723,7 @@ function nearby(arg, all, within) {
 // cmd, args, ok, out) and <dir>/<persona>/shots/<n>.jpg (the bench after
 // the command; nothing after look, frame-text and wait-free reads).
 const RECORD = process.env.BENCHDRIVE_RECORD || ''
-const READS = new Set(['look', 'frame-text', 'shot', 'frame-shot', 'see'])
+const READS = new Set(['look', 'frame-text', 'shot', 'frame-shot', 'see', 'reply'])
 async function record(P, persona, cmd, args, ok, out, ms, where) {
   const root = where || RECORD
   if (!root || !path.isAbsolute(root)) return
@@ -731,7 +746,7 @@ async function serve(port) {
   const commands = {
     look: P => P.look(), shot: (P, a) => P.shot(a[0]), click: (P, a) => { const i = a.indexOf('--in'); return i >= 0 ? P.click(a.slice(0, i).join(' '), a[i + 1]) : P.click(a.join(' ')) },
     type: (P, a) => { const r = a.indexOf('--replace'); P.replaceOk = r >= 0; const b = r >= 0 ? a.filter((_, i) => i !== r) : a; return P.type(b[0], b.slice(1).join(' ')).finally(() => { P.replaceOk = false }) }, key: (P, a) => P.key(a[0]),
-    read: (P, a) => P.read(a[0], a[1]),
+    read: (P, a) => P.read(a[0], a[1]), reply: P => P.reply(),
     see: (P, a) => P.see(a[0]), 'click-at': (P, a) => P.clickAt(a[0], a[1]), 'dblclick-at': (P, a) => P.dblclickAt(a[0], a[1]),
     drag: (P, a) => P.drag(a[0], a[1], a[2], a[3]), 'scroll-at': (P, a) => P.scrollAt(a[0], a[1], a[2]), keys: (P, a) => P.keys(a.join(' ')),
     'new-app': (P, a) => P.newApp(a[0], a.slice(1).join(' ')), 'open-app': (P, a) => P.openApp(a[0]),

@@ -1172,3 +1172,137 @@ The round found four more bugs in the bench and the sample backend that no test 
 ### Technical details
 - **Round 2:** started 03:28:35 UTC; Devon, Maya, Aisha, Rosa and Kenji exited 0 at 03:50–04:13 UTC.
 - **The archive:** `various/persona-review-2026-11-17/r2/`, with screenshots shrunk to 1120 px at JPEG quality 55 (the originals were 66 MB).
+
+## Step 14: Round 3: a visual persona, a credentials leak in the harness, and the agent's API from its own evals
+
+Round 3 ran six personas on the bench from c4f7117, with the round-2 fixes live. It added a persona who works only by eye (screenshots and pointer commands on deepseek-4.1-flash), and three harder goals:
+- a security review of the legacy inventory app;
+- a messy document-database member list;
+- charts with an npm library.
+
+Five of the six said "yes". Lena timed out (exit 124) after her chart worked and her questions were answered, without writing a verdict.
+
+The round also exposed a serious harness leak: a persona reached the operator's own `slop` CLI. Midway, the user asked me to "focus on improving the agent's JS API and documentation too". Mining the bench agent's own evals then found the biggest single problem of the review so far: a server limit that cut 60 of 97 turns at exactly 9 evals.
+
+### Prompt Context
+**User prompts (verbatim):**
+- "do you think in addition to benchdrive we should try playwright as well, to see if we maybe missed something?"
+- "use deepseek-4.1-flash for vision, not glm-5.3-vision which is bolted on vision" (said twice)
+- "how far are we?"
+- "focus on improving the agent's JS API and documentation too, not just what user experience"
+
+**Assistant interpretation:**
+- **Playwright:** add what benchdrive's text view hides. That meant a persona that sees only pixels, plus my own visual audit in a real browser.
+- **The API request:** the agent's API matters as much as the UI. Find evidence of where the API misleads the agent, and fix it.
+
+**Inferred user intent:** cover the bench from every side (people, pixels, the agent itself), and keep improving between rounds.
+
+**Commit (code):**
+- db44437 — a narrow Code view gives an open file the whole width
+- 3a9d472 — the guide: no `slop vendor` for a person who only has the bench
+- cd9e57c, 261ade7 — the publish dialog in plain words; a 900 px header fits (and keeps the agent pill)
+- 9205fd7 — a running reply says how long it has worked and on what
+- 8d1d809 — New app and Import come first in the app menu
+- d602552 — a frame on a page's #route is not "(missing)"
+- fa3268d — a new app's page says it is a starting point
+- f856b2c — the agent knows the person's local date and time zone
+- f48c5d5 — stale scenario results lose their marks; seeding offers to replace
+- c182885 — the agent's API from its own failures: return shapes, clear refusals, selectors
+- 50481c3 — fix lib.def ("collectPattern is not defined"), a regression of mine
+- e8575e7 — a turn continues past one model call's 9 evals, up to its budget
+- db8701c — documents as a table in the Data view; Accept is a button in the chat
+- eebd686 — files.lines says it returns one string
+
+**Docs commits on main:** 5c26c20 (playbook: visual personas, the CLI shim, resuming, redaction), e0b577f (analysis/03 and the mining scripts), and this step.
+
+### What I did
+- **Round 3 setup:**
+  - Rebuilt the server at c4f7117 and pushed the bench (rev 1455); the boot smoke passed.
+  - Added `see`, `click-at`, `dblclick-at`, `drag`, `scroll-at`, `keys` and `pause` to benchdrive. The daemon refuses any other command to a persona named `*-visual`.
+  - Launched maya-visual (deepseek, medium), theo (glm-5.3, high, on inventory2), grace (deepseek, on members), lena (glm-5.3-flash), kenji (deepseek, high) and sam (glm-5.3).
+- **Theo's first start** died on lunaroute's "the upstream stream failed before completion" after 38 commands. I resumed his pi session with `--continue` (now `resume.sh`).
+- **The leak:**
+  - What happened: Lena's diary said "my slop login (default server) shows no lena-charts store". She had run the operator's real `slop` CLI from her bash tool: `whoami`, `store ls`, `app ls`, help, and an `import` that failed with not_found. The output of `whoami` (name, email, user id) and the store list went into her transcript, and through it to the persona's model provider. No token was printed, and nothing was written.
+  - The fix: a `slop` shim first on PATH, with `SLOP_SERVER` and `SLOP_CREDENTIALS` pointing nowhere. I stopped all six personas, resumed them with the shim, and checked each pi's environment (`/proc/<pid>/environ`: PATH[0] is the shim).
+  - The archive: `redact.py` replaces the CLI outputs (15) and masks the operator's identity. I checked it on a copy before using it on the archive.
+- **My visual audit** with Playwright, at 1600×1000, 1280×800 and 900×900, light and dark, on a second bench (`benchnext`, a bench store mounted at `/benchnext`) so the personas' bench stayed unchanged. It found:
+  - at laptop width the Code editor was 180 px by 12 lines: a 480 px container rule came before the base rule and never applied;
+  - the 900 px header overflowed;
+  - the Publish dialog was in jargon.
+  My first header fix hid the agent's Working/Idle pill (it shares `hide-s`); a re-audit caught it.
+- **Maya-visual** found what no text persona had: "New app…" below twenty apps, out of sight. Her screenshots first landed in the operator's repo checkout, because `see` didn't resolve its path in the client. I moved them out and fixed the client.
+- **The agent's evals:**
+  - `scripts/06-api-mining/mine.mjs` reads every eval step of the apps' threads through the bench in a headless browser: 520 steps from rounds 1–2, 250 from round 3.
+  - `analyze.py` groups the failures by message with the failing line, and counts evals per turn.
+  - The fixes are listed in analysis/03. Each was checked through the Eval view on `benchnext`, and the turn continuation with a real 12-eval request: 15 evals in one turn.
+
+### Why
+- **Fix the API, not the guide.** Every mined failure was a mismatch between what a call did and what its reference said or implied. A rule in the guide would have to be remembered; a return shape in the reference, or an eval refused with its reason, needs nothing.
+- **Continue turns in the bench rather than raise the server's 10-round limit.** The limit bounds the cost of any page's single call. The bench already had its own turn budget of 30 evals; it just never used it.
+- **A second bench store** let me look at fixes in a real browser mid-round without changing what the personas were testing.
+
+### What worked
+- **The verdicts:**
+  - Theo: "Two real vulnerabilities found, both fixed minimally (no rewrite), each with proof that fails without the fix".
+  - Grace: "12 rows down to 9 real gardeners, no one lost and no payment lost".
+  - Sam: "every number on the page had a SELECT behind it".
+  - Kenji's live poll pushes updates through room moments, as the round-2 guide line said.
+- **The visual persona on deepseek-4.1-flash** read its screenshots reliably and found layout problems the text harness can't see.
+- **Mining** turned "the agent was slow and stopped" into one number: 60 of 97 turns ended at 9 evals.
+- **Tests:** 36 Node tests pass, the Go host tests pass, and `TestTemplateTypes` passes with the new starter note.
+
+### What didn't work
+- **The CLI leak** (above): the persona prompt said to use only benchdrive, but a prompt is not a boundary.
+- **My own regression:** `collectPattern is not defined` broke every `lib.def` in the deployed round-3 bench. I had moved `rewrite()` with its helper and missed that `lib.def`'s checker in `worker.js` used it too. The build's import check doesn't catch undefined calls, and no test covered `lib.def`. Mining found it, not a person.
+- **Interruptions:** restarting the personas for the shim cut one ask in flight. Theo and Grace logged "command aborted"; those are harness artifacts.
+- **Lena timed out** (3300 s) before her verdict.
+- **Script and shell slips:**
+  - zsh's word splitting broke a two-fixture push loop.
+  - `benchdrive stop` stopped the whole daemon when I meant to tidy up a probe.
+  - My first end-to-end script read the oldest result card instead of the newest.
+
+### What I learned
+- **Text and pixels find different bugs.** Three rounds of text personas never noticed a menu item out of sight. One visual persona found it in ten minutes.
+- **An agent's evals are a better API review than the agent's replies.** The replies explained around the failures; the steps showed them.
+- **A shared limit can hide behind a local one.** The bench's budget said 30, and the server said 10 rounds. Nobody saw both until the per-turn counts showed a spike at 9.
+
+### What was tricky to build
+- **The continuation** had to keep the reply text across calls, give the model what it did (its evals, rendered as in history) and say how much budget is left. It stops after two continuations, and when a call made fewer than 9 evals, so a turn that ends by itself is never continued.
+- **The selector parser** handles `:has-text()` at the end, followed by more selector, and inside `:has(…)`, recursively and scoped to each match. It stays inside `probe.js`'s single function, between markers a Playwright check extracts.
+
+### What warrants a second pair of eyes
+- **`onInstance`** in `agent/api/app.js` retries a data call once after starting a missing instance. A "no store" for another reason would also retry, once.
+- **The refusal of evals that shadow an API name** is broad: any top-level declaration of a reserved name, including core terms like `step` and `par`.
+- **`redact.py`** masks only what it is told (`OPERATOR_*`). A future persona that reaches some other credentialed tool needs the shim treatment first.
+
+### What should be done in the future
+- Decisions for the user: frames as different people (design-doc/02), and npm packages from the bench.
+- A server listing of a store's collections for the Data view.
+- A proposal preview seeded from the dev data, or an offer to do it: Sam's top struggle in two rounds.
+- Round 4 on the fixed bench: theo-ts (a TypeScript migration of the legacy app, with scenarios first), priya2 (weekly quizzes on a published app with data), devon2 (a live team board over rooms), ines-visual, and reruns of Aisha and Lena.
+
+### Code review instructions
+- **Start with:**
+  - `web/bench/src/agent/agent.js` (`CALL_EVALS`, the continuation loop);
+  - `web/bench/src/core/api.js` (`ret`);
+  - `web/bench/src/worker/rewrite.js` (shadows, `freeNames`);
+  - `web/bench/src/frames/probe.js` (the `qsa:begin` … `qsa:end` block);
+  - `web/bench/src/agent/api/app.js` (`onInstance`, `readOnly`).
+- **Validate:**
+  - `cd web/bench && node --test test/*.test.mjs`
+  - `node scripts/06-api-mining/qsa-test.mjs web/bench/src/frames/probe.js`
+
+### Technical details
+- **Round 3:** started 04:28 UTC; the personas were restarted with the shim at about 04:36. Exits:
+
+  | Persona | Exit | Time (UTC) |
+  |---|---|---|
+  | Grace | 0 | 04:55 |
+  | Sam | 0 | 04:59 |
+  | Kenji | 0 | 05:14 |
+  | Maya-visual | 0 | 05:16 |
+  | Theo | 0 | 05:22 |
+  | Lena | 124 | 05:31 |
+
+- **Struggles/commands:** grace 8/70, kenji 9/140, lena 5/102, maya-visual 17/150, sam 7/152, theo 5/145.
+- **Archive:** `various/persona-review-2026-11-17/r3`, redacted. Embedded screenshots were dropped from the sessions, and the shots are 960 px at quality 50 (37 MB).

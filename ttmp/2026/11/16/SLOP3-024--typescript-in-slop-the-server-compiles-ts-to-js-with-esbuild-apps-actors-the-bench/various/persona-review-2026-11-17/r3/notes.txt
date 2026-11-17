@@ -1,0 +1,3 @@
+theo's first run ended: 'the upstream stream failed before completion' (lunaroute) after 38 commands; resumed with pi --continue
+lena found the operator's slop CLI on PATH (round 3, 04:32-04:35 UTC); stopped at 04:35:57 and resumed with the shim (run.sh now puts a slop shim first on PATH)
+04:4x UTC: maya-visual, grace, kenji, sam and theo stopped and resumed with the slop shim (none had used the CLI)

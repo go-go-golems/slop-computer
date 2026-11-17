@@ -89,3 +89,4 @@
 - [bench agent, grace r3] "today is 17 November" (eval Date, UTC) vs the page's "Printed on 16 November" (local, near midnight). FIXED: each turn's context gives the person's local time and zone.
 - [app, grace r3] a Print button and a changed date on the A4 "paper" frame: does the printer get the button? The guide could say: print views hide controls (@media print).
 - [harness, kenji r3] look truncates long agent replies ('… 71 more lines'); add a way to read the last reply whole (next round).
+- [data, grace r3] the Data view does not list a store's collections; you must know the name (a collection…). Needs a server listing.

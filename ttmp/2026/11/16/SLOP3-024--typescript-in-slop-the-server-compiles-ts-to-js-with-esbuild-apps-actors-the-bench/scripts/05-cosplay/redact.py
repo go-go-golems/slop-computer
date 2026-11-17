@@ -5,6 +5,8 @@
   (round 3: a persona found it on PATH) becomes a placeholder.
 - The operator's identity (OPERATOR_NAME, OPERATOR_EMAIL, OPERATOR_ID
   from the environment) is masked in every text file.
+- Screenshots embedded in pi sessions (base64 image data) are dropped; the
+  files stay in the persona folder.
 - Link tokens (k_...) standing alone are masked; base64 blobs that merely
   contain "k_" are left alone.
 
@@ -30,6 +32,9 @@ for f in root.rglob('*'):
             m = o.get('message') or {}
             for c in (m.get('content') if isinstance(m.get('content'), list) else []):
                 if c.get('type') == 'toolCall' and c.get('name') == 'bash' and CLI.search(str((c.get('arguments') or {}).get('command', ''))): calls.add(c.get('id'))
+            # screenshots a persona read are embedded as base64; the files are beside the session
+            for c in (m.get('content') if isinstance(m.get('content'), list) else []):
+                if isinstance(c, dict) and c.get('type') == 'image' and c.get('data'): c['data'] = ''; c['note'] = 'image data dropped in the archive; the screenshot file is in the persona folder'
             if m.get('role') == 'toolResult' and m.get('toolCallId') in calls:
                 m['content'] = [{'type': 'text', 'text': "[redacted: the output of the operator's slop command line, which this persona should not have reached]"}]; n_cli += 1
             out.append(mask(json.dumps(o, ensure_ascii=False)))

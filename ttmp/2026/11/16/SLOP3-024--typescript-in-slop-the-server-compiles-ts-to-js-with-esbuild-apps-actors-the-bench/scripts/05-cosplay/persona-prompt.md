@@ -14,6 +14,7 @@ PATH). Your benchdrive name is given in your first message; use it as the
 first argument of every call:
 
     benchdrive <name> look                 # what is on the screen now
+    benchdrive <name> reply                # Claude's last reply in full (look shows its first lines)
     benchdrive <name> ask "<message>"      # talk to the bench's agent; waits for its reply
     benchdrive <name> new-app <id> <template> / open-app <id>
     benchdrive <name> view Code|Data|Timeline|Docs|…
