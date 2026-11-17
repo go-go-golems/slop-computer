@@ -13,6 +13,7 @@ import (
 	"github.com/spf13/cobra"
 
 	"github.com/go-go-golems/slop-computer/pkg/client"
+	"github.com/go-go-golems/slop-computer/pkg/tscompile"
 )
 
 // addExtraCommands adds the commands that work with local files (push,
@@ -112,9 +113,9 @@ func pullCmd() *cobra.Command {
 
 func evalCmd() *cobra.Command {
 	var file, expr, argsJSON string
-	var readOnly bool
+	var readOnly, ts bool
 	cmd := &cobra.Command{
-		Use:   "eval [-f prog.js | -e 'source']",
+		Use:   "eval [-f prog.js | -f prog.ts | -e 'source']",
 		Short: "Run a JavaScript program on the server with every verb in scope as slop.<group>.<verb>(args)",
 		Args:  cobra.NoArgs,
 		RunE: func(cmd *cobra.Command, args []string) error {
@@ -137,6 +138,10 @@ func evalCmd() *cobra.Command {
 				return errors.New("give -f prog.js, -f - (stdin) or -e 'source'")
 			}
 			in := map[string]any{"source": src, "readOnly": readOnly}
+			// A .ts program is TypeScript; --ts says so for -e and stdin.
+			if ts || tscompile.Is(file) {
+				in["ts"] = true
+			}
 			if argsJSON != "" {
 				var v any
 				if err := json.Unmarshal([]byte(argsJSON), &v); err != nil {
@@ -165,6 +170,7 @@ func evalCmd() *cobra.Command {
 	cmd.Flags().StringVarP(&expr, "expr", "e", "", "the program source")
 	cmd.Flags().StringVar(&argsJSON, "args", "", "JSON passed to the program as args")
 	cmd.Flags().BoolVar(&readOnly, "read-only", false, "writing verbs throw permission_denied")
+	cmd.Flags().BoolVar(&ts, "ts", false, "the program is TypeScript (the default for a .ts file)")
 	return cmd
 }
 
