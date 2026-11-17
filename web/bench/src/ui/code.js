@@ -229,9 +229,18 @@ export const CODE = {
       const { path, ws, text } = S.pending
       S.pending = null
       try { P().write(path, text, ws) } catch (e) { toast(e.message) }
+      // a stray keystroke saves too: a florist's "p" turned <body> into <bdy> and broke her shop, and she could
+      // not tell which version to go back to (round 5). A small edit (a few keys) offers Undo
+      const b = S.burst
+      if (b && b.path === path && b.keys <= 3 && b.before !== null && b.before !== text) {
+        toast('Changed ' + path + ' (' + plural(b.keys, 'key') + ', saved)', 8000, { label: 'Undo', run: () => { P().write(path, b.before, ws); S.burst = null; load(true); toast('Undone: ' + path + ' is back as it was') } })
+      }
       paintFoot(); typesSoon()
     }
-    ta.addEventListener('input', () => { S.pending = { path: S.cur, ws: App.ws, text: ta.value }; paintCode(); commitSoon(); if (isMd(S.cur)) previewSoon() })
+    ta.addEventListener('input', () => {
+      if (!S.burst || S.burst.path !== S.cur || Date.now() - S.burst.at > 4000) S.burst = { path: S.cur, before: P() ? P().read(S.cur, App.ws) : null, keys: 0 }
+      S.burst.keys++; S.burst.at = Date.now()
+      S.pending = { path: S.cur, ws: App.ws, text: ta.value }; paintCode(); commitSoon(); if (isMd(S.cur)) previewSoon() })
     ta.addEventListener('scroll', scroll)
     ta.addEventListener('keyup', () => { paintFoot(); traceSoon(); infoSoon() }); ta.addEventListener('click', () => { paintFoot(); traceSoon(); infoSoon() })
     // the caret's line (HTML) or rule (CSS) outlines what it renders in every frame

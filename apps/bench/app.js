@@ -1,4 +1,4 @@
-/* the bench, built from web/bench: do not edit. source sha256:2e98e0031f3096fedcaaec5b2b1a6719f4a63252fff338f617acba72946d428e */
+/* the bench, built from web/bench: do not edit. source sha256:7e22f19e483f8771482ea8aba899f3feb61db1a38a4bd6073eaa5c9a43f2f76a */
 // The bench: a live dev environment for slop apps. Built from web/bench/src.
 (() => {
   // src/lib/util.js
@@ -141,7 +141,7 @@
     return el;
   }
   var toastT;
-  function toast(msg, ms = 2600) {
+  function toast(msg, ms = 2600, action = null) {
     let el = $("#toast");
     if (!el) {
       el = h("div#toast");
@@ -153,6 +153,10 @@
     toastT = setTimeout(() => {
       el.hidden = true;
     }, ms);
+    if (action) el.append(" ", h("button.btn.sm", { on: { click: () => {
+      el.hidden = true;
+      action.run();
+    } } }, action.label));
   }
   function modal({ title, body, actions = [], onClose, wide }) {
     const close2 = () => {
@@ -8374,10 +8378,22 @@ Markdown files (README.md, notes, specs) render in the Docs panel. Keep README.m
         } catch (e) {
           toast(e.message);
         }
+        const b = S.burst;
+        if (b && b.path === path && b.keys <= 3 && b.before !== null && b.before !== text) {
+          toast("Changed " + path + " (" + plural(b.keys, "key") + ", saved)", 8e3, { label: "Undo", run: () => {
+            P().write(path, b.before, ws);
+            S.burst = null;
+            load(true);
+            toast("Undone: " + path + " is back as it was");
+          } });
+        }
         paintFoot();
         typesSoon();
       }
       ta.addEventListener("input", () => {
+        if (!S.burst || S.burst.path !== S.cur || Date.now() - S.burst.at > 4e3) S.burst = { path: S.cur, before: P() ? P().read(S.cur, App.ws) : null, keys: 0 };
+        S.burst.keys++;
+        S.burst.at = Date.now();
         S.pending = { path: S.cur, ws: App.ws, text: ta.value };
         paintCode();
         commitSoon();
