@@ -321,6 +321,16 @@ defineActor({
       },
     },
 
+    // Give the published app its web address (platform admins: the
+    // publish dialog offers it when the app has none).
+    putOnline: {
+      requires: 'view',
+      args: args({ app: S.store }, ['app']),
+      async run(ctx, { app }) {
+        return await tool(ctx).mountApp(app);
+      },
+    },
+
     // ---- instances: the visitor's dev, test and prop stores of an app ----
 
     // Where the app's refs are and what the visitor's instances run (peeked:

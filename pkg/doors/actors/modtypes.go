@@ -16,6 +16,8 @@ import (
 // workshopExtraTS declares workshopModule's own functions.
 const workshopExtraTS = `  /** Delete an instance that runs unpublished code (another store's app, at a ref other than main). */
   drop(id: string): Promise<{ removed: string; [key: string]: unknown }>;
+  /** Give a published app a web address: /<app> on the first live host (platform admins only). */
+  mountApp(app: string): Promise<{ url: string; existed?: boolean }>;
   /** Run SQL that may write (INSERT, UPDATE, DELETE) on the app tables of an instance that runs unpublished code. */
   exec(id: string, sql: string, args?: unknown[]): Promise<unknown>;
   /** Open a view of store for the visitor, framed by this app's own page ({dev: true}: with the dev probe, for admins). */

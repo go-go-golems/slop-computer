@@ -293,8 +293,20 @@ export const App = {
     const where = h('div', h('p.note', 'Looking up where the app is on the web…'))
     Slop.call('addresses', { app: P.app }).then(r => {
       clear(where)
-      if (r.urls.length) where.append(h('p', h('b', 'Your app is live at: '), ...r.urls.map((u, i) => [i ? ', ' : '', h('a', { href: u.url, target: '_blank', rel: 'noopener' }, u.url)])))
-      else where.append(h('p', h('b', 'Your app is published, but it has no web address yet. '), 'An administrator of this server gives it one (a mount: slop mount set --host <host> --path /' + P.app + ' --store ' + P.app + '); ask them, and the link will show here.'))
+      const live = urls => h('p', h('b', 'Your app is live at: '), ...urls.map((u, i) => [i ? ', ' : '', h('a', { href: u.url, target: '_blank', rel: 'noopener' }, u.url)]))
+      if (r.urls.length) { where.append(live(r.urls)); return }
+      const none = h('p', h('b', 'Your app is published, but it has no web address yet. '), 'An administrator of this server gives it one; ask them, and the link will show here.')
+      where.append(none)
+      // an administrator (who can build here) can give it one now: /<app> on the server's live host
+      Slop.call('me', {}).then(me => {
+        if (!me || !me.canBuild) return
+        clear(none); none.append(h('b', 'Your app is published, but it has no web address yet. '))
+        const btn = h('button.btn.sm.primary', { on: { click: async () => {
+          btn.disabled = true
+          try { const m = await Slop.call('putOnline', { app: P.app }); clear(where); where.append(live([{ url: m.url }])) } catch (e) { btn.disabled = false; toast('No address: ' + (e.message || e), 6000) }
+        } } }, 'Give it a web address (/' + P.app + ')')
+        none.append(btn)
+      }).catch(() => { })
     }).catch(() => { clear(where) })
     modal({
       title: 'Published draft ' + n, wide: true, body: [where, h('p.note', 'Instances that follow main:'), list],

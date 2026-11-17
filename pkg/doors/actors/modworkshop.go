@@ -3,6 +3,7 @@ package actors
 import (
 	"context"
 	"encoding/json"
+	"strings"
 
 	"github.com/dop251/goja"
 
@@ -107,6 +108,81 @@ func (s *Door) workshopModule(a *actor.Actor) goja.Value {
 				return nil, verbFail(err)
 			}
 			return out, nil
+		}, func(out any) (goja.Value, error) { return a.ToJS(out), nil })
+	})
+	// mountApp(app) gives a published app a web address: /<app> on the
+	// server's first live host, unless something else is mounted there
+	// (the same mount again is a no-op). mount.set is for platform admins,
+	// so only they can; personas who published asked "where is my link?"
+	// four times in two rounds.
+	_ = o.Set("mountApp", func(app string) goja.Value {
+		if !s.Gov.Trusted(context.Background(), a.App(), "workshop") {
+			a.Throw("permission_denied", a.App()+" is no longer trusted with workshop")
+		}
+		p := s.actAs(a, "workshop", true)
+		return a.IO(func() (any, error) {
+			ctx := web.WithPrincipal(context.Background(), p)
+			var st struct {
+				Store, App string
+				Refs       map[string]int64
+			}
+			out, err := s.Verbs.Call(ctx, p, "app.status", map[string]any{"store": app})
+			if err != nil {
+				return nil, verbFail(err)
+			}
+			b, _ := json.Marshal(out)
+			_ = json.Unmarshal(b, &st)
+			if st.App != st.Store {
+				return nil, &actor.Error{Code: "invalid_argument", Message: app + " is an instance of " + st.App + ", not an app"}
+			}
+			refs, err := s.Verbs.Call(ctx, p, "ref.ls", map[string]any{"store": app})
+			if err != nil {
+				return nil, verbFail(err)
+			}
+			if rb, _ := json.Marshal(refs); !strings.Contains(string(rb), `"main"`) {
+				return nil, &actor.Error{Code: "failed_precondition", Message: app + " is not published yet: publish it first"}
+			}
+			hosts, err := s.Verbs.Call(ctx, p, "server.hosts", map[string]any{})
+			if err != nil {
+				return nil, verbFail(err)
+			}
+			var h struct{ Live []string }
+			hb, _ := json.Marshal(hosts)
+			_ = json.Unmarshal(hb, &h)
+			if len(h.Live) == 0 {
+				return nil, &actor.Error{Code: "failed_precondition", Message: "this server has no live host to put apps on"}
+			}
+			host, path := h.Live[0], "/"+app
+			ms, err := s.Verbs.Call(ctx, p, "mount.ls", map[string]any{"host": host})
+			if err != nil {
+				return nil, verbFail(err)
+			}
+			var list []struct {
+				Mount struct{ Path, Store string }
+				URL   string
+			}
+			mb, _ := json.Marshal(ms)
+			_ = json.Unmarshal(mb, &list)
+			for _, m := range list {
+				if m.Mount.Path == path {
+					if m.Mount.Store == app {
+						return map[string]any{"url": m.URL, "existed": true}, nil
+					}
+					return nil, &actor.Error{Code: "already_exists", Message: host + path + " already serves " + m.Mount.Store}
+				}
+			}
+			if _, err := s.Verbs.Call(ctx, p, "mount.set", map[string]any{"host": host, "path": path, "store": app}); err != nil {
+				return nil, verbFail(err)
+			}
+			ms, _ = s.Verbs.Call(ctx, p, "mount.ls", map[string]any{"host": host})
+			mb, _ = json.Marshal(ms)
+			_ = json.Unmarshal(mb, &list)
+			for _, m := range list {
+				if m.Mount.Path == path {
+					return map[string]any{"url": m.URL}, nil
+				}
+			}
+			return map[string]any{"url": ""}, nil
 		}, func(out any) (goja.Value, error) { return a.ToJS(out), nil })
 	})
 	// embed(store, {dev}) opens a view of store for the visitor, framed by

@@ -1,4 +1,4 @@
-/* the bench, built from web/bench: do not edit. source sha256:43e2469ae5e662b372902802d66dd9b2d3446521412c7511bf8793cbf7764e39 */
+/* the bench, built from web/bench: do not edit. source sha256:25ab617717a31cfff5328f258791aa8a2eff6bce7098f2719a186e1b1caed30b */
 // The bench: a live dev environment for slop apps. Built from web/bench/src.
 (() => {
   // src/lib/util.js
@@ -3939,7 +3939,7 @@ Markdown files (README.md, notes, specs) render in the Docs panel. Keep README.m
 - Leave nothing of your own testing in the app: a probe action, a scratch file, a deliberate type error to see what the checker says. Remove it in the same turn, or do the probing in an eval that does not write.
 - Start with what the person will see: a page they can look at and try, then the server code and tests behind it. Someone who does not program judges progress by the page.
 - Tell the person everything they need to use what you made: a code or password you chose, which page to open, where to click, that a result appears below the fold.
-- Questions about the bench itself are part of the job: how to try a change safely (a proposal), how to keep it (Accept in the chat or the Review tab), how to undo it (Reject; the Timeline restores earlier versions), how to see the data (the Data view), how to publish (Publish in the header). Answer them plainly.
+- Questions about the bench itself are part of the job: how to try a change safely (a proposal), how to keep it (Accept in the chat or the Review tab), how to undo it (Reject; the Timeline restores earlier versions), how to see the data (the Data view), how to publish (Publish in the header; an administrator then gets a "Give it a web address" button, and app.addresses() tells you the link). Answer them plainly.
 - Data you add to try things (rows, documents, test sign-ups) goes in the test instance (scenarios and fixtures), not the dev instance the person looks at: test rows in dev show up on their page. If some ended up in dev, remove just those rows (app.exec('DELETE FROM t WHERE id = ?', [id])), and say so. Never reset the dev instance to clean up: app.reset drops everything the person entered too.
 - A scenario passes only if it checks what the person cares about: the numbers or words on the page, the rows in the data. Make each one fail once on purpose (change the expected value) to show it can, then put it back.
 - Keep the app's README.md true: when the app's purpose or files change, update it in the same turn.
@@ -6555,8 +6555,31 @@ Markdown files (README.md, notes, specs) render in the Docs panel. Keep README.m
       const where = h("div", h("p.note", "Looking up where the app is on the web\u2026"));
       Slop.call("addresses", { app: P.app }).then((r) => {
         clear(where);
-        if (r.urls.length) where.append(h("p", h("b", "Your app is live at: "), ...r.urls.map((u, i) => [i ? ", " : "", h("a", { href: u.url, target: "_blank", rel: "noopener" }, u.url)])));
-        else where.append(h("p", h("b", "Your app is published, but it has no web address yet. "), "An administrator of this server gives it one (a mount: slop mount set --host <host> --path /" + P.app + " --store " + P.app + "); ask them, and the link will show here."));
+        const live = (urls) => h("p", h("b", "Your app is live at: "), ...urls.map((u, i) => [i ? ", " : "", h("a", { href: u.url, target: "_blank", rel: "noopener" }, u.url)]));
+        if (r.urls.length) {
+          where.append(live(r.urls));
+          return;
+        }
+        const none = h("p", h("b", "Your app is published, but it has no web address yet. "), "An administrator of this server gives it one; ask them, and the link will show here.");
+        where.append(none);
+        Slop.call("me", {}).then((me) => {
+          if (!me || !me.canBuild) return;
+          clear(none);
+          none.append(h("b", "Your app is published, but it has no web address yet. "));
+          const btn = h("button.btn.sm.primary", { on: { click: async () => {
+            btn.disabled = true;
+            try {
+              const m = await Slop.call("putOnline", { app: P.app });
+              clear(where);
+              where.append(live([{ url: m.url }]));
+            } catch (e) {
+              btn.disabled = false;
+              toast("No address: " + (e.message || e), 6e3);
+            }
+          } } }, "Give it a web address (/" + P.app + ")");
+          none.append(btn);
+        }).catch(() => {
+        });
       }).catch(() => {
         clear(where);
       });

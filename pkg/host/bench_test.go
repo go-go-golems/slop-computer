@@ -708,3 +708,30 @@ func TestBenchExec(t *testing.T) {
 	}
 	// (the app store and production instances are refused: TestWorkshopDevInstances)
 }
+
+// An administrator gives a published app its web address from the bench:
+// /<app> on the live host; again is a no-op; a path another store holds
+// is refused; an unpublished app is refused.
+func TestBenchPutOnline(t *testing.T) {
+	h := newHarness(t)
+	admin := h.tokenFor("admin@example.com", "read", "write", "admin")
+	installBench(t, h, admin)
+	put := func(app string) map[string]any {
+		t.Helper()
+		return h.call(admin, "actor.call", map[string]any{"store": "bench", "action": "putOnline", "args": map[string]any{"app": app}}).(map[string]any)
+	}
+	h.call(admin, "store.new", map[string]any{"id": "jot"})
+	h.push(admin, map[string]any{"store": "jot", "files": files(devApp()), "ref": "draft"})
+	h.fail(admin, "actor.call", map[string]any{"store": "bench", "action": "putOnline", "args": map[string]any{"app": "jot"}}, "failed_precondition")
+	h.push(admin, map[string]any{"store": "jot", "files": files(devApp())})
+	if m := put("jot"); !strings.HasSuffix(m["url"].(string), "/jot") || m["existed"] != nil {
+		t.Fatalf("putOnline = %v", m)
+	}
+	if m := put("jot"); m["existed"] != true {
+		t.Fatalf("putOnline again = %v", m)
+	}
+	h.call(admin, "store.new", map[string]any{"id": "other"})
+	h.push(admin, map[string]any{"store": "other", "files": files(devApp())})
+	h.call(admin, "mount.set", map[string]any{"host": h.cfg.Hosts.Live[0], "path": "/other", "store": "jot"})
+	h.fail(admin, "actor.call", map[string]any{"store": "bench", "action": "putOnline", "args": map[string]any{"app": "other"}}, "already_exists")
+}
