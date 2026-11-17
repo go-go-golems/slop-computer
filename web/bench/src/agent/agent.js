@@ -22,6 +22,9 @@ import { guide } from './guide.js';
 import { libEntries } from './api/lib.js';
 
 const BUDGET = 30
+// evals one model call can run: the server's tool rounds for a page's sample call (pkg/llm/request.go,
+// MaxRounds 10), less the last round, which offers no tools; and how often a turn continues a full call
+const CALL_EVALS = 9, MAX_CONTINUES = 2
 const firstLine = code => (code.split('\n').find(l => l.trim() && !l.trim().startsWith('//')) || '').trim().slice(0, 90)
 
 export const Agent = {
@@ -196,9 +199,23 @@ export const Agent = {
       await this.compact(P, th, { end: th.msgs.length - 2, signal: o.signal, onStart: n => { msg.note = 'Summarizing ' + plural(n, 'earlier message') + '…'; this.ev.emit('text', th.id) } })
     } catch (e) { if (o.signal && o.signal.aborted) throw e }
     if (msg.note) { delete msg.note; this.ev.emit('text', th.id) }
-    const res = await this.sample(this.messages(P, th, o.ws, text, head), { tools: [tool], onText: ({ text: t }) => { msg.text = t; this.ev.emit('text', th.id) }, signal: o.signal, modelTier: th.tier || 'default', cache: false, ...(th.model ? { model: th.model } : {}) })
+    // One model call runs at most CALL_EVALS evals (the server's tool rounds, less the last, which
+    // has no tools). A call that used them all, with turn budget left, is continued: the model sees
+    // what it did in this turn and a note from the bench. 60 of 97 turns in the persona reviews
+    // stopped at exactly 9 evals, mid-task, and the person had to say "continue".
+    let msgs = this.messages(P, th, o.ws, text, head), res = null, prev = ''
+    for (let call = 0; ; call++) {
+      const before = msg.steps.length
+      res = await this.sample(msgs, { tools: [tool], onText: ({ text: t }) => { msg.text = (prev ? prev + '\n\n' : '') + t; this.ev.emit('text', th.id) }, signal: o.signal, modelTier: th.tier || 'default', cache: false, ...(th.model ? { model: th.model } : {}) })
+      const made = msg.steps.length - before, left = o.budget.max - o.budget.used
+      if (made < CALL_EVALS || left <= 0 || call >= MAX_CONTINUES || (o.signal && o.signal.aborted)) break
+      prev = (prev ? prev + '\n\n' : '') + ((res && res.text) || '').trim()
+      msg.text = prev; this.ev.emit('text', th.id)
+      msgs = [...msgs, { role: 'assistant', content: this.renderMsg({ ...msg, text: (res && res.text) || '' }, true) || '(evals)' },
+        { role: 'user', content: '(From the bench, not the person: that model call reached its limit of ' + CALL_EVALS + ' evals. This turn has ' + left + ' evals left. Carry on with the work where you stopped; when it is done, or you need the person, reply to them.)' }]
+    }
     if (res && res.modelApplied) msg.model = res.modelApplied
-    msg.text = (res && res.text) || msg.text
+    msg.text = (prev ? prev + (res && res.text ? '\n\n' + res.text : '') : (res && res.text)) || msg.text
     if (res && res.truncated) msg.text += '\n[reply truncated]'
     return msg.text
   },

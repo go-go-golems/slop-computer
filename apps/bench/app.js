@@ -1,4 +1,4 @@
-/* the bench, built from web/bench: do not edit. source sha256:afb17e2704e22b4dcf4c2b8475cf14060ca80a3b088870573006aa03bc124dd8 */
+/* the bench, built from web/bench: do not edit. source sha256:35ea0c072001ea608eb11e24e66f7f6618e16b139be10895216477c38f3e9927 */
 // The bench: a live dev environment for slop apps. Built from web/bench/src.
 (() => {
   // src/lib/util.js
@@ -3986,6 +3986,8 @@ Markdown files (README.md, notes, specs) render in the Docs panel. Keep README.m
 
   // src/agent/agent.js
   var BUDGET = 30;
+  var CALL_EVALS = 9;
+  var MAX_CONTINUES = 2;
   var firstLine2 = (code) => (code.split("\n").find((l) => l.trim() && !l.trim().startsWith("//")) || "").trim().slice(0, 90);
   var Agent = {
     sample: null,
@@ -4223,12 +4225,26 @@ Markdown files (README.md, notes, specs) render in the Docs panel. Keep README.m
         delete msg.note;
         this.ev.emit("text", th.id);
       }
-      const res = await this.sample(this.messages(P, th, o.ws, text, head), { tools: [tool], onText: ({ text: t }) => {
-        msg.text = t;
+      let msgs = this.messages(P, th, o.ws, text, head), res = null, prev = "";
+      for (let call = 0; ; call++) {
+        const before = msg.steps.length;
+        res = await this.sample(msgs, { tools: [tool], onText: ({ text: t }) => {
+          msg.text = (prev ? prev + "\n\n" : "") + t;
+          this.ev.emit("text", th.id);
+        }, signal: o.signal, modelTier: th.tier || "default", cache: false, ...th.model ? { model: th.model } : {} });
+        const made = msg.steps.length - before, left = o.budget.max - o.budget.used;
+        if (made < CALL_EVALS || left <= 0 || call >= MAX_CONTINUES || o.signal && o.signal.aborted) break;
+        prev = (prev ? prev + "\n\n" : "") + (res && res.text || "").trim();
+        msg.text = prev;
         this.ev.emit("text", th.id);
-      }, signal: o.signal, modelTier: th.tier || "default", cache: false, ...th.model ? { model: th.model } : {} });
+        msgs = [
+          ...msgs,
+          { role: "assistant", content: this.renderMsg({ ...msg, text: res && res.text || "" }, true) || "(evals)" },
+          { role: "user", content: "(From the bench, not the person: that model call reached its limit of " + CALL_EVALS + " evals. This turn has " + left + " evals left. Carry on with the work where you stopped; when it is done, or you need the person, reply to them.)" }
+        ];
+      }
       if (res && res.modelApplied) msg.model = res.modelApplied;
-      msg.text = res && res.text || msg.text;
+      msg.text = (prev ? prev + (res && res.text ? "\n\n" + res.text : "") : res && res.text) || msg.text;
       if (res && res.truncated) msg.text += "\n[reply truncated]";
       return msg.text;
     },
