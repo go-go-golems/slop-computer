@@ -6,9 +6,10 @@
 // for an app with TypeScript files. A view is what to check: anything with
 // list() → paths and read(path) → text (an eval's transaction, a Draft at
 // its head, the person's live edits). The declarations are the app's
-// app.types (the bench actor's types action), cached per app until a
-// commit brings an instance up on new code (actions.d.ts follows the dev
-// instance's actor).
+// app.types (the bench actor's types action), cached per app and per
+// version the dev instance runs (devKey): actions.d.ts declares the dev
+// instance's actor's actions, so it changes when the instance comes up on
+// new code, and is empty until the instance exists.
 //
 // Results inform; they never fail anything. A check that does not answer in
 // time says so ({skipped}).
@@ -17,11 +18,19 @@
 // (wants, check, info, transpile, invalidate, diff).
 import { Slop } from '../server/slop.js';
 
+// What the declarations depend on: the version the dev instance runs.
+export const devKey = st => {
+  const dev = st && st.dev
+  return dev ? dev.n + (dev.broken ? ':broken' : '') : 'none'
+}
+
 const CODE = /\.(ts|tsx|mts|cts)$/
 const RELEVANT = p => CODE.test(p) || p === 'app.json' || p === 'tsconfig.json' || p === 'vendor/tsconfig.vendor.json'
 
 export const Types = {
   worker: null, state: 'off', version: '', seq: 0, waits: new Map(), decl: new Map(),
+  // the shell's (ui/app.js): the app's status as last polled ({dev: {n, broken}}), or null
+  status: () => null,
 
   // Whether a view is an app the checker looks at: it has TypeScript of its own.
   wants(view) {
@@ -72,15 +81,17 @@ export const Types = {
 
   // The app's declarations ({name: text}), fetched once per app until invalidated.
   declarations(P) {
-    let d = this.decl.get(P.app)
+    const key = P.app + '|' + devKey(this.status(P))
+    let d = this.decl.get(key)
     if (!d) {
       d = Slop.call('types', { app: P.app }).then(r => Object.fromEntries((r.files || []).map(f => [f.path, f.text])))
-      d.catch(() => { if (this.decl.get(P.app) === d) this.decl.delete(P.app) })
-      this.decl.set(P.app, d)
+      d.catch(() => { if (this.decl.get(key) === d) this.decl.delete(key) })
+      for (const k of this.decl.keys()) if (k.startsWith(P.app + '|')) this.decl.delete(k)
+      this.decl.set(key, d)
     }
     return d
   },
-  invalidate(P) { this.decl.delete(P.app) },
+  invalidate(P) { for (const k of [...this.decl.keys()]) if (k.startsWith(P.app + '|')) this.decl.delete(k) },
 
   // Type errors in a view: {diags: [{file, line, col, code, message,
   // program}], ms} or {skipped: why}.

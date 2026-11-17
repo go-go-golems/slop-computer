@@ -14,7 +14,8 @@
 // App.docs = {open}.
 import { App } from './app.js';
 import { Dock } from './dock.js';
-import { Types, headView } from '../agent/types.js';
+import { Types, devKey, headView } from '../agent/types.js';
+import { Watch } from '../server/instances.js';
 import { blame, versions, why } from '../model/timeline.js';
 import { blameCard, blameTitle } from './history.js';
 import { checkPath } from '../core/draft.js';
@@ -255,6 +256,8 @@ export const CODE = {
       const tpl = isMd(p) ? '# ' + p.replace(/\.md$/i, '').split('/').pop() + '\n\n' : /\.html?$/.test(p) ? '<!doctype html>\n<html lang="en">\n<head>\n  <meta charset="utf-8">\n  <meta name="viewport" content="width=device-width, initial-scale=1">\n  <title>' + p + '</title>\n</head>\n<body>\n  <h1>' + p + '</h1>\n</body>\n</html>\n' : ''
       P().write(p, tpl, App.ws); open(p)
     }
+    // the dev instance came up on new code: its actions, and so the types, may differ
+    Watch.ev.on('status', st => { const k = devKey(st); if (k !== S.devKey) { S.devKey = k; typesSoon() } })
     App.ev.on('project', () => { S.tabs = []; S.cur = null; S.pending = null; S.snap = null; S.tdiags = null; S.tinfo = ''; paintTabs(); paintList(); load(); refreshChanged(); typesSoon() })
     App.ev.on('ws', () => { commit(); S.bkey = ''; S.bdata = null; paintList(); load(true); refreshChanged(); if (S.cur) loadVersions(); typesSoon() })
     const changedSoon = debounce(refreshChanged, 400)

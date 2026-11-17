@@ -1,4 +1,4 @@
-/* the bench, built from web/bench: do not edit. source sha256:d5363ad901e2f2ea9700d05424eced3de9b7b7ce78a9cb76831d78b02536db4e */
+/* the bench, built from web/bench: do not edit. source sha256:0bd84a66cca4c1fb2d752c028e67b42184843a0d43233f941a57822737e28dae */
 // The bench: a live dev environment for slop apps. Built from web/bench/src.
 (() => {
   // src/lib/util.js
@@ -3035,6 +3035,10 @@
   };
 
   // src/agent/types.js
+  var devKey = (st) => {
+    const dev = st && st.dev;
+    return dev ? dev.n + (dev.broken ? ":broken" : "") : "none";
+  };
   var CODE = /\.(ts|tsx|mts|cts)$/;
   var RELEVANT = (p) => CODE.test(p) || p === "app.json" || p === "tsconfig.json" || p === "vendor/tsconfig.vendor.json";
   var Types = {
@@ -3044,6 +3048,8 @@
     seq: 0,
     waits: /* @__PURE__ */ new Map(),
     decl: /* @__PURE__ */ new Map(),
+    // the shell's (ui/app.js): the app's status as last polled ({dev: {n, broken}}), or null
+    status: () => null,
     // Whether a view is an app the checker looks at: it has TypeScript of its own.
     wants(view) {
       return view.list().some((p) => CODE.test(p) && !p.endsWith(".d.ts") && !p.startsWith("vendor/") && !p.startsWith("node_modules/"));
@@ -3111,18 +3117,20 @@
     },
     // The app's declarations ({name: text}), fetched once per app until invalidated.
     declarations(P) {
-      let d = this.decl.get(P.app);
+      const key = P.app + "|" + devKey(this.status(P));
+      let d = this.decl.get(key);
       if (!d) {
         d = Slop.call("types", { app: P.app }).then((r) => Object.fromEntries((r.files || []).map((f) => [f.path, f.text])));
         d.catch(() => {
-          if (this.decl.get(P.app) === d) this.decl.delete(P.app);
+          if (this.decl.get(key) === d) this.decl.delete(key);
         });
-        this.decl.set(P.app, d);
+        for (const k of this.decl.keys()) if (k.startsWith(P.app + "|")) this.decl.delete(k);
+        this.decl.set(key, d);
       }
       return d;
     },
     invalidate(P) {
-      this.decl.delete(P.app);
+      for (const k of [...this.decl.keys()]) if (k.startsWith(P.app + "|")) this.decl.delete(k);
     },
     // Type errors in a view: {diags: [{file, line, col, code, message,
     // program}], ms} or {skipped: why}.
@@ -6621,6 +6629,7 @@ Markdown files (README.md, notes, specs) render in the Docs panel. Keep README.m
       Dock.ev.on("changed", () => this.savePrefs());
     },
     async boot() {
+      Types.status = (P) => Watch.P === P ? Watch.status : null;
       if (/(^|\.)localhost$|^127\.0\.0\.1$/.test(location.hostname)) window.__SB = { App, Snaps, Headless, Agent, Slop, Watch, Projects };
       const root = $("#app");
       clear(root);
@@ -8102,6 +8111,13 @@ Markdown files (README.md, notes, specs) render in the Docs panel. Keep README.m
         P().write(p, tpl, App.ws);
         open2(p);
       }
+      Watch.ev.on("status", (st) => {
+        const k = devKey(st);
+        if (k !== S.devKey) {
+          S.devKey = k;
+          typesSoon();
+        }
+      });
       App.ev.on("project", () => {
         S.tabs = [];
         S.cur = null;

@@ -398,6 +398,7 @@ export const App = {
     Dock.ev.on('changed', () => this.savePrefs())
   },
   async boot() {
+    Types.status = P => (Watch.P === P ? Watch.status : null)
     if (/(^|\.)localhost$|^127\.0\.0\.1$/.test(location.hostname)) window.__SB = { App, Snaps, Headless, Agent, Slop, Watch, Projects }   // local test runs only
     const root = $('#app')
     clear(root)
