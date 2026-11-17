@@ -61,7 +61,9 @@ export function rewrite(code, reserved) {
       edits.push({ at: st.start, del: 0, text: ';' + st.id.name + ' = ' }, { at: st.end, del: 0, text: ';' })
     }
   }
-  edits.sort((a, b) => b.at - a.at)
+  // from the end; at one position a replacement (the comma becoming ";") goes first, so what is inserted there
+  // (" = undefined", a closing parenthesis) lands before it ("let applied, rowsNow;" failed to parse, round 5)
+  edits.sort((a, b) => b.at - a.at || (b.del > 0) - (a.del > 0))
   let out = code
   for (const e of edits) out = out.slice(0, e.at) + e.text + out.slice(e.at + e.del)
   return { code: out, names, keep, shadows: [...new Set(shadows)] }

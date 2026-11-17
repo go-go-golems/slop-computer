@@ -169,3 +169,12 @@ test('fitPrompt: cuts the largest turns, keeps the last, fits the limit', async 
   const multi = fitPrompt([{ role: 'user', content: 'é'.repeat(150000) }], 240000) // 2 bytes a character
   assert.ok(new TextEncoder().encode(multi.msgs[0].content).length <= 240000)
 })
+
+test('rewrite: declarations without a value, and destructuring, followed by a comma', async () => {
+  const { rewrite } = await import('../src/worker/rewrite.js')
+  const run = c => { const r = rewrite(c, new Set()); return new Function('let applied, rowsNow, a, b, x, y;' + r.code + '; return [typeof applied, a, b, x, y]')() }
+  assert.deepEqual(run('let applied, rowsNow;'), ['undefined', undefined, undefined, undefined, undefined])
+  assert.deepEqual(run('let a, b = 2;'), ['undefined', undefined, 2, undefined, undefined])
+  assert.deepEqual(run('const [x] = [1], y = 2;'), ['undefined', undefined, undefined, 1, 2])
+  assert.deepEqual(run('let a = 1, b;'), ['undefined', 1, undefined, undefined, undefined])
+})

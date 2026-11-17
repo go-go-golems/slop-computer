@@ -1,4 +1,4 @@
-/* the bench, built from web/bench: do not edit. source sha256:c1c81fc7a0da2cbe741073966d3853088b0cec7d2a8bfe6a7d1b69f62c897d20 */
+/* the bench, built from web/bench: do not edit. source sha256:92c4560f4fbbecfe24f8ac9c80632b07def01e02fa98781f1d16d64ca5b1daad */
 // The bench: a live dev environment for slop apps. Built from web/bench/src.
 (() => {
   // src/lib/util.js
