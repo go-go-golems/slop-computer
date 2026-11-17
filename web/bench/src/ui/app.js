@@ -340,7 +340,7 @@ export const App = {
     return h('header.bar', h('div.brand', 'Bench', h('i', 'slop app workbench')),
       h('div.rel', H.proj), h('div.rel', H.ws), H.modes, h('span.sp'),
       h('div.rel', H.health), H.agent, H.store, H.publish,
-      h('button.btn.hide-s', { title: 'Bookmark this moment on the timeline', on: { click: () => this.addMark() } }, '+ Mark'),
+      h('button.btn.hide-s.markbtn', { title: 'Bookmark this moment on the timeline', on: { click: () => this.addMark() } }, '+ Mark'),
       h('div.rel', h('button.btn', { on: { click: e => this.layoutMenu(e.currentTarget) } }, 'Layout')),
       h('button.ibtn', { title: 'Theme', on: { click: () => this.theme({ auto: 'dark', dark: 'light', light: 'auto' }[this.prefs.theme || 'auto']) } }, '◐'))
   },

@@ -1,4 +1,4 @@
-/* the bench, built from web/bench: do not edit. source sha256:49eeded9f6810bd515a1273434107a9e16252b9103551a25c3989ce11af45eb5 */
+/* the bench, built from web/bench: do not edit. source sha256:6fbfdaacb107dc89589f908353a74f7491539062454aa208dfcff7f739450e01 */
 // The bench: a live dev environment for slop apps. Built from web/bench/src.
 (() => {
   // src/lib/util.js
@@ -6645,7 +6645,7 @@ Markdown files (README.md, notes, specs) render in the Docs panel. Keep README.m
         H.agent,
         H.store,
         H.publish,
-        h("button.btn.hide-s", { title: "Bookmark this moment on the timeline", on: { click: () => this.addMark() } }, "+ Mark"),
+        h("button.btn.hide-s.markbtn", { title: "Bookmark this moment on the timeline", on: { click: () => this.addMark() } }, "+ Mark"),
         h("div.rel", h("button.btn", { on: { click: (e) => this.layoutMenu(e.currentTarget) } }, "Layout")),
         h("button.ibtn", { title: "Theme", on: { click: () => this.theme({ auto: "dark", dark: "light", light: "auto" }[this.prefs.theme || "auto"]) } }, "\u25D0")
       );
