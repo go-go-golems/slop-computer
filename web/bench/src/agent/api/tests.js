@@ -85,21 +85,23 @@ export const TESTS = {
     }
   },
   'scenarios.run': {
-    sig: 'nameOrSpec', doc: '{ok, failedAt, steps: ["✓ …", "✗ …: why"], snapshots}', long: true,
+    sig: 'nameOrSpec', ret: '{name, workspace, ok, ms, failedAt, steps: ["✓ …", "✗ …: why"], snapshots}', doc: 'runs it on the scenarios and code of this eval\'s workspace (a proposal\'s, when you write to one)', long: true,
     run: async (ctx, target) => {
       const name = typeof target === 'string' ? target : 'unsaved', spec = typeof target === 'string' ? read(ctx, target) : target
       const r = await runScenario(ctx.project, spec, { ...runOpts(ctx), name })
       return {
-        name, ok: r.ok, ms: r.ms, failedAt: r.ok ? undefined : r.failedAt + 1, snapshots: r.snaps.map(s => s.id),
+        name, workspace: ctx.ws, ok: r.ok, ms: r.ms, failedAt: r.ok ? undefined : r.failedAt + 1, snapshots: r.snaps.map(s => s.id),
         steps: r.steps.map(s => (s.ok ? '✓ ' : '✗ ') + s.label + (s.error ? ': ' + s.error : '') + (s.errors ? ' [console: ' + s.errors.join('; ') + ']' : ''))
       }
     }
   },
   'scenarios.runAll': {
-    sig: '', doc: '{passed, failed, results}', long: true,
+    // which copy of the app ran: a proposal's results differed from the person's Run all on draft, and
+    // nothing said why (round 5: "the agent's results contradict what I saw")
+    sig: '', ret: '{workspace, passed, failed, results}', doc: 'every saved scenario of this eval\'s workspace; the person\'s Run all runs the workspace they view, so say which one yours ran on', long: true,
     run: async ctx => {
       const rs = await runAllScenarios(ctx.project, { ...runOpts(ctx), files: files(ctx) })
-      return { passed: rs.filter(r => r.ok).length, failed: rs.filter(r => !r.ok).length, results: rs.map(r => (r.ok ? '✓ ' : '✗ ') + r.name + (r.error ? ' (step ' + ((r.failedAt ?? -1) + 1) + '): ' + r.error : '')) }
+      return { workspace: ctx.ws, passed: rs.filter(r => r.ok).length, failed: rs.filter(r => !r.ok).length, results: rs.map(r => (r.ok ? '✓ ' : '✗ ') + r.name + (r.error ? ' (step ' + ((r.failedAt ?? -1) + 1) + '): ' + r.error : '')) }
     }
   },
 }

@@ -1,4 +1,4 @@
-/* the bench, built from web/bench: do not edit. source sha256:230c269e911470984dce270fb7082dbca2880ca51c3ecf757e5d6c0d5e72c4b1 */
+/* the bench, built from web/bench: do not edit. source sha256:f5270b317a77a82c26663e962f6a45669e0c8d1cb007738eab401a3a9630ab73 */
 // The bench: a live dev environment for slop apps. Built from web/bench/src.
 (() => {
   // src/lib/util.js
@@ -3023,13 +3023,15 @@
     },
     "scenarios.run": {
       sig: "nameOrSpec",
-      doc: '{ok, failedAt, steps: ["\u2713 \u2026", "\u2717 \u2026: why"], snapshots}',
+      ret: '{name, workspace, ok, ms, failedAt, steps: ["\u2713 \u2026", "\u2717 \u2026: why"], snapshots}',
+      doc: "runs it on the scenarios and code of this eval's workspace (a proposal's, when you write to one)",
       long: true,
       run: async (ctx, target) => {
         const name = typeof target === "string" ? target : "unsaved", spec = typeof target === "string" ? read(ctx, target) : target;
         const r = await runScenario(ctx.project, spec, { ...runOpts(ctx), name });
         return {
           name,
+          workspace: ctx.ws,
           ok: r.ok,
           ms: r.ms,
           failedAt: r.ok ? void 0 : r.failedAt + 1,
@@ -3039,12 +3041,15 @@
       }
     },
     "scenarios.runAll": {
+      // which copy of the app ran: a proposal's results differed from the person's Run all on draft, and
+      // nothing said why (round 5: "the agent's results contradict what I saw")
       sig: "",
-      doc: "{passed, failed, results}",
+      ret: "{workspace, passed, failed, results}",
+      doc: "every saved scenario of this eval's workspace; the person's Run all runs the workspace they view, so say which one yours ran on",
       long: true,
       run: async (ctx) => {
         const rs = await runAllScenarios(ctx.project, { ...runOpts(ctx), files: files(ctx) });
-        return { passed: rs.filter((r) => r.ok).length, failed: rs.filter((r) => !r.ok).length, results: rs.map((r) => (r.ok ? "\u2713 " : "\u2717 ") + r.name + (r.error ? " (step " + ((r.failedAt ?? -1) + 1) + "): " + r.error : "")) };
+        return { workspace: ctx.ws, passed: rs.filter((r) => r.ok).length, failed: rs.filter((r) => !r.ok).length, results: rs.map((r) => (r.ok ? "\u2713 " : "\u2717 ") + r.name + (r.error ? " (step " + ((r.failedAt ?? -1) + 1) + "): " + r.error : "")) };
       }
     }
   };
