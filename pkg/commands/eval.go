@@ -12,6 +12,7 @@ import (
 
 	"github.com/go-go-golems/slop-computer/pkg/access"
 	"github.com/go-go-golems/slop-computer/pkg/authz"
+	"github.com/go-go-golems/slop-computer/pkg/jsrt"
 	"github.com/go-go-golems/slop-computer/pkg/verbs"
 )
 
@@ -34,6 +35,7 @@ func evalVerbs(e evalEnv) []*verbs.Verb {
 // every check applies exactly as from the CLI.
 func runEval(ctx context.Context, e evalEnv, p *access.Principal, source string, args any, readOnly bool) (any, error) {
 	vm := goja.New()
+	jsrt.ForAppCode(vm)
 	inner := *p
 	inner.Via = "eval"
 	logs := []string{}

@@ -26,6 +26,8 @@ import (
 	"github.com/dop251/goja"
 	"github.com/go-go-golems/go-go-goja/pkg/engine"
 	"github.com/go-go-golems/go-go-goja/pkg/runtimebridge"
+
+	"github.com/go-go-golems/slop-computer/pkg/jsrt"
 )
 
 // RuntimeEngine is what actors run on (slop.yaml actors.runtime): a
@@ -63,6 +65,7 @@ func (m *Manager) newHost(a *Actor) (vmHost, error) {
 	if err != nil {
 		return nil, err
 	}
+	jsrt.ForAppCode(rt.VM)
 	h.rt = rt
 	return h, nil
 }

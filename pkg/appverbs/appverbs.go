@@ -30,6 +30,7 @@ import (
 	"github.com/spf13/cobra"
 
 	"github.com/go-go-golems/slop-computer/pkg/client"
+	"github.com/go-go-golems/slop-computer/pkg/jsrt"
 	"github.com/go-go-golems/slop-computer/pkg/verbs"
 )
 
@@ -210,6 +211,7 @@ func Commands(reg *jsverbs.Registry, c Caller, b Board, stderr io.Writer) ([]cmd
 func Invoker(c Caller, b Board, stderr io.Writer) jsverbs.VerbInvoker {
 	return func(ctx context.Context, reg *jsverbs.Registry, verb *jsverbs.VerbSpec, parsed *values.Values) (interface{}, error) {
 		vm := goja.New()
+		jsrt.ForAppCode(vm)
 		r := require.NewRegistry(require.WithLoader(reg.RequireLoader()))
 		r.RegisterNativeModule("slop", Module(c, b))
 		req := r.Enable(vm)
