@@ -43,3 +43,7 @@ Review of #54 fixed in ec894d5: peers stay imports (the app's one copy), optiona
 ## 2026-11-16
 
 Phase 1 in PR #55: page.d.ts (from web/runtime), actor.d.ts (by hand, drift-tested), modules.d.ts (per app, verb-backed modules generated), the push manifest as a union, app.types, slop types, slop dev refresh, a fixture app checked with tsc (make test-ci). #51 merged with main (1391d9b). Diary step 8.
+
+## 2026-11-16
+
+Phase 1 complete in PR #55: TypeScript templates (TestTemplateTypes runs and tsc-checks them), the agent's guide for TS, files.commit's FileChange as a union, system: reactors typed as SystemEntry (Codex review). Generated tsconfigs set moduleDetection force. Diary step 9.

@@ -616,3 +616,68 @@ The person answered "yes." to starting phase 1, and while I was reading the code
   - `pkg/client/types.go`;
   - `pkg/host/apptypes_test.go`.
 - **Run:** `make runtime && go test -tags sqlite_fts5 ./pkg/host -run 'TestAppTypes|TestActorTypesDrift|TestSlopDev' -count=1 -v`
+
+## Step 9: #51 merged; TypeScript templates, the agent's guide, FileChange as a union; a review fix
+
+With #51 on main, the last two phase 1 items could land on #55: the TypeScript templates with the agent's guide, and `files.commit`'s `FileChange` as a union. While I worked, the person forwarded a Codex comment on #55: `system:` reactors were typed as receiving store commits. That is fixed too.
+
+The new template test found a real problem. TypeScript treats a page script with no imports as a script rather than a module, and refuses its top-level `await`. The generated `tsconfig` files now set `moduleDetection: force`.
+
+### Prompt Context
+**User prompts (verbatim):** "mergeed #51"; then, sent mid-turn, "Also thiscomment [the Codex comment on pkg/apptypes/actor.d.ts: Distinguish system-log events from store commits] (fix and answer when done) on https://github.com/go-go-golems/slop-computer/pull/55".
+**Assistant interpretation:** Merge main into #55 and finish phase 1's remaining items. Fix the comment and reply on the PR.
+**Inferred user intent:** Close out phase 1 in one PR.
+**Commits (on `task/slop3-024-types`):**
+- 76b03c3: the merge, the `FileChange` union, and the reactor fix;
+- 8ebc4b9: the templates and the guide.
+
+### What I did
+- **The merge:** main into #55. One conflict, in `modules.go`: my `TypeScript:` fields against #51's new workshop doc ("commit or push"). I kept both.
+- **The `FileChange` union:** `FileChange.JSONSchema()` returns the four kinds `files.commit` enforces: text, data, sha256 with size, and `delete: true`.
+- **The reactor fix:** `SystemEntry` and `SystemReactor` declared from `sysdb.LogEntry`. `Reactors` has a `` `system:${string}` `` index signature beside the string one.
+- **The templates, in TypeScript:**
+  - `index.html` with `<script type="module" src="main.ts">`;
+  - in the actor template, `api.ts`, `actor.ts` and `main.ts`, plus READMEs on checking with `slop types` and `tsc`.
+- **`TestTemplateTypes`:** it renders the templates with node, runs each on the server (the actor template's add and list included), and runs `tsc` on its pages and actor against its own `app.types`.
+- **The guide:**
+  - write TypeScript, which is compiled but not checked;
+  - imports carry extensions;
+  - there is no npm: ask the person to vendor a package, and never copy one in;
+  - the contract pattern;
+  - `server/` holds files only the actor uses;
+  - `.js` apps are not converted unless asked.
+- **`make bench`:** only the stamps changed in `sandbox.js`, `index.html` and `probe.js`.
+
+### Why
+- **The pattern index signature:** a union of reactor types in the string index loses contextual typing; handlers' parameters became implicit `any`. With two index signatures, each key picks its own. That requires `SystemReactor` to be assignable to `Reactor`, so `SystemEntry.summary` is optional.
+- **Templates checked by a Go test:** CI runs only `go test` (`make test-ci`), and the test checks the templates against the declarations the server actually returns.
+
+### What worked
+- **The reactor fix under `tsc`:** `entry.store` in a `system:grant` handler is "Property 'store' does not exist on type 'SystemEntry'", and a `table:` handler still gets `commit.store` and `commit.epoch`.
+- **The suites:** `go test -tags sqlite_fts5 ./...` passes; `golangci-lint` reports 0 issues; the bench's Node tests pass (25).
+- **CI:** #55's CI passed before these commits, which was the first run of `make test-ci`.
+
+### What didn't work
+- **The first reactor typing:** `{ [K in \`system:${string}\`]: SystemReactor } & { [K: string]: Reactor | SystemReactor }` gave TS7006 (implicit `any`) on every handler parameter.
+- **After the merge,** `TestAppTypes` and `TestActorTypesDrift` failed with "files.push needs ifAt". They now push through `h.push`.
+- **`TestTemplateTypes` first run:** the blank template's `main.ts` failed with "error TS1375: 'await' expressions are only allowed at the top level of a file when that file is a module". Fixed with `moduleDetection: force` in `client.Tsconfigs`.
+- **`gh pr edit`:** it failed on the Projects (classic) GraphQL deprecation; the REST API worked.
+
+### What I learned
+- **A module-typed page needs `moduleDetection: force`:** without it, TypeScript decides module-ness from imports and exports, which differs from how the browser loads `<script type="module">`. The fixture app had imports, so `TestAppTypes` could not catch this; the import-less template could.
+
+### What warrants a second pair of eyes
+- **The blank template's `db`** is typed `any` by `page.d.ts`, so its `d: { data(): Note }` annotation is the only typing there. This is the existing task to annotate the runtime's namespaces.
+
+### What should be done in the future
+- **Annotate `web/runtime`'s `db`, `user`, `comments` and `room`.**
+- **Phase 2:** typed actions.
+
+### Code review instructions
+- **Read:**
+  - `web/bench/src/model/templates.js`;
+  - `web/bench/src/agent/guide.js`;
+  - `pkg/host/apptypes_test.go` (`TestTemplateTypes`);
+  - `pkg/apptypes/actor.d.ts` (`Reactors`);
+  - `pkg/commands/files.go` (`FileChange.JSONSchema`).
+- **Run:** `make runtime && go test -tags sqlite_fts5 ./pkg/host -run 'TestAppTypes|TestTemplateTypes' -count=1 -v`

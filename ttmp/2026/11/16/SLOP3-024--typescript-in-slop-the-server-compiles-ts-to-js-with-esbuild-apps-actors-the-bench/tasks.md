@@ -37,8 +37,8 @@ The phases follow the design (design-doc/01, section 10).
 - [x] The push manifest (`files.push`, `import.files`) as a `oneOf` union; `files.commit`'s `FileChange` follows once SLOP3-023 (#51) merges (part of notes §7.3)
 - [x] The `app.types` verb; `slop types <app> [dir]` writing `.slop/types/` and the two tsconfig files; `slop dev` refreshes them
 - [x] A fixture TypeScript app checked by `tsc` against the generated declarations (`TestAppTypes`; CI runs `make test-ci`, which installs TypeScript)
-- [ ] TypeScript templates as the default for new apps; the agent's guide to match (TS, extensions in imports, vendored packages; ask the person for new ones). Waits for SLOP3-023 (#51): the templates and guide are in its rewrite of web/bench
-- [ ] `files.commit`'s `FileChange` as a `oneOf` union, once #51 merges
+- [x] TypeScript templates as the default for new apps; the agent's guide to match (TS, extensions in imports, vendored packages; ask the person for new ones). `TestTemplateTypes` runs and type-checks every template
+- [x] `files.commit`'s `FileChange` as a `oneOf` union
 - [ ] Annotate web/runtime's `db`, `user`, `comments` and `room` namespaces: page.d.ts has them as `any` or open records today
 
 ## Phase 2: typed actor actions
