@@ -1,4 +1,4 @@
-/* the bench, built from web/bench: do not edit. source sha256:2715cf869eaf8b20f428a26cfc09f092716f268c4db8d55117fc860c314eec08 */
+/* the bench, built from web/bench: do not edit. source sha256:1e3a11a3fb2b730989b75ec4567e709efaa714cf9093fde1306ae58066b515fa */
 // The bench: a live dev environment for slop apps. Built from web/bench/src.
 (() => {
   // src/lib/util.js
@@ -6689,7 +6689,13 @@ Markdown files (README.md, notes, specs) render in the Docs panel. Keep README.m
         ready: (fh) => this.ev.emit("frameready", fh),
         hostFor: (fid) => this.hostFor(fid),
         log: (fh, l) => this.consoleAdd(l),
-        pick: (fh, info2) => this.select(info2),
+        pick: (fh, info2) => {
+          this.select(info2);
+          if (!this.playHinted && /^(button|a|input|select|textarea|label|summary)\b/i.test(info2.tag || "")) {
+            this.playHinted = true;
+            toast("Select mode: that click picked the " + String(info2.tag).split(/[.#]/)[0] + " to inspect it. To use your app (press buttons, type), switch to Play (P) in the header.", 8e3);
+          }
+        },
         placePin: (fh, m) => this.placePin(fh, m),
         openPin: (fh, id) => this.openPin(id, fh),
         textEdit: (fh, m) => this.textEdit(fh, m)
@@ -7331,7 +7337,7 @@ Markdown files (README.md, notes, specs) render in the Docs panel. Keep README.m
       function hudPaint() {
         clear(hud);
         hud.append(h("span.chip.on", App.mode), h("span.chip", App.ws === "draft" ? "draft" : "proposal: " + (App.proposal() || {}).title));
-        if (App.mode === "select") hud.append(h("span.note", "click to select \xB7 double-click text to edit"));
+        if (App.mode === "select") hud.append(h("span.note", "clicks pick elements to inspect \xB7 double-click text to edit \xB7 Play (P) to use the app"));
         if (App.mode === "comment") hud.append(h("span.note", "click to drop a pin"));
       }
       function addFrameMenu(btn) {

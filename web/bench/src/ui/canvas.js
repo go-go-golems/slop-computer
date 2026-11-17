@@ -195,7 +195,7 @@ export const CANVAS = {
     function hudPaint() {
       clear(hud)
       hud.append(h('span.chip.on', App.mode), h('span.chip', App.ws === 'draft' ? 'draft' : 'proposal: ' + (App.proposal() || {}).title))
-      if (App.mode === 'select') hud.append(h('span.note', 'click to select · double-click text to edit'))
+      if (App.mode === 'select') hud.append(h('span.note', 'clicks pick elements to inspect · double-click text to edit · Play (P) to use the app'))
       if (App.mode === 'comment') hud.append(h('span.note', 'click to drop a pin'))
     }
     function addFrameMenu(btn) {

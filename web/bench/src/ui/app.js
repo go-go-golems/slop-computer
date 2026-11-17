@@ -404,7 +404,14 @@ export const App = {
     Object.assign(FrameHost.ui, {
       mode: () => this.mode, pinsFor: r => this.pinsFor(r), preview: () => Preview.payload(), health: () => this.ev.emit('health'),
       ready: fh => this.ev.emit('frameready', fh), hostFor: fid => this.hostFor(fid), log: (fh, l) => this.consoleAdd(l),
-      pick: (fh, info) => this.select(info), placePin: (fh, m) => this.placePin(fh, m), openPin: (fh, id) => this.openPin(id, fh), textEdit: (fh, m) => this.textEdit(fh, m)
+      pick: (fh, info) => {
+        this.select(info)
+        // a person who clicks a button in Select mode meant to press it (two persona reviews in a row)
+        if (!this.playHinted && /^(button|a|input|select|textarea|label|summary)\b/i.test(info.tag || '')) {
+          this.playHinted = true
+          toast('Select mode: that click picked the ' + String(info.tag).split(/[.#]/)[0] + ' to inspect it. To use your app (press buttons, type), switch to Play (P) in the header.', 8000)
+        }
+      }, placePin: (fh, m) => this.placePin(fh, m), openPin: (fh, id) => this.openPin(id, fh), textEdit: (fh, m) => this.textEdit(fh, m)
     })
     Object.assign(AgentUI, {
       ws: () => this.ws, setWs: ws => this.setWs(ws), selection: () => this.sel,
