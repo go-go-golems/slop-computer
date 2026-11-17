@@ -1,0 +1,59 @@
+<!doctype html>
+<html>
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Inventory</title>
+<style>
+body{font-family:Arial;margin:10px;background:#eee}
+table{border-collapse:collapse;width:100%;background:white}
+td,th{border:1px solid #999;padding:4px;font-size:13px}
+.btn{background:#0066cc;color:white;border:0;padding:4px 8px;cursor:pointer}
+#tot{font-weight:bold;font-size:18px;margin-top:10px}
+</style>
+</head>
+<body>
+<h2>Inventory</h2>
+<div>
+Name <input id="nm"> Qty <input id="qty" size="4"> Price <input id="prc" size="6">
+<button class="btn" onclick="addItem()">Add</button>
+</div>
+<br>
+<table id="tbl"></table>
+<div id="tot"></div>
+<script>
+var slop, items = [], editing = null;
+window.claude.use('slop').then(function (s) { slop = s; load(); });
+
+function load() {
+  slop.actions.getAll({}).then(function (r) { items = r; draw(); });
+}
+function draw() {
+  var h = '<tr><th>Name</th><th>Qty</th><th>Price</th><th>Updated</th><th></th></tr>';
+  var total = 0;
+  for (var i = 0; i < items.length; i++) {
+    var it = items[i];
+    h += '<tr><td>' + it.Nm + '</td><td>' + it.Qty + '</td><td>' + it.Prc + '</td><td>' + it.upd + '</td>' +
+      '<td><button class="btn" onclick="edit(' + it.ID + ')">edit</button> <button class="btn" onclick="del(' + it.ID + ')">x</button></td></tr>';
+    var line = (it.Qty * it.Prc).toFixed(2); // 2 decimals for money
+    total = total + line;
+  }
+  document.getElementById('tbl').innerHTML = h;
+  document.getElementById('tot').innerHTML = 'Total stock value: $' + total;
+}
+function addItem() {
+  var o = { nm: document.getElementById('nm').value, qty: document.getElementById('qty').value, prc: document.getElementById('prc').value };
+  if (editing) o.id = editing;
+  slop.actions.save(o).then(function () { editing = null; document.getElementById('nm').value = ''; document.getElementById('qty').value = ''; document.getElementById('prc').value = ''; load(); });
+}
+function edit(id) {
+  for (var i = 0; i < items.length; i++) if (items[i].ID == id) {
+    document.getElementById('nm').value = items[i].Nm; document.getElementById('qty').value = items[i].Qty; document.getElementById('prc').value = items[i].Prc;
+  }
+  editing = id;
+}
+function del(id) { if (confirm('delete?')) slop.actions.del({ id: id }).then(load); }
+// function exportCsv() { TODO }
+</script>
+</body>
+</html>

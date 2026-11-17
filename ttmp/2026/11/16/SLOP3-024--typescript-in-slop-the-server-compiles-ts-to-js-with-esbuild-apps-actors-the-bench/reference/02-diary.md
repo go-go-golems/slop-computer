@@ -770,3 +770,261 @@ Two pieces of work:
   - `web/runtime/src/types.ts` and `db.ts`;
   - `apps/bench/actor.js` (`S` and `args`).
 - **Run:** `make runtime && go test -tags sqlite_fts5 ./pkg/host -run 'TestActionArgsSchema|TestActionsTypes|TestBenchArgs|TestTemplateTypes' -count=1 -v`
+
+## Step 11: Phase 3, type checking in the bench
+
+Phase 3 puts TypeScript's own checker into the bench, so the person and the agent see type errors while they work, not only when `slop types` and `tsc` run on a laptop. The checker runs in a worker of its own, built into `apps/bench/checker.js`. It checks an app the way `slop types` sets it up: two programs, the pages and the actor, against the declarations the server writes (`app.types`). Its results reach three places:
+- each eval's effects, as the type errors it introduced and how many it fixed;
+- the agent's `types.check()`;
+- the Code view: gutter marks, a footer count that jumps to each error, and the type under the caret.
+
+A browser smoke test of the built bench found one real bug: a fresh app's declarations were fetched before its dev instance existed, so `actions.d.ts` was empty and the template showed a false error. The declarations are now cached per version of the dev instance.
+
+### Prompt Context
+**User prompt (verbatim):** "what's left total? then do phase 3"
+**Assistant interpretation:** List what remains of SLOP3-024, then implement phase 3 (design §6.2) on PR #55.
+**Inferred user intent:** Finish the ticket's main line: TypeScript in the bench itself, so its agent and its person get the benefit of the types phases 1 and 2 produced.
+**Commit (code):** a883762 — "SLOP3-024 phase 3: type checking in the bench"; 3be0f65 — "SLOP3-024 phase 3: the declarations follow the dev instance"
+
+### What I did
+- **`web/bench/src/checker/checker.js` (new): the worker.**
+  - `plan()` builds two root sets and option sets:
+    - pages: ES2022 + DOM, with `page.d.ts` and `actions.d.ts`;
+    - actor: ES2020, with `actor.d.ts` and `modules.d.ts`.
+    The options are the ones `client.Tsconfigs` writes, plus the app's JSX options and the vendored packages' `paths`.
+  - Each program is a `ts.LanguageService` kept warm, through one `DocumentRegistry`.
+  - Messages:
+    - `check` returns `{diags}`;
+    - `info` returns the type at a position;
+    - `transpile` strips an eval's types: it wraps the code in `async function __slop_eval__() {…}`, then unwraps it.
+- **`web/bench/build.mjs`:** bundles TypeScript 5.9.3 into `checker.js`.
+  - The lib files are inlined as `__TS_LIBS__`: the closure of `es2022`, `dom`, `dom.iterable`, `es2020` and `es2022.full`, following `/// <reference lib>`.
+  - Node built-ins are stubbed.
+  - The output is minified: 6.0 MB raw, 1.35 MB gzipped.
+- **`web/bench/src/agent/types.js` (new):** the page's side.
+  - It spawns the worker; `post(msg, ms)` times out to `{skipped}`.
+  - `declarations(P)` comes from the bench actor's new `types` action.
+  - `check`, `info`, `transpile`, and `diff(before, after)`, keyed on file, code and message, so an error that only moved lines is the same error.
+- **`agent/eval.js`:** checks before the eval (in parallel with the run) and after its commit, then sets `effects.types = {new, fixed, total} | {skipped}`. The effects line shows it.
+- **The agent:**
+  - `agent/api/types.js`: `types.check({file})` (a long call).
+  - `agent/agent.js`: the eval tool takes `ts: true` and transpiles before running.
+  - `agent/guide.js`: what the type effects mean, and that the agent fixes the errors it introduced.
+- **The person's side:**
+  - `ui/code.js`: `typeView` (the person's unsaved edits included), `typesSoon`, `infoSoon`, the gutter class `terr`, and the footer's count and jump menu.
+  - `ui/app.js`: warms the checker when a TypeScript project opens.
+- **The server side:**
+  - `apps/bench/actor.js`: a `types` action.
+  - `pkg/doors/actors/modworkshop.go`: `{JS: "types", Verb: "app.types", Pos: ["app"]}`.
+- **Tests:**
+  - `web/bench/test/types.test.mjs` (4 tests): runs the built `checker.js` in a `vm` against the TypeScript fixture app.
+  - `TestBenchArgs`: covers the `types` action.
+  - `buildstamp_test.go`: includes `checker.js`.
+- **3be0f65:**
+  - The declarations are cached per app and per `devKey(status)`. The status reaches `Types` through a hook the shell sets (`Types.status`), so `agent/types.js` keeps no import of `server/instances.js`, which touches `addEventListener` and broke the Node test.
+  - The Code view re-checks when the dev instance's version changes.
+
+### Why
+- **A worker of its own:** the QuickJS sandbox is restarted when an eval overruns, and a restart must not throw away a checker that takes about a second to warm.
+- **The real TypeScript, not a subset:** the declarations from phases 1 and 2 (`FromSchema`, `defineAction`, the generated `actions.d.ts`) need the real checker to mean anything.
+- **Informative only:** checking a commit too would make TypeScript a gate, which the design rejects (§6.2). Results inform and never fail anything.
+
+### What worked
+- The full Go suite, 0 lint issues, and 29 bench Node tests pass at a883762.
+- In Node, a cold check took 505 ms and a warm one about 20 ms. The planted page and actor errors are found.
+- **Browser smoke** (`$J/smoke/smoke.mjs`, Playwright against a local server built from a883762):
+  - Before 3be0f65, a fresh "Page and actor" app showed `'rows' is of type 'unknown'` on `main.ts`.
+  - After 3be0f65 the footer says "types ok". Planting `{ txt: input.value }` gives one error, on line 21: "Object literal may only specify known properties, but 'txt' does not exist in type '{ text: string; }'".
+
+### What didn't work
+- `node tools/imports.mjs`: `checker/checker.js: not in a layer`. It is added to `SKIP`, since it is a worker entry, not a page module.
+- The vm test's `assert.deepEqual` failed across realms: objects from the vm's context are not `Object.prototype` objects of the test's realm. The results are copied out through JSON.
+- My transpile comment claimed that lines keep their numbers. They don't when an interface line drops out, so the comment now says so.
+- First smoke attempt: no frame had `__SB`. The live host's bench page asks you to sign in through a link first. The smoke now follows it.
+- 3be0f65, first try: `ReferenceError: addEventListener is not defined` in `types.test.mjs`. `agent/types.js` imported `Watch` from `server/instances.js`, which registers a visibility listener at load. The fix is the `Types.status` hook.
+
+### What I learned
+- `actions.d.ts` depends on a running instance's actor, not on the files: it is what the instance's `defineActor` registered. Anything that caches it must key on the instance's version.
+
+### What was tricky to build
+- **Unwrapping the transpiled eval:** an eval body has top-level `await` and `return`, so it can't be compiled as a module. It is wrapped in an async function, compiled, and unwrapped by taking the text between the first `{\n` and the last `}`. The result is checked to start with the wrapper's name, or the transpile fails rather than guessing.
+- **Libs in a worker:** TypeScript asks for libs by file name. The build follows `/// <reference lib>` from the five roots to inline exactly what the two programs reference.
+
+### What warrants a second pair of eyes
+- `checker.js` is 6 MB in the bench store. It is fetched only for TypeScript apps, but it's in every bench install.
+- `Types.diff` keys errors on (file, code, message). Two identical errors in one file count as two, and fixing one of them leaves one.
+
+### What should be done in the future
+- Point the checker at a proposal's own declarations. Done in Step 12 (a persona review found it).
+
+### Code review instructions
+- Start at `web/bench/src/agent/types.js` and `web/bench/src/checker/checker.js`, then the `effects.types` lines in `agent/eval.js`.
+- Validate:
+  - `cd web/bench && node build.mjs && node --test test/*.test.mjs`
+  - `GOWORK=off go test -tags sqlite_fts5 ./pkg/host -run 'TestBench|TestBuildOutputsFresh'`
+
+### Technical details
+- Worker protocol, each message answered with `{id, ok, …}`:
+  - `{type:'check', files, decl}` → `{diags:[{file,line,col,code,message,program}], ms}`
+  - `{type:'info', files, decl, path, pos}` → `{text, doc}`
+  - `{type:'transpile', code}` → `{code}`
+- At most 200 diagnostics; messages are cut at 600 characters.
+
+## Step 12: Persona reviews of the bench: the harness, round 1, and what it found
+
+The person asked for model-played personas to actually build apps in the bench. The harness:
+- **benchdrive** (built by a subagent): a daemon holding a headless Chromium, which a persona drives from the shell;
+- **one pi process per persona**: `lunaroute/deepseek-4.1-flash` at thinking medium, with the persona prompt and a brief;
+- **a runner** (`scripts/05-cosplay/run.sh`).
+
+Round 1 had four personas on a server built from 3be0f65, with the bench's own agent on the same model:
+- Maya, a baker who doesn't code, wanted a bread preorder page;
+- Devon, a TypeScript developer, wanted a kanban board;
+- Priya, a teacher, wanted a leaderboard added to an existing quiz app;
+- Sam, an operations lead, wanted a shipments dashboard with tests.
+
+Priya got what she wanted. Sam got nearly all of it; Maya and Devon got part of it. Together they logged 53 struggles.
+
+Most struggles were fixable, and while the round ran I fixed them in the worktree in five commits (ab4ca68, 5a157d1, 5d0e593, a033d65, 9cbe08a). Two are bugs that no test had caught:
+- **A phase-3 bug:** a proposal was type-checked against draft's actor, so it showed "types ok" over a call to an action that no longer existed.
+- **A server bug:** after an instance reset, its actor kept the deleted store's closed SQL connection, so every scenario ran once and then failed.
+
+### Prompt Context
+**User prompts (verbatim):**
+- "make sure to actually use cosplay subagents against the bench application and have them build different applications, you can use the pi coding agent and the lunaroute deepseek-4.1-flash thinking medium agent."
+- "write a playbook on using cosplayed persona based review where we have different personas that want to use bench to create or modify applications, so that we can learn from their struggles."
+- "run the whole spiel a couple of times, makng adjustments at each iteration (without losing the plot, obv), you can switch to glm-5.3 or glm-5.3-flash or different thinking levels as well, depending on how things go. it's good to cover a wide range of scenarios, and lunaroute doesn't cost us anything!"
+- Mid-turn: "alright i'm going swimming. make this fucking sick. .If things are going well, have the personas get more ambitious, or provide them with messier "legacy" code or so."
+- "commit at appropriate intervals and keep a detailed diary as you work (using the diary format from the skill)"
+- "Keep a very detiled diary and also keep the transcripts available and such"
+- "also take screenshots for the reports you make me, i would like to be able to browse the sessions people did in the browser and see how the app evolved"
+- "anyway keep on rocking, lunaroute is free, we can have up to 6 concurrent, but we get 429 throttled anyway so feel free to maxx"
+- "write a little server to allow me to browse the persona cosplay transcripts"
+
+**Assistant interpretation:**
+- Run several rounds of personas building and changing apps in the bench through pi on lunaroute models.
+- Fix what they find between rounds, on #55.
+- Make the rounds harder as they go.
+- Keep every transcript, diary and screenshot.
+- Give the person a way to browse them.
+
+**Inferred user intent:** Learn what it is like to use the bench from people unlike its developers, and turn that into fixes, with evidence the person can look through later.
+
+**Commit (code):**
+- ab4ca68 — "SLOP3-024: fixes from the first persona review of the bench"
+- 5a157d1 — "SLOP3-024: scenario checks for numbers; type errors in the header; guide"
+- 5d0e593 — "SLOP3-024: a deleted store's actor lets go; scenario steps checked strictly"
+- a033d65 — "SLOP3-024: after a publish, the bench shows the app's web address"
+- 9cbe08a — "SLOP3-024: fix the bench's boot (Prefs, not Records); honest new scenarios; guide"
+
+### What I did
+- **The harness:**
+  - **benchdrive** (`$J/bd/benchdrive`, built by a subagent with its own diary at `$J/bd/DIARY.md`). Its commands: `look`, `ask`, `click`, `type`, `key`, `new-app`, `open-app`, `view`, `frame-text`, `frame-click`, `frame-type`, `shot`, `wait`, `close`. Each prints what the page renders, as text.
+  - **`scripts/05-cosplay/persona-prompt.md`:** stay in character; a diary with `STRUGGLE:` lines and a `## Verdict`; a budget of commands.
+  - **The briefs:** `personas/{maya,devon,priya,sam}.md`.
+  - **`fixtures/quiz`:** Priya's existing app, pushed to the server before the round.
+  - **`run.sh`:** one pi per persona, with `--no-extensions -e <the lunaroute extension>` and only the bash, read, write and edit tools.
+- **The review server:** port 18494, `$J/rev3`, `--local`. The CLI is signed in through a device login approved by a Playwright script. benchdrive's daemon is on 18498.
+- **Round 1:** `$J/rounds/r1b`, started 03:01 UTC; all four exited 0 by 03:20.
+  - I watched each diary's steps and struggles through a monitor.
+  - I wrote the findings into `$J/rounds/findings.md` as they came in, and fixed them in the worktree. The server stayed on one build for the whole round.
+- **Fixes, by commit:**
+  - **ab4ca68:**
+    - The `types` action takes a ref and reads `actions.d.ts` from the proposal's own instance, falling back to dev, then the app. The page caches declarations per (app, ref, that instance's version).
+    - gepp asks a model that ended silently after using tools for its reply, once and without tools.
+    - The bench writes a summary from the evals when a turn still has no reply.
+    - The proposal line explains itself, with Show it, Review and Accept.
+    - A turn that changed nothing says so, instead of `"<your message>" was discarded`.
+    - The Data view follows the workspace into a proposal's preview.
+    - Template names in plain words; the profile scope in the server-code template, so lists show names.
+    - Guide lines: plain words; don't shadow API names.
+  - **5a157d1:**
+    - Scenario `{text, exact: true}` and `{match}`.
+    - The header counts type errors, and its menu lists them.
+    - New files start with an empty name.
+    - Guide: leave no testing debris; page first; tell the person what they need; answer questions about the bench.
+  - **5d0e593:**
+    - `Kernel.OnDeleted`, called by `DeleteStore`; the manager sets it to `Restart`.
+    - Scenario steps reject keys their kind doesn't take.
+    - `{sql, value}` and `{sql, rows}`.
+  - **a033d65:** `workshop.mounts` (`mount.ls`), the bench's `addresses` action, the publish dialog's "Your app is live at …", and the agent's `app.addresses()`.
+  - **9cbe08a:**
+    - The boot fix (Prefs).
+    - New scenario stubs fail until they check something.
+    - Guide: test data goes in the test instance; show each scenario failing once; keep README.md true.
+- **Tests added:**
+  - `TestBenchTypesFollowRef`, `TestBenchResetRestartsTheActor`, `TestBenchAddresses` (pkg/host);
+  - `TestSilentEndAsksForAReply` (gepp);
+  - `expect: text contains, exact and match` and `checkScenario: unknown step keys` (bench Node tests).
+- **The transcript browser:** `scripts/05-cosplay/browse.mjs` (`node browse.mjs <rounds dir> --port 18600`). It shows rounds, personas, a timeline that interleaves the pi session with benchdrive's recorded steps and their screenshots, the diary, and a gallery.
+- **benchdrive, between rounds:**
+  - With `BENCHDRIVE_RECORD` (sent by each client, set by `run.sh`), every command goes to `<round>/<persona>/steps.jsonl` with a JPEG of the bench.
+  - `new-app <id>` without a template lists the templates.
+  - Dialog fields are named `dialog`, `dialog2`, … and `type` accepts them.
+  - `edit <old> <new>` changes the open file the way a person would: select the text, then type over it.
+  - `look` and `click` see the shell's dialogs.
+- **Round 1's material** went to `various/persona-review-2026-11-17/r1/` after a scan for `k_` tokens and bearer tokens (none found): diaries, `pi.out`, pi session JSONL, the personas' own screenshots, and the benchdrive log.
+
+### Why
+- **Fixing during the round, on a server that stays on one build:** a round's findings stay comparable, and the next round tests the fixes.
+- **The silent model, fixed in gepp rather than the bench:** an `empty_completion` error loses the turn's work from the person's view. Asking once more without tools gives the model's own account, and is cheaper than replaying.
+
+### What worked
+- **The personas found real bugs, not just usability notes:**
+  - Devon read his proposal's `main.ts`, saw it call `slop.actions.list`, and saw that the actor had no `list` while the footer said "types ok" (round 1, devon step 5).
+  - Sam's agent reported "sql: connection is already closed" from the test instance. I reproduced it with the CLI:
+    ```
+    $ slop actor call tsmoke2-test-1082d4 list --args '{}'
+    error: actor_error: sql: connection is already closed
+    ```
+    This happened after `bench reset` and `bench instance`.
+  - `TestBenchResetRestartsTheActor` fails without the `OnDeleted` hook and passes with it. I checked by commenting the hook out and rerunning.
+- **The verdicts:**
+  - Priya: yes ("The quiz is live (quiz @9)…").
+  - Sam: "Partly — nearly all of it".
+  - Maya: partly ("What I did not get is the plain web address").
+  - Devon: partly.
+- **Final suite:** pkg/host, pkg/llm/gepp and the bench's 31 Node tests pass. The boot smoke passes after 9cbe08a.
+
+### What didn't work
+- **The first launch** (`$J/rounds/r1`): every persona exited 1 with `No API key found for lunaroute.` `--no-extensions` had dropped the lunaroute provider extension. The fix is `--no-extensions -e ~/.pi/agent/npm/node_modules/@lunaroute/pi-extension` (tested with a "pong" prompt).
+- **CLI calls with variables in one string** (`E="SLOP_CREDENTIALS=… SLOP_SERVER=…"; env $E slop …`) all failed with `error: no server`. zsh doesn't split `$E`; the variables have to be written inline.
+- **benchdrive's subagent restarted its own server and daemon** after I had stopped them (I had moved the review to a newer build). I told it to stand down and stopped them again.
+- **The boot bug, my own:** ab4ca68 used `Records.get`/`Records.set`, but the per-person settings object is `Prefs`. The bench failed to start: `TypeError: Records.get is not a function at Object.openProject`. I found it with a benchdrive probe before round 2, and fixed it in 9cbe08a. The broken commit had never been pushed.
+- **The round-2 monitor's first try** exited at once: zsh's `nomatch` on an empty `$R/*/` glob. It runs under bash with `nullglob` now.
+- **`TestBenchAddresses`'s first assertion** expected `"/jot","kind":"live"`, but the JSON orders `kind` before `url`.
+
+### What I learned
+- A persona's struggle often has a bench cause and an agent cause. Priya's "Submit does nothing" was the score appearing below the fold of a 375×720 frame, plus an agent that never said so.
+- **The proposal flow is the biggest barrier for people who don't code.** All three non-programmers met it before anything else. The default target is a proposal, and nothing told them to look at it and accept it.
+- **The bench's agent on deepseek-4.1-flash often ends a turn without a word** (maya steps 3, 5, 10; devon 6; sam 6). Every bench-side fix for that is a workaround for the model.
+
+### What was tricky to build
+- **The proposal's declarations.** A proposal's preview instance is created on first use, so it may not exist when the Code view checks. The `types` action falls back from the proposal's instance to the dev instance to the app store, so the checker always has some declarations. The cache key includes the ref and that instance's version from the polled status (`status.props[].n`), so the check redoes itself when the proposal's instance comes up on new code.
+- **The deleted store's actor.** `DeleteStore` closes the store, but the actor manager's map still held the actor built over it. The next store with the same id got the old actor, and its `sql` module held the old `*sql.Conn` (`store.go:58`). `OnDeleted` is called after the close and before the directory is removed, and `Manager.Restart` drops the actor and its broken mark.
+
+### What warrants a second pair of eyes
+- **`Kernel.OnDeleted`** is called while the kernel's map lock is released. Something could reopen the store between the close and the call; check whether that matters for `Restart`.
+- **The gepp nudge** adds a user message that says it comes from the system. A model may quote it to the person.
+
+### What should be done in the future
+- **A bench boot test in CI.** The boot bug would have shipped without the smoke run.
+- **The shell's Share button** shares the bench, not the person's app. Maya expected the latter.
+- **Mounting from the bench** (an admin action) is a governance decision for the person. The bench now only shows existing addresses.
+
+### Code review instructions
+- **Start with:**
+  - `apps/bench/actor.js` (`types`, `addresses`);
+  - `web/bench/src/agent/types.js` (`devKey`, `declarations`);
+  - `pkg/kernel/kernel.go` (`OnDeleted`);
+  - `pkg/llm/gepp/sample.go` (`nudgeReply`);
+  - `web/bench/src/core/scenario.js` (`STEP_KEYS`).
+- **Validate:**
+  - `GOWORK=off go test -tags sqlite_fts5 ./pkg/host -run 'TestBench' && GOWORK=off go test ./pkg/llm/gepp`
+  - `cd web/bench && node --test test/*.test.mjs`
+- **Browse the round:** `node scripts/05-cosplay/browse.mjs various/persona-review-2026-11-17 --port 18600`.
+
+### Technical details
+- **Round 1:** 4 personas; 53 `STRUGGLE:` lines (maya 15, devon 11, priya 13, sam 14).
+- **The findings list:** `various/persona-review-2026-11-17/findings.md`.
+- **Persona exit times:** devon 22:15:00, priya 22:15:06, maya 22:18:20, sam 22:20:49 (local time).
