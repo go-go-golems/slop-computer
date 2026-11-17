@@ -41,6 +41,8 @@ var workshopFuncs = []modFunc{
 	{JS: "follow", Verb: "app.follow", Pos: []string{"store", "ref"}},
 	{JS: "status", Verb: "app.status", Pos: []string{"store"}},
 	{JS: "preview", Verb: "preview.url", Pos: []string{"store", "at", "parent"}},
+	// types(app, {instance}): the app's TypeScript declarations (SLOP3-024).
+	{JS: "types", Verb: "app.types", Pos: []string{"app"}},
 
 	// SLOP3-022, a dev loop: instances that run a ref of an app
 	// (newStore(id, {app, type}), then follow), their state, logs and

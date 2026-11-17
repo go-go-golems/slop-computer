@@ -2,7 +2,8 @@
 //
 // effects: {files: [{path, change, add, del}], commit: {ref, n, merged},
 // instances: [{store, n, broken}], actorLogs, newIssues, fixedIssues,
-// newErrors, layout} when it committed; {folded} when its changes went to
+// newErrors, layout, types} when it committed (types: {new: [{file, line,
+// message}], fixed, total} or {skipped}: agent/types.js); {folded} when its changes went to
 // the eval that delegated it; {rolledBack} when it failed; {conflict}.
 // Frame effects compare each board frame's issues and layout before the
 // eval with after its commit, once the frames run the new snapshot.
@@ -80,6 +81,11 @@ export function effectsLine(e) {
   if (e.fixedIssues) parts.push('fixed ' + plural(e.fixedIssues.length, 'issue'))
   if (e.newIssues) parts.push(plural(e.newIssues.length, 'new issue'))
   if (e.newErrors) parts.push(plural(e.newErrors.length, 'new error'))
+  if (e.types && e.types.skipped) parts.push('types not checked')
+  else if (e.types) {
+    if (e.types.new.length) parts.push(plural(e.types.new.length + (e.types.more || 0), 'new type error'))
+    if (e.types.fixed) parts.push('fixed ' + plural(e.types.fixed, 'type error'))
+  }
   if (e.layout) parts.push('layout changed on ' + e.layout.map(l => l.frame.split(' ')[0]).filter((x, i, a) => a.indexOf(x) === i).join(', '))
   return parts.join(' · ')
 }

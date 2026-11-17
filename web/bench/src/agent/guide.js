@@ -67,6 +67,8 @@ function appGuide(P) {
 - actor.ts: defineActor({ actions: { name: { requires: 'view' | 'interact' | 'admin', async run(ctx, args) { … } } }, setup(ctx) { … } }). ctx.visitor is {id, name, level}. use('sql') runs SQL on the instance's own tables, synchronously, each argument a separate parameter (never an array): sql.all(query, ...args) -> rows, sql.one(query, ...args) -> row or null, sql.run(query, ...args). Files only the actor uses go under server/.
 - sql/NNN_name.sql are migrations, applied once per instance, in order. Never edit one that has run; add a new file. app.reset() gives you a fresh dev instance when you must.
 - After writing the actor or a migration, look at effects.instances and effects.actorLogs (or app.logs()) before going on.
+- In an app with TypeScript, the bench type-checks the pages and the actor against the app's declarations (the same check as tsc with slop types). An eval's effects.types says what it did: {new: [{file, line, message}], fixed, total} (or {skipped} when the checker was not ready). Fix the type errors your eval introduced in your next eval; they are real mistakes (a misspelled field, a wrong argument), even though the page may still run. types.check() lists all of them, as your eval sees the files. Do not chase errors that were there before you, unless asked.
+- Your eval code may be TypeScript too: pass ts: true with it (the types are stripped, not checked).
 Markdown files (README.md, notes, specs) render in the Docs panel. Keep README.md current when you change pages, the actor or migrations.`
 }
 

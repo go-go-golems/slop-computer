@@ -5,12 +5,16 @@
 // buffered, committed a moment after the last keystroke. When a commit of
 // them conflicts with draft (someone changed the same file), the footer
 // says so and offers to keep theirs or redo the commit over the new head.
-// History reads earlier versions from snapshots (model/timeline.js).
+// History reads earlier versions from snapshots (model/timeline.js). In an
+// app with TypeScript, the checker's errors mark their lines in the gutter
+// (the message on hover), the footer counts them and jumps to each, and
+// shows the type under the caret (agent/types.js).
 //
 // Public API: CODE, DOCS (views); App.code = {open, showVersion},
 // App.docs = {open}.
 import { App } from './app.js';
 import { Dock } from './dock.js';
+import { Types, headView } from '../agent/types.js';
 import { blame, versions, why } from '../model/timeline.js';
 import { blameCard, blameTitle } from './history.js';
 import { checkPath } from '../core/draft.js';
@@ -81,7 +85,12 @@ export const CODE = {
       pre.innerHTML = highlight(S.cur, ta.value) + '\n'
       const n = ta.value.split('\n').length
       let s = ''
-      for (let i = 1; i <= n; i++) s += '<div' + (i === S.hiLine ? ' class="hit"' : '') + '>' + i + '</div>'
+      const errs = new Map()
+      for (const d of S.tdiags || []) if (d.file === S.cur) errs.set(d.line, (errs.has(d.line) ? errs.get(d.line) + '\n' : '') + d.message)
+      for (let i = 1; i <= n; i++) {
+        const cls = [i === S.hiLine ? 'hit' : '', errs.has(i) ? 'terr' : ''].filter(Boolean).join(' ')
+        s += '<div' + (cls ? ' class="' + cls + '"' : '') + (errs.has(i) ? ' title="' + escHtml(errs.get(i)) + '"' : '') + '>' + i + '</div>'
+      }
       gin.innerHTML = s; paintBlame(); scroll()
     }
     function scroll() { pre.style.transform = `translate(${-ta.scrollLeft}px, ${-ta.scrollTop}px)`; gin.style.transform = bin.style.transform = `translateY(${-ta.scrollTop}px)`; if (S.hiLine) band.style.top = (10 + (S.hiLine - 1) * 18 - ta.scrollTop) + 'px' }
@@ -131,7 +140,10 @@ export const CODE = {
       const ws = App.ws, prop = App.proposal(), d = P().draftOf(ws), nv = S.versions ? S.versions.length : 0
       const pos = ta.value.slice(0, ta.selectionStart).split('\n')
       const conflict = d.conflict && d.conflict.conflicts.includes(S.cur) ? d.conflict : null
+      const terrs = (S.tdiags || []).filter(x => x.file === S.cur)
       put(foot, h('b', S.cur), h('span', 'Ln ' + pos.length + ', Col ' + (pos[pos.length - 1].length + 1)), h('span', prop ? 'editing proposal "' + prop.title + '"' : 'editing draft'),
+        S.tdiags ? h('button.link' + (terrs.length ? '.terr' : ''), { title: 'TypeScript errors in this file (and in the app)', on: { click: ev => typeMenu(ev.currentTarget) } }, terrs.length ? plural(terrs.length, 'type error') : 'types ok', S.tdiags.length > terrs.length ? ' (' + S.tdiags.length + ' in the app)' : '') : null,
+        S.tinfo ? h('span.mono.tinfo', { title: S.tinfo }, S.tinfo.length > 70 ? S.tinfo.slice(0, 70) + '…' : S.tinfo) : null,
         S.pending || (d.edits && d.edits.changes.has(S.cur)) ? h('span', conflict ? '' : 'saving…') : null,
         S.trace ? h('span', { style: { color: S.trace.elements ? 'var(--a1)' : '' } }, '↳ ' + (S.trace.selector ? S.trace.selector.slice(0, 30) + ' matches ' : 'renders ') + plural(S.trace.elements, 'element') + (S.trace.elements ? ' in ' + plural(S.trace.frames, 'frame') : ''),
           ' ', h('button.link', { title: 'Clear the outlines (Esc)', on: { click: () => { App.trace(null); S.trace = null; paintFoot() } } }, '×')) : null,
@@ -173,6 +185,31 @@ export const CODE = {
       if (!same) loadVersions()
       if (line) goto(line)
     }
+    // the type checker (agent/types.js): errors for the workspace as the
+    // person sees it (their uncommitted edits included), and the type under
+    // the caret
+    const typeView = () => { const d = P().draftOf(App.ws); return d.edits && d.edits.open ? d.edits : headView(d) }
+    const typesSoon = debounce(async () => {
+      const p = P()
+      if (!p || S.snap) return
+      const view = typeView()
+      if (!Types.wants(view)) { if (S.tdiags) { S.tdiags = null; paintCode(); paintFoot() } return }
+      const r = await Types.check(p, view, { timeoutMs: 20000 })
+      if (r.skipped || P() !== p) return
+      S.tdiags = r.diags; paintCode(); paintFoot()
+    }, 500)
+    const infoSoon = debounce(async () => {
+      const p = P(), path = S.cur
+      if (!p || !path || S.snap || !/\.(ts|tsx|mts|cts)$/.test(path) || !S.tdiags) { if (S.tinfo) { S.tinfo = ''; paintFoot() } return }
+      const i = await Types.info(p, typeView(), path, ta.selectionStart)
+      if (S.cur !== path) return
+      S.tinfo = i ? i.text : ''; paintFoot()
+    }, 300)
+    function typeMenu(anchor) {
+      const all = S.tdiags || []
+      if (!all.length) return toast('No type errors')
+      popMenu(anchor, all.slice(0, 40).map(d => ({ label: d.file + ':' + d.line + ' ' + d.message.split('\n')[0].slice(0, 90), sub: d.program, run: () => d.file === S.cur ? goto(d.line) : open(d.file, d.line) })))
+    }
     function goto(line) {
       const off = offsetOfLine(ta.value, line)
       ta.focus({ preventScroll: true }); ta.setSelectionRange(off, off)
@@ -187,11 +224,11 @@ export const CODE = {
       const { path, ws, text } = S.pending
       S.pending = null
       try { P().write(path, text, ws) } catch (e) { toast(e.message) }
-      paintFoot()
+      paintFoot(); typesSoon()
     }
     ta.addEventListener('input', () => { S.pending = { path: S.cur, ws: App.ws, text: ta.value }; paintCode(); commitSoon(); if (isMd(S.cur)) previewSoon() })
     ta.addEventListener('scroll', scroll)
-    ta.addEventListener('keyup', () => { paintFoot(); traceSoon() }); ta.addEventListener('click', () => { paintFoot(); traceSoon() })
+    ta.addEventListener('keyup', () => { paintFoot(); traceSoon(); infoSoon() }); ta.addEventListener('click', () => { paintFoot(); traceSoon(); infoSoon() })
     // the caret's line (HTML) or rule (CSS) outlines what it renders in every frame
     const traceSoon = debounce(async () => {
       let t = null
@@ -218,12 +255,12 @@ export const CODE = {
       const tpl = isMd(p) ? '# ' + p.replace(/\.md$/i, '').split('/').pop() + '\n\n' : /\.html?$/.test(p) ? '<!doctype html>\n<html lang="en">\n<head>\n  <meta charset="utf-8">\n  <meta name="viewport" content="width=device-width, initial-scale=1">\n  <title>' + p + '</title>\n</head>\n<body>\n  <h1>' + p + '</h1>\n</body>\n</html>\n' : ''
       P().write(p, tpl, App.ws); open(p)
     }
-    App.ev.on('project', () => { S.tabs = []; S.cur = null; S.pending = null; S.snap = null; paintTabs(); paintList(); load(); refreshChanged() })
-    App.ev.on('ws', () => { commit(); S.bkey = ''; S.bdata = null; paintList(); load(true); refreshChanged(); if (S.cur) loadVersions() })
+    App.ev.on('project', () => { S.tabs = []; S.cur = null; S.pending = null; S.snap = null; S.tdiags = null; S.tinfo = ''; paintTabs(); paintList(); load(); refreshChanged(); typesSoon() })
+    App.ev.on('ws', () => { commit(); S.bkey = ''; S.bdata = null; paintList(); load(true); refreshChanged(); if (S.cur) loadVersions(); typesSoon() })
     const changedSoon = debounce(refreshChanged, 400)
     App.ev.on('files', (ws, paths) => {
       if (ws !== App.ws) return
-      paintList(); changedSoon()
+      paintList(); changedSoon(); typesSoon()
       if (S.snap) { paintFoot(); return }
       const mine = S.cur && (!paths.length || paths.includes(S.cur))
       // a commit (anyone's, the person's own too) makes a version and changes blame

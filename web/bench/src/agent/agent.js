@@ -13,6 +13,7 @@
 import { AgentUI, makeContext, runEval } from './eval.js';
 import { FrameHost, FrameHosts } from '../frames/host.js';
 import { MAX_DEPTH, ROLES } from './roles.js';
+import { Types } from './types.js';
 import { Watch } from '../server/instances.js';
 import { diffText, parseJSONReply, toYAML } from '../lib/text.js';
 import { effectsLine, scopeSummary } from './effects.js';
@@ -145,9 +146,9 @@ export const Agent = {
     const tool = {
       name: 'eval',
       description: 'Run a JavaScript async function body in the bench sandbox with the host API in scope (files, app, frames, fixtures, scenarios, session, ui, lib, publish) and the step core (step, seq, par, delegate, …). Use `return` for the result. Returns {ok, value, logs, error, effects}.',
-      inputSchema: { type: 'object', properties: { code: { type: 'string', description: 'JavaScript statements; may use await; return the value you want back' } }, required: ['code'] },
+      inputSchema: { type: 'object', properties: { code: { type: 'string', description: 'JavaScript statements; may use await; return the value you want back' }, ts: { type: 'boolean', description: 'the code is TypeScript: its types are stripped before it runs (they are not checked)' } }, required: ['code'] },
       execute: async input => {
-        const code = String((input && input.code) || '')
+        let code = String((input && input.code) || '')
         const step = { code, t: now(), status: 'running' }
         msg.steps.push(step); this.ev.emit('step', th.id)
         const b = o.budget
@@ -159,6 +160,14 @@ export const Agent = {
           delete step.decide
           if (!ok) { step.status = 'skipped'; this.ev.emit('step', th.id); return JSON.stringify({ ok: false, error: { kind: 'declined', message: 'the person declined to run this eval; ask or try something else' } }) }
           step.status = 'running'; this.ev.emit('step', th.id)
+        }
+        if (input && input.ts) {
+          const t = await Types.transpile(code)
+          if (t.error) {
+            Object.assign(step, { ok: false, status: 'error', out: 'syntax: ' + t.error + (t.line ? ' (line ' + t.line + ')' : '') }); this.ev.emit('step', th.id)
+            return JSON.stringify({ ok: false, error: { kind: 'syntax', message: 'the TypeScript does not compile: ' + t.error, line: t.line || undefined } })
+          }
+          code = t.code
         }
         const r = await runEval(ctx, code, { sid: th.id, restore: th.scope && th.scope.vars })
         Object.assign(step, { ok: r.ok, ms: r.ms, engine: r.engine, calls: r.calls, effects: r.effects || undefined })

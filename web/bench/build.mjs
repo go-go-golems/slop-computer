@@ -6,6 +6,9 @@
 //   index.html  src/index.html (the page and all its CSS)
 //   sandbox.js  src/worker/worker.js bundled with QuickJS and acorn;
 //               src/worker/core.js (the term core) inlined as __CORE_SRC__
+//   checker.js  src/checker/checker.js bundled with TypeScript (pinned in
+//               package.json) and the lib .d.ts files its two programs
+//               use, inlined as __TS_LIBS__ (SLOP3-024 phase 3)
 //
 // and pkg/doors/pages/assets/probe.js: src/frames/probe.js's PROBE, started
 // in embedded mode, which slop's sandbox adds to dev embeds (the frames the
@@ -53,6 +56,33 @@ await build({
   target: 'es2020', minify: true, legalComments: 'none', logLevel: 'warning', banner: { js: banner },
   define: { 'process.env.NODE_ENV': '"production"', __CORE_SRC__: JSON.stringify(readFileSync('src/worker/core.js', 'utf8')) },
   plugins: [stubNode],
+});
+
+// The type checker: TypeScript and the libs the pages (ES2022, DOM) and the
+// actor (ES2020) use, with every lib they reference. Minified: it is
+// TypeScript's compiler, read in the browser's tools by nobody.
+const libDir = 'node_modules/typescript/lib/';
+const libs = {};
+const addLib = (name) => {
+  const file = 'lib.' + name.toLowerCase() + '.d.ts';
+  if (libs[file] !== undefined) return;
+  const text = readFileSync(libDir + file, 'utf8');
+  libs[file] = text;
+  for (const m of text.matchAll(/^\/\/\/ <reference lib="([^"]+)" \/>/gm)) addLib(m[1]);
+};
+for (const l of ['es2022', 'dom', 'dom.iterable', 'es2020', 'es2022.full']) addLib(l);
+const stubAllNode = {
+  name: 'stub-node-all',
+  setup(b) {
+    b.onResolve({ filter: /^(fs|path|os|crypto|perf_hooks|inspector|buffer|source-map-support|module|url|util|child_process|worker_threads)$/ }, (a) => ({ path: a.path, namespace: 'stub' }));
+    b.onLoad({ filter: /.*/, namespace: 'stub' }, () => ({ contents: 'module.exports = {}', loader: 'js' }));
+  },
+};
+await build({
+  entryPoints: ['src/checker/checker.js'], outfile: `${out}/checker.js`, bundle: true, format: 'iife', platform: 'browser',
+  target: 'es2020', minify: true, legalComments: 'none', logLevel: 'warning', banner: { js: banner },
+  define: { __TS_LIBS__: JSON.stringify(libs) },
+  plugins: [stubAllNode],
 });
 
 // The server's probe: the boot data names the bench (parentOrigin); the

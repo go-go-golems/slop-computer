@@ -1,4 +1,4 @@
-/* the bench, built from web/bench: do not edit. source sha256:c98279bd2a4f39450dc4c1d1c1eb28a9024c1a5967be13fc457ecb6e8eec2601 */
+/* the bench, built from web/bench: do not edit. source sha256:d5363ad901e2f2ea9700d05424eced3de9b7b7ce78a9cb76831d78b02536db4e */
 // The bench: a live dev environment for slop apps. Built from web/bench/src.
 (() => {
   // src/lib/util.js
@@ -2466,6 +2466,11 @@
     if (e.fixedIssues) parts.push("fixed " + plural(e.fixedIssues.length, "issue"));
     if (e.newIssues) parts.push(plural(e.newIssues.length, "new issue"));
     if (e.newErrors) parts.push(plural(e.newErrors.length, "new error"));
+    if (e.types && e.types.skipped) parts.push("types not checked");
+    else if (e.types) {
+      if (e.types.new.length) parts.push(plural(e.types.new.length + (e.types.more || 0), "new type error"));
+      if (e.types.fixed) parts.push("fixed " + plural(e.types.fixed, "type error"));
+    }
     if (e.layout) parts.push("layout changed on " + e.layout.map((l) => l.frame.split(" ")[0]).filter((x, i, a) => a.indexOf(x) === i).join(", "));
     return parts.join(" \xB7 ");
   }
@@ -3029,6 +3034,169 @@
     "dry.discard": { sig: "id", internal: true, run: (ctx, id) => ctx.changesets.delete(id) }
   };
 
+  // src/agent/types.js
+  var CODE = /\.(ts|tsx|mts|cts)$/;
+  var RELEVANT = (p) => CODE.test(p) || p === "app.json" || p === "tsconfig.json" || p === "vendor/tsconfig.vendor.json";
+  var Types = {
+    worker: null,
+    state: "off",
+    version: "",
+    seq: 0,
+    waits: /* @__PURE__ */ new Map(),
+    decl: /* @__PURE__ */ new Map(),
+    // Whether a view is an app the checker looks at: it has TypeScript of its own.
+    wants(view) {
+      return view.list().some((p) => CODE.test(p) && !p.endsWith(".d.ts") && !p.startsWith("vendor/") && !p.startsWith("node_modules/"));
+    },
+    // The view's files the checker reads, taken now (a later write does not change them).
+    filesOf(view) {
+      const out = {};
+      for (const p of view.list()) if (RELEVANT(p)) {
+        const t = view.read(p);
+        if (typeof t === "string") out[p] = t;
+      }
+      return out;
+    },
+    spawn() {
+      if (this.worker) return;
+      this.state = "loading";
+      const attach = (w) => {
+        w.onmessage = (e) => {
+          const m = e.data || {};
+          if (m.type === "ready") {
+            this.state = "ready";
+            this.version = m.version;
+            return;
+          }
+          const wait = this.waits.get(m.id);
+          if (wait) {
+            this.waits.delete(m.id);
+            wait(m);
+          }
+        };
+        w.onerror = (e) => {
+          e.preventDefault && e.preventDefault();
+          this.fail("the checker could not start");
+        };
+        this.worker = w;
+      };
+      try {
+        attach(new Worker("checker.js"));
+      } catch {
+        fetch("checker.js").then((r) => r.text()).then((src) => attach(new Worker(URL.createObjectURL(new Blob([src], { type: "text/javascript" }))))).catch(() => this.fail("the checker could not load"));
+      }
+    },
+    fail(why2) {
+      this.state = "off";
+      this.worker = null;
+      for (const [, w] of this.waits) w({ ok: false, error: why2 });
+      this.waits.clear();
+    },
+    // Sends a message; resolves with the answer, or {timeout} after ms (the
+    // answer, when it comes, is dropped: the worker answers in order).
+    post(msg, ms) {
+      this.spawn();
+      const id = ++this.seq;
+      return new Promise((resolve) => {
+        const t = setTimeout(() => {
+          if (this.waits.delete(id)) resolve({ ok: false, timeout: true });
+        }, ms);
+        this.waits.set(id, (m) => {
+          clearTimeout(t);
+          resolve(m);
+        });
+        const send = () => this.worker ? this.worker.postMessage({ ...msg, id }) : setTimeout(send, 50);
+        send();
+      });
+    },
+    // The app's declarations ({name: text}), fetched once per app until invalidated.
+    declarations(P) {
+      let d = this.decl.get(P.app);
+      if (!d) {
+        d = Slop.call("types", { app: P.app }).then((r) => Object.fromEntries((r.files || []).map((f) => [f.path, f.text])));
+        d.catch(() => {
+          if (this.decl.get(P.app) === d) this.decl.delete(P.app);
+        });
+        this.decl.set(P.app, d);
+      }
+      return d;
+    },
+    invalidate(P) {
+      this.decl.delete(P.app);
+    },
+    // Type errors in a view: {diags: [{file, line, col, code, message,
+    // program}], ms} or {skipped: why}.
+    async check(P, view, { timeoutMs = 2e3 } = {}) {
+      const files2 = this.filesOf(view);
+      let decl;
+      try {
+        decl = await this.declarations(P);
+      } catch (e) {
+        return { skipped: "no declarations from the server: " + (e.message || e) };
+      }
+      const r = await this.post({ type: "check", files: files2, decl }, timeoutMs);
+      if (r.timeout) return { skipped: this.state === "ready" ? "the check took longer than " + Math.round(timeoutMs / 1e3) + " s" : "the checker was still loading" };
+      if (!r.ok) return { skipped: r.error || "the checker failed" };
+      return { diags: r.diags, ms: r.ms };
+    },
+    // The type at a position in a file of the view: {text, doc} or null.
+    async info(P, view, path, pos) {
+      let decl;
+      try {
+        decl = await this.declarations(P);
+      } catch {
+        return null;
+      }
+      const r = await this.post({ type: "info", files: this.filesOf(view), decl, path, pos }, 3e3);
+      return r.ok && r.text ? { text: r.text, doc: r.doc || "" } : null;
+    },
+    // An eval's TypeScript body with its types stripped: {code} or {error, line}.
+    async transpile(code) {
+      const r = await this.post({ type: "transpile", code }, 2e4);
+      if (r.timeout) return { error: "the checker did not load in time to compile TypeScript" };
+      return r.ok ? { code: r.code } : { error: r.error, line: r.line };
+    },
+    // What an eval did to the types: the errors after that were not there
+    // before (by file, code and message: an error that only moved lines is
+    // the same error), and how many before are gone. {new, fixed, total} or
+    // {skipped}.
+    diff(before, after, cap = 8) {
+      if (after.skipped) return { skipped: after.skipped };
+      if (before.skipped) return { skipped: "no check from before the eval (" + before.skipped + ")", total: after.diags.length };
+      const key = (d) => d.file + "|" + d.code + "|" + d.message;
+      const left = /* @__PURE__ */ new Map();
+      for (const d of before.diags) left.set(key(d), (left.get(key(d)) || 0) + 1);
+      const added = [];
+      for (const d of after.diags) {
+        const n = left.get(key(d)) || 0;
+        if (n) left.set(key(d), n - 1);
+        else added.push({ file: d.file, line: d.line, message: d.message });
+      }
+      const fixed = [...left.values()].reduce((a, b) => a + b, 0);
+      const out = { new: added.slice(0, cap), fixed, total: after.diags.length };
+      if (added.length > cap) out.more = added.length - cap;
+      return out;
+    }
+  };
+  var headView = (d) => ({ list: () => d.list(), read: (p) => d.read(p) });
+
+  // src/agent/api/types.js
+  var TYPES = {
+    "types.check": {
+      sig: "{file}?",
+      long: true,
+      doc: "{errors: [{file, line, col, message, program}], count} for the files as this eval sees them (its own writes included), or {skipped}: TypeScript errors in the pages and the actor, checked against the app's declarations",
+      run: async (ctx, o = {}) => {
+        const view = ctx.tx || headView(ctx.draft);
+        if (!Types.wants(view)) return { errors: [], count: 0, note: "the app has no TypeScript files" };
+        const r = await Types.check(ctx.project, view, { timeoutMs: 2e4 });
+        if (r.skipped) return { skipped: r.skipped };
+        const errors = r.diags.filter((d) => !o.file || d.file === o.file).map((d) => ({ file: d.file, line: d.line, col: d.col, message: d.message, program: d.program }));
+        return { errors: errors.slice(0, 50), count: errors.length };
+      }
+    }
+  };
+
   // src/agent/api/ui.js
   var pins = (P) => P.meta.pins = P.meta.pins || [];
   var UI = {
@@ -3155,7 +3323,7 @@
   }
 
   // src/agent/api/index.js
-  var API = defineAPI(FILES, APP, FRAMES, TESTS, SESSION, UI, LIB, TX, AGENTS);
+  var API = defineAPI(FILES, APP, FRAMES, TESTS, SESSION, UI, LIB, TX, AGENTS, TYPES);
 
   // src/model/templates.js
   var esc = (s) => String(s).replace(/[<&"]/g, "");
@@ -3175,7 +3343,7 @@ ${body}
 </body>
 </html>
 `;
-  var TYPES = `Files are TypeScript; the server compiles them (types are stripped, not
+  var TYPES2 = `Files are TypeScript; the server compiles them (types are stripped, not
 checked). To check them, pull the app and run \`slop types <app>\`: it writes
 the declarations into \`.slop/types/\` and the tsconfig files, then
 \`tsc -p tsconfig.json\` checks the pages`;
@@ -3236,7 +3404,7 @@ A slop app: \`app.json\` is its manifest, \`index.html\` its page, and
 \`main.ts\` the page's script. It keeps notes in the app's document database
 (\`claude.use('db')\`).
 
-${TYPES}.
+${TYPES2}.
 
 Edits in the bench go to the \`draft\` ref and your dev instance runs them;
 publishing moves \`main\`, which production instances run.
@@ -3340,7 +3508,7 @@ checks before the action runs, and of its result. They are the contract:
 \`defineAction\` types the action's code from them, and \`slop types\`
 declares the page's \`slop.actions\` from them (\`.slop/types/actions.d.ts\`).
 
-${TYPES}, and \`tsc -p tsconfig.actor.json\` the actor.
+${TYPES2}, and \`tsc -p tsconfig.actor.json\` the actor.
 
 Edits in the bench go to the \`draft\` ref and your dev instance runs them;
 publishing moves \`main\`, which production instances run (their migrations
@@ -3521,6 +3689,7 @@ run then).
     const line = firstLine(code), t0 = now();
     const before = parent ? null : await framesBefore(P, ctx.ws);
     const tx = parent ? parent.child({ label: "eval" }) : d.begin({ label: "eval", event: { who: ctx.who, thread: ctx.thread, note: line } });
+    const typesBefore = !parent && Types.wants(tx) ? Types.check(P, tx, { timeoutMs: 15e3 }) : null;
     ctx.tx = tx;
     ctx.stack = [];
     ctx.logs = [];
@@ -3547,6 +3716,11 @@ run then).
         Object.assign(effects, { files: files2, commit: { ref: d.ref, n: c.n, merged: c.merged } });
         if (c.activated.length) effects.instances = c.activated.map((a) => ({ store: a.store, n: a.n, broken: a.broken || a.error || void 0 }));
         Object.assign(effects, await afterCommit(ctx, c, before, t0));
+        if (typesBefore || Types.wants(tx)) {
+          if (c.activated.length) Types.invalidate(P);
+          const t = Types.diff(typesBefore ? await typesBefore : { diags: [] }, await Types.check(P, tx));
+          if (t.skipped || t.new.length || t.fixed) effects.types = t;
+        }
       } else {
         tx.abort();
         r.ok = false;
@@ -3662,6 +3836,8 @@ Subagents. delegate(role, task, { output, evals, proposal }) runs another Claude
 - actor.ts: defineActor({ actions: { name: { requires: 'view' | 'interact' | 'admin', async run(ctx, args) { \u2026 } } }, setup(ctx) { \u2026 } }). ctx.visitor is {id, name, level}. use('sql') runs SQL on the instance's own tables, synchronously, each argument a separate parameter (never an array): sql.all(query, ...args) -> rows, sql.one(query, ...args) -> row or null, sql.run(query, ...args). Files only the actor uses go under server/.
 - sql/NNN_name.sql are migrations, applied once per instance, in order. Never edit one that has run; add a new file. app.reset() gives you a fresh dev instance when you must.
 - After writing the actor or a migration, look at effects.instances and effects.actorLogs (or app.logs()) before going on.
+- In an app with TypeScript, the bench type-checks the pages and the actor against the app's declarations (the same check as tsc with slop types). An eval's effects.types says what it did: {new: [{file, line, message}], fixed, total} (or {skipped} when the checker was not ready). Fix the type errors your eval introduced in your next eval; they are real mistakes (a misspelled field, a wrong argument), even though the page may still run. types.check() lists all of them, as your eval sees the files. Do not chase errors that were there before you, unless asked.
+- Your eval code may be TypeScript too: pass ts: true with it (the types are stripped, not checked).
 Markdown files (README.md, notes, specs) render in the Docs panel. Keep README.md current when you change pages, the actor or migrations.`;
   }
   var RULES = `Working rules:
@@ -3843,9 +4019,9 @@ Markdown files (README.md, notes, specs) render in the Docs panel. Keep README.m
       const tool = {
         name: "eval",
         description: "Run a JavaScript async function body in the bench sandbox with the host API in scope (files, app, frames, fixtures, scenarios, session, ui, lib, publish) and the step core (step, seq, par, delegate, \u2026). Use `return` for the result. Returns {ok, value, logs, error, effects}.",
-        inputSchema: { type: "object", properties: { code: { type: "string", description: "JavaScript statements; may use await; return the value you want back" } }, required: ["code"] },
+        inputSchema: { type: "object", properties: { code: { type: "string", description: "JavaScript statements; may use await; return the value you want back" }, ts: { type: "boolean", description: "the code is TypeScript: its types are stripped before it runs (they are not checked)" } }, required: ["code"] },
         execute: async (input) => {
-          const code = String(input && input.code || "");
+          let code = String(input && input.code || "");
           const step = { code, t: now(), status: "running" };
           msg.steps.push(step);
           this.ev.emit("step", th.id);
@@ -3872,6 +4048,15 @@ Markdown files (README.md, notes, specs) render in the Docs panel. Keep README.m
             }
             step.status = "running";
             this.ev.emit("step", th.id);
+          }
+          if (input && input.ts) {
+            const t = await Types.transpile(code);
+            if (t.error) {
+              Object.assign(step, { ok: false, status: "error", out: "syntax: " + t.error + (t.line ? " (line " + t.line + ")" : "") });
+              this.ev.emit("step", th.id);
+              return JSON.stringify({ ok: false, error: { kind: "syntax", message: "the TypeScript does not compile: " + t.error, line: t.line || void 0 } });
+            }
+            code = t.code;
           }
           const r = await runEval(ctx, code, { sid: th.id, restore: th.scope && th.scope.vars });
           Object.assign(step, { ok: r.ok, ms: r.ms, engine: r.engine, calls: r.calls, effects: r.effects || void 0 });
@@ -6035,6 +6220,9 @@ Markdown files (README.md, notes, specs) render in the Docs panel. Keep README.m
       Watch.start(P);
       Snaps.open(P).catch(() => {
       });
+      const head = headView(P.draftOf("draft"));
+      if (Types.wants(head)) Types.check(P, head, { timeoutMs: 3e4 }).catch(() => {
+      });
       this.ev.emit("project", P);
       if (this.canvas) this.canvas.sync();
       this.paintHeader();
@@ -7513,7 +7701,7 @@ Markdown files (README.md, notes, specs) render in the Docs panel. Keep README.m
 
   // src/ui/code.js
   var isMd = (p) => /\.(md|markdown)$/i.test(p || "");
-  var CODE = {
+  var CODE2 = {
     title: "Code",
     sub: "files",
     make() {
@@ -7596,7 +7784,12 @@ Markdown files (README.md, notes, specs) render in the Docs panel. Keep README.m
         pre.innerHTML = highlight(S.cur, ta.value) + "\n";
         const n = ta.value.split("\n").length;
         let s = "";
-        for (let i = 1; i <= n; i++) s += "<div" + (i === S.hiLine ? ' class="hit"' : "") + ">" + i + "</div>";
+        const errs = /* @__PURE__ */ new Map();
+        for (const d of S.tdiags || []) if (d.file === S.cur) errs.set(d.line, (errs.has(d.line) ? errs.get(d.line) + "\n" : "") + d.message);
+        for (let i = 1; i <= n; i++) {
+          const cls = [i === S.hiLine ? "hit" : "", errs.has(i) ? "terr" : ""].filter(Boolean).join(" ");
+          s += "<div" + (cls ? ' class="' + cls + '"' : "") + (errs.has(i) ? ' title="' + escHtml(errs.get(i)) + '"' : "") + ">" + i + "</div>";
+        }
         gin.innerHTML = s;
         paintBlame();
         scroll();
@@ -7680,11 +7873,14 @@ Markdown files (README.md, notes, specs) render in the Docs panel. Keep README.m
         const ws = App.ws, prop = App.proposal(), d = P().draftOf(ws), nv = S.versions ? S.versions.length : 0;
         const pos = ta.value.slice(0, ta.selectionStart).split("\n");
         const conflict = d.conflict && d.conflict.conflicts.includes(S.cur) ? d.conflict : null;
+        const terrs = (S.tdiags || []).filter((x) => x.file === S.cur);
         put(
           foot,
           h("b", S.cur),
           h("span", "Ln " + pos.length + ", Col " + (pos[pos.length - 1].length + 1)),
           h("span", prop ? 'editing proposal "' + prop.title + '"' : "editing draft"),
+          S.tdiags ? h("button.link" + (terrs.length ? ".terr" : ""), { title: "TypeScript errors in this file (and in the app)", on: { click: (ev) => typeMenu(ev.currentTarget) } }, terrs.length ? plural(terrs.length, "type error") : "types ok", S.tdiags.length > terrs.length ? " (" + S.tdiags.length + " in the app)" : "") : null,
+          S.tinfo ? h("span.mono.tinfo", { title: S.tinfo }, S.tinfo.length > 70 ? S.tinfo.slice(0, 70) + "\u2026" : S.tinfo) : null,
           S.pending || d.edits && d.edits.changes.has(S.cur) ? h("span", conflict ? "" : "saving\u2026") : null,
           S.trace ? h(
             "span",
@@ -7777,6 +7973,47 @@ Markdown files (README.md, notes, specs) render in the Docs panel. Keep README.m
         if (!same) loadVersions();
         if (line) goto(line);
       }
+      const typeView = () => {
+        const d = P().draftOf(App.ws);
+        return d.edits && d.edits.open ? d.edits : headView(d);
+      };
+      const typesSoon = debounce(async () => {
+        const p = P();
+        if (!p || S.snap) return;
+        const view = typeView();
+        if (!Types.wants(view)) {
+          if (S.tdiags) {
+            S.tdiags = null;
+            paintCode();
+            paintFoot();
+          }
+          return;
+        }
+        const r = await Types.check(p, view, { timeoutMs: 2e4 });
+        if (r.skipped || P() !== p) return;
+        S.tdiags = r.diags;
+        paintCode();
+        paintFoot();
+      }, 500);
+      const infoSoon = debounce(async () => {
+        const p = P(), path = S.cur;
+        if (!p || !path || S.snap || !/\.(ts|tsx|mts|cts)$/.test(path) || !S.tdiags) {
+          if (S.tinfo) {
+            S.tinfo = "";
+            paintFoot();
+          }
+          return;
+        }
+        const i = await Types.info(p, typeView(), path, ta.selectionStart);
+        if (S.cur !== path) return;
+        S.tinfo = i ? i.text : "";
+        paintFoot();
+      }, 300);
+      function typeMenu(anchor) {
+        const all = S.tdiags || [];
+        if (!all.length) return toast("No type errors");
+        popMenu(anchor, all.slice(0, 40).map((d) => ({ label: d.file + ":" + d.line + " " + d.message.split("\n")[0].slice(0, 90), sub: d.program, run: () => d.file === S.cur ? goto(d.line) : open2(d.file, d.line) })));
+      }
       function goto(line) {
         const off = offsetOfLine(ta.value, line);
         ta.focus({ preventScroll: true });
@@ -7803,6 +8040,7 @@ Markdown files (README.md, notes, specs) render in the Docs panel. Keep README.m
           toast(e.message);
         }
         paintFoot();
+        typesSoon();
       }
       ta.addEventListener("input", () => {
         S.pending = { path: S.cur, ws: App.ws, text: ta.value };
@@ -7814,10 +8052,12 @@ Markdown files (README.md, notes, specs) render in the Docs panel. Keep README.m
       ta.addEventListener("keyup", () => {
         paintFoot();
         traceSoon();
+        infoSoon();
       });
       ta.addEventListener("click", () => {
         paintFoot();
         traceSoon();
+        infoSoon();
       });
       const traceSoon = debounce(async () => {
         let t = null;
@@ -7867,10 +8107,13 @@ Markdown files (README.md, notes, specs) render in the Docs panel. Keep README.m
         S.cur = null;
         S.pending = null;
         S.snap = null;
+        S.tdiags = null;
+        S.tinfo = "";
         paintTabs();
         paintList();
         load();
         refreshChanged();
+        typesSoon();
       });
       App.ev.on("ws", () => {
         commit();
@@ -7880,12 +8123,14 @@ Markdown files (README.md, notes, specs) render in the Docs panel. Keep README.m
         load(true);
         refreshChanged();
         if (S.cur) loadVersions();
+        typesSoon();
       });
       const changedSoon = debounce(refreshChanged, 400);
       App.ev.on("files", (ws, paths) => {
         if (ws !== App.ws) return;
         paintList();
         changedSoon();
+        typesSoon();
         if (S.snap) {
           paintFoot();
           return;
@@ -9131,7 +9376,7 @@ return { files: list.map(f => f.path), issues }`;
     console: CONSOLE,
     data: DATA,
     scenarios: SCENARIOS,
-    code: CODE,
+    code: CODE2,
     docs: DOCS,
     review: REVIEW,
     inspector: INSPECTOR,

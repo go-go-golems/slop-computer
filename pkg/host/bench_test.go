@@ -541,6 +541,12 @@ func TestBenchArgs(t *testing.T) {
 		}
 	}
 
+	// The page's checker gets the same declarations through the bench's
+	// types action (workshop.types → app.types).
+	tr := h.call(admin, "actor.call", map[string]any{"store": "bench", "action": "types", "args": map[string]any{"app": "bench"}}).(map[string]any)
+	if fs, _ := tr["files"].([]any); len(fs) != 4 || !strings.Contains(fmtJSON(fs), "interface AppActions") {
+		t.Fatalf("types = %.300s", fmtJSON(tr))
+	}
 	decl := appTypes(h, admin, "bench")
 	actions := decl[client.TypesDir+"/actions.d.ts"]
 	for _, want := range []string{

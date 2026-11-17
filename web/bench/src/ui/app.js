@@ -25,6 +25,7 @@ import { Publish } from '../server/publish.js';
 import { Sandbox } from '../agent/sandbox.js';
 import { Slop } from '../server/slop.js';
 import { Snaps } from '../frames/layout.js';
+import { Types, headView } from '../agent/types.js';
 import { appZip, readArchive, saveFile, slug } from './archive.js';
 import { clone, debounce, emitter, lineOf, now, offsetOfLine, plural } from '../lib/util.js';
 
@@ -148,6 +149,10 @@ export const App = {
       ...this.autoMarks(P))
     Watch.start(P)
     Snaps.open(P).catch(() => { })
+    // an app with TypeScript: warm the checker now (its first check parses
+    // the DOM's types, about a second), so the first eval's check is quick
+    const head = headView(P.draftOf('draft'))
+    if (Types.wants(head)) Types.check(P, head, { timeoutMs: 30000 }).catch(() => { })
     this.ev.emit('project', P)
     if (this.canvas) this.canvas.sync()
     this.paintHeader()

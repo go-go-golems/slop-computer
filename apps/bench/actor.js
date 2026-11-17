@@ -276,6 +276,21 @@ defineActor({
       },
     },
 
+    // The app's TypeScript declarations (app.types: page.d.ts, actor.d.ts,
+    // modules.d.ts, actions.d.ts), for the page's type checker (SLOP3-024
+    // phase 3). The actions are the visitor's dev instance's, which runs
+    // draft, when it exists; else the app store's.
+    types: {
+      requires: 'view',
+      args: args({ app: S.store }, ['app']),
+      async run(ctx, { app }) {
+        const dev = instanceId(app, ctx.visitor.id, 'dev');
+        const st = await statusOf(ctx, dev, { peek: true });
+        const r = await tool(ctx).types(app, st && st.app === app ? { instance: dev } : {});
+        return { n: r.n, instance: r.instance, files: r.files };
+      },
+    },
+
     // ---- instances: the visitor's dev, test and prop stores of an app ----
 
     // Where the app's refs are and what the visitor's instances run (peeked:

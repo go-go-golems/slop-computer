@@ -1,6 +1,6 @@
 // The bench's import lines, kept by a tool: node tools/imports.mjs [--write]
 //
-// Every module under src/ (except the worker, built on its own) says what it
+// Every module under src/ (except the workers, built on their own) says what it
 // uses from the others with `import { … } from './…'` lines at its top. This
 // tool parses each module (acorn), finds the names it uses but does not
 // declare, and resolves them against what the other modules export:
@@ -16,7 +16,7 @@ import { join, relative, dirname } from 'node:path';
 import { parse } from 'acorn';
 
 const ROOT = new URL('../src/', import.meta.url).pathname;
-const SKIP = new Set(['worker/worker.js', 'worker/core.js']);
+const SKIP = new Set(['worker/worker.js', 'worker/core.js', 'checker/checker.js']);
 // globals of a page (and of the bench's own window.claude runtime)
 const GLOBALS = new Set(('window document navigator location history console localStorage sessionStorage fetch URL URLSearchParams Blob File FileReader ' +
   'TextEncoder TextDecoder crypto performance requestAnimationFrame cancelAnimationFrame setTimeout clearTimeout setInterval clearInterval queueMicrotask ' +
