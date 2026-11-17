@@ -7,6 +7,7 @@ import (
 	"os"
 	"path/filepath"
 	"sort"
+	"strconv"
 	"strings"
 	"testing"
 
@@ -176,5 +177,26 @@ func TestFetchCaches(t *testing.T) {
 	}
 	if n != 2 {
 		t.Fatalf("calls: %d", n)
+	}
+}
+
+// A verb never makes the CLI open a file through a source map URL
+// (pkg/jsrt): the stack of an error made in eval'd code names no file the
+// URL points at.
+func TestVerbOpensNoFiles(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "outside.map")
+	if err := os.WriteFile(path, []byte(`{"version":3,"sources":["outside.ts"],"names":[],"mappings":"AAAA;AAAA;AAAA;AAAA"}`), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	byFile := strconv.Quote("new Error('x').stack\n//# sourceMappingURL=file://" + filepath.ToSlash(path) + "\n")
+	src := &Source{Store: "s-1", Type: "maps", App: "maps", Snapshot: 1, Alias: "mp", Files: []File{{Path: "verbs/where.js",
+		Source: "function where() { return eval(" + byFile + ") }\n__verb__(\"where\", { short: \"Where an error says it is\", output: \"text\" });\n"}}}
+	var errw bytes.Buffer
+	out, err := stdout(t, func() error {
+		return Execute(context.Background(), src, &fake{}, Board{ID: "s-1", Title: "M", Type: "maps", App: "maps"},
+			[]string{"slop", "mp", "M"}, "maps' verbs", []string{"verbs", "where", "where"}, &errw, &errw)
+	})
+	if err != nil || !strings.Contains(out, "Error: x") || strings.Contains(out, "outside.ts") {
+		t.Fatalf("where: %v %q %s", err, out, errw.String())
 	}
 }
