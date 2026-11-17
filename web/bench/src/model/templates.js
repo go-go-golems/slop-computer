@@ -44,6 +44,7 @@ form { display: flex; gap: .5rem; margin: 1rem 0; }
 input { flex: 1; font: inherit; padding: .4rem .6rem; border: 1px solid #bbb; }
 button { font: inherit; padding: .4rem .9rem; border: 1px solid #1a1a1a; background: #fff; cursor: pointer; }
 li { padding: .25rem 0; }
+.starter { color: #6b6b6b; font-size: 14px; border-left: 3px solid #d0d0d0; padding-left: 10px; }
 `
 
 export const APP_TEMPLATES = [
@@ -53,6 +54,7 @@ export const APP_TEMPLATES = [
     files: ({ title }) => ({
       'app.json': JSON.stringify({ title: esc(title), page: 'index.html', capabilities: { db: {} } }, null, 2) + '\n',
       'index.html': page(esc(title), `<h1>${esc(title)}</h1>
+<p class="starter">A starting point: a small list that works. Tell Claude in the chat what you want here, and this page becomes it.</p>
 <form id="add"><input name="text" placeholder="Something to remember" required><button>Add</button></form>
 <ul id="list"></ul>`),
       'main.ts': `// The page: notes in the app's document database.
@@ -159,6 +161,7 @@ CREATE TABLE items (
 );
 `,
       'index.html': page(esc(title), `<h1>${esc(title)}</h1>
+<p class="starter">A starting point: a small list that works. Tell Claude in the chat what you want here, and this page becomes it.</p>
 <form id="add"><input name="text" placeholder="Add an item" required><button>Add</button></form>
 <ul id="list"></ul>`),
       'main.ts': `// The page: it calls the actor's actions, typed by their schemas

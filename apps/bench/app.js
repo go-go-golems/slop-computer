@@ -1,4 +1,4 @@
-/* the bench, built from web/bench: do not edit. source sha256:fd8a2be5adf81eb098137c58b90ddd86258b111147838e77ed9c2013d88c4a55 */
+/* the bench, built from web/bench: do not edit. source sha256:2b096fae1388c2723bd2b3c17dba8d9afa73e3c1ba0b38687fdb13323373a346 */
 // The bench: a live dev environment for slop apps. Built from web/bench/src.
 (() => {
   // src/lib/util.js
@@ -3415,6 +3415,7 @@ form { display: flex; gap: .5rem; margin: 1rem 0; }
 input { flex: 1; font: inherit; padding: .4rem .6rem; border: 1px solid #bbb; }
 button { font: inherit; padding: .4rem .9rem; border: 1px solid #1a1a1a; background: #fff; cursor: pointer; }
 li { padding: .25rem 0; }
+.starter { color: #6b6b6b; font-size: 14px; border-left: 3px solid #d0d0d0; padding-left: 10px; }
 `;
   var APP_TEMPLATES = [
     {
@@ -3425,6 +3426,7 @@ li { padding: .25rem 0; }
       files: ({ title }) => ({
         "app.json": JSON.stringify({ title: esc(title), page: "index.html", capabilities: { db: {} } }, null, 2) + "\n",
         "index.html": page(esc(title), `<h1>${esc(title)}</h1>
+<p class="starter">A starting point: a small list that works. Tell Claude in the chat what you want here, and this page becomes it.</p>
 <form id="add"><input name="text" placeholder="Something to remember" required><button>Add</button></form>
 <ul id="list"></ul>`),
         "main.ts": `// The page: notes in the app's document database.
@@ -3533,6 +3535,7 @@ CREATE TABLE items (
 );
 `,
         "index.html": page(esc(title), `<h1>${esc(title)}</h1>
+<p class="starter">A starting point: a small list that works. Tell Claude in the chat what you want here, and this page becomes it.</p>
 <form id="add"><input name="text" placeholder="Add an item" required><button>Add</button></form>
 <ul id="list"></ul>`),
         "main.ts": `// The page: it calls the actor's actions, typed by their schemas
@@ -3911,7 +3914,7 @@ Subagents. delegate(role, task, { output, evals, proposal }) runs another Claude
 - Instances run the app on data of their own. The canvas frames show the person's dev instance, which follows draft (a proposal is shown on their prop instance); scenarios run on their test instance, reset and seeded per run. Production instances follow main.
 - app.json is the manifest: { "title", "page": "${Instances.entry(P)}" (the entry page), "actor": "actor.ts"?, "capabilities": { "db": {}, "user": {}, \u2026 }, "type"? }. Read it first, and README.md.
 - Write TypeScript (.ts; .tsx for JSX): the server compiles it when it serves a page or loads the actor. It strips the types and does not check them, so write them with care: the person checks them with slop types and tsc. Apps written in .js keep working; do not convert one unless asked.
-- Imports name the file with its extension: import { fmt } from './lib/fmt.ts', import type { Actions } from './api.ts'. There is no npm and no node_modules: a package is available only when the person has vendored it (vendor/, named in app.json's slop.imports). Never copy a package's code into the app. If a package would help: the person can't add one from the bench (only someone with the slop command line can: slop vendor <package>), so first build it without one when that is reasonable (a bar or line chart is a few dozen lines of SVG), and say so; otherwise tell them plainly that a developer has to add the package, in one sentence they can forward.
+- Imports name the file with its extension: import { fmt } from './lib/fmt.ts', import type { Actions } from './api.ts'. There is no npm and no node_modules: a package is available only when the person has vendored it (vendor/, named in app.json's slop.imports). A new app's page starts with a <p class="starter"> note saying it is a starting point; remove it (and the starter list, if it isn't wanted) when you build the person's page. Never copy a package's code into the app. If a package would help: the person can't add one from the bench (only someone with the slop command line can: slop vendor <package>), so first build it without one when that is reasonable (a bar or line chart is a few dozen lines of SVG), and say so; otherwise tell them plainly that a developer has to add the package, in one sentence they can forward.
 - Only the entry page gets the runtime; other .html files are served as plain files. Build one page and navigate inside it (hash routes: location.hash). Its script is a file: <script type="module" src="main.ts"><\/script>.
 - Pages use claude (window.claude): const db = await claude.use('db'), then db.doc('notes/a').set({\u2026}), (await db.doc('notes/a').get()).data(), (await db.collection('notes').get()).docs, db.collection('notes').add({\u2026}), onSnapshot(\u2026). Capabilities the manifest does not declare are null: check before use.
 - Live updates between people (a vote count on every phone, a board two people edit): don't poll. Either keep the shared state in db and render from onSnapshot, or, with an actor, send a room moment after each change so every open page refetches at once: const room = await claude.use('room'); room.on('votes', refetch); after a change, room.emit('votes', {}). Declare the topic in app.json: "capabilities": {"room": {"topics": {"votes": "interact"}}}. Say which you chose and why.
