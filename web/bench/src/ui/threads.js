@@ -102,7 +102,7 @@ export const THREADS = {
     }
     async function acceptProp(prop) {
       const r = await P().accept(prop.ref, null, 'you').catch(e => ({ status: 'failed', error: e.message }))
-      if (r.status === 'committed') { toast('Accepted "' + prop.title + '": the changes are in your draft now'); if (App.ws === prop.ref) App.setWs('draft') }
+      if (r.status === 'committed') { toast('Accepted "' + prop.title + '": the changes are in your draft now (test data you entered in its preview stays behind)', 6000); if (App.ws === prop.ref) App.setWs('draft') }
       else if (r.status === 'conflict') toast('Not accepted: the draft also changed ' + r.conflicts.join(', ') + '. Open Review to sort it out.', 8000)
       else toast('Not accepted: ' + (r.error || r.status), 6000)
       paintChat()
@@ -122,7 +122,7 @@ export const THREADS = {
           h('div', { style: { display: 'flex', gap: '6px' } }, h('button.btn.sm.primary', { on: { click: () => m.approval && m.approval.decide(true) } }, 'Approve'), h('button.btn.sm', { on: { click: () => m.approval && m.approval.decide(false) } }, 'Decline'))) : null,
         prop ? h('div.ctx', prop.status === 'open'
           ? [h('span.tag.ws', 'proposal'), ' ', m.summary || 'working in "' + prop.title + '"',
-            m.summary && m.status !== 'running' ? h('div.note', 'These changes are in a proposal: a copy of your app. Your app does not change until you accept them.') : null,
+            m.summary && m.status !== 'running' ? h('div.note', 'These changes are in a proposal: a copy of your app. Your app does not change until you accept them. What you type into its preview stays with the preview: accepting takes the changes, not that test data.') : null,
             h('span', { style: { display: 'inline-flex', gap: '8px', marginLeft: '6px' } },
               App.ws !== prop.ref ? h('button.link', { on: { click: () => App.setWs(prop.ref) } }, 'Show it') : null,
               h('button.link', { on: { click: () => { App.setWs(prop.ref); Dock.open('review') } } }, 'Review'),

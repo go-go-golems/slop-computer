@@ -1,4 +1,4 @@
-/* the bench, built from web/bench: do not edit. source sha256:1e3a11a3fb2b730989b75ec4567e709efaa714cf9093fde1306ae58066b515fa */
+/* the bench, built from web/bench: do not edit. source sha256:82bbc1452f3e2b4769fd44dbb67b5e776bb8d10e58b01140f383aae84d879614 */
 // The bench: a live dev environment for slop apps. Built from web/bench/src.
 (() => {
   // src/lib/util.js
@@ -9284,7 +9284,7 @@ return { files: list.map(f => f.path), issues }`;
       async function acceptProp(prop) {
         const r = await P().accept(prop.ref, null, "you").catch((e) => ({ status: "failed", error: e.message }));
         if (r.status === "committed") {
-          toast('Accepted "' + prop.title + '": the changes are in your draft now');
+          toast('Accepted "' + prop.title + '": the changes are in your draft now (test data you entered in its preview stays behind)', 6e3);
           if (App.ws === prop.ref) App.setWs("draft");
         } else if (r.status === "conflict") toast("Not accepted: the draft also changed " + r.conflicts.join(", ") + ". Open Review to sort it out.", 8e3);
         else toast("Not accepted: " + (r.error || r.status), 6e3);
@@ -9325,7 +9325,7 @@ return { files: list.map(f => f.path), issues }`;
             h("span.tag.ws", "proposal"),
             " ",
             m.summary || 'working in "' + prop.title + '"',
-            m.summary && m.status !== "running" ? h("div.note", "These changes are in a proposal: a copy of your app. Your app does not change until you accept them.") : null,
+            m.summary && m.status !== "running" ? h("div.note", "These changes are in a proposal: a copy of your app. Your app does not change until you accept them. What you type into its preview stays with the preview: accepting takes the changes, not that test data.") : null,
             h(
               "span",
               { style: { display: "inline-flex", gap: "8px", marginLeft: "6px" } },

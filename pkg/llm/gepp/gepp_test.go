@@ -480,3 +480,21 @@ func TestSilentEndAsksForAReply(t *testing.T) {
 	require.NotNil(t, rec.last("error").Error)
 	assert.Equal(t, "empty_completion", rec.last("error").Error.Code)
 }
+
+// A tool call written as text ("<tool_call>…") ran nothing: the model is
+// told so and the round runs again, so the turn does not end mid-task.
+func TestToolCallAsTextIsRetried(t *testing.T) {
+	exec := func(context.Context, llm.Event) (llm.ToolResult, error) {
+		return llm.ToolResult{Value: json.RawMessage(`17`)}, nil
+	}
+	b, p := setup(t, nil,
+		text("Let me check.\n<tool_call>get_weather\n<arg_key>city</arg_key><arg_value>Oslo</arg_value></tool_call>"),
+		toolCalls("", [3]string{"call_1", "get_weather", `{"city":"Oslo"}`}),
+		text("It is 17 degrees in Oslo."))
+	rec := &recorder{}
+	require.NoError(t, b.Sample(context.Background(), req("weather?", llm.Options{}, weather), rec.emit, exec))
+	assert.Equal(t, "It is 17 degrees in Oslo.", *rec.last("result").Result.FinalText)
+	require.Len(t, p.bodies, 3)
+	assert.Contains(t, fmt.Sprint(p.bodies[1]["messages"]), "wrote a tool call as text")
+	assert.Contains(t, p.bodies[1], "tools", "the retried round still offers the tools")
+}

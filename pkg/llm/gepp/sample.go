@@ -33,6 +33,10 @@ func (f *failure) Error() string { return f.message }
 // its reply.
 const nudgeReply = "(From the system, not the person: you ended without replying. Reply to the person now, in a few plain sentences: what you did, what changed, and what they should do next. Do not call tools.)"
 
+// nudgeTextCall tells a model that wrote a tool call as text that it did
+// not run.
+const nudgeTextCall = "(From the system, not the person: your last message wrote a tool call as text (<tool_call>…); it did not run. Call the tool through the tool interface instead, or reply to the person if you are done.)"
+
 var (
 	errEmpty      = &failure{"empty_completion", "Empty completion"}
 	errRounds     = &failure{"upstream_error", "Tool round limit reached"}
@@ -126,6 +130,7 @@ func (c *call) run(ctx context.Context) error {
 		rounds = 5
 	}
 	nudged := false // asked once for a reply after a silent end
+	textCalls := 0  // rounds whose tool call came as text (told so, at most twice)
 	for round := 0; round < rounds; round++ {
 		if contextBytes(t) > maxContextBytes {
 			return errContext
@@ -184,6 +189,15 @@ func (c *call) run(ctx context.Context) error {
 		budget.consume(s.output)
 		t = out
 		calls := toolblocks.ExtractPendingToolCalls(t)
+		// A model that writes its tool call as text (GLM's "<tool_call>name
+		// <arg_key>…" markup) made no call: the turn would end mid-task with
+		// the markup as its reply (a persona review saw it). It is told, and
+		// the round runs again, at most twice.
+		if len(calls) == 0 && offersTools && textCalls < 2 && budget.remaining > 0 && strings.Contains(s.text, "<tool_call>") {
+			textCalls++
+			turns.AppendBlock(t, turns.NewUserTextBlock(nudgeTextCall))
+			continue
+		}
 		if len(calls) == 0 || budget.remaining <= 0 {
 			if strings.TrimSpace(c.visible) == "" {
 				// A model that used its tools and then stopped without a
