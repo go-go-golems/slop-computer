@@ -1,4 +1,4 @@
-/* the bench, built from web/bench: do not edit. source sha256:4c4fa6a8956823062974e83a8c8bd7c2d8a09f51968f7531d49ad6c4ee3c921b */
+/* the bench, built from web/bench: do not edit. source sha256:bdb22f87eed94746dd2a43bfee06dff005c5e8815d83d8186af65cd9a3fa68b3 */
 // The bench: a live dev environment for slop apps. Built from web/bench/src.
 (() => {
   // src/lib/util.js
@@ -7226,10 +7226,11 @@ Markdown files (README.md, notes, specs) render in the Docs panel. Keep README.m
           C.fitted = false;
           return;
         }
-        const z = clamp(Math.min((r.width - 60) / (b.x1 - b.x0), (r.height - 60) / (b.y1 - b.y0)), 0.1, 1.2);
+        const hud2 = 44;
+        const z = clamp(Math.min((r.width - 60) / (b.x1 - b.x0), (r.height - 60 - hud2) / (b.y1 - b.y0)), 0.1, 1.2);
         C.z = z;
         C.x = (r.width - (b.x1 - b.x0) * z) / 2 - b.x0 * z;
-        C.y = (r.height - (b.y1 - b.y0) * z) / 2 - b.y0 * z;
+        C.y = (r.height - hud2 - (b.y1 - b.y0) * z) / 2 - b.y0 * z;
         apply();
         saveView();
       }

@@ -58,8 +58,10 @@ export const CANVAS = {
     }
     function fit() {
       const b = bounds(), r = cv.getBoundingClientRect(); if (!b || !r.width) { C.fitted = false; return }
-      const z = clamp(Math.min((r.width - 60) / (b.x1 - b.x0), (r.height - 60) / (b.y1 - b.y0)), 0.1, 1.2)
-      C.z = z; C.x = (r.width - (b.x1 - b.x0) * z) / 2 - b.x0 * z; C.y = (r.height - (b.y1 - b.y0) * z) / 2 - b.y0 * z; apply(); saveView()
+      // the mode bar (SELECT · DRAFT) sits on the canvas's bottom edge: fit above it (a frame's form hid behind it, round 4)
+      const hud = 44
+      const z = clamp(Math.min((r.width - 60) / (b.x1 - b.x0), (r.height - 60 - hud) / (b.y1 - b.y0)), 0.1, 1.2)
+      C.z = z; C.x = (r.width - (b.x1 - b.x0) * z) / 2 - b.x0 * z; C.y = (r.height - hud - (b.y1 - b.y0) * z) / 2 - b.y0 * z; apply(); saveView()
     }
     const saveView = debounce(() => { const P = App.P; if (P) { P.meta.view = { x: C.x, y: C.y, z: C.z }; P.saveMeta() } }, 800)
 
