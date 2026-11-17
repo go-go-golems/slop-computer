@@ -286,9 +286,16 @@ export const App = {
       }
     }
     paint(pf.production)
-    if (!pf.production.length) list.append(h('div', 'No production instance follows main yet. Mount the app or make an instance (slop store new <id> --app ' + P.app + ').'))
+    if (!pf.production.length) list.append(h('div.note', 'No other copy of the app follows main.'))
+    // the person's question after a publish: what is my link?
+    const where = h('div', h('p.note', 'Looking up where the app is on the web…'))
+    Slop.call('addresses', { app: P.app }).then(r => {
+      clear(where)
+      if (r.urls.length) where.append(h('p', h('b', 'Your app is live at: '), ...r.urls.map((u, i) => [i ? ', ' : '', h('a', { href: u.url, target: '_blank', rel: 'noopener' }, u.url)])))
+      else where.append(h('p', h('b', 'Your app is published, but it has no web address yet. '), 'An administrator of this server gives it one (a mount: slop mount set --host <host> --path /' + P.app + ' --store ' + P.app + '); ask them, and the link will show here.'))
+    }).catch(() => { clear(where) })
     modal({
-      title: 'Published draft ' + n, wide: true, body: [h('p.note', 'Instances that follow main:'), list],
+      title: 'Published draft ' + n, wide: true, body: [where, h('p.note', 'Instances that follow main:'), list],
       actions: [{ label: from ? 'Roll back to ' + from : 'Close', danger: !!from, run: async () => { if (!from) return; try { await Publish.rollback(P, from, n); toast('main is back at ' + from) } catch (e) { toast('Not rolled back: ' + (e.message || e), 6000) } } }, ...(from ? [{ label: 'Done', primary: true }] : [])]
     })
   },

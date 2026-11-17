@@ -655,3 +655,24 @@ func TestBenchResetRestartsTheActor(t *testing.T) {
 		t.Fatalf("tables after the reset = %s", got)
 	}
 }
+
+// After a publish the person asks for their link: the bench's addresses
+// action lists the mounts serving the app (none until one is set).
+func TestBenchAddresses(t *testing.T) {
+	h := newHarness(t)
+	admin := h.tokenFor("admin@example.com", "read", "write", "admin")
+	installBench(t, h, admin)
+	h.call(admin, "store.new", map[string]any{"id": "jot"})
+	h.push(admin, map[string]any{"store": "jot", "files": files(devApp())})
+	addr := func() string {
+		t.Helper()
+		return fmtJSON(h.call(admin, "actor.call", map[string]any{"store": "bench", "action": "addresses", "args": map[string]any{"app": "jot"}}))
+	}
+	if got := addr(); got != `{"urls":[]}` {
+		t.Fatalf("addresses before a mount = %s", got)
+	}
+	h.call(admin, "mount.set", map[string]any{"host": h.cfg.Hosts.Live[0], "path": "/jot", "store": "jot"})
+	if got := addr(); !strings.Contains(got, `"kind":"live"`) || !strings.Contains(got, "/jot\"") {
+		t.Fatalf("addresses after a mount = %s", got)
+	}
+}

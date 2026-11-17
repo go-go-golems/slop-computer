@@ -1,4 +1,4 @@
-/* the bench, built from web/bench: do not edit. source sha256:aa56bd8c11bc69b5dcc31e29ec70450f42b34c5d9291eb4967e20fe92a4b93e0 */
+/* the bench, built from web/bench: do not edit. source sha256:723a7583909c37825af1d661a28e875afc7514a9a233ba36c9b817378ef9de62 */
 // The bench: a live dev environment for slop apps. Built from web/bench/src.
 (() => {
   // src/lib/util.js
@@ -1679,6 +1679,7 @@
         return { app: P.app, refs: P.refs, entry: Instances.entry(P), workspace: ctx.ws, instances: { dev: st.dev || null, test: st.test || null, props: st.props || [] } };
       }
     },
+    "app.addresses": { sig: "", doc: "{urls: [{url, kind}]}: where the published app is on the web (the mounts serving it); none means an administrator has not given it an address yet. Tell the person their link after a publish.", run: (ctx) => Slop.call("addresses", { app: ctx.project.app }) },
     "app.status": { sig: "", doc: "where the refs are and what each instance runs: {refs, dev, test, prop} ({id, ref, n, broken})", run: (ctx) => Slop.call("status", { app: ctx.project.app }) },
     "app.logs": {
       sig: "{limit, kind}?",
@@ -6508,11 +6509,19 @@ Markdown files (README.md, notes, specs) render in the Docs panel. Keep README.m
         }
       };
       paint(pf.production);
-      if (!pf.production.length) list.append(h("div", "No production instance follows main yet. Mount the app or make an instance (slop store new <id> --app " + P.app + ")."));
+      if (!pf.production.length) list.append(h("div.note", "No other copy of the app follows main."));
+      const where = h("div", h("p.note", "Looking up where the app is on the web\u2026"));
+      Slop.call("addresses", { app: P.app }).then((r) => {
+        clear(where);
+        if (r.urls.length) where.append(h("p", h("b", "Your app is live at: "), ...r.urls.map((u, i) => [i ? ", " : "", h("a", { href: u.url, target: "_blank", rel: "noopener" }, u.url)])));
+        else where.append(h("p", h("b", "Your app is published, but it has no web address yet. "), "An administrator of this server gives it one (a mount: slop mount set --host <host> --path /" + P.app + " --store " + P.app + "); ask them, and the link will show here."));
+      }).catch(() => {
+        clear(where);
+      });
       modal({
         title: "Published draft " + n,
         wide: true,
-        body: [h("p.note", "Instances that follow main:"), list],
+        body: [where, h("p.note", "Instances that follow main:"), list],
         actions: [{ label: from ? "Roll back to " + from : "Close", danger: !!from, run: async () => {
           if (!from) return;
           try {

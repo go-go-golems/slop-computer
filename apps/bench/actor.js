@@ -298,6 +298,20 @@ defineActor({
       },
     },
 
+    // Where the app is on the web: the URLs of the mounts that serve its
+    // store (a person who publishes asks "what is my link?"). An app no
+    // mount serves has none: an administrator gives it an address.
+    addresses: {
+      requires: 'view',
+      args: args({ app: S.store }, ['app']),
+      async run(ctx, { app }) {
+        const ms = await tool(ctx).mounts().catch(() => []);
+        return {
+          urls: ms.filter((m) => m.mount && (m.mount.store === app || m.mount.store === ':' + app)).map((m) => ({ url: m.url, kind: m.kind })),
+        };
+      },
+    },
+
     // ---- instances: the visitor's dev, test and prop stores of an app ----
 
     // Where the app's refs are and what the visitor's instances run (peeked:

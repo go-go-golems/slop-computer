@@ -30,6 +30,7 @@ export const APP = {
       return { app: P.app, refs: P.refs, entry: Instances.entry(P), workspace: ctx.ws, instances: { dev: st.dev || null, test: st.test || null, props: st.props || [] } }
     }
   },
+  'app.addresses': { sig: '', doc: '{urls: [{url, kind}]}: where the published app is on the web (the mounts serving it); none means an administrator has not given it an address yet. Tell the person their link after a publish.', run: ctx => Slop.call('addresses', { app: ctx.project.app }) },
   'app.status': { sig: '', doc: 'where the refs are and what each instance runs: {refs, dev, test, prop} ({id, ref, n, broken})', run: ctx => Slop.call('status', { app: ctx.project.app }) },
   'app.logs': {
     sig: '{limit, kind}?', doc: '{broken, lines: [{at, level, text}]}: the instance\'s actor console, setup and activation failures',
