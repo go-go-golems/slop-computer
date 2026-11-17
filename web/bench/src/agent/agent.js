@@ -50,7 +50,11 @@ export const Agent = {
     for (const fh of FrameHosts) if (!fh.headless && fh.project === P) for (const i of fh.issues) issues.push(fh.route + ' ' + fh.w + 'px: ' + i.message + (i.src ? ' @' + i.src : ''))
     const props = P.openProposals().map(p => p.ref + ' "' + p.title + '"').join('; ') || 'none'
     const where = ws === 'draft' ? 'draft ' + P.draftOf(ws).head : 'proposal ' + ws + ' "' + (P.proposals.get(ws) || {}).title + '" at ' + P.draftOf(ws).head
-    return 'App "' + P.title + '" (' + P.app + '). Your writes go to ' + where + '; main is ' + (P.refs.main ?? 'not published yet') +
+    // the person's own date and zone: an eval's new Date() prints UTC, and a persona near midnight
+    // was told "today is 17 November" while the app printed the 16th (round 3)
+    const d = new Date(), tz = (() => { try { return Intl.DateTimeFormat().resolvedOptions().timeZone } catch { return '' } })()
+    const when = 'The person\'s local time: ' + d.toLocaleString('en-GB', { weekday: 'short', day: 'numeric', month: 'long', year: 'numeric', hour: '2-digit', minute: '2-digit' }) + (tz ? ' (' + tz + ')' : '') + '; dates you tell them use this, not UTC.\n'
+    return when + 'App "' + P.title + '" (' + P.app + '). Your writes go to ' + where + '; main is ' + (P.refs.main ?? 'not published yet') +
       '.\nFiles: ' + files + '\nInstances: ' + inst + '\nFrames: ' + frames + '\nOpen proposals: ' + props + '\nSelected: ' + sel + '\nOpen pins:\n' + pins +
       '\nCurrent check issues: ' + (issues.slice(0, 8).join('; ') || 'none') +
       '\nSaved lib functions: ' + (libEntries(view).map(l => 'lib.' + l.name + '(' + l.params.join(', ') + ')' + (l.description ? ' — ' + l.description : '')).join('; ') || 'none') +

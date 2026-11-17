@@ -1,4 +1,4 @@
-/* the bench, built from web/bench: do not edit. source sha256:2b096fae1388c2723bd2b3c17dba8d9afa73e3c1ba0b38687fdb13323373a346 */
+/* the bench, built from web/bench: do not edit. source sha256:c25551d09bfa6ee6880dd5bbc99f2ab03cba33421d0e9f0f9b5b2117a870990f */
 // The bench: a live dev environment for slop apps. Built from web/bench/src.
 (() => {
   // src/lib/util.js
@@ -3993,7 +3993,15 @@ Markdown files (README.md, notes, specs) render in the Docs panel. Keep README.m
       for (const fh of FrameHosts) if (!fh.headless && fh.project === P) for (const i of fh.issues) issues.push(fh.route + " " + fh.w + "px: " + i.message + (i.src ? " @" + i.src : ""));
       const props = P.openProposals().map((p) => p.ref + ' "' + p.title + '"').join("; ") || "none";
       const where = ws === "draft" ? "draft " + P.draftOf(ws).head : "proposal " + ws + ' "' + (P.proposals.get(ws) || {}).title + '" at ' + P.draftOf(ws).head;
-      return 'App "' + P.title + '" (' + P.app + "). Your writes go to " + where + "; main is " + (P.refs.main ?? "not published yet") + ".\nFiles: " + files2 + "\nInstances: " + inst + "\nFrames: " + frames + "\nOpen proposals: " + props + "\nSelected: " + sel + "\nOpen pins:\n" + pins2 + "\nCurrent check issues: " + (issues.slice(0, 8).join("; ") || "none") + "\nSaved lib functions: " + (libEntries(view).map((l) => "lib." + l.name + "(" + l.params.join(", ") + ")" + (l.description ? " \u2014 " + l.description : "")).join("; ") || "none") + "\nYour variables from earlier evals: " + (th && th.scope ? (scopeSummary(th.scope) || "none") + (th.scope.skipped && th.scope.skipped.length ? " (not kept: " + th.scope.skipped.join(", ") + ")" : "") : "none");
+      const d = /* @__PURE__ */ new Date(), tz = (() => {
+        try {
+          return Intl.DateTimeFormat().resolvedOptions().timeZone;
+        } catch {
+          return "";
+        }
+      })();
+      const when = "The person's local time: " + d.toLocaleString("en-GB", { weekday: "short", day: "numeric", month: "long", year: "numeric", hour: "2-digit", minute: "2-digit" }) + (tz ? " (" + tz + ")" : "") + "; dates you tell them use this, not UTC.\n";
+      return when + 'App "' + P.title + '" (' + P.app + "). Your writes go to " + where + "; main is " + (P.refs.main ?? "not published yet") + ".\nFiles: " + files2 + "\nInstances: " + inst + "\nFrames: " + frames + "\nOpen proposals: " + props + "\nSelected: " + sel + "\nOpen pins:\n" + pins2 + "\nCurrent check issues: " + (issues.slice(0, 8).join("; ") || "none") + "\nSaved lib functions: " + (libEntries(view).map((l) => "lib." + l.name + "(" + l.params.join(", ") + ")" + (l.description ? " \u2014 " + l.description : "")).join("; ") || "none") + "\nYour variables from earlier evals: " + (th && th.scope ? (scopeSummary(th.scope) || "none") + (th.scope.skipped && th.scope.skipped.length ? " (not kept: " + th.scope.skipped.join(", ") + ")" : "") : "none");
     },
     HIST_CHARS: 28e3,
     KEEP_CHARS: 12e3,
