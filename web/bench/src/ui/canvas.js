@@ -104,7 +104,8 @@ export const CANVAS = {
         const p = v.pos(); Object.assign(v.el.style, { left: p.x + 'px', top: p.y + 'px', width: v.fr.w + 'px' })
         clear(routeSel); for (const r of App.P.list(host.ws).filter(x => /\.html?$/.test(x))) routeSel.appendChild(h('option', { value: r, selected: r === host.route }, r))
         routeSel.hidden = role === 'm'
-        if (![...routeSel.options].some(o => o.value === host.route)) routeSel.appendChild(h('option', { value: host.route, selected: true }, host.route + ' (missing)'))
+        // a route the list lacks: a page's #hash or ?query is that page (index.html#/host), only a file that is gone is missing
+        if (![...routeSel.options].some(o => o.value === host.route)) { const file = String(host.route).split(/[?#]/)[0]; routeSel.appendChild(h('option', { value: host.route, selected: true }, host.route + (App.P.list(host.ws).includes(file) ? '' : ' (missing)'))) }
         back.hidden = role === 'm' || host.route === v.fr.route; back.title = 'Back to ' + v.fr.route
         flabel.textContent = v.fr.label || ''; flabel.hidden = !v.fr.label; routeSel.classList.toggle('sub', !!fr.label)
         meta.textContent = v.fr.w + '×' + v.fr.h + (host.errors ? ' · ' + plural(host.errors, 'error') : '') + (host.issues.length ? ' · ' + plural(host.issues.length, 'issue') : '')

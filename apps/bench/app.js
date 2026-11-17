@@ -1,4 +1,4 @@
-/* the bench, built from web/bench: do not edit. source sha256:241631240eb0f9657b0666a8654104a252e2cbf56db9a2e2e6de17df9813538d */
+/* the bench, built from web/bench: do not edit. source sha256:fd8a2be5adf81eb098137c58b90ddd86258b111147838e77ed9c2013d88c4a55 */
 // The bench: a live dev environment for slop apps. Built from web/bench/src.
 (() => {
   // src/lib/util.js
@@ -7244,7 +7244,10 @@ Markdown files (README.md, notes, specs) render in the Docs panel. Keep README.m
           clear(routeSel);
           for (const r of App.P.list(host.ws).filter((x) => /\.html?$/.test(x))) routeSel.appendChild(h("option", { value: r, selected: r === host.route }, r));
           routeSel.hidden = role === "m";
-          if (![...routeSel.options].some((o) => o.value === host.route)) routeSel.appendChild(h("option", { value: host.route, selected: true }, host.route + " (missing)"));
+          if (![...routeSel.options].some((o) => o.value === host.route)) {
+            const file = String(host.route).split(/[?#]/)[0];
+            routeSel.appendChild(h("option", { value: host.route, selected: true }, host.route + (App.P.list(host.ws).includes(file) ? "" : " (missing)")));
+          }
           back.hidden = role === "m" || host.route === v.fr.route;
           back.title = "Back to " + v.fr.route;
           flabel.textContent = v.fr.label || "";
