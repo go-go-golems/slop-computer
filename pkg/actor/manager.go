@@ -95,6 +95,7 @@ func New(k *kernel.Kernel) *Manager {
 	m := &Manager{K: k, actors: map[string]*Actor{}, inboxes: map[string]*inbox{}, broken: map[string]string{}, files: map[string]map[string][]byte{}, logs: map[string][]LogLine{}}
 	k.Activate = m.activate
 	k.OnActivated = m.onActivated
+	k.OnDeleted = m.Restart // a deleted store's actor holds its closed connection
 	k.Subscribe(m.onCommit)
 	m.followSystem()
 	m.registerBuiltins()

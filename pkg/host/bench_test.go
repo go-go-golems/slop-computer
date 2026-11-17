@@ -625,3 +625,33 @@ func TestBenchTypesFollowRef(t *testing.T) {
 		t.Fatalf("a proposal without an instance:\n%s", a)
 	}
 }
+
+// Resetting an instance deletes its store; the next use makes it again
+// under the same id. Its actor must start over on the new store: the old
+// one held the deleted store's closed connection, and every SQL call
+// failed with "sql: connection is already closed" (a persona review found
+// it: a scenario could run once).
+func TestBenchResetRestartsTheActor(t *testing.T) {
+	h := newHarness(t)
+	admin := h.tokenFor("admin@example.com", "read", "write", "admin")
+	installBench(t, h, admin)
+	act := func(action string, args map[string]any) map[string]any {
+		t.Helper()
+		return h.call(admin, "actor.call", map[string]any{"store": "bench", "action": action, "args": args}).(map[string]any)
+	}
+	h.call(admin, "store.new", map[string]any{"id": "jot"})
+	h.push(admin, map[string]any{"store": "jot", "files": files(devApp()), "ref": "draft"})
+	id := act("instance", map[string]any{"app": "jot", "kind": "test"})["id"].(string)
+	tables := func() string {
+		t.Helper()
+		return fmtJSON(h.call(admin, "actor.call", map[string]any{"store": id, "action": "tables"}))
+	}
+	if got := tables(); !strings.Contains(got, "notes") {
+		t.Fatalf("tables before the reset = %s", got)
+	}
+	act("reset", map[string]any{"app": "jot", "kind": "test"})
+	act("instance", map[string]any{"app": "jot", "kind": "test"})
+	if got := tables(); !strings.Contains(got, "notes") {
+		t.Fatalf("tables after the reset = %s", got)
+	}
+}

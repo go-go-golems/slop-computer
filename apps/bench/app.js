@@ -1,4 +1,4 @@
-/* the bench, built from web/bench: do not edit. source sha256:6fd559a31babdb5328b130159274f9452f96933e5f1ca3191b46522f799d9e7f */
+/* the bench, built from web/bench: do not edit. source sha256:aa56bd8c11bc69b5dcc31e29ec70450f42b34c5d9291eb4967e20fe92a4b93e0 */
 // The bench: a live dev environment for slop apps. Built from web/bench/src.
 (() => {
   // src/lib/util.js
@@ -2595,6 +2595,18 @@
   var SCEN_DIR = "scenarios/";
   var FIX_DIR = "fixtures/";
   var STEP_KINDS = ["go", "click", "type", "waitFor", "wait", "expect", "sql", "docs", "snapshot"];
+  var STEP_KEYS = {
+    go: ["go"],
+    click: ["click"],
+    type: ["type", "text"],
+    waitFor: ["waitFor"],
+    wait: ["wait"],
+    expect: ["expect", "text", "exact", "match", "count", "visible", "value"],
+    sql: ["sql", "args", "count", "value", "rows"],
+    docs: ["docs", "where", "count"],
+    snapshot: ["snapshot"]
+  };
+  var ANY_STEP = ["timeout", "note"];
   var fixturePath = (name) => FIX_DIR + String(name).replace(/\.json$/, "") + ".json";
   function checkFixture(spec) {
     if (!spec || typeof spec !== "object" || Array.isArray(spec)) return "a fixture is an object: { docs?: { coll: [rows] }, tables?: { name: [rows] } }";
@@ -2616,6 +2628,15 @@
       if (k === "expect" && typeof s.expect !== "string") return "step " + (i + 1) + ": expect is a selector";
       if (k === "sql" && typeof s.sql !== "string") return "step " + (i + 1) + ": sql is a query";
       if (k === "docs" && typeof s.docs !== "string") return "step " + (i + 1) + ": docs is a collection";
+      const extra = Object.keys(s).filter((x) => !STEP_KEYS[k].includes(x) && !ANY_STEP.includes(x));
+      if (extra.length) return "step " + (i + 1) + " (" + k + "): unknown " + (extra.length > 1 ? "keys " : "key ") + extra.join(", ") + "; a " + k + " step takes " + STEP_KEYS[k].join(", ") + " (and timeout, note)";
+      if (k === "expect" && s.match != null) {
+        try {
+          new RegExp(String(s.match));
+        } catch (e) {
+          return "step " + (i + 1) + ": match is not a regular expression: " + e.message;
+        }
+      }
     }
     if (spec.size && (!Array.isArray(spec.size) || spec.size.length !== 2)) return "size is [width, height]";
     return null;
@@ -2629,9 +2650,9 @@
     if (s.waitFor) return "wait for " + s.waitFor;
     if (s.wait != null) return "wait " + s.wait + " ms";
     if (s.expect) {
-      return "expect " + s.expect + count + (s.text != null ? ' has "' + String(s.text).slice(0, 30) + '"' : "") + (s.value != null ? ' value "' + s.value + '"' : "") + (s.visible === false ? " hidden" : "");
+      return "expect " + s.expect + count + (s.text != null ? ' has "' + String(s.text).slice(0, 30) + '"' : "") + (s.exact ? " (exactly)" : "") + (s.match != null ? " matches /" + s.match + "/" : "") + (s.value != null ? ' value "' + s.value + '"' : "") + (s.visible === false ? " hidden" : "");
     }
-    if (s.sql) return "sql " + s.sql.slice(0, 60) + count;
+    if (s.sql) return "sql " + s.sql.slice(0, 60) + count + (s.value !== void 0 ? " = " + JSON.stringify(s.value) : "") + (s.rows ? " rows " + JSON.stringify(s.rows).slice(0, 60) : "");
     if (s.docs) return "docs " + s.docs + (s.where ? " " + JSON.stringify(s.where) : "") + count;
     if (s.snapshot != null) return "snapshot" + (s.snapshot ? ' "' + s.snapshot + '"' : "");
     return JSON.stringify(s);
@@ -2759,7 +2780,13 @@
           else if (s.expect) verify(s, await poll(s, () => expectStep(fh, s)));
           else if (s.sql) verify(s, await poll(s, async () => {
             const rows = await Slop.call("sql", { app: P.app, kind: "test", query: s.sql, args: s.args || [] });
-            const n = Array.isArray(rows) ? rows.length : 0;
+            const list = Array.isArray(rows) ? rows : [], n = list.length;
+            if (s.value !== void 0) {
+              const v = n ? Object.values(list[0])[0] : void 0;
+              const same = typeof s.value === "number" && v != null ? Number(v) === s.value : JSON.stringify(v) === JSON.stringify(s.value);
+              return { ok: same, got: n ? JSON.stringify(v) : "no rows" };
+            }
+            if (s.rows) return { ok: JSON.stringify(list) === JSON.stringify(s.rows), got: JSON.stringify(list).slice(0, 160) };
             return s.count != null ? { ok: n === +s.count, got: n + " rows" } : { ok: n > 0, got: "0 rows" };
           }));
           else if (s.docs) verify(s, await poll(s, async () => {
@@ -3809,8 +3836,8 @@ Reads wait until the page has settled (data loaded, DOM quiet). Arranging, label
 { description, page: "index.html", size?: [375, 720], fixture?: name, steps: [
   { click: sel }, { type: sel, text }, { go: "#/cart" }, { waitFor: sel }, { wait: ms },
   { expect: sel } (visible) | { expect: sel, text } (contains, ignoring case) | { expect: sel, text, exact: true } (the whole text) | { expect: sel, match: "^12 kg$" } (a regular expression) | { expect: sel, count } | { expect: sel, visible: false } | { expect: sel, value },
-  { sql: "SELECT \u2026 FROM notes WHERE \u2026", args?, count? } | { docs: coll, where?: {field: value}, count? } (the test instance's data), { snapshot: label } ] }
-A number is checked with exact or match, never contains: "12" is contained in "128" and "312". Checks retry until they pass or time out ({ timeout } on a step or the scenario, default 2000 ms). A failure keeps a snapshot.`,
+  { sql: "SELECT \u2026 FROM notes WHERE \u2026", args?, count? } | { sql: "SELECT sum(kg) FROM \u2026", value: 30.5 } (the first column of the first row) | { sql, rows: [{\u2026}] } (exactly these rows) | { docs: coll, where?: {field: value}, count? } (the test instance's data), { snapshot: label } ] }
+A step with a key its kind does not take is an error (the scenario does not run). To check a total, check it both on the page and in the data: { expect, text, exact } and { sql, value }. A number is checked with exact or match, never contains: "12" is contained in "128" and "312". Checks retry until they pass or time out ({ timeout } on a step or the scenario, default 2000 ms). A failure keeps a snapshot.`,
     session: `Long threads: older messages are folded into a summary at the top of your context; session.recall and session.message reach what it left out.`,
     ui: ``
   };

@@ -72,3 +72,14 @@ test('expect: text contains, exact and match', async () => {
   assert.equal((await expectStep(fh, { expect: '#w', match: '\\b128 kg' })).ok, true)
   assert.match((await expectStep(fh, { expect: '#w', match: '(' })).got, /not a regular expression/)
 })
+
+// A key a step's kind does not take fails the scenario's check, naming the
+// keys it does take (an unknown key was ignored: a misspelled check never ran).
+test('checkScenario: unknown step keys', async () => {
+  const { checkScenario } = await import('../src/core/scenario.js')
+  const sc = steps => checkScenario({ page: 'index.html', steps })
+  assert.equal(sc([{ expect: '#n', text: '12', exact: true }, { sql: 'SELECT 1', value: 1, timeout: 500 }]), null)
+  assert.match(sc([{ expect: '#n', equals: '12' }]), /step 1 \(expect\): unknown key equals; a expect step takes expect, text, exact, match/)
+  assert.match(sc([{ click: 'b' }, { sql: 'SELECT 1', equal: 1, nme: 'x' }]), /step 2 \(sql\): unknown keys equal, nme/)
+  assert.match(sc([{ expect: '#n', match: '(' }]), /match is not a regular expression/)
+})

@@ -102,7 +102,14 @@ async function runHolding(P, spec, { ws = 'draft', name = 'unsaved', onStep, sig
         else if (s.expect) verify(s, await poll(s, () => expectStep(fh, s)))
         else if (s.sql) verify(s, await poll(s, async () => {
           const rows = await Slop.call('sql', { app: P.app, kind: 'test', query: s.sql, args: s.args || [] })
-          const n = Array.isArray(rows) ? rows.length : 0
+          const list = Array.isArray(rows) ? rows : [], n = list.length
+          // value: the first column of the first row (numbers compared as numbers); rows: exactly these rows
+          if (s.value !== undefined) {
+            const v = n ? Object.values(list[0])[0] : undefined
+            const same = typeof s.value === 'number' && v != null ? Number(v) === s.value : JSON.stringify(v) === JSON.stringify(s.value)
+            return { ok: same, got: n ? JSON.stringify(v) : 'no rows' }
+          }
+          if (s.rows) return { ok: JSON.stringify(list) === JSON.stringify(s.rows), got: JSON.stringify(list).slice(0, 160) }
           return s.count != null ? { ok: n === +s.count, got: n + ' rows' } : { ok: n > 0, got: '0 rows' }
         }))
         else if (s.docs) verify(s, await poll(s, async () => {
