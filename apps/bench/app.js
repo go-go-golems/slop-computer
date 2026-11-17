@@ -1,4 +1,4 @@
-/* the bench, built from web/bench: do not edit. source sha256:82bbc1452f3e2b4769fd44dbb67b5e776bb8d10e58b01140f383aae84d879614 */
+/* the bench, built from web/bench: do not edit. source sha256:e16bb7158074e62dde59204b02e83711e5fd24cce5732ec1b3979cda332ff598 */
 // The bench: a live dev environment for slop apps. Built from web/bench/src.
 (() => {
   // src/lib/util.js
@@ -6331,7 +6331,11 @@ Markdown files (README.md, notes, specs) render in the Docs panel. Keep README.m
       let pick = APP_TEMPLATES[0].id;
       const id = h("input.txt", { value: "", placeholder: "id: lowercase letters, digits and -", style: { width: "100%" } });
       const title = h("input.txt", { value: "", placeholder: "Title (optional)", style: { width: "100%" } });
-      const cards = h("div.tcards");
+      const cards = h("div.tcards"), who = h("div");
+      Slop.call("me", {}).then((me) => {
+        if (me && !me.canBuild) who.append(h("p.note", { style: { color: "var(--accent)" } }, "Only this server's administrators can create or change apps. You can use the apps you have access to; ask an administrator to create one for you."));
+      }).catch(() => {
+      });
       const paint = () => {
         clear(cards);
         for (const t of APP_TEMPLATES) cards.appendChild(h("button" + (t.id === pick ? ".on" : ""), { on: { click: () => {
@@ -6360,7 +6364,7 @@ Markdown files (README.md, notes, specs) render in the Docs panel. Keep README.m
       if (!files2) paint();
       modal({
         title: files2 ? "Import as a new app" : "New app",
-        body: [h("p.note", files2 ? plural(files2.length, "file") + " go to the new app's draft." : "An app store with app.json and a page. Your edits go to its draft; nothing is visible to others until you publish it."), files2 ? null : cards, id, files2 ? null : title],
+        body: [who, h("p.note", files2 ? plural(files2.length, "file") + " go to the new app's draft." : "A new app. Your changes stay private (its draft) until you publish it."), files2 ? null : cards, id, files2 ? null : title],
         actions: [{ label: "Cancel" }, { label: "Create", primary: true, run: go }]
       });
       setTimeout(() => id.focus(), 0);

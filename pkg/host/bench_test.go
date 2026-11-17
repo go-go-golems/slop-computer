@@ -676,3 +676,14 @@ func TestBenchAddresses(t *testing.T) {
 		t.Fatalf("addresses after a mount = %s", got)
 	}
 }
+
+// Only admins change app code (D9): the bench's me action tells the page
+// before a member tries to create an app.
+func TestBenchMe(t *testing.T) {
+	h := newHarness(t)
+	admin := h.tokenFor("admin@example.com", "read", "write", "admin")
+	installBench(t, h, admin)
+	if got := fmtJSON(h.call(admin, "actor.call", map[string]any{"store": "bench", "action": "me", "args": map[string]any{}})); got != `{"audience":"admin","canBuild":true}` {
+		t.Fatalf("me as admin = %s", got)
+	}
+}

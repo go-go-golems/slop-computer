@@ -189,7 +189,9 @@ export const App = {
     let pick = APP_TEMPLATES[0].id
     const id = h('input.txt', { value: '', placeholder: 'id: lowercase letters, digits and -', style: { width: '100%' } })
     const title = h('input.txt', { value: '', placeholder: 'Title (optional)', style: { width: '100%' } })
-    const cards = h('div.tcards')
+    const cards = h('div.tcards'), who = h('div')
+    // only admins change app code (decision D9): say so up front, not as a failed Create
+    Slop.call('me', {}).then(me => { if (me && !me.canBuild) who.append(h('p.note', { style: { color: 'var(--accent)' } }, 'Only this server\'s administrators can create or change apps. You can use the apps you have access to; ask an administrator to create one for you.')) }).catch(() => { })
     const paint = () => { clear(cards); for (const t of APP_TEMPLATES) cards.appendChild(h('button' + (t.id === pick ? '.on' : ''), { on: { click: () => { pick = t.id; paint() } } }, h('b', t.name), h('small', t.blurb))) }
     const go = async () => {
       const v = id.value.trim()
@@ -203,7 +205,7 @@ export const App = {
     if (!files) paint()
     modal({
       title: files ? 'Import as a new app' : 'New app',
-      body: [h('p.note', files ? plural(files.length, 'file') + ' go to the new app\'s draft.' : 'An app store with app.json and a page. Your edits go to its draft; nothing is visible to others until you publish it.'), files ? null : cards, id, files ? null : title],
+      body: [who, h('p.note', files ? plural(files.length, 'file') + ' go to the new app\'s draft.' : 'A new app. Your changes stay private (its draft) until you publish it.'), files ? null : cards, id, files ? null : title],
       actions: [{ label: 'Cancel' }, { label: 'Create', primary: true, run: go }]
     })
     setTimeout(() => id.focus(), 0)

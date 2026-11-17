@@ -162,6 +162,15 @@ defineActor({
     // The app stores the visitor may develop (admin on them): stores that
     // run no other store's app, with their refs and the instances that run
     // them. The bench itself is left out.
+    // Who the visitor is to the bench: only admins change app code (the
+    // platform's decision D9), so the page says so before a member tries.
+    me: {
+      requires: 'view',
+      args: args({}),
+      run(ctx) {
+        return { audience: ctx.visitor.audience || '', canBuild: ctx.visitor.audience === 'admin' };
+      },
+    },
     apps: {
       requires: 'view',
       args: args({}),
