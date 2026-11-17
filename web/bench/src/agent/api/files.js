@@ -33,7 +33,7 @@ export const FILES = {
   'files.read': { sig: 'path', doc: 'text', run: (ctx, path) => readText(ctx.tx, path) },
   'files.exists': { sig: 'path', doc: 'bool', run: (ctx, path) => ctx.tx.has(path) },
   'files.lines': {
-    sig: 'path, from?, to?', doc: 'numbered lines "12| …" (200 by default)',
+    sig: 'path, from?, to?', ret: 'one string, a numbered line per line (.split(\'\\n\') for an array)', doc: 'numbered lines "12| …" (200 by default)',
     run: (ctx, path, from = 1, to) => {
       const ls = readText(ctx.tx, path).split('\n')
       from = Math.max(1, +from || 1); to = Math.min(ls.length, +to || from + 199)

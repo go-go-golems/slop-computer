@@ -1,4 +1,4 @@
-/* the bench, built from web/bench: do not edit. source sha256:247146373bd366a9491a319970a7b87e47452fb0f336c3d13da4afb8c8b18bd0 */
+/* the bench, built from web/bench: do not edit. source sha256:e59eb4d23fe770e3af87b81a9b29a146a70a0a1fbc5e74ff3c9656b653fd480e */
 // The bench: a live dev environment for slop apps. Built from web/bench/src.
 (() => {
   // src/lib/util.js
@@ -1899,6 +1899,7 @@
     "files.exists": { sig: "path", doc: "bool", run: (ctx, path) => ctx.tx.has(path) },
     "files.lines": {
       sig: "path, from?, to?",
+      ret: "one string, a numbered line per line (.split('\\n') for an array)",
       doc: 'numbered lines "12| \u2026" (200 by default)',
       run: (ctx, path, from = 1, to) => {
         const ls = readText(ctx.tx, path).split("\n");
