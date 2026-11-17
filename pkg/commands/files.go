@@ -12,6 +12,8 @@ import (
 	"strings"
 	"unicode/utf8"
 
+	"github.com/invopop/jsonschema"
+
 	"github.com/go-go-golems/slop-computer/pkg/access"
 	"github.com/go-go-golems/slop-computer/pkg/authz"
 	"github.com/go-go-golems/slop-computer/pkg/blobs"
@@ -521,6 +523,45 @@ type FilesPushIn struct {
 	Zone     string   `json:"zone,omitempty" jsonschema_description:"tree (default) or assets"`
 	Activate []string `json:"activate,omitempty" jsonschema_description:"stores to activate after the snapshot (the instances following the moved ref); the result reports each one's n and broken"`
 	IfAt     *int64   `json:"ifAt,omitempty" jsonschema_description:"push only if the ref points at this snapshot now (0: only if it does not exist yet); otherwise conflict, nothing written"`
+}
+
+// JSONSchemaExtend declares files as what push accepts (pushFilesSchema).
+func (FilesPushIn) JSONSchemaExtend(s *jsonschema.Schema) { setPushFiles(s) }
+
+// JSONSchemaExtend declares files as what push accepts (pushFilesSchema).
+func (ImportFilesIn) JSONSchemaExtend(s *jsonschema.Schema) { setPushFiles(s) }
+
+func setPushFiles(s *jsonschema.Schema) {
+	if s.Properties != nil {
+		s.Properties.Set("files", pushFilesSchema())
+	}
+}
+
+// pushFilesSchema is a push manifest's schema: a list whose entries each
+// give their content one way (text, base64 data, or a blob named by
+// sha256 and size), or that list as JSON text, as the CLI passes it. The
+// TypeScript generated from it is a union, so code that writes an entry
+// of one kind with another kind's fields does not compile (SLOP3-024).
+func pushFilesSchema() *jsonschema.Schema {
+	entry := func(doc string, kv ...any) *jsonschema.Schema {
+		e := &jsonschema.Schema{Type: "object", Description: doc, Properties: jsonschema.NewProperties(), AdditionalProperties: jsonschema.FalseSchema}
+		e.Properties.Set("path", &jsonschema.Schema{Type: "string", Description: "the file's path in the tree"})
+		e.Required = []string{"path"}
+		for i := 0; i < len(kv); i += 2 {
+			e.Properties.Set(kv[i].(string), kv[i+1].(*jsonschema.Schema))
+			e.Required = append(e.Required, kv[i].(string))
+		}
+		e.Properties.Set("type", &jsonschema.Schema{Type: "string", Description: "its media type (default: from the extension)"})
+		return e
+	}
+	return &jsonschema.Schema{Description: "the files the tree holds after the push", OneOf: []*jsonschema.Schema{
+		{Type: "array", Items: &jsonschema.Schema{OneOf: []*jsonschema.Schema{
+			entry("inline text", "text", &jsonschema.Schema{Type: "string"}),
+			entry("inline bytes", "data", &jsonschema.Schema{Type: "string", Description: "base64"}),
+			entry("a blob the server has (or that blobs carries)", "sha256", &jsonschema.Schema{Type: "string"}, "size", &jsonschema.Schema{Type: "integer"}),
+		}}},
+		{Type: "string", Description: "the list as JSON text"},
+	}}
 }
 
 // FilesBlobsIn is files.blobs's input.
