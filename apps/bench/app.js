@@ -1,4 +1,4 @@
-/* the bench, built from web/bench: do not edit. source sha256:2e0cef7f4cf968b9006de7ea76268e37a63b66a19c88f44e1715c429d56c7151 */
+/* the bench, built from web/bench: do not edit. source sha256:78c02aa9182508d9462c3239429e5f39a1972886cf92879610214b673bdde3ca */
 // The bench: a live dev environment for slop apps. Built from web/bench/src.
 (() => {
   // src/lib/util.js
@@ -3769,6 +3769,24 @@ run then).
     return " \u2014 the line: `" + text.trim().slice(0, 160) + "`" + unknown.map((u) => ". " + u.name + " is not in the API (did you mean " + u.hint + "?)").join("");
   }
   var FAKED_EVAL = /\[evals?\b[^\]\n]{0,12}\n?[\s\S]{0,400}?\bawait\s+(files|app|frames|scenarios|fixtures|session|types|lib|ui|publish)\.\w+\(|```(js|javascript|ts)?\s*\n[\s\S]{0,600}?\bawait\s+(files|app|frames|scenarios|fixtures|session|types|lib|ui|publish)\.\w+\(/;
+  function fitPrompt(msgs, max = 24e4) {
+    const enc = new TextEncoder(), size = (s) => enc.encode(s).length;
+    const out = msgs.map((m) => ({ ...m })), cut = [];
+    let total = out.reduce((a, m) => a + size(m.content), 0);
+    for (let guard2 = 0; total > max && guard2 < 50; guard2++) {
+      const order = out.map((m, i2) => i2).sort((a, b) => out[b].content.length - (b === out.length - 1 ? 1e9 : 0) - (out[a].content.length - (a === out.length - 1 ? 1e9 : 0)));
+      let i = order.find((k) => out[k].content.length > 4e3);
+      if (i === void 0) i = order[0];
+      const c = out[i].content, before = size(c), over = total - max;
+      const keep = Math.max(1500, c.length - Math.ceil(over * 1.1) - 400), half = Math.floor(keep / 2);
+      if (keep >= c.length) break;
+      out[i].content = c.slice(0, half) + "\n\u2026(" + (c.length - keep) + " characters cut here to fit the prompt; session.message(n) reads a message in full)\u2026\n" + c.slice(c.length - half);
+      const after = size(out[i].content);
+      cut.push({ i, from: before, to: after });
+      total += after - before;
+    }
+    return { msgs: out, cut };
+  }
 
   // src/agent/eval.js
   var AgentUI = {
@@ -4098,7 +4116,7 @@ Markdown files (README.md, notes, specs) render in the Docs panel. Keep README.m
       let text = "", by = "claude";
       try {
         if (this.sample) {
-          const r = await this.sample(prompt, { modelTier: "quick", cache: false, signal });
+          const r = await this.sample(fitPrompt([{ role: "user", content: prompt }]).msgs[0].content, { modelTier: "quick", cache: false, signal });
           text = (r && r.text || "").trim();
         }
       } catch (e) {
@@ -4247,7 +4265,9 @@ Markdown files (README.md, notes, specs) render in the Docs panel. Keep README.m
       let msgs = this.messages(P, th, o.ws, text, head), res = null, prev = "", faked = false;
       for (let call = 0; ; call++) {
         const before = msg.steps.length;
-        res = await this.sample(msgs, { tools: [tool], onText: ({ text: t }) => {
+        const fit = fitPrompt(msgs);
+        if (fit.cut.length) msg.promptCut = { parts: msgs.map((m) => m.role[0] + m.content.length), cut: fit.cut };
+        res = await this.sample(fit.msgs, { tools: [tool], onText: ({ text: t }) => {
           msg.text = (prev ? prev + "\n\n" : "") + t;
           this.ev.emit("text", th.id);
         }, signal: o.signal, modelTier: th.tier || "default", cache: false, ...th.model ? { model: th.model } : {} });
@@ -4263,7 +4283,25 @@ Markdown files (README.md, notes, specs) render in the Docs panel. Keep README.m
           ];
           continue;
         }
-        if (made < CALL_EVALS || left <= 0 || call >= MAX_CONTINUES || o.signal && o.signal.aborted) break;
+        if (made < CALL_EVALS || o.signal && o.signal.aborted) break;
+        if (left <= 0 || call >= MAX_CONTINUES) {
+          prev = (prev ? prev + "\n\n" : "") + (res && res.text || "").trim();
+          const fin = fitPrompt([
+            ...msgs,
+            { role: "assistant", content: this.renderMsg({ ...msg, text: res && res.text || "" }, true) || "(evals)" },
+            { role: "user", content: "(From the bench, not the person: this turn has used all its evals. Reply to the person now, without evals: what you changed, what you checked and how, what is not done or not verified yet, and any temporary code (probes, console.log) still in the files. They can send a message to let you go on.)" }
+          ]);
+          try {
+            res = await this.sample(fin.msgs, { onText: ({ text: t }) => {
+              msg.text = (prev ? prev + "\n\n" : "") + t;
+              this.ev.emit("text", th.id);
+            }, signal: o.signal, modelTier: th.tier || "default", cache: false, ...th.model ? { model: th.model } : {} });
+          } catch (e) {
+            if (o.signal && o.signal.aborted) throw e;
+            res = { text: "(The turn used all its evals before Claude could report; send a message to go on.)" };
+          }
+          break;
+        }
         prev = (prev ? prev + "\n\n" : "") + (res && res.text || "").trim();
         msg.text = prev;
         this.ev.emit("text", th.id);

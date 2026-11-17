@@ -113,9 +113,11 @@ function preludeSource(api, sigs = {}, roles = []) {
   src += 'const __fmt = v => { if (typeof v === "string") return v; try { return JSON.stringify(v); } catch (e) { return String(v); } };\n'
   src += 'const console = { log: (...a) => __log("log", a.map(__fmt).join(" ")), info: (...a) => __log("log", a.map(__fmt).join(" ")), warn: (...a) => __log("warn", a.map(__fmt).join(" ")), error: (...a) => __log("error", a.map(__fmt).join(" ")) };\n'
   src += 'const sleep = ms => __call("sleep", [ms]);\n'
-  src += 'const __snapshot = () => { const out = {}, skipped = []; for (const n of __names) { if (!(n in globalThis)) continue; const v = globalThis[n];' +
+  // the newest variables first, at most 96 KB in all: the snapshot is saved with the thread, and a thread whose
+  // 145 variables (each up to 24 KB) outgrew a saved record stopped saving (round 4)
+  src += 'const __snapshot = () => { const out = {}, skipped = []; let total = 0; for (const n of [...__names].reverse()) { if (!(n in globalThis)) continue; const v = globalThis[n];' +
     ' if (typeof v === "function") { skipped.push(n + " (a function: save it with lib.def to keep it)"); continue }' +
-    ' try { const s = JSON.stringify(v); if (s === undefined) { skipped.push(n); continue } if (s.length > 24000) { skipped.push(n + " (over 24 KB)"); continue } out[n] = JSON.parse(s) } catch (e) { skipped.push(n + " (not JSON)") } }' +
+    ' try { const s = JSON.stringify(v); if (s === undefined) { skipped.push(n); continue } if (s.length > 24000) { skipped.push(n + " (over 24 KB)"); continue } if (total + s.length > 96000) { skipped.push(n + " (the kept variables are over 96 KB)"); continue } total += s.length; out[n] = JSON.parse(s) } catch (e) { skipped.push(n + " (not JSON)") } }' +
     ' return JSON.stringify({ vars: out, skipped }) };\n'
   src += 'const __restore = o => { for (const k of Object.keys(o || {})) { globalThis[k] = o[k]; __names.add(k) } };\n'
   src += 'const __libSet = (n, src) => { try { const f = (0, eval)("(" + src + "\\n)"); if (typeof f !== "function") throw new Error("not a function"); __lib[n] = f } catch (e) { const msg = String(e && e.message || e); __lib[n] = () => { throw new Error("lib." + n + " failed to load: " + msg) } } };\n'

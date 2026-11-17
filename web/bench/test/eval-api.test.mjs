@@ -147,3 +147,19 @@ test('FAKED_EVAL: eval code written as text, not page code or plain words', asyn
   assert.ok(!FAKED_EVAL.test('I changed index.html: Export CSV now builds the file from rows.'), 'plain words')
   assert.ok(!FAKED_EVAL.test("In your page:\n```js\nconst db = await claude.use('db')\n```"), 'page code')
 })
+
+test('fitPrompt: cuts the largest turns, keeps the last, fits the limit', async () => {
+  const { fitPrompt } = await import('../src/agent/hints.js')
+  const big = 'a'.repeat(200000), small = 'b'.repeat(1000), last = 'c'.repeat(90000)
+  const { msgs, cut } = fitPrompt([{ role: 'user', content: big }, { role: 'assistant', content: small }, { role: 'user', content: last }], 240000)
+  const total = msgs.reduce((a, m) => a + m.content.length, 0)
+  assert.ok(total <= 240000, 'fits: ' + total)
+  assert.equal(msgs[2].content, last, 'the current message is kept')
+  assert.equal(msgs[1].content, small)
+  assert.match(msgs[0].content, /characters cut here/)
+  assert.equal(cut.length, 1)
+  const same = fitPrompt([{ role: 'user', content: 'hi' }])
+  assert.equal(same.cut.length, 0); assert.equal(same.msgs[0].content, 'hi')
+  const multi = fitPrompt([{ role: 'user', content: 'é'.repeat(150000) }], 240000) // 2 bytes a character
+  assert.ok(new TextEncoder().encode(multi.msgs[0].content).length <= 240000)
+})

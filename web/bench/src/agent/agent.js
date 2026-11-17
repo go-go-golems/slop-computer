@@ -11,7 +11,7 @@
 // Owns: turns in flight. Public API: Agent (init, send, stop, delegate,
 // busy, anyBusy, compact, sample, ev 'ready' | 'turn' | 'step' | 'text').
 import { AgentUI, makeContext, runEval } from './eval.js';
-import { FAKED_EVAL } from './hints.js';
+import { FAKED_EVAL, fitPrompt } from './hints.js';
 import { FrameHost, FrameHosts } from '../frames/host.js';
 import { MAX_DEPTH, ROLES } from './roles.js';
 import { Types } from './types.js';
@@ -101,7 +101,7 @@ export const Agent = {
       'Be specific (file:line, names, numbers). Do not add anything that is not in the messages. Reply with the summary only.\n\n' +
       'Previous summary:\n' + (th.summary ? th.summary.text : '(none: this is the start of the thread)') + '\n\nMessages ' + (start + 1) + '–' + cut + ':\n' + trunc(transcript, 40000) + (marks.length ? '\n\nMarks on the timeline from this stretch:\n' + marks.join('\n') : '')
     let text = '', by = 'claude'
-    try { if (this.sample) { const r = await this.sample(prompt, { modelTier: 'quick', cache: false, signal }); text = ((r && r.text) || '').trim() } } catch (e) { if (signal && signal.aborted) throw e }
+    try { if (this.sample) { const r = await this.sample(fitPrompt([{ role: 'user', content: prompt }]).msgs[0].content, { modelTier: 'quick', cache: false, signal }); text = ((r && r.text) || '').trim() } } catch (e) { if (signal && signal.aborted) throw e }
     if (text.length < 40) { by = 'fallback'; text = this.plainSummary(th, start, cut) }
     th.summary = { upTo: cut, text: trunc(text, 6000), by, t: now(), t0: lastT, chars: total }
     P.saveThread(th)
@@ -210,7 +210,9 @@ export const Agent = {
     let msgs = this.messages(P, th, o.ws, text, head), res = null, prev = '', faked = false
     for (let call = 0; ; call++) {
       const before = msg.steps.length
-      res = await this.sample(msgs, { tools: [tool], onText: ({ text: t }) => { msg.text = (prev ? prev + '\n\n' : '') + t; this.ev.emit('text', th.id) }, signal: o.signal, modelTier: th.tier || 'default', cache: false, ...(th.model ? { model: th.model } : {}) })
+      const fit = fitPrompt(msgs)
+      if (fit.cut.length) msg.promptCut = { parts: msgs.map(m => m.role[0] + m.content.length), cut: fit.cut }
+      res = await this.sample(fit.msgs, { tools: [tool], onText: ({ text: t }) => { msg.text = (prev ? prev + '\n\n' : '') + t; this.ev.emit('text', th.id) }, signal: o.signal, modelTier: th.tier || 'default', cache: false, ...(th.model ? { model: th.model } : {}) })
       const made = msg.steps.length - before, left = o.budget.max - o.budget.used
       // evals written as text: a model imitating the history's "[evals: …]" wrote code into its reply,
       // never called the tool, and reported results it invented (round 4: "written and verified", and
@@ -221,7 +223,18 @@ export const Agent = {
           { role: 'user', content: '(From the bench, not the person: your last reply wrote eval code as text instead of calling the eval tool, so none of it ran and nothing it described happened. Call the eval tool to run code, and report only results you saw in its output.)' }]
         continue
       }
-      if (made < CALL_EVALS || left <= 0 || call >= MAX_CONTINUES || (o.signal && o.signal.aborted)) break
+      if (made < CALL_EVALS || (o.signal && o.signal.aborted)) break
+      // out of evals or continuations mid-work: one more call without the tool, for a report to the person
+      // (a turn ended on "Now verifying the refactor live —" after 27 evals, and the person had nothing: round 4)
+      if (left <= 0 || call >= MAX_CONTINUES) {
+        prev = (prev ? prev + '\n\n' : '') + ((res && res.text) || '').trim()
+        const fin = fitPrompt([...msgs, { role: 'assistant', content: this.renderMsg({ ...msg, text: (res && res.text) || '' }, true) || '(evals)' },
+          { role: 'user', content: '(From the bench, not the person: this turn has used all its evals. Reply to the person now, without evals: what you changed, what you checked and how, what is not done or not verified yet, and any temporary code (probes, console.log) still in the files. They can send a message to let you go on.)' }])
+        try {
+          res = await this.sample(fin.msgs, { onText: ({ text: t }) => { msg.text = (prev ? prev + '\n\n' : '') + t; this.ev.emit('text', th.id) }, signal: o.signal, modelTier: th.tier || 'default', cache: false, ...(th.model ? { model: th.model } : {}) })
+        } catch (e) { if (o.signal && o.signal.aborted) throw e; res = { text: '(The turn used all its evals before Claude could report; send a message to go on.)' } }
+        break
+      }
       prev = (prev ? prev + '\n\n' : '') + ((res && res.text) || '').trim()
       msg.text = prev; this.ev.emit('text', th.id)
       msgs = [...msgs, { role: 'assistant', content: this.renderMsg({ ...msg, text: (res && res.text) || '' }, true) || '(evals)' },
