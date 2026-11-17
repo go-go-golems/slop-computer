@@ -5,7 +5,7 @@ import { test } from 'node:test'
 import assert from 'node:assert/strict'
 
 globalThis.addEventListener ??= () => { } // server/instances.js watches visibility
-const { Fixtures, runScenario } = await import('../src/frames/scenarios.js')
+const { Fixtures, runScenario, expectStep } = await import('../src/frames/scenarios.js')
 const { Slop } = await import('../src/server/slop.js')
 const { Headless } = await import('../src/frames/host.js')
 const { sleep } = await import('../src/lib/util.js')
@@ -58,4 +58,17 @@ test('a fixture applied during a run waits for it; a failed run lets the next on
   assert.deepEqual(await applied, { fixture: 'one', ws: 'draft' })
   assert.equal(s.rows.length, 1, 'the fixture applied after the run, not under it')
   assert.ok((await runScenario(P, spec('one', 1), { name: 'next', keep: false })).ok)
+})
+
+// A text check is "contains"; a number wants exact or match ("12" is
+// contained in "128": a persona review found a check passing on the wrong
+// number).
+test('expect: text contains, exact and match', async () => {
+  const fh = { call: async (m) => (m === 'count' ? 1 : [{ text: '  Shipped:\n 128 kg ', rect: { w: 10, h: 10 } }]) }
+  assert.equal((await expectStep(fh, { expect: '#w', text: '12' })).ok, true)
+  assert.equal((await expectStep(fh, { expect: '#w', text: '12 kg', exact: true })).ok, false)
+  assert.equal((await expectStep(fh, { expect: '#w', text: 'shipped: 128 KG', exact: true })).ok, true)
+  assert.equal((await expectStep(fh, { expect: '#w', match: '\\b12 kg' })).ok, false)
+  assert.equal((await expectStep(fh, { expect: '#w', match: '\\b128 kg' })).ok, true)
+  assert.match((await expectStep(fh, { expect: '#w', match: '(' })).got, /not a regular expression/)
 })

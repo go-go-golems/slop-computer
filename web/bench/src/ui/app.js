@@ -39,8 +39,11 @@ export const App = {
     let n = 0
     for (const fh of FrameHosts) if (!fh.headless && fh.project === this.P) n += fh.issues.length + fh.errors
     if (Watch.status && Watch.status.dev && Watch.status.dev.broken) n++
-    return n
+    return n + this.typeErrors.length
   },
+  // the type checker's errors in the workspace shown (the Code view keeps them: ui/code.js)
+  typeErrors: [],
+  setTypeErrors(diags) { this.typeErrors = diags || []; this.ev.emit('health'); this.paintHeader() },
   hostFor(fid) { return this.canvas ? this.canvas.hostFor(fid) : null },
   hostByFid(fid) { for (const fh of FrameHosts) if (fh.fid === fid) return fh; return null },
   firstHost() { for (const fh of FrameHosts) if (!fh.headless && fh.project === this.P) return fh; return null },
@@ -132,7 +135,7 @@ export const App = {
     this.offs.forEach(f => f()); this.offs = []
     if (this.canvas) this.canvas.reset()
     Headless.clear()
-    this.P = P; this.ws = 'draft'; this.sel = null; this.logs = []
+    this.P = P; this.ws = 'draft'; this.sel = null; this.logs = []; this.typeErrors = []
     this.offs.push(
       P.ev.on('files', (ws, paths) => { this.ev.emit('files', ws, paths); this.paintHeader() }),
       P.ev.on('proposals', () => {
@@ -370,7 +373,12 @@ export const App = {
         })
       }
     }
-    if (items.length === 1) items.push({ note: 'No issues in the frames on the canvas.' })
+    if (this.typeErrors.length) {
+      items.push({ group: 'Type errors' })
+      for (const d of this.typeErrors.slice(0, 6)) items.push({ label: d.file + ':' + d.line, sub: d.message.split('\n')[0].slice(0, 70), run: () => this.reveal(d.file, d.line) })
+      if (this.typeErrors.length > 6) items.push({ note: (this.typeErrors.length - 6) + ' more in the Code view' })
+    }
+    if (items.length === 1) items.push({ note: 'No issues in the frames on the canvas, and no type errors.' })
     else items.push({ hr: true }, { label: 'Ask Claude to fix these', run: () => this.askAgent('Fix the check issues and errors the frames report.') })
     popMenu(btn, items, { right: true })
   },

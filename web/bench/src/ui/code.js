@@ -194,10 +194,10 @@ export const CODE = {
       const p = P()
       if (!p || S.snap) return
       const view = typeView()
-      if (!Types.wants(view)) { if (S.tdiags) { S.tdiags = null; paintCode(); paintFoot() } return }
+      if (!Types.wants(view)) { if (S.tdiags) { S.tdiags = null; paintCode(); paintFoot(); App.setTypeErrors([]) } return }
       const r = await Types.check(p, view, { timeoutMs: 20000, ref: App.ws })
       if (r.skipped || P() !== p) return
-      S.tdiags = r.diags; paintCode(); paintFoot()
+      S.tdiags = r.diags; paintCode(); paintFoot(); App.setTypeErrors(r.diags)
     }, 500)
     const infoSoon = debounce(async () => {
       const p = P(), path = S.cur
@@ -248,7 +248,7 @@ export const CODE = {
       if (e.key === 's' && (e.metaKey || e.ctrlKey)) { e.preventDefault(); commit(); P().draftOf(App.ws).settle(); toast('Saved') }
     })
     async function newFile() {
-      const p = await promptBox('New file', 'Path, like about.html or css/theme.css', 'about.html')
+      const p = await promptBox('New file', 'Its path, like about.html or css/theme.css', '')
       if (!p) return
       const bad = checkPath(p)
       if (bad) return toast(bad)

@@ -133,7 +133,7 @@ async function runHolding(P, spec, { ws = 'draft', name = 'unsaved', onStep, sig
   P.log({ kind: 'scenario', who, ref: ws, thread, name, ok: res.ok, note })
   return res
 }
-async function expectStep(fh, s) {
+export async function expectStep(fh, s) {
   const n = await fh.call('count', [s.expect])
   if (s.count != null) return { ok: n === +s.count, got: 'count ' + n }
   if (s.visible === false) {
@@ -143,9 +143,17 @@ async function expectStep(fh, s) {
   }
   if (!n) return { ok: false, got: 'nothing matches' }
   const els = await fh.call('all', [s.expect, 20])
+  const got = () => 'text "' + els.map(e => e.text).join(' | ').slice(0, 120) + '"'
+  // text: contains, ignoring case ("12" passes on "128": a number wants exact or match);
+  // exact: the whole text, spaces collapsed; match: a regular expression
+  if (s.match != null) {
+    let re
+    try { re = new RegExp(String(s.match)) } catch (e) { return { ok: false, got: 'match is not a regular expression: ' + e.message } }
+    return { ok: els.some(e => re.test(e.text)), got: got() }
+  }
   if (s.text != null) {
-    const want = String(s.text).toLowerCase()
-    return { ok: els.some(e => e.text.toLowerCase().includes(want)), got: 'text "' + els.map(e => e.text).join(' | ').slice(0, 120) + '"' }
+    const norm = t => String(t).replace(/\s+/g, ' ').trim().toLowerCase(), want = norm(s.text)
+    return { ok: els.some(e => s.exact ? norm(e.text) === want : e.text.toLowerCase().includes(String(s.text).toLowerCase())), got: got() }
   }
   if (s.value != null) { const v = (els[0].attrs || {}).value; return { ok: String(v) === String(s.value), got: 'value "' + v + '"' } }
   return { ok: els.some(e => e.rect.w && e.rect.h), got: 'not visible' }

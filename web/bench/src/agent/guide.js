@@ -16,9 +16,9 @@ Reads wait until the page has settled (data loaded, DOM quiet). Arranging, label
   scenarios: `A scenario (scenarios/<name>.json) runs in a fresh frame of your test instance, after it is reset and seeded with the fixture, and passes or fails:
 { description, page: "index.html", size?: [375, 720], fixture?: name, steps: [
   { click: sel }, { type: sel, text }, { go: "#/cart" }, { waitFor: sel }, { wait: ms },
-  { expect: sel } (visible) | { expect: sel, text } (contains) | { expect: sel, count } | { expect: sel, visible: false } | { expect: sel, value },
+  { expect: sel } (visible) | { expect: sel, text } (contains, ignoring case) | { expect: sel, text, exact: true } (the whole text) | { expect: sel, match: "^12 kg$" } (a regular expression) | { expect: sel, count } | { expect: sel, visible: false } | { expect: sel, value },
   { sql: "SELECT … FROM notes WHERE …", args?, count? } | { docs: coll, where?: {field: value}, count? } (the test instance's data), { snapshot: label } ] }
-Checks retry until they pass or time out ({ timeout } on a step or the scenario, default 2000 ms). A failure keeps a snapshot.`,
+A number is checked with exact or match, never contains: "12" is contained in "128" and "312". Checks retry until they pass or time out ({ timeout } on a step or the scenario, default 2000 ms). A failure keeps a snapshot.`,
   session: `Long threads: older messages are folded into a summary at the top of your context; session.recall and session.message reach what it left out.`,
   ui: ``,
 }
@@ -84,6 +84,10 @@ const RULES = `Working rules:
 - In a proposal, say what you changed so the person can judge it. Say which draft your change made; publishing is the person's call.
 - Do not name your variables after the API's namespaces (files, app, frames, tests, session, ui, lib, types, …): const [info, files] = … makes files a variable for the whole eval, and files.list() then fails.
 - Talk to the person in their words, not the bench's internals: "your proposal \"Add a heading\"" (its title), not proposal/mwk3…; "the preview of your proposal", not "the prop instance"; "the draft", not "draft 14". Explain a term the first time a person who does not program would meet it (a proposal: a copy of the app with your changes, which they look at and accept or reject).
+- Leave nothing of your own testing in the app: a probe action, a scratch file, a deliberate type error to see what the checker says. Remove it in the same turn, or do the probing in an eval that does not write.
+- Start with what the person will see: a page they can look at and try, then the server code and tests behind it. Someone who does not program judges progress by the page.
+- Tell the person everything they need to use what you made: a code or password you chose, which page to open, where to click, that a result appears below the fold.
+- Questions about the bench itself are part of the job: how to try a change safely (a proposal), how to keep it (Accept in the chat or the Review tab), how to undo it (Reject; the Timeline restores earlier versions), how to see the data (the Data view), how to publish (Publish in the header). Answer them plainly.
 - Finish with a short summary in Markdown (short paragraphs, bullets, \`code\`; no big headings): what you changed, where, and anything left to do. Cite places as \`file:line\` (for example \`styles.css:73\`): they become links that open the file.`
 
 export function guide(P, api) {
