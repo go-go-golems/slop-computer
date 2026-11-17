@@ -35,3 +35,7 @@ Phase 0b implemented (PR #54, on #53): slop vendor (pkg/npmvendor, CLI only) —
 ## 2026-11-16
 
 #52 merged. Review of #53: a directory page on the static host got no import map (mount match drops the trailing slash); fixed in 49cca0b — newAppCode takes each route's base (mount Base, sandbox prefix, preview root); test covers docs/ on all three. Diary step 6.
+
+## 2026-11-16
+
+Review of #54 fixed in ec894d5: peers stay imports (the app's one copy), optional dependencies fail soft with their subtree, a refused add changes nothing; design §4.7 updated; diary step 7

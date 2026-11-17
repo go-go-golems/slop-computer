@@ -458,3 +458,73 @@ The person merged #52 and asked me to address the Codex review of #53. It found 
 
 ### Technical details
 - N/A.
+
+## Step 7: Review of #54, peers, optional dependencies and refused adds
+
+The person asked me to address the Codex review of #54 before going on with #51's findings. All three findings were real, and they're fixed in ec894d5. A package's peers stay imports, which the app resolves to its own copy. An optional dependency that can't be had is left out, with everything placed for it. An add that the new `app.json` would refuse now changes nothing.
+
+### Prompt Context
+**User prompt (verbatim):** "Actually first address code review issues on https://github.com/go-go-golems/slop-computer/pull/54" (sent while I was starting on "what about the findings on #51")
+**Assistant interpretation:** Fix #54's review findings first, then come back to #51.
+**Inferred user intent:** Get the stacked PRs ready to merge in order.
+**Commit (code):** ec894d5, "slop vendor: peers stay imports, optional dependencies fail soft, a refused add changes nothing", pushed to `task/slop3-024-vendor`.
+
+### What I did
+- **Peers (P2, `registry.go:298`):** a package that imports a peer the tree doesn't hold used to fail to bundle, and vendoring the peer separately didn't help.
+  - `resolveAll` now returns a `tree` that carries the peer names.
+  - `bundle` marks each peer as external, along with its subpaths (`name/*`), and reads the bundle's external imports from esbuild's metafile.
+  - `Add` prints one note per peer package that lists the names the app doesn't map yet, with an `addCommand` that maps them all.
+- **Optional dependencies (P2, `registry.go:305`):** a missing tarball for an optional dependency used to fail the whole add.
+  - Each tarball is now fetched as its package is placed.
+  - A failed optional dependency is rolled back together with everything placed for it. The code records the placement order and truncates it to a mark.
+- **Refused adds (P2, `vendor.go:195`):** `Add` used to delete the old version's files before `save` refused the new `app.json`.
+  - `save` is split into `prepare` and `commit`. `prepare` computes and checks the new files and writes nothing; `commit` writes them.
+  - `Add` writes the new files first, then removes the old ones. `removeFiles` takes a `keep` set, so a re-add at the same version doesn't delete what it just wrote.
+  - `Remove` uses the same order.
+- **Tests:** `TestPeersStayImports`, `TestOptionalDependencies` and `TestRefusedAddChangesNothing`.
+- **Design doc §4.7:** new paragraphs on peers, optional dependencies and refused adds.
+
+### Why
+- **Externalizing every peer, even one the tree also holds,** follows from what a peer is: the host provides it, and bundling it gives the package its own copy, which breaks identity whenever the app uses the peer too.
+- **Fetching during placement** makes "optional" a matter of scope. Everything that can fail for an optional dependency fails inside its own visit, which is exactly the part that gets rolled back.
+
+### What worked
+- **Each new test fails on the old code,** with the problem the review describes:
+  - `bundling ui: Could not resolve "core"; Could not resolve "core/extra"`;
+  - `GET …/-/notar-1.0.0.tgz: 404 Not Found`;
+  - and the refused add, which had already rewritten the files.
+- **Against npm:** I vendored `@preact/signals` 2.11.4 before `preact` into a fresh app.
+  - Its bundle imports `from "preact"` and `from "preact/hooks"`.
+  - The note's command, `slop vendor add preact preact preact/hooks`, mapped both names, and re-adding signals then gave no note.
+  - `slop vendor` reports no problems.
+- **Full suite:** `golangci-lint` reports 0 issues; `go test -tags sqlite_fts5 ./...` passes in all 24 packages; `-race` on `pkg/npmvendor` passes.
+- **Replied** on the three threads (discussion_r4593923230, …3430, …3612).
+
+### What didn't work
+- **The first note named one command per import:** `slop vendor add preact preact/hooks` for `preact/hooks`. Given import names, an add maps only those names, so that command left `preact` unmapped, and the npm run showed it. The notes are now grouped per peer package, with one command for all its names.
+- **`bundle` with named results** would have failed `nonamedreturns`; I changed it before linting.
+
+### What I learned
+- **esbuild's metafile** lists each output's imports with `external: true`. That is the exact set of names the app must map, so optional peers a package never imports produce no notes.
+
+### What was tricky to build
+- **Rolling back an optional subtree:**
+  - **The obstacle:** the resolver dedupes against what is already placed, so removing entries could break something that relies on them.
+  - **Why it's safe:** the walk is depth first. Everything placed after the mark was placed by the failed visit itself, and no other branch has looked at it yet. So truncating the order to the mark is enough.
+
+### What warrants a second pair of eyes
+- **A peer the tree also holds is now external too.** Example: a package that depends on react and also on react-dom, which peers react. Before this change, react was bundled into the package. Now the app must vendor react, and a note says so.
+
+### What should be done in the future
+- **Peer ranges are not checked** against the version the app has vendored. npm warns about an unmet peer; a later change could too, since the lock has the versions.
+- **Shared non-peer dependencies:** two packages vendored separately that both depend on the same library, such as `@codemirror/state`, each get their own copy of it. Vendoring them in one add would share it, but `slop vendor add` takes one package per add.
+
+### Code review instructions
+- **Read:**
+  - `pkg/npmvendor/registry.go` (`resolveAll`, `tree`);
+  - `pkg/npmvendor/build.go` (`bundle`: `External`, metafile);
+  - `pkg/npmvendor/vendor.go` (`Add` after `count`, `prepare`/`commit`, `removeFiles`).
+- **Run:** `go test ./pkg/npmvendor -run 'Peers|Optional|Refused' -count=1 -v`
+
+### Technical details
+- The note's format: `<pkg>'s page bundles import its peer <peer> (<names>), and the app does not map it yet: slop vendor add <peer> <names…>`. The actor's note says "require" and "for the actor".

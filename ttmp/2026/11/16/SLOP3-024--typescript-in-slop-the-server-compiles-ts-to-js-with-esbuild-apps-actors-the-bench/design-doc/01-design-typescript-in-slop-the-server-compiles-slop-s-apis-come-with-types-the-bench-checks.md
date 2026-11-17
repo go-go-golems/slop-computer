@@ -38,7 +38,7 @@ WhenToUse: Before implementing any part of SLOP3-024, or when touching how slop 
 
 **The server compiles, slop's APIs come with types, and the bench checks.**
 
-Status: decided, 2026-11-16 (section 11 lists the decisions). Phase 0 is in PR #53 (on top of #52), and phase 0b (`slop vendor`) is in PR #54 (on top of #53). The evidence was gathered against slop-computer `main` at 407a3f9. The goja source-map loader from section 4.4 shipped first, as a separate fix (PR #52).
+Status: decided, 2026-11-16 (section 11 lists the decisions). Phase 0 is in PR #53, and phase 0b (`slop vendor`) is in PR #54 (on top of #53); both have had their Codex review findings fixed. The evidence was gathered against slop-computer `main` at 407a3f9. The goja source-map loader from section 4.4 shipped first, as a separate fix (PR #52).
 
 ## 1. Summary
 
@@ -378,6 +378,16 @@ app.json                                "slop": {"imports": {"page": {"preact": 
 - Names the person mapped by hand in `slop.imports`, even to files under `vendor/`, are kept. Only names that point into a folder `slop vendor` manages are rewritten.
 - `slop vendor rm preact` removes a package.
 - Adding a different version replaces the old one, and the change shows up as an ordinary diff.
+
+**Peers.** A peer dependency is one the package expects its host to provide: `@preact/signals` declares `preact` as one. The package and the app must share a single copy, because a second copy of preact breaks hooks. So a peer is never bundled into the package that wants it:
+- its page bundles keep `import … from "preact"`, and its actor bundles keep `require("preact")`;
+- the app's mapping resolves those names, so the package gets the app's copy.
+
+The peer can be vendored before the package or after it. Until the app maps every name the bundles import, `slop vendor add` prints a note with one command that maps them all (`slop vendor add preact preact preact/hooks`). An add keeps the names a package already has.
+
+**Optional dependencies.** An optional dependency that can't be had is left out with a note, as npm does. That covers missing metadata, no matching version, a missing tarball, or any of these for one of its own dependencies. A required dependency that can't be had fails the add.
+
+**A refused add changes nothing.** `slop vendor` works out the new `app.json`, the lock and the tsconfig, and checks them, before it writes any file. So an add the new `app.json` would refuse, for example one name over the limit of 256 per side, leaves the installed version as it was.
 
 **Where it runs.** There are two forms, and a person runs both:
 
