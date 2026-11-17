@@ -1,4 +1,4 @@
-/* the bench, built from web/bench: do not edit. source sha256:2c5dac4b34b2350c77c653cac03b4eea68c44d40a1e4ba362e32ff2356c2e0c1 */
+/* the bench, built from web/bench: do not edit. source sha256:9ac80b7d246b6116b7d670c15e23e0660c71d94e52e7b2280942691905df840b */
 // The bench: a live dev environment for slop apps. Built from web/bench/src.
 (() => {
   // src/lib/util.js
@@ -1414,6 +1414,9 @@
           }
           break;
         }
+        case "invalid":
+          if (!this.headless) toast('Not sent: "' + m.field + '": ' + m.message, 5e3);
+          break;
         case "modekey":
           if (!this.headless) document.dispatchEvent(new KeyboardEvent("keydown", { key: String(m.key || "") }));
           break;

@@ -1,4 +1,4 @@
-/* the bench, built from web/bench: do not edit. source sha256:2c5dac4b34b2350c77c653cac03b4eea68c44d40a1e4ba362e32ff2356c2e0c1 */
+/* the bench, built from web/bench: do not edit. source sha256:9ac80b7d246b6116b7d670c15e23e0660c71d94e52e7b2280942691905df840b */
 // slop's dev probe (SLOP3-022): the bench's PROBE from web/bench/src/frames/probe.js,
 // which the sandbox adds to dev embeds only, after the runtime. It answers the
 // tool that framed the view (the boot data's parentOrigin) and nothing else.
@@ -42,6 +42,17 @@ function PROBE(CFG) {
   }
   try { const A = window.HTMLAnchorElement.prototype, ac = A.click; A.click = function () { recDl(this); return ac.call(this) } } catch (e) { /* read-only */ }
   addEventListener('click', e => { const a = e.target && e.target.closest && e.target.closest('a[download]'); if (a) recDl(a) }, true)
+  // a form the browser refused (a required field empty, a bad format) shows a bubble that is easy to miss on
+  // a zoomed canvas, and that an agent never sees: "Add did nothing" (rounds 4 and 5). Say which field and why
+  let lastInvalid = 0
+  addEventListener('invalid', e => {
+    const t = e.target, now = Date.now()
+    if (now - lastInvalid < 800) return
+    lastInvalid = now
+    const lab = (t.labels && t.labels[0] && t.labels[0].innerText.trim()) || t.getAttribute('aria-label') || t.name || t.id || t.tagName.toLowerCase()
+    post({ ev: 'log', level: 'warn', text: 'The form was not sent: "' + String(lab).slice(0, 60) + '": ' + (t.validationMessage || 'not valid'), src: srcOf(t) })
+    post({ ev: 'invalid', field: String(lab).slice(0, 60), message: t.validationMessage || 'not valid' })
+  }, true)
   // print() does nothing in a sandboxed frame: say so instead of nothing (a florist pressed Print twice, round 4)
   try { window.print = () => post({ ev: 'print' }) } catch (e) { /* not writable: the page prints as it can */ }
 

@@ -156,6 +156,9 @@ export class FrameHost {
         if (p) { this.pend.delete(m.id); m.ok ? p.res(m.value) : p.rej(Object.assign(new Error(m.error), { kind: 'frame' })) }
         break
       }
+      case 'invalid':
+        if (!this.headless) toast('Not sent: "' + m.field + '": ' + m.message, 5000)
+        break
       case 'modekey':
         if (!this.headless) document.dispatchEvent(new KeyboardEvent('keydown', { key: String(m.key || '') }))
         break
