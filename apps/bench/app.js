@@ -1,4 +1,4 @@
-/* the bench, built from web/bench: do not edit. source sha256:7e22f19e483f8771482ea8aba899f3feb61db1a38a4bd6073eaa5c9a43f2f76a */
+/* the bench, built from web/bench: do not edit. source sha256:c9d5d79c51ec1dcc7bdfd8a02aaba918afa5635ab06651d6964dfda42f07988e */
 // The bench: a live dev environment for slop apps. Built from web/bench/src.
 (() => {
   // src/lib/util.js
@@ -1517,6 +1517,8 @@
     openPin: () => {
     },
     textEdit: () => {
+    },
+    reveal: () => {
     }
   };
   addEventListener("message", async (e) => {
@@ -2221,6 +2223,7 @@
           changed(P);
         }
         canvasLog(ctx, "opened " + route + " " + w + "\xD7" + hh);
+        FrameHost.ui.reveal(f.id);
         return info(f);
       }
     },
@@ -6920,6 +6923,7 @@ Markdown files (README.md, notes, specs) render in the Docs panel. Keep README.m
         ready: (fh) => this.ev.emit("frameready", fh),
         hostFor: (fid) => this.hostFor(fid),
         log: (fh, l) => this.consoleAdd(l),
+        reveal: (fid) => setTimeout(() => this.canvas && this.canvas.focusFrame && this.canvas.focusFrame(fid), 400),
         pick: (fh, info2) => {
           this.select(info2);
           if (!this.playHinted && /^(button|a|input|select|textarea|label|summary)\b/i.test(info2.tag || "")) {

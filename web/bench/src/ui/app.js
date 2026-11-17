@@ -424,6 +424,7 @@ export const App = {
     Object.assign(FrameHost.ui, {
       mode: () => this.mode, pinsFor: r => this.pinsFor(r), preview: () => Preview.payload(), health: () => this.ev.emit('health'),
       ready: fh => this.ev.emit('frameready', fh), hostFor: fid => this.hostFor(fid), log: (fh, l) => this.consoleAdd(l),
+      reveal: fid => setTimeout(() => this.canvas && this.canvas.focusFrame && this.canvas.focusFrame(fid), 400),
       pick: (fh, info) => {
         this.select(info)
         // a person who clicks a button in Select mode meant to press it (two persona reviews in a row)

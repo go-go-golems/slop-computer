@@ -40,6 +40,9 @@ export const FRAMES = {
       const f = P.addFrame({ route, w, h: hh, x: o.x, y: o.y })
       if (o.label) { f.label = String(o.label).slice(0, 60); changed(P) }
       canvasLog(ctx, 'opened ' + route + ' ' + w + '×' + hh)
+      // a frame the agent opens off screen is brought into view (a florist found two new sheets only by
+      // pressing Fit, round 5)
+      FrameHost.ui.reveal(f.id)
       return info(f)
     }
   },

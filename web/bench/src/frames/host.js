@@ -223,7 +223,7 @@ export class FrameHost {
 // What only the page can do, set by the shell (ui/app.js) at boot.
 FrameHost.ui = {
   mode: () => 'select', pinsFor: () => [], preview: () => null, health: () => { }, ready: () => { }, hostFor: () => null,
-  log: () => { }, pick: () => { }, placePin: () => { }, openPin: () => { }, textEdit: () => { }
+  log: () => { }, pick: () => { }, placePin: () => { }, openPin: () => { }, textEdit: () => { }, reveal: () => { }
 }
 
 // The bench is the shell of its embedded frames: it answers their slop
