@@ -141,14 +141,15 @@ func TestAppTypes(t *testing.T) {
 	}
 	// Mistakes on each side of the contract.
 	write(map[string]string{
-		"main.ts": strings.Replace(app["main.ts"], "{ text: 'from the page' }", "{ txt: 'from the page' }", 1),
+		"main.ts": strings.Replace(strings.Replace(app["main.ts"], "{ text: 'from the page' }", "{ txt: 'from the page' }", 1),
+			"d.data()?.text", "d.data()?.txt", 1),
 		"actor.ts": strings.Replace(strings.Replace(app["actor.ts"], "return { id: lastRowid }", "return { id: String(lastRowid) }", 1),
 			"use('workshop')", "use('system')", 1),
 		"server/reactors.ts": strings.Replace(reactors, "entry.rev", "entry.store", 1),
 	})
 	pages, okPages := check("tsconfig.json")
 	actorOut, okActor := check("tsconfig.actor.json")
-	if okPages || !strings.Contains(pages, "'txt' does not exist") {
+	if okPages || !strings.Contains(pages, "'txt' does not exist") || !strings.Contains(pages, "Property 'txt' does not exist on type 'Pin'") {
 		t.Errorf("the page's mistake:\n%s", pages)
 	}
 	if okActor || !strings.Contains(actorOut, `"system"' is not assignable`) || !strings.Contains(actorOut, "Type 'string' is not assignable to type 'number'") ||

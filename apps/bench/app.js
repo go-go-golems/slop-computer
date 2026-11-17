@@ -1,4 +1,4 @@
-/* the bench, built from web/bench: do not edit. source sha256:65df6eb0909f14717ee7bf62dd50af9eb84792bf7993e4bb10afa69e2890d266 */
+/* the bench, built from web/bench: do not edit. source sha256:7836c117ce339610e0f58467bcd0ca3ba8ee80615762981ab420e2ecccf15301 */
 // The bench: a live dev environment for slop apps. Built from web/bench/src.
 (() => {
   // src/lib/util.js
@@ -3209,10 +3209,10 @@ const form = document.querySelector<HTMLFormElement>('#add')!
 
 async function show() {
   if (!db) return
-  const snap = await db.collection('notes').get()
-  list.replaceChildren(...snap.docs.map((d: { data(): Note }) => {
+  const snap = await db.collection<Note>('notes').orderBy('at').get()
+  list.replaceChildren(...snap.docs.map(d => {
     const li = document.createElement('li')
-    li.textContent = d.data().text
+    li.textContent = d.data()?.text ?? ''
     return li
   }))
 }
@@ -3223,7 +3223,7 @@ form.addEventListener('submit', async e => {
   const text = input.value.trim()
   if (!text || !db) return
   const note: Note = { text, at: Date.now() }
-  await db.collection('notes').add(note)
+  await db.collection<Note>('notes').add(note)
   form.reset()
   await show()
 })

@@ -67,10 +67,10 @@ const form = document.querySelector<HTMLFormElement>('#add')!
 
 async function show() {
   if (!db) return
-  const snap = await db.collection('notes').get()
-  list.replaceChildren(...snap.docs.map((d: { data(): Note }) => {
+  const snap = await db.collection<Note>('notes').orderBy('at').get()
+  list.replaceChildren(...snap.docs.map(d => {
     const li = document.createElement('li')
-    li.textContent = d.data().text
+    li.textContent = d.data()?.text ?? ''
     return li
   }))
 }
@@ -81,7 +81,7 @@ form.addEventListener('submit', async e => {
   const text = input.value.trim()
   if (!text || !db) return
   const note: Note = { text, at: Date.now() }
-  await db.collection('notes').add(note)
+  await db.collection<Note>('notes').add(note)
   form.reset()
   await show()
 })

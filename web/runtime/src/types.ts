@@ -1,19 +1,20 @@
 // window.claude's type, for apps (SLOP3-024). Not part of the bundle:
 // build.mjs emits the declarations of this file, and of what it imports,
-// into pkg/doors/pages/assets/page.d.ts, which app.types returns and
+// into pkg/apptypes/page.d.ts, which app.types returns and
 // `slop types` writes into an app. The types are the implementation's own,
 // so the declaration changes when the runtime does.
-import type { artifact, assets, comments, downloads, files, permissions, slop, user } from "./caps.ts";
-import type { db } from "./db.ts";
-import type { lobby } from "./room.ts";
+import type { artifact, assets, Comments, downloads, files, permissions, slop, User } from "./caps.ts";
+import type { Db } from "./db.ts";
+import type { Lobby } from "./room.ts";
 import type { sample } from "./sample.ts";
 
 /** What claude.use(name) resolves to, when this view may use it. */
 export interface Capabilities {
-  db: typeof db;
-  user: ReturnType<typeof user>;
-  room: ReturnType<typeof lobby>;
-  comments: ReturnType<typeof comments>;
+  db: Db;
+  user: User;
+  /** The lobby; lobby.join(name) enters a named room. */
+  room: Lobby;
+  comments: Comments;
   assets: typeof assets;
   downloads: typeof downloads;
   files: ReturnType<typeof files>;

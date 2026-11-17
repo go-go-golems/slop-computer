@@ -10,3 +10,12 @@ if (slop && list) {
     list.append(li)
   }
 }
+
+// The document database, typed by what the app keeps in it.
+interface Pin { text: string; at: number }
+const db = await claude.use('db')
+if (db) {
+  await db.collection<Pin>('pins').add({ text: 'pinned', at: Date.now() })
+  const snap = await db.collection<Pin>('pins').where('at', '>', 0).orderBy('at', 'desc').limit(5).get()
+  for (const d of snap.docs) console.log(d.id, d.data()?.text)
+}
