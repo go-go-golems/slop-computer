@@ -1,4 +1,4 @@
-/* the bench, built from web/bench: do not edit. source sha256:c9d5d79c51ec1dcc7bdfd8a02aaba918afa5635ab06651d6964dfda42f07988e */
+/* the bench, built from web/bench: do not edit. source sha256:15870e792b0402e0287f998493842e06320e44c85873acfba4ea52aa4c235ca1 */
 // The bench: a live dev environment for slop apps. Built from web/bench/src.
 (() => {
   // src/lib/util.js
@@ -6749,8 +6749,9 @@ Markdown files (README.md, notes, specs) render in the Docs panel. Keep README.m
         title: "Published draft " + n,
         wide: true,
         body: [where, h("p.note", "Instances that follow main:"), list],
-        actions: [{ label: from ? "Roll back to " + from : "Close", danger: !!from, run: async () => {
+        actions: [{ label: from ? "Undo this publish\u2026" : "Close", run: async () => {
           if (!from) return;
+          if (!await confirmBox("Undo this publish?", "People get the version from before (" + from + ") again. Your draft keeps everything.", "Undo the publish")) return false;
           try {
             await Publish.rollback(P, from, n);
             toast("main is back at " + from);

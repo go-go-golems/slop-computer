@@ -312,7 +312,7 @@ export const App = {
     }).catch(() => { clear(where) })
     modal({
       title: 'Published draft ' + n, wide: true, body: [where, h('p.note', 'Instances that follow main:'), list],
-      actions: [{ label: from ? 'Roll back to ' + from : 'Close', danger: !!from, run: async () => { if (!from) return; try { await Publish.rollback(P, from, n); toast('main is back at ' + from) } catch (e) { toast('Not rolled back: ' + (e.message || e), 6000) } } }, ...(from ? [{ label: 'Done', primary: true }] : [])]
+      actions: [{ label: from ? 'Undo this publish…' : 'Close', run: async () => { if (!from) return; if (!await confirmBox('Undo this publish?', 'People get the version from before (' + from + ') again. Your draft keeps everything.', 'Undo the publish')) return false; try { await Publish.rollback(P, from, n); toast('main is back at ' + from) } catch (e) { toast('Not rolled back: ' + (e.message || e), 6000) } } }, ...(from ? [{ label: 'Done', primary: true }] : [])]
     })
   },
   // the dev instance's data changed under the frames (a seed): show it
