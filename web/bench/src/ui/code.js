@@ -40,8 +40,12 @@ export const CODE = {
     const code = h('div.code', band, pre, ta), ed = h('div.ed', bcol, gutter, code)
     const prev = h('div.mdprev', { hidden: true }), edrow = h('div.edrow', ed, prev)
     const foot = h('div.efoot'), empty = h('p.empty', 'Open a file from the list, or select an element on the canvas to jump to its source.')
-    const main = h('div.cmain', tabs, edrow, foot, empty)
-    const el = h('div', h('div.cview', side, main))
+    // in a narrow pane an open file gets the whole width: the list hides behind "Files"
+    // (a persona review: a laptop showed 180 px by 12 lines of code)
+    const filesBtn = h('button.btn.sm.fbtn', { title: 'Show or hide the file list', on: { click: () => cv.classList.toggle('showfiles') } }, 'Files')
+    const main = h('div.cmain', h('div.ftop', filesBtn, tabs), edrow, foot, empty)
+    const cv = h('div.cview', side, main)
+    const el = h('div', cv)
     const snapOf = () => S.snap && S.snap.path === S.cur ? S.snap : null
 
     const mdMode = () => isMd(S.cur) ? (S.view[S.cur] || (main.clientWidth >= 640 ? 'split' : 'code')) : 'code'
@@ -168,7 +172,7 @@ export const CODE = {
     }
     function load(keepView) {
       const snap = snapOf(), has = !!S.cur && !!P() && (!!snap || P().read(S.cur, App.ws) !== null)
-      edrow.hidden = foot.hidden = !has; empty.hidden = has
+      edrow.hidden = foot.hidden = !has; empty.hidden = has; cv.classList.toggle('hasfile', has)
       ta.readOnly = !!snap; edrow.classList.toggle('hist', !!snap); foot.classList.toggle('hist', !!snap)
       if (!has) return
       const st = ta.scrollTop, sl = ta.scrollLeft, ss = ta.selectionStart, se = ta.selectionEnd
@@ -181,7 +185,7 @@ export const CODE = {
       if (!keepSnap && S.snap) S.snap = null
       if (!S.tabs.includes(path)) S.tabs.push(path)
       const same = S.cur === path
-      S.cur = path; S.bkey = ''; S.bdata = null
+      S.cur = path; S.bkey = ''; S.bdata = null; cv.classList.remove('showfiles')
       paintTabs(); paintList(); load(same)
       if (!same) loadVersions()
       if (line) goto(line)

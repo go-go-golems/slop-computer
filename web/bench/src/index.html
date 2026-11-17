@@ -122,7 +122,7 @@ select.sel { height: 28px; padding: 0 4px; background: var(--bg); }
 .tilebody { flex: 1; min-height: 0; min-width: 0; display: flex; flex-direction: column; position: relative; overflow: hidden; }
 .view { flex: 1; min-height: 0; min-width: 0; display: flex; flex-direction: column; position: relative; container-type: inline-size; }
 @container (max-width: 600px) { .tl { flex-direction: column; } .tlside { width: auto; border-left: 0; border-top: 1px solid var(--hair); max-height: 45%; } }
-@container (max-width: 480px) { .flist { width: 130px; } .tlist { width: 110px; } .story > button { grid-template-columns: 16px 56px 1fr; } }
+@container (max-width: 480px) { .tlist { width: 110px; } .story > button { grid-template-columns: 16px 56px 1fr; } }
 body.dragging-view, body.dragging-view * { cursor: grabbing !important; user-select: none; }
 body.resizing-x, body.resizing-x * { cursor: col-resize !important; user-select: none; }
 body.resizing-y, body.resizing-y * { cursor: row-resize !important; user-select: none; }
@@ -192,6 +192,17 @@ body.dragging-view iframe, body.resizing-x iframe, body.resizing-y iframe, body.
 .tlist .fi .ch { color: var(--ink-2); }
 .flist .fi.dir { color: var(--ink-2); font-family: var(--ui); font-size: var(--fs-xs); padding-top: 8px; }
 .cmain { flex: 1; min-width: 0; display: flex; flex-direction: column; }
+.ftop { display: flex; align-items: stretch; flex: none; border-bottom: 1px solid var(--hair); }
+.ftop > .ftabs { flex: 1; min-width: 0; border-bottom: 0; }
+.fbtn { display: none; margin: 4px 6px; flex: none; }
+/* a narrow Code view: the list is 130 px, and hides behind "Files" while a file is open (after .flist, so it wins) */
+@container (max-width: 640px) {
+  .flist { width: 130px; }
+  .cview.hasfile .fbtn { display: inline-block; }
+  .cview.hasfile:not(.showfiles) .flist { display: none; }
+  .cview.showfiles .fbtn { background: var(--fill); }
+  .efoot { gap: 6px 8px; padding: 4px 8px; }
+}
 .ftabs { display: flex; align-items: stretch; height: 34px; border-bottom: 1px solid var(--hair); overflow-x: auto; scrollbar-width: none; flex: none; }
 .ftab { display: inline-flex; align-items: stretch; flex: none; }
 .ftab button { background: none; border: 0; padding: 0 4px 0 10px; font: 400 var(--fs-s) var(--code); color: var(--ink-2); white-space: nowrap; border-radius: 0; }

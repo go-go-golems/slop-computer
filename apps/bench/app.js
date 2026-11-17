@@ -1,4 +1,4 @@
-/* the bench, built from web/bench: do not edit. source sha256:25ab617717a31cfff5328f258791aa8a2eff6bce7098f2719a186e1b1caed30b */
+/* the bench, built from web/bench: do not edit. source sha256:66b989ad74133da8f30a5137c676baecc39a73514db886c48d3c0b02da4d742d */
 // The bench: a live dev environment for slop apps. Built from web/bench/src.
 (() => {
   // src/lib/util.js
@@ -7884,8 +7884,10 @@ Markdown files (README.md, notes, specs) render in the Docs panel. Keep README.m
       const code = h("div.code", band, pre, ta), ed = h("div.ed", bcol, gutter, code);
       const prev = h("div.mdprev", { hidden: true }), edrow = h("div.edrow", ed, prev);
       const foot = h("div.efoot"), empty = h("p.empty", "Open a file from the list, or select an element on the canvas to jump to its source.");
-      const main = h("div.cmain", tabs, edrow, foot, empty);
-      const el = h("div", h("div.cview", side, main));
+      const filesBtn = h("button.btn.sm.fbtn", { title: "Show or hide the file list", on: { click: () => cv.classList.toggle("showfiles") } }, "Files");
+      const main = h("div.cmain", h("div.ftop", filesBtn, tabs), edrow, foot, empty);
+      const cv = h("div.cview", side, main);
+      const el = h("div", cv);
       const snapOf = () => S.snap && S.snap.path === S.cur ? S.snap : null;
       const mdMode = () => isMd(S.cur) ? S.view[S.cur] || (main.clientWidth >= 640 ? "split" : "code") : "code";
       function paintPreview() {
@@ -8106,6 +8108,7 @@ Markdown files (README.md, notes, specs) render in the Docs panel. Keep README.m
         const snap = snapOf(), has = !!S.cur && !!P() && (!!snap || P().read(S.cur, App.ws) !== null);
         edrow.hidden = foot.hidden = !has;
         empty.hidden = has;
+        cv.classList.toggle("hasfile", has);
         ta.readOnly = !!snap;
         edrow.classList.toggle("hist", !!snap);
         foot.classList.toggle("hist", !!snap);
@@ -8132,6 +8135,7 @@ Markdown files (README.md, notes, specs) render in the Docs panel. Keep README.m
         S.cur = path;
         S.bkey = "";
         S.bdata = null;
+        cv.classList.remove("showfiles");
         paintTabs();
         paintList();
         load(same);
