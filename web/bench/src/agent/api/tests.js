@@ -67,7 +67,7 @@ export const TESTS = {
     sig: '', doc: '[{name, description, page, steps, fixture, error, last}]',
     run: ctx => scenarioList(files(ctx), ctx.ws).map(s => ({
       name: s.name, description: s.spec && s.spec.description || undefined, page: s.spec && s.spec.page, steps: s.spec && Array.isArray(s.spec.steps) ? s.spec.steps.length : 0,
-      fixture: s.spec && s.spec.fixture || undefined, error: s.error || undefined, last: s.last ? (s.last.ok ? 'passed' : 'failed at step ' + (s.last.failedAt + 1)) : undefined
+      fixture: s.spec && s.spec.fixture || undefined, error: s.error || undefined, last: s.last ? (s.last.stale ? 'edited since its last run (not run since)' : s.last.ok ? 'passed' : 'failed at step ' + (s.last.failedAt + 1)) : undefined
     }))
   },
   'scenarios.read': { sig: 'name', run: (ctx, name) => read(ctx, name) },

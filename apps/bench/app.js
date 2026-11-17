@@ -1,4 +1,4 @@
-/* the bench, built from web/bench: do not edit. source sha256:c25551d09bfa6ee6880dd5bbc99f2ab03cba33421d0e9f0f9b5b2117a870990f */
+/* the bench, built from web/bench: do not edit. source sha256:a61570438e2331239004c102a74fdc9d3fcc5fc3519b863561b3eb752fc1496b */
 // The bench: a live dev environment for slop apps. Built from web/bench/src.
 (() => {
   // src/lib/util.js
@@ -2685,6 +2685,12 @@
       return { name, path, spec, error, description: spec && spec.description || "", parts };
     });
   }
+  function specKey(spec) {
+    const t = JSON.stringify(spec);
+    let x = 5381;
+    for (let i = 0; i < t.length; i++) x = (x << 5) + x + t.charCodeAt(i) | 0;
+    return (x >>> 0).toString(36);
+  }
   function scenarioList(P, ws) {
     return P.list(ws).filter((p) => p.startsWith(SCEN_DIR) && p.endsWith(".json")).map((path) => {
       const name = path.slice(SCEN_DIR.length, -5);
@@ -2695,7 +2701,9 @@
       } catch (e) {
         error = "not valid JSON: " + e.message;
       }
-      return { name, path, spec, error, last: (P.meta.runs || {})[ws + "|" + name] || null };
+      let last = (P.meta.runs || {})[ws + "|" + name] || null;
+      if (last && spec && last.key && last.key !== specKey(spec)) last = { ...last, stale: true };
+      return { name, path, spec, error, last };
     });
   }
 
@@ -2834,7 +2842,7 @@
     res.ms = now() - t0;
     if (keep && name !== "unsaved") {
       P.meta.runs = P.meta.runs || {};
-      P.meta.runs[ws + "|" + name] = { t: res.t, ok: res.ok, ms: res.ms, failedAt: res.failedAt, steps: res.steps.map((s) => ({ label: s.label, ok: s.ok, error: s.error, ms: s.ms })), snaps: res.snaps };
+      P.meta.runs[ws + "|" + name] = { key: specKey(spec), t: res.t, ok: res.ok, ms: res.ms, failedAt: res.failedAt, steps: res.steps.map((s) => ({ label: s.label, ok: s.ok, error: s.error, ms: s.ms })), snaps: res.snaps };
       P.saveMeta();
     }
     const note = name + (res.ok ? " passed (" + plural(res.steps.length, "step") + ")" : " failed at step " + (res.failedAt + 1) + ": " + res.steps[res.failedAt].error);
@@ -2952,7 +2960,7 @@
         steps: s.spec && Array.isArray(s.spec.steps) ? s.spec.steps.length : 0,
         fixture: s.spec && s.spec.fixture || void 0,
         error: s.error || void 0,
-        last: s.last ? s.last.ok ? "passed" : "failed at step " + (s.last.failedAt + 1) : void 0
+        last: s.last ? s.last.stale ? "edited since its last run (not run since)" : s.last.ok ? "passed" : "failed at step " + (s.last.failedAt + 1) : void 0
       }))
     },
     "scenarios.read": { sig: "name", run: (ctx, name) => read(ctx, name) },
@@ -6953,7 +6961,7 @@ Markdown files (README.md, notes, specs) render in the Docs panel. Keep README.m
         ))));
       }
       function card(p, s) {
-        const live = S.live[s.name], last = s.last, shown = S.open[s.name] ?? (!!live || last && !last.ok);
+        const live = S.live[s.name], last = s.last && !s.last.stale ? s.last : null, stale = !!(s.last && s.last.stale), shown = S.open[s.name] ?? (!!live || last && !last.ok);
         const state = live ? live.done ? live.ok ? "ok" : "bad" : "run" : last ? last.ok ? "ok" : "bad" : "none";
         const icon = { ok: "\u2713", bad: "\u2717", run: "\u25CC", none: "\u25CB" }[state];
         const head = h(
@@ -6966,7 +6974,7 @@ Markdown files (README.md, notes, specs) render in the Docs panel. Keep README.m
           s.spec && s.spec.description ? h("span.note", s.spec.description) : null,
           h("span.sp"),
           s.spec ? h("span.note", s.spec.page + (s.spec.fixture ? " \xB7 fixture " + s.spec.fixture : "") + " \xB7 " + plural(s.spec.steps.length, "step")) : null,
-          last && !live ? h("span.note", fmtAgo(last.t)) : null,
+          last && !live ? h("span.note", fmtAgo(last.t)) : stale && !live ? h("span.note", { title: "Its steps changed after its last run" }, "edited: run it again") : null,
           h("button.btn.sm", { disabled: !!s.error || S.busy, on: { click: () => run(s) } }, "Run"),
           h("button.btn.sm", { on: { click: () => App.reveal(s.path, 1) } }, "Edit")
         );
@@ -8792,13 +8800,28 @@ return { files: list.map(f => f.path), issues }`;
           sub: f.error || f.parts.join(", ") || "empty",
           disabled: !!f.error,
           run: async () => {
-            try {
-              await Slop.call("seed", { app: P().app, kind: "dev", docs: f.spec.docs || {}, tables: f.spec.tables || {} });
+            const seed = () => Slop.call("seed", { app: P().app, kind: "dev", docs: f.spec.docs || {}, tables: f.spec.tables || {} });
+            const done = () => {
               toast("Seeded the dev instance from " + f.name + "; the frames reload");
               App.reloadDev();
               loadTables();
+            };
+            try {
+              await seed();
+              done();
             } catch (e) {
-              toast("Not seeded: " + (e.message || e), 5e3);
+              if (!/UNIQUE|constraint/i.test(e.message || "")) {
+                toast("Not seeded: " + (e.message || e), 6e3);
+                return;
+              }
+              if (!await confirmBox("Replace your dev data?", "Some rows of " + f.name + " are already in your dev data (the same ids), so nothing was added. Replace your dev data with " + f.name + "? Your dev instance is reset, then seeded.", "Replace")) return;
+              try {
+                await Instances.reset(P(), "dev");
+                await seed();
+                done();
+              } catch (e2) {
+                toast("Not seeded: " + (e2.message || e2), 6e3);
+              }
             }
           }
         })), ...fx.length ? [] : [{ note: "No fixtures yet: save rows as one, or write fixtures/<name>.json." }]]);

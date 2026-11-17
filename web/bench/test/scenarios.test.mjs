@@ -88,3 +88,15 @@ test('checkScenario: unknown step keys', async () => {
   assert.match(sc([{ click: 'b' }, { sql: 'SELECT 1', equal: 1, nme: 'x' }]), /step 2 \(sql\): unknown keys equal, nme/)
   assert.match(sc([{ expect: '#n', match: '(' }]), /match is not a regular expression/)
 })
+
+test('scenarioList: a result from before an edit is stale', async () => {
+  const { scenarioList, specKey } = await import('../src/core/scenario.js')
+  const spec = { page: 'index.html', steps: [{ expect: 'h1', text: 'Hi' }] }
+  let text = JSON.stringify(spec)
+  const P = { list: () => ['scenarios/a.json'], read: () => text, meta: { runs: { 'draft|a': { key: specKey(spec), ok: true, t: 1, steps: [] } } } }
+  assert.equal(scenarioList(P, 'draft')[0].last.stale, undefined, 'unchanged: the result stands')
+  text = JSON.stringify({ ...spec, steps: [{ expect: 'h1', text: 'Bye' }] })
+  assert.equal(scenarioList(P, 'draft')[0].last.stale, true, 'edited: stale')
+  P.meta.runs['draft|a'] = { ok: true, t: 1, steps: [] }
+  assert.equal(scenarioList(P, 'draft')[0].last.stale, undefined, 'an older run without a key is not marked')
+})

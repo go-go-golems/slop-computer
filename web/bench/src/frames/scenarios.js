@@ -16,7 +16,7 @@ import { FrameHosts, Headless } from './host.js';
 import { Instances } from '../server/instances.js';
 import { Slop } from '../server/slop.js';
 import { Snaps } from './layout.js';
-import { checkFixture, checkScenario, fixturePath, scenarioList, stepLabel } from '../core/scenario.js';
+import { checkFixture, checkScenario, fixturePath, scenarioList, specKey, stepLabel } from '../core/scenario.js';
 import { clamp, emitter, lock, now, plural, sleep } from '../lib/util.js';
 
 // The test instance is one per person and app, and a scenario run or a
@@ -133,7 +133,7 @@ async function runHolding(P, spec, { ws = 'draft', name = 'unsaved', onStep, sig
   res.ms = now() - t0
   if (keep && name !== 'unsaved') {
     P.meta.runs = P.meta.runs || {}
-    P.meta.runs[ws + '|' + name] = { t: res.t, ok: res.ok, ms: res.ms, failedAt: res.failedAt, steps: res.steps.map(s => ({ label: s.label, ok: s.ok, error: s.error, ms: s.ms })), snaps: res.snaps }
+    P.meta.runs[ws + '|' + name] = { key: specKey(spec), t: res.t, ok: res.ok, ms: res.ms, failedAt: res.failedAt, steps: res.steps.map(s => ({ label: s.label, ok: s.ok, error: s.error, ms: s.ms })), snaps: res.snaps }
     P.saveMeta()
   }
   const note = name + (res.ok ? ' passed (' + plural(res.steps.length, 'step') + ')' : ' failed at step ' + (res.failedAt + 1) + ': ' + res.steps[res.failedAt].error)

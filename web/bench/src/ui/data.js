@@ -11,6 +11,7 @@
 import { App } from './app.js';
 import { Dock } from './dock.js';
 import { FIX_DIR, checkFixture, fixtureList, fixturePath } from '../core/scenario.js';
+import { Instances } from '../server/instances.js';
 import { Slop } from '../server/slop.js';
 import { clear, confirmBox, h, popMenu, promptBox, put, toast } from '../lib/dom.js';
 import { debounce, plural } from '../lib/util.js';
@@ -92,7 +93,14 @@ export const DATA = {
       const fx = fixtureList(P(), App.ws)
       popMenu(btn, [{ group: 'Fixtures (' + FIX_DIR + ')' }, ...fx.map(f => ({
         label: f.name, sub: f.error || f.parts.join(', ') || 'empty', disabled: !!f.error, run: async () => {
-          try { await Slop.call('seed', { app: P().app, kind: 'dev', docs: f.spec.docs || {}, tables: f.spec.tables || {} }); toast('Seeded the dev instance from ' + f.name + '; the frames reload'); App.reloadDev(); loadTables() } catch (e) { toast('Not seeded: ' + (e.message || e), 5000) }
+          const seed = () => Slop.call('seed', { app: P().app, kind: 'dev', docs: f.spec.docs || {}, tables: f.spec.tables || {} })
+          const done = () => { toast('Seeded the dev instance from ' + f.name + '; the frames reload'); App.reloadDev(); loadTables() }
+          try { await seed(); done() } catch (e) {
+            // rows with the same ids are already there (an ops lead met a raw UNIQUE error, round 3): offer to replace
+            if (!/UNIQUE|constraint/i.test(e.message || '')) { toast('Not seeded: ' + (e.message || e), 6000); return }
+            if (!await confirmBox('Replace your dev data?', 'Some rows of ' + f.name + ' are already in your dev data (the same ids), so nothing was added. Replace your dev data with ' + f.name + '? Your dev instance is reset, then seeded.', 'Replace')) return
+            try { await Instances.reset(P(), 'dev'); await seed(); done() } catch (e2) { toast('Not seeded: ' + (e2.message || e2), 6000) }
+          }
         }
       })), ...(fx.length ? [] : [{ note: 'No fixtures yet: save rows as one, or write fixtures/<name>.json.' }])])
     }

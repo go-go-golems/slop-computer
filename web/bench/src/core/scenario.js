@@ -86,11 +86,19 @@ export function fixtureList(P, ws) {
     return { name, path, spec, error, description: spec && spec.description || '', parts }
   })
 }
+// a short fingerprint of a scenario's spec: a run remembers it, so a result from before an edit shows as stale
+export function specKey(spec) {
+  const t = JSON.stringify(spec); let x = 5381
+  for (let i = 0; i < t.length; i++) x = ((x << 5) + x + t.charCodeAt(i)) | 0
+  return (x >>> 0).toString(36)
+}
 export function scenarioList(P, ws) {
   return P.list(ws).filter(p => p.startsWith(SCEN_DIR) && p.endsWith('.json')).map(path => {
     const name = path.slice(SCEN_DIR.length, -5)
     let spec = null, error = null
     try { spec = JSON.parse(P.read(path, ws)); error = checkScenario(spec) } catch (e) { error = 'not valid JSON: ' + e.message }
-    return { name, path, spec, error, last: (P.meta.runs || {})[ws + '|' + name] || null }
+    let last = (P.meta.runs || {})[ws + '|' + name] || null
+    if (last && spec && last.key && last.key !== specKey(spec)) last = { ...last, stale: true }
+    return { name, path, spec, error, last }
   })
 }
