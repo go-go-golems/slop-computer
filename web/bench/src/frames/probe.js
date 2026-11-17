@@ -16,6 +16,21 @@ export function PROBE(CFG) {
   for (const l of ['log', 'info', 'warn', 'error']) { const o = console[l].bind(console); console[l] = (...a) => { o(...a); post({ ev: 'log', level: l, text: a.map(fmt).join(' ').slice(0, 2000) }) } }
   addEventListener('error', e => post({ ev: 'log', level: 'error', text: e.message, src: e.filename && !/^about:/.test(e.filename) ? e.filename.split('/').pop() + (e.lineno ? ':' + e.lineno : '') : '' }))
   addEventListener('unhandledrejection', e => post({ ev: 'log', level: 'error', text: 'Unhandled rejection: ' + fmt(e.reason && e.reason.message || e.reason) }))
+  // downloads the page makes (an <a download> clicked, attached or not; a blob or data: URL): the last one's
+  // name and text, for a scenario's { download } step (a CSV export could not be checked: round 4)
+  let lastDl = null
+  const blobs = new Map()
+  try { const cou = URL.createObjectURL; URL.createObjectURL = function (b) { const u = cou.call(URL, b); try { if (b instanceof Blob) blobs.set(u, b) } catch (e) { /* not a blob */ } return u } } catch (e) { /* read-only */ }
+  const recDl = a => {
+    if (!a || !a.hasAttribute || !a.hasAttribute('download')) return
+    const name = a.getAttribute('download') || '', href = a.href || '', done = text => { lastDl = { name, text, t: Date.now() } }
+    const b = blobs.get(href)
+    if (b) b.text().then(done, () => done(null))
+    else if (href.startsWith('data:')) { try { const c = href.indexOf(','), head = href.slice(0, c), data = href.slice(c + 1); done(head.includes(';base64') ? atob(data) : decodeURIComponent(data)) } catch (e) { done(null) } }
+    else done(null)
+  }
+  try { const A = window.HTMLAnchorElement.prototype, ac = A.click; A.click = function () { recDl(this); return ac.call(this) } } catch (e) { /* read-only */ }
+  addEventListener('click', e => { const a = e.target && e.target.closest && e.target.closest('a[download]'); if (a) recDl(a) }, true)
   // print() does nothing in a sandboxed frame: say so instead of nothing (a florist pressed Print twice, round 4)
   try { window.print = () => post({ ev: 'print' }) } catch (e) { /* not writable: the page prints as it can */ }
 
@@ -407,6 +422,7 @@ export function PROBE(CFG) {
       }
     },
     count: q => qsa(q).length,
+    download: () => lastDl,
     all: (q, max = 50) => qsa(q).slice(0, max).map(info),
     // the whole text of each match (info's is cut at 120 characters: a scenario's text check missed rows)
     texts: (q, max = 20) => qsa(q).slice(0, max).map(el => (el.innerText || el.textContent || '').trim().replace(/\s+/g, ' ').slice(0, 100000)),

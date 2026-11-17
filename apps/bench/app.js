@@ -1,4 +1,4 @@
-/* the bench, built from web/bench: do not edit. source sha256:3424200ed938aa3e50fbad7fa9b1466f92a93290fd59a8c40765a3ce96e53e64 */
+/* the bench, built from web/bench: do not edit. source sha256:2e0cef7f4cf968b9006de7ea76268e37a63b66a19c88f44e1715c429d56c7151 */
 // The bench: a live dev environment for slop apps. Built from web/bench/src.
 (() => {
   // src/lib/util.js
@@ -2633,7 +2633,7 @@
   // src/core/scenario.js
   var SCEN_DIR = "scenarios/";
   var FIX_DIR = "fixtures/";
-  var STEP_KINDS = ["go", "click", "type", "waitFor", "wait", "expect", "sql", "docs", "snapshot"];
+  var STEP_KINDS = ["go", "click", "type", "waitFor", "wait", "expect", "sql", "docs", "download", "snapshot"];
   var STEP_KEYS = {
     go: ["go"],
     click: ["click"],
@@ -2643,7 +2643,8 @@
     expect: ["expect", "text", "exact", "match", "count", "visible", "value"],
     sql: ["sql", "args", "count", "value", "rows"],
     docs: ["docs", "where", "count"],
-    snapshot: ["snapshot"]
+    snapshot: ["snapshot"],
+    download: ["download", "text", "exact", "match"]
   };
   var ANY_STEP = ["timeout", "note"];
   var fixturePath = (name) => FIX_DIR + String(name).replace(/\.json$/, "") + ".json";
@@ -2669,7 +2670,8 @@
       if (k === "docs" && typeof s.docs !== "string") return "step " + (i + 1) + ": docs is a collection";
       const extra = Object.keys(s).filter((x) => !STEP_KEYS[k].includes(x) && !ANY_STEP.includes(x));
       if (extra.length) return "step " + (i + 1) + " (" + k + "): unknown " + (extra.length > 1 ? "keys " : "key ") + extra.join(", ") + "; a " + k + " step takes " + STEP_KEYS[k].join(", ") + " (and timeout, note)";
-      if (k === "expect" && s.match != null) {
+      if (k === "download" && typeof s.download !== "string") return "step " + (i + 1) + ': download is the file name ("" for any)';
+      if ((k === "expect" || k === "download") && s.match != null) {
         try {
           new RegExp(String(s.match));
         } catch (e) {
@@ -2688,6 +2690,7 @@
     if (s.type) return 'type "' + String(s.text ?? "").slice(0, 30) + '" into ' + s.type;
     if (s.waitFor) return "wait for " + s.waitFor;
     if (s.wait != null) return "wait " + s.wait + " ms";
+    if (s.download != null) return "download " + (s.download || "(any file)") + (s.text != null ? (s.exact ? " is exactly " : " has ") + '"' + String(s.text).slice(0, 30) + '"' : "") + (s.match != null ? " matches /" + s.match + "/" : "");
     if (s.expect) {
       return "expect " + s.expect + count + (s.text != null ? ' has "' + String(s.text).slice(0, 30) + '"' : "") + (s.exact ? " (exactly)" : "") + (s.match != null ? " matches /" + s.match + "/" : "") + (s.value != null ? ' value "' + s.value + '"' : "") + (s.visible === false ? " hidden" : "");
     }
@@ -2835,6 +2838,14 @@
             }
             if (s.rows) return { ok: JSON.stringify(list) === JSON.stringify(s.rows), got: JSON.stringify(list).slice(0, 160) };
             return s.count != null ? { ok: n === +s.count, got: n + " rows" } : { ok: n > 0, got: "0 rows" };
+          }));
+          else if (s.download != null) verify(s, await poll(s, async () => {
+            const d = await fh.call("download", []);
+            if (!d) return { ok: false, got: "no download yet" };
+            if (s.download && d.name !== s.download) return { ok: false, got: 'downloaded "' + d.name + '"' };
+            const t = d.text == null ? "" : String(d.text);
+            const ok = s.exact ? t === String(s.text) : s.match != null ? new RegExp(String(s.match)).test(t) : s.text != null ? t.includes(String(s.text)) : true;
+            return { ok, got: 'downloaded "' + d.name + '": ' + JSON.stringify(t.slice(0, 120)) };
           }));
           else if (s.docs) verify(s, await poll(s, async () => {
             const docs = (await Slop.call("docs", { app: P.app, kind: "test", coll: s.docs })).map((d) => d.body || {});
@@ -3911,6 +3922,7 @@ Reads wait until the page has settled (data loaded, DOM quiet). Arranging, label
 { description, page: "index.html", size?: [375, 720], fixture?: name, steps: [
   { click: sel }, { type: sel, text }, { go: "#/cart" }, { waitFor: sel }, { wait: ms },
   { expect: sel } (visible) | { expect: sel, text } (contains, ignoring case) | { expect: sel, text, exact: true } (the whole text) | { expect: sel, match: "^12 kg$" } (a regular expression) | { expect: sel, count } | { expect: sel, visible: false } | { expect: sel, value },
+  { download: "orders.csv", text } | { download, text, exact: true } | { download, match } (the last file the page downloaded: its name, "" for any, and its content; click the button that downloads first) |
   { sql: "SELECT \u2026 FROM notes WHERE \u2026", args?, count? } | { sql: "SELECT sum(kg) FROM \u2026", value: 30.5 } (the first column of the first row) | { sql, rows: [{\u2026}] } (exactly these rows) | { docs: coll, where?: {field: value}, count? } (the test instance's data), { snapshot: label } ] }
 A step with a key its kind does not take is an error (the scenario does not run). To check a total, check it both on the page and in the data: { expect, text, exact } and { sql, value }. A number is checked with exact or match, never contains: "12" is contained in "128" and "312". Checks retry until they pass or time out ({ timeout } on a step or the scenario, default 2000 ms). A failure keeps a snapshot.`,
     session: `Long threads: older messages are folded into a summary at the top of your context; session.recall and session.message reach what it left out.`,

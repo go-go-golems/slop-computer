@@ -112,6 +112,14 @@ async function runHolding(P, spec, { ws = 'draft', name = 'unsaved', onStep, sig
           if (s.rows) return { ok: JSON.stringify(list) === JSON.stringify(s.rows), got: JSON.stringify(list).slice(0, 160) }
           return s.count != null ? { ok: n === +s.count, got: n + ' rows' } : { ok: n > 0, got: '0 rows' }
         }))
+        else if (s.download != null) verify(s, await poll(s, async () => {
+          const d = await fh.call('download', [])
+          if (!d) return { ok: false, got: 'no download yet' }
+          if (s.download && d.name !== s.download) return { ok: false, got: 'downloaded "' + d.name + '"' }
+          const t = d.text == null ? '' : String(d.text)
+          const ok = s.exact ? t === String(s.text) : s.match != null ? new RegExp(String(s.match)).test(t) : s.text != null ? t.includes(String(s.text)) : true
+          return { ok, got: 'downloaded "' + d.name + '": ' + JSON.stringify(t.slice(0, 120)) }
+        }))
         else if (s.docs) verify(s, await poll(s, async () => {
           const docs = (await Slop.call('docs', { app: P.app, kind: 'test', coll: s.docs })).map(d => d.body || {})
           const hits = s.where ? docs.filter(d => Object.entries(s.where).every(([k, v]) => d[k] === v)) : docs

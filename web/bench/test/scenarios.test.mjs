@@ -100,3 +100,12 @@ test('scenarioList: a result from before an edit is stale', async () => {
   P.meta.runs['draft|a'] = { ok: true, t: 1, steps: [] }
   assert.equal(scenarioList(P, 'draft')[0].last.stale, undefined, 'an older run without a key is not marked')
 })
+
+test('checkScenario: a download step', async () => {
+  const { checkScenario, stepLabel } = await import('../src/core/scenario.js')
+  assert.equal(checkScenario({ page: 'index.html', steps: [{ click: '#export' }, { download: 'inventory.csv', text: 'ID,Nm', exact: true }] }), null)
+  assert.match(checkScenario({ page: 'index.html', steps: [{ download: 1 }] }), /download is the file name/)
+  assert.match(checkScenario({ page: 'index.html', steps: [{ download: '', match: '([' }] }), /not a regular expression/)
+  assert.match(checkScenario({ page: 'index.html', steps: [{ download: '', count: 2 }] }), /unknown key count/)
+  assert.equal(stepLabel({ download: 'a.csv', text: 'x', exact: true }), 'download a.csv is exactly "x"')
+})

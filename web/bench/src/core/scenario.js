@@ -7,7 +7,8 @@
 // tables). A scenario (scenarios/<name>.json) is a list of steps run in a
 // frame of the person's test instance, after it was reset and seeded:
 //   { description, page, size: [w, h], fixture, steps: [ { click }, { type, text },
-//     { expect, text [exact]|match|count|visible|value }, { sql, count|value|rows }, { docs, where, count }, … ] }
+//     { expect, text [exact]|match|count|visible|value }, { sql, count|value|rows }, { docs, where, count },
+//     { download: name, text [exact]|match } (the last file the page downloaded), … ] }
 // Both are files of the app: they are committed, reviewed and proposed like
 // code. Running them is frames/scenarios.js.
 //
@@ -15,7 +16,7 @@
 // checkScenario, stepLabel, fixtureList, scenarioList. No DOM, no network.
 
 export const SCEN_DIR = 'scenarios/', FIX_DIR = 'fixtures/'
-export const STEP_KINDS = ['go', 'click', 'type', 'waitFor', 'wait', 'expect', 'sql', 'docs', 'snapshot']
+export const STEP_KINDS = ['go', 'click', 'type', 'waitFor', 'wait', 'expect', 'sql', 'docs', 'download', 'snapshot']
 // The keys each kind of step takes (besides timeout and note, which any
 // step may have). A key that is not one of them fails the check: an
 // unknown key was ignored, so a misspelled check never ran.
@@ -23,6 +24,7 @@ export const STEP_KEYS = {
   go: ['go'], click: ['click'], type: ['type', 'text'], waitFor: ['waitFor'], wait: ['wait'],
   expect: ['expect', 'text', 'exact', 'match', 'count', 'visible', 'value'],
   sql: ['sql', 'args', 'count', 'value', 'rows'], docs: ['docs', 'where', 'count'], snapshot: ['snapshot'],
+  download: ['download', 'text', 'exact', 'match'],
 }
 const ANY_STEP = ['timeout', 'note']
 export const fixturePath = name => FIX_DIR + String(name).replace(/\.json$/, '') + '.json'
@@ -50,7 +52,8 @@ export function checkScenario(spec) {
     if (k === 'docs' && typeof s.docs !== 'string') return 'step ' + (i + 1) + ': docs is a collection'
     const extra = Object.keys(s).filter(x => !STEP_KEYS[k].includes(x) && !ANY_STEP.includes(x))
     if (extra.length) return 'step ' + (i + 1) + ' (' + k + '): unknown ' + (extra.length > 1 ? 'keys ' : 'key ') + extra.join(', ') + '; a ' + k + ' step takes ' + STEP_KEYS[k].join(', ') + ' (and timeout, note)'
-    if (k === 'expect' && s.match != null) { try { new RegExp(String(s.match)) } catch (e) { return 'step ' + (i + 1) + ': match is not a regular expression: ' + e.message } }
+    if (k === 'download' && typeof s.download !== 'string') return 'step ' + (i + 1) + ': download is the file name ("" for any)'
+    if ((k === 'expect' || k === 'download') && s.match != null) { try { new RegExp(String(s.match)) } catch (e) { return 'step ' + (i + 1) + ': match is not a regular expression: ' + e.message } }
   }
   if (spec.size && (!Array.isArray(spec.size) || spec.size.length !== 2)) return 'size is [width, height]'
   return null
@@ -64,6 +67,7 @@ export function stepLabel(s) {
   if (s.type) return 'type "' + String(s.text ?? '').slice(0, 30) + '" into ' + s.type
   if (s.waitFor) return 'wait for ' + s.waitFor
   if (s.wait != null) return 'wait ' + s.wait + ' ms'
+  if (s.download != null) return 'download ' + (s.download || '(any file)') + (s.text != null ? (s.exact ? ' is exactly ' : ' has ') + '"' + String(s.text).slice(0, 30) + '"' : '') + (s.match != null ? ' matches /' + s.match + '/' : '')
   if (s.expect) {
     return 'expect ' + s.expect + count + (s.text != null ? ' has "' + String(s.text).slice(0, 30) + '"' : '') +
       (s.exact ? ' (exactly)' : '') + (s.match != null ? ' matches /' + s.match + '/' : '') +
