@@ -35,10 +35,11 @@ const (
 )
 
 type storeBytes struct {
-	st  *store.Store
-	f   store.File
-	vis visibility
-	mut mutability
+	st   *store.Store
+	f    store.File
+	vis  visibility
+	mut  mutability
+	code *appCode // set by the routes that serve an app's pages (code.go)
 }
 
 func (b storeBytes) cacheControl() string {
@@ -92,6 +93,12 @@ func resolveStoreFile(ctx context.Context, st *store.Store, at, name string) (st
 // and a download unless they are media. Pages run only from a store's
 // tree on the static and sandbox hosts, which hold no sessions.
 func (s *Door) writeStoreBytes(w http.ResponseWriter, r *http.Request, b storeBytes) {
+	if b.code != nil && b.f.Zone != "assets" && !s.trustedHost(r.Host) {
+		if body, etag, ctype, ok := s.codeBytes(r.Context(), b); ok {
+			s.writeDerived(w, r, b, body, etag, ctype)
+			return
+		}
+	}
 	h := w.Header()
 	if s.trustedHost(r.Host) || b.f.Zone == "assets" {
 		h.Set("Content-Security-Policy", "sandbox; default-src 'none'")
