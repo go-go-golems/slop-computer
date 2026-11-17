@@ -114,8 +114,14 @@ func (s *Door) serveStatic(w http.ResponseWriter, r *http.Request) {
 	case strings.HasSuffix(r.URL.Path, "/"):
 		name = strings.TrimSuffix(name, "/") + "/index.html"
 	}
+	// The mount's base, not the URL minus rest: the match drops a trailing
+	// slash (/ts/docs/ has rest "docs").
+	code := newAppCode(as, res.run.N, res.run.Manifest, res.m.Base+"/")
 	if f, err := as.SnapshotFile(ctx, res.run.N, name); err == nil {
-		s.writeStoreBytes(w, r, storeBytes{st: as, f: f, vis: public, mut: moving}) // anyone may read (checked above)
+		s.writeStoreBytes(w, r, storeBytes{st: as, f: f, vis: public, mut: moving, code: code}) // anyone may read (checked above)
+		return
+	}
+	if s.serveSourceMap(w, r, storeBytes{st: as, vis: public, mut: moving, code: code}, name) {
 		return
 	}
 	// A directory without its slash: send it to the slash.
@@ -145,7 +151,7 @@ func (s *Door) serveStatic(w http.ResponseWriter, r *http.Request) {
 	// Client-side routes: a path without an extension gets the entry page.
 	if path.Ext(name) == "" {
 		if f, err := as.SnapshotFile(ctx, res.run.N, entry); err == nil {
-			s.writeStoreBytes(w, r, storeBytes{st: as, f: f, vis: public, mut: moving}) // anyone may read (checked above)
+			s.writeStoreBytes(w, r, storeBytes{st: as, f: f, vis: public, mut: moving, code: code}) // anyone may read (checked above)
 			return
 		}
 	}

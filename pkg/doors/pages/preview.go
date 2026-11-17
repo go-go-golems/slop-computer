@@ -64,7 +64,11 @@ func (s *Door) servePreview(w http.ResponseWriter, r *http.Request, label string
 	case strings.HasSuffix(r.URL.Path, "/"):
 		name += "/index.html"
 	}
+	code := newAppCode(st, pv.N, man, "/") // a preview's host serves the app at its root
 	f, err := st.SnapshotFile(ctx, pv.N, name)
+	if err != nil && s.serveSourceMap(w, r, storeBytes{st: st, vis: private, mut: noStore, code: code}, name) {
+		return
+	}
 	if err != nil && path.Ext(name) == "" {
 		f, err = st.SnapshotFile(ctx, pv.N, name+"/index.html")
 	}
@@ -78,7 +82,7 @@ func (s *Door) servePreview(w http.ResponseWriter, r *http.Request, label string
 		return
 	}
 	if !strings.HasPrefix(f.Type, "text/html") {
-		s.writeStoreBytes(w, r, storeBytes{st: st, f: f, vis: private, mut: noStore})
+		s.writeStoreBytes(w, r, storeBytes{st: st, f: f, vis: private, mut: noStore, code: code})
 		return
 	}
 	page, err := st.ReadFile(f)
@@ -90,7 +94,11 @@ func (s *Door) servePreview(w http.ResponseWriter, r *http.Request, label string
 	h.Set("Cache-Control", "private, no-store")
 	h.Set("X-Content-Type-Options", "nosniff")
 	w.WriteHeader(status)
-	_, _ = w.Write(injectPreview(page, pv.Parent))
+	page = injectPreview(page, pv.Parent)
+	if tag, _ := code.importMap(); tag != "" {
+		page = insertHead(page, []byte(tag))
+	}
+	_, _ = w.Write(page)
 }
 
 // injectPreview puts the preview's boot data, a claude stub (a preview has

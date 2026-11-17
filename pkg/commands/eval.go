@@ -12,6 +12,8 @@ import (
 
 	"github.com/go-go-golems/slop-computer/pkg/access"
 	"github.com/go-go-golems/slop-computer/pkg/authz"
+	"github.com/go-go-golems/slop-computer/pkg/jsrt"
+	"github.com/go-go-golems/slop-computer/pkg/tscompile"
 	"github.com/go-go-golems/slop-computer/pkg/verbs"
 )
 
@@ -25,15 +27,16 @@ func evalVerbs(e evalEnv) []*verbs.Verb {
 		Run: func(req verbs.Req, in EvalIn) (any, error) {
 			ctx := req.Context
 			p := req.Principal
-			return runEval(ctx, e, p, in.Source, in.Args, in.ReadOnly)
+			return runEval(ctx, e, p, in.Source, in.Args, in.ReadOnly, in.TS)
 		}}.Verb()}
 }
 
 // runEval runs a program in a fresh runtime. Each verb it calls is a
 // separate, synchronous call with the caller's identity (via eval), so
 // every check applies exactly as from the CLI.
-func runEval(ctx context.Context, e evalEnv, p *access.Principal, source string, args any, readOnly bool) (any, error) {
+func runEval(ctx context.Context, e evalEnv, p *access.Principal, source string, args any, readOnly, ts bool) (any, error) {
 	vm := goja.New()
+	jsrt.ForAppCode(vm)
 	inner := *p
 	inner.Via = "eval"
 	logs := []string{}
@@ -104,7 +107,16 @@ func runEval(ctx context.Context, e evalEnv, p *access.Principal, source string,
 	defer stop()
 
 	// Same first line as the source, so error positions match it.
-	val, err := vm.RunScript("eval.js", "(function(){"+source+"\n})()")
+	name, program := "eval.js", "(function(){"+source+"\n})()"
+	if ts {
+		// Wrapped first: a top-level return parses only inside a function.
+		out, err := tscompile.Compile("eval.ts", []byte(program), tscompile.Eval, nil)
+		if err != nil {
+			return nil, &verbs.Error{Code: "eval_error", Message: err.Error(), Extra: map[string]any{"logs": logs}}
+		}
+		name, program = "eval.ts", string(out.Code)
+	}
+	val, err := vm.RunScript(name, program)
 	if err != nil {
 		return nil, evalError(err, logs)
 	}
@@ -218,4 +230,5 @@ type EvalIn struct {
 	Source   string `json:"source" jsonschema_description:"the program body; top-level return gives the result"`
 	Args     any    `json:"args,omitempty" jsonschema_description:"passed to the program as args"`
 	ReadOnly bool   `json:"readOnly,omitempty" jsonschema_description:"writing verbs throw permission_denied"`
+	TS       bool   `json:"ts,omitempty" jsonschema_description:"the source is TypeScript: its types are removed before it runs (nothing is type-checked)"`
 }

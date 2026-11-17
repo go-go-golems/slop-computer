@@ -153,25 +153,30 @@ func (s *Door) serveSandbox(w http.ResponseWriter, r *http.Request) {
 	man, _ := s.appManifest(ctx, as, n)
 	entry := man.Entry()
 	rest := m[2]
+	code := newAppCode(as, n, man, prefixBase(r.URL.Path, rest))
 	if rest != "" && rest != entry {
 		if strings.HasSuffix(rest, "/") {
 			rest += "index.html"
 		}
+		// public: the sandbox serves an app's files to anyone who has its
+		// origin (the label is the capability), so a shared cache adds no
+		// exposure; a snapshot's bytes never change
+		b := storeBytes{st: as, vis: public, mut: immutable, code: code}
 		f, err := as.SnapshotFile(ctx, n, rest)
 		if err != nil {
-			notFound(w)
+			if !s.serveSourceMap(w, r, b, rest) {
+				notFound(w)
+			}
 			return
 		}
 		if !isDocument(as, f, rest) {
-			// public: the sandbox serves an app's files to anyone who has its
-			// origin (the label is the capability), so a shared cache adds no
-			// exposure; a snapshot's bytes never change
-			s.writeStoreBytes(w, r, storeBytes{st: as, f: f, vis: public, mut: immutable})
+			b.f = f
+			s.writeStoreBytes(w, r, b)
 			return
 		}
 		// Another page of the app (about.html) is served as the entry is:
-		// with the runtime, so it can call the app's actor, and in a dev
-		// embed with the probe the bench's frames talk to.
+		// with the runtime, so it can call the app's actor, the import map,
+		// and in a dev embed the probe the bench's frames talk to.
 		entry = rest
 	}
 	f, err := as.SnapshotFile(ctx, n, entry)
@@ -206,6 +211,9 @@ func (s *Door) serveSandbox(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("Cache-Control", cachePrivate)
 	w.Header().Set("X-Content-Type-Options", "nosniff")
 	var extra []string
+	if tag, _ := code.importMap(); tag != "" {
+		extra = append(extra, tag)
+	}
 	if emb != nil && emb.dev {
 		extra = append(extra, `<script src="`+assetURL("probe.js")+`"></script>`) // after the boot data it reads
 	}
