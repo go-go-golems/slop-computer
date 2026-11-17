@@ -8,7 +8,7 @@ The phases follow the design (design-doc/01, section 10).
 - [x] Settle the questions in section 5 of the notes (settled in the design, sections 4–6; bundling and .tsx left out on purpose, section 9)
 - [x] Decide: TypeScript as the default for new apps (decided 2026-11-16: yes; templates and guide switch in phase 1)
 - [x] Decide: packages and .tsx (decided 2026-11-16: packages only through `slop vendor`, run by a person with the CLI; the server never fetches, the agent cannot add packages; .tsx in phase 0) (design §4.7, §11)
-- [x] Fix first: goja runtimes for app code read no files for source maps (PR #52, `pkg/jsrt`)
+- [x] Fix first: goja runtimes for app code read no files for source maps (PR #52, `pkg/jsrt`; merged 2026-11-17)
 
 ## Phase 0: the server compiles (PR #53)
 

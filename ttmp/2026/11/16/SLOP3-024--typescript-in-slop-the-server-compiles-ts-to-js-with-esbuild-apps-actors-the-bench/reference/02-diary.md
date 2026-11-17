@@ -409,3 +409,52 @@ The branch builds on #52. Two things in the design were wrong and are corrected:
 - **Output names:** a package's root becomes the last segment of its name (`@lit/context` → `context.js`); a subpath becomes its remaining path with the extension dropped and `/` turned into `-`.
 - **ES-module chunks** are named `chunk-[hash].js`.
 - **Lock:** `{registry, packages: {name: {version, integrity, dependencies: {dir: name@version}, page, actor, files: {path: sha256}}}}`.
+
+## Step 6: Review of #53, the import map on directory pages; #52 merged
+
+The person merged #52 and asked me to address the Codex review of #53. It found one bug, which was real: on the static host, a directory page (`/ts/docs/`) got no import map. The fix passes each route's known base to `newAppCode`, and the pages test now covers directory pages on every route.
+
+### Prompt Context
+**User prompt (verbatim):** "Address code review issue: https://github.com/go-go-golems/slop-computer/pull/53 / Merged #52" (first sent as "Merged #62", corrected to #52)
+**Assistant interpretation:** Fix the review finding on #53, then push and reply.
+**Inferred user intent:** Get #53 ready to merge.
+**Commit (code):** 49cca0b, "pages: the static host's import map resolves against the mount's base", pushed to `task/slop3-024-compile`.
+
+### What I did
+- **Read the finding:** `registry.BestMount` returns `Rest: "docs"` for `/ts/docs/` (no trailing slash), so `newAppCode`'s check that the URL path ends in rest failed, `base` stayed empty, and `importMap()` returned nothing.
+- **`newAppCode(st, n, man, base)`** now takes the app's root URL directly:
+  - the static host passes `res.m.Base + "/"` (`Match.Base` is "the request path the mount matched, without a trailing slash");
+  - the sandbox passes `prefixBase(r.URL.Path, rest)`, because its `versionPath` rest keeps the slash;
+  - a preview passes `/`.
+- **`TestTypeScriptPages`:** `docs/index.html` is now in `tsApp`, and `checkTSFiles` checks `docs/` for the import map, on the sandbox, the static host and a preview.
+- **The worktree moved:** the session's scratchpad was withdrawn, so this work is in a new worktree under the job folder (`~/.claude/jobs/7fa934c5/tmp/p53`, local branch `fix/pr53-import-map-base`), pushed to `task/slop3-024-compile`.
+
+### Why
+- **Each route already knows where the app's root is;** reconstructing it from a normalized suffix is what broke.
+
+### What worked
+- **The test catches the bug:** with the old derivation put back on the static host, it fails with `docs/ (200) has no import map <script type="importmap">{"imports":{"preact":"/ts/vendor/preact.js",…}}</script>`. With the fix it passes.
+- **Full suite:** `go vet` passes, `golangci-lint` reports 0 issues, and `go test -tags sqlite_fts5 ./...` passes in all 23 packages.
+- **Replied** on the review thread (discussion_r4593819396).
+
+### What didn't work
+- No failures beyond the reproduction above.
+
+### What I learned
+- **`registry.Match.Base`** exists, and is the right source for a mount's root.
+
+### What was tricky to build
+- N/A.
+
+### What warrants a second pair of eyes
+- **Mounts with parameters** (`/r/:store`): `Base` is the matched request path (`/r/abc`), which is the app's root for that request.
+
+### What should be done in the future
+- #54 is stacked on #53. Once #53 merges, #54 shows only its own commits. It doesn't touch the page code, so no conflict is expected.
+
+### Code review instructions
+- **Read:** `pkg/doors/pages/code.go` (`newAppCode`, `prefixBase`) and the three call sites.
+- **Run:** `go test -tags sqlite_fts5 ./pkg/host -run TestTypeScriptPages -count=1`
+
+### Technical details
+- N/A.
