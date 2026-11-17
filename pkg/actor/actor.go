@@ -275,6 +275,15 @@ func (a *Actor) load(files map[string][]byte, entry string, src []byte) error {
 		a.def = obj
 		return obj // so a declaration can say defineActor<D>(def: D): D (SLOP3-024)
 	})
+	// defineAction returns its argument: in TypeScript it types run's args
+	// from the action's args schema (actor.d.ts's FromSchema).
+	_ = g.Set("defineAction", func(call goja.FunctionCall) goja.Value {
+		obj, ok := call.Argument(0).(*goja.Object)
+		if !ok {
+			panic(a.vm.NewTypeError("defineAction takes an object"))
+		}
+		return obj
+	})
 	_ = g.Set("use", func(name string) goja.Value { return a.module(name) })
 	_ = g.Set("require", a.requirer(files, entry))
 	console := a.vm.NewObject()

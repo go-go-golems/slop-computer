@@ -61,9 +61,71 @@ interface Ctx {
 interface ActionDef<A = any, R = unknown> {
   /** The level the visitor needs; an action that declares none needs admin. */
   requires?: Level;
+  /**
+   * The arguments' JSON Schema: checked before run (a wrong shape is
+   * invalid_argument), and actions.d.ts declares the action from it.
+   * defineAction types run's args from it.
+   */
+  args?: JsonSchema;
+  /** The result's JSON Schema: not checked; actions.d.ts declares the result from it. */
+  result?: JsonSchema;
   run(ctx: Ctx, args: A): Awaitable<R>;
 }
 type Action<A = any, R = unknown> = ActionDef<A, R> | ((ctx: Ctx, args: A) => Awaitable<R>);
+
+// ---- schemas ----------------------------------------------------------------
+
+/** A JSON Schema (draft 2020-12): an object, or true (anything) or false (nothing). */
+type JsonSchema = boolean | { readonly [keyword: string]: unknown };
+type SchemaRequired<S> = S extends { readonly required: readonly (infer R)[] } ? R : never;
+type SchemaFlat<T> = { [K in keyof T]: T[K] } & {};
+type SchemaObject<S> = S extends { readonly properties: infer P }
+  ? SchemaFlat<
+      { -readonly [K in keyof P & string as K extends SchemaRequired<S> ? K : never]: FromSchema<P[K]> } &
+      { -readonly [K in keyof P & string as K extends SchemaRequired<S> ? never : K]?: FromSchema<P[K]> } &
+      (S extends { readonly additionalProperties: false } ? {}
+        : S extends { readonly additionalProperties: infer X } ? { [k: string]: FromSchema<X> | FromSchema<P[keyof P]> }
+        : {})>
+  : S extends { readonly additionalProperties: false } ? Record<string, never>
+  : S extends { readonly additionalProperties: infer X } ? Record<string, FromSchema<X>>
+  : Record<string, unknown>;
+type SchemaTuple<T> = T extends readonly [infer H, ...infer R] ? [FromSchema<H>, ...SchemaTuple<R>] : [];
+type SchemaOfType<T, S> =
+  T extends "string" ? string :
+  T extends "number" | "integer" ? number :
+  T extends "boolean" ? boolean :
+  T extends "null" ? null :
+  T extends "array" ? (S extends { readonly prefixItems: infer P } ? SchemaTuple<P> : S extends { readonly items: infer I } ? FromSchema<I>[] : unknown[]) :
+  T extends "object" ? SchemaObject<S> :
+  unknown;
+/**
+ * The type a JSON Schema describes, for a schema written as a literal (the
+ * subset actions.d.ts's converter reads: type, properties, required,
+ * additionalProperties, items, prefixItems, enum, const, oneOf, anyOf;
+ * anything else is unknown).
+ */
+type FromSchema<S> =
+  S extends true ? unknown :
+  S extends false ? never :
+  S extends { readonly const: infer C } ? C :
+  S extends { readonly enum: readonly (infer E)[] } ? E :
+  S extends { readonly oneOf: readonly (infer U)[] } ? FromSchema<U> :
+  S extends { readonly anyOf: readonly (infer U)[] } ? FromSchema<U> :
+  S extends { readonly type: readonly (infer T)[] } ? SchemaOfType<T, S> :
+  S extends { readonly type: infer T } ? SchemaOfType<T, S> :
+  S extends { readonly properties: unknown } ? SchemaObject<S> :
+  unknown;
+
+/**
+ * An action whose run gets the arguments its args schema describes, and
+ * must return what its result schema describes when it declares one (no
+ * `as const` needed). It returns its argument:
+ *   add: defineAction({ requires: 'interact', args: { type: 'object', required: ['text'],
+ *     properties: { text: { type: 'string' } } }, run(ctx, { text }) { … } })
+ */
+declare function defineAction<const S extends JsonSchema, const RS extends JsonSchema | undefined = undefined>(
+  def: ActionDef<FromSchema<S>, RS extends JsonSchema ? FromSchema<RS> : unknown> & { args: S; result?: RS },
+): ActionDef<FromSchema<S>, RS extends JsonSchema ? FromSchema<RS> : unknown> & { args: S; result?: RS };
 
 interface HttpRequest {
   method: string;
@@ -212,8 +274,9 @@ declare const console: {
 
 /** The app's tables, in the turn's transaction. Integers past 2^53 arrive as strings. */
 interface SqlModule {
-  all(query: string, ...params: unknown[]): Row[];
-  one(query: string, ...params: unknown[]): Row | null;
+  /** The rows; T says what they hold (unchecked: the query decides). */
+  all<T = Row>(query: string, ...params: unknown[]): T[];
+  one<T = Row>(query: string, ...params: unknown[]): T | null;
   run(query: string, ...params: unknown[]): { changes: number; lastRowid: number };
   /** Runs fn in a savepoint: a throw rolls back its writes. */
   transaction<T>(fn: () => T): T;

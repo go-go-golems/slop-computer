@@ -106,44 +106,47 @@ publishing moves \`main\`, which production instances run.
     frames: [{ route: 'index.html', w: 1024, h: 700 }, { route: 'index.html', w: 375, h: 700 }],
     files: ({ title }) => ({
       'app.json': JSON.stringify({ title: esc(title), page: 'index.html', actor: 'actor.ts', capabilities: { user: {} } }, null, 2) + '\n',
-      'api.ts': `// The contract between the page and the actor: types only. Both sides
-// import it with \`import type\`, so a change here is checked on both.
-export type Item = {
-  id: number
-  text: string
-  by: string
-  at: number
-}
-
-export interface Actions {
-  list(args: {}): Item[]
-  add(args: { text: string }): { added: string }
-}
-`,
-      'actor.ts': `// The app's server half: actions the page calls, rows in SQL.
-import type { Actions, Item } from './api.ts'
-
+      'actor.ts': `// The app's server half: actions the page calls, rows in SQL. Each action
+// declares its arguments' JSON Schema (checked before run: a wrong shape is
+// refused) and its result's; defineAction types run from them, and the
+// page's types come from them too (slop types writes actions.d.ts).
 const sql = use('sql')
 
 defineActor({
   actions: {
-    list: {
+    list: defineAction({
       requires: 'view',
-      run(ctx) {
-        return sql.all('SELECT id, text, by, at FROM items ORDER BY at DESC LIMIT 100') as Item[]
+      args: { type: 'object', properties: {} },
+      result: {
+        type: 'array',
+        items: {
+          type: 'object',
+          required: ['id', 'text', 'by', 'at'],
+          properties: { id: { type: 'integer' }, text: { type: 'string' }, by: { type: 'string' }, at: { type: 'integer' } },
+        },
       },
-    },
-    add: {
+      run(ctx) {
+        return sql.all('SELECT id, text, by, at FROM items ORDER BY at DESC LIMIT 100')
+      },
+    }),
+    add: defineAction({
       requires: 'interact',
+      args: {
+        type: 'object',
+        required: ['text'],
+        additionalProperties: false,
+        properties: { text: { type: 'string', minLength: 1, maxLength: 500 } },
+      },
+      result: { type: 'object', required: ['added'], properties: { added: { type: 'string' } } },
       run(ctx, { text }) {
-        const t = String(text || '').trim().slice(0, 500)
+        const t = text.trim()
         if (!t) ctx.fail('invalid_argument', 'text is empty')
         sql.run('INSERT INTO items (text, by, at) VALUES (?, ?, ?)', t, ctx.visitor.name || ctx.visitor.id || 'someone', Date.now())
         return { added: t }
       },
-    },
+    }),
   },
-} satisfies ActorOf<Actions>)
+})
 `,
       'sql/001_items.sql': `-- The app's rows. A migration runs once per instance; change the schema
 -- with a new file (sql/002_….sql), never by editing this one after it ran.
@@ -157,10 +160,9 @@ CREATE TABLE items (
       'index.html': page(esc(title), `<h1>${esc(title)}</h1>
 <form id="add"><input name="text" placeholder="Add an item" required><button>Add</button></form>
 <ul id="list"></ul>`),
-      'main.ts': `// The page: it calls the actor's actions, typed by the contract in api.ts.
-import type { Actions } from './api.ts'
-
-const slop = await claude.use<Actions>('slop')
+      'main.ts': `// The page: it calls the actor's actions, typed by their schemas
+// (actions.d.ts, from slop types).
+const slop = await claude.use('slop')
 const list = document.querySelector<HTMLUListElement>('#list')!
 const form = document.querySelector<HTMLFormElement>('#add')!
 
@@ -189,9 +191,10 @@ await show()
 
 A slop app with an actor: the page (\`index.html\`, \`main.ts\`) calls the
 actions in \`actor.ts\`, which keeps rows in SQL (\`sql/001_items.sql\`).
-\`api.ts\` is their contract: the actor implements it
-(\`satisfies ActorOf<Actions>\`), and the page calls it
-(\`claude.use<Actions>('slop')\`).
+Each action declares the JSON Schema of its arguments, which the server
+checks before the action runs, and of its result. They are the contract:
+\`defineAction\` types the action's code from them, and \`slop types\`
+declares the page's \`slop.actions\` from them (\`.slop/types/actions.d.ts\`).
 
 ${TYPES}, and \`tsc -p tsconfig.actor.json\` the actor.
 
