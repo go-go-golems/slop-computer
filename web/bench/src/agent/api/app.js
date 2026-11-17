@@ -16,6 +16,8 @@ import { Slop } from '../../server/slop.js';
 import { clamp } from '../../lib/util.js';
 
 const READ_KINDS = ['dev', 'test']
+// app.sql(q, { kind: 'test' }): options in the args' place ("at /args: got object, want array", round 5)
+const argsOpts = (args, o) => args && typeof args === 'object' && !Array.isArray(args) && o === undefined ? [[], args] : [args || [], o]
 const kindOf = o => {
   const k = (o && o.kind) || 'dev'
   if (!READ_KINDS.includes(k)) throw Object.assign(new Error('kind is dev or test'), { kind: 'invalid' })
@@ -57,10 +59,10 @@ export const APP = {
   },
   'app.docs': { sig: 'coll, {kind}?', ret: '[{path, body}]', doc: 'the documents of a collection', run: (ctx, coll, o) => onInstance(ctx, o, () => Slop.call('docs', { app: ctx.project.app, kind: kindOf(o), coll })) },
   'app.doc': { sig: 'path, {kind}?', doc: 'one document ("coll/id")', run: (ctx, path, o) => onInstance(ctx, o, () => Slop.call('doc', { app: ctx.project.app, kind: kindOf(o), path })) },
-  'app.sql': { sig: 'query, args?, {kind}?', ret: '[{column: value, …}]: rows as objects', doc: 'rows (read-only SQL on the instance\'s tables)', run: (ctx, query, args, o) => readOnly(onInstance(ctx, o, () => Slop.call('sql', { app: ctx.project.app, kind: kindOf(o), query, args: args || [] }))) },
+  'app.sql': { sig: 'query, args?, {kind}?', ret: '[{column: value, …}]: rows as objects', doc: 'rows (read-only SQL on the instance\'s tables)', run: (ctx, query, a0, o0) => { const [args, o] = argsOpts(a0, o0); return readOnly(onInstance(ctx, o, () => Slop.call('sql', { app: ctx.project.app, kind: kindOf(o), query, args: args || [] }))) } },
   'app.exec': {
     sig: 'query, args?, {kind}?', doc: 'runs SQL that may write (INSERT, UPDATE, DELETE) on the dev instance\'s tables (or the test instance: {kind: \'test\'}); for removing the test rows you added, one by one', writes: 'dev',
-    run: (ctx, query, args, o) => onInstance(ctx, o, () => Slop.call('exec', { app: ctx.project.app, kind: kindOf(o), query, args: args || [] })),
+    run: (ctx, query, a0, o0) => { const [args, o] = argsOpts(a0, o0); return onInstance(ctx, o, () => Slop.call('exec', { app: ctx.project.app, kind: kindOf(o), query, args: args || [] })) },
   },
   'app.seed': {
     sig: '{docs, tables}', doc: 'adds data to the dev instance: docs {coll: [rows]} (a row\'s id field names its document), tables {name: [rows]} (tables a migration made)', writes: 'dev',

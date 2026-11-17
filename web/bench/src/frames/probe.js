@@ -447,7 +447,8 @@ export function PROBE(CFG) {
     texts: (q, max = 20) => qsa(q).slice(0, max).map(el => (el.innerText || el.textContent || '').trim().replace(/\s+/g, ' ').slice(0, 100000)),
     record: on => { recording = !!on; return recording },
     stableSel: t => stableSel(find(t)),
-    click: t => { const el = find(t); const m = mode; mode = 'play'; try { el.click() } finally { mode = m } return info(el) },
+    // an SVG element has no click(): a dispatched click works on every element ("el.click is not a function", round 5)
+    click: t => { const el = find(t); const m = mode; mode = 'play'; try { if (typeof el.click === 'function') el.click(); else el.dispatchEvent(new MouseEvent('click', { bubbles: true, cancelable: true, view: window })) } finally { mode = m } return info(el) },
     type: (t, text) => { const el = find(t); el.focus(); el.value = String(text); el.dispatchEvent(new Event('input', { bubbles: true })); el.dispatchEvent(new Event('change', { bubbles: true })); return info(el) },
     text: t => { const el = t ? find(t) : document.body; return (el.innerText || '').slice(0, 6000) },
     state: () => ({ scroll: [scrollX, scrollY], fields: [...document.querySelectorAll('input, textarea, select')].map((e, i) => ({ k: (e.dataset.src || '') + '|' + (e.name || i), v: e.value, c: e.checked })) }),

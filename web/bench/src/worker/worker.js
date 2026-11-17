@@ -66,7 +66,7 @@ function apiShape(api) {
   return { ns, flat }
 }
 const CORE_NAMES = ['step', 'id', 'seq', 'par', 'alt', 'loop', 'dyn', 'llm', 'delegate', 's', 'monoid', 'help', 'tx', 'setTimeout', 'clearTimeout']
-const PRELUDE_NAMES = ['__call', '__API', '__SIGS', '__ROLES', '__DOCS', '__PASS', '__lev', '__near', '__ns', '__names', '__lib', '__declare', '__keep', '__kind', 'vars', 'forget', 'lib', '__fmt', 'console', 'sleep', '__snapshot', '__restore', '__libSet', '__libLoad', '__host', '__log', '__eid', 'globalThis', 'undefined', 'NaN', 'Infinity', 'eval', 'arguments', ...CORE_NAMES]
+const PRELUDE_NAMES = ['__arr', '__call', '__API', '__SIGS', '__ROLES', '__DOCS', '__PASS', '__lev', '__near', '__ns', '__names', '__lib', '__declare', '__keep', '__kind', 'vars', 'forget', 'lib', '__fmt', 'console', 'sleep', '__snapshot', '__restore', '__libSet', '__libLoad', '__host', '__log', '__eid', 'globalThis', 'undefined', 'NaN', 'Infinity', 'eval', 'arguments', ...CORE_NAMES]
 function reservedFor(api) { const { ns, flat } = apiShape(api); return Object.assign(new Set([...Object.keys(ns), ...flat, ...PRELUDE_NAMES, ...(CORE.match(/^(?:function|const|class) (__\w+)/gm) || []).map(x => x.split(' ')[1])]), { ns: new Set([...Object.keys(ns), 'lib', 'console']) }) }
 
 // ---------- the prelude, evaluated once per session ----------
@@ -75,7 +75,10 @@ const DIRECT = new Set(['lib.def', 'lib.list', 'lib.remove', 'lib.source', 'log'
 let DOCS = {} // verb → '→ ret — doc', for help(); set from each eval message
 function preludeSource(api, sigs = {}, roles = []) {
   const { ns, flat } = apiShape(api)
-  let src = 'const __call = async (n, a) => { try { return JSON.parse(await __host(n, JSON.stringify(a === undefined ? [] : a))) } catch (e) { if (e && typeof e === "object" && !e.kind) e.kind = e.name; throw e } };\n'
+  // a result with its list in .items (frames.layout) also answers the array methods, on .items, without
+  // changing its JSON: layout.filter(…) failed in three rounds despite the documented shape
+  let src = 'const __arr = v => { if (v && typeof v === "object" && !Array.isArray(v) && Array.isArray(v.items)) for (const m of ["filter", "map", "find", "findIndex", "some", "every", "forEach", "slice", "flatMap", "reduce"]) if (!(m in v)) Object.defineProperty(v, m, { value: (...x) => v.items[m](...x), enumerable: false }); return v };\n'
+  src += 'const __call = async (n, a) => { try { return __arr(JSON.parse(await __host(n, JSON.stringify(a === undefined ? [] : a)))) } catch (e) { if (e && typeof e === "object" && !e.kind) e.kind = e.name; throw e } };\n'
   src += 'const __API = ' + JSON.stringify(api.filter(n => !DIRECT.has(n) || n.startsWith('lib.'))) + ';\n'
   src += 'const __SIGS = ' + JSON.stringify(Object.fromEntries(Object.entries(sigs).filter(([k]) => !DIRECT.has(k)))) + ';\n'
   src += 'const __ROLES = ' + JSON.stringify(roles) + ';\n'

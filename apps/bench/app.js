@@ -1,4 +1,4 @@
-/* the bench, built from web/bench: do not edit. source sha256:15870e792b0402e0287f998493842e06320e44c85873acfba4ea52aa4c235ca1 */
+/* the bench, built from web/bench: do not edit. source sha256:c1c81fc7a0da2cbe741073966d3853088b0cec7d2a8bfe6a7d1b69f62c897d20 */
 // The bench: a live dev environment for slop apps. Built from web/bench/src.
 (() => {
   // src/lib/util.js
@@ -1680,6 +1680,7 @@
 
   // src/agent/api/app.js
   var READ_KINDS = ["dev", "test"];
+  var argsOpts = (args, o) => args && typeof args === "object" && !Array.isArray(args) && o === void 0 ? [[], args] : [args || [], o];
   var kindOf = (o) => {
     const k = o && o.kind || "dev";
     if (!READ_KINDS.includes(k)) throw Object.assign(new Error("kind is dev or test"), { kind: "invalid" });
@@ -1721,12 +1722,18 @@
     },
     "app.docs": { sig: "coll, {kind}?", ret: "[{path, body}]", doc: "the documents of a collection", run: (ctx, coll, o) => onInstance(ctx, o, () => Slop.call("docs", { app: ctx.project.app, kind: kindOf(o), coll })) },
     "app.doc": { sig: "path, {kind}?", doc: 'one document ("coll/id")', run: (ctx, path, o) => onInstance(ctx, o, () => Slop.call("doc", { app: ctx.project.app, kind: kindOf(o), path })) },
-    "app.sql": { sig: "query, args?, {kind}?", ret: "[{column: value, \u2026}]: rows as objects", doc: "rows (read-only SQL on the instance's tables)", run: (ctx, query, args, o) => readOnly(onInstance(ctx, o, () => Slop.call("sql", { app: ctx.project.app, kind: kindOf(o), query, args: args || [] }))) },
+    "app.sql": { sig: "query, args?, {kind}?", ret: "[{column: value, \u2026}]: rows as objects", doc: "rows (read-only SQL on the instance's tables)", run: (ctx, query, a0, o0) => {
+      const [args, o] = argsOpts(a0, o0);
+      return readOnly(onInstance(ctx, o, () => Slop.call("sql", { app: ctx.project.app, kind: kindOf(o), query, args: args || [] })));
+    } },
     "app.exec": {
       sig: "query, args?, {kind}?",
       doc: "runs SQL that may write (INSERT, UPDATE, DELETE) on the dev instance's tables (or the test instance: {kind: 'test'}); for removing the test rows you added, one by one",
       writes: "dev",
-      run: (ctx, query, args, o) => onInstance(ctx, o, () => Slop.call("exec", { app: ctx.project.app, kind: kindOf(o), query, args: args || [] }))
+      run: (ctx, query, a0, o0) => {
+        const [args, o] = argsOpts(a0, o0);
+        return onInstance(ctx, o, () => Slop.call("exec", { app: ctx.project.app, kind: kindOf(o), query, args: args || [] }));
+      }
     },
     "app.seed": {
       sig: "{docs, tables}",
@@ -4257,7 +4264,14 @@ Markdown files (README.md, notes, specs) render in the Docs panel. Keep README.m
             }
             code = t.code;
           }
-          const r = await runEval(ctx, code, { sid: th.id, restore: th.scope && th.scope.vars });
+          let r = await runEval(ctx, code, { sid: th.id, restore: th.scope && th.scope.vars });
+          if (!r.ok && !(input && input.ts) && r.error && r.error.kind === "SyntaxError" && /\)\s*:\s*[\w[{(]|\b(const|let|var)\s+\w+\s*:\s*[\w[{(]|\bas\s+[A-Z\w[]|\b(interface|type)\s+\w+|catch\s*\(\s*\w+\s*:/.test(code)) {
+            const t = await Types.transpile(code).catch(() => ({ error: "no transpiler" }));
+            if (!t.error && t.code && t.code !== code) {
+              r = await runEval(ctx, t.code, { sid: th.id, restore: th.scope && th.scope.vars });
+              step.note = "ran as TypeScript (pass ts: true for TypeScript)";
+            }
+          }
           Object.assign(step, { ok: r.ok, ms: r.ms, engine: r.engine, calls: r.calls, effects: r.effects || void 0 });
           if (ctx.children.length) step.children = ctx.children.splice(0);
           if (r.scope) th.scope = r.scope;
