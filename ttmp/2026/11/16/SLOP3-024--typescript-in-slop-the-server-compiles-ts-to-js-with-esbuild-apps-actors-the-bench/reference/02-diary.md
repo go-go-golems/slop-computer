@@ -681,3 +681,92 @@ The new template test found a real problem. TypeScript treats a page script with
   - `pkg/apptypes/actor.d.ts` (`Reactors`);
   - `pkg/commands/files.go` (`FileChange.JSONSchema`).
 - **Run:** `make runtime && go test -tags sqlite_fts5 ./pkg/host -run 'TestAppTypes|TestTemplateTypes' -count=1 -v`
+
+## Step 10: Phase 1's last item, and phase 2: typed actions
+
+The person asked me to continue ("ok, continue?"), and then mid-turn: "yeah just pile it all on #55 i think, we don't need all that many PRs and granularity". All of this went onto #55.
+
+Two pieces of work:
+- **Phase 1's last item:** `page.d.ts` no longer types the runtime's namespaces as `any`.
+- **All of phase 2, typed actions:**
+  - actions declare JSON Schemas for their arguments and results;
+  - the server checks the arguments before `run`;
+  - `actions.d.ts` gives pages typed calls;
+  - `FromSchema` with `defineAction` types `run`;
+  - the bench actor's 35 actions declare their arguments.
+
+### Prompt Context
+**User prompts (verbatim):** "ok, continue?"; then, mid-turn, "yeah just pile it all on #55 i think, we don't need all that many PRs and granularity".
+**Assistant interpretation:** Finish phase 1, then do phase 2, all on #55. I saved the preference as a memory.
+**Inferred user intent:** Progress with less PR overhead.
+**Commits (on `task/slop3-024-types`):**
+- 0d05a98: the runtime types;
+- 0e62c9a: the `args` schemas and validation;
+- 92ea520: `actions.d.ts`;
+- acba8c7: `FromSchema` and `defineAction`, and the template;
+- c988b4e: the bench actor.
+
+### What I did
+- **The runtime's types (`web/runtime`):**
+  - `db.ts` declares `Db`, `DocumentReference<T>`, `CollectionReference<T>`, `Query<T>`, the snapshots, `WhereOp` and `Lease`. The result shapes come from the server's RPCs.
+  - `caps.ts` declares `User`, `Viewer`, `UserProfile`, `Comments`, `Asset`, `BoundStore`, `StoreDoc`, `StoreFile` and `StoreListing`.
+  - `room.ts` declares `Lobby`, `NamedRoom`, `RoomChannel`, `RoomMessage<T>` and `PeersChange`.
+  - `sample.ts` declares `SampleLimits`.
+- **Action schemas (`pkg/actor/argschema.go`):** `readSchema` and `compileSchema`, with `noLoader`, Draft 2020 and the vm's `JSON.stringify` to keep property order. `checkArgs` runs in `Manager.Call`; `describe` lists the failing places.
+- **`ActionDecls` and `ActionsTypeScript`.** `app.types` gains `instance` and returns `actions.d.ts`; the client passes the dev instance.
+- **`page.d.ts`:** a global `AppActions`, and `DefaultActions`.
+- **`actor.d.ts`:** `JsonSchema`, `FromSchema` and `defineAction<const S, const RS>`. `sql.all<T>` and `sql.one<T>` are now generic. The runtime gets a `defineAction` global.
+- **The actor template** uses `defineAction` with schemas. The guide presents the schemas as the contract.
+- **The bench actor:** shared schema pieces (`S`, `args()`, `INSTANCE`), and `args` on all 35 actions.
+
+### Why
+- **`actions.d.ts` comes from a running actor:** the manager cannot read a snapshot's actor definition without running it. The dev instance runs `draft`, and `slop dev` refreshes the types just after it activates.
+- **`defineAction`:** TypeScript would not infer each action's schema type through a mapped type over `defineActor`'s actions. I tried two shapes (t2, t3); `run`'s parameters came out `unknown` or fell back to the constraint. A generic helper per action, with `const` type parameters, infers the literal without `as const`.
+- **The bench's free text is still cut to length, not refused:** callers send agent-written notes that are longer, and refusing them would change behaviour.
+- **The bench's schemas allow extra properties:** I couldn't check every caller.
+- **`if`/`then` is avoided:** the converter declares it as `unknown`, so those checks stay in code.
+
+### What worked
+- **`TestActionArgsSchema`:**
+  - six wrong shapes are each refused with their place;
+  - a schema'd action called without arguments gets `{}`;
+  - a bad schema, a remote `$ref`, and a schema that isn't an object each break the version.
+- **`TestActionsTypes`:** a JavaScript actor's page passes `tsc` with typed calls; a wrong argument and an unknown action are errors.
+- **`TestBenchArgs`:** eight wrong shapes are refused with their place, and the bench's `actions.d.ts` passes `tsc`.
+- **`TestTemplateTypes`:** the schema template runs on the server, and `tsc` passes both programs.
+- **The suites:** the full suite passes, `golangci-lint` reports 0 issues, and the bench's Node tests pass (25), as do its Go tests.
+
+### What didn't work
+- **`describe` panicked:** `LocalizedString(nil)` crashed with a nil `*message.Printer` (golang.org/x/text). It now uses an English printer.
+- **A test case:** a string `args` "just text" arrived as `{}`. `actor.call` reads a string `args` as JSON text (the CLI relies on that), so the test now uses a number.
+- **The first `actions.d.ts`:**
+  - Properties came out in the wrong order: `goja` `Export` and `json.Marshal` sort keys. Fixed with `JSON.stringify`.
+  - `additionalProperties: false` declared an index signature: JSON-read `true`/`false` schemas are copies of invopop's `TrueSchema`/`FalseSchema`, not the same pointers. Fixed with `isTrue`/`isFalse` by value.
+- **A test expectation:** `apps(args?: {})` was wrong; an object schema with no properties is `Record<string, unknown>`.
+
+### What I learned
+- **Contextual return types infer generics:** `sql.all<T>()` in `run` picks up `T` from the result schema's `FromSchema`, so no cast is needed.
+- **TypeScript 5's `const` type parameters** make `FromSchema` usable on inline schemas.
+
+### What was tricky to build
+- **Per-action inference:**
+  - **The obstacle:** the natural API, `defineActor({ actions: { add: { args, run } } })`, cannot type `run` from `args`, because inference through a mapped type over the actions does not reach a sibling property.
+  - **What I tried:** two shapes, both failing in `tsc`.
+  - **The fix:** a `defineAction` wrapper, which costs one identity global in the runtime.
+
+### What warrants a second pair of eyes
+- **The bench's call sites:** schemas now refuse what used to be coerced. The Go and Node bench tests pass, but I reviewed the page's call sites by reading, not by clicking through on staging.
+- **Staleness of `actions.d.ts`:** it reflects whichever actor runs, so it's stale until the dev instance has activated the new draft.
+
+### What should be done in the future
+- **Phase 3:** checking in the bench (the checker worker and `types` in eval effects).
+- **Deploy #55 to staging** after it merges, and click through the bench.
+
+### Code review instructions
+- **Read:**
+  - `pkg/actor/argschema.go`;
+  - `pkg/actor/types.go` (`ActionsTypeScript`);
+  - `pkg/apptypes/actor.d.ts` (schemas section);
+  - `web/runtime/src/types.ts` and `db.ts`;
+  - `apps/bench/actor.js` (`S` and `args`).
+- **Run:** `make runtime && go test -tags sqlite_fts5 ./pkg/host -run 'TestActionArgsSchema|TestActionsTypes|TestBenchArgs|TestTemplateTypes' -count=1 -v`

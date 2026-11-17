@@ -39,13 +39,13 @@ The phases follow the design (design-doc/01, section 10).
 - [x] A fixture TypeScript app checked by `tsc` against the generated declarations (`TestAppTypes`; CI runs `make test-ci`, which installs TypeScript)
 - [x] TypeScript templates as the default for new apps; the agent's guide to match (TS, extensions in imports, vendored packages; ask the person for new ones). `TestTemplateTypes` runs and type-checks every template
 - [x] `files.commit`'s `FileChange` as a `oneOf` union
-- [ ] Annotate web/runtime's `db`, `user`, `comments` and `room` namespaces: page.d.ts has them as `any` or open records today
+- [x] Annotate web/runtime's `db`, `user`, `comments` and `room` namespaces (and `assets`, `slop` reads, `sample.limits`): page.d.ts has no `any` left but `AnyActions`
 
-## Phase 2: typed actor actions
+## Phase 2: typed actor actions (PR #55)
 
-- [ ] `args` (and optional `result`) JSON Schemas on actions: read in `readShape`, validated before `run` (`invalid_argument` with the failing path); add a validator library (notes §7.1; the validation can come before TypeScript)
-- [ ] `actions.d.ts` generated from the schemas; `FromSchema<S>` in `actor.d.ts`
-- [ ] Convert the bench actor's actions first, replacing its hand conversion
+- [x] `args` (and optional `result`) JSON Schemas on actions: read in `readShape`, validated before `run` (`invalid_argument` with the failing path); santhosh-tekuri/jsonschema (notes §7.1)
+- [x] `actions.d.ts` generated from the schemas (`AppActions`, the default of `claude.use('slop')`); `FromSchema<S>` and `defineAction` in `actor.d.ts`
+- [x] Convert the bench actor's actions, replacing its hand conversion (`TestBenchArgs`)
 
 ## Phase 3: checking in the bench
 
