@@ -94,8 +94,8 @@ func resolveStoreFile(ctx context.Context, st *store.Store, at, name string) (st
 // tree on the static and sandbox hosts, which hold no sessions.
 func (s *Door) writeStoreBytes(w http.ResponseWriter, r *http.Request, b storeBytes) {
 	if b.code != nil && b.f.Zone != "assets" && !s.trustedHost(r.Host) {
-		if body, etag, ctype, ok := s.codeBytes(r.Context(), b); ok {
-			s.writeDerived(w, r, b, body, etag, ctype)
+		if d := s.codeBytes(r.Context(), b); d != nil {
+			s.writeDerived(w, r, b, d.body, d.etag, d.ctype)
 			return
 		}
 	}

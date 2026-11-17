@@ -9,7 +9,7 @@ import (
 // used results go first.
 type lru struct {
 	mu    sync.Mutex
-	max   int
+	limit int
 	size  int
 	order *list.List // front: most recently used
 	items map[string]*list.Element
@@ -21,8 +21,8 @@ type lruItem struct {
 	size int
 }
 
-func newLRU(max int) *lru {
-	return &lru{max: max, order: list.New(), items: map[string]*list.Element{}}
+func newLRU(limit int) *lru {
+	return &lru{limit: limit, order: list.New(), items: map[string]*list.Element{}}
 }
 
 func (c *lru) get(key string) (result, bool) {
@@ -43,12 +43,12 @@ func (c *lru) put(key string, r result, size int) {
 		c.size -= e.Value.(*lruItem).size
 		c.order.Remove(e)
 	}
-	if size > c.max {
+	if size > c.limit {
 		return
 	}
 	c.items[key] = c.order.PushFront(&lruItem{key, r, size})
 	c.size += size
-	for c.size > c.max {
+	for c.size > c.limit {
 		e := c.order.Back()
 		it := e.Value.(*lruItem)
 		c.order.Remove(e)

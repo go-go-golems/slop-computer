@@ -83,3 +83,20 @@ func TestTypeScriptActor(t *testing.T) {
 		t.Fatalf("status after a broken push = %v", st)
 	}
 }
+
+// slop eval runs a TypeScript program when asked (ts: true); one that does
+// not compile fails with the position.
+func TestTypeScriptEval(t *testing.T) {
+	h := newHarness(t)
+	admin := h.tokenFor("admin@example.com", "read", "write", "admin")
+	res := h.call(admin, "eval", map[string]any{"ts": true, "source": "interface P { n: number }\nconst p: P = { n: 21 }\nreturn p.n * 2 as number"}).(map[string]any)
+	if res["result"] != 42.0 {
+		t.Fatalf("eval = %v", res)
+	}
+	e := h.fail(admin, "eval", map[string]any{"ts": true, "source": "const n: number = \nreturn n"}, "eval_error")
+	if msg, _ := e["message"].(string); !strings.Contains(msg, "eval.ts:2:1: ") {
+		t.Fatalf("a program that does not compile: %v", e)
+	}
+	// Without ts, TypeScript is a syntax error, as before.
+	h.fail(admin, "eval", map[string]any{"source": "const n: number = 1\nreturn n"}, "eval_error")
+}

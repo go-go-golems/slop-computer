@@ -64,8 +64,8 @@ func (c *appCode) tsconfig(ctx context.Context) []byte {
 
 // importMap is the <script type="importmap"> of the app's page imports,
 // with paths resolved against the app's root ("" when there is nothing to
-// map). Its digest goes into the ETag of a page that carries it.
-func (c *appCode) importMap() (tag, digest string) {
+// map), and its digest, which goes into the ETag of a page that carries it.
+func (c *appCode) importMap() (string, string) {
 	if c == nil || c.man == nil || c.man.Slop.Imports == nil || len(c.man.Slop.Imports.Page) == 0 || c.base == "" {
 		return "", ""
 	}
@@ -78,32 +78,37 @@ func (c *appCode) importMap() (tag, digest string) {
 	return `<script type="importmap">` + string(raw) + `</script>`, hex.EncodeToString(sum[:6])
 }
 
+// derived is bytes computed from a store file, served in its place.
+type derived struct {
+	body        []byte
+	etag, ctype string
+}
+
 // codeBytes is what a page route serves for b in place of the stored bytes:
-// a compiled .ts or .tsx, or an HTML page with the import map. ok is false
+// a compiled .ts or .tsx, or an HTML page with the import map. It is nil
 // when the stored bytes are served as they are.
-func (s *Door) codeBytes(ctx context.Context, b storeBytes) (body []byte, etag, ctype string, ok bool) {
+func (s *Door) codeBytes(ctx context.Context, b storeBytes) *derived {
 	c := b.code
 	switch {
 	case tscompile.Is(b.f.Path):
 		src, err := b.st.ReadFile(b.f)
 		if err != nil || !utf8.Valid(src) {
-			return nil, "", "", false // not text: most likely a video (MPEG transport stream)
+			return nil // not text: most likely a video (MPEG transport stream)
 		}
 		tsconfig := c.tsconfig(ctx)
-		body := compiled(b.f.Path, src, tsconfig, false)
-		return body, b.f.SHA256 + "." + tscompile.Version + "." + short(tsconfig), "text/javascript; charset=utf-8", true
+		return &derived{compiled(b.f.Path, src, tsconfig, false), b.f.SHA256 + "." + tscompile.Version + "." + short(tsconfig), "text/javascript; charset=utf-8"}
 	case strings.HasPrefix(b.f.Type, "text/html"):
 		tag, digest := c.importMap()
 		if tag == "" {
-			return nil, "", "", false
+			return nil
 		}
 		page, err := b.st.ReadFile(b.f)
 		if err != nil {
-			return nil, "", "", false
+			return nil
 		}
-		return insertHead(page, []byte(tag)), b.f.SHA256 + ".im" + digest, b.f.Type, true
+		return &derived{insertHead(page, []byte(tag)), b.f.SHA256 + ".im" + digest, b.f.Type}
 	}
-	return nil, "", "", false
+	return nil
 }
 
 // compiled is a page file's JavaScript (or, for wantMap, its source map).

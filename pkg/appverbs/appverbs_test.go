@@ -200,3 +200,20 @@ func TestVerbOpensNoFiles(t *testing.T) {
 		t.Fatalf("where: %v %q %s", err, out, errw.String())
 	}
 }
+
+// A verb file in TypeScript (SLOP3-024): scanned and run compiled, and the
+// files it requires compile too.
+func TestTypeScriptVerbs(t *testing.T) {
+	src := &Source{Store: "s-1", Type: "notes", App: "notes", Snapshot: 1, Alias: "nt", Files: []File{
+		{Path: "verbs/hello.ts", Source: "import { greet } from './lib.ts'\ninterface Who { name: string }\nfunction hello(): string {\n  const who: Who = { name: 'ts' }\n  return greet(who.name)\n}\n__verb__(\"hello\", { short: \"Say hello\", output: \"text\" });\n"},
+		{Path: "verbs/lib.ts", Source: "export const greet = (name: string): string => `hello ${name}`\n"},
+	}}
+	var errw bytes.Buffer
+	out, err := stdout(t, func() error {
+		return Execute(context.Background(), src, &fake{}, Board{ID: "s-1", Title: "N", Type: "notes", App: "notes"},
+			[]string{"slop", "nt", "N"}, "notes' verbs", []string{"verbs", "hello", "hello"}, &errw, &errw)
+	})
+	if err != nil || strings.TrimSpace(out) != "hello ts" {
+		t.Fatalf("hello: %v %q %s", err, out, errw.String())
+	}
+}

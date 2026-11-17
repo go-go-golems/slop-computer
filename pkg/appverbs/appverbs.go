@@ -31,6 +31,7 @@ import (
 
 	"github.com/go-go-golems/slop-computer/pkg/client"
 	"github.com/go-go-golems/slop-computer/pkg/jsrt"
+	"github.com/go-go-golems/slop-computer/pkg/tscompile"
 	"github.com/go-go-golems/slop-computer/pkg/verbs"
 )
 
@@ -121,6 +122,43 @@ func writeCached(dir, store string, s *Source) {
 	_ = os.WriteFile(filepath.Join(dir, "stores", safeName.ReplaceAllString(store, "_")), []byte(s.Key()), 0o600)
 }
 
+// languageTS marks a verb file jsverbs read as TypeScript.
+const languageTS = "typescript"
+
+// scanOptions are jsverbs' defaults plus TypeScript (SLOP3-024): a .ts verb
+// file is compiled (slop's Actor profile) for the scan, and again with the
+// metadata jsverbs appends to it before it runs, as go-go-goja's xgoja does.
+func scanOptions() jsverbs.ScanOptions {
+	o := jsverbs.DefaultScanOptions()
+	o.Extensions = append(o.Extensions, ".ts", ".mts", ".cts")
+	o.SourceTransform = func(f jsverbs.SourceFile) (jsverbs.SourceFile, error) {
+		if !tscompile.Is(f.Path) {
+			return f, nil
+		}
+		out, err := tscompile.Compile(f.Path, f.Source, tscompile.Actor, nil)
+		if err != nil {
+			return f, err
+		}
+		f.OriginalSource = append([]byte(nil), f.Source...)
+		f.Source, f.Language = out.Code, languageTS
+		return f, nil
+	}
+	o.RuntimeTransform = func(in jsverbs.RuntimeTransformInput) ([]byte, error) {
+		src := []byte(in.Prelude)
+		if in.Language != languageTS {
+			src = append(src, in.Source...)
+			return append(src, in.Overlay...), nil
+		}
+		src = append(append(append(src, in.OriginalSource...), '\n'), in.Overlay...)
+		out, err := tscompile.Compile(in.RelPath, src, tscompile.Actor, nil)
+		if err != nil {
+			return nil, err
+		}
+		return out.Code, nil
+	}
+	return o
+}
+
 // Scan reads a source's files into a jsverbs registry. Only functions with
 // __verb__ metadata become commands; the other files (shared code such as
 // core.js) are there for require().
@@ -129,7 +167,7 @@ func Scan(src *Source) (*jsverbs.Registry, error) {
 	for _, f := range src.Files {
 		files = append(files, jsverbs.SourceFile{Path: f.Path, Source: []byte(f.Source)})
 	}
-	reg, err := jsverbs.ScanSources(files, jsverbs.DefaultScanOptions())
+	reg, err := jsverbs.ScanSources(files, scanOptions())
 	if err != nil {
 		return nil, err
 	}

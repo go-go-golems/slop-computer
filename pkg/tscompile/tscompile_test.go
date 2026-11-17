@@ -186,3 +186,24 @@ func TestVersionMatchesGoMod(t *testing.T) {
 		t.Fatalf("go.mod has esbuild %s; Version is %s", m, Version)
 	}
 }
+
+// Requests for the same file at once compile it once; all get that output.
+func TestConcurrentCompiles(t *testing.T) {
+	src := []byte("export const many: number[] = [1, 2, 3]\n")
+	outs := make(chan *Output, 32)
+	for range 32 {
+		go func() {
+			out, err := Compile("many.ts", src, Page, nil)
+			if err != nil {
+				t.Error(err)
+			}
+			outs <- out
+		}()
+	}
+	first := <-outs
+	for range 31 {
+		if out := <-outs; out != first {
+			t.Fatal("the same file compiled more than once")
+		}
+	}
+}
