@@ -1,4 +1,4 @@
-/* the bench, built from web/bench: do not edit. source sha256:41dce727e82a5360ac0443fc62db6c01798156f908bb18df8c11021c0cc10eb6 */
+/* the bench, built from web/bench: do not edit. source sha256:30035a3aa0bd6a800ac40808f19171acd04d142de58251c9d1871548ebf833bb */
 // The bench: a live dev environment for slop apps. Built from web/bench/src.
 (() => {
   // src/lib/util.js
@@ -1692,6 +1692,12 @@
     "app.docs": { sig: "coll, {kind}?", doc: "the documents of a collection", run: (ctx, coll, o) => Slop.call("docs", { app: ctx.project.app, kind: kindOf(o), coll }) },
     "app.doc": { sig: "path, {kind}?", doc: 'one document ("coll/id")', run: (ctx, path, o) => Slop.call("doc", { app: ctx.project.app, kind: kindOf(o), path }) },
     "app.sql": { sig: "query, args?, {kind}?", doc: "rows (read-only SQL on the instance's tables)", run: (ctx, query, args, o) => Slop.call("sql", { app: ctx.project.app, kind: kindOf(o), query, args: args || [] }) },
+    "app.exec": {
+      sig: "query, args?, {kind}?",
+      doc: "runs SQL that may write (INSERT, UPDATE, DELETE) on the dev instance's tables (or the test instance: {kind: 'test'}); for removing the test rows you added, one by one",
+      writes: "dev",
+      run: (ctx, query, args, o) => Slop.call("exec", { app: ctx.project.app, kind: kindOf(o), query, args: args || [] })
+    },
     "app.seed": {
       sig: "{docs, tables}",
       doc: "adds data to the dev instance: docs {coll: [rows]} (a row's id field names its document), tables {name: [rows]} (tables a migration made)",
@@ -3932,7 +3938,7 @@ Markdown files (README.md, notes, specs) render in the Docs panel. Keep README.m
 - Start with what the person will see: a page they can look at and try, then the server code and tests behind it. Someone who does not program judges progress by the page.
 - Tell the person everything they need to use what you made: a code or password you chose, which page to open, where to click, that a result appears below the fold.
 - Questions about the bench itself are part of the job: how to try a change safely (a proposal), how to keep it (Accept in the chat or the Review tab), how to undo it (Reject; the Timeline restores earlier versions), how to see the data (the Data view), how to publish (Publish in the header). Answer them plainly.
-- Data you add to try things (rows, documents, test sign-ups) goes in the test instance (scenarios and fixtures), not the dev instance the person looks at: test rows in dev show up on their page. If some ended up in dev, remove just those rows through the app's own buttons, or tell the person they are there. Never reset the dev instance to clean up: app.reset drops everything the person entered too.
+- Data you add to try things (rows, documents, test sign-ups) goes in the test instance (scenarios and fixtures), not the dev instance the person looks at: test rows in dev show up on their page. If some ended up in dev, remove just those rows (app.exec('DELETE FROM t WHERE id = ?', [id])), and say so. Never reset the dev instance to clean up: app.reset drops everything the person entered too.
 - A scenario passes only if it checks what the person cares about: the numbers or words on the page, the rows in the data. Make each one fail once on purpose (change the expected value) to show it can, then put it back.
 - Keep the app's README.md true: when the app's purpose or files change, update it in the same turn.
 - Finish with a short summary in Markdown (short paragraphs, bullets, \`code\`; no big headings): what you changed, where, and anything left to do. Cite places as \`file:line\` (for example \`styles.css:73\`): they become links that open the file.`;
@@ -8618,12 +8624,23 @@ return { files: list.map(f => f.path), issues }`;
       }
       async function loadRows() {
         const my = ++S.seq;
+        const q = S.query || 'SELECT rowid AS __rowid, * FROM "' + S.cur + '" LIMIT 300';
         try {
-          S.rows = await call("sql", { query: S.query || 'SELECT * FROM "' + S.cur + '" LIMIT 300', args: [] });
+          S.rows = await call("sql", { query: q, args: [] });
           S.error = "";
         } catch (e) {
-          S.rows = null;
-          S.error = e.message || String(e);
+          if (!S.query) {
+            try {
+              S.rows = await call("sql", { query: 'SELECT * FROM "' + S.cur + '" LIMIT 300', args: [] });
+              S.error = "";
+            } catch (e2) {
+              S.rows = null;
+              S.error = e2.message || String(e2);
+            }
+          } else {
+            S.rows = null;
+            S.error = e.message || String(e);
+          }
         }
         if (my === S.seq) paint();
       }
@@ -8705,8 +8722,20 @@ return { files: list.map(f => f.path), issues }`;
           grid.appendChild(h("p.empty", "No rows."));
           return;
         }
-        const cols = [...new Set(S.rows.flatMap((r) => Object.keys(r)))];
-        grid.appendChild(h("table.grid.ro", h("thead", h("tr", cols.map((c) => h("th", c)))), h("tbody", S.rows.map((r) => h("tr", cols.map((c) => h("td", cell(r[c]))))))));
+        const cols = [...new Set(S.rows.flatMap((r) => Object.keys(r)))].filter((c) => c !== "__rowid");
+        const del = (r) => async () => {
+          if (!await confirmBox("Delete this row?", "From " + S.cur + " in your " + (S.kind === "dev" ? "dev" : S.kind === "prop" ? "proposal's preview" : "test") + " data: " + cols.slice(0, 4).map((c) => c + " " + cell(r[c]).slice(0, 30)).join(", "), "Delete")) return;
+          try {
+            await call("exec", { query: 'DELETE FROM "' + S.cur + '" WHERE rowid = ?', args: [r.__rowid] });
+            toast("Deleted the row");
+            loadRows();
+            if (S.kind === "dev") App.reloadDev();
+          } catch (e) {
+            toast("Not deleted: " + (e.message || e), 6e3);
+          }
+        };
+        const canDel = !S.query && S.rows.some((r) => r.__rowid != null);
+        grid.appendChild(h("table.grid.ro", h("thead", h("tr", cols.map((c) => h("th", c)), canDel ? h("th", "") : null)), h("tbody", S.rows.map((r) => h("tr", cols.map((c) => h("td", cell(r[c]))), canDel ? h("td", h("button.link.note", { title: "Delete this row", on: { click: del(r) } }, "\u2715")) : null)))));
         if (S.rows.length >= 300) grid.appendChild(h("p.note", { style: { padding: "0 10px" } }, "The first 300 rows."));
       }
       function seedMenu(btn) {

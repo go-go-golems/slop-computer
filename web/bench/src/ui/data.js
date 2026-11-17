@@ -12,7 +12,7 @@ import { App } from './app.js';
 import { Dock } from './dock.js';
 import { FIX_DIR, checkFixture, fixtureList, fixturePath } from '../core/scenario.js';
 import { Slop } from '../server/slop.js';
-import { clear, h, popMenu, promptBox, put, toast } from '../lib/dom.js';
+import { clear, confirmBox, h, popMenu, promptBox, put, toast } from '../lib/dom.js';
 import { debounce, plural } from '../lib/util.js';
 
 const TABLES = "SELECT name FROM sqlite_master WHERE type = 'table' AND name NOT LIKE '\\_%' ESCAPE '\\' AND name NOT LIKE 'sqlite\\_%' ESCAPE '\\' ORDER BY name"
@@ -38,7 +38,12 @@ export const DATA = {
     }
     async function loadRows() {
       const my = ++S.seq
-      try { S.rows = await call('sql', { query: S.query || 'SELECT * FROM "' + S.cur + '" LIMIT 300', args: [] }); S.error = '' } catch (e) { S.rows = null; S.error = e.message || String(e) }
+      // a table's rows carry their rowid, so one can be deleted (a table without one: read-only)
+      const q = S.query || 'SELECT rowid AS __rowid, * FROM "' + S.cur + '" LIMIT 300'
+      try { S.rows = await call('sql', { query: q, args: [] }); S.error = '' } catch (e) {
+        if (!S.query) { try { S.rows = await call('sql', { query: 'SELECT * FROM "' + S.cur + '" LIMIT 300', args: [] }); S.error = '' } catch (e2) { S.rows = null; S.error = e2.message || String(e2) } }
+        else { S.rows = null; S.error = e.message || String(e) }
+      }
       if (my === S.seq) paint()
     }
     async function loadDocs() {
@@ -73,8 +78,14 @@ export const DATA = {
       }
       if (!S.rows) return
       if (!S.rows.length) { grid.appendChild(h('p.empty', 'No rows.')); return }
-      const cols = [...new Set(S.rows.flatMap(r => Object.keys(r)))]
-      grid.appendChild(h('table.grid.ro', h('thead', h('tr', cols.map(c => h('th', c)))), h('tbody', S.rows.map(r => h('tr', cols.map(c => h('td', cell(r[c]))))))))
+      const cols = [...new Set(S.rows.flatMap(r => Object.keys(r)))].filter(c => c !== '__rowid')
+      // one row out of the instance's data (only an instance's: never the published app's)
+      const del = r => async () => {
+        if (!await confirmBox('Delete this row?', 'From ' + S.cur + ' in your ' + (S.kind === 'dev' ? 'dev' : S.kind === 'prop' ? 'proposal\'s preview' : 'test') + ' data: ' + cols.slice(0, 4).map(c => c + ' ' + cell(r[c]).slice(0, 30)).join(', '), 'Delete')) return
+        try { await call('exec', { query: 'DELETE FROM "' + S.cur + '" WHERE rowid = ?', args: [r.__rowid] }); toast('Deleted the row'); loadRows(); if (S.kind === 'dev') App.reloadDev() } catch (e) { toast('Not deleted: ' + (e.message || e), 6000) }
+      }
+      const canDel = !S.query && S.rows.some(r => r.__rowid != null)
+      grid.appendChild(h('table.grid.ro', h('thead', h('tr', cols.map(c => h('th', c)), canDel ? h('th', '') : null)), h('tbody', S.rows.map(r => h('tr', cols.map(c => h('td', cell(r[c]))), canDel ? h('td', h('button.link.note', { title: 'Delete this row', on: { click: del(r) } }, '✕')) : null)))))
       if (S.rows.length >= 300) grid.appendChild(h('p.note', { style: { padding: '0 10px' } }, 'The first 300 rows.'))
     }
     function seedMenu(btn) {

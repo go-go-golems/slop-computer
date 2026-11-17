@@ -42,6 +42,10 @@ export const APP = {
   'app.docs': { sig: 'coll, {kind}?', doc: 'the documents of a collection', run: (ctx, coll, o) => Slop.call('docs', { app: ctx.project.app, kind: kindOf(o), coll }) },
   'app.doc': { sig: 'path, {kind}?', doc: 'one document ("coll/id")', run: (ctx, path, o) => Slop.call('doc', { app: ctx.project.app, kind: kindOf(o), path }) },
   'app.sql': { sig: 'query, args?, {kind}?', doc: 'rows (read-only SQL on the instance\'s tables)', run: (ctx, query, args, o) => Slop.call('sql', { app: ctx.project.app, kind: kindOf(o), query, args: args || [] }) },
+  'app.exec': {
+    sig: 'query, args?, {kind}?', doc: 'runs SQL that may write (INSERT, UPDATE, DELETE) on the dev instance\'s tables (or the test instance: {kind: \'test\'}); for removing the test rows you added, one by one', writes: 'dev',
+    run: (ctx, query, args, o) => Slop.call('exec', { app: ctx.project.app, kind: kindOf(o), query, args: args || [] }),
+  },
   'app.seed': {
     sig: '{docs, tables}', doc: 'adds data to the dev instance: docs {coll: [rows]} (a row\'s id field names its document), tables {name: [rows]} (tables a migration made)', writes: 'dev',
     run: async (ctx, spec) => {

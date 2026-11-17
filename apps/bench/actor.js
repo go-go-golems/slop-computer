@@ -375,6 +375,16 @@ defineActor({
         return { id, kind, ref: follow, n: status.n || 0, broken: status.broken || '' };
       },
     },
+    // Change rows of an instance's data (it runs unpublished code: the
+    // server refuses an app store or a production instance): a person
+    // removing one test row, which before only a reset of everything could.
+    exec: {
+      requires: 'view',
+      args: args({ ...INSTANCE.properties, query: { type: 'string', maxLength: 20000 }, args: { type: 'array', maxItems: 100 } }, [...INSTANCE.required, 'query']),
+      async run(ctx, { app, kind, ref, query, args: a }) {
+        return await tool(ctx).exec(instanceOf(ctx, app, kind, ref), query, a || []);
+      },
+    },
     // Throw an instance and its data away (it runs unpublished code, so
     // workshop's drop allows it); the next use makes a fresh one.
     reset: {

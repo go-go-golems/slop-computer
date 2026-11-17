@@ -150,6 +150,7 @@ defineActor({
     async publish(ctx, { app, n, ifAt }) { return await ws.publish(app, n, { ifAt }); },
     async logs(ctx, { id }) { return await ws.logs(id); },
     async drop(ctx, { id }) { return await ws.drop(id); },
+    async exec(ctx, { id, sql }) { return await ws.exec(id, sql, []); },
   },
 });
 `
@@ -201,6 +202,10 @@ func TestWorkshopDevInstances(t *testing.T) {
 	h.fail(admin, "actor.call", map[string]any{"store": "devbench", "action": "drop", "args": map[string]any{"id": "jot-shop"}}, "permission_denied")
 	h.fail(admin, "actor.call", map[string]any{"store": "devbench", "action": "drop", "args": map[string]any{"id": "jot"}}, "permission_denied")
 	h.call(admin, "app.status", map[string]any{"store": "jot-shop"})
+	// exec writes under the same rule: never a production instance or the app store
+	for _, id := range []string{"jot-shop", "jot"} {
+		h.fail(admin, "actor.call", map[string]any{"store": "devbench", "action": "exec", "args": map[string]any{"id": id, "sql": "DELETE FROM notes"}}, "permission_denied")
+	}
 }
 
 const embedBenchActor = `

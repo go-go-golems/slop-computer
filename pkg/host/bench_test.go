@@ -687,3 +687,24 @@ func TestBenchMe(t *testing.T) {
 		t.Fatalf("me as admin = %s", got)
 	}
 }
+
+// A person removes one row of their dev data (exec, under drop's rule);
+// the app's own store is refused.
+func TestBenchExec(t *testing.T) {
+	h := newHarness(t)
+	admin := h.tokenFor("admin@example.com", "read", "write", "admin")
+	installBench(t, h, admin)
+	act := func(action string, args map[string]any) any {
+		t.Helper()
+		return h.call(admin, "actor.call", map[string]any{"store": "bench", "action": action, "args": args})
+	}
+	h.call(admin, "store.new", map[string]any{"id": "jot"})
+	h.push(admin, map[string]any{"store": "jot", "files": files(devApp()), "ref": "draft"})
+	act("instance", map[string]any{"app": "jot", "kind": "dev"})
+	act("seed", map[string]any{"app": "jot", "kind": "dev", "tables": map[string]any{"notes": []any{map[string]any{"id": "a"}, map[string]any{"id": "b"}}}})
+	act("exec", map[string]any{"app": "jot", "kind": "dev", "query": "DELETE FROM notes WHERE id = ?", "args": []any{"a"}})
+	if got := fmtJSON(act("sql", map[string]any{"app": "jot", "kind": "dev", "query": "SELECT id FROM notes", "args": []any{}})); got != `[{"id":"b"}]` {
+		t.Fatalf("dev notes after the delete = %s", got)
+	}
+	// (the app store and production instances are refused: TestWorkshopDevInstances)
+}

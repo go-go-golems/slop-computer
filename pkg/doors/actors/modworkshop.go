@@ -6,6 +6,7 @@ import (
 
 	"github.com/dop251/goja"
 
+	"github.com/go-go-golems/slop-computer/pkg/access"
 	"github.com/go-go-golems/slop-computer/pkg/actor"
 	"github.com/go-go-golems/slop-computer/pkg/doors/web"
 )
@@ -73,17 +74,36 @@ func (s *Door) workshopModule(a *actor.Actor) goja.Value {
 		p := s.actAs(a, "workshop", true)
 		return a.IO(func() (any, error) {
 			ctx := web.WithPrincipal(context.Background(), p)
-			out, err := s.Verbs.Call(ctx, p, "app.status", map[string]any{"store": id})
+			if err := s.unpublished(ctx, p, "drop removes", id); err != nil {
+				return nil, err
+			}
+			out, err := s.Verbs.Call(ctx, p, "store.rm", map[string]any{"id": id})
 			if err != nil {
 				return nil, verbFail(err)
 			}
-			var st struct{ Store, App, Ref string }
-			b, _ := json.Marshal(out)
-			_ = json.Unmarshal(b, &st)
-			if st.App == st.Store || st.Ref == "" || st.Ref == "main" {
-				return nil, &actor.Error{Code: "permission_denied", Message: "drop removes only instances that run unpublished code (another store's app, at a ref other than main); " + id + " runs " + st.App + "@" + st.Ref}
+			return out, nil
+		}, func(out any) (goja.Value, error) { return a.ToJS(out), nil })
+	})
+	// exec(id, sql, args) runs SQL that may write on an instance's app
+	// tables, under the same rule as drop: only an instance that runs
+	// unpublished code (a person removing one test row from their dev
+	// data; before, only a reset of all of it could).
+	_ = o.Set("exec", func(id, query string, args goja.Value) goja.Value {
+		if !s.Gov.Trusted(context.Background(), a.App(), "workshop") {
+			a.Throw("permission_denied", a.App()+" is no longer trusted with workshop")
+		}
+		var av any
+		if args != nil && !goja.IsUndefined(args) && !goja.IsNull(args) {
+			av = args.Export()
+		}
+		p := s.actAs(a, "workshop", true)
+		return a.IO(func() (any, error) {
+			ctx := web.WithPrincipal(context.Background(), p)
+			if err := s.unpublished(ctx, p, "exec writes to", id); err != nil {
+				return nil, err
 			}
-			if out, err = s.Verbs.Call(ctx, p, "store.rm", map[string]any{"id": id}); err != nil {
+			out, err := s.Verbs.Call(ctx, p, "sql.exec", map[string]any{"store": id, "sql": query, "args": av, "write": true})
+			if err != nil {
 				return nil, verbFail(err)
 			}
 			return out, nil
@@ -150,4 +170,22 @@ func (s *Door) workshopModule(a *actor.Actor) goja.Value {
 		}, toJS)
 	})
 	return o
+}
+
+// unpublished refuses unless id is an instance that runs unpublished code:
+// a store that runs another store's app, at a ref other than main (a dev,
+// proposal or test-run instance). Never an app store or a production
+// instance, even for an admin, who holds admin on every store.
+func (s *Door) unpublished(ctx context.Context, p *access.Principal, what, id string) error {
+	out, err := s.Verbs.Call(ctx, p, "app.status", map[string]any{"store": id})
+	if err != nil {
+		return verbFail(err)
+	}
+	var st struct{ Store, App, Ref string }
+	b, _ := json.Marshal(out)
+	_ = json.Unmarshal(b, &st)
+	if st.App == st.Store || st.Ref == "" || st.Ref == "main" {
+		return &actor.Error{Code: "permission_denied", Message: what + " only instances that run unpublished code (another store's app, at a ref other than main); " + id + " runs " + st.App + "@" + st.Ref}
+	}
+	return nil
 }
