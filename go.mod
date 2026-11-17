@@ -3,6 +3,7 @@ module github.com/go-go-golems/slop-computer
 go 1.26.6
 
 require (
+	github.com/Masterminds/semver/v3 v3.5.0
 	github.com/bmatcuk/doublestar/v4 v4.10.3
 	github.com/dop251/goja v0.0.0-20261103151521-97b96e1e55f5
 	github.com/dop251/goja_nodejs v0.0.0-20260918173711-b481721df8a2
@@ -36,7 +37,6 @@ require (
 	cloud.google.com/go/longrunning v0.6.7 // indirect
 	github.com/Masterminds/goutils v1.1.1 // indirect
 	github.com/Masterminds/semver v1.5.0 // indirect
-	github.com/Masterminds/semver/v3 v3.5.0 // indirect
 	github.com/Masterminds/sprig v2.22.0+incompatible // indirect
 	github.com/ThreeDotsLabs/watermill v1.5.1 // indirect
 	github.com/araddon/dateparse v0.0.0-20210429162001-6b43995a97de // indirect
