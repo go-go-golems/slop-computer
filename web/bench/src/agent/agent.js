@@ -69,6 +69,9 @@ export const Agent = {
   renderMsg(m, detail) {
     if (m.role === 'user') return (m.from ? '(from the ' + m.from + ') ' : '') + (m.text || '')
     const steps = m.steps || [], wrote = [...new Set(steps.flatMap(s => (s.calls || []).filter(c => /write|replace|remove|copy|save|seed|reset/.test(c))))]
+    // a past reply that wrote evals as text (from before FAKED_EVAL was caught) would teach the model to do
+    // it again (a thread in round 4 did it twice in a row): the history says what it was instead
+    if (!steps.length && FAKED_EVAL.test(m.text || '')) return '(this reply wrote eval code as text; none of it ran, and what it reported did not happen)'
     const t = m.text || (m.error ? '(failed: ' + m.error + ')' : '(no reply)')
     if (!steps.length) return t
     if (!detail) return t + '\n[' + plural(steps.length, 'eval') + (wrote.length ? ', used ' + wrote.join(', ') : '') + ']'

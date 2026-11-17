@@ -1,4 +1,4 @@
-/* the bench, built from web/bench: do not edit. source sha256:8797cac51ec0130fea894ba203db74e9323296d3080284a834cc67b5cc16854c */
+/* the bench, built from web/bench: do not edit. source sha256:2e5e7f97362158adc32e39064c35726beec7375be485f334c76d4fb7dd318aed */
 // The bench: a live dev environment for slop apps. Built from web/bench/src.
 (() => {
   // src/lib/util.js
@@ -4048,6 +4048,7 @@ Markdown files (README.md, notes, specs) render in the Docs panel. Keep README.m
     renderMsg(m, detail) {
       if (m.role === "user") return (m.from ? "(from the " + m.from + ") " : "") + (m.text || "");
       const steps = m.steps || [], wrote = [...new Set(steps.flatMap((s) => (s.calls || []).filter((c) => /write|replace|remove|copy|save|seed|reset/.test(c))))];
+      if (!steps.length && FAKED_EVAL.test(m.text || "")) return "(this reply wrote eval code as text; none of it ran, and what it reported did not happen)";
       const t = m.text || (m.error ? "(failed: " + m.error + ")" : "(no reply)");
       if (!steps.length) return t;
       if (!detail) return t + "\n[" + plural(steps.length, "eval") + (wrote.length ? ", used " + wrote.join(", ") : "") + "]";
