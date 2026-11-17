@@ -1,4 +1,4 @@
-/* slop page runtime declarations (window.claude), built from web/runtime: do not edit. source sha256:46138ab161bb11ffcc0d202d6e30735030460fd5b2c22d99fbe9b95371d70278 */
+/* slop page runtime declarations (window.claude), built from web/runtime: do not edit. source sha256:9cbcfa2adee1d8ec50cb0027aeaefd2cb943d1418c539091bc608a6a102b3c24 */
 // window.claude: claude.use(name) resolves a capability's namespace, or null.
 // claude.use<Actions>("slop") types the actor's actions by the app's contract.
 declare module "slop:page/limits" {
@@ -696,10 +696,20 @@ declare module "slop:page/types" {
     };
     /** Untyped actions: any name, any arguments. */
     export type AnyActions = Record<string, (args?: any) => unknown>;
+    global {
+        /**
+         * The app's actions as actions.d.ts declares them from their schemas
+         * (slop types); empty without it.
+         */
+        interface AppActions {
+        }
+    }
+    /** What claude.use('slop') types its actions by: AppActions when the app declares any, else anything. */
+    export type DefaultActions = keyof AppActions extends never ? AnyActions : AppActions;
     /** window.claude. */
     export interface Claude {
         /** The slop namespace, its actions typed by the app's contract: claude.use<Actions>("slop"). */
-        use<A = AnyActions>(name: "slop"): Promise<SlopOf<A> | null>;
+        use<A = DefaultActions>(name: "slop"): Promise<SlopOf<A> | null>;
         /** A capability's namespace, or null when this view may not use it (undeclared, or not allowed). */
         use<N extends keyof Capabilities>(name: N): Promise<Capabilities[N] | null>;
     }

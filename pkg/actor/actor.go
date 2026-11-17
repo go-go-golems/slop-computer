@@ -339,7 +339,7 @@ func (a *Actor) readShape() error {
 		need, declared := rt.LevelAdmin, false
 		if o, ok := actions.Get(name).(*goja.Object); ok {
 			if _, isFn := goja.AssertFunction(o); !isFn {
-				s, err := readSchema(name, o)
+				s, err := readSchema(a.vm, name, o)
 				if err != nil {
 					return err
 				}

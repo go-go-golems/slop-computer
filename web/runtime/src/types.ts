@@ -58,10 +58,21 @@ export type SlopOf<A> = Omit<Capabilities["slop"], "actions"> & { actions: Actio
 /** Untyped actions: any name, any arguments. */
 export type AnyActions = Record<string, (args?: any) => unknown>;
 
+declare global {
+  /**
+   * The app's actions as actions.d.ts declares them from their schemas
+   * (slop types); empty without it.
+   */
+  interface AppActions {}
+}
+
+/** What claude.use('slop') types its actions by: AppActions when the app declares any, else anything. */
+export type DefaultActions = keyof AppActions extends never ? AnyActions : AppActions;
+
 /** window.claude. */
 export interface Claude {
   /** The slop namespace, its actions typed by the app's contract: claude.use<Actions>("slop"). */
-  use<A = AnyActions>(name: "slop"): Promise<SlopOf<A> | null>;
+  use<A = DefaultActions>(name: "slop"): Promise<SlopOf<A> | null>;
   /** A capability's namespace, or null when this view may not use it (undeclared, or not allowed). */
   use<N extends keyof Capabilities>(name: N): Promise<Capabilities[N] | null>;
 }

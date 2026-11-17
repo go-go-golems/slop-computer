@@ -1,8 +1,12 @@
 package host
 
 import (
+	"os"
+	"path/filepath"
 	"strings"
 	"testing"
+
+	"github.com/go-go-golems/slop-computer/pkg/client"
 )
 
 const schemaActor = `
@@ -81,4 +85,61 @@ func TestActionArgsSchema(t *testing.T) {
 			t.Errorf("%s: %q", name, msg)
 		}
 	}
+}
+
+// actions.d.ts declares an app's actions from their schemas (SLOP3-024
+// phase 2): a page of a JavaScript actor gets typed slop.actions, with no
+// contract of its own, and tsc catches a wrong call.
+func TestActionsTypes(t *testing.T) {
+	h := newHarness(t)
+	admin := h.tokenFor("admin@example.com", "read", "write", "admin")
+	h.call(admin, "store.new", map[string]any{"id": "sch"})
+	h.push(admin, map[string]any{"store": "sch", "files": files(map[string]string{
+		"app.json": `{"title":"Schemas","actor":"actor.js"}`,
+		"actor.js": schemaActor,
+	})})
+	decl := appTypes(h, admin, "sch")
+	actions := decl[client.TypesDir+"/actions.d.ts"]
+	for _, want := range []string{
+		"The actions of sch's actor",
+		"add(args: {\n    text: string;\n    tags?: string[];\n  }): {\n    n?: number;\n  };",
+		"none(args?: {\n    max?: number;\n  }): unknown;",
+		"loose(args?: unknown): unknown;",
+	} {
+		if !strings.Contains(actions, want) {
+			t.Fatalf("actions.d.ts lacks %q:\n%s", want, actions)
+		}
+	}
+	// An instance that does not run the app is refused.
+	h.call(admin, "store.new", map[string]any{"id": "other"})
+	h.fail(admin, "app.types", map[string]any{"app": "sch", "instance": "other"}, "invalid_argument")
+
+	tsc := tscPath()
+	if tsc == "" {
+		t.Skip("no tsc: actions.d.ts is not type-checked")
+	}
+	dir := t.TempDir()
+	writeTree(t, dir, decl)
+	for name, cfg := range client.Tsconfigs("actor.js", false) {
+		writeTree(t, dir, map[string]string{name: string(cfg)})
+	}
+	page := `const slop = await claude.use('slop')
+if (slop) {
+  const { n } = await slop.actions.add({ text: 'hi', tags: ['a'] })
+  const len: number | undefined = n
+  await slop.actions.none()
+  await slop.actions.loose({ anything: 1 })
+  console.log(len)
+}
+`
+	writeTree(t, dir, map[string]string{"main.ts": page})
+	if out, ok := tscCheck(tsc, dir, "tsconfig.json"); !ok {
+		t.Fatalf("tsc:\n%s", out)
+	}
+	writeTree(t, dir, map[string]string{"main.ts": strings.Replace(strings.Replace(page, "{ text: 'hi', tags: ['a'] }", "{ text: 1 }", 1), "slop.actions.none()", "slop.actions.nope()", 1)})
+	out, ok := tscCheck(tsc, dir, "tsconfig.json")
+	if ok || !strings.Contains(out, "Type 'number' is not assignable to type 'string'") || !strings.Contains(out, "Property 'nope' does not exist") {
+		t.Fatalf("tsc on the mistakes:\n%s", out)
+	}
+	_ = os.Remove(filepath.Join(dir, "main.ts"))
 }

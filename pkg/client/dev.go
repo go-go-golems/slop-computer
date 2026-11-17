@@ -90,7 +90,7 @@ func (c *Client) Dev(ctx context.Context, dir string, o DevOptions) error {
 	// An app whose declarations slop types wrote gets them fresh: they
 	// describe this server, and the draft just pushed (SLOP3-024).
 	if fi, err := os.Stat(filepath.Join(dir, filepath.FromSlash(TypesDir))); err == nil && fi.IsDir() {
-		if _, err := c.Types(o.App, dir, false); err != nil {
+		if _, err := c.Types(o.App, dir, false, o.Instance); err != nil {
 			_, _ = fmt.Fprintf(o.Out, "types: %v\n", err)
 		} else {
 			_, _ = fmt.Fprintf(o.Out, "types: %s refreshed\n", TypesDir)

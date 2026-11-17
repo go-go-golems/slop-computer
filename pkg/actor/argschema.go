@@ -13,6 +13,7 @@ package actor
 
 import (
 	"bytes"
+	"context"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -45,20 +46,23 @@ func (noLoader) Load(url string) (any, error) {
 }
 
 // schemaJSON is the JSON of a schema in the definition: an object, or
-// true/false. nil when the action declares none.
-func schemaJSON(v goja.Value) (json.RawMessage, error) {
+// true/false. nil when the action declares none. JSON.stringify keeps the
+// properties in the order the actor wrote them, for actions.d.ts.
+func schemaJSON(vm *goja.Runtime, v goja.Value) (json.RawMessage, error) {
 	if v == nil || goja.IsUndefined(v) || goja.IsNull(v) {
 		return nil, nil
 	}
-	switch x := v.Export().(type) {
+	switch v.Export().(type) {
 	case bool, map[string]any:
-		b, err := json.Marshal(x)
-		if err != nil {
-			return nil, err
-		}
-		return b, nil
+	default:
+		return nil, errors.New("a schema is an object (or true or false)")
 	}
-	return nil, errors.New("a schema is an object (or true or false)")
+	stringify, _ := goja.AssertFunction(vm.Get("JSON").ToObject(vm).Get("stringify"))
+	out, err := stringify(goja.Undefined(), v)
+	if err != nil {
+		return nil, err
+	}
+	return json.RawMessage(out.String()), nil
 }
 
 // compileSchema compiles one schema (draft 2020-12 unless it says).
@@ -83,12 +87,12 @@ func compileSchema(name string, raw json.RawMessage) (*jsonschema.Schema, error)
 }
 
 // readSchema reads an action object's args and result.
-func readSchema(name string, o *goja.Object) (*actionSchema, error) {
-	args, err := schemaJSON(o.Get("args"))
+func readSchema(vm *goja.Runtime, name string, o *goja.Object) (*actionSchema, error) {
+	args, err := schemaJSON(vm, o.Get("args"))
 	if err != nil {
 		return nil, fmt.Errorf("action %s: args: %v", name, err)
 	}
-	result, err := schemaJSON(o.Get("result"))
+	result, err := schemaJSON(vm, o.Get("result"))
 	if err != nil {
 		return nil, fmt.Errorf("action %s: result: %v", name, err)
 	}
@@ -168,16 +172,35 @@ func describe(ve *jsonschema.ValidationError) string {
 	return strings.Join(leaves, "; ")
 }
 
-// ActionSchemas is the declared schemas of a store's running actor, by
-// action (nil entries for actions that declare none), for actions.d.ts.
-func (m *Manager) ActionSchemas(id string) (map[string]*actionSchema, bool) {
-	a := m.Running(id)
+// ActionDecl is one action of a running actor, as actions.d.ts declares
+// it: its schemas as written (nil for none).
+type ActionDecl struct {
+	Name   string
+	Args   json.RawMessage
+	Result json.RawMessage
+}
+
+// ActionDecls is the actions of a store's actor, in definition order, and
+// why the actor is broken ("" when it runs). It starts the actor.
+func (m *Manager) ActionDecls(ctx context.Context, id string) ([]ActionDecl, string, error) {
+	a, err := m.Get(ctx, id)
+	if err != nil {
+		var e *Error
+		if errors.As(err, &e) && e.Code == "actor_error" {
+			return nil, e.Message, nil
+		}
+		return nil, "", err
+	}
 	if a == nil {
-		return nil, false
+		return nil, "", nil
 	}
-	out := map[string]*actionSchema{}
+	var out []ActionDecl
 	for _, name := range a.keys("actions") {
-		out[name] = a.schemas[name]
+		d := ActionDecl{Name: name}
+		if s := a.schemas[name]; s != nil {
+			d.Args, d.Result = s.ArgsJSON, s.ResultJSON
+		}
+		out = append(out, d)
 	}
-	return out, true
+	return out, "", nil
 }

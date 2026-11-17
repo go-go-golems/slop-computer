@@ -15,11 +15,17 @@ import (
 const TypesDir = ".slop/types"
 
 // Types fetches an app's TypeScript declarations (app.types) and writes
-// them into dir/.slop/types. With tsconfigs, it also writes tsconfig.json
-// (the pages) and tsconfig.actor.json (the actor) when they do not exist
-// yet. It returns the paths it wrote, relative to dir.
-func (c *Client) Types(app, dir string, tsconfigs bool) ([]string, error) {
-	res, err := c.Call("app.types", map[string]any{"app": app})
+// them into dir/.slop/types. instance is the store whose running actor's
+// actions actions.d.ts declares ("": the app store). With tsconfigs, it
+// also writes tsconfig.json (the pages) and tsconfig.actor.json (the
+// actor) when they do not exist yet. It returns the paths it wrote,
+// relative to dir.
+func (c *Client) Types(app, dir string, tsconfigs bool, instance string) ([]string, error) {
+	args := map[string]any{"app": app}
+	if instance != "" {
+		args["instance"] = instance
+	}
+	res, err := c.Call("app.types", args)
 	if err != nil {
 		return nil, err
 	}
@@ -74,6 +80,24 @@ func (c *Client) Types(app, dir string, tsconfigs bool) ([]string, error) {
 	return wrote, nil
 }
 
+// DevInstance is the caller's dev instance of app when it exists ("" when
+// it does not): the store slop dev runs draft on.
+func (c *Client) DevInstance(app string) string {
+	who, err := c.Call("whoami", map[string]any{})
+	if err != nil {
+		return ""
+	}
+	id, _ := who.(map[string]any)["id"].(string)
+	if id == "" {
+		return ""
+	}
+	inst := DevInstanceID(app, id)
+	if _, err := c.Call("app.status", map[string]any{"store": inst, "peek": true}); err != nil {
+		return ""
+	}
+	return inst
+}
+
 // Tsconfigs are the two TypeScript programs of an app (design §5.5): the
 // pages (the DOM and window.claude) and, when it has one, the actor (the
 // actor runtime and its modules, no DOM). Files under server/ are the
@@ -109,7 +133,7 @@ func Tsconfigs(actor string, vendored bool) map[string][]byte {
 	put("tsconfig.json", extend(map[string]any{
 		"//":              "Written by slop types: the app's pages. The actor has tsconfig.actor.json; " + TypesDir + " holds the declarations (slop types refreshes them).",
 		"compilerOptions": options("ES2022", []string{"ES2022", "DOM", "DOM.Iterable"}),
-		"files":           []string{TypesDir + "/page.d.ts"},
+		"files":           []string{TypesDir + "/page.d.ts", TypesDir + "/actions.d.ts"},
 		"include":         []string{"**/*.ts", "**/*.tsx"},
 		"exclude":         exclude,
 	}))

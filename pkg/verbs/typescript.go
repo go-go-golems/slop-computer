@@ -13,6 +13,7 @@ package verbs
 
 import (
 	"encoding/json"
+	"reflect"
 	"regexp"
 	"strings"
 
@@ -58,11 +59,21 @@ func TypeScriptObjectMembers(s *jsonschema.Schema, indent string, skip, optional
 // expanded) is unknown below it.
 const tsMaxDepth = 12
 
+// isTrue and isFalse recognize the boolean schemas by value: a schema read
+// from JSON holds copies of TrueSchema and FalseSchema.
+func isTrue(s *jsonschema.Schema) bool {
+	return s == jsonschema.TrueSchema || (s != nil && reflect.DeepEqual(*s, *jsonschema.TrueSchema))
+}
+
+func isFalse(s *jsonschema.Schema) bool {
+	return s == jsonschema.FalseSchema || (s != nil && reflect.DeepEqual(*s, *jsonschema.FalseSchema))
+}
+
 func tsType(s *jsonschema.Schema, ind string, depth int) string {
 	switch {
-	case s == nil || s == jsonschema.TrueSchema || depth > tsMaxDepth:
+	case s == nil || isTrue(s) || depth > tsMaxDepth:
 		return "unknown"
-	case s == jsonschema.FalseSchema:
+	case isFalse(s):
 		return "never"
 	case s.Ref != "" || s.Not != nil || s.If != nil:
 		return "unknown"
@@ -125,7 +136,7 @@ func tsType(s *jsonschema.Schema, ind string, depth int) string {
 func tsObject(s *jsonschema.Schema, ind string, depth int) string {
 	extra := s.AdditionalProperties
 	if s.Properties == nil || s.Properties.Len() == 0 {
-		if extra == jsonschema.FalseSchema {
+		if isFalse(extra) {
 			return "Record<string, never>"
 		}
 		return "Record<string, " + tsType(extra, ind, depth+1) + ">"
@@ -145,7 +156,7 @@ func tsObject(s *jsonschema.Schema, ind string, depth int) string {
 		}
 		b.WriteString(inner + tsKey(p.Key) + opt + ": " + tsType(p.Value, inner, depth+1) + ";\n")
 	}
-	if extra != nil && extra != jsonschema.FalseSchema {
+	if extra != nil && !isFalse(extra) {
 		// other keys besides the named ones: their type must admit the
 		// named ones' too, so it says only that they exist
 		b.WriteString(inner + "[key: string]: unknown;\n")

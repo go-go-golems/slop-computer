@@ -1,9 +1,14 @@
 package actor
 
 import (
+	"encoding/json"
 	"regexp"
 	"slices"
 	"strings"
+
+	"github.com/invopop/jsonschema"
+
+	"github.com/go-go-golems/slop-computer/pkg/verbs"
 )
 
 // ModulesTypeScript is an app's modules.d.ts (SLOP3-024, design §5.3): the
@@ -67,4 +72,56 @@ func tsName(name string) string {
 func firstLine(s string) string {
 	s, _, _ = strings.Cut(strings.TrimSpace(s), "\n")
 	return s
+}
+
+// ActionsTypeScript is an app's actions.d.ts (SLOP3-024 phase 2, design
+// §5.4): AppActions, the actions of the actor of from, declared from their
+// schemas with the converter of section 5.3. An action without an args
+// schema takes anything; without a result schema it returns unknown.
+// page.d.ts makes AppActions what claude.use('slop') types its actions by
+// when the app declares any, so a JavaScript app gets typed calls too.
+func ActionsTypeScript(from string, actions []ActionDecl, broken string) string {
+	var b strings.Builder
+	b.WriteString("// The actions of " + from + "'s actor, from their args and result schemas.\n")
+	if broken != "" {
+		b.WriteString("// Its actor is broken, so none are declared: " + firstLine(broken) + "\n")
+	}
+	b.WriteString("interface AppActions {\n")
+	for _, a := range actions {
+		args, opt := "unknown", "?"
+		if s := schemaOf(a.Args); s != nil {
+			args = verbs.TypeScript(s, "  ")
+			if needsArgs(s) {
+				opt = ""
+			}
+			if s.Description != "" {
+				b.WriteString("  /** " + strings.ReplaceAll(firstLine(s.Description), "*/", "*\\/") + " */\n")
+			}
+		}
+		result := "unknown"
+		if s := schemaOf(a.Result); s != nil {
+			result = verbs.TypeScript(s, "  ")
+		}
+		b.WriteString("  " + tsName(a.Name) + "(args" + opt + ": " + args + "): " + result + ";\n")
+	}
+	b.WriteString("}\n")
+	return b.String()
+}
+
+// schemaOf reads a declared schema for the converter (nil for none).
+func schemaOf(raw json.RawMessage) *jsonschema.Schema {
+	if raw == nil {
+		return nil
+	}
+	s := &jsonschema.Schema{}
+	if err := json.Unmarshal(raw, s); err != nil {
+		return nil
+	}
+	return s
+}
+
+// needsArgs: a call must pass arguments, because the schema requires a
+// property or is not an object (a call without them is checked as {}).
+func needsArgs(s *jsonschema.Schema) bool {
+	return len(s.Required) > 0 || (s.Type != "" && s.Type != "object")
 }

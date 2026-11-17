@@ -408,8 +408,8 @@ func TestSlopDev(t *testing.T) {
 	// the app's own; slop dev refreshes the declarations of an app that has
 	// them, and never pushes them (SLOP3-024).
 	write("tsconfig.json", `{"compilerOptions": {"jsx": "react-jsx"}}`)
-	wrote, err := c.Types("jot", dir, true)
-	if err != nil || strings.Join(wrote, " ") != ".slop/types/page.d.ts .slop/types/actor.d.ts .slop/types/modules.d.ts tsconfig.actor.json" {
+	wrote, err := c.Types("jot", dir, true, inst)
+	if err != nil || strings.Join(wrote, " ") != ".slop/types/page.d.ts .slop/types/actor.d.ts .slop/types/modules.d.ts .slop/types/actions.d.ts tsconfig.actor.json" {
 		t.Fatalf("slop types wrote %v (%v)", wrote, err)
 	}
 	if b, _ := os.ReadFile(filepath.Join(dir, "tsconfig.json")); string(b) != `{"compilerOptions": {"jsx": "react-jsx"}}` {
@@ -425,6 +425,10 @@ func TestSlopDev(t *testing.T) {
 	}
 	if _, err := os.Stat(filepath.Join(dir, ".slop/types/page.d.ts")); err != nil || !strings.Contains(again.String(), "types: .slop/types refreshed") {
 		t.Fatalf("slop dev did not refresh the types (%v):\n%s", err, again.String())
+	}
+	// actions.d.ts declares the dev instance's actor's actions (ping).
+	if b, _ := os.ReadFile(filepath.Join(dir, ".slop/types/actions.d.ts")); !strings.Contains(string(b), "ping(args?: unknown): unknown;") || !strings.Contains(string(b), inst+"'s actor") {
+		t.Fatalf("actions.d.ts:\n%s", b)
 	}
 	for _, f := range h.call(admin, "files.ls", map[string]any{"store": "jot", "at": "draft"}).([]any) {
 		if p := f.(map[string]any)["path"].(string); strings.HasPrefix(p, ".slop/") {
