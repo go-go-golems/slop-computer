@@ -127,3 +127,7 @@
 - CDN scripts in app pages: KEEP ALLOWING (the guide's three options stay: no library, a pinned CDN link, a vendored package).
 - A vision model tier: YES, lunaroute/deepseek-4.1-flash. BUILT: pi.models.vision on the server, frames.look in the bench (a1? see git: the vision commit and doc/production.md).
 - Frames as different people: explained; no decision yet.
+
+## Feature requests from the user (2026-11-17, for later; not started)
+- Stream the agent's thinking into the chat as it happens.
+- Interleave evals properly with the reply: text, eval, text, eval in the order they happened, instead of the reply text with its steps beside it.
