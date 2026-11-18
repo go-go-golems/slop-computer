@@ -453,3 +453,89 @@ func TestMeterHoldsToolDefinitions(t *testing.T) {
 	assert.GreaterOrEqual(t, m.ests[0].InputTokens-plain.ests[0].InputTokens, defs, "round 0 offers the tool: its definition is held")
 	assert.Less(t, m.ests[1].InputTokens-plain.ests[0].InputTokens, defs+int64(200), "the last round offers no tools: only its grown context")
 }
+
+// A model that used its tools and then ended without a word is asked once,
+// without tools, for its reply; one that is silent again is an error.
+func TestSilentEndAsksForAReply(t *testing.T) {
+	exec := func(context.Context, llm.Event) (llm.ToolResult, error) {
+		return llm.ToolResult{Value: json.RawMessage(`1`)}, nil
+	}
+	b, p := setup(t, nil,
+		toolCalls("", [3]string{"call_1", "get_weather", `{"city":"Oslo"}`}),
+		text(),
+		text("It is 17 degrees in Oslo."))
+	rec := &recorder{}
+	require.NoError(t, b.Sample(context.Background(), req("weather?", llm.Options{}, weather), rec.emit, exec))
+	assert.Equal(t, "It is 17 degrees in Oslo.", *rec.last("result").Result.FinalText)
+	require.Len(t, p.bodies, 3)
+	assert.NotContains(t, p.bodies[2], "tools", "the reply is asked for without tools")
+	assert.Contains(t, fmt.Sprint(p.bodies[2]["messages"]), "you ended without replying")
+
+	b, _ = setup(t, nil,
+		toolCalls("", [3]string{"call_1", "get_weather", `{"city":"Oslo"}`}),
+		text(),
+		text())
+	rec = &recorder{}
+	require.NoError(t, b.Sample(context.Background(), req("weather?", llm.Options{}, weather), rec.emit, exec))
+	require.NotNil(t, rec.last("error").Error)
+	assert.Equal(t, "empty_completion", rec.last("error").Error.Code)
+}
+
+// A tool call written as text ("<tool_call>…") ran nothing: the model is
+// told so and the round runs again, so the turn does not end mid-task.
+func TestToolCallAsTextIsRetried(t *testing.T) {
+	exec := func(context.Context, llm.Event) (llm.ToolResult, error) {
+		return llm.ToolResult{Value: json.RawMessage(`17`)}, nil
+	}
+	b, p := setup(t, nil,
+		text("Let me check.\n<tool_call>get_weather\n<arg_key>city</arg_key><arg_value>Oslo</arg_value></tool_call>"),
+		toolCalls("", [3]string{"call_1", "get_weather", `{"city":"Oslo"}`}),
+		text("It is 17 degrees in Oslo."))
+	rec := &recorder{}
+	require.NoError(t, b.Sample(context.Background(), req("weather?", llm.Options{}, weather), rec.emit, exec))
+	assert.Equal(t, "It is 17 degrees in Oslo.", *rec.last("result").Result.FinalText)
+	require.Len(t, p.bodies, 3)
+	assert.Contains(t, fmt.Sprint(p.bodies[1]["messages"]), "wrote a tool call as text")
+	assert.Contains(t, p.bodies[1], "tools", "the retried round still offers the tools")
+}
+
+// A turn whose tool results outgrow the budget gets one round without
+// tools to reply, instead of failing mid-answer.
+func TestOverBudgetTurnReplies(t *testing.T) {
+	big := json.RawMessage(`"` + strings.Repeat("x", 530<<10) + `"`)
+	exec := func(context.Context, llm.Event) (llm.ToolResult, error) { return llm.ToolResult{Value: big}, nil }
+	b, p := setup(t, nil,
+		toolCalls("", [3]string{"call_1", "get_weather", `{"city":"Oslo"}`}),
+		text("I read the forecast; it was long. Oslo is 17 degrees."))
+	rec := &recorder{}
+	require.NoError(t, b.Sample(context.Background(), req("weather?", llm.Options{}, weather), rec.emit, exec))
+	require.NotNil(t, rec.last("result"), "no error: %v", rec.last("error"))
+	assert.Equal(t, "I read the forecast; it was long. Oslo is 17 degrees.", *rec.last("result").Result.FinalText)
+	require.Len(t, p.bodies, 2)
+	assert.NotContains(t, p.bodies[1], "tools")
+	assert.Contains(t, fmt.Sprint(p.bodies[1]["messages"]), "used up its room")
+}
+
+// A call with images on a tier whose model can't read them runs on the
+// configured vision model; a vision model that can't read images is refused
+// at start.
+func TestVisionModelTakesImages(t *testing.T) {
+	b, p := setup(t, map[string]string{"vision": "lunaroute/small"}, text("a chart"))
+	r := req("what is this?", llm.Options{})
+	r.Images = []llm.Image{{MimeType: "image/jpeg", Data: "/9j/AA=="}}
+	rec := &recorder{}
+	require.NoError(t, b.Sample(context.Background(), r, rec.emit, noTools))
+	require.Nil(t, rec.last("error").Error, "no error")
+	assert.Equal(t, "a chart", rec.last("result").Result.Text)
+	assert.Equal(t, "small", p.bodies[0]["model"])
+
+	dir := t.TempDir()
+	writeJSON(t, filepath.Join(dir, "settings.json"), map[string]any{"defaultProvider": "lunaroute", "defaultModel": "big"})
+	writeJSON(t, filepath.Join(dir, "models.json"), map[string]any{"providers": map[string]any{"lunaroute": map[string]any{
+		"baseUrl": "http://127.0.0.1:9/v1", "api": "openai-completions", "apiKey": "test-key",
+		"models": []any{map[string]any{"id": "big", "reasoning": true, "input": []string{"text"}, "maxTokens": 100000}},
+	}}})
+	_, err := New(Config{AgentDir: dir, Tiers: map[string]string{"vision": "lunaroute/big"}, Options: []pi.Option{pi.WithLocalProviders()}})
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "cannot read images")
+}

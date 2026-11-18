@@ -16,7 +16,7 @@ import { FrameHosts, Headless } from './host.js';
 import { Instances } from '../server/instances.js';
 import { Slop } from '../server/slop.js';
 import { Snaps } from './layout.js';
-import { checkFixture, checkScenario, fixturePath, scenarioList, stepLabel } from '../core/scenario.js';
+import { checkFixture, checkScenario, fixturePath, scenarioList, specKey, stepLabel } from '../core/scenario.js';
 import { clamp, emitter, lock, now, plural, sleep } from '../lib/util.js';
 
 // The test instance is one per person and app, and a scenario run or a
@@ -50,7 +50,7 @@ async function applyFixture(P, name, ws, read = path => P.read(path, ws)) {
   }
   await Instances.reset(P, 'test')
   await Instances.ensure(P, 'test', ws === 'draft' ? undefined : ws)
-  if (spec) await Slop.call('seed', { app: P.app, kind: 'test', docs: spec.docs || {}, tables: spec.tables || {} })
+  if (spec) await Slop.call('seed', { app: P.app, kind: 'test', docs: spec.docs || {}, tables: spec.tables || {}, replace: true })
   Fixtures.current = name || null
   for (const fh of FrameHosts) if (fh.project === P && fh.kind === 'test') fh.load({ keepState: false })
   Fixtures.ev.emit('applied', Fixtures.current)
@@ -102,8 +102,23 @@ async function runHolding(P, spec, { ws = 'draft', name = 'unsaved', onStep, sig
         else if (s.expect) verify(s, await poll(s, () => expectStep(fh, s)))
         else if (s.sql) verify(s, await poll(s, async () => {
           const rows = await Slop.call('sql', { app: P.app, kind: 'test', query: s.sql, args: s.args || [] })
-          const n = Array.isArray(rows) ? rows.length : 0
+          const list = Array.isArray(rows) ? rows : [], n = list.length
+          // value: the first column of the first row (numbers compared as numbers); rows: exactly these rows
+          if (s.value !== undefined) {
+            const v = n ? Object.values(list[0])[0] : undefined
+            const same = typeof s.value === 'number' && v != null ? Number(v) === s.value : JSON.stringify(v) === JSON.stringify(s.value)
+            return { ok: same, got: n ? JSON.stringify(v) : 'no rows' }
+          }
+          if (s.rows) return { ok: JSON.stringify(list) === JSON.stringify(s.rows), got: JSON.stringify(list).slice(0, 160) }
           return s.count != null ? { ok: n === +s.count, got: n + ' rows' } : { ok: n > 0, got: '0 rows' }
+        }))
+        else if (s.download != null) verify(s, await poll(s, async () => {
+          const d = await fh.call('download', [])
+          if (!d) return { ok: false, got: 'no download yet' }
+          if (s.download && d.name !== s.download) return { ok: false, got: 'downloaded "' + d.name + '"' }
+          const t = d.text == null ? '' : String(d.text)
+          const ok = s.exact ? t === String(s.text) : s.match != null ? new RegExp(String(s.match)).test(t) : s.text != null ? t.includes(String(s.text)) : true
+          return { ok, got: 'downloaded "' + d.name + '": ' + JSON.stringify(t.slice(0, 120)) }
         }))
         else if (s.docs) verify(s, await poll(s, async () => {
           const docs = (await Slop.call('docs', { app: P.app, kind: 'test', coll: s.docs })).map(d => d.body || {})
@@ -126,14 +141,14 @@ async function runHolding(P, spec, { ws = 'draft', name = 'unsaved', onStep, sig
   res.ms = now() - t0
   if (keep && name !== 'unsaved') {
     P.meta.runs = P.meta.runs || {}
-    P.meta.runs[ws + '|' + name] = { t: res.t, ok: res.ok, ms: res.ms, failedAt: res.failedAt, steps: res.steps.map(s => ({ label: s.label, ok: s.ok, error: s.error, ms: s.ms })), snaps: res.snaps }
+    P.meta.runs[ws + '|' + name] = { key: specKey(spec), t: res.t, ok: res.ok, ms: res.ms, failedAt: res.failedAt, steps: res.steps.map(s => ({ label: s.label, ok: s.ok, error: s.error, ms: s.ms })), snaps: res.snaps }
     P.saveMeta()
   }
   const note = name + (res.ok ? ' passed (' + plural(res.steps.length, 'step') + ')' : ' failed at step ' + (res.failedAt + 1) + ': ' + res.steps[res.failedAt].error)
   P.log({ kind: 'scenario', who, ref: ws, thread, name, ok: res.ok, note })
   return res
 }
-async function expectStep(fh, s) {
+export async function expectStep(fh, s) {
   const n = await fh.call('count', [s.expect])
   if (s.count != null) return { ok: n === +s.count, got: 'count ' + n }
   if (s.visible === false) {
@@ -143,9 +158,19 @@ async function expectStep(fh, s) {
   }
   if (!n) return { ok: false, got: 'nothing matches' }
   const els = await fh.call('all', [s.expect, 20])
+  // text and match read each match's whole text (all() cuts it at 120 characters; an older probe has no texts)
+  const texts = s.text != null || s.match != null ? await fh.call('texts', [s.expect, 20]).catch(() => els.map(e => e.text)) : []
+  const got = () => 'text "' + texts.join(' | ').slice(0, 160) + '"'
+  // text: contains, ignoring case ("12" passes on "128": a number wants exact or match);
+  // exact: the whole text, spaces collapsed; match: a regular expression
+  if (s.match != null) {
+    let re
+    try { re = new RegExp(String(s.match)) } catch (e) { return { ok: false, got: 'match is not a regular expression: ' + e.message } }
+    return { ok: texts.some(t => re.test(t)), got: got() }
+  }
   if (s.text != null) {
-    const want = String(s.text).toLowerCase()
-    return { ok: els.some(e => e.text.toLowerCase().includes(want)), got: 'text "' + els.map(e => e.text).join(' | ').slice(0, 120) + '"' }
+    const norm = t => String(t).replace(/\s+/g, ' ').trim().toLowerCase(), want = norm(s.text)
+    return { ok: texts.some(t => s.exact ? norm(t) === want : t.toLowerCase().includes(String(s.text).toLowerCase())), got: got() }
   }
   if (s.value != null) { const v = (els[0].attrs || {}).value; return { ok: String(v) === String(s.value), got: 'value "' + v + '"' } }
   return { ok: els.some(e => e.rect.w && e.rect.h), got: 'not visible' }

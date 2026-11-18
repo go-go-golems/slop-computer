@@ -9,7 +9,9 @@
 // file it changed), which writes nothing and fails the eval. A subagent's
 // eval folds into its caller's instead, and lands with it. After a commit,
 // the frames come up on the new snapshot before the eval's frame effects are
-// measured (agent/effects.js).
+// measured (agent/effects.js). In an app with TypeScript, the effects say
+// which type errors the eval introduced and how many it fixed (types: the
+// checker's view before the eval against after its commit; agent/types.js).
 //
 // The same path serves the agent and the person's Eval panel: the context
 // says who is running and where (makeContext).
@@ -20,9 +22,11 @@ import { FrameHosts, showing } from '../frames/host.js';
 import { ROLES } from './roles.js';
 import { Sandbox } from './sandbox.js';
 import { Slop } from '../server/slop.js';
+import { Types } from './types.js';
 import { fileEffects, frameEffects, framesBefore } from './effects.js';
 import { h, modal, toast } from '../lib/dom.js';
 import { libEntries } from './api/lib.js';
+import { notAFunctionHint } from './hints.js';
 import { now } from '../lib/util.js';
 
 // What only the page can do, set by the shell (ui/app.js): the workspace
@@ -57,6 +61,8 @@ export async function runEval(ctx, code, { sid, restore, timeoutMs } = {}) {
   const line = firstLine(code), t0 = now()
   const before = parent ? null : await framesBefore(P, ctx.ws)
   const tx = parent ? parent.child({ label: 'eval' }) : d.begin({ label: 'eval', event: { who: ctx.who, thread: ctx.thread, note: line } })
+  // the types before the eval: checked while it runs (the files are taken now)
+  const typesBefore = !parent && Types.wants(tx) ? Types.check(P, tx, { timeoutMs: 15000, ref: d.ref }) : null
   ctx.tx = tx; ctx.stack = []; ctx.logs = []
   let r
   try {
@@ -67,6 +73,7 @@ export async function runEval(ctx, code, { sid, restore, timeoutMs } = {}) {
     ctx.tx = null
   }
   if (ctx.logs.length) r.logs = [...(r.logs || []), ...ctx.logs.map(text => ({ level: 'log', text }))]
+  if (!r.ok && r.error) r.error.message += notAFunctionHint(r.error, code, ctx.api)
   const effects = {}
   if (!r.ok) {
     if (tx.changes.size) effects.rolledBack = tx.paths()
@@ -79,6 +86,11 @@ export async function runEval(ctx, code, { sid, restore, timeoutMs } = {}) {
       Object.assign(effects, { files, commit: { ref: d.ref, n: c.n, merged: c.merged } })
       if (c.activated.length) effects.instances = c.activated.map(a => ({ store: a.store, n: a.n, broken: a.broken || a.error || undefined }))
       Object.assign(effects, await afterCommit(ctx, c, before, t0))
+      if (typesBefore || Types.wants(tx)) {
+        if (c.activated.length) Types.invalidate(P) // actions.d.ts follows the ref's instance's actor
+        const t = Types.diff(typesBefore ? await typesBefore : { diags: [] }, await Types.check(P, tx, { ref: d.ref }))
+        if (t.skipped || t.new.length || t.fixed) effects.types = t
+      }
     } else {
       tx.abort()
       r.ok = false

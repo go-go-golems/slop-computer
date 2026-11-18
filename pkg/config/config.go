@@ -71,7 +71,7 @@ type Actors struct {
 // by Geppetto's Pi provider (pkg/llm/gepp).
 type Pi struct {
 	AgentDir string            `yaml:"agent_dir"` // ~/.pi/agent (models, credentials, settings)
-	Models   map[string]string `yaml:"models"`    // tier (quick, default, complex) -> provider/model
+	Models   map[string]string `yaml:"models"`    // tier (quick, default, complex, and vision for calls with images) -> provider/model
 }
 
 // Load reads a YAML file (optional) and applies defaults.

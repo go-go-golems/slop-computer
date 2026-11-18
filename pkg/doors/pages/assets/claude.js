@@ -1,4 +1,4 @@
-/* slop page runtime (window.claude), built from web/runtime: do not edit. source sha256:1e09d74a10aa3fc11392a37eba7756d262c94540fade4e15facfde444ff0a92f */
+/* slop page runtime (window.claude), built from web/runtime: do not edit. source sha256:9cbcfa2adee1d8ec50cb0027aeaefd2cb943d1418c539091bc608a6a102b3c24 */
 "use strict";
 (() => {
   // src/limits.ts
@@ -1369,7 +1369,7 @@
           } catch (e) {
             throw e?.code === "limit_reached" ? e : fail(e?.code === "invalid_argument" ? e.code : "upstream_error", e?.message || "join failed");
           }
-          nr.api = Object.freeze({
+          const named = Object.freeze({
             name,
             ...api(nr),
             async leave() {
@@ -1384,7 +1384,8 @@
               });
             }
           });
-          return nr.api;
+          nr.api = named;
+          return named;
         },
         async sendToClaudeSession(data, opts) {
           if (!isPlain(data) || !Object.keys(data).length) throw fail("invalid_argument", "send a non-empty plain object");

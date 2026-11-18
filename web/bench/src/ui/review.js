@@ -62,7 +62,7 @@ export const REVIEW = {
       const c = h('div.ovcard', h('header', h('h3', p.title), th ? h('span.tag.ws', th.role || 'agent') : h('span.tag.ws', 'you'), th ? h('span.note', th.title) : null, h('span.note', fmtAgo(p.created)), h('span.sp'),
         h('button.btn.sm' + (App.ws === p.ref ? '.on' : ''), { on: { click: () => App.setWs(App.ws === p.ref ? 'draft' : p.ref) } }, App.ws === p.ref ? 'Viewing' : 'View'),
         h('button.btn.sm', { disabled: !all, title: 'Draft above, proposal below on the canvas', on: { click: () => { App.setWs(p.ref); App.compare(true) } } }, 'Compare'),
-        h('button.btn.sm.primary', { disabled: !n, on: { click: () => accept(P, p, list.filter(x => pick[x.path]).map(x => x.path)) } }, 'Accept ' + (n === all ? 'all' : n)),
+        h('button.btn.sm.primary', { disabled: !n, on: { click: () => accept(P, p, list.filter(x => pick[x.path]).map(x => x.path), list.filter(x => !pick[x.path]).map(x => x.path)) } }, 'Accept ' + (n === all ? 'all' : n + ' of ' + all)),
         h('button.btn.sm.danger', { on: { click: async () => { if (!all || await confirmBox('Reject "' + p.title + '"?', 'Its ' + plural(all, 'change') + ' are discarded with the proposal. The timeline keeps its commits.', 'Reject')) { await P.reject(p.ref); if (App.ws === p.ref) App.setWs('draft') } } } }, 'Reject')))
       const files = h('div.files')
       if (!ch) files.appendChild(h('p.note', 'Reading its changes…'))
@@ -71,7 +71,9 @@ export const REVIEW = {
       for (const x of list) {
         const text = x.after !== null || x.before !== null, st = text ? diffStat(x.before ?? '', x.after ?? '') : null, key = p.ref + x.path, shown = S.shown[key] ?? list.length <= 3
         const cb = h('input', { type: 'checkbox', checked: pick[x.path], on: { change: () => { pick[x.path] = cb.checked; paint() } } })
-        files.appendChild(h('div', h('label', cb, h('span', x.path), h('span.note', !x.existed ? 'new' : !x.entry ? 'deleted' : st ? '+' + st.add + ' −' + st.del : 'replaced (kept by hash)'), h('span.sp'),
+        // only the checkbox takes a file in or out: clicking a file's name to look at it unticked it
+        // (a persona's accept then dropped actor.ts and broke the draft)
+        files.appendChild(h('div', h('label', { title: 'Include this file when you accept' }, cb), text ? h('button.link', { style: { padding: 0 }, on: { click: e => { e.preventDefault(); S.shown[key] = !shown; paint() } } }, x.path) : h('span', x.path), h('span', h('span.note', !x.existed ? 'new' : !x.entry ? 'deleted' : st ? '+' + st.add + ' −' + st.del : 'replaced (kept by hash)'), h('span.sp'),
           text ? h('button.link.note', { on: { click: e => { e.preventDefault(); S.shown[key] = !shown; paint() } } }, shown ? 'hide diff' : 'show diff') : null, ' ',
           x.entry ? h('button.link.note', { on: { click: e => { e.preventDefault(); App.setWs(p.ref); App.reveal(x.path, 1) } } }, 'open') : null),
           shown && text ? diffView(x.before ?? '', x.after ?? '') : null))
@@ -80,7 +82,9 @@ export const REVIEW = {
       if (all) c.appendChild(checksPanel(P, p))
       return c
     }
-    async function accept(P, p, paths) {
+    async function accept(P, p, paths, left = []) {
+      // accepting part of a proposal closes it: what is left out goes with it, so say which
+      if (left.length && !await confirmBox('Accept ' + paths.length + ' of ' + (paths.length + left.length) + ' files?', 'Left out, and discarded with the proposal: ' + left.join(', ') + '. Files that belong together (a migration and the code that uses it) should go in together.', 'Accept ' + paths.length)) return
       const r = await P.accept(p.ref, paths, 'you').catch(e => ({ status: 'failed', error: e.message }))
       if (r.status === 'committed') { toast('Accepted ' + plural(paths.length, 'change') + ' into draft ' + r.n + (r.merged ? ' (merged with what changed since)' : '')); if (App.ws === p.ref) App.setWs('draft') }
       else if (r.status === 'conflict') toast('Not accepted: draft also changed ' + r.conflicts.join(', ') + ' since the proposal began. Bring those files up to date in the proposal, or leave them out.', 8000)

@@ -6,6 +6,7 @@
 // Engine 2 (fallback): this worker's own JS realm, scope kept in a plain object. A capability boundary, not a sandbox.
 import { getQuickJS, shouldInterruptAfterDeadline } from '@tootallnate/quickjs-emscripten'
 import * as acorn from 'acorn'
+import { freeNames, paramsOf, rewrite } from './rewrite.js'
 /* global __CORE_SRC__ */
 const CORE = __CORE_SRC__          // src/core.js, inlined by the build
 
@@ -65,18 +66,23 @@ function apiShape(api) {
   return { ns, flat }
 }
 const CORE_NAMES = ['step', 'id', 'seq', 'par', 'alt', 'loop', 'dyn', 'llm', 'delegate', 's', 'monoid', 'help', 'tx', 'setTimeout', 'clearTimeout']
-const PRELUDE_NAMES = ['__call', '__API', '__SIGS', '__ROLES', '__PASS', '__lev', '__near', '__ns', '__names', '__lib', '__declare', '__keep', '__kind', 'vars', 'forget', 'lib', '__fmt', 'console', 'sleep', '__snapshot', '__restore', '__libSet', '__libLoad', '__host', '__log', '__eid', 'globalThis', 'undefined', 'NaN', 'Infinity', 'eval', 'arguments', ...CORE_NAMES]
-function reservedFor(api) { const { ns, flat } = apiShape(api); return new Set([...Object.keys(ns), ...flat, ...PRELUDE_NAMES, ...(CORE.match(/^(?:function|const|class) (__\w+)/gm) || []).map(x => x.split(' ')[1])]) }
+const PRELUDE_NAMES = ['__arr', '__call', '__API', '__SIGS', '__ROLES', '__DOCS', '__PASS', '__lev', '__near', '__ns', '__names', '__lib', '__declare', '__keep', '__kind', 'vars', 'forget', 'lib', '__fmt', 'console', 'sleep', '__snapshot', '__restore', '__libSet', '__libLoad', '__host', '__log', '__eid', 'globalThis', 'undefined', 'NaN', 'Infinity', 'eval', 'arguments', ...CORE_NAMES]
+function reservedFor(api) { const { ns, flat } = apiShape(api); return Object.assign(new Set([...Object.keys(ns), ...flat, ...PRELUDE_NAMES, ...(CORE.match(/^(?:function|const|class) (__\w+)/gm) || []).map(x => x.split(' ')[1])]), { ns: new Set([...Object.keys(ns), 'lib', 'console']) }) }
 
 // ---------- the prelude, evaluated once per session ----------
 // verbs that stay direct calls returning promises; every other module verb returns a Step
 const DIRECT = new Set(['lib.def', 'lib.list', 'lib.remove', 'lib.source', 'log', 'sleep', 'tx.begin', 'tx.commit', 'tx.rollback', 'dry.begin', 'dry.end', 'dry.apply', 'dry.discard', 'agents.delegate', 'agents.roles', 'llm', 'ui.approve'])
+let DOCS = {} // verb → '→ ret — doc', for help(); set from each eval message
 function preludeSource(api, sigs = {}, roles = []) {
   const { ns, flat } = apiShape(api)
-  let src = 'const __call = async (n, a) => { try { return JSON.parse(await __host(n, JSON.stringify(a === undefined ? [] : a))) } catch (e) { if (e && typeof e === "object" && !e.kind) e.kind = e.name; throw e } };\n'
+  // a result with its list in .items (frames.layout) also answers the array methods, on .items, without
+  // changing its JSON: layout.filter(…) failed in three rounds despite the documented shape
+  let src = 'const __arr = v => { if (v && typeof v === "object" && !Array.isArray(v) && Array.isArray(v.items)) for (const m of ["filter", "map", "find", "findIndex", "some", "every", "forEach", "slice", "flatMap", "reduce"]) if (!(m in v)) Object.defineProperty(v, m, { value: (...x) => v.items[m](...x), enumerable: false }); return v };\n'
+  src += 'const __call = async (n, a) => { try { return __arr(JSON.parse(await __host(n, JSON.stringify(a === undefined ? [] : a)))) } catch (e) { if (e && typeof e === "object" && !e.kind) e.kind = e.name; throw e } };\n'
   src += 'const __API = ' + JSON.stringify(api.filter(n => !DIRECT.has(n) || n.startsWith('lib.'))) + ';\n'
   src += 'const __SIGS = ' + JSON.stringify(Object.fromEntries(Object.entries(sigs).filter(([k]) => !DIRECT.has(k)))) + ';\n'
   src += 'const __ROLES = ' + JSON.stringify(roles) + ';\n'
+  src += 'const __DOCS = ' + JSON.stringify(DOCS) + ';\n'
   src += 'const __lev = (a, b) => { const m = []; for (let i = 0; i <= b.length; i++) m[i] = [i]; for (let j = 0; j <= a.length; j++) m[0][j] = j; for (let i = 1; i <= b.length; i++) for (let j = 1; j <= a.length; j++) m[i][j] = Math.min(m[i-1][j] + 1, m[i][j-1] + 1, m[i-1][j-1] + (b[i-1] === a[j-1] ? 0 : 1)); return m[b.length][a.length] };\n'
   src += 'const __near = (k, names) => { let best = null, bd = Math.max(2, Math.floor(k.length / 3)) + 1; for (const n of names) { const d = __lev(k.toLowerCase(), n.toLowerCase()); if (d < bd) { bd = d; best = n } } return best };\n'
   // namespaces answer an unknown verb with the nearest real one, in this namespace or another
@@ -110,9 +116,11 @@ function preludeSource(api, sigs = {}, roles = []) {
   src += 'const __fmt = v => { if (typeof v === "string") return v; try { return JSON.stringify(v); } catch (e) { return String(v); } };\n'
   src += 'const console = { log: (...a) => __log("log", a.map(__fmt).join(" ")), info: (...a) => __log("log", a.map(__fmt).join(" ")), warn: (...a) => __log("warn", a.map(__fmt).join(" ")), error: (...a) => __log("error", a.map(__fmt).join(" ")) };\n'
   src += 'const sleep = ms => __call("sleep", [ms]);\n'
-  src += 'const __snapshot = () => { const out = {}, skipped = []; for (const n of __names) { if (!(n in globalThis)) continue; const v = globalThis[n];' +
+  // the newest variables first, at most 96 KB in all: the snapshot is saved with the thread, and a thread whose
+  // 145 variables (each up to 24 KB) outgrew a saved record stopped saving (round 4)
+  src += 'const __snapshot = () => { const out = {}, skipped = []; let total = 0; for (const n of [...__names].reverse()) { if (!(n in globalThis)) continue; const v = globalThis[n];' +
     ' if (typeof v === "function") { skipped.push(n + " (a function: save it with lib.def to keep it)"); continue }' +
-    ' try { const s = JSON.stringify(v); if (s === undefined) { skipped.push(n); continue } if (s.length > 24000) { skipped.push(n + " (over 24 KB)"); continue } out[n] = JSON.parse(s) } catch (e) { skipped.push(n + " (not JSON)") } }' +
+    ' try { const s = JSON.stringify(v); if (s === undefined) { skipped.push(n); continue } if (s.length > 24000) { skipped.push(n + " (over 24 KB)"); continue } if (total + s.length > 96000) { skipped.push(n + " (the kept variables are over 96 KB)"); continue } total += s.length; out[n] = JSON.parse(s) } catch (e) { skipped.push(n + " (not JSON)") } }' +
     ' return JSON.stringify({ vars: out, skipped }) };\n'
   src += 'const __restore = o => { for (const k of Object.keys(o || {})) { globalThis[k] = o[k]; __names.add(k) } };\n'
   src += 'const __libSet = (n, src) => { try { const f = (0, eval)("(" + src + "\\n)"); if (typeof f !== "function") throw new Error("not a function"); __lib[n] = f } catch (e) { const msg = String(e && e.message || e); __lib[n] = () => { throw new Error("lib." + n + " failed to load: " + msg) } } };\n'
@@ -120,82 +128,11 @@ function preludeSource(api, sigs = {}, roles = []) {
   return src
 }
 
-// ---------- persistent top-level declarations: rewrite them into assignments the session keeps ----------
-// const/let/var x = … becomes x = … (a global of the session); function f(){} stays where it is (so it still hoists)
-// and is copied out by __keep at the top; class C {} becomes C = class C {}. Every edit stays on its own line,
-// so error line numbers still match the code as written. Names the API uses are left local.
-function collectPattern(p, out) {
-  if (!p) return out
-  if (p.type === 'Identifier') out.push(p.name)
-  else if (p.type === 'ObjectPattern') for (const q of p.properties) collectPattern(q.type === 'RestElement' ? q.argument : q.value, out)
-  else if (p.type === 'ArrayPattern') for (const q of p.elements) collectPattern(q, out)
-  else if (p.type === 'RestElement') collectPattern(p.argument, out)
-  else if (p.type === 'AssignmentPattern') collectPattern(p.left, out)
-  return out
-}
-function rewrite(code, reserved) {
-  let ast
-  try { ast = acorn.parse(code, { ecmaVersion: 'latest', sourceType: 'script', allowAwaitOutsideFunction: true, allowReturnOutsideFunction: true }) }
-  catch (e) { return { code, names: [], keep: [] } }
-  const edits = [], names = [], keep = []
-  for (const st of ast.body) {
-    if (st.type === 'VariableDeclaration') {
-      const ids = []; for (const d of st.declarations) collectPattern(d.id, ids)
-      if (!ids.length || ids.some(n => reserved.has(n))) continue
-      names.push(...ids)
-      edits.push({ at: st.start, del: st.kind.length, text: '' })
-      st.declarations.forEach((d, i) => {
-        const paren = d.id.type !== 'Identifier'
-        if (paren) edits.push({ at: d.id.start, del: 0, text: '(' })
-        if (!d.init) edits.push({ at: d.id.end, del: 0, text: ' = undefined' + (paren ? ')' : '') })
-        else if (paren) edits.push({ at: d.init.end, del: 0, text: ')' })
-        const next = st.declarations[i + 1]
-        if (next) { const between = code.slice(d.end, next.start), c = between.indexOf(','); if (c >= 0) edits.push({ at: d.end + c, del: 1, text: ';' }) }
-      })
-    } else if (st.type === 'FunctionDeclaration' && st.id && !reserved.has(st.id.name)) {
-      keep.push(st.id.name)
-    } else if (st.type === 'ClassDeclaration' && st.id && !reserved.has(st.id.name)) {
-      names.push(st.id.name)
-      edits.push({ at: st.start, del: 0, text: st.id.name + ' = ' }, { at: st.end, del: 0, text: ';' })
-    }
-  }
-  edits.sort((a, b) => b.at - a.at)
-  let out = code
-  for (const e of edits) out = out.slice(0, e.at) + e.text + out.slice(e.at + e.del)
-  return { code: out, names, keep }
-}
 function prefixFor(rw) {
   return (rw.names.length ? '__declare(' + rw.names.map(n => JSON.stringify(n)).join(',') + ');' : '') + rw.keep.map(n => '__keep(' + JSON.stringify(n) + ', ' + n + ');').join('')
 }
 
-// ---------- lib.def: refuse code that won't survive being rebuilt from its source ----------
-function freeNames(node) {
-  const declared = new Set(), refs = new Set()
-  const visit = (n, parent, key) => {
-    if (!n || typeof n.type !== 'string') return
-    if (n.type === 'Identifier') {
-      if (parent) {
-        if (parent.type === 'MemberExpression' && key === 'property' && !parent.computed) return
-        if ((parent.type === 'Property' || parent.type === 'MethodDefinition' || parent.type === 'PropertyDefinition') && key === 'key' && !parent.computed && !parent.shorthand) return
-        if (['LabeledStatement', 'BreakStatement', 'ContinueStatement'].includes(parent.type)) return
-      }
-      refs.add(n.name); return
-    }
-    if (n.type === 'VariableDeclarator') collectPattern(n.id, []).forEach(x => declared.add(x))
-    if (n.type === 'FunctionDeclaration' || n.type === 'FunctionExpression' || n.type === 'ArrowFunctionExpression') { if (n.id) declared.add(n.id.name); for (const p of n.params) collectPattern(p, []).forEach(x => declared.add(x)) }
-    if ((n.type === 'ClassDeclaration' || n.type === 'ClassExpression') && n.id) declared.add(n.id.name)
-    if (n.type === 'CatchClause' && n.param) collectPattern(n.param, []).forEach(x => declared.add(x))
-    for (const k of Object.keys(n)) {
-      if (k === 'type' || k === 'start' || k === 'end') continue
-      const v = n[k]
-      if (Array.isArray(v)) { for (const c of v) if (c && typeof c.type === 'string') visit(c, n, k) }
-      else if (v && typeof v.type === 'string') visit(v, n, k)
-    }
-  }
-  visit(node, null, null)
-  return [...refs].filter(x => !declared.has(x))
-}
-function paramsOf(fn) { return fn.params.map(p => p.type === 'Identifier' ? p.name : p.type === 'AssignmentPattern' && p.left.type === 'Identifier' ? p.left.name + '?' : p.type === 'RestElement' ? '...' + (p.argument.name || 'rest') : p.type === 'ObjectPattern' ? '{' + collectPattern(p, []).join(', ') + '}' : '[…]') }
+// ---------- lib.def: refuse code that won't survive being rebuilt from its source (freeNames, paramsOf: rewrite.js) ----------
 function checkLib(name, source, api) {
   if (!/^[A-Za-z_$][\w$]{0,40}$/.test(name || '')) return { problem: 'lib.def: names are identifiers, like checkAll' }
   if (['def', 'list', 'remove', 'source'].includes(name)) return { problem: 'lib.def: "' + name + '" is taken by lib itself' }
@@ -235,6 +172,13 @@ function explain(err, m, known) {
   return err
 }
 
+// an eval that declares an API name at its top level fails before it runs, saying why
+function refuseShadows(rw) {
+  if (!rw.shadows || !rw.shadows.length) return rw
+  const n = rw.shadows.map(x => '`' + x + '`').join(', ')
+  const msg = n + (rw.shadows.length > 1 ? ' are names' : ' is the name') + ' of the bench API, and this eval declares a variable of that name, which hides the API for the whole eval. Rename the variable (fileList, appInfo, frameList, …) and run it again. Nothing ran.'
+  return { ...rw, code: 'throw Object.assign(new TypeError(' + JSON.stringify(msg) + '), { kind: "invalid" })' }
+}
 function cut(s, n) { s = String(s); return s.length > n ? s.slice(0, n) + `… [${s.length - n} more characters cut]` : s }
 
 // ---------- engine 1: QuickJS, one context per session ----------
@@ -261,7 +205,8 @@ function hash(s) { let x = 2166136261; for (let i = 0; i < s.length; i++) { x ^=
 
 async function runQuick(m) {
   // long: the calls that may wait on a person or a model (the page's API table says which)
-  const { id: eid, code, api, timeoutMs = 20000, sid, restore, lib, sigs = {}, roles = [], long = [] } = m
+  const { id: eid, code, api, timeoutMs = 20000, sid, restore, lib, sigs = {}, roles = [], long = [], docs } = m
+  if (docs) DOCS = docs
   const LONG = new Set(long)
   let S = sid ? sessions.get(sid) : null, fresh = false
   if (S && S.api !== api.join(',') + '|' + roles.join(',')) { dropSession(sid); S = null }
@@ -305,7 +250,7 @@ async function runQuick(m) {
   const logFn = vm.newFunction('__log', (lvlH, sH) => { logs.push({ level: vm.getString(lvlH), text: cut(vm.getString(sH), 2000) }) })
   vm.setProp(vm.global, '__log', logFn); logFn.dispose()
 
-  const rw = sid ? rewrite(code, reservedFor(api)) : { code, names: [], keep: [] }
+  const rw = refuseShadows(sid ? rewrite(code, reservedFor(api)) : { code, names: [], keep: [] })
   // line 1 of the person's code is line 2 of eval.js
   const src = '(async () => {' + prefixFor(rw) + '\n' + rw.code + '\n})().then(v => JSON.stringify(v === undefined ? null : v))'
   const snapshot = () => { try { return JSON.parse(evalIn(vm, '__snapshot()')) } catch (e) { return null } }
@@ -367,8 +312,9 @@ async function runPlain({ id: eid, code, api, timeoutMs = 20000, sid, restore, l
     __host: hostP, __log: (level, text) => logs.push({ level, text: cut(text, 2000) }),
     __declare: (...n) => { for (const x of n) { names.add(x); if (!(x in S)) S[x] = undefined } }, __keep: (n, v) => { S[n] = v; names.add(n) }
   }
+  if (arguments[0].docs) DOCS = arguments[0].docs
   const pre = preludeSource(api, arguments[0].sigs, arguments[0].roles).replace(/^const (__names|__declare|__keep) = .*$/gm, '') + CORE + '\n'
-  const rw = sid ? rewrite(code, reservedFor(api)) : { code, names: [], keep: [] }
+  const rw = refuseShadows(sid ? rewrite(code, reservedFor(api)) : { code, names: [], keep: [] })
   for (const n of rw.names) if (!(n in S)) S[n] = undefined
   const libLoad = '__libLoad(' + JSON.stringify((lib || []).map(l => [l.name, l.source])) + ');\n'
   const preludeLines = (pre + libLoad).split('\n').length - 1

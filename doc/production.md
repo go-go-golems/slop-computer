@@ -40,7 +40,7 @@ oidc:
   scope: urn:zitadel:iam:org:id:<organization id>
 # secret_key_file: /run/secrets/slop/secret-key   (optional: else data/secret.key)
 # llm: pi                                         (sample through Pi's models; off by default)
-# pi: {agent_dir: /var/lib/slop/pi, models: {quick: lunaroute/…, default: …}}
+# pi: {agent_dir: /var/lib/slop/pi, models: {quick: lunaroute/…, default: …, vision: lunaroute/deepseek-4.1-flash}}
 ```
 
 ## Hosts, DNS and TLS
@@ -149,7 +149,12 @@ address); every other path there gets 421.
 agent directory (`pi.agent_dir`, default `~/.pi/agent`: `auth.json`,
 `models.json`, `settings.json`), so models and credentials are managed with
 Pi on the server and never reach a database or a browser. `pi.models` pins
-the tiers (`quick`, `default`, `complex`). Which apps may sample for which
+the tiers (`quick`, `default`, `complex`). An optional `vision` entry (for
+example `vision: lunaroute/deepseek-4.1-flash`) names the model a call with
+images runs on when its tier's model can't read images; the server refuses
+to start if that model can't read them. Without it, such a call fails with
+`images_unavailable`. The bench's `frames.look`, which reads charts drawn on
+a canvas or in an SVG, needs it. Which apps may sample for which
 audience is the policy matrix (`slop policy set <app> sample @member on`);
 who has LLM access, with a monthly token budget, is `slop llm set`.
 

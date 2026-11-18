@@ -30,24 +30,43 @@ function tool(ctx) {
   if (!ws) ctx.fail('unavailable', 'the bench is not trusted with the workshop module (slop app trust <store> workshop)');
   return ws;
 }
-function storeId(ctx, id, what) {
-  if (typeof id !== 'string' || !ID.test(id)) ctx.fail('invalid_argument', (what || 'app') + ' must be a store id: lowercase letters, digits and -');
-  return id;
-}
-// A snapshot number (0: none, for a ref that does not exist yet).
-function snap(ctx, n, what) {
-  if (typeof n !== 'number' || !Number.isInteger(n) || n < 0) ctx.fail('invalid_argument', (what || 'n') + ' must be a snapshot number');
-  return n;
-}
-function benchRef(ctx, ref) {
-  if (ref !== 'draft' && !(typeof ref === 'string' && PROPOSAL.test(ref))) ctx.fail('invalid_argument', 'ref must be draft or proposal/<id>');
-  return ref;
-}
-function kindOf(ctx, kind) {
-  if (!Object.prototype.hasOwnProperty.call(KINDS, kind)) ctx.fail('invalid_argument', 'kind must be dev, test or prop');
-  return kind;
-}
+// text is v cut to max characters ('' for none). The schemas have checked
+// that v is a string; free text (titles, notes) is shortened, not refused.
 function text(v, max) { return String(v == null ? '' : v).slice(0, max); }
+
+// The actions' argument schemas (SLOP3-024 phase 2): the server checks them
+// before run, so a wrong shape is invalid_argument naming its place, and run
+// converts nothing. Extra properties are allowed: the page may send more
+// than an action reads.
+const S = {
+  store: { type: 'string', pattern: ID.source, description: 'a store id: lowercase letters, digits and -' },
+  // A snapshot number (0: none, for a ref that does not exist yet).
+  n: { type: 'integer', minimum: 0 },
+  ref: { anyOf: [{ const: 'draft' }, { type: 'string', pattern: PROPOSAL.source }], description: 'draft or proposal/<id>' },
+  proposal: { type: 'string', pattern: PROPOSAL.source },
+  kind: { enum: Object.keys(KINDS) },
+  id: { type: 'string', pattern: '^[\\w-]{1,80}$' },
+  str: { type: 'string' },
+  // Free text that may be absent as null too (a thread, a note).
+  text: { type: ['string', 'null'] },
+  obj: { type: 'object' },
+  rows: { type: 'object', additionalProperties: { type: 'array', items: { type: 'object' } } },
+  // A change as files.commit takes it; the server checks it is exactly one kind.
+  changes: {
+    type: 'array', minItems: 1,
+    items: {
+      type: 'object', required: ['path'],
+      properties: {
+        path: { type: 'string', minLength: 1 }, text: { type: 'string' }, data: { type: 'string' },
+        sha256: { type: 'string' }, size: { type: 'integer', minimum: 0 }, type: { type: 'string' }, delete: { const: true },
+      },
+    },
+  },
+};
+// args is an object schema: the properties, the required ones listed.
+function args(properties, required) { return { type: 'object', required: required || [], properties }; }
+// An instance's arguments: the app, the kind, and a proposal's ref for prop.
+const INSTANCE = args({ app: S.store, kind: S.kind, ref: S.ref }, ['app', 'kind']);
 function json(v) { try { return JSON.parse(v); } catch (e) { return null; } }
 
 // The changes of a commit as files.commit takes them: {path, text} |
@@ -58,9 +77,7 @@ function json(v) { try { return JSON.parse(v); } catch (e) { return null; } }
 // something else.
 const CHANGE_FIELDS = ['text', 'data', 'sha256', 'size', 'type', 'delete'];
 function changeList(ctx, changes, { deletes = true } = {}) {
-  if (!Array.isArray(changes) || !changes.length) ctx.fail('invalid_argument', 'changes is a non-empty list of {path, text} | {path, data} | {path, sha256, size} | {path, delete: true}');
-  return changes.map((c, i) => {
-    if (!c || typeof c !== 'object' || typeof c.path !== 'string' || !c.path) ctx.fail('invalid_argument', 'changes[' + i + '] has no path');
+  return changes.map((c) => {
     if (!deletes && c.delete) ctx.fail('invalid_argument', c.path + ': a new app has nothing to delete');
     const out = { path: c.path };
     for (const k of CHANGE_FIELDS) if (c[k] !== undefined) out[k] = c[k];
@@ -79,7 +96,7 @@ function instanceId(app, person, kind) {
 // each per app; prop is one per proposal (<app>-prop-<proposal id>-<person>),
 // so proposals shown side by side each run their own code on their own data.
 function instanceOf(ctx, app, kind, ref) {
-  if (kindOf(ctx, kind) !== 'prop') return instanceId(app, ctx.visitor.id, kind);
+  if (kind !== 'prop') return instanceId(app, ctx.visitor.id, kind);
   if (!PROPOSAL.test(ref || '')) ctx.fail('invalid_argument', 'a prop instance is a proposal\'s: pass its ref');
   return instanceId(app, ctx.visitor.id, 'prop-' + ref.slice('proposal/'.length));
 }
@@ -145,8 +162,18 @@ defineActor({
     // The app stores the visitor may develop (admin on them): stores that
     // run no other store's app, with their refs and the instances that run
     // them. The bench itself is left out.
+    // Who the visitor is to the bench: only admins change app code (the
+    // platform's decision D9), so the page says so before a member tries.
+    me: {
+      requires: 'view',
+      args: args({}),
+      run(ctx) {
+        return { audience: ctx.visitor.audience || '', canBuild: ctx.visitor.audience === 'admin' };
+      },
+    },
     apps: {
       requires: 'view',
+      args: args({}),
       async run(ctx) {
         const w = tool(ctx);
         const all = await allStores(ctx);
@@ -162,9 +189,9 @@ defineActor({
     // time) and the stores that run it.
     open: {
       requires: 'view',
+      args: args({ app: S.store }, ['app']),
       async run(ctx, { app }) {
         const w = tool(ctx);
-        storeId(ctx, app);
         let refs = await w.refs(app);
         if (refs.draft == null && refs.main != null) {
           try { await w.moveRef(app, 'draft', refs.main, { ifAt: 0 }); } catch (e) { if (e.code !== 'conflict') throw e; } // someone else made it
@@ -183,9 +210,9 @@ defineActor({
     // back to it.
     create: {
       requires: 'view',
+      args: args({ id: S.store, type: S.str, files: S.changes }, ['id', 'files']),
       async run(ctx, { id, type, files }) {
         const w = tool(ctx);
-        storeId(ctx, id, 'id');
         const list = changeList(ctx, files, { deletes: false });
         await w.newStore(id, type ? { type: text(type, 63) } : {});
         const r = await w.commit(id, list, { ref: 'draft', base: 0, message: 'created in the bench' });
@@ -199,33 +226,33 @@ defineActor({
     // Where a ref points: {n} (0: it does not exist).
     head: {
       requires: 'view',
+      args: args({ app: S.store, ref: S.ref }, ['app', 'ref']),
       async run(ctx, { app, ref }) {
-        storeId(ctx, app);
         const refs = await tool(ctx).refs(app);
-        return { n: refs[benchRef(ctx, ref)] ?? 0 };
+        return { n: refs[ref] ?? 0 };
       },
     },
     // The listing of snapshot n: [{path, sha256, size, type}].
     files: {
       requires: 'view',
+      args: args({ app: S.store, at: S.n }, ['app', 'at']),
       async run(ctx, { app, at }) {
-        storeId(ctx, app);
-        return listing(await tool(ctx).files(app, String(snap(ctx, at, 'at'))));
+        return listing(await tool(ctx).files(app, String(at)));
       },
     },
     // File texts at snapshot n: {texts: {path: text}, binary: [path], more:
     // [path]} (more: what did not fit in this answer).
     read: {
       requires: 'view',
+      args: args({ app: S.store, at: S.n, paths: { type: 'array', items: S.str } }, ['app', 'at']),
       async run(ctx, { app, at, paths }) {
         const w = tool(ctx);
-        storeId(ctx, app);
-        const n = String(snap(ctx, at, 'at'));
+        const n = String(at);
         const texts = {}, binary = [], more = [];
         let used = 0;
-        for (const path of Array.isArray(paths) ? paths : []) {
+        for (const path of paths || []) {
           if (used > READ_BUDGET) { more.push(path); continue; }
-          const v = await w.read(app, n, String(path));
+          const v = await w.read(app, n, path);
           if (typeof v === 'string') { texts[path] = v; used += v.length; } else binary.push(path);
         }
         return { texts, binary, more };
@@ -240,11 +267,9 @@ defineActor({
     // activated, event}.
     commit: {
       requires: 'view',
+      args: args({ app: S.store, ref: S.ref, base: S.n, changes: S.changes, message: S.text, event: args({ who: S.text, thread: S.text, note: S.text }) }, ['app', 'ref', 'base', 'changes']),
       async run(ctx, { app, ref, base, changes, message, event }) {
         const w = tool(ctx);
-        storeId(ctx, app);
-        benchRef(ctx, ref);
-        snap(ctx, base, 'base');
         const list = changeList(ctx, changes);
         let r;
         try {
@@ -260,6 +285,52 @@ defineActor({
       },
     },
 
+    // The app's TypeScript declarations (app.types: page.d.ts, actor.d.ts,
+    // modules.d.ts, actions.d.ts), for the page's type checker (SLOP3-024
+    // phase 3). The actions are those of the instance that runs the ref
+    // being checked: the visitor's dev instance for draft, the proposal's
+    // own instance for a proposal (its actor may have other actions than
+    // draft's), falling back to the dev instance, then the app store's.
+    types: {
+      requires: 'view',
+      args: args({ app: S.store, ref: S.ref }, ['app']),
+      async run(ctx, { app, ref }) {
+        const ids = [instanceId(app, ctx.visitor.id, 'dev')];
+        if (ref && ref !== 'draft') ids.unshift(instanceOf(ctx, app, 'prop', ref));
+        let instance = '';
+        for (const id of ids) {
+          const st = await statusOf(ctx, id, { peek: true });
+          if (st && st.app === app) { instance = id; break; }
+        }
+        const r = await tool(ctx).types(app, instance ? { instance } : {});
+        return { n: r.n, instance: r.instance, files: r.files };
+      },
+    },
+
+    // Where the app is on the web: the URLs of the mounts that serve its
+    // store (a person who publishes asks "what is my link?"). An app no
+    // mount serves has none: an administrator gives it an address.
+    addresses: {
+      requires: 'view',
+      args: args({ app: S.store }, ['app']),
+      async run(ctx, { app }) {
+        const ms = await tool(ctx).mounts().catch(() => []);
+        return {
+          urls: ms.filter((m) => m.mount && (m.mount.store === app || m.mount.store === ':' + app)).map((m) => ({ url: m.url, kind: m.kind })),
+        };
+      },
+    },
+
+    // Give the published app its web address (platform admins: the
+    // publish dialog offers it when the app has none).
+    putOnline: {
+      requires: 'view',
+      args: args({ app: S.store }, ['app']),
+      async run(ctx, { app }) {
+        return await tool(ctx).mountApp(app);
+      },
+    },
+
     // ---- instances: the visitor's dev, test and prop stores of an app ----
 
     // Where the app's refs are and what the visitor's instances run (peeked:
@@ -268,8 +339,8 @@ defineActor({
     // do not exist, props lists the open proposals' instances that do.
     status: {
       requires: 'view',
+      args: args({ app: S.store }, ['app']),
       async run(ctx, { app }) {
-        storeId(ctx, app);
         const out = { refs: await tool(ctx).refs(app), props: [] };
         const peek = async (id) => {
           const st = await statusOf(ctx, id, { peek: true });
@@ -290,10 +361,9 @@ defineActor({
     // serve it. Asking brings it up on its ref.
     instance: {
       requires: 'view',
+      args: INSTANCE,
       async run(ctx, { app, kind, ref }) {
         const w = tool(ctx);
-        storeId(ctx, app);
-        kindOf(ctx, kind);
         // dev follows draft; test follows draft or the proposal given; prop a proposal
         const follow = kind === 'dev' ? 'draft' : ref || KINDS[kind];
         if (!follow || !(follow === 'draft' || PROPOSAL.test(follow))) ctx.fail('invalid_argument', 'a prop instance follows a proposal ref: pass ref');
@@ -315,12 +385,22 @@ defineActor({
         return { id, kind, ref: follow, n: status.n || 0, broken: status.broken || '' };
       },
     },
+    // Change rows of an instance's data (it runs unpublished code: the
+    // server refuses an app store or a production instance): a person
+    // removing one test row, which before only a reset of everything could.
+    exec: {
+      requires: 'view',
+      args: args({ ...INSTANCE.properties, query: { type: 'string', maxLength: 20000 }, args: { type: 'array', maxItems: 100 } }, [...INSTANCE.required, 'query']),
+      async run(ctx, { app, kind, ref, query, args: a }) {
+        return await tool(ctx).exec(instanceOf(ctx, app, kind, ref), query, a || []);
+      },
+    },
     // Throw an instance and its data away (it runs unpublished code, so
     // workshop's drop allows it); the next use makes a fresh one.
     reset: {
       requires: 'view',
+      args: INSTANCE,
       async run(ctx, { app, kind, ref }) {
-        storeId(ctx, app);
         const id = instanceOf(ctx, app, kind, ref);
         if ((await statusOf(ctx, id, { peek: true })) !== null) await tool(ctx).drop(id);
         return { dropped: id };
@@ -332,29 +412,31 @@ defineActor({
     // through renew below.
     embed: {
       requires: 'view',
+      args: INSTANCE,
       async run(ctx, { app, kind, ref }) {
-        storeId(ctx, app);
         return await tool(ctx).embed(instanceOf(ctx, app, kind, ref), { dev: true });
       },
     },
     renew: {
       requires: 'view',
+      args: args({ view: S.str }, ['view']),
       async run(ctx, { view }) {
-        return await tool(ctx).renewEmbed(text(view, 200));
+        return await tool(ctx).renewEmbed(view);
       },
     },
     close: {
       requires: 'view',
+      args: args({ view: S.str }, ['view']),
       async run(ctx, { view }) {
-        return await tool(ctx).closeEmbed(text(view, 200));
+        return await tool(ctx).closeEmbed(view);
       },
     },
     // An instance's log (its actor's console, setup and activation
     // failures): {broken, lines: [{at, level, text}]}.
     logs: {
       requires: 'view',
+      args: INSTANCE,
       async run(ctx, { app, kind, ref }) {
-        storeId(ctx, app);
         return await tool(ctx).logs(instanceOf(ctx, app, kind, ref)).catch(() => ({ broken: '', lines: [] }));
       },
     },
@@ -363,40 +445,43 @@ defineActor({
     // visitor's own instances only, never a production one.
     docs: {
       requires: 'view',
+      args: args({ ...INSTANCE.properties, coll: S.str }, [...INSTANCE.required, 'coll']),
       async run(ctx, { app, kind, ref, coll }) {
-        storeId(ctx, app);
-        return await tool(ctx).docs(instanceOf(ctx, app, kind, ref), text(coll, 200));
+        return await tool(ctx).docs(instanceOf(ctx, app, kind, ref), coll);
       },
     },
     doc: {
       requires: 'view',
+      args: args({ ...INSTANCE.properties, path: S.str }, [...INSTANCE.required, 'path']),
       async run(ctx, { app, kind, ref, path }) {
-        storeId(ctx, app);
-        return await tool(ctx).doc(instanceOf(ctx, app, kind, ref), text(path, 400));
+        return await tool(ctx).doc(instanceOf(ctx, app, kind, ref), path);
       },
     },
     sql: {
       requires: 'view',
+      args: args({ ...INSTANCE.properties, query: S.str, args: { type: 'array' } }, [...INSTANCE.required, 'query']),
       async run(ctx, { app, kind, ref, query, args }) {
-        storeId(ctx, app);
-        return await tool(ctx).sql(instanceOf(ctx, app, kind, ref), text(query, 20000), Array.isArray(args) ? args : []);
+        return await tool(ctx).sql(instanceOf(ctx, app, kind, ref), query, args || []);
       },
     },
     seed: {
       requires: 'view',
-      async run(ctx, { app, kind, ref, docs, tables }) {
+      args: args({ ...INSTANCE.properties, docs: S.rows, tables: S.rows, replace: { type: 'boolean' } }, INSTANCE.required),
+      // replace: each named table holds exactly the fixture's rows (a scenario's fixture is the data the
+      // test instance starts from; rows its migrations seeded clashed with the fixture's ids). Keys
+      // starting with __ are the bench's (__rowid from the Data view) and are dropped.
+      async run(ctx, { app, kind, ref, docs, tables, replace }) {
         const w = tool(ctx);
-        storeId(ctx, app);
         const id = instanceOf(ctx, app, kind, ref);
         const out = { docs: {}, tables: {} };
         for (const [coll, rows] of Object.entries(docs || {})) {
-          if (!Array.isArray(rows)) ctx.fail('invalid_argument', 'docs.' + coll + ' must be a list of objects');
           // documents are named by their id field when every row has one
           out.docs[coll] = await w.importDocs(id, coll, rows, rows.length && rows.every((r) => r && typeof r.id === 'string' && r.id) ? { id: 'id' } : {});
         }
         for (const [table, rows] of Object.entries(tables || {})) {
-          if (!Array.isArray(rows)) ctx.fail('invalid_argument', 'tables.' + table + ' must be a list of objects');
-          out.tables[table] = await w.importTable(id, table, rows);
+          if (replace) await w.exec(id, 'DELETE FROM "' + String(table).replace(/"/g, '""') + '"', []);
+          const clean = (rows || []).map((r) => (r && typeof r === 'object' ? Object.fromEntries(Object.entries(r).filter(([k]) => !k.startsWith('__'))) : r));
+          out.tables[table] = clean.length ? await w.importTable(id, table, clean) : { imported: 0 };
         }
         return out;
       },
@@ -407,9 +492,9 @@ defineActor({
     // A new proposal at draft's snapshot: {ref, base, title}.
     propose: {
       requires: 'view',
+      args: args({ app: S.store, title: S.text, thread: S.text }, ['app']),
       async run(ctx, { app, title, thread }) {
         const w = tool(ctx);
-        storeId(ctx, app);
         const refs = await w.refs(app);
         if (refs.draft == null) ctx.fail('not_found', app + ' has no draft');
         const ref = 'proposal/' + Date.now().toString(36) + Math.random().toString(36).slice(2, 6);
@@ -423,8 +508,8 @@ defineActor({
     // The visitor's proposals for an app, open ones with where their ref is.
     proposals: {
       requires: 'view',
+      args: args({ app: S.store }, ['app']),
       async run(ctx, { app }) {
-        storeId(ctx, app);
         const refs = await tool(ctx).refs(app);
         return sql.all('SELECT ref, title, thread, base, status, created, closed FROM proposals WHERE app = ? AND owner = ? ORDER BY created DESC LIMIT 200', app, ctx.visitor.id)
           .map((p) => Object.assign(p, { n: refs[p.ref] ?? null }));
@@ -435,12 +520,10 @@ defineActor({
     // prop instance of it with it.
     closeProposal: {
       requires: 'view',
+      args: args({ app: S.store, ref: S.proposal, status: { enum: ['accepted', 'rejected', 'discarded'] }, ifAt: S.n }, ['app', 'ref', 'status', 'ifAt']),
       async run(ctx, { app, ref, status, ifAt }) {
         const w = tool(ctx);
-        storeId(ctx, app);
-        if (!PROPOSAL.test(ref || '')) ctx.fail('invalid_argument', 'ref must be proposal/<id>');
-        // discarded: an agent's proposal that ended with no changes (no event)
-        if (status !== 'accepted' && status !== 'rejected' && status !== 'discarded') ctx.fail('invalid_argument', 'status is accepted, rejected or discarded');
+        // status discarded: an agent's proposal that ended with no changes (no event)
         const p = sql.one('SELECT owner, status, title FROM proposals WHERE app = ? AND ref = ?', app, ref);
         if (!p || p.owner !== ctx.visitor.id) ctx.fail('not_found', 'no proposal ' + ref);
         if (p.status !== 'open') ctx.fail('conflict', ref + ' is already ' + p.status);
@@ -451,7 +534,7 @@ defineActor({
         if (ps && ps.app === app) await w.drop(prop);
         const ts = await statusOf(ctx, test, { peek: true });
         if (ts && ts.ref === ref) await w.follow(test, 'draft');
-        await w.dropRef(app, ref, { ifAt: snap(ctx, ifAt, 'ifAt') });
+        await w.dropRef(app, ref, { ifAt });
         sql.run('UPDATE proposals SET status = ?, closed = ? WHERE app = ? AND ref = ?', status, Date.now(), app, ref);
         if (status !== 'discarded') addEvent(ctx, app, { kind: status === 'accepted' ? 'accept' : 'reject', who: 'you', ref, n: ifAt, data: { title: p.title } });
         return { ref, status };
@@ -470,9 +553,9 @@ defineActor({
     // was approved; and it only looks: nothing activates.
     preflight: {
       requires: 'view',
+      args: args({ app: S.store }, ['app']),
       async run(ctx, { app }) {
         const w = tool(ctx);
-        storeId(ctx, app);
         const refs = await w.refs(app);
         if (refs.draft == null) ctx.fail('not_found', app + ' has no draft');
         const [draft, main] = await Promise.all([w.files(app, String(refs.draft)), refs.main != null ? w.files(app, String(refs.main)) : []]);
@@ -508,10 +591,9 @@ defineActor({
     // answer's from is where main was: publishing that again rolls back.
     publish: {
       requires: 'view',
+      args: args({ app: S.store, n: { type: 'integer', minimum: 1 }, ifAt: S.n, note: S.text }, ['app', 'n', 'ifAt']),
       async run(ctx, { app, n, ifAt, note }) {
-        storeId(ctx, app);
-        if (!(snap(ctx, n) > 0)) ctx.fail('invalid_argument', 'n is the snapshot to publish');
-        const r = await tool(ctx).publish(app, n, { ifAt: snap(ctx, ifAt, 'ifAt') });
+        const r = await tool(ctx).publish(app, n, { ifAt });
         addEvent(ctx, app, { kind: 'publish', who: 'you', ref: 'main', n, data: { from: r.from, note: text(note, 300) } });
         return r;
       },
@@ -520,8 +602,8 @@ defineActor({
     // ("Activate now"; otherwise it does on its next view or event).
     activate: {
       requires: 'view',
+      args: args({ store: S.store }, ['store']),
       async run(ctx, { store }) {
-        storeId(ctx, store, 'store');
         const st = await tool(ctx).status(store);
         return { store, n: st.n, broken: st.broken || '' };
       },
@@ -534,21 +616,21 @@ defineActor({
     // proposals.
     project: {
       requires: 'view',
+      args: args({ app: S.store, limit: { type: 'integer', minimum: 1, maximum: 10000 } }, ['app']),
       async run(ctx, { app, limit }) {
-        storeId(ctx, app);
         const me = ctx.visitor.id;
         const p = sql.one('SELECT meta FROM projects WHERE app = ? AND owner = ?', app, me);
         const threads = sql.all('SELECT t.id, t.meta, t.created, t.updated, (SELECT count(*) FROM messages m WHERE m.thread = t.id) AS count FROM threads t WHERE t.app = ? AND t.owner = ? ORDER BY t.updated DESC', app, me)
           .map((t) => ({ id: t.id, meta: json(t.meta) || {}, created: t.created, updated: t.updated, count: t.count }));
-        const lim = Math.min(Math.max(Number(limit) || 2000, 1), 10000);
+        const lim = limit || 2000;
         const events = sql.all('SELECT * FROM (SELECT * FROM events WHERE app = ? AND owner = ? ORDER BY seq DESC LIMIT ?) ORDER BY seq', app, me, lim).map(eventOut);
         return { meta: p ? json(p.meta) : null, threads, events };
       },
     },
     saveProject: {
       requires: 'view',
+      args: args({ app: S.store, meta: S.obj }, ['app']),
       async run(ctx, { app, meta }) {
-        storeId(ctx, app);
         const v = JSON.stringify(meta || {});
         if (v.length > 2 << 20) ctx.fail('invalid_argument', 'project meta is at most 2 MiB');
         sql.run('INSERT INTO projects (app, owner, meta, updated) VALUES (?, ?, ?, ?) ON CONFLICT (app, owner) DO UPDATE SET meta = excluded.meta, updated = excluded.updated',
@@ -559,8 +641,8 @@ defineActor({
     // Forget an app's project here (the app store and its instances stay).
     forget: {
       requires: 'view',
+      args: args({ app: S.store }, ['app']),
       async run(ctx, { app }) {
-        storeId(ctx, app);
         const me = ctx.visitor.id;
         sql.run('DELETE FROM messages WHERE thread IN (SELECT id FROM threads WHERE app = ? AND owner = ?)', app, me);
         for (const t of ['threads', 'events', 'snaps', 'projects']) sql.run('DELETE FROM ' + t + ' WHERE app = ? AND owner = ?', app, me);
@@ -570,6 +652,7 @@ defineActor({
     // A thread with its messages, in order.
     thread: {
       requires: 'view',
+      args: args({ id: S.str }, ['id']),
       async run(ctx, { id }) {
         const t = ownThread(ctx, id);
         if (!t) ctx.fail('not_found', 'no thread ' + id);
@@ -583,16 +666,15 @@ defineActor({
     // reply that grows is saved again in place.
     saveThread: {
       requires: 'view',
+      args: args({ id: S.id, app: S.store, meta: S.obj, from: { type: 'integer', minimum: 1 }, messages: { type: 'array' } }, ['id', 'app']),
       async run(ctx, { id, app, meta, from, messages }) {
-        storeId(ctx, app);
-        if (typeof id !== 'string' || !/^[\w-]{1,80}$/.test(id)) ctx.fail('invalid_argument', 'id is a thread id');
         const t = ownThread(ctx, id);
         if (t && t.app !== app) ctx.fail('invalid_argument', 'thread ' + id + ' belongs to ' + t.app);
         const now = Date.now();
         sql.run('INSERT INTO threads (id, app, owner, meta, created, updated) VALUES (?, ?, ?, ?, ?, ?) ON CONFLICT (id) DO UPDATE SET meta = excluded.meta, updated = excluded.updated',
           id, app, ctx.visitor.id, JSON.stringify(meta || {}), now, now);
-        if (Array.isArray(messages)) {
-          const start = Math.max(1, Math.floor(Number(from) || 1));
+        if (messages) {
+          const start = from || 1;
           sql.run('DELETE FROM messages WHERE thread = ? AND seq >= ?', id, start);
           messages.forEach((m, i) => sql.run('INSERT INTO messages (thread, seq, body) VALUES (?, ?, ?)', id, start + i, JSON.stringify(m)));
         }
@@ -601,6 +683,7 @@ defineActor({
     },
     dropThread: {
       requires: 'view',
+      args: args({ id: S.str }, ['id']),
       async run(ctx, { id }) {
         const t = ownThread(ctx, id);
         if (!t) return { dropped: false };
@@ -616,13 +699,10 @@ defineActor({
     // written: retrying it cannot help.
     logEvents: {
       requires: 'view',
+      args: args({ app: S.store, events: { type: 'array', maxItems: 200, items: { type: 'object', required: ['kind', 'ref', 'n'], properties: { kind: { type: 'string', minLength: 1 }, ref: { type: 'string', minLength: 1 }, n: { type: 'integer', minimum: 1 }, who: S.text, thread: S.text } } } }, ['app', 'events']),
       async run(ctx, { app, events }) {
-        storeId(ctx, app);
-        if (!Array.isArray(events) || events.length > 200) ctx.fail('invalid_argument', 'events is a list of at most 200');
         events.forEach((e, i) => {
-          const { kind, ref, n } = e || {};
-          if (typeof kind !== 'string' || !kind || kind === 'commit') ctx.fail('invalid_argument', 'events[' + i + '] has no kind, or is a commit (commits are logged by commit)');
-          if (typeof ref !== 'string' || !ref || !isSnap(n)) ctx.fail('invalid_argument', 'events[' + i + '] (' + kind + ') needs its ref and that ref\'s snapshot n');
+          if (e.kind === 'commit') ctx.fail('invalid_argument', 'events[' + i + '] is a commit (commits are logged by commit)');
         });
         return events.map((e) => {
           const { kind, who, thread, ref, n } = e;
@@ -642,25 +722,26 @@ defineActor({
     // Older events: up to limit before seq before.
     events: {
       requires: 'view',
+      args: args({ app: S.store, before: { type: 'integer' }, limit: { type: 'integer', minimum: 1, maximum: 5000 } }, ['app']),
       async run(ctx, { app, before, limit }) {
-        storeId(ctx, app);
-        const lim = Math.min(Math.max(Number(limit) || 500, 1), 5000);
+        const lim = limit || 500;
         return sql.all('SELECT * FROM (SELECT * FROM events WHERE app = ? AND owner = ? AND seq < ? ORDER BY seq DESC LIMIT ?) ORDER BY seq',
-          app, ctx.visitor.id, Number(before) || 1e15, lim).map(eventOut);
+          app, ctx.visitor.id, before ?? 1e15, lim).map(eventOut);
       },
     },
     // Layout snapshots of frames: the list (meta only), one with its document
     // ({html, css, layout, scroll}: a frozen page), saving one.
     snaps: {
       requires: 'view',
+      args: args({ app: S.store }, ['app']),
       async run(ctx, { app }) {
-        storeId(ctx, app);
         return sql.all('SELECT id, at, meta FROM snaps WHERE app = ? AND owner = ? ORDER BY at', app, ctx.visitor.id)
           .map((s) => Object.assign(json(s.meta) || {}, { id: s.id, t: s.at }));
       },
     },
     snap: {
       requires: 'view',
+      args: args({ id: S.str }, ['id']),
       async run(ctx, { id }) {
         const s = sql.one('SELECT id, at, meta, doc, owner FROM snaps WHERE id = ?', text(id, 80));
         if (!s || s.owner !== ctx.visitor.id) ctx.fail('not_found', 'no snapshot ' + id);
@@ -669,9 +750,8 @@ defineActor({
     },
     saveSnap: {
       requires: 'view',
+      args: args({ id: S.id, app: S.store, meta: S.obj }, ['id', 'app']),
       async run(ctx, { id, app, meta, doc }) {
-        storeId(ctx, app);
-        if (typeof id !== 'string' || !/^[\w-]{1,80}$/.test(id)) ctx.fail('invalid_argument', 'id is a snapshot id');
         const d = JSON.stringify(doc || null);
         if (d.length > 4 << 20) ctx.fail('invalid_argument', 'a snapshot is at most 4 MiB');
         sql.run('INSERT INTO snaps (id, app, owner, at, meta, doc) VALUES (?, ?, ?, ?, ?, ?)', id, app, ctx.visitor.id, Date.now(), JSON.stringify(meta || {}), d);

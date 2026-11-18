@@ -10,7 +10,7 @@ const api = defineAPI({
   'fixtures.save': { sig: 'name, spec', writes: 'files', pathOf: ([n]) => 'fixtures/' + n + '.json', run: () => true },
   'app.seed': { sig: '{docs, tables}', writes: 'dev', run: () => 'seeded' },
   'publish.run': { sig: '{note}?', writes: 'main', long: true, run: () => 'published' },
-  'fixtures.apply': { sig: 'name?', run: () => 'applied' },
+  'fixtures.apply': { sig: 'name?', ret: '{ok}', doc: 'resets', run: () => 'applied' },
   'tx.begin': { sig: '', internal: true, run: () => 1 },
   'frames.move': { sig: 'frameId, x, y', run: () => 'moved' },
   'agents.delegate': { sig: 'role, task, {output, evals}?', long: true, run: () => 'ok' },
@@ -66,6 +66,7 @@ test('unknown calls, long calls, the reference, duplicates', async () => {
   const ref = api.reference({ files: 'paths are relative' })
   assert.match(ref, /^files\.read\(path\) — a file$/m)
   assert.match(ref, /^files\.write\(path, text\)\n  paths are relative$/m)
+  assert.match(ref, /^fixtures\.apply\(name\?\) → \{ok\} — resets$/m, 'what a call gives back')
   assert.doesNotMatch(ref, /tx\.begin/)
   assert.equal(await api.call({}, 'log', [1, 2, 3]), 3)
   assert.throws(() => api.add({ 'files.read': { run: () => 1 } }), /declared twice/)

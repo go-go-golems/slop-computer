@@ -12,6 +12,8 @@ import (
 	"strings"
 	"unicode/utf8"
 
+	"github.com/invopop/jsonschema"
+
 	"github.com/go-go-golems/slop-computer/pkg/access"
 	"github.com/go-go-golems/slop-computer/pkg/authz"
 	"github.com/go-go-golems/slop-computer/pkg/blobs"
@@ -856,6 +858,63 @@ type FileChange struct {
 	Size   int64   `json:"size,omitempty"`
 	Type   string  `json:"type,omitempty" jsonschema_description:"the content type (default: from the path)"`
 	Delete bool    `json:"delete,omitempty" jsonschema_description:"remove the file (nothing to do if it does not exist)"`
+}
+
+// JSONSchemaExtend declares files as what push accepts (pushFilesSchema).
+func (FilesPushIn) JSONSchemaExtend(s *jsonschema.Schema) { setPushFiles(s) }
+
+// JSONSchemaExtend declares files as what push accepts (pushFilesSchema).
+func (ImportFilesIn) JSONSchemaExtend(s *jsonschema.Schema) { setPushFiles(s) }
+
+func setPushFiles(s *jsonschema.Schema) {
+	if s.Properties != nil {
+		s.Properties.Set("files", pushFilesSchema())
+	}
+}
+
+// pushFilesSchema is a push manifest's schema: a list whose entries each
+// give their content one way (text, base64 data, or a blob named by
+// sha256 and size), or that list as JSON text, as the CLI passes it. The
+// TypeScript generated from it is a union, so code that writes an entry
+// of one kind with another kind's fields does not compile (SLOP3-024).
+func pushFilesSchema() *jsonschema.Schema {
+	return &jsonschema.Schema{Description: "the files the tree holds after the push", OneOf: []*jsonschema.Schema{
+		{Type: "array", Items: &jsonschema.Schema{OneOf: []*jsonschema.Schema{
+			fileEntry("inline text", "text", &jsonschema.Schema{Type: "string"}),
+			fileEntry("inline bytes", "data", &jsonschema.Schema{Type: "string", Description: "base64"}),
+			fileEntry("a blob the server has (or that blobs carries)", "sha256", &jsonschema.Schema{Type: "string"}, "size", &jsonschema.Schema{Type: "integer"}),
+		}}},
+		{Type: "string", Description: "the list as JSON text"},
+	}}
+}
+
+// fileEntry is one kind of manifest entry or change: path, the fields
+// kv names (all required), and an optional type.
+func fileEntry(doc string, kv ...any) *jsonschema.Schema {
+	e := &jsonschema.Schema{Type: "object", Description: doc, Properties: jsonschema.NewProperties(), AdditionalProperties: jsonschema.FalseSchema}
+	e.Properties.Set("path", &jsonschema.Schema{Type: "string", Description: "the file's path in the tree"})
+	e.Required = []string{"path"}
+	for i := 0; i < len(kv); i += 2 {
+		e.Properties.Set(kv[i].(string), kv[i+1].(*jsonschema.Schema))
+		e.Required = append(e.Required, kv[i].(string))
+	}
+	if kv[0] != "delete" {
+		e.Properties.Set("type", &jsonschema.Schema{Type: "string", Description: "its media type (default: from the extension)"})
+	}
+	return e
+}
+
+// JSONSchema declares a change as the union files.commit enforces (exactly
+// one of text, data, sha256 or delete), so its TypeScript is a union too:
+// a change built from one kind's fields with another kind's does not
+// compile (SLOP3-024; the bug the review of #51 found).
+func (FileChange) JSONSchema() *jsonschema.Schema {
+	return &jsonschema.Schema{OneOf: []*jsonschema.Schema{
+		fileEntry("the file's text (an empty string is an empty file)", "text", &jsonschema.Schema{Type: "string"}),
+		fileEntry("the file's bytes", "data", &jsonschema.Schema{Type: "string", Description: "base64"}),
+		fileEntry("a blob the server holds", "sha256", &jsonschema.Schema{Type: "string"}, "size", &jsonschema.Schema{Type: "integer"}),
+		fileEntry("remove the file (nothing to do if it does not exist)", "delete", &jsonschema.Schema{Const: true}),
+	}}
 }
 
 // FilesBlobsIn is files.blobs's input.

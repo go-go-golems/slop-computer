@@ -191,6 +191,8 @@ type Actor struct {
 	// actions that declare none, which need admin.
 	requires   map[string]rt.Level
 	undeclared []string
+	// schemas: the actions that declare args or result (argschema.go).
+	schemas map[string]*actionSchema
 
 	storage  goja.Value            // use('storage'), built on first use (storage.go)
 	database goja.Value            // use('database'), built on first use (database.go)
@@ -273,6 +275,15 @@ func (a *Actor) load(files map[string][]byte, entry string, src []byte) error {
 		a.def = obj
 		return obj // so a declaration can say defineActor<D>(def: D): D (SLOP3-024)
 	})
+	// defineAction returns its argument: in TypeScript it types run's args
+	// from the action's args schema (actor.d.ts's FromSchema).
+	_ = g.Set("defineAction", func(call goja.FunctionCall) goja.Value {
+		obj, ok := call.Argument(0).(*goja.Object)
+		if !ok {
+			panic(a.vm.NewTypeError("defineAction takes an object"))
+		}
+		return obj
+	})
 	_ = g.Set("use", func(name string) goja.Value { return a.module(name) })
 	_ = g.Set("require", a.requirer(files, entry))
 	console := a.vm.NewObject()
@@ -331,12 +342,19 @@ func (a *Actor) readShape() error {
 	// Each action's requires: { requires: 'view' | 'interact' | 'admin' |
 	// 'owner', run }. A plain function, or an object without requires,
 	// needs admin: an action fails closed (decision 4, amended).
-	a.requires, a.undeclared = map[string]rt.Level{}, nil
+	a.requires, a.undeclared, a.schemas = map[string]rt.Level{}, nil, map[string]*actionSchema{}
 	actions, _ := a.def.Get("actions").(*goja.Object)
 	for _, name := range a.groups["actions"] {
 		need, declared := rt.LevelAdmin, false
 		if o, ok := actions.Get(name).(*goja.Object); ok {
 			if _, isFn := goja.AssertFunction(o); !isFn {
+				s, err := readSchema(a.vm, name, o)
+				if err != nil {
+					return err
+				}
+				if s != nil {
+					a.schemas[name] = s
+				}
 				if v := o.Get("requires"); v != nil && !goja.IsUndefined(v) {
 					l, ok := rt.ParseLevel(v.String())
 					if !ok || l == rt.LevelNone || l == rt.LevelSelf {

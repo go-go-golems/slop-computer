@@ -43,14 +43,17 @@ export const TESTS = {
   },
   // the dev instance's rows as a fixture: tables by name, docs by collection
   'fixtures.capture': {
-    sig: 'name, {tables, docs, description}', doc: 'saves rows of the dev instance as a fixture', writes: 'files', pathOf: ([name]) => fixturePath(fileName(name)),
+    sig: 'name, {tables, docs, description}', ret: '{path, tables: [names], docs: [collections]}', doc: 'saves rows of the dev instance as a fixture: tables is a list of table names (["orders"]), docs a list of collections; all their rows go in', writes: 'files', pathOf: ([name]) => fixturePath(fileName(name)),
     run: async (ctx, name, o) => {
       const app = ctx.project.app, spec = { description: o.description || 'captured from the dev instance', docs: {}, tables: {} }
-      for (const t of o.tables || []) {
+      // a list of names; an object ({orders: …}) gives its keys (agents passed one twice)
+      const names = v => Array.isArray(v) ? v : v && typeof v === 'object' ? Object.keys(v) : v ? [v] : []
+      o = { ...(o || {}), tables: names((o || {}).tables), docs: names((o || {}).docs) }
+      for (const t of o.tables) {
         if (!/^\w+$/.test(t)) throw invalid('table names are words: ' + t)
         spec.tables[t] = await Slop.call('sql', { app, kind: 'dev', query: 'SELECT * FROM "' + t + '"', args: [] })
       }
-      for (const c of o.docs || []) {
+      for (const c of o.docs) {
         // a document {path: "coll/id", body}: a row with its id
         spec.docs[c] = (await Slop.call('docs', { app, kind: 'dev', coll: c })).map(d => ({ id: d.path.split('/').pop(), ...d.body }))
       }
@@ -67,10 +70,10 @@ export const TESTS = {
     sig: '', doc: '[{name, description, page, steps, fixture, error, last}]',
     run: ctx => scenarioList(files(ctx), ctx.ws).map(s => ({
       name: s.name, description: s.spec && s.spec.description || undefined, page: s.spec && s.spec.page, steps: s.spec && Array.isArray(s.spec.steps) ? s.spec.steps.length : 0,
-      fixture: s.spec && s.spec.fixture || undefined, error: s.error || undefined, last: s.last ? (s.last.ok ? 'passed' : 'failed at step ' + (s.last.failedAt + 1)) : undefined
+      fixture: s.spec && s.spec.fixture || undefined, error: s.error || undefined, last: s.last ? (s.last.stale ? 'edited since its last run (not run since)' : s.last.ok ? 'passed' : 'failed at step ' + (s.last.failedAt + 1)) : undefined
     }))
   },
-  'scenarios.read': { sig: 'name', run: (ctx, name) => read(ctx, name) },
+  'scenarios.read': { sig: 'name', ret: 'the spec {description, page, size?, fixture?, steps}', run: (ctx, name) => read(ctx, name) },
   'scenarios.save': {
     sig: 'name, spec', writes: 'files', pathOf: ([name]) => SCEN_DIR + fileName(name) + '.json',
     run: (ctx, name, spec) => {
@@ -82,21 +85,23 @@ export const TESTS = {
     }
   },
   'scenarios.run': {
-    sig: 'nameOrSpec', doc: '{ok, failedAt, steps: ["✓ …", "✗ …: why"], snapshots}', long: true,
+    sig: 'nameOrSpec', ret: '{name, workspace, ok, ms, failedAt, steps: ["✓ …", "✗ …: why"], snapshots}', doc: 'runs it on the scenarios and code of this eval\'s workspace (a proposal\'s, when you write to one)', long: true,
     run: async (ctx, target) => {
       const name = typeof target === 'string' ? target : 'unsaved', spec = typeof target === 'string' ? read(ctx, target) : target
       const r = await runScenario(ctx.project, spec, { ...runOpts(ctx), name })
       return {
-        name, ok: r.ok, ms: r.ms, failedAt: r.ok ? undefined : r.failedAt + 1, snapshots: r.snaps.map(s => s.id),
+        name, workspace: ctx.ws, ok: r.ok, ms: r.ms, failedAt: r.ok ? undefined : r.failedAt + 1, snapshots: r.snaps.map(s => s.id),
         steps: r.steps.map(s => (s.ok ? '✓ ' : '✗ ') + s.label + (s.error ? ': ' + s.error : '') + (s.errors ? ' [console: ' + s.errors.join('; ') + ']' : ''))
       }
     }
   },
   'scenarios.runAll': {
-    sig: '', doc: '{passed, failed, results}', long: true,
+    // which copy of the app ran: a proposal's results differed from the person's Run all on draft, and
+    // nothing said why (round 5: "the agent's results contradict what I saw")
+    sig: '', ret: '{workspace, passed, failed, results}', doc: 'every saved scenario of this eval\'s workspace; the person\'s Run all runs the workspace they view, so say which one yours ran on', long: true,
     run: async ctx => {
       const rs = await runAllScenarios(ctx.project, { ...runOpts(ctx), files: files(ctx) })
-      return { passed: rs.filter(r => r.ok).length, failed: rs.filter(r => !r.ok).length, results: rs.map(r => (r.ok ? '✓ ' : '✗ ') + r.name + (r.error ? ' (step ' + ((r.failedAt ?? -1) + 1) + '): ' + r.error : '')) }
+      return { workspace: ctx.ws, passed: rs.filter(r => r.ok).length, failed: rs.filter(r => !r.ok).length, results: rs.map(r => (r.ok ? '✓ ' : '✗ ') + r.name + (r.error ? ' (step ' + ((r.failedAt ?? -1) + 1) + '): ' + r.error : '')) }
     }
   },
 }

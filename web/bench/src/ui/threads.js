@@ -13,12 +13,22 @@ import { Agent } from '../agent/agent.js';
 import { App } from './app.js';
 import { Dock } from './dock.js';
 import { Panels, panelEl } from './panels.js';
+import { Prefs } from '../server/records.js';
 import { Sandbox } from '../agent/sandbox.js';
 import { effectsLine } from '../agent/effects.js';
 import { fmtAgo, fmtTime, now, plural } from '../lib/util.js';
 import { hlJS, hlYAML, renderMarkdown } from '../lib/text.js';
 import { libEntries } from '../agent/api/lib.js';
 import { saveFile, slug, transcriptMd } from './archive.js';
+
+// "Working for 2 min 5 s: writing its next step (3 steps done)"; refreshed every second
+function elapsedText(since, steps, note) {
+  const s = Math.max(0, Math.round((Date.now() - since) / 1000))
+  const d = s < 60 ? s + ' s' : Math.floor(s / 60) + ' min ' + (s % 60) + ' s'
+  const what = note || (steps ? 'writing its next step (' + plural(steps, 'step') + ' done)' : 'reading your app and planning')
+  return 'Working for ' + d + ': ' + what + (s >= 240 ? '. A long one: you can Stop it and ask for a smaller step.' : '.')
+}
+setInterval(() => { for (const e of document.querySelectorAll('.elapsed')) e.textContent = elapsedText(+e.dataset.since, +e.dataset.steps, e.dataset.note) }, 1000)
 
 const MODELS = [
   { v: 'quick', label: 'Quick' }, { v: 'default', label: 'Default' }, { v: 'complex', label: 'Complex' },
@@ -100,19 +110,53 @@ export const THREADS = {
       try { const r = await Agent.compact(P(), t, { force: true }); toast(r ? 'Summarized messages 1–' + r.upTo : 'Too short to summarize') } catch (e) { toast('Could not summarize: ' + e.message) }
       paintChat(); paintChips()
     }
+    async function acceptProp(prop) {
+      const r = await P().accept(prop.ref, null, 'you').catch(e => ({ status: 'failed', error: e.message }))
+      if (r.status === 'committed') { toast('Accepted "' + prop.title + '": the changes are in your draft now (test data you entered in its preview stays behind)', 6000); if (App.ws === prop.ref) App.setWs('draft') }
+      else if (r.status === 'conflict') toast('Not accepted: the draft also changed ' + r.conflicts.join(', ') + '. Open Review to sort it out.', 8000)
+      else toast('Not accepted: ' + (r.error || r.status), 6000)
+      paintChat()
+    }
+    // a finished reply's evals fold into one line, so its words come first (people who do not code
+    // skipped past "eval 1, styles.css:55 +5", and the proof sat in the middle of them: round 4);
+    // open or closed, the last choice is the default
+    function stepsEl(m) {
+      const steps = m.steps || []
+      if (!steps.length || m.status === 'running') return steps.map(stepEl)
+      const files = [...new Set(steps.flatMap(s => ((s.effects && s.effects.files) || []).map(f => f.path)))], bad = steps.filter(s => s.status === 'error').length
+      const d = h('details.steps', { open: Prefs.get('stepsOpen', false) },
+        h('summary.note', plural(steps.length, 'step') + (files.length ? ' · changed ' + files.slice(0, 4).join(', ') + (files.length > 4 ? ' +' + (files.length - 4) : '') : ' · nothing changed') + (bad ? ' · ' + bad + ' failed' : '')),
+        steps.map(stepEl))
+      d.addEventListener('toggle', () => Prefs.set('stepsOpen', d.open))
+      return d
+    }
     function msgEl(m, i, t) {
       if (m.role === 'user') return h('div.msg.user', h('div.who', m.from ? 'From the ' + m.from : 'You', h('span', fmtTime(m.t)), m.ctx && m.ctx.sel ? h('span.tag', m.ctx.sel.tag + ' ' + m.ctx.sel.src) : null), h('div.body', m.text))
       const prop = m.ws && m.ws !== 'draft' ? P().proposals.get(m.ws) : null
       return h('div.msg.agent',
         h('div.who', 'Claude', h('span', fmtTime(m.t)), m.model ? h('span', m.model) : null, m.status === 'running' ? h('span.dot.busy') : null, h('span.sp'),
           h('button.link.note', { title: 'Bookmark this reply on the timeline', on: { click: () => { P().mark({ label: (m.text || 'reply').split('\n')[0].slice(0, 40), by: 'you', thread: t.id }); toast('Marked on the timeline') } } }, '☆ mark')),
-        (m.steps || []).map(stepEl),
+        stepsEl(m),
         (m.panels || []).map(id => { const pn = Panels.get(P(), id); return pn ? panelEl(P(), pn, { inline: true }) : null }),
-        m.text ? renderMarkdown(m.text, file => P().read(file, 'draft') !== null || (!!prop && prop.status === 'open' && P().read(file, m.ws) !== null)) : m.status === 'running' && !(m.steps || []).length ? h('div.body.note', m.note || 'Thinking…') : null,
+        m.auto ? h('div.note', 'Claude ended without a reply; the bench says what happened:') : null,
+        m.text ? renderMarkdown(m.text, file => P().read(file, 'draft') !== null || (!!prop && prop.status === 'open' && P().read(file, m.ws) !== null)) : null,
+        // a running turn says how long and what it is doing (persona reviews: 9-13 minute turns showed only "Working")
+        m.status === 'running' ? h('div.note.elapsed', { 'data-since': String(m.t || Date.now()), 'data-steps': String((m.steps || []).length), 'data-note': m.note || '' }, elapsedText(m.t || Date.now(), (m.steps || []).length, m.note)) : null,
         m.error ? h('div.note', { style: { color: 'var(--accent)' } }, m.error) : null,
         m.approval ? h('div.approval', h('b', m.approval.title), m.approval.detail ? h('pre', m.approval.detail) : null,
           h('div', { style: { display: 'flex', gap: '6px' } }, h('button.btn.sm.primary', { on: { click: () => m.approval && m.approval.decide(true) } }, 'Approve'), h('button.btn.sm', { on: { click: () => m.approval && m.approval.decide(false) } }, 'Decline'))) : null,
-        prop ? h('div.ctx', prop.status === 'open' ? [h('span.tag.ws', 'proposal'), ' ', m.summary || 'working in "' + prop.title + '"', ' ', h('button.link', { on: { click: () => { App.setWs(prop.ref); Dock.open('review') } } }, 'Review')] : h('span', '"' + prop.title + '" was ' + prop.status)) : null)
+        prop ? h('div.ctx', prop.status === 'open'
+          ? [h('span.tag.ws', 'proposal'), ' ', m.summary || 'working in "' + prop.title + '"',
+            m.summary && m.status !== 'running' ? h('div.note', 'These changes are in a proposal: a copy of your app. Your app does not change until you accept them. What you type into its preview stays with the preview: accepting takes the changes, not that test data.') : null,
+            // real buttons, Accept first and filled: as grey links at the foot of a reply they were missed (round 3)
+            h('div', { style: { display: 'flex', gap: '6px', marginTop: '6px', flexWrap: 'wrap' } },
+              m.summary && m.status !== 'running' ? h('button.btn.sm.primary', { title: 'Take these changes into your app', on: { click: () => acceptProp(prop) } }, 'Accept the changes') : null,
+              h('button.btn.sm', { on: { click: () => { App.setWs(prop.ref); Dock.open('review') } } }, 'Review them'),
+              App.ws !== prop.ref ? h('button.btn.sm', { on: { click: () => App.setWs(prop.ref) } }, 'Show it') : null)]
+          // a proposal closed because the turn changed nothing: its title is the person's message, so
+          // '"…" was discarded' read as "your message was discarded" (a persona review found it)
+          : prop.status === 'discarded' ? h('span.note', 'Nothing in the app changed in this turn.')
+          : h('span', 'The proposal "' + prop.title + '" was ' + prop.status + '.')) : null)
     }
     let raf = 0
     function paintChat() {

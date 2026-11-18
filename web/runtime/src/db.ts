@@ -5,12 +5,83 @@
 // when they are small next to the body (D6).
 import { applyPatch, diff, patchSize, type Patch } from "./diff.ts";
 import { limits } from "./limits.ts";
-import { apply as applyQuery, validate, type Filter, type Query } from "./query.ts";
+import { apply as applyQuery, validate, type Filter, type Query as Q } from "./query.ts";
 import { ask, connect, on, rpc, state } from "./transport.ts";
 import { bytes, checkPath, collOf, depth, fail, freeze, idOf, isPlain, plain, randomId, type Body } from "./util.ts";
 
 type Meta = { fromCache: boolean; hasPendingWrites: boolean };
-type DocSnap = { id: string; exists: boolean; data(): Body | undefined; metadata: Meta };
+type DocSnap = DocumentSnapshot<Body>;
+
+// --- the types apps see (page.d.ts, SLOP3-024) -----------------------------
+// A document's body is a plain JSON object; T is what the app says it holds
+// (db.collection<Note>('notes')): the server does not check it.
+
+/** Snapshot metadata: hasPendingWrites while this view's write is on its way. */
+export type SnapshotMetadata = { readonly fromCache: boolean; readonly hasPendingWrites: boolean };
+/** A document as read: data() is undefined when it does not exist. */
+export interface DocumentSnapshot<T = Body> {
+  readonly id: string;
+  readonly exists: boolean;
+  data(): T | undefined;
+  readonly metadata: SnapshotMetadata;
+}
+/** How a collection's result changed since the last snapshot. */
+export interface DocumentChange<T = Body> {
+  readonly type: "added" | "modified" | "removed";
+  readonly doc: DocumentSnapshot<T>;
+  readonly oldIndex: number;
+  readonly newIndex: number;
+}
+/** A query's result. */
+export interface QuerySnapshot<T = Body> {
+  readonly docs: readonly DocumentSnapshot<T>[];
+  readonly size: number;
+  readonly empty: boolean;
+  docChanges(): readonly DocumentChange<T>[];
+  readonly metadata: SnapshotMetadata;
+}
+/** Stops a subscription. */
+export type Unsubscribe = () => void;
+/** The comparisons where() takes. */
+export type WhereOp = "==" | "!=" | "<" | "<=" | ">" | ">=" | "in" | "not-in" | "array-contains";
+/** acquire's answer: the lease, or who holds it until when. */
+export type Lease = { acquired: true; version: number; expiresAt: string; holder: string } | { acquired: false; expiresAt: string };
+/** A document path ("notes/a"); reads and writes are calls to the server. */
+export interface DocumentReference<T = Body> {
+  readonly id: string;
+  readonly path: string;
+  get(): Promise<DocumentSnapshot<T>>;
+  /** Replaces the document. */
+  set(data: T): Promise<void>;
+  /** Merges fields into the document (nested objects merge too). */
+  update(data: Partial<T>): Promise<void>;
+  delete(): Promise<void>;
+  /** A lease on the document for holder (ttlMs: default 30 s). */
+  acquire(o: { holder: string; ttlMs?: number; data?: Body }): Promise<Lease>;
+  onSnapshot(next: (snap: DocumentSnapshot<T>) => void, error?: (e: unknown) => void): Unsubscribe;
+  collection<U = Body>(sub: string): CollectionReference<U>;
+}
+/** A query over one collection, built with where, orderBy and limit. */
+export interface Query<T = Body> {
+  where(field: keyof T & string | (string & {}), op: WhereOp, value: unknown): Query<T>;
+  orderBy(field: keyof T & string | (string & {}), dir?: "asc" | "desc"): Query<T>;
+  limit(n: number): Query<T>;
+  get(): Promise<QuerySnapshot<T>>;
+  onSnapshot(next: (snap: QuerySnapshot<T>) => void, error?: (e: unknown) => void): Unsubscribe;
+}
+/** A collection: a query over all of it, and its documents. */
+export interface CollectionReference<T = Body> extends Query<T> {
+  readonly path: string;
+  /** A document of the collection; without an id, a new random one. */
+  doc(id?: string): DocumentReference<T>;
+  /** Adds a document with a random id. */
+  add(data: T): Promise<DocumentReference<T>>;
+}
+/** claude.use('db'): the app's document database. */
+export interface Db {
+  doc<T = Body>(path: string): DocumentReference<T>;
+  collection<T = Body>(path: string): CollectionReference<T>;
+}
 type Entry = { path: string; version: number; body: Body; snap?: DocSnap };
 type Wire = { path: string; version: number; body?: Body | null; exists?: boolean; patch?: Patch; base?: number; deleted?: boolean; rev?: number };
 
@@ -54,7 +125,7 @@ type Listener = {
   id: string;
   path: string;
   coll: boolean;
-  query: Query;
+  query: Q;
   mirror: Map<string, Entry>;
   seen: Map<string, number>; // path → newest version, deletions included
   streamed: Set<string>; // paths the stream changed while db.subscribe was out
@@ -130,8 +201,8 @@ function deliver(l: Listener) {
   call(l, Object.freeze({ docs: Object.freeze(docs), size: docs.length, empty: docs.length === 0, docChanges: () => changes, metadata: meta }));
 }
 
-function docChanges(prev: DocSnap[], next: DocSnap[]) {
-  const out: unknown[] = [];
+function docChanges(prev: readonly DocSnap[], next: readonly DocSnap[]): readonly DocumentChange[] {
+  const out: DocumentChange[] = [];
   const pi = new Map(prev.map((d, i) => [d.id, i]));
   const ni = new Map(next.map((d, i) => [d.id, i]));
   prev.forEach((d, i) => {
@@ -244,7 +315,7 @@ on("terminal", (code: string) => {
   for (const l of [...listeners.values()]) kill(l, code, "this view was closed");
 });
 
-function subscribe(path: string, coll: boolean, query: Query, next: (s: any) => void, error?: (e: unknown) => void): () => void {
+function subscribe(path: string, coll: boolean, query: Q, next: (s: any) => void, error?: (e: unknown) => void): () => void {
   if (typeof next !== "function") throw new TypeError("onSnapshot needs a callback");
   const l: Listener = { id: randomId(12), path, coll, query, mirror: new Map(), seen: new Map(), streamed: new Set(), ready: false, dead: false, last: null, next, error };
   queueMicrotask(() => {
@@ -359,7 +430,7 @@ async function write(path: string, op: "set" | "update" | "delete", body?: Body)
 
 // --- refs ------------------------------------------------------------------
 
-function docRef(path: string): any {
+function docRef(path: string): DocumentReference {
   checkPath(path, true);
   return Object.freeze({
     id: idOf(path),
@@ -372,14 +443,14 @@ function docRef(path: string): any {
       if (d.exists) remember(path, d.version, d.body as Body);
       return snapOf(path, d.exists ? (d.body as Body) : undefined, META_OK);
     },
-    set(data: Record<string, unknown>) {
+    set(data: Body) {
       try {
         return write(path, "set", checkBody(data));
       } catch (e) {
         return Promise.reject(e);
       }
     },
-    update(data: Record<string, unknown>) {
+    update(data: Partial<Body>) {
       try {
         return write(path, "update", checkBody(data));
       } catch (e) {
@@ -392,19 +463,19 @@ function docRef(path: string): any {
     async acquire(o: { holder: string; ttlMs?: number; data?: Record<string, unknown> }) {
       if (!o || typeof o.holder !== "string" || !o.holder) throw fail("invalid_argument", "acquire needs a holder");
       if (!(await connect())) throw fail("not_granted", "db is not available in this view");
-      return Object.freeze(await rpc("db.acquire", { path, holder: o.holder, ttlMs: o.ttlMs ?? 0, data: o.data ? checkBody(o.data) : undefined }));
+      return Object.freeze(await rpc<Lease>("db.acquire", { path, holder: o.holder, ttlMs: o.ttlMs ?? 0, data: o.data ? checkBody(o.data) : undefined }));
     },
     onSnapshot(next: (s: DocSnap) => void, error?: (e: unknown) => void) {
       return subscribe(path, false, { coll: collOf(path) }, next, error);
     },
-    collection(sub: string) {
-      return collRef(path + "/" + sub);
+    collection<U = Body>(sub: string) {
+      return collRef(path + "/" + sub) as unknown as CollectionReference<U>;
     },
   });
 }
 
-function query(coll: string, q: Query): any {
-  const self = {
+function query(coll: string, q: Q): Query {
+  const self: Query = {
     where(field: string, op: string, value: unknown) {
       const filters: Filter[] = [...(q.filters ?? []), { field, op, value: plain(value) }];
       if (filters.length > limits.MaxFilters) throw fail("invalid_argument", `at most ${limits.MaxFilters} filters`);
@@ -426,14 +497,14 @@ function query(coll: string, q: Query): any {
       return Object.freeze({ docs: Object.freeze(docs), size: docs.length, empty: docs.length === 0,
         docChanges: () => docChanges([], docs), metadata: META_OK });
     },
-    onSnapshot(next: (s: unknown) => void, error?: (e: unknown) => void) {
-      return subscribe(coll, true, q, next, error);
+    onSnapshot(next: (s: QuerySnapshot) => void, error?: (e: unknown) => void) {
+      return subscribe(coll, true, q, next as (s: unknown) => void, error);
     },
   };
   return self;
 }
 
-function collRef(path: string): any {
+function collRef(path: string): CollectionReference {
   checkPath(path, false);
   const q = query(path, { coll: path });
   return Object.freeze({
@@ -442,7 +513,7 @@ function collRef(path: string): any {
     doc(id?: string) {
       return docRef(path + "/" + (id ?? randomId(20)));
     },
-    async add(data: Record<string, unknown>) {
+    async add(data: Body) {
       const ref = docRef(path + "/" + randomId(20));
       await ref.set(data);
       return ref;
@@ -450,7 +521,9 @@ function collRef(path: string): any {
   });
 }
 
-export const db = Object.freeze({
-  doc: (path: string) => docRef(path),
-  collection: (path: string) => collRef(path),
+// The generic parameter is the app's word for what a collection holds: the
+// same runtime objects serve every T.
+export const db: Db = Object.freeze({
+  doc: <T = Body>(path: string) => docRef(path) as unknown as DocumentReference<T>,
+  collection: <T = Body>(path: string) => collRef(path) as unknown as CollectionReference<T>,
 });

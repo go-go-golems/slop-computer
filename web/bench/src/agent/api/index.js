@@ -11,7 +11,8 @@ import { LIB } from './lib.js';
 import { SESSION } from './session.js';
 import { TESTS } from './tests.js';
 import { TX } from './tx.js';
+import { TYPES } from './types.js';
 import { UI } from './ui.js';
 import { defineAPI } from '../../core/api.js';
 
-export const API = defineAPI(FILES, APP, FRAMES, TESTS, SESSION, UI, LIB, TX, AGENTS)
+export const API = defineAPI(FILES, APP, FRAMES, TESTS, SESSION, UI, LIB, TX, AGENTS, TYPES)

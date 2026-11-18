@@ -24,7 +24,7 @@ import (
 // verb of the same name exists, the local command replaces its generated
 // one (and still calls that verb).
 func addExtraCommands(root *cobra.Command) {
-	for _, cmd := range []*cobra.Command{pushCmd(), pullCmd(), devCmd(), evalCmd(), callCmd(), vendorCmd()} {
+	for _, cmd := range []*cobra.Command{pushCmd(), pullCmd(), devCmd(), evalCmd(), callCmd(), vendorCmd(), typesCmd()} {
 		for _, c := range root.Commands() {
 			if c.Name() == cmd.Name() {
 				root.RemoveCommand(c) // the generated eval

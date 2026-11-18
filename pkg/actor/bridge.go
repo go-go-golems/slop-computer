@@ -61,7 +61,27 @@ func typeScriptOf(mod modules.NativeModule, extra ...string) string {
 	if err != nil {
 		return ""
 	}
-	return strings.TrimSpace(strings.TrimPrefix(out, header))
+	return fixExportAssignment(strings.TrimSpace(strings.TrimPrefix(out, header)))
+}
+
+// fixExportAssignment makes a declaration that has both "export = X" and
+// "export { X }" valid TypeScript, which refuses the two together (events
+// declares them so): the named export becomes a namespace merged with X,
+// so require('events').EventEmitter keeps its type (SLOP3-024).
+func fixExportAssignment(ts string) string {
+	for _, line := range strings.Split(ts, "\n") {
+		x, ok := strings.CutPrefix(strings.TrimSpace(line), "export = ")
+		if !ok {
+			continue
+		}
+		x = strings.TrimSuffix(x, ";")
+		named := "export { " + x + " };"
+		if !strings.Contains(ts, named) {
+			return ts
+		}
+		return strings.Replace(ts, named, "type "+x+"Class = typeof "+x+";\n  namespace "+x+" { export const "+x+": "+x+"Class; }", 1)
+	}
+	return ts
 }
 
 // registerBridged adds the bridged modules to the catalog.
@@ -92,14 +112,19 @@ func (m *Manager) registerBridged() {
 		}})
 }
 
+// bufferTS declares Buffer as an interface and a value: a class that
+// extends Uint8Array cannot give from() Buffer's signature.
 const bufferTS = `declare module "buffer" {
   type Encoding = "utf8" | "utf-8" | "hex" | "base64";
-  export class Buffer extends Uint8Array {
-    static from(data: string | ArrayBuffer | ArrayLike<number>, encoding?: Encoding): Buffer;
-    static alloc(size: number, fill?: string | number, encoding?: Encoding): Buffer;
-    static concat(list: Uint8Array[], totalLength?: number): Buffer;
+  export interface Buffer extends Uint8Array {
     toString(encoding?: Encoding, start?: number, end?: number): string;
     equals(other: Uint8Array): boolean;
     write(text: string, offset?: number, length?: number, encoding?: Encoding): number;
   }
+  export const Buffer: {
+    readonly prototype: Buffer;
+    from(data: string | ArrayBuffer | ArrayLike<number>, encoding?: Encoding): Buffer;
+    alloc(size: number, fill?: string | number, encoding?: Encoding): Buffer;
+    concat(list: Uint8Array[], totalLength?: number): Buffer;
+  };
 }`

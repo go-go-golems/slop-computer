@@ -37,13 +37,14 @@ export const SCENARIOS = {
         h('button.link.note', { on: { click: () => App.reveal(f.path, 1) } }, 'edit')))))
     }
     function card(p, s) {
-      const live = S.live[s.name], last = s.last, shown = S.open[s.name] ?? (!!live || (last && !last.ok))
+      // a result from before the scenario was edited is no result: no marks until it runs again
+      const live = S.live[s.name], last = s.last && !s.last.stale ? s.last : null, stale = !!(s.last && s.last.stale), shown = S.open[s.name] ?? (!!live || (last && !last.ok))
       const state = live ? (live.done ? (live.ok ? 'ok' : 'bad') : 'run') : last ? (last.ok ? 'ok' : 'bad') : 'none'
       const icon = { ok: '✓', bad: '✗', run: '◌', none: '○' }[state]
       const head = h('div.sh', h('span.si.' + state, icon), h('button.link', { on: { click: () => { S.open[s.name] = !shown; paint() } } }, h('b', s.name)),
         s.spec && s.spec.description ? h('span.note', s.spec.description) : null, h('span.sp'),
         s.spec ? h('span.note', s.spec.page + (s.spec.fixture ? ' · fixture ' + s.spec.fixture : '') + ' · ' + plural(s.spec.steps.length, 'step')) : null,
-        last && !live ? h('span.note', fmtAgo(last.t)) : null,
+        last && !live ? h('span.note', fmtAgo(last.t)) : stale && !live ? h('span.note', { title: 'Its steps changed after its last run' }, 'edited: run it again') : null,
         h('button.btn.sm', { disabled: !!s.error || S.busy, on: { click: () => run(s) } }, 'Run'),
         h('button.btn.sm', { on: { click: () => App.reveal(s.path, 1) } }, 'Edit'))
       const c = h('div.scard.' + state, head)
@@ -81,7 +82,7 @@ export const SCENARIOS = {
     async function newScenario() {
       const p = P(), n = await promptBox('New scenario', 'A name (letters, digits, -). You can also record one from a frame\'s ⋯ menu.', 'add-a-note'); if (!n) return
       const page = Instances.entry(p), path = SCEN_DIR + n.replace(/[^\w-]+/g, '-') + '.json'
-      if (p.read(path, App.ws) === null) p.write(path, JSON.stringify({ description: '', page, steps: [{ waitFor: 'body' }, { expect: 'h1' }] }, null, 2) + '\n', App.ws)
+      if (p.read(path, App.ws) === null) p.write(path, JSON.stringify({ description: 'What this scenario proves (edit me)', page, steps: [{ waitFor: 'body' }, { expect: 'h1', text: 'The words the page must show (edit me)', exact: true }] }, null, 2) + '\n', App.ws) // fails until it checks something: a new stub that passed at once proved nothing (a persona review)
       App.reveal(path, 1)
     }
     async function newFixture() {

@@ -202,14 +202,26 @@ export function parseJSON(text: string): unknown {
   throw fail("invalid_json", "the reply is not JSON", { text });
 }
 
+/** What sampling allows this view now; without the server's answer, only maxPromptBytes. */
+export type SampleLimits = Readonly<{
+  maxPromptBytes: number;
+  available?: boolean;
+  allowed?: boolean;
+  remaining?: number | null;
+  modelTiers?: readonly string[];
+  models?: readonly Readonly<Record<string, unknown>>[];
+  tools?: Readonly<{ maxCount: number }>;
+  images?: Readonly<{ maxCount: number; maxInputBytes: number; mediaTypes: readonly string[] }>;
+}>;
+
 export function sample(h: Hello) {
   const images = !!(h.caps.sample as any)?.images;
   const fn = (input: unknown, o?: Options) => call(images, input, o);
   return Object.freeze(Object.assign(fn, {
     json: async (input: unknown, o?: Options) => parseJSON((await call(images, input, o)).text),
-    limits: async () => {
+    limits: async (): Promise<SampleLimits> => {
       try {
-        return freeze(await rpc("sample.limits"));
+        return freeze(await rpc<SampleLimits>("sample.limits"));
       } catch {
         return freeze({ maxPromptBytes: limits.MaxPromptBytes });
       }

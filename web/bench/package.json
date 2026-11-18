@@ -3,10 +3,15 @@
   "private": true,
   "type": "module",
   "description": "The bench: a coding-agent workbench, as a slop app for developing slop apps (SLOP3-022, SLOP3-023)",
-  "scripts": { "build": "node build.mjs", "test": "node --test test/*.test.mjs", "imports": "node tools/imports.mjs" },
+  "scripts": {
+    "build": "node build.mjs",
+    "test": "node --test test/*.test.mjs",
+    "imports": "node tools/imports.mjs"
+  },
   "devDependencies": {
     "@tootallnate/quickjs-emscripten": "0.23.0",
     "acorn": "8.18.0",
-    "esbuild": "0.25.12"
+    "esbuild": "0.25.12",
+    "typescript": "5.9.3"
   }
 }

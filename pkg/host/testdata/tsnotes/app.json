@@ -1,0 +1,7 @@
+{
+  "title": "TS notes",
+  "actor": "actor.ts",
+  "type": "tsnotes",
+  "capabilities": { "db": {} },
+  "slop": { "modules": ["workshop"] }
+}
