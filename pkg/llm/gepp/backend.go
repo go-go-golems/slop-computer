@@ -22,7 +22,9 @@ type Config struct {
 	// AgentDir is Pi's agent directory (~/.pi/agent).
 	AgentDir string
 	// Tiers maps quick/default/complex to "provider/model[:thinking]"; an
-	// empty tier uses Pi's default model.
+	// empty tier uses Pi's default model. An optional "vision" entry names
+	// the model a call with images runs on when its tier's model cannot
+	// read images (it must be one that can).
 	Tiers map[string]string
 	// Options are passed to pi.LoadAgentDir (tests: WithLocalProviders, WithEnv).
 	Options []pi.Option
@@ -32,7 +34,8 @@ type Config struct {
 type Backend struct {
 	dir      *pi.AgentDir
 	tiers    map[string]choice
-	baseline string // settings.json's defaultThinkingLevel; "" when off
+	vision   *choice // the model for calls with images, when the tier's cannot read them
+	baseline string  // settings.json's defaultThinkingLevel; "" when off
 	models   []llm.Model
 }
 
@@ -79,6 +82,16 @@ func New(cfg Config) (*Backend, error) {
 		}
 		b.tiers[tier] = c
 	}
+	if ref := cfg.Tiers["vision"]; ref != "" {
+		c, found := b.lookup(ref, eligible)
+		if !found {
+			return nil, errors.Errorf("no authenticated model %q for vision", ref)
+		}
+		if !c.model.Images() {
+			return nil, errors.Errorf("the vision model %q cannot read images", ref)
+		}
+		b.vision = &c
+	}
 	seen := map[string]bool{}
 	for _, tier := range tierNames {
 		m := b.tiers[tier].model
@@ -86,6 +99,10 @@ func New(cfg Config) (*Backend, error) {
 			b.models = append(b.models, publicModel(m, tier))
 			seen[m.Ref()] = true
 		}
+	}
+	if b.vision != nil && !seen[b.vision.model.Ref()] {
+		b.models = append(b.models, publicModel(b.vision.model, "vision"))
+		seen[b.vision.model.Ref()] = true
 	}
 	for _, m := range available {
 		if !seen[m.Ref()] {

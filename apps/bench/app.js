@@ -1,4 +1,4 @@
-/* the bench, built from web/bench: do not edit. source sha256:92c4560f4fbbecfe24f8ac9c80632b07def01e02fa98781f1d16d64ca5b1daad */
+/* the bench, built from web/bench: do not edit. source sha256:6fb0a8a800fb96cd96144a16bdd84a6bb02b7cd08c9c4a5aa1fc9ad7bf7f1f75 */
 // The bench: a live dev environment for slop apps. Built from web/bench/src.
 (() => {
   // src/lib/util.js
@@ -2322,6 +2322,30 @@
       }
     },
     "frames.query": { sig: "frameId, selector", doc: "matches, each with attrs (data-*, href, name, value, checked, aria-*)", run: async (ctx, id, sel) => (await hostOf(ctx, id)).call("query", [sel]) },
+    "frames.look": {
+      sig: "frameId, question, {target}?",
+      ret: "{answer, kind, target, size}",
+      long: true,
+      doc: "looks at a drawing (a <canvas> or <svg>: a chart, what frames.text cannot read) with a model that sees images, and answers the question: overlapping or cut-off labels, the shape of a line, the colours. It can misread words that overlap: take exact labels and numbers from the data, and use it for what the eye sees. target: a selector (default the largest canvas or svg)",
+      run: async (ctx, id, question, o = {}) => {
+        if (!ctx.agent || !ctx.agent.sample) throw Object.assign(new Error("Claude is not available in this view"), { kind: "unavailable" });
+        ctx.llmCalls = (ctx.llmCalls || 0) + 1;
+        if (ctx.llmCalls > 24) throw Object.assign(new Error("model calls (llm, frames.look) are capped at 24 per turn"), { kind: "budget" });
+        const fh = await hostOf(ctx, id);
+        const pic = await fh.call("image", [o.target || null], 15e3);
+        const b64 = String(pic.data).split(",")[1] || "", bin = atob(b64), bytes = new Uint8Array(bin.length);
+        for (let i = 0; i < bin.length; i++) bytes[i] = bin.charCodeAt(i);
+        const blob = new Blob([bytes], { type: "image/png" });
+        const prompt = "The image is a " + pic.kind + " from a web page, " + pic.w + "\xD7" + pic.h + " CSS pixels, shown in a frame " + pic.frameWidth + " px wide. Answer the question from what is visible in the image only. Be specific (which labels, where); say plainly when text overlaps, is cut off or is too small to read, and say when you cannot tell.\n\nQuestion: " + String(question || "Describe what this drawing shows and anything that looks wrong.");
+        let res;
+        try {
+          res = await ctx.agent.sample(prompt, { images: [blob], modelTier: "quick", cache: false, signal: ctx.signal });
+        } catch (e) {
+          throw Object.assign(new Error(e && e.code === "images_unavailable" ? "no model that reads images is configured on this server (an administrator sets pi.models.vision)" : e && e.message || String(e)), { kind: "llm" });
+        }
+        return { answer: (res && res.text || "").trim(), kind: pic.kind, target: pic.selector, size: [pic.w, pic.h] };
+      }
+    },
     "frames.count": { sig: "frameId, selector", ret: "a number", run: async (ctx, id, sel) => {
       const fh = await hostOf(ctx, id);
       await fh.call("settle", [600], 2e3).catch(() => {
@@ -4036,6 +4060,7 @@ Markdown files (README.md, notes, specs) render in the Docs panel. Keep README.m
 - Talk to the person in their words, not the bench's internals: "your proposal "Add a heading"" (its title), not proposal/mwk3\u2026; "the preview of your proposal", not "the prop instance"; "the draft", not "draft 14". Explain a term the first time a person who does not program would meet it (a proposal: a copy of the app with your changes, which they look at and accept or reject).
 - A button that is only a symbol (\u2715, \u2190, \u2192) gets an aria-label naming its item ("Delete card: Draft the launch announcement"): a list of identical \u2715 says nothing to a screen reader or to frames.click (round 5). A two-click confirm says it is waiting, and says when it gave up.
 - A page never shows an action's error text as it is ("listRoster: at /code: minLength: got 0, want 1" reached a volunteer, round 5): catch it, say in plain words what to do, and don't call an action whose arguments are not ready (an empty code).
+- A chart drawn on a <canvas> or in an <svg> is invisible to frames.text and frames.layout: check it with frames.look(frame, 'at this width, do any labels overlap or get cut off?') at each size you care about (375 px too), and fix what it reports (round 5: overlapping district names at 375 px passed every text check).
 - Check behaviour, not your own text. Reading back a file you just wrote proves only that you wrote it: before you call a change done, use it (frames.click / frames.type and frames.text in the dev frame, or a scenario run) and look at types.check; an action called with the wrong argument shape or a misspelled field passes a read-back and fails a click.
 - Say only what the effects show. A failed eval wrote nothing (its writes were rolled back: effects.rolledBack lists them), so a file it was making does not exist until an eval that succeeds writes it. Check before you tell the person something is done.
 - Leave nothing of your own testing in the app: a probe action, a scratch file, a deliberate type error to see what the checker says. Remove it in the same turn, or do the probing in an eval that does not write.
@@ -8740,7 +8765,7 @@ return { files: list.map(f => f.path), issues }`;
         const card = h("div.block", h("header", h("h3", "Running\u2026"), h("span.sub", fmtTime(t0))));
         res.prepend(card);
         const P = App.P, ws = App.ws;
-        const r = await runEval(makeContext(P, { ws, who: "you", mode: "auto" }), code, { sid: "repl:" + P.app, restore: P.meta.replScope && P.meta.replScope.vars });
+        const r = await runEval(makeContext(P, { ws, who: "you", mode: "auto", agent: Agent }), code, { sid: "repl:" + P.app, restore: P.meta.replScope && P.meta.replScope.vars });
         if (r.scope) {
           P.meta.replScope = r.scope;
           P.saveMeta();

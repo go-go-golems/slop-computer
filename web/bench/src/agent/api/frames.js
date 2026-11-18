@@ -101,6 +101,26 @@ export const FRAMES = {
     run: async (ctx, id, target) => { const r = await (await hostOf(ctx, id)).call('inspect', [target]); r.rules = r.rules.map(x => ({ file: x.file, selector: x.selector, media: x.media || undefined, css: x.text })); return r }
   },
   'frames.query': { sig: 'frameId, selector', doc: 'matches, each with attrs (data-*, href, name, value, checked, aria-*)', run: async (ctx, id, sel) => (await hostOf(ctx, id)).call('query', [sel]) },
+  'frames.look': {
+    sig: 'frameId, question, {target}?', ret: '{answer, kind, target, size}', long: true,
+    doc: 'looks at a drawing (a <canvas> or <svg>: a chart, what frames.text cannot read) with a model that sees images, and answers the question: overlapping or cut-off labels, the shape of a line, the colours. It can misread words that overlap: take exact labels and numbers from the data, and use it for what the eye sees. target: a selector (default the largest canvas or svg)',
+    run: async (ctx, id, question, o = {}) => {
+      if (!ctx.agent || !ctx.agent.sample) throw Object.assign(new Error('Claude is not available in this view'), { kind: 'unavailable' })
+      ctx.llmCalls = (ctx.llmCalls || 0) + 1
+      if (ctx.llmCalls > 24) throw Object.assign(new Error('model calls (llm, frames.look) are capped at 24 per turn'), { kind: 'budget' })
+      const fh = await hostOf(ctx, id)
+      const pic = await fh.call('image', [o.target || null], 15000)
+      const b64 = String(pic.data).split(',')[1] || '', bin = atob(b64), bytes = new Uint8Array(bin.length)
+      for (let i = 0; i < bin.length; i++) bytes[i] = bin.charCodeAt(i)
+      const blob = new Blob([bytes], { type: 'image/png' })
+      const prompt = 'The image is a ' + pic.kind + ' from a web page, ' + pic.w + '×' + pic.h + ' CSS pixels, shown in a frame ' + pic.frameWidth + ' px wide. Answer the question from what is visible in the image only. Be specific (which labels, where); say plainly when text overlaps, is cut off or is too small to read, and say when you cannot tell.\n\nQuestion: ' + String(question || 'Describe what this drawing shows and anything that looks wrong.')
+      let res
+      try { res = await ctx.agent.sample(prompt, { images: [blob], modelTier: 'quick', cache: false, signal: ctx.signal }) } catch (e) {
+        throw Object.assign(new Error((e && e.code === 'images_unavailable' ? 'no model that reads images is configured on this server (an administrator sets pi.models.vision)' : (e && e.message) || String(e))), { kind: 'llm' })
+      }
+      return { answer: ((res && res.text) || '').trim(), kind: pic.kind, target: pic.selector, size: [pic.w, pic.h] }
+    }
+  },
   'frames.count': { sig: 'frameId, selector', ret: 'a number', run: async (ctx, id, sel) => { const fh = await hostOf(ctx, id); await fh.call('settle', [600], 2000).catch(() => { }); return fh.call('count', [sel]) } },
   'frames.text': { sig: 'frameId?, target?', ret: 'a string', doc: 'visible text', run: async (ctx, id, target) => (await hostOf(ctx, id)).call('text', [target || null]) },
   'frames.click': { sig: 'frameId, target', run: async (ctx, id, target) => { const r = await (await hostOf(ctx, id)).call('click', [target]); await sleep(120); return r } },

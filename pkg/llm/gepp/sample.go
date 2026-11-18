@@ -112,7 +112,11 @@ func (c *call) run(ctx context.Context) error {
 	ch, applied := c.b.pick(c.r.Options)
 	m := ch.model
 	if len(c.r.Images) > 0 && !m.Images() {
-		return errImages
+		// the tier's model can't read images: the configured vision model can
+		if c.b.vision == nil {
+			return errImages
+		}
+		ch, m, applied = *c.b.vision, c.b.vision.model, c.b.vision.model.Ref()
 	}
 	res, err := c.b.dir.Resolve(ctx, m.Ref(), pi.ResolveOptions{Thinking: c.level(ch)})
 	if err != nil {

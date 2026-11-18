@@ -441,6 +441,29 @@ export function PROBE(CFG) {
       }
     },
     count: q => qsa(q).length,
+    // a picture of a <canvas> or an <svg> (a chart: what no text tool can read), on white, for frames.look:
+    // the target, or the largest visible canvas or svg. An svg gets its computed styles inlined first.
+    image: async q => {
+      const vis = el => { const r = el.getBoundingClientRect(); return r.width > 4 && r.height > 4 }
+      const el = q ? find(q) : [...document.querySelectorAll('canvas, svg')].filter(e => vis(e) && !(e instanceof SVGElement && e.ownerSVGElement)).sort((a, b) => { const ra = a.getBoundingClientRect(), rb = b.getBoundingClientRect(); return rb.width * rb.height - ra.width * ra.height })[0]
+      if (!el) throw new Error('no canvas or svg on this page' + (q ? ' matches ' + q : '') + ': frames.look reads drawings; for HTML use frames.text and frames.layout')
+      // at least 2× (small text read at 1× came back with invented words), at most 1568 px a side (the runtime's limit)
+      const r = el.getBoundingClientRect(), dpr = Math.min(Math.max(2, window.devicePixelRatio || 1), 1568 / Math.max(r.width, r.height, 1))
+      const out = document.createElement('canvas'); out.width = Math.max(1, Math.round(r.width * dpr)); out.height = Math.max(1, Math.round(r.height * dpr))
+      const g = out.getContext('2d'); g.fillStyle = '#fff'; g.fillRect(0, 0, out.width, out.height)
+      if (el.tagName === 'CANVAS') g.drawImage(el, 0, 0, out.width, out.height)
+      else if (el instanceof SVGElement) {
+        const clone = el.cloneNode(true), src = [el, ...el.querySelectorAll('*')], dst = [clone, ...clone.querySelectorAll('*')]
+        const props = ['fill', 'stroke', 'stroke-width', 'stroke-dasharray', 'opacity', 'fill-opacity', 'stroke-opacity', 'font-family', 'font-size', 'font-weight', 'text-anchor', 'dominant-baseline', 'visibility', 'display']
+        src.forEach((s, i) => { const cs = getComputedStyle(s); dst[i].setAttribute('style', props.map(p => p + ':' + cs.getPropertyValue(p)).join(';')) })
+        clone.setAttribute('width', r.width); clone.setAttribute('height', r.height)
+        if (!clone.getAttribute('xmlns')) clone.setAttribute('xmlns', 'http://www.w3.org/2000/svg')
+        const img = new Image()
+        await new Promise((res, rej) => { img.onload = res; img.onerror = () => rej(new Error('the svg could not be drawn as an image')); img.src = 'data:image/svg+xml;charset=utf-8,' + encodeURIComponent(new XMLSerializer().serializeToString(clone)) })
+        g.drawImage(img, 0, 0, out.width, out.height)
+      } else throw new Error(q + ' is a ' + el.tagName.toLowerCase() + ', not a canvas or svg: frames.look reads drawings; for HTML use frames.text and frames.layout')
+      return { data: out.toDataURL('image/png'), w: Math.round(r.width), h: Math.round(r.height), kind: el.tagName.toLowerCase(), selector: selPath(el), frameWidth: innerWidth }
+    },
     download: () => lastDl,
     all: (q, max = 50) => qsa(q).slice(0, max).map(info),
     // the whole text of each match (info's is cut at 120 characters: a scenario's text check missed rows)

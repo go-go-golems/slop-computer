@@ -515,3 +515,27 @@ func TestOverBudgetTurnReplies(t *testing.T) {
 	assert.NotContains(t, p.bodies[1], "tools")
 	assert.Contains(t, fmt.Sprint(p.bodies[1]["messages"]), "used up its room")
 }
+
+// A call with images on a tier whose model can't read them runs on the
+// configured vision model; a vision model that can't read images is refused
+// at start.
+func TestVisionModelTakesImages(t *testing.T) {
+	b, p := setup(t, map[string]string{"vision": "lunaroute/small"}, text("a chart"))
+	r := req("what is this?", llm.Options{})
+	r.Images = []llm.Image{{MimeType: "image/jpeg", Data: "/9j/AA=="}}
+	rec := &recorder{}
+	require.NoError(t, b.Sample(context.Background(), r, rec.emit, noTools))
+	require.Nil(t, rec.last("error").Error, "no error")
+	assert.Equal(t, "a chart", rec.last("result").Result.Text)
+	assert.Equal(t, "small", p.bodies[0]["model"])
+
+	dir := t.TempDir()
+	writeJSON(t, filepath.Join(dir, "settings.json"), map[string]any{"defaultProvider": "lunaroute", "defaultModel": "big"})
+	writeJSON(t, filepath.Join(dir, "models.json"), map[string]any{"providers": map[string]any{"lunaroute": map[string]any{
+		"baseUrl": "http://127.0.0.1:9/v1", "api": "openai-completions", "apiKey": "test-key",
+		"models": []any{map[string]any{"id": "big", "reasoning": true, "input": []string{"text"}, "maxTokens": 100000}},
+	}}})
+	_, err := New(Config{AgentDir: dir, Tiers: map[string]string{"vision": "lunaroute/big"}, Options: []pi.Option{pi.WithLocalProviders()}})
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "cannot read images")
+}
