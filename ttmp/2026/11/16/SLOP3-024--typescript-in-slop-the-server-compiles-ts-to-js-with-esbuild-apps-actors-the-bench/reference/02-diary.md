@@ -1587,3 +1587,10 @@ The user decided two of the three open questions. CDN scripts in app pages stay 
 - **Staging** (slop.yolo) needs `vision: lunaroute/deepseek-4.1-flash` in its server config for `frames.look` to work there. That's an infrastructure change for the user.
 - **Frames as different people** is still undecided.
 - **A future persona round** could give a chart goal to a text persona and see whether the agent uses `frames.look` unprompted.
+
+**Deployed to staging (the user: "do it"):**
+- **The image:** branch CI publishes no image, so I ran `publish-image.yaml` by `workflow_dispatch` on the branch, which produced `sha-ad8b318`. Main had only ticket docs beyond the branch, and the branch held staging's `sha-084eaa2`, so nothing rolled back. No database migration.
+- **The k3s PR:** wesen/2026-03-27--hetzner-k3s#443 sets the image and `pi.models.vision: lunaroute/deepseek-4.1-flash`. `validate` passed, and I merged it (d495b2e).
+- **The rollout:** Argo CD rolled it out. The pod is ready with no restarts, the log shows "Pi models ready", and the live `slop-config` has the vision entry.
+- **The apps:** `make deploy-apps` with a CLI built at `ad8b318`. Staging's bench manifest declares `sample: { images: true }`.
+- **Not done:** `frames.look` wasn't run on staging, which needs a real account's session; it was verified on the review server.
