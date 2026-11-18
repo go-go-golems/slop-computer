@@ -62,7 +62,7 @@ export const Agent = {
       '.\nFiles: ' + files + '\nInstances: ' + inst + '\nFrames: ' + frames + '\nOpen proposals: ' + props + '\nSelected: ' + sel + '\nOpen pins:\n' + pins +
       '\nCurrent check issues: ' + (issues.slice(0, 8).join('; ') || 'none') +
       '\nSaved lib functions: ' + (libEntries(view).map(l => 'lib.' + l.name + '(' + l.params.join(', ') + ')' + (l.description ? ' — ' + l.description : '')).join('; ') || 'none') +
-      '\nYour variables from earlier evals: ' + (th && th.scope ? (scopeSummary(th.scope) || 'none') + (th.scope.skipped && th.scope.skipped.length ? ' (not kept: ' + th.scope.skipped.join(', ') + ')' : '') : 'none')
+      '\nYour variables from earlier evals: ' + (th && th.scope ? (scopeSummary(th.scope) || 'none') + (th.scope.skipped && th.scope.skipped.length ? ' (still in the sandbox while this bench page stays open, but not saved for after a reload: ' + th.scope.skipped.join(', ') + ')' : '') : 'none')
   },
   HIST_CHARS: 28000, KEEP_CHARS: 12000, KEEP_MIN: 4, MAX_MSGS: 30,
   // one message as history; detail adds a line per eval (what it ran, how it went, what it changed)

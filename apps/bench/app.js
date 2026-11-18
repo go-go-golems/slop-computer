@@ -1,4 +1,4 @@
-/* the bench, built from web/bench: do not edit. source sha256:824e768ac781de2d2dac61f75ada5c1e7403648dc9e054de976b46b0787214c8 */
+/* the bench, built from web/bench: do not edit. source sha256:273576d551870107626e23f26ba5f46d4df62b42f7daf17b5e9ab6a4319647c0 */
 // The bench: a live dev environment for slop apps. Built from web/bench/src.
 (() => {
   // src/lib/util.js
@@ -4127,7 +4127,7 @@ Markdown files (README.md, notes, specs) render in the Docs panel. Keep README.m
         }
       })();
       const when = "The person's local time: " + d.toLocaleString("en-GB", { weekday: "short", day: "numeric", month: "long", year: "numeric", hour: "2-digit", minute: "2-digit" }) + (tz ? " (" + tz + ")" : "") + "; dates you tell them use this, not UTC.\n";
-      return when + 'App "' + P.title + '" (' + P.app + "). Your writes go to " + where + "; main is " + (P.refs.main ?? "not published yet") + ".\nFiles: " + files2 + "\nInstances: " + inst + "\nFrames: " + frames + "\nOpen proposals: " + props + "\nSelected: " + sel + "\nOpen pins:\n" + pins2 + "\nCurrent check issues: " + (issues.slice(0, 8).join("; ") || "none") + "\nSaved lib functions: " + (libEntries(view).map((l) => "lib." + l.name + "(" + l.params.join(", ") + ")" + (l.description ? " \u2014 " + l.description : "")).join("; ") || "none") + "\nYour variables from earlier evals: " + (th && th.scope ? (scopeSummary(th.scope) || "none") + (th.scope.skipped && th.scope.skipped.length ? " (not kept: " + th.scope.skipped.join(", ") + ")" : "") : "none");
+      return when + 'App "' + P.title + '" (' + P.app + "). Your writes go to " + where + "; main is " + (P.refs.main ?? "not published yet") + ".\nFiles: " + files2 + "\nInstances: " + inst + "\nFrames: " + frames + "\nOpen proposals: " + props + "\nSelected: " + sel + "\nOpen pins:\n" + pins2 + "\nCurrent check issues: " + (issues.slice(0, 8).join("; ") || "none") + "\nSaved lib functions: " + (libEntries(view).map((l) => "lib." + l.name + "(" + l.params.join(", ") + ")" + (l.description ? " \u2014 " + l.description : "")).join("; ") || "none") + "\nYour variables from earlier evals: " + (th && th.scope ? (scopeSummary(th.scope) || "none") + (th.scope.skipped && th.scope.skipped.length ? " (still in the sandbox while this bench page stays open, but not saved for after a reload: " + th.scope.skipped.join(", ") + ")" : "") : "none");
     },
     HIST_CHARS: 28e3,
     KEEP_CHARS: 12e3,
