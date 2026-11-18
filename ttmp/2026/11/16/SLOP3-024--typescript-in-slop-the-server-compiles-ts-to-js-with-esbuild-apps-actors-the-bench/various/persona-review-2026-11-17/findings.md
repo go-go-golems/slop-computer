@@ -132,3 +132,4 @@
 - Stream the agent's thinking into the chat as it happens.
 - Interleave evals properly with the reply: text, eval, text, eval in the order they happened, instead of the reply text with its steps beside it.
 - Syntax highlighting (where exactly is still to settle with the user: the Code view's editor, code blocks in the chat, eval steps).
+- A message sent while the agent is busy is queued, not refused: the queued message shows in the chat with Cancel (drop it) and Send now (stop the running turn and send it).
