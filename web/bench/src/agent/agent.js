@@ -183,7 +183,10 @@ export const Agent = {
         let r = await runEval(ctx, code, { sid: th.id, restore: th.scope && th.scope.vars })
         // TypeScript sent without ts: true ("catch (e: any)", "const rows: Row[] = …") fails to parse, so nothing
         // ran: it is run again with its types stripped (two evals in round 5)
-        if (!r.ok && !(input && input.ts) && r.error && r.error.kind === 'SyntaxError' && /\)\s*:\s*[\w[{(]|\b(const|let|var)\s+\w+\s*:\s*[\w[{(]|\bas\s+[A-Z\w[]|\b(interface|type)\s+\w+|catch\s*\(\s*\w+\s*:/.test(code)) {
+        // (and typed parameters, "(p: string, from: number) =>", which the first pattern missed: the chess thread on
+        // staging). A syntax error means nothing ran, so any one is tried once as TypeScript; the run counts only if
+        // stripping the types changed the code
+        if (!r.ok && !(input && input.ts) && r.error && r.error.kind === 'SyntaxError' && /\w\s*\??\s*:\s*[\w[{(<'"]|\bas\s+[A-Z\w[]|\b(interface|type)\s+\w+/.test(code)) {
           const t = await Types.transpile(code).catch(() => ({ error: 'no transpiler' }))
           if (!t.error && t.code && t.code !== code) { r = await runEval(ctx, t.code, { sid: th.id, restore: th.scope && th.scope.vars }); step.note = 'ran as TypeScript (pass ts: true for TypeScript)' }
         }

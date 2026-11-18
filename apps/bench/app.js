@@ -1,4 +1,4 @@
-/* the bench, built from web/bench: do not edit. source sha256:0ca32a65c02efa623d486b0a7f0b5603f5ad2c342fc0c2e6b726ff055a092994 */
+/* the bench, built from web/bench: do not edit. source sha256:824e768ac781de2d2dac61f75ada5c1e7403648dc9e054de976b46b0787214c8 */
 // The bench: a live dev environment for slop apps. Built from web/bench/src.
 (() => {
   // src/lib/util.js
@@ -4290,7 +4290,7 @@ Markdown files (README.md, notes, specs) render in the Docs panel. Keep README.m
             code = t.code;
           }
           let r = await runEval(ctx, code, { sid: th.id, restore: th.scope && th.scope.vars });
-          if (!r.ok && !(input && input.ts) && r.error && r.error.kind === "SyntaxError" && /\)\s*:\s*[\w[{(]|\b(const|let|var)\s+\w+\s*:\s*[\w[{(]|\bas\s+[A-Z\w[]|\b(interface|type)\s+\w+|catch\s*\(\s*\w+\s*:/.test(code)) {
+          if (!r.ok && !(input && input.ts) && r.error && r.error.kind === "SyntaxError" && /\w\s*\??\s*:\s*[\w[{(<'"]|\bas\s+[A-Z\w[]|\b(interface|type)\s+\w+/.test(code)) {
             const t = await Types.transpile(code).catch(() => ({ error: "no transpiler" }));
             if (!t.error && t.code && t.code !== code) {
               r = await runEval(ctx, t.code, { sid: th.id, restore: th.scope && th.scope.vars });
