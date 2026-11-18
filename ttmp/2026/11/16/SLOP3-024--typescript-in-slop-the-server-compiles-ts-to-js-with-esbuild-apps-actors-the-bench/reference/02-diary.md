@@ -1552,3 +1552,38 @@ No new user prompts in this step; it continues under Step 14's prompts.
 
 - **Evals mined:** 622 (74 failed): 491 from the finished apps and 131 from inventory2. Some failures are from earlier rounds' threads in the same apps.
 - **Archive:** `various/persona-review-2026-11-17/r5`, redacted (57 MB). No standalone link token and no operator identity.
+
+## Step 17: Two decisions: CDN scripts stay, and the agent gets eyes (frames.look on deepseek-4.1-flash)
+
+The user decided two of the three open questions. CDN scripts in app pages stay allowed. A vision-capable model tier is wanted, on deepseek-4.1-flash. I built the tier into the server's model config and, on top of it, `frames.look`: the agent's way to look at a chart drawn on a `<canvas>` or in an `<svg>`, which no text tool can read.
+
+### Prompt Context
+**User prompts (verbatim):** "what does frames as different people mean? what's 3. about?"; "yes, use deepseek-4.1-flash"; "yes to 2. and 3."
+
+**Assistant interpretation:** 3 is the vision tier, on deepseek-4.1-flash. "Yes to 2" could mean keep CDN scripts or restrict to vendored packages, so I asked. The answer was "Keep allowing CDN".
+
+**Commit (code):** the vision model and frames.look (`git log --grep "vision model for calls with images"`), and ad8b318 (doc/production.md).
+
+### What I did
+- **The server:**
+  - `pkg/llm/gepp`: an optional `vision` entry in `pi.models`. A call with images whose tier's model can't read them runs on it, and a vision model that can't read images is refused at start.
+  - `TestVisionModelTakesImages`.
+  - `doc/production.md` documents the entry.
+- **The bench:**
+  - The probe's `image(target)` draws the target (or the largest canvas or svg) on white at 2× or more. An svg gets its computed styles inlined, since class styles are lost when an svg becomes an image.
+  - `frames.look(frame, question, {target})` sends the picture with the question to the quick tier, which the server routes to the vision model.
+  - The bench declares `sample: { images: true }`.
+  - The Eval view's context now has the agent, so `llm` and `frames.look` work there too.
+  - A guide line: check a drawn chart with `frames.look` at each size.
+- **Verified** on the review server, configured with `vision: lunaroute/deepseek-4.1-flash`, with `scripts/06-api-mining/look-check.mjs`:
+  - a canvas chart with two labels drawn on top of each other: "Yes — "Centro" and "Península" overlap each other near the top-middle dot";
+  - the same in svg: "The line is red and rises from lower-left to upper-right… two labels… clearly overlap each other and are unreadable".
+
+### What didn't work
+- **At 1× (headless Chrome)**, both answers invented label names ("Georgia" and "Pennsylvania"). Rendering at 2× fixed the readable words. Words that really do overlap stay unreliable, so the doc says to take exact labels from the data and use `frames.look` for what the eye sees.
+- **The first test run said "Claude is not available in this view"**: the Eval view's context had no agent.
+
+### What should be done in the future
+- **Staging** (slop.yolo) needs `vision: lunaroute/deepseek-4.1-flash` in its server config for `frames.look` to work there. That's an infrastructure change for the user.
+- **Frames as different people** is still undecided.
+- **A future persona round** could give a chart goal to a text persona and see whether the agent uses `frames.look` unprompted.

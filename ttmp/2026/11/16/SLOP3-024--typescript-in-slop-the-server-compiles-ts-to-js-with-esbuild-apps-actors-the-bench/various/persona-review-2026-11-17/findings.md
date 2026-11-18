@@ -122,3 +122,8 @@
 - [publish, ines2-visual r5] a dark "Roll back to 7" beside Done. FIXED: "Undo this publish…", plain, confirmed.
 - [guide, devon3 r5] symbol-only buttons with no item name; a silent 4 s confirm timeout. Guide line.
 - [guide, aisha2 r5] a raw action error reached volunteers. Guide line.
+
+## Decisions (2026-11-17)
+- CDN scripts in app pages: KEEP ALLOWING (the guide's three options stay: no library, a pinned CDN link, a vendored package).
+- A vision model tier: YES, lunaroute/deepseek-4.1-flash. BUILT: pi.models.vision on the server, frames.look in the bench (a1? see git: the vision commit and doc/production.md).
+- Frames as different people: explained; no decision yet.
