@@ -21,6 +21,10 @@ let streamOpened!: () => void;
 const opened = new Promise<void>((r) => (streamOpened = r));
 let streams = 0, runs = 0;
 let hold202: Promise<void> | null = null; // when set, the next 202 waits for it
+const streamsOf = new Map<string, ReadableStreamDefaultController<Uint8Array>>(); // per session
+const lastRun = new Map<string, string>(); // session -> the run id of its last 202
+let failResults = 0; // result posts to fail at the network
+const sid = (url: string) => url.split("/")[4];
 const enc = new TextEncoder();
 const json = (v: unknown, status = 200) => new Response(JSON.stringify(v), { status, headers: { "Content-Type": "application/json" } });
 
@@ -30,20 +34,30 @@ globalThis.fetch = (async (url: string, init?: RequestInit) => {
   reqs.push({ method, url, body });
   if (url.startsWith("/_rt/events")) return new Promise(() => {});
   if (url.endsWith("/events")) {
-    const rs = new ReadableStream<Uint8Array>({ start: (c) => { stream = c; } });
+    const rs = new ReadableStream<Uint8Array>({ start: (c) => { if (sid(url) === "s1") stream = c; streamsOf.set(sid(url), c); } });
     streams++;
     queueMicrotask(streamOpened);
     return new Response(rs, { status: 200, headers: { "Content-Type": "text/event-stream" } });
   }
   if (url.startsWith("/_rt/agent/sessions?label=")) return json({ sessions: [] });
-  if (url === "/_rt/agent/sessions" && method === "POST") return json({ sessionId: "s1", session: { id: "s1", labels: { key: body.labels.key, app: "bench" } } }, 201);
+  if (url === "/_rt/agent/sessions" && method === "POST") {
+    const id = body.labels.key === "t1" ? "s1" : "s-" + body.labels.key;
+    return json({ sessionId: id, session: { id, labels: { key: body.labels.key, app: "bench" } } }, 201);
+  }
   if (url.endsWith("/tools/manifest")) return json({ accepted: true, executor: { assignmentId: "a1", connectionId: body.connectionId } });
   if (url.endsWith("/messages")) {
     const id = "r" + ++runs;
+    lastRun.set(sid(url), id);
     if (hold202) await hold202;
     return json({ sessionId: "s1", accepted: true, messageId: id }, 202);
   }
-  if (url.endsWith("/tools/results")) return json({ ok: true });
+  if (url.endsWith("/tools/results")) {
+    if (failResults > 0) {
+      failResults--;
+      throw new TypeError("network error");
+    }
+    return json({ ok: true });
+  }
   if (url.endsWith("/stop")) return json({ sessionId: "s1", accepted: true }, 202);
   return json({ error: "no route " + url, code: "invalid_request" }, 404);
 }) as typeof fetch;
@@ -179,4 +193,87 @@ test("a tool call requested while the stream was down runs from the next snapsho
   assert.equal((await answer).text, "eval returned: 42");
   assert.equal(results(), 1, "a call runs once, however many times the copy changes");
   s.close();
+});
+
+// --- the run's lifecycle (design 02, change 5) and the outbox (change 6) ---
+
+const to = (id: string, name: string, payload: unknown) =>
+  streamsOf.get(id)!.enqueue(enc.encode(`id: ${++ordinal}\nevent: ui\ndata: ${JSON.stringify({ sessionId: id, ordinal: String(ordinal), name, payload })}\n\n`));
+const snapshotTo = (id: string, entities: unknown[]) =>
+  streamsOf.get(id)!.enqueue(enc.encode(`event: snapshot\ndata: ${JSON.stringify({ sessionId: id, snapshotOrdinal: String(++ordinal), entities })}\n\n`));
+const posted = (id: string, path: string) => reqs.filter((r) => r.url === `/_rt/agent/sessions/${id}${path}`);
+
+const s3 = await a.open("t3", { tools });
+await waitFor(() => streamsOf.has("s-t3"));
+snapshotTo("s-t3", []);
+
+test("two sends without awaiting: the second is refused at once, the first is answered", async () => {
+  const first = s3.send("one");
+  await assert.rejects(s3.send("two"), (e: any) => e.code === "run_active");
+  await waitFor(() => posted("s-t3", "/messages").length === 1);
+  await waitFor(() => lastRun.has("s-t3"));
+  const run = lastRun.get("s-t3")!;
+  to("s-t3", "ChatRunStarted", { messageId: run });
+  to("s-t3", "ChatTextSegmentFinished", { messageId: run + ":text:a", content: "answer one" });
+  to("s-t3", "ChatRunFinished", { messageId: run });
+  assert.equal((await first).text, "answer one");
+});
+
+test("an abort before the session is ready posts nothing", async () => {
+  const s4 = await a.open("t4", { tools });
+  const ctrl = new AbortController();
+  const answer = s4.send("never sent", { signal: ctrl.signal });
+  ctrl.abort();
+  await assert.rejects(answer, (e: any) => e.code === "cancelled");
+  await waitFor(() => streamsOf.has("s-t4"));
+  snapshotTo("s-t4", []);
+  await new Promise((r) => setTimeout(r, 30));
+  assert.equal(posted("s-t4", "/messages").length, 0);
+  s4.close();
+});
+
+test("an abort while the 202 is pending rejects the send and stops the run it names", async () => {
+  let release!: () => void;
+  hold202 = new Promise((r) => (release = r));
+  const ctrl = new AbortController();
+  const answer = s3.send("abort me while posting", { signal: ctrl.signal });
+  await waitFor(() => posted("s-t3", "/messages").length === 2);
+  ctrl.abort();
+  hold202 = null;
+  release();
+  await assert.rejects(answer, (e: any) => e.code === "cancelled");
+  await waitFor(() => posted("s-t3", "/stop").length === 1);
+  const run = lastRun.get("s-t3")!;
+  to("s-t3", "ChatRunStarted", { messageId: run });
+  to("s-t3", "ChatRunStopped", { messageId: run });
+});
+
+test("a tool result lost at the network is delivered again after a reconnect, without running the tool again", { todo: "design 02, change 6: the outbox" }, async () => {
+  ran.length = 0;
+  failResults = 1;
+  const answer = s3.send("tool, then a flaky network");
+  await waitFor(() => posted("s-t3", "/messages").length === 3);
+  await waitFor(() => lastRun.get("s-t3") !== undefined && posted("s-t3", "/messages").length === 3);
+  const run = lastRun.get("s-t3")!;
+  const call = { toolCallId: "call9", toolName: "eval", input: { code: "2+2" }, executor: { assignmentId: "a1" }, messageId: run };
+  to("s-t3", "ChatRunStarted", { messageId: run });
+  to("s-t3", "ChatFrontendToolCallRequested", call);
+  const results = () => posted("s-t3", "/tools/results").filter((r) => r.body.toolCallId === "call9");
+  await waitFor(() => results().length === 1); // failed at the network
+  streamsOf.get("s-t3")!.close(); // the connection drops; the server still waits for the result
+  await waitFor(() => streamsOf.get("s-t3") !== undefined && results().length === 1);
+  await new Promise((r) => setTimeout(r, 300)); // the reconnect
+  snapshotTo("s-t3", [
+    { kind: "ChatRun", id: run, createdOrdinal: "1", payload: { status: "running" } },
+    { kind: "ChatFrontendToolCall", id: "call9", createdOrdinal: "2", payload: { ...call, status: "requested" } },
+  ]);
+  await waitFor(() => results().length === 2);
+  assert.deepEqual(ran, [{ code: "2+2" }], "the tool ran once");
+  assert.equal(results()[1].body.result, 42);
+  to("s-t3", "ChatFrontendToolResultReceived", { toolCallId: "call9", status: "success" });
+  to("s-t3", "ChatTextSegmentFinished", { messageId: run + ":text:a", content: "eval returned: 42" });
+  to("s-t3", "ChatRunFinished", { messageId: run });
+  assert.equal((await answer).text, "eval returned: 42");
+  assert.equal(results().length, 2, "a received result is not sent again");
+  s3.close();
 });

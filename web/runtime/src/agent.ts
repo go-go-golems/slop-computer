@@ -72,8 +72,16 @@ async function api(method: string, path: string, body?: unknown): Promise<any> {
 
 const clean = (o: Record<string, unknown>) => Object.fromEntries(Object.entries(o).filter(([, v]) => v !== undefined && v !== null && v !== ""));
 
+// A send's run. send() claims the session's slot with it before anything
+// else (no await comes first), and the run owns its lifecycle: stage says
+// how far it got, and an abort is handled at any stage (#abort).
 type Run = {
   id: string; // the 202's messageId; "" until it arrives
+  stage: "preparing" | "posting" | "running";
+  aborted: boolean;
+  settled: boolean;
+  cancelled: Promise<void>; // resolves on abort: the preparation's waits race it
+  cancel: () => void; // resolves cancelled
   text: string;
   onText?: SendOptions["onText"];
   tools: AbortController;
@@ -136,34 +144,70 @@ class Session {
   }
 
   /** Sends a message and resolves with the answer when the run ends. */
-  async send(prompt: string, o: SendOptions = {}): Promise<Result> {
-    if (typeof prompt !== "string" || !prompt.trim()) throw fail("invalid_request", "the message is empty");
-    if (this.#closed) throw fail("cancelled", "the session is closed");
-    if (this.#run) throw fail("run_active", "an answer is still running in this session");
-    if (o.signal?.aborted) throw fail("cancelled", "the call was aborted");
-    await this.#grant.consent();
-    await this.#ready;
-    if (this.#tools.length) await this.#register(); // the tab that sends runs the tools
-    return new Promise<Result>((resolve, reject) => {
-      const run: Run = { id: "", text: "", onText: o.onText, tools: new AbortController(), resolve, reject };
-      this.#run = run;
-      const onAbort = () => void this.stop();
-      o.signal?.addEventListener("abort", onAbort, { once: true });
-      const done = () => {
-        o.signal?.removeEventListener("abort", onAbort);
-        run.tools.abort();
-        if (this.#run === run) this.#run = null;
-      };
-      run.resolve = (r) => (done(), resolve(r));
-      run.reject = (e) => (done(), reject(e));
-      api("POST", `/sessions/${this.id}/messages`, clean({ prompt, context: o.context }))
-        .then((a) => {
-          if (!a?.messageId) throw fail("upstream_error", "the server did not name the run");
-          run.id = a.messageId; // the only way a send learns its run
-          this.#derive(); // its events may have arrived before the 202
-        })
-        .catch((e) => run.reject(e));
-    });
+  send(prompt: string, o: SendOptions = {}): Promise<Result> {
+    if (typeof prompt !== "string" || !prompt.trim()) return Promise.reject(fail("invalid_request", "the message is empty"));
+    if (this.#closed) return Promise.reject(fail("cancelled", "the session is closed"));
+    if (this.#run) return Promise.reject(fail("run_active", "an answer is still running in this session"));
+    if (o.signal?.aborted) return Promise.reject(fail("cancelled", "the call was aborted"));
+    // Claim the slot now, synchronously: a second send sees it at once.
+    let resolve!: (r: Result) => void, reject!: (e: unknown) => void, onCancel!: () => void;
+    const promise = new Promise<Result>((a, b) => ((resolve = a), (reject = b)));
+    const run: Run = {
+      id: "", stage: "preparing", aborted: false, settled: false, cancelled: new Promise((r) => (onCancel = r)), cancel: () => onCancel(),
+      text: "", onText: o.onText, tools: new AbortController(), resolve, reject,
+    };
+    const onAbort = () => this.#abort(run);
+    const settle = () => {
+      run.settled = true;
+      o.signal?.removeEventListener("abort", onAbort);
+      run.tools.abort();
+      if (this.#run === run) this.#run = null; // only its own run frees the slot
+    };
+    run.resolve = (r) => { if (!run.settled) { settle(); resolve(r); } };
+    run.reject = (e) => { if (!run.settled) { settle(); reject(e); } };
+    run.cancelled.then(() => run.stage === "preparing" && run.reject(fail("cancelled", "the call was aborted")));
+    this.#run = run;
+    o.signal?.addEventListener("abort", onAbort, { once: true });
+    void this.#start(run, prompt, o.context);
+    return promise;
+  }
+
+  // Preparation, then the POST. After every await: still this run's turn,
+  // and not aborted? An aborted preparation posts nothing.
+  async #start(run: Run, prompt: string, context?: string) {
+    const live = () => !run.settled && !run.aborted;
+    try {
+      await this.#grant.consent();
+      if (!live()) return;
+      await Promise.race([this.#ready, run.cancelled]);
+      if (!live()) return;
+      if (this.#tools.length) await this.#register(); // the tab that sends runs the tools
+      if (!live()) return;
+      run.stage = "posting";
+      const a = await api("POST", `/sessions/${this.id}/messages`, clean({ prompt, context }));
+      if (!a?.messageId) throw fail("upstream_error", "the server did not name the run");
+      run.id = a.messageId; // the only way a send learns its run
+      run.stage = "running";
+      if (run.aborted) {
+        // aborted while posting: the message was sent, so stop its run
+        run.reject(fail("cancelled", "the call was aborted"));
+        void this.stop();
+        return;
+      }
+      this.#derive(); // its events may have arrived before the 202
+    } catch (e) {
+      run.reject(e);
+    }
+  }
+
+  // An abort, at whatever stage the run is: preparing → nothing was posted,
+  // the send rejects now; posting → #start stops the run once the 202 names
+  // it; running → stop, and the run's ChatRun entity settles it.
+  #abort(run: Run) {
+    if (run.settled || run.aborted) return;
+    run.aborted = true;
+    run.cancel();
+    if (run.stage === "running") void this.stop();
   }
 
   async stop(): Promise<void> {

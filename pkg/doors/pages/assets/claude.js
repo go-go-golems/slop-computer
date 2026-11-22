@@ -1,4 +1,4 @@
-/* slop page runtime (window.claude), built from web/runtime: do not edit. source sha256:f8e87ba6e16e0d706e1493fdc5d5a38a3c6e23f85df9c582ddd732e1f3c2eaa9 */
+/* slop page runtime (window.claude), built from web/runtime: do not edit. source sha256:daa8bda2e9edd310c9d49b3c3ad3bdaf72bf6c60d95701f4065e332552b03c81 */
 "use strict";
 (() => {
   var __defProp = Object.defineProperty;
@@ -1452,7 +1452,7 @@
     const i = segmentId.lastIndexOf(":text:");
     return i > 0 ? segmentId.slice(0, i) : "";
   };
-  var _grant, _tools, _connection, _executor, _stream, _ready, _onReady, _closed, _run, _ran, _listeners, _entities, _seq, _Session_instances, register_fn, connect_fn, snapshot_fn, event_fn, put_fn, get_fn, apply_fn, derive_fn, call_fn;
+  var _grant, _tools, _connection, _executor, _stream, _ready, _onReady, _closed, _run, _ran, _listeners, _entities, _seq, _Session_instances, start_fn, abort_fn, register_fn, connect_fn, snapshot_fn, event_fn, put_fn, get_fn, apply_fn, derive_fn, call_fn;
   var Session = class {
     constructor(info, tools, fresh, grant) {
       __privateAdd(this, _Session_instances);
@@ -1496,32 +1496,50 @@
       return () => __privateGet(this, _listeners).delete(fn);
     }
     /** Sends a message and resolves with the answer when the run ends. */
-    async send(prompt, o = {}) {
-      if (typeof prompt !== "string" || !prompt.trim()) throw fail("invalid_request", "the message is empty");
-      if (__privateGet(this, _closed)) throw fail("cancelled", "the session is closed");
-      if (__privateGet(this, _run)) throw fail("run_active", "an answer is still running in this session");
-      if (o.signal?.aborted) throw fail("cancelled", "the call was aborted");
-      await __privateGet(this, _grant).consent();
-      await __privateGet(this, _ready);
-      if (__privateGet(this, _tools).length) await __privateMethod(this, _Session_instances, register_fn).call(this);
-      return new Promise((resolve2, reject) => {
-        const run = { id: "", text: "", onText: o.onText, tools: new AbortController(), resolve: resolve2, reject };
-        __privateSet(this, _run, run);
-        const onAbort = () => void this.stop();
-        o.signal?.addEventListener("abort", onAbort, { once: true });
-        const done = () => {
-          o.signal?.removeEventListener("abort", onAbort);
-          run.tools.abort();
-          if (__privateGet(this, _run) === run) __privateSet(this, _run, null);
-        };
-        run.resolve = (r) => (done(), resolve2(r));
-        run.reject = (e) => (done(), reject(e));
-        api2("POST", `/sessions/${this.id}/messages`, clean({ prompt, context: o.context })).then((a) => {
-          if (!a?.messageId) throw fail("upstream_error", "the server did not name the run");
-          run.id = a.messageId;
-          __privateMethod(this, _Session_instances, derive_fn).call(this);
-        }).catch((e) => run.reject(e));
-      });
+    send(prompt, o = {}) {
+      if (typeof prompt !== "string" || !prompt.trim()) return Promise.reject(fail("invalid_request", "the message is empty"));
+      if (__privateGet(this, _closed)) return Promise.reject(fail("cancelled", "the session is closed"));
+      if (__privateGet(this, _run)) return Promise.reject(fail("run_active", "an answer is still running in this session"));
+      if (o.signal?.aborted) return Promise.reject(fail("cancelled", "the call was aborted"));
+      let resolve2, reject, onCancel;
+      const promise = new Promise((a, b) => (resolve2 = a, reject = b));
+      const run = {
+        id: "",
+        stage: "preparing",
+        aborted: false,
+        settled: false,
+        cancelled: new Promise((r) => onCancel = r),
+        cancel: () => onCancel(),
+        text: "",
+        onText: o.onText,
+        tools: new AbortController(),
+        resolve: resolve2,
+        reject
+      };
+      const onAbort = () => __privateMethod(this, _Session_instances, abort_fn).call(this, run);
+      const settle = () => {
+        run.settled = true;
+        o.signal?.removeEventListener("abort", onAbort);
+        run.tools.abort();
+        if (__privateGet(this, _run) === run) __privateSet(this, _run, null);
+      };
+      run.resolve = (r) => {
+        if (!run.settled) {
+          settle();
+          resolve2(r);
+        }
+      };
+      run.reject = (e) => {
+        if (!run.settled) {
+          settle();
+          reject(e);
+        }
+      };
+      run.cancelled.then(() => run.stage === "preparing" && run.reject(fail("cancelled", "the call was aborted")));
+      __privateSet(this, _run, run);
+      o.signal?.addEventListener("abort", onAbort, { once: true });
+      void __privateMethod(this, _Session_instances, start_fn).call(this, run, prompt, o.context);
+      return promise;
     }
     async stop() {
       await api2("POST", `/sessions/${this.id}/stop`).catch(() => {
@@ -1562,6 +1580,39 @@
   _entities = new WeakMap();
   _seq = new WeakMap();
   _Session_instances = new WeakSet();
+  start_fn = async function(run, prompt, context) {
+    const live = () => !run.settled && !run.aborted;
+    try {
+      await __privateGet(this, _grant).consent();
+      if (!live()) return;
+      await Promise.race([__privateGet(this, _ready), run.cancelled]);
+      if (!live()) return;
+      if (__privateGet(this, _tools).length) await __privateMethod(this, _Session_instances, register_fn).call(this);
+      if (!live()) return;
+      run.stage = "posting";
+      const a = await api2("POST", `/sessions/${this.id}/messages`, clean({ prompt, context }));
+      if (!a?.messageId) throw fail("upstream_error", "the server did not name the run");
+      run.id = a.messageId;
+      run.stage = "running";
+      if (run.aborted) {
+        run.reject(fail("cancelled", "the call was aborted"));
+        void this.stop();
+        return;
+      }
+      __privateMethod(this, _Session_instances, derive_fn).call(this);
+    } catch (e) {
+      run.reject(e);
+    }
+  };
+  // An abort, at whatever stage the run is: preparing → nothing was posted,
+  // the send rejects now; posting → #start stops the run once the 202 names
+  // it; running → stop, and the run's ChatRun entity settles it.
+  abort_fn = function(run) {
+    if (run.settled || run.aborted) return;
+    run.aborted = true;
+    run.cancel();
+    if (run.stage === "running") void this.stop();
+  };
   register_fn = async function() {
     const ack = await api2("POST", `/sessions/${this.id}/tools/manifest`, {
       clientInstanceId: CLIENT,
