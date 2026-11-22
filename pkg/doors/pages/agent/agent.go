@@ -1,4 +1,4 @@
-// Package agent is the agent capability: server-held agent sessions for
+// Package agent serves the agent capability: server-held agent sessions for
 // pages (SLOP3-025). A page opens a session, registers the tools it runs,
 // sends one message at a time and reads events; the conversation and the
 // tool loop stay on the server. It is pinocchio's chat HTTP API
@@ -6,6 +6,8 @@
 // view, the person's own sessions in the app, the runtime of each message
 // from slop's model backend and the page's settings, and a hold on the LLM
 // ledger before every model round, as sample's rounds have (SLOP3-007).
+// It lives in the pages door, which alone serves it (on the sandbox origin):
+// it is HTTP through and through, which capabilities (pkg/caps) may not be.
 package agent
 
 import (

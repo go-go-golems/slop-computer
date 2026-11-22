@@ -17,6 +17,7 @@ import (
 	"sync"
 
 	"github.com/go-go-golems/slop-computer/pkg/apps"
+	capagent "github.com/go-go-golems/slop-computer/pkg/doors/pages/agent"
 	"github.com/go-go-golems/slop-computer/pkg/store"
 )
 
@@ -109,6 +110,9 @@ func (s *Door) serveSandbox(w http.ResponseWriter, r *http.Request) {
 		return
 	case strings.HasPrefix(p, "/_rt/sample") && r.Method == http.MethodPost:
 		s.serveSampleRoute(w, r, p)
+		return
+	case p == capagent.Prefix || strings.HasPrefix(p, capagent.Prefix+"/"):
+		s.serveAgentRoute(w, r)
 		return
 	case !get:
 		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
