@@ -1,4 +1,4 @@
-/* slop page runtime (window.claude), built from web/runtime: do not edit. source sha256:3933af0249e740f637d0361486634b8ba756db3ab8f14ab793fd27e592e7f81e */
+/* slop page runtime (window.claude), built from web/runtime: do not edit. source sha256:4602d816fd17899cd50145052f60a2e8845604665510eecd908d938cf93be56b */
 "use strict";
 (() => {
   var __defProp = Object.defineProperty;
@@ -1436,10 +1436,12 @@
   var clean = (o) => Object.fromEntries(Object.entries(o).filter(([, v]) => v !== void 0 && v !== null && v !== ""));
   var _tools, _connection, _executor, _stream, _ready, _onReady, _closed, _run, _seen, _listeners, _Session_instances, register_fn, connect_fn, snapshot_fn, event_fn, text_fn, call_fn;
   var Session = class {
-    constructor(info, tools) {
+    constructor(info, tools, fresh) {
       __privateAdd(this, _Session_instances);
       __publicField(this, "id");
       __publicField(this, "key");
+      /** True when open() created the session: the server has no conversation yet. */
+      __publicField(this, "fresh");
       __publicField(this, "info");
       __publicField(this, "running", false);
       __privateAdd(this, _tools);
@@ -1453,6 +1455,7 @@
       __privateAdd(this, _seen, /* @__PURE__ */ new Set());
       __privateAdd(this, _listeners, /* @__PURE__ */ new Set());
       this.id = info.id;
+      this.fresh = fresh;
       this.key = info.labels?.key ?? "";
       this.info = info;
       __privateSet(this, _tools, tools);
@@ -1674,6 +1677,7 @@
         for (const t of tools) if (!t || typeof t.name !== "string" || typeof t.execute !== "function") throw fail("invalid_request", "a tool is {name, description, inputSchema, execute}");
         const find = async () => (await api2("GET", "/sessions?label=" + encodeURIComponent("key:" + key))).sessions?.[0] ?? null;
         let info = await find();
+        let fresh = false;
         if (!info) {
           try {
             info = (await api2("POST", "/sessions", clean({
@@ -1681,11 +1685,12 @@
               labels: clean({ key, tier: o.modelTier, model: o.model, effort: o.effort }),
               data: clean({ system: o.system, maxRounds: o.maxRounds, toolTimeout: o.toolTimeout, maxTokens: o.maxTokens })
             }))).session;
+            fresh = true;
           } catch (e) {
             if (e?.code !== "session_exists" || !(info = await find())) throw e;
           }
         }
-        return new Session(info, tools);
+        return new Session(info, tools, fresh);
       },
       /** The person's sessions in this app. */
       async list() {

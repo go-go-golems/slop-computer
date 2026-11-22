@@ -61,6 +61,7 @@ test("open creates the session with its key and settings when none exists", asyn
   const create = reqs.find((r) => r.method === "POST" && r.url === "/_rt/agent/sessions")!;
   assert.deepEqual(create.body, { labels: { key: "t1", tier: "default" }, data: { system: "You are a test.", maxRounds: 12 } });
   assert.equal(s.id, "s1");
+  assert.equal(s.fresh, true);
   await opened;
   stream!.enqueue(enc.encode(`event: snapshot\ndata: {"sessionId":"s1","snapshotOrdinal":"1","entities":[]}\n\n`));
   await waitFor(() => reqs.some((r) => r.url.endsWith("/tools/manifest")));

@@ -80,6 +80,8 @@ type Run = {
 class Session {
   readonly id: string;
   readonly key: string;
+  /** True when open() created the session: the server has no conversation yet. */
+  readonly fresh: boolean;
   info: any;
   running = false;
   #tools: Tool[];
@@ -93,8 +95,9 @@ class Session {
   #seen = new Set<string>();
   #listeners = new Set<(e: UIEvent) => void>();
 
-  constructor(info: any, tools: Tool[]) {
+  constructor(info: any, tools: Tool[], fresh: boolean) {
     this.id = info.id;
+    this.fresh = fresh;
     this.key = info.labels?.key ?? "";
     this.info = info;
     this.#tools = tools;
@@ -317,6 +320,7 @@ export function agent() {
       for (const t of tools) if (!t || typeof t.name !== "string" || typeof t.execute !== "function") throw fail("invalid_request", "a tool is {name, description, inputSchema, execute}");
       const find = async () => (await api("GET", "/sessions?label=" + encodeURIComponent("key:" + key))).sessions?.[0] ?? null;
       let info = await find();
+      let fresh = false;
       if (!info) {
         try {
           info = (await api("POST", "/sessions", clean({
@@ -324,11 +328,12 @@ export function agent() {
             labels: clean({ key, tier: o.modelTier, model: o.model, effort: o.effort }),
             data: clean({ system: o.system, maxRounds: o.maxRounds, toolTimeout: o.toolTimeout, maxTokens: o.maxTokens }),
           }))).session;
+          fresh = true;
         } catch (e: any) {
           if (e?.code !== "session_exists" || !(info = await find())) throw e;
         }
       }
-      return new Session(info, tools);
+      return new Session(info, tools, fresh);
     },
     /** The person's sessions in this app. */
     async list() {
