@@ -49,6 +49,8 @@ topics:
       description: The bench (coding-agent workbench app)
     - slug: runtime
       description: The page runtime (window.claude)
+    - slug: chatapp
+      description: pinocchio's chat runtime and HTTP API
 docTypes:
     - slug: design-doc
       description: Structured rationale and architecture notes
