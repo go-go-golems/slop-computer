@@ -1,7 +1,8 @@
 // agent.ts against a scripted server: open by key (list, then create), the
 // page's tool runs when a call names its assignment and its result is
 // posted, the answer is every text segment of the run, failures carry the
-// run's code, and an abort stops the run (SLOP3-025).
+// run's code, an abort stops the run, and a run that ended while the stream
+// was down settles from the next snapshot (SLOP3-025).
 import assert from "node:assert/strict";
 import { test } from "node:test";
 
@@ -18,6 +19,7 @@ const reqs: Req[] = [];
 let stream: ReadableStreamDefaultController<Uint8Array> | null = null;
 let streamOpened!: () => void;
 const opened = new Promise<void>((r) => (streamOpened = r));
+let streams = 0, runs = 0;
 const enc = new TextEncoder();
 const json = (v: unknown, status = 200) => new Response(JSON.stringify(v), { status, headers: { "Content-Type": "application/json" } });
 
@@ -28,13 +30,14 @@ globalThis.fetch = (async (url: string, init?: RequestInit) => {
   if (url.startsWith("/_rt/events")) return new Promise(() => {});
   if (url.endsWith("/events")) {
     const rs = new ReadableStream<Uint8Array>({ start: (c) => { stream = c; } });
+    streams++;
     queueMicrotask(streamOpened);
     return new Response(rs, { status: 200, headers: { "Content-Type": "text/event-stream" } });
   }
   if (url.startsWith("/_rt/agent/sessions?label=")) return json({ sessions: [] });
   if (url === "/_rt/agent/sessions" && method === "POST") return json({ sessionId: "s1", session: { id: "s1", labels: { key: body.labels.key, app: "bench" } } }, 201);
   if (url.endsWith("/tools/manifest")) return json({ accepted: true, executor: { assignmentId: "a1", connectionId: body.connectionId } });
-  if (url.endsWith("/messages")) return json({ sessionId: "s1", accepted: true }, 202);
+  if (url.endsWith("/messages")) return json({ sessionId: "s1", accepted: true, messageId: "r" + ++runs }, 202);
   if (url.endsWith("/tools/results")) return json({ ok: true });
   if (url.endsWith("/stop")) return json({ sessionId: "s1", accepted: true }, 202);
   return json({ error: "no route " + url, code: "invalid_request" }, 404);
@@ -43,7 +46,8 @@ globalThis.fetch = (async (url: string, init?: RequestInit) => {
 const { initPermissions } = await import("../src/caps.ts");
 const { agent } = await import("../src/agent.ts");
 on.message({ origin: PARENT, source: parent, data: { slop: 1, type: "view", view: "v1", secret: "s1" } });
-initPermissions({ permissions: { sample: "granted" } } as any);
+// An app that declares agent without sample: the agent's own consent.
+initPermissions({ permissions: { agent: "granted" } } as any);
 
 let ordinal = 1;
 const push = (name: string, payload: unknown) => stream!.enqueue(enc.encode(`id: ${++ordinal}\nevent: ui\ndata: ${JSON.stringify({ sessionId: "s1", ordinal: String(ordinal), name, payload })}\n\n`));
@@ -115,5 +119,25 @@ test("an abort stops the run", async () => {
   await waitFor(() => reqs.some((r) => r.url.endsWith("/stop")));
   push("ChatRunStopped", { messageId: "r3" });
   await assert.rejects(answer, (e: any) => e.code === "cancelled");
+});
+
+test("a run that ends while the stream is down settles from the next snapshot", async () => {
+  const answer = s.send("while offline");
+  await waitFor(() => reqs.filter((r) => r.url.endsWith("/messages")).length === 4);
+  push("ChatRunStarted", { messageId: "r4" });
+  const before = streams;
+  stream!.close(); // the connection drops; the run finishes meanwhile
+  await waitFor(() => streams > before);
+  const ent = (kind: string, id: string, ord: number, payload: unknown) => ({ kind, id, createdOrdinal: String(ord), payload });
+  const entities = [
+    ent("ChatRun", "r4", 20, { messageId: "r4", status: "finished", truncated: true, reason: "max_rounds" }),
+    ent("ChatMessage", "r4:text:a", 21, { role: "assistant", text: "first part", parentMessageId: "r4" }),
+    ent("ChatMessage", "r4:text:b", 23, { role: "assistant", text: "second part", parentMessageId: "r4" }),
+    ent("ChatMessage", "r3:text:a", 15, { role: "assistant", text: "another run", parentMessageId: "r3" }),
+  ];
+  stream!.enqueue(enc.encode(`event: snapshot\ndata: ${JSON.stringify({ sessionId: "s1", snapshotOrdinal: "30", entities })}\n\n`));
+  const r = await answer;
+  assert.equal(r.text, "first part\n\nsecond part");
+  assert.equal(r.truncated, true);
   s.close();
 });

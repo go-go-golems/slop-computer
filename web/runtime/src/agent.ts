@@ -3,8 +3,13 @@
 // message at a time and gets the answer; the server keeps the conversation
 // (append-only, so the provider's prompt cache holds) and runs the tool
 // loop; the page runs the tools it registered when the model calls them.
-// Spending is the sample capability's: the viewer's consent to sample and
-// the person's LLM budget, held before every model round.
+// Spending is the sample capability's (the sample policy, the person's LLM
+// budget, held before every model round); the consent asked is agent's own,
+// since a page may declare agent without sample.
+//
+// A run is known by the id the server's 202 gives it, and every run's
+// outcome is a ChatRun entity in the snapshot: a send settles from the live
+// terminal event or, after a reconnect that missed it, from the snapshot.
 import { consent } from "./caps.ts";
 import { request, rpc } from "./transport.ts";
 import { fail, freeze } from "./util.ts";
@@ -94,6 +99,7 @@ class Session {
   #run: Run | null = null;
   #seen = new Set<string>();
   #listeners = new Set<(e: UIEvent) => void>();
+  #entities: any[] = []; // the last snapshot's
 
   constructor(info: any, tools: Tool[], fresh: boolean) {
     this.id = info.id;
@@ -117,7 +123,7 @@ class Session {
     if (this.#closed) throw fail("cancelled", "the session is closed");
     if (this.#run) throw fail("run_active", "an answer is still running in this session");
     if (o.signal?.aborted) throw fail("cancelled", "the call was aborted");
-    await consent("sample");
+    await consent("agent");
     await this.#ready;
     if (this.#tools.length) await this.#register(); // the tab that sends runs the tools
     return new Promise<Result>((resolve, reject) => {
@@ -132,7 +138,12 @@ class Session {
       };
       run.resolve = (r) => (done(), resolve(r));
       run.reject = (e) => (done(), reject(e));
-      api("POST", `/sessions/${this.id}/messages`, clean({ prompt, context: o.context })).catch((e) => run.reject(e));
+      api("POST", `/sessions/${this.id}/messages`, clean({ prompt, context: o.context }))
+        .then((a) => {
+          if (a?.messageId) run.id = a.messageId; // the server's name for the run
+          this.#reconcile(run); // a snapshot that came in before the 202 may already hold its end
+        })
+        .catch((e) => run.reject(e));
     });
   }
 
@@ -223,8 +234,10 @@ class Session {
   }
 
   async #snapshot(snap: any) {
+    this.#entities = snap.entities ?? [];
     if (this.#tools.length) await this.#register().catch(() => {});
     this.#onReady();
+    if (this.#run) this.#reconcile(this.#run);
     // A call requested while the stream was down, assigned to this page.
     for (const e of snap.entities ?? []) {
       const p = e.payload;
@@ -264,6 +277,23 @@ class Session {
         else if (ev.name === "ChatRunStopped") run.reject(fail("cancelled", "the answer was stopped", run.visible ? { text: run.visible } : undefined));
         else run.reject(fail(p.code || "upstream_error", p.error || "the run failed", run.visible ? { text: run.visible } : undefined));
     }
+  }
+
+  // A run whose end the stream did not deliver (it ended while the stream
+  // was down): its ChatRun entity says how, its segments what it answered.
+  #reconcile(run: Run) {
+    if (!run.id || this.#run !== run) return;
+    const state = this.#entities.find((e) => e.kind === "ChatRun" && e.id === run.id)?.payload;
+    if (!state || state.status === "running") return;
+    const segs = this.#entities
+      .filter((e) => e.kind === "ChatMessage" && e.payload?.role === "assistant" && e.payload?.parentMessageId === run.id)
+      .sort((a, b) => Number(a.createdOrdinal ?? 0) - Number(b.createdOrdinal ?? 0));
+    for (const e of segs) this.#text(run, "ChatTextSegmentFinished", { messageId: e.id, content: e.payload.text ?? e.payload.content ?? "" });
+    this.running = false;
+    const extra = run.visible ? { text: run.visible } : undefined;
+    if (state.status === "finished") run.resolve(freeze({ text: run.visible, truncated: !!state.truncated }));
+    else if (state.status === "stopped") run.reject(fail("cancelled", "the answer was stopped", extra));
+    else run.reject(fail(state.code || "upstream_error", state.error || "the run failed", extra));
   }
 
   // The answer so far: every text segment of the run, in order, as sample's

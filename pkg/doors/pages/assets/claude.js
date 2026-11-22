@@ -1,4 +1,4 @@
-/* slop page runtime (window.claude), built from web/runtime: do not edit. source sha256:4602d816fd17899cd50145052f60a2e8845604665510eecd908d938cf93be56b */
+/* slop page runtime (window.claude), built from web/runtime: do not edit. source sha256:5aaf7c61839189a202fdb6d2dabe51909b9a4a784e261b07d759c9b4d9d79a2e */
 "use strict";
 (() => {
   var __defProp = Object.defineProperty;
@@ -1434,8 +1434,9 @@
     return data;
   }
   var clean = (o) => Object.fromEntries(Object.entries(o).filter(([, v]) => v !== void 0 && v !== null && v !== ""));
-  var _tools, _connection, _executor, _stream, _ready, _onReady, _closed, _run, _seen, _listeners, _Session_instances, register_fn, connect_fn, snapshot_fn, event_fn, text_fn, call_fn;
+  var _tools, _connection, _executor, _stream, _ready, _onReady, _closed, _run, _seen, _listeners, _entities, _Session_instances, register_fn, connect_fn, snapshot_fn, event_fn, reconcile_fn, text_fn, call_fn;
   var Session = class {
+    // the last snapshot's
     constructor(info, tools, fresh) {
       __privateAdd(this, _Session_instances);
       __publicField(this, "id");
@@ -1454,6 +1455,7 @@
       __privateAdd(this, _run, null);
       __privateAdd(this, _seen, /* @__PURE__ */ new Set());
       __privateAdd(this, _listeners, /* @__PURE__ */ new Set());
+      __privateAdd(this, _entities, []);
       this.id = info.id;
       this.fresh = fresh;
       this.key = info.labels?.key ?? "";
@@ -1473,7 +1475,7 @@
       if (__privateGet(this, _closed)) throw fail("cancelled", "the session is closed");
       if (__privateGet(this, _run)) throw fail("run_active", "an answer is still running in this session");
       if (o.signal?.aborted) throw fail("cancelled", "the call was aborted");
-      await consent("sample");
+      await consent("agent");
       await __privateGet(this, _ready);
       if (__privateGet(this, _tools).length) await __privateMethod(this, _Session_instances, register_fn).call(this);
       return new Promise((resolve2, reject) => {
@@ -1488,7 +1490,10 @@
         };
         run.resolve = (r) => (done(), resolve2(r));
         run.reject = (e) => (done(), reject(e));
-        api2("POST", `/sessions/${this.id}/messages`, clean({ prompt, context: o.context })).catch((e) => run.reject(e));
+        api2("POST", `/sessions/${this.id}/messages`, clean({ prompt, context: o.context })).then((a) => {
+          if (a?.messageId) run.id = a.messageId;
+          __privateMethod(this, _Session_instances, reconcile_fn).call(this, run);
+        }).catch((e) => run.reject(e));
       });
     }
     async stop() {
@@ -1527,6 +1532,7 @@
   _run = new WeakMap();
   _seen = new WeakMap();
   _listeners = new WeakMap();
+  _entities = new WeakMap();
   _Session_instances = new WeakSet();
   register_fn = async function() {
     const ack = await api2("POST", `/sessions/${this.id}/tools/manifest`, {
@@ -1587,9 +1593,11 @@
     }
   };
   snapshot_fn = async function(snap) {
+    __privateSet(this, _entities, snap.entities ?? []);
     if (__privateGet(this, _tools).length) await __privateMethod(this, _Session_instances, register_fn).call(this).catch(() => {
     });
     __privateGet(this, _onReady).call(this);
+    if (__privateGet(this, _run)) __privateMethod(this, _Session_instances, reconcile_fn).call(this, __privateGet(this, _run));
     for (const e of snap.entities ?? []) {
       const p = e.payload;
       if (e.kind === "ChatFrontendToolCall" && p && p.status === "requested") __privateMethod(this, _Session_instances, call_fn).call(this, p);
@@ -1627,6 +1635,20 @@
         else if (ev.name === "ChatRunStopped") run.reject(fail("cancelled", "the answer was stopped", run.visible ? { text: run.visible } : void 0));
         else run.reject(fail(p.code || "upstream_error", p.error || "the run failed", run.visible ? { text: run.visible } : void 0));
     }
+  };
+  // A run whose end the stream did not deliver (it ended while the stream
+  // was down): its ChatRun entity says how, its segments what it answered.
+  reconcile_fn = function(run) {
+    if (!run.id || __privateGet(this, _run) !== run) return;
+    const state2 = __privateGet(this, _entities).find((e) => e.kind === "ChatRun" && e.id === run.id)?.payload;
+    if (!state2 || state2.status === "running") return;
+    const segs = __privateGet(this, _entities).filter((e) => e.kind === "ChatMessage" && e.payload?.role === "assistant" && e.payload?.parentMessageId === run.id).sort((a, b) => Number(a.createdOrdinal ?? 0) - Number(b.createdOrdinal ?? 0));
+    for (const e of segs) __privateMethod(this, _Session_instances, text_fn).call(this, run, "ChatTextSegmentFinished", { messageId: e.id, content: e.payload.text ?? e.payload.content ?? "" });
+    this.running = false;
+    const extra = run.visible ? { text: run.visible } : void 0;
+    if (state2.status === "finished") run.resolve(freeze({ text: run.visible, truncated: !!state2.truncated }));
+    else if (state2.status === "stopped") run.reject(fail("cancelled", "the answer was stopped", extra));
+    else run.reject(fail(state2.code || "upstream_error", state2.error || "the run failed", extra));
   };
   // The answer so far: every text segment of the run, in order, as sample's
   // text is every round's text.
