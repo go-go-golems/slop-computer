@@ -186,6 +186,12 @@ func TestAPageToolRoundTripIsMeteredOnTheLedger(t *testing.T) {
 	used := f.ledger.LLMUsed(context.Background(), "usr_a", llm.Period(time.Now()))
 	require.Positive(t, used, "both model rounds are charged to the person")
 	require.Zero(t, f.ledger.LLMReserved(context.Background(), "usr_a", llm.Period(time.Now())), "no hold stays open")
+
+	// The next message's rounds are charged too: its holds are its own.
+	status, out = f.do("usr_a", "bench", http.MethodPost, "/sessions/"+id+"/messages", `{"prompt":"thanks"}`)
+	require.Equal(t, http.StatusAccepted, status, string(out))
+	next(t, ev, "ChatRunFinished")
+	require.Greater(t, f.ledger.LLMUsed(context.Background(), "usr_a", llm.Period(time.Now())), used, "a second message's round reuses no hold of the first")
 }
 
 func TestSessionsBelongToOnePersonInOneApp(t *testing.T) {

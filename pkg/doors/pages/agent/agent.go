@@ -35,6 +35,7 @@ import (
 	"github.com/go-go-golems/pinocchio/pkg/chatapp/toolkit/toolexec"
 	infruntime "github.com/go-go-golems/pinocchio/pkg/inference/runtime"
 	chatstore "github.com/go-go-golems/pinocchio/pkg/persistence/chatstore"
+	"github.com/go-go-golems/slop-computer/pkg/ids"
 	"github.com/go-go-golems/slop-computer/pkg/llm"
 	"github.com/pkg/errors"
 )
@@ -337,7 +338,9 @@ func (s *Service) resolve(ctx context.Context, r *http.Request, info sessions.In
 	}
 	metered := &meteredEngine{
 		inner: base, ledger: s.cfg.Ledger, payer: v.User, audience: v.Audience,
-		call: "agent:" + info.ID, maxOut: maxOut,
+		// one call per message: hold keys are idempotent (a retry gets its
+		// hold back), so a message's rounds must not reuse the last one's
+		call: "agent:" + info.ID + ":" + ids.New("m", 8), maxOut: maxOut,
 	}
 	mws := []middleware.Middleware{middleware.NewToolResultReorderMiddleware()}
 	if strings.TrimSpace(d.System) != "" {
