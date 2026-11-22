@@ -13,14 +13,15 @@ Owners:
 RelatedFiles: []
 ExternalSources: []
 Summary: Three structural changes after the review of pinocchio#221 and slop-computer#56. httpapi reaches sessions only through a per-principal guard; each runtime capability gets a consent bound to its own name; the agent runtime follows runs with one reducer over the snapshot and the events.
-LastUpdated: 2026-11-22T17:00:00-05:00
+LastUpdated: 2026-11-22T18:30:00-05:00
 WhatFor: Reviewing the guard, grant and reducer changes, and keeping them in place.
 WhenToUse: Before adding an httpapi route, a runtime capability, or agent client logic.
 ---
 
 # Design: making the review's bug classes impossible to express
 
-**Status:** implemented. Change 1 in pinocchio cedda17, change 2 in slop c7a9d79, change 3 in slop 6a62fcb.
+**Status:** changes 1–3 implemented (pinocchio cedda17; slop c7a9d79, 6a62fcb). Changes 4–6 (section 7, from the
+second review) in progress.
 
 ## 1. Why
 
@@ -170,3 +171,93 @@ again when the id arrives. A reconnect is a snapshot like any other: there is no
 - Purging a deleted session's turns and timeline. It needs delete operations in the turn store and in sessionstream's
   hydration store.
 - Other runtime capabilities that keep their own event logic (db, room). The reducer rule applies to agent only.
+
+## 7. Second review: changes 4–6
+
+The second Codex review found four more bugs. They fall into three classes, and each gets a structural fix.
+
+| Bug | What allowed it | Change |
+|---|---|---|
+| pinocchio#221: `budget.tokensPerSession` is skipped when a session has no tools | the round guard is attached to geppetto's tool loop, not to the model call; with no tool registry, `enginebuilder` makes one plain call and never runs the guard | 4 |
+| slop#56: two `send()`s without awaiting lose the first run | `send()` checks state, awaits consent, readiness and registration, and only then claims the run | 5 |
+| slop#56: an abort during those awaits is ignored | the abort listener is installed after the awaits | 5 |
+| slop#56: a tool result that fails to post is lost | running a tool and delivering its result are one step, and a failed delivery is dropped | 6 |
+
+### Change 4: the round guard wraps the engine (pinocchio `pkg/chatapp`)
+
+**Rule:** a run's guard runs before every model call of the run, whatever path geppetto takes.
+
+chatapp no longer passes `ComposedRuntime.RoundGuard` to `enginebuilder.Builder`. It wraps the run's engine:
+
+```go
+type guardedEngine struct {
+    inner engine.Engine
+    guard toolloop.RoundGuard
+    round int // model calls of this run so far; one guardedEngine per run
+}
+
+func (g *guardedEngine) RunInference(ctx, t) (*turns.Turn, error) {
+    if err := g.guard(ctx, t, g.round); err != nil {
+        return t, err // the turn so far stays the conversation (chatapp saves it)
+    }
+    g.round++
+    return g.inner.RunInference(ctx, t)
+}
+```
+
+The round index equals the loop's: calls are counted from 0, and the final answer at the limit is call
+`maxRounds`, the index geppetto's loop passes. This is the same structure as slop's metered engine, which was not
+affected by the bug. A guard error from the engine path reaches `decideOutcome` like any other engine error, so its
+`CodedError` code (`quota_exceeded`) is kept.
+
+Tests: in agentserver, a session over budget with no in-process tools and no browser tools fails its next message
+with `quota_exceeded` without calling the engine (Codex's repro). The existing "budget stops between rounds" test keeps
+passing.
+
+A follow-up in geppetto: its builder should not drop the guard on the single-call path either. It is not needed here,
+since chatapp no longer depends on that.
+
+### Change 5: a send claims its run first and owns its lifecycle (slop `agent.ts`)
+
+**Rule:** the first thing `send()` does is claim the session's run slot, synchronously, with a `Run` object. Nothing
+awaits before that. The run's stage is explicit, and an abort is handled by the run at any stage.
+
+```text
+send():
+  if #run → run_active          (synchronous: a second send is refused at once)
+  run = new Run(stage: preparing); #run = run; listen for abort now
+  await consent, readiness, registration       // each await is followed by "still mine and not aborted?"
+  if aborted → settle cancelled (nothing posted)
+  stage = posting; POST /messages → 202 {messageId} → stage = running, id = messageId
+  abort while running → POST /stop; the ChatRun entity settles it (cancelled)
+  abort while posting → settle cancelled once the 202 arrives, then POST /stop for that id
+  409 / error → settle rejected (the slot is this run's, so clearing it cannot drop another run)
+```
+
+`#run` is cleared only by its own run's `settle`, which checks identity (`if (this.#run === run)`). Waiting for the
+first snapshot becomes cancellable, because the wait races the run's abort.
+
+Tests: two `send()`s without awaiting (the second is refused with `run_active`, the first resolves); an abort before
+the first snapshot (no `/messages` is posted, the send rejects `cancelled`); an abort while the `202` is pending (the
+send rejects `cancelled`, and `/stop` is posted).
+
+### Change 6: tool results go through an outbox (slop `agent.ts`)
+
+**Rule:** a tool runs once. Its result is kept in an outbox until the server has it, and the outbox is delivered from
+`#derive`, the same place that decides which tools to run.
+
+```text
+#derive():
+  for each ChatFrontendToolCall in the local copy:
+    status requested, assigned here, not run → run it once; result → outbox[id]; deliver
+    status requested, outbox[id] present, no delivery in flight → deliver again (after a reconnect)
+    status not requested (the server has it, or gave up) → drop outbox[id]
+deliver(id): POST /tools/results; 2xx or a 4xx (late, unknown, invalid) → drop outbox[id]; network/5xx → keep
+```
+
+A tool's side effects therefore happen at most once, and its result is delivered at least once while the server still
+waits for it. The server dedupes, since a second result for a call is refused.
+
+Tests: a result post that fails at the network is retried after the next snapshot shows the call still requested,
+without running the tool again; a call the server no longer waits for is not resent.
+
