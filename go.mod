@@ -8,9 +8,10 @@ require (
 	github.com/dop251/goja v0.0.0-20261103151521-97b96e1e55f5
 	github.com/dop251/goja_nodejs v0.0.0-20260918173711-b481721df8a2
 	github.com/evanw/esbuild v0.25.12
-	github.com/go-go-golems/geppetto v0.14.1
+	github.com/go-go-golems/geppetto v0.14.3
 	github.com/go-go-golems/glazed v1.4.3
 	github.com/go-go-golems/go-go-goja v0.10.8-0.20261108231830-9d7ede7027c7
+	github.com/go-go-golems/pinocchio v0.11.18 // needs the release after task/merge-agentd-into-chatapp (SLOP3-025)
 	github.com/go-jose/go-jose/v4 v4.1.8
 	github.com/invopop/jsonschema v0.14.0
 	github.com/mattn/go-sqlite3 v1.14.52
