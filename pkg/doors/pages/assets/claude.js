@@ -1,6 +1,18 @@
-/* slop page runtime (window.claude), built from web/runtime: do not edit. source sha256:1e09d74a10aa3fc11392a37eba7756d262c94540fade4e15facfde444ff0a92f */
+/* slop page runtime (window.claude), built from web/runtime: do not edit. source sha256:3933af0249e740f637d0361486634b8ba756db3ab8f14ab793fd27e592e7f81e */
 "use strict";
 (() => {
+  var __defProp = Object.defineProperty;
+  var __typeError = (msg) => {
+    throw TypeError(msg);
+  };
+  var __defNormalProp = (obj, key, value) => key in obj ? __defProp(obj, key, { enumerable: true, configurable: true, writable: true, value }) : obj[key] = value;
+  var __publicField = (obj, key, value) => __defNormalProp(obj, typeof key !== "symbol" ? key + "" : key, value);
+  var __accessCheck = (obj, member, msg) => member.has(obj) || __typeError("Cannot " + msg);
+  var __privateGet = (obj, member, getter) => (__accessCheck(obj, member, "read from private field"), getter ? getter.call(obj) : member.get(obj));
+  var __privateAdd = (obj, member, value) => member.has(obj) ? __typeError("Cannot add the same private member more than once") : member instanceof WeakSet ? member.add(obj) : member.set(obj, value);
+  var __privateSet = (obj, member, value, setter) => (__accessCheck(obj, member, "write to private field"), setter ? setter.call(obj, value) : member.set(obj, value), value);
+  var __privateMethod = (obj, member, method) => (__accessCheck(obj, member, "access private method"), method);
+
   // src/limits.ts
   var limits = {
     MaxDocBytes: 256 << 10,
@@ -1398,6 +1410,302 @@
     return r.api;
   }
 
+  // src/agent.ts
+  var BASE = "/_rt/agent";
+  var CLIENT = "page-" + Math.random().toString(36).slice(2, 10);
+  async function api2(method, path, body) {
+    const r = await request(BASE + path, {
+      method,
+      headers: body === void 0 ? {} : { "Content-Type": "application/json" },
+      body: body === void 0 ? void 0 : JSON.stringify(body)
+    });
+    const txt = await r.text();
+    let data = null;
+    try {
+      data = txt ? JSON.parse(txt) : null;
+    } catch {
+      data = null;
+    }
+    if (!r.ok) {
+      const e = data?.error;
+      const code = (typeof e === "object" && e ? e.code : data?.code) || (r.status === 409 ? "run_active" : "upstream_error");
+      throw fail(code, (typeof e === "object" && e ? e.message : e) || "HTTP " + r.status);
+    }
+    return data;
+  }
+  var clean = (o) => Object.fromEntries(Object.entries(o).filter(([, v]) => v !== void 0 && v !== null && v !== ""));
+  var _tools, _connection, _executor, _stream, _ready, _onReady, _closed, _run, _seen, _listeners, _Session_instances, register_fn, connect_fn, snapshot_fn, event_fn, text_fn, call_fn;
+  var Session = class {
+    constructor(info, tools) {
+      __privateAdd(this, _Session_instances);
+      __publicField(this, "id");
+      __publicField(this, "key");
+      __publicField(this, "info");
+      __publicField(this, "running", false);
+      __privateAdd(this, _tools);
+      __privateAdd(this, _connection, "c-" + Math.random().toString(36).slice(2, 10));
+      __privateAdd(this, _executor, null);
+      __privateAdd(this, _stream, null);
+      __privateAdd(this, _ready);
+      __privateAdd(this, _onReady);
+      __privateAdd(this, _closed, false);
+      __privateAdd(this, _run, null);
+      __privateAdd(this, _seen, /* @__PURE__ */ new Set());
+      __privateAdd(this, _listeners, /* @__PURE__ */ new Set());
+      this.id = info.id;
+      this.key = info.labels?.key ?? "";
+      this.info = info;
+      __privateSet(this, _tools, tools);
+      __privateSet(this, _ready, new Promise((r) => __privateSet(this, _onReady, r)));
+      void __privateMethod(this, _Session_instances, connect_fn).call(this);
+    }
+    /** Calls fn with every UI event of the session (chatapp's names); returns an unsubscribe. */
+    on(fn) {
+      __privateGet(this, _listeners).add(fn);
+      return () => __privateGet(this, _listeners).delete(fn);
+    }
+    /** Sends a message and resolves with the answer when the run ends. */
+    async send(prompt, o = {}) {
+      if (typeof prompt !== "string" || !prompt.trim()) throw fail("invalid_request", "the message is empty");
+      if (__privateGet(this, _closed)) throw fail("cancelled", "the session is closed");
+      if (__privateGet(this, _run)) throw fail("run_active", "an answer is still running in this session");
+      if (o.signal?.aborted) throw fail("cancelled", "the call was aborted");
+      await consent("sample");
+      await __privateGet(this, _ready);
+      if (__privateGet(this, _tools).length) await __privateMethod(this, _Session_instances, register_fn).call(this);
+      return new Promise((resolve2, reject) => {
+        const run = { id: "", segments: /* @__PURE__ */ new Map(), order: [], visible: "", onText: o.onText, tools: new AbortController(), resolve: resolve2, reject };
+        __privateSet(this, _run, run);
+        const onAbort = () => void this.stop();
+        o.signal?.addEventListener("abort", onAbort, { once: true });
+        const done = () => {
+          o.signal?.removeEventListener("abort", onAbort);
+          run.tools.abort();
+          if (__privateGet(this, _run) === run) __privateSet(this, _run, null);
+        };
+        run.resolve = (r) => (done(), resolve2(r));
+        run.reject = (e) => (done(), reject(e));
+        api2("POST", `/sessions/${this.id}/messages`, clean({ prompt, context: o.context })).catch((e) => run.reject(e));
+      });
+    }
+    async stop() {
+      await api2("POST", `/sessions/${this.id}/stop`).catch(() => {
+      });
+    }
+    /** The conversation so far: [{role, text}] (user, assistant, thinking, error). */
+    async history() {
+      const v = await api2("GET", `/sessions/${this.id}`);
+      this.info = v.session;
+      this.running = !!v.running;
+      const out = [];
+      for (const e of v.snapshot?.entities ?? []) {
+        if (e.kind === "ChatMessage" && e.payload && !e.tombstone) out.push({ role: e.payload.role, text: e.payload.text ?? e.payload.content ?? "" });
+      }
+      return freeze(out);
+    }
+    async delete() {
+      this.close();
+      await api2("DELETE", `/sessions/${this.id}`);
+    }
+    /** Ends the event stream; a run in progress keeps going on the server. */
+    close() {
+      __privateSet(this, _closed, true);
+      __privateGet(this, _stream)?.abort();
+      __privateGet(this, _run)?.reject(fail("cancelled", "the session was closed"));
+    }
+  };
+  _tools = new WeakMap();
+  _connection = new WeakMap();
+  _executor = new WeakMap();
+  _stream = new WeakMap();
+  _ready = new WeakMap();
+  _onReady = new WeakMap();
+  _closed = new WeakMap();
+  _run = new WeakMap();
+  _seen = new WeakMap();
+  _listeners = new WeakMap();
+  _Session_instances = new WeakSet();
+  register_fn = async function() {
+    const ack = await api2("POST", `/sessions/${this.id}/tools/manifest`, {
+      clientInstanceId: CLIENT,
+      connectionId: __privateGet(this, _connection),
+      revision: Date.now(),
+      tools: __privateGet(this, _tools).map((t) => ({
+        name: t.name,
+        description: String(t.description ?? ""),
+        mode: t.mode ?? "frontend",
+        inputSchema: t.inputSchema ?? { type: "object" },
+        available: true
+      }))
+    });
+    __privateSet(this, _executor, ack.executor);
+  };
+  connect_fn = async function() {
+    for (let attempt = 0; !__privateGet(this, _closed); attempt++) {
+      const ctrl = new AbortController();
+      __privateSet(this, _stream, ctrl);
+      try {
+        const r = await request(`${BASE}/sessions/${this.id}/events`, { signal: ctrl.signal });
+        if (!r.ok || !r.body) {
+          if (r.status === 403 || r.status === 404) {
+            __privateSet(this, _closed, true);
+            __privateGet(this, _run)?.reject(fail(r.status === 404 ? "session_not_found" : "not_granted", "the session's events are not available"));
+            return;
+          }
+          throw new Error("HTTP " + r.status);
+        }
+        attempt = 0;
+        const reader = r.body.getReader();
+        const dec = new TextDecoder();
+        let buf = "";
+        for (; ; ) {
+          const x = await reader.read();
+          if (x.done) break;
+          buf += dec.decode(x.value, { stream: true });
+          let i;
+          while ((i = buf.indexOf("\n\n")) >= 0) {
+            const block = buf.slice(0, i);
+            buf = buf.slice(i + 2);
+            let type = "", data = "";
+            for (const line of block.split("\n")) {
+              if (line.startsWith("event: ")) type = line.slice(7);
+              else if (line.startsWith("data: ")) data += line.slice(6);
+            }
+            if (!data) continue;
+            const ev = JSON.parse(data);
+            if (type === "snapshot") await __privateMethod(this, _Session_instances, snapshot_fn).call(this, ev);
+            else if (type === "ui") __privateMethod(this, _Session_instances, event_fn).call(this, ev);
+          }
+        }
+      } catch {
+        if (__privateGet(this, _closed)) return;
+      }
+      await new Promise((r) => setTimeout(r, Math.min(5e3, 250 * 2 ** attempt)));
+    }
+  };
+  snapshot_fn = async function(snap) {
+    if (__privateGet(this, _tools).length) await __privateMethod(this, _Session_instances, register_fn).call(this).catch(() => {
+    });
+    __privateGet(this, _onReady).call(this);
+    for (const e of snap.entities ?? []) {
+      const p = e.payload;
+      if (e.kind === "ChatFrontendToolCall" && p && p.status === "requested") __privateMethod(this, _Session_instances, call_fn).call(this, p);
+    }
+  };
+  event_fn = function(ev) {
+    const p = ev.payload ?? {};
+    for (const fn of [...__privateGet(this, _listeners)]) {
+      try {
+        fn(ev);
+      } catch (e) {
+        console.error(e);
+      }
+    }
+    const run = __privateGet(this, _run);
+    switch (ev.name) {
+      case "ChatRunStarted":
+        this.running = true;
+        if (run && !run.id) run.id = p.messageId ?? "";
+        return;
+      case "ChatFrontendToolCallRequested":
+        __privateMethod(this, _Session_instances, call_fn).call(this, p);
+        return;
+      case "ChatTextSegmentStarted":
+      case "ChatTextPatch":
+      case "ChatTextSegmentFinished":
+        if (run && ownedBy(run, p.messageId)) __privateMethod(this, _Session_instances, text_fn).call(this, run, ev.name, p);
+        return;
+      case "ChatRunFinished":
+      case "ChatRunFailed":
+      case "ChatRunStopped":
+        this.running = false;
+        if (!run || run.id && p.messageId && p.messageId !== run.id) return;
+        if (ev.name === "ChatRunFinished") run.resolve(freeze({ text: run.visible, truncated: !!p.truncated }));
+        else if (ev.name === "ChatRunStopped") run.reject(fail("cancelled", "the answer was stopped", run.visible ? { text: run.visible } : void 0));
+        else run.reject(fail(p.code || "upstream_error", p.error || "the run failed", run.visible ? { text: run.visible } : void 0));
+    }
+  };
+  // The answer so far: every text segment of the run, in order, as sample's
+  // text is every round's text.
+  text_fn = function(run, name, p) {
+    const seg = String(p.messageId);
+    if (!run.segments.has(seg)) {
+      run.segments.set(seg, "");
+      run.order.push(seg);
+    }
+    let t = run.segments.get(seg);
+    if (name === "ChatTextSegmentFinished") t = p.content ?? p.text ?? t;
+    else if (name === "ChatTextPatch") {
+      if (p.mode === "CHAT_STREAM_PATCH_MODE_APPEND") t = t.slice(0, p.offset !== void 0 ? Number(p.offset) : t.length) + (p.text ?? "");
+      else if (p.text !== void 0) t = p.text;
+    }
+    run.segments.set(seg, t);
+    const before = run.visible;
+    run.visible = run.order.map((s) => run.segments.get(s)).filter((s) => s !== "").join("\n\n");
+    if (run.visible !== before) run.onText?.({ text: run.visible, delta: run.visible.startsWith(before) ? run.visible.slice(before.length) : "" });
+  };
+  call_fn = async function(p) {
+    const id = p.toolCallId;
+    if (!id || __privateGet(this, _seen).has(id) || !__privateGet(this, _executor) || p.executor?.assignmentId !== __privateGet(this, _executor).assignmentId) return;
+    __privateGet(this, _seen).add(id);
+    const tool = __privateGet(this, _tools).find((t) => t.name === p.toolName);
+    const signal = __privateGet(this, _run)?.tools.signal ?? new AbortController().signal;
+    let status = "success", result = null, error = "";
+    try {
+      if (!tool) throw new Error("this page has no tool " + p.toolName);
+      result = await tool.execute(p.input ?? {}, { signal, callId: id });
+      if (result === void 0) result = null;
+      if (JSON.stringify(result) === void 0) result = String(result);
+    } catch (e) {
+      status = "failed";
+      error = String(e?.message ?? e);
+    }
+    if (signal.aborted) return;
+    await api2("POST", `/sessions/${this.id}/tools/results`, clean({ toolCallId: id, toolName: p.toolName, status, result, error, executor: __privateGet(this, _executor) })).catch(() => {
+    });
+  };
+  var ownedBy = (run, messageId) => !run.id || String(messageId ?? "").startsWith(run.id);
+  function agent() {
+    return freeze({
+      /** Resumes the session with this key, or creates it with these settings. */
+      async open(key, o = {}) {
+        if (typeof key !== "string" || !key || key.length > 200) throw fail("invalid_request", "a session key is a string of 1 to 200 characters");
+        const tools = o.tools ?? [];
+        for (const t of tools) if (!t || typeof t.name !== "string" || typeof t.execute !== "function") throw fail("invalid_request", "a tool is {name, description, inputSchema, execute}");
+        const find = async () => (await api2("GET", "/sessions?label=" + encodeURIComponent("key:" + key))).sessions?.[0] ?? null;
+        let info = await find();
+        if (!info) {
+          try {
+            info = (await api2("POST", "/sessions", clean({
+              title: o.title,
+              labels: clean({ key, tier: o.modelTier, model: o.model, effort: o.effort }),
+              data: clean({ system: o.system, maxRounds: o.maxRounds, toolTimeout: o.toolTimeout, maxTokens: o.maxTokens })
+            }))).session;
+          } catch (e) {
+            if (e?.code !== "session_exists" || !(info = await find())) throw e;
+          }
+        }
+        return new Session(info, tools);
+      },
+      /** The person's sessions in this app. */
+      async list() {
+        const l = await api2("GET", "/sessions");
+        return freeze((l.sessions ?? []).map((s) => freeze({
+          id: s.id,
+          key: s.labels?.key ?? "",
+          title: s.title ?? "",
+          created: s.created,
+          updated: s.updated,
+          running: !!s.running,
+          usage: s.usage
+        })));
+      },
+      async limits() {
+        return freeze(await rpc("agent.limits"));
+      }
+    });
+  }
+
   // src/sample.ts
   var cache = /* @__PURE__ */ new Map();
   function checkInput(input) {
@@ -1721,6 +2029,8 @@
         return artifact;
       case "sample":
         return sample(h);
+      case "agent":
+        return agent();
       case "slop":
         return slop(h);
     }

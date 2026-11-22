@@ -4,6 +4,7 @@
 import { artifact, assets, comments, downloads, files, initPermissions, permissions, slop, user } from "./caps.ts";
 import { db } from "./db.ts";
 import { lobby } from "./room.ts";
+import { agent } from "./agent.ts";
 import { sample } from "./sample.ts";
 import { staticDb, staticUser } from "./static.ts";
 import { boot, connect, type Hello } from "./transport.ts";
@@ -43,6 +44,8 @@ async function resolve(name: string): Promise<unknown> {
       return artifact;
     case "sample":
       return sample(h);
+    case "agent":
+      return agent();
     case "slop":
       return slop(h);
   }
