@@ -252,7 +252,9 @@ send rejects `cancelled`, and `/stop` is posted).
     status requested, assigned here, not run → run it once; result → outbox[id]; deliver
     status requested, outbox[id] present, no delivery in flight → deliver again (after a reconnect)
     status not requested (the server has it, or gave up) → drop outbox[id]
-deliver(id): POST /tools/results; 2xx or a 4xx (late, unknown, invalid) → drop outbox[id]; network/5xx → keep
+deliver(id): POST /tools/results; 2xx or a 4xx (late, unknown, invalid) → drop outbox[id];
+             network/5xx → keep, back off (200 ms × 2^tries, at most 5 s) and schedule a #derive for then
+snapshot:    resets every backoff (the connection is back)
 ```
 
 A tool's side effects therefore happen at most once, and its result is delivered at least once while the server still

@@ -1,4 +1,4 @@
-/* slop page runtime (window.claude), built from web/runtime: do not edit. source sha256:daa8bda2e9edd310c9d49b3c3ad3bdaf72bf6c60d95701f4065e332552b03c81 */
+/* slop page runtime (window.claude), built from web/runtime: do not edit. source sha256:113a7a8500bf34ba683089b7c4a12ff2a1ed49e6bce77bac398bff855b5299e5 */
 "use strict";
 (() => {
   var __defProp = Object.defineProperty;
@@ -1442,7 +1442,7 @@
     if (!r.ok) {
       const e = data?.error;
       const code = (typeof e === "object" && e ? e.code : data?.code) || (r.status === 409 ? "run_active" : "upstream_error");
-      throw fail(code, (typeof e === "object" && e ? e.message : e) || "HTTP " + r.status);
+      throw fail(code, (typeof e === "object" && e ? e.message : e) || "HTTP " + r.status, { status: r.status });
     }
     return data;
   }
@@ -1452,7 +1452,7 @@
     const i = segmentId.lastIndexOf(":text:");
     return i > 0 ? segmentId.slice(0, i) : "";
   };
-  var _grant, _tools, _connection, _executor, _stream, _ready, _onReady, _closed, _run, _ran, _listeners, _entities, _seq, _Session_instances, start_fn, abort_fn, register_fn, connect_fn, snapshot_fn, event_fn, put_fn, get_fn, apply_fn, derive_fn, call_fn;
+  var _grant, _tools, _connection, _executor, _stream, _ready, _onReady, _closed, _run, _ran, _outbox, _listeners, _entities, _seq, _Session_instances, start_fn, abort_fn, register_fn, connect_fn, snapshot_fn, event_fn, put_fn, get_fn, apply_fn, derive_fn, call_fn, deliver_fn;
   var Session = class {
     constructor(info, tools, fresh, grant) {
       __privateAdd(this, _Session_instances);
@@ -1474,6 +1474,10 @@
       __privateAdd(this, _run, null);
       __privateAdd(this, _ran, /* @__PURE__ */ new Set());
       // tool calls this page has run
+      // Results the server does not have yet, by call id. A tool runs once; its
+      // result stays here until the server accepts it, refuses it for good
+      // (4xx), or no longer waits for the call (design 02, change 6).
+      __privateAdd(this, _outbox, /* @__PURE__ */ new Map());
       __privateAdd(this, _listeners, /* @__PURE__ */ new Set());
       // The local copy of the session's timeline: a snapshot replaces it, every
       // UI event updates it (#apply), and everything a caller waits for is
@@ -1576,6 +1580,7 @@
   _closed = new WeakMap();
   _run = new WeakMap();
   _ran = new WeakMap();
+  _outbox = new WeakMap();
   _listeners = new WeakMap();
   _entities = new WeakMap();
   _seq = new WeakMap();
@@ -1677,6 +1682,7 @@
     for (const e of list) if (!e.tombstone) __privateMethod(this, _Session_instances, put_fn).call(this, e.kind, e.id, e.payload ?? {});
     if (__privateGet(this, _tools).length) await __privateMethod(this, _Session_instances, register_fn).call(this).catch(() => {
     });
+    for (const r of __privateGet(this, _outbox).values()) r.next = 0;
     __privateGet(this, _onReady).call(this);
     __privateMethod(this, _Session_instances, derive_fn).call(this);
   };
@@ -1758,7 +1764,16 @@
         else run.reject(fail(state2.code || "upstream_error", state2.error || "the run failed", extra));
       }
     }
-    for (const e of ents) if (e.kind === "ChatFrontendToolCall" && e.payload?.status === "requested") void __privateMethod(this, _Session_instances, call_fn).call(this, e.payload);
+    for (const e of ents) {
+      if (e.kind !== "ChatFrontendToolCall") continue;
+      const id = e.id;
+      if (e.payload?.status === "requested") {
+        if (__privateGet(this, _outbox).has(id)) __privateMethod(this, _Session_instances, deliver_fn).call(this, id);
+        else void __privateMethod(this, _Session_instances, call_fn).call(this, e.payload);
+      } else {
+        __privateGet(this, _outbox).delete(id);
+      }
+    }
   };
   call_fn = async function(p) {
     const id = p.toolCallId;
@@ -1777,7 +1792,25 @@
       error = String(e?.message ?? e);
     }
     if (signal.aborted) return;
-    await api2("POST", `/sessions/${this.id}/tools/results`, clean({ toolCallId: id, toolName: p.toolName, status, result, error, executor: __privateGet(this, _executor) })).catch(() => {
+    __privateGet(this, _outbox).set(id, { toolName: p.toolName, status, result, error, sending: false, tries: 0, next: 0 });
+    __privateMethod(this, _Session_instances, deliver_fn).call(this, id);
+  };
+  // One delivery attempt of an outbox entry; a network or server failure
+  // keeps it, with a backoff, for the next #derive.
+  deliver_fn = function(id) {
+    const r = __privateGet(this, _outbox).get(id);
+    if (!r || r.sending || Date.now() < r.next) return;
+    r.sending = true;
+    api2("POST", `/sessions/${this.id}/tools/results`, clean({ toolCallId: id, toolName: r.toolName, status: r.status, result: r.result, error: r.error, executor: __privateGet(this, _executor) })).then(() => __privateGet(this, _outbox).delete(id)).catch((e) => {
+      if (typeof e?.status === "number" && e.status >= 400 && e.status < 500) __privateGet(this, _outbox).delete(id);
+      else {
+        r.tries++;
+        const wait = Math.min(5e3, 200 * 2 ** r.tries);
+        r.next = Date.now() + wait;
+        setTimeout(() => !__privateGet(this, _closed) && __privateMethod(this, _Session_instances, derive_fn).call(this), wait);
+      }
+    }).finally(() => {
+      r.sending = false;
     });
   };
   function agent(grant) {

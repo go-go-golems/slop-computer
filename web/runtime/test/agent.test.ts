@@ -248,7 +248,7 @@ test("an abort while the 202 is pending rejects the send and stops the run it na
   to("s-t3", "ChatRunStopped", { messageId: run });
 });
 
-test("a tool result lost at the network is delivered again after a reconnect, without running the tool again", { todo: "design 02, change 6: the outbox" }, async () => {
+test("a tool result lost at the network is delivered again after a reconnect, without running the tool again", async () => {
   ran.length = 0;
   failResults = 1;
   const answer = s3.send("tool, then a flaky network");

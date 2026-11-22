@@ -65,7 +65,7 @@ async function api(method: string, path: string, body?: unknown): Promise<any> {
     // The service answers {error, code}; the door's checks {error: {code, message}}.
     const e = data?.error;
     const code = (typeof e === "object" && e ? e.code : data?.code) || (r.status === 409 ? "run_active" : "upstream_error");
-    throw fail(code, (typeof e === "object" && e ? e.message : e) || "HTTP " + r.status);
+    throw fail(code, (typeof e === "object" && e ? e.message : e) || "HTTP " + r.status, { status: r.status });
   }
   return data;
 }
@@ -118,6 +118,10 @@ class Session {
   #closed = false;
   #run: Run | null = null;
   #ran = new Set<string>(); // tool calls this page has run
+  // Results the server does not have yet, by call id. A tool runs once; its
+  // result stays here until the server accepts it, refuses it for good
+  // (4xx), or no longer waits for the call (design 02, change 6).
+  #outbox = new Map<string, { toolName: string; status: string; result: unknown; error: string; sending: boolean; tries: number; next: number }>();
   #listeners = new Set<(e: UIEvent) => void>();
   // The local copy of the session's timeline: a snapshot replaces it, every
   // UI event updates it (#apply), and everything a caller waits for is
@@ -301,6 +305,7 @@ class Session {
     const list = [...(snap.entities ?? [])].sort((a, b) => Number(a.createdOrdinal ?? 0) - Number(b.createdOrdinal ?? 0));
     for (const e of list) if (!e.tombstone) this.#put(e.kind, e.id, e.payload ?? {});
     if (this.#tools.length) await this.#register().catch(() => {});
+    for (const r of this.#outbox.values()) r.next = 0; // the connection is back: deliver now
     this.#onReady();
     this.#derive();
   }
@@ -392,7 +397,16 @@ class Session {
         else run.reject(fail(state.code || "upstream_error", state.error || "the run failed", extra));
       }
     }
-    for (const e of ents) if (e.kind === "ChatFrontendToolCall" && e.payload?.status === "requested") void this.#call(e.payload);
+    for (const e of ents) {
+      if (e.kind !== "ChatFrontendToolCall") continue;
+      const id = e.id;
+      if (e.payload?.status === "requested") {
+        if (this.#outbox.has(id)) this.#deliver(id); // still waited for: deliver again
+        else void this.#call(e.payload);
+      } else {
+        this.#outbox.delete(id); // the server has it, or gave up on the call
+      }
+    }
   }
 
   async #call(p: any) {
@@ -411,9 +425,32 @@ class Session {
       status = "failed";
       error = String(e?.message ?? e);
     }
-    if (signal.aborted) return;
-    await api("POST", `/sessions/${this.id}/tools/results`, clean({ toolCallId: id, toolName: p.toolName, status, result, error, executor: this.#executor }))
-      .catch(() => {}); // late (the call timed out) or the run was stopped
+    if (signal.aborted) return; // the run was stopped: the server no longer waits
+    this.#outbox.set(id, { toolName: p.toolName, status, result, error, sending: false, tries: 0, next: 0 });
+    this.#deliver(id);
+  }
+
+  // One delivery attempt of an outbox entry; a network or server failure
+  // keeps it, with a backoff, for the next #derive.
+  #deliver(id: string) {
+    const r = this.#outbox.get(id);
+    if (!r || r.sending || Date.now() < r.next) return;
+    r.sending = true;
+    api("POST", `/sessions/${this.id}/tools/results`, clean({ toolCallId: id, toolName: r.toolName, status: r.status, result: r.result, error: r.error, executor: this.#executor }))
+      .then(() => this.#outbox.delete(id))
+      .catch((e: any) => {
+        if (typeof e?.status === "number" && e.status >= 400 && e.status < 500) this.#outbox.delete(id); // late, unknown or invalid: final
+        else {
+          r.tries++;
+          const wait = Math.min(5000, 200 * 2 ** r.tries);
+          r.next = Date.now() + wait;
+          // try again then, if the copy still says the call is waited for
+          setTimeout(() => !this.#closed && this.#derive(), wait);
+        }
+      })
+      .finally(() => {
+        r.sending = false;
+      });
   }
 }
 
