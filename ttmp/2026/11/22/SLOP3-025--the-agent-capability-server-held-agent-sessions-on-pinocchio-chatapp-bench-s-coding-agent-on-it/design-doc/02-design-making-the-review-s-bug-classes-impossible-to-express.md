@@ -20,8 +20,8 @@ WhenToUse: Before adding an httpapi route, a runtime capability, or agent client
 
 # Design: making the review's bug classes impossible to express
 
-**Status:** changes 1–3 implemented (pinocchio cedda17; slop c7a9d79, 6a62fcb). Changes 4–6 (section 7, from the
-second review) in progress.
+**Status:** implemented. Changes 1–3: pinocchio cedda17; slop c7a9d79, 6a62fcb. Changes 4–6 (section 7, from the
+second review): pinocchio ecae347; slop a8afc9f, 6c656fe.
 
 ## 1. Why
 

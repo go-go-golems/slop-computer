@@ -17,3 +17,7 @@ Agent capability implemented: server (pkg/doors/pages/agent, 3aef663/8922ce0, ho
 ## 2026-11-22
 
 Review fixes (9f4b923) and design 02 implemented: session guard (pinocchio cedda17), grant per capability (c7a9d79), one reducer for the agent client (6a62fcb)
+
+## 2026-11-22
+
+Second review: design 02 section 7 implemented: guard wraps the engine (pinocchio ecae347), sends claim their run (a8afc9f), tool results outbox (6c656fe)

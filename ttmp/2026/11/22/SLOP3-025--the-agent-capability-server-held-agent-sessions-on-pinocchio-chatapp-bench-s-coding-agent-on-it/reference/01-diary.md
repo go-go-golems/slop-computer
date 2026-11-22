@@ -338,3 +338,118 @@ Commit: 6a62fcb.
 
 ### Code review instructions
 - `web/runtime/src/agent.ts` (`#apply`, `#derive`, `send`), `web/runtime/test/agent.test.ts`.
+
+## Step 6: Second review: design 02 section 7, and a send that owns its run
+
+The second Codex review found one P1 in pinocchio (the budget was skipped without tools; fixed in pinocchio ecae347,
+diary step 11 there) and three P2s here. This step added section 7 to design doc 02, with three classes and three
+changes. It then implemented change 5: `send()` claims its run synchronously, and the run handles an abort at any
+stage.
+
+Commits: 194d570 (design), a8afc9f (change 5).
+
+### Prompt Context
+**User prompt (verbatim):** "did codex bring up anything new?", "any of these warranting some refactor like we did
+previously? or are these more like one offs", then "ok, add to the design doc, then implement, ccommit at
+appropriate intervals and keep a detailed diary as you work (using the diary format from the skill) and then ask for
+rereview"
+**Assistant interpretation:** Design section 7, then changes 4–6, each committed and recorded; push; re-request
+review.
+**Inferred user intent:** Fix the classes, not the instances, with the same routine as before.
+**Commit (code):** a8afc9f
+
+### What I did
+- Read the second review: pinocchio#221 P1 (`agentserver.go:423`, budget without tools); slop#56 P2s at
+  `agent.ts:146` (two sends), `agent.ts:148` (abort while waiting), `agent.ts:372` (lost tool result).
+- Design 02 section 7: changes 4 (the guard wraps the engine), 5 (claim the run first), 6 (the outbox).
+- `agent.ts`: `send()` is no longer `async`. It checks synchronously, builds a `Run` (`stage`, `aborted`,
+  `settled`, `cancelled`/`cancel`), sets `#run`, attaches the abort listener, and starts `#start`.
+  `#start` checks `live()` after consent, `Promise.race([#ready, run.cancelled])`, and registration, then posts.
+  `#abort`: preparing → reject now; posting → `#start` rejects when the 202 names the run, then stops it; running →
+  stop. `resolve`/`reject` are idempotent, and only the run's own settle clears `#run`.
+- Tests (mock with a stream per session, the last run per session, network failures on demand): two sends without
+  awaiting; an abort before the session is ready; an abort while the 202 is pending.
+
+### Why
+- One object holding the run's stage is what makes "an abort at any time" a single rule, not one check per await.
+
+### What worked
+- On the previous `agent.ts` all three new tests fail (`✖ two sends without awaiting …` after 4000 ms; `✖ an abort
+  before the session is ready posts nothing`; `✖ an abort while the 202 is pending …`); with change 5 they pass.
+  `make runtime-test`: 30 pass, 1 todo (the outbox test, until change 6).
+
+### What didn't work
+- My first version stored the cancel function with `Object.defineProperty(run, "abortNow", …)` and called it through
+  `(run as any)`; replaced by a typed `cancel` field before committing.
+
+### What I learned
+- `send()` must not be `async` when its first statements claim shared state: an `async` function still runs
+  synchronously up to its first `await`, but returning a plain promise makes the claim-before-await shape explicit.
+
+### What was tricky to build
+- Abort while posting: the message is already on its way, so the send rejects, but the run is stopped only once the
+  202 names it.
+
+### What warrants a second pair of eyes
+- After an abort while preparing, `#start`'s pending awaits stay pending (`#ready` can stay unresolved), though they
+  no longer hold the slot.
+
+### What should be done in the future
+- Change 6, the outbox (next step).
+
+### Code review instructions
+- `web/runtime/src/agent.ts` (`send`, `#start`, `#abort`), `web/runtime/test/agent.test.ts` (the last section).
+
+## Step 7: Change 6, tool results through an outbox
+
+This step made running a tool and delivering its result two separate things. A tool runs once; its result stays in
+an outbox until the server accepts it, and `#derive` delivers it again while the server still waits for the call.
+
+Commit: 6c656fe.
+
+### Prompt Context
+**User prompt (verbatim):** see Step 6.
+**Assistant interpretation:** Design 02, change 6.
+**Inferred user intent:** A flaky network cannot turn a tool that ran into a timeout.
+**Commit (code):** 6c656fe
+
+### What I did
+- `#outbox` (`toolName, status, result, error, sending, tries, next`). `#call` puts the result there and calls
+  `#deliver`; `#deliver` posts, then drops the entry on 2xx or a final 4xx, or backs off on a network error or 5xx.
+  `#derive` delivers again for calls still `requested` that have an outbox entry, and drops entries for calls that
+  aren't. `api()` failures carry `status`.
+- The test from step 6 is enabled: a failed result post, a dropped stream, a snapshot with the call still requested →
+  a second post with the result, the tool run once, nothing resent after `ChatFrontendToolResultReceived`.
+- bench end to end again (slop rebuilt with pinocchio ecae347): `✓ eval 1 · files.list · 34 ms`, `eval returned:
+  "{\"ok\":true,\"value\":\"README.md,app.json,index.html,styles.css\"}"`; `turns` 7; `llm_holds` 9, 9 settled.
+
+### Why
+- At most once for the side effect, at least once for the delivery while it is waited for; the server refuses
+  duplicates, so the second delivery is safe.
+
+### What worked
+- `make runtime-test`: 31 pass. `go test -tags sqlite_fts5 ./pkg/doors/... ./pkg/host`: pass.
+
+### What didn't work
+- My first outbox retried only from `#derive` after events, with a backoff of 200 ms × 2^tries. The test failed at
+  `agent.test.ts:270` (`waitFor(() => results().length === 2)`, "condition not reached"): the snapshot arrived inside
+  the backoff, and no event came after it. Now a failed delivery schedules a `#derive` for when its backoff ends, and
+  a snapshot resets every backoff (the connection is back).
+
+### What I learned
+- An event-driven retry needs either a trigger of its own or a reset on reconnect; this one has both.
+
+### What was tricky to build
+- Deciding which 4xx are final: every 4xx (late, unknown, invalid, executor mismatch) means the server will not take
+  this result, so it is dropped.
+
+### What warrants a second pair of eyes
+- A result kept while the server says nothing (no stream, no snapshot) is retried by its own timer with backoff up to
+  5 s until the session is closed.
+
+### What should be done in the future
+- Push, re-request review.
+
+### Code review instructions
+- `web/runtime/src/agent.ts` (`#outbox`, `#deliver`, `#derive`, `#snapshot`), the last test in
+  `web/runtime/test/agent.test.ts`.
