@@ -13,12 +13,14 @@ Owners:
 RelatedFiles: []
 ExternalSources: []
 Summary: Three structural changes after the review of pinocchio#221 and slop-computer#56. httpapi reaches sessions only through a per-principal guard; each runtime capability gets a consent bound to its own name; the agent runtime follows runs with one reducer over the snapshot and the events.
-LastUpdated: 2026-11-22T15:00:00-05:00
+LastUpdated: 2026-11-22T17:00:00-05:00
 WhatFor: Reviewing the guard, grant and reducer changes, and keeping them in place.
 WhenToUse: Before adding an httpapi route, a runtime capability, or agent client logic.
 ---
 
 # Design: making the review's bug classes impossible to express
+
+**Status:** implemented. Change 1 in pinocchio cedda17, change 2 in slop c7a9d79, change 3 in slop 6a62fcb.
 
 ## 1. Why
 
