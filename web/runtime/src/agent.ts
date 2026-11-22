@@ -10,7 +10,7 @@
 // A run is known by the id the server's 202 gives it, and every run's
 // outcome is a ChatRun entity in the snapshot: a send settles from the live
 // terminal event or, after a reconnect that missed it, from the snapshot.
-import { consent } from "./caps.ts";
+import type { Grant } from "./consent.ts";
 import { request, rpc } from "./transport.ts";
 import { fail, freeze } from "./util.ts";
 
@@ -101,7 +101,10 @@ class Session {
   #listeners = new Set<(e: UIEvent) => void>();
   #entities: any[] = []; // the last snapshot's
 
-  constructor(info: any, tools: Tool[], fresh: boolean) {
+  readonly #grant: Grant;
+
+  constructor(info: any, tools: Tool[], fresh: boolean, grant: Grant) {
+    this.#grant = grant;
     this.id = info.id;
     this.fresh = fresh;
     this.key = info.labels?.key ?? "";
@@ -123,7 +126,7 @@ class Session {
     if (this.#closed) throw fail("cancelled", "the session is closed");
     if (this.#run) throw fail("run_active", "an answer is still running in this session");
     if (o.signal?.aborted) throw fail("cancelled", "the call was aborted");
-    await consent("agent");
+    await this.#grant.consent();
     await this.#ready;
     if (this.#tools.length) await this.#register(); // the tab that sends runs the tools
     return new Promise<Result>((resolve, reject) => {
@@ -341,7 +344,7 @@ class Session {
 // A text segment's id is "<run id>:text:<segment>".
 const ownedBy = (run: Run, messageId: unknown) => !run.id || String(messageId ?? "").startsWith(run.id);
 
-export function agent() {
+export function agent(grant: Grant) {
   return freeze({
     /** Resumes the session with this key, or creates it with these settings. */
     async open(key: string, o: OpenOptions = {}) {
@@ -363,7 +366,7 @@ export function agent() {
           if (e?.code !== "session_exists" || !(info = await find())) throw e;
         }
       }
-      return new Session(info, tools, fresh);
+      return new Session(info, tools, fresh, grant);
     },
     /** The person's sessions in this app. */
     async list() {

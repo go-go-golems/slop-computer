@@ -3,7 +3,7 @@
 // their results back; aborting cancels on the server. Who may sample, and
 // how many tokens they have left, is the admin's policy and LLM budget.
 import { limits } from "./limits.ts";
-import { consent } from "./caps.ts";
+import type { Grant } from "./consent.ts";
 import { request, rpc, type Hello } from "./transport.ts";
 import { bytes, canon, fail, freeze } from "./util.ts";
 
@@ -65,7 +65,7 @@ const codes: Record<string, string> = {
   session_expired: "session_expired", image_rejected: "image_rejected",
 };
 
-async function call(images: boolean, input: unknown, o: Options = {}): Promise<Result> {
+async function call(images: boolean, grant: Grant, input: unknown, o: Options = {}): Promise<Result> {
   const prompt = checkInput(input);
   const tools = o.tools ?? [];
   if (tools.length > 16) throw fail("tools_unavailable", "at most 16 tools");
@@ -81,7 +81,7 @@ async function call(images: boolean, input: unknown, o: Options = {}): Promise<R
     const hit = cache.get(key);
     if (hit && Date.now() - hit.at < hit.ttl) return hit.result;
   }
-  await consent("sample");
+  await grant.consent();
   const body = {
     input: prompt, modelTier: tier, model: o.model, effort: o.effort,
     tools: tools.map((t) => ({ name: t.name, description: String(t.description ?? ""), inputSchema: t.inputSchema })),
@@ -202,11 +202,11 @@ export function parseJSON(text: string): unknown {
   throw fail("invalid_json", "the reply is not JSON", { text });
 }
 
-export function sample(h: Hello) {
+export function sample(h: Hello, grant: Grant) {
   const images = !!(h.caps.sample as any)?.images;
-  const fn = (input: unknown, o?: Options) => call(images, input, o);
+  const fn = (input: unknown, o?: Options) => call(images, grant, input, o);
   return Object.freeze(Object.assign(fn, {
-    json: async (input: unknown, o?: Options) => parseJSON((await call(images, input, o)).text),
+    json: async (input: unknown, o?: Options) => parseJSON((await call(images, grant, input, o)).text),
     limits: async () => {
       try {
         return freeze(await rpc("sample.limits"));

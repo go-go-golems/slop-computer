@@ -43,7 +43,7 @@ globalThis.fetch = (async (url: string, init?: RequestInit) => {
   return json({ error: "no route " + url, code: "invalid_request" }, 404);
 }) as typeof fetch;
 
-const { initPermissions } = await import("../src/caps.ts");
+const { grantFor, initPermissions } = await import("../src/consent.ts");
 const { agent } = await import("../src/agent.ts");
 on.message({ origin: PARENT, source: parent, data: { slop: 1, type: "view", view: "v1", secret: "s1" } });
 // An app that declares agent without sample: the agent's own consent.
@@ -58,7 +58,7 @@ const waitFor = async (pred: () => boolean) => {
 
 const ran: unknown[] = [];
 const tools = [{ name: "eval", description: "run code", inputSchema: { type: "object" }, execute: async (input: any) => (ran.push(input), 42) }];
-const a = agent();
+const a = agent(grantFor("agent"));
 const s = await a.open("t1", { system: "You are a test.", modelTier: "default", maxRounds: 12, tools });
 
 test("open creates the session with its key and settings when none exists", async () => {

@@ -1,4 +1,4 @@
-/* slop page runtime (window.claude), built from web/runtime: do not edit. source sha256:5aaf7c61839189a202fdb6d2dabe51909b9a4a784e261b07d759c9b4d9d79a2e */
+/* slop page runtime (window.claude), built from web/runtime: do not edit. source sha256:4f1160ee81447fb269c7e5595ad44cfc2936a6626404c836707c3e08004c059b */
 "use strict";
 (() => {
   var __defProp = Object.defineProperty;
@@ -454,58 +454,6 @@
     }
     return Object.freeze(base);
   }
-  var states = {};
-  var denied = /* @__PURE__ */ new Set();
-  function initPermissions(h) {
-    states = { ...h?.permissions ?? {} };
-  }
-  function stateOf(name) {
-    if (denied.has(name)) return "denied";
-    return states[name] ?? "unavailable";
-  }
-  async function request2(names) {
-    const want = (names ?? Object.keys(states)).filter((n) => stateOf(n) === "prompt");
-    if (want.length) {
-      try {
-        const res = await ask("consent", { names: want, app: boot.runtime?.app });
-        const got = res.states ?? {};
-        for (const n of want) {
-          if (got[n] === "granted") states[n] = "granted";
-          else denied.add(n);
-        }
-      } catch {
-        for (const n of want) denied.add(n);
-      }
-    }
-    const out = {};
-    for (const n of names ?? Object.keys(states)) out[n] = stateOf(n);
-    return freeze(out);
-  }
-  async function consent(name, code = "not_granted") {
-    if (stateOf(name) === "granted") return;
-    const r = await request2([name]);
-    if (r[name] !== "granted") throw fail(code, `the viewer has not allowed ${name}`);
-  }
-  var permissions = Object.freeze({
-    async state(name) {
-      await connect();
-      if (typeof name === "string") return stateOf(name);
-      const out = {};
-      for (const n of Object.keys(states)) out[n] = stateOf(n);
-      return freeze(out);
-    },
-    async request(names) {
-      await connect();
-      return request2(names);
-    },
-    async manage() {
-      try {
-        await ask("permissions", {});
-      } catch {
-        throw fail("unavailable", "the permissions panel did not open");
-      }
-    }
-  });
   function anchorOf(el2) {
     const r = el2.getBoundingClientRect();
     const path = [];
@@ -520,7 +468,7 @@
     }
     return freeze({ path: path.join(" > "), x: r.width ? 0.5 : 0, y: r.height ? 0.5 : 0 });
   }
-  function comments(h) {
+  function comments(h, grant) {
     const composerOnly = !!h.caps.comments?.composer_only;
     const base = {
       async openComposer(t) {
@@ -537,7 +485,7 @@
       return t;
     };
     const call3 = async (method, args) => {
-      await consent("comments", "consent_required");
+      await grant.consent("consent_required");
       try {
         return await rpc(method, args);
       } catch (e) {
@@ -737,6 +685,63 @@
     ]);
     return Object.freeze({ list, read, download, asSampleTools });
   }
+
+  // src/consent.ts
+  var states = {};
+  var denied = /* @__PURE__ */ new Set();
+  function initPermissions(h) {
+    states = { ...h?.permissions ?? {} };
+  }
+  function stateOf(name) {
+    if (denied.has(name)) return "denied";
+    return states[name] ?? "unavailable";
+  }
+  async function request2(names) {
+    const want = (names ?? Object.keys(states)).filter((n) => stateOf(n) === "prompt");
+    if (want.length) {
+      try {
+        const res = await ask("consent", { names: want, app: boot.runtime?.app });
+        const got = res.states ?? {};
+        for (const n of want) {
+          if (got[n] === "granted") states[n] = "granted";
+          else denied.add(n);
+        }
+      } catch {
+        for (const n of want) denied.add(n);
+      }
+    }
+    const out = {};
+    for (const n of names ?? Object.keys(states)) out[n] = stateOf(n);
+    return freeze(out);
+  }
+  async function consent(name, code = "not_granted") {
+    if (stateOf(name) === "granted") return;
+    const r = await request2([name]);
+    if (r[name] !== "granted") throw fail(code, `the viewer has not allowed ${name}`);
+  }
+  function grantFor(name) {
+    return Object.freeze({ name, consent: (code) => consent(name, code) });
+  }
+  var permissions = Object.freeze({
+    async state(name) {
+      await connect();
+      if (typeof name === "string") return stateOf(name);
+      const out = {};
+      for (const n of Object.keys(states)) out[n] = stateOf(n);
+      return freeze(out);
+    },
+    async request(names) {
+      await connect();
+      return request2(names);
+    },
+    async manage() {
+      try {
+        await ask("permissions", {});
+      } catch {
+        throw fail("unavailable", "the permissions panel did not open");
+      }
+    }
+  });
 
   // src/diff.ts
   function diff(a, b) {
@@ -1434,10 +1439,9 @@
     return data;
   }
   var clean = (o) => Object.fromEntries(Object.entries(o).filter(([, v]) => v !== void 0 && v !== null && v !== ""));
-  var _tools, _connection, _executor, _stream, _ready, _onReady, _closed, _run, _seen, _listeners, _entities, _Session_instances, register_fn, connect_fn, snapshot_fn, event_fn, reconcile_fn, text_fn, call_fn;
+  var _tools, _connection, _executor, _stream, _ready, _onReady, _closed, _run, _seen, _listeners, _entities, _grant, _Session_instances, register_fn, connect_fn, snapshot_fn, event_fn, reconcile_fn, text_fn, call_fn;
   var Session = class {
-    // the last snapshot's
-    constructor(info, tools, fresh) {
+    constructor(info, tools, fresh, grant) {
       __privateAdd(this, _Session_instances);
       __publicField(this, "id");
       __publicField(this, "key");
@@ -1456,6 +1460,9 @@
       __privateAdd(this, _seen, /* @__PURE__ */ new Set());
       __privateAdd(this, _listeners, /* @__PURE__ */ new Set());
       __privateAdd(this, _entities, []);
+      // the last snapshot's
+      __privateAdd(this, _grant);
+      __privateSet(this, _grant, grant);
       this.id = info.id;
       this.fresh = fresh;
       this.key = info.labels?.key ?? "";
@@ -1475,7 +1482,7 @@
       if (__privateGet(this, _closed)) throw fail("cancelled", "the session is closed");
       if (__privateGet(this, _run)) throw fail("run_active", "an answer is still running in this session");
       if (o.signal?.aborted) throw fail("cancelled", "the call was aborted");
-      await consent("agent");
+      await __privateGet(this, _grant).consent();
       await __privateGet(this, _ready);
       if (__privateGet(this, _tools).length) await __privateMethod(this, _Session_instances, register_fn).call(this);
       return new Promise((resolve2, reject) => {
@@ -1533,6 +1540,7 @@
   _seen = new WeakMap();
   _listeners = new WeakMap();
   _entities = new WeakMap();
+  _grant = new WeakMap();
   _Session_instances = new WeakSet();
   register_fn = async function() {
     const ack = await api2("POST", `/sessions/${this.id}/tools/manifest`, {
@@ -1690,7 +1698,7 @@
     });
   };
   var ownedBy = (run, messageId) => !run.id || String(messageId ?? "").startsWith(run.id);
-  function agent() {
+  function agent(grant) {
     return freeze({
       /** Resumes the session with this key, or creates it with these settings. */
       async open(key, o = {}) {
@@ -1712,7 +1720,7 @@
             if (e?.code !== "session_exists" || !(info = await find())) throw e;
           }
         }
-        return new Session(info, tools, fresh);
+        return new Session(info, tools, fresh, grant);
       },
       /** The person's sessions in this app. */
       async list() {
@@ -1780,7 +1788,7 @@
     session_expired: "session_expired",
     image_rejected: "image_rejected"
   };
-  async function call2(images, input, o = {}) {
+  async function call2(images, grant, input, o = {}) {
     const prompt = checkInput(input);
     const tools = o.tools ?? [];
     if (tools.length > 16) throw fail("tools_unavailable", "at most 16 tools");
@@ -1796,7 +1804,7 @@
       const hit = cache.get(key);
       if (hit && Date.now() - hit.at < hit.ttl) return hit.result;
     }
-    await consent("sample");
+    await grant.consent();
     const body = {
       input: prompt,
       modelTier: tier,
@@ -1916,11 +1924,11 @@
     }
     throw fail("invalid_json", "the reply is not JSON", { text });
   }
-  function sample(h) {
+  function sample(h, grant) {
     const images = !!h.caps.sample?.images;
-    const fn = (input, o) => call2(images, input, o);
+    const fn = (input, o) => call2(images, grant, input, o);
     return Object.freeze(Object.assign(fn, {
-      json: async (input, o) => parseJSON((await call2(images, input, o)).text),
+      json: async (input, o) => parseJSON((await call2(images, grant, input, o)).text),
       limits: async () => {
         try {
           return freeze(await rpc("sample.limits"));
@@ -2045,7 +2053,7 @@
       case "room":
         return lobby();
       case "comments":
-        return comments(h);
+        return comments(h, grantFor(name));
       case "assets":
         return assets;
       case "downloads":
@@ -2055,9 +2063,9 @@
       case "artifact":
         return artifact;
       case "sample":
-        return sample(h);
+        return sample(h, grantFor(name));
       case "agent":
-        return agent();
+        return agent(grantFor(name));
       case "slop":
         return slop(h);
     }
