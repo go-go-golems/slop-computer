@@ -1,4 +1,4 @@
-/* slop page runtime (window.claude), built from web/runtime: do not edit. source sha256:4f1160ee81447fb269c7e5595ad44cfc2936a6626404c836707c3e08004c059b */
+/* slop page runtime (window.claude), built from web/runtime: do not edit. source sha256:f8e87ba6e16e0d706e1493fdc5d5a38a3c6e23f85df9c582ddd732e1f3c2eaa9 */
 "use strict";
 (() => {
   var __defProp = Object.defineProperty;
@@ -12,6 +12,14 @@
   var __privateAdd = (obj, member, value) => member.has(obj) ? __typeError("Cannot add the same private member more than once") : member instanceof WeakSet ? member.add(obj) : member.set(obj, value);
   var __privateSet = (obj, member, value, setter) => (__accessCheck(obj, member, "write to private field"), setter ? setter.call(obj, value) : member.set(obj, value), value);
   var __privateMethod = (obj, member, method) => (__accessCheck(obj, member, "access private method"), method);
+  var __privateWrapper = (obj, member, setter, getter) => ({
+    set _(value) {
+      __privateSet(obj, member, value, setter);
+    },
+    get _() {
+      return __privateGet(obj, member, getter);
+    }
+  });
 
   // src/limits.ts
   var limits = {
@@ -1439,7 +1447,12 @@
     return data;
   }
   var clean = (o) => Object.fromEntries(Object.entries(o).filter(([, v]) => v !== void 0 && v !== null && v !== ""));
-  var _tools, _connection, _executor, _stream, _ready, _onReady, _closed, _run, _seen, _listeners, _entities, _grant, _Session_instances, register_fn, connect_fn, snapshot_fn, event_fn, reconcile_fn, text_fn, call_fn;
+  var terminal2 = /* @__PURE__ */ new Set(["finished", "failed", "stopped"]);
+  var parentOf = (segmentId) => {
+    const i = segmentId.lastIndexOf(":text:");
+    return i > 0 ? segmentId.slice(0, i) : "";
+  };
+  var _grant, _tools, _connection, _executor, _stream, _ready, _onReady, _closed, _run, _ran, _listeners, _entities, _seq, _Session_instances, register_fn, connect_fn, snapshot_fn, event_fn, put_fn, get_fn, apply_fn, derive_fn, call_fn;
   var Session = class {
     constructor(info, tools, fresh, grant) {
       __privateAdd(this, _Session_instances);
@@ -1448,7 +1461,9 @@
       /** True when open() created the session: the server has no conversation yet. */
       __publicField(this, "fresh");
       __publicField(this, "info");
+      /** Whether a run of this session is running (from the timeline). */
       __publicField(this, "running", false);
+      __privateAdd(this, _grant);
       __privateAdd(this, _tools);
       __privateAdd(this, _connection, "c-" + Math.random().toString(36).slice(2, 10));
       __privateAdd(this, _executor, null);
@@ -1457,11 +1472,15 @@
       __privateAdd(this, _onReady);
       __privateAdd(this, _closed, false);
       __privateAdd(this, _run, null);
-      __privateAdd(this, _seen, /* @__PURE__ */ new Set());
+      __privateAdd(this, _ran, /* @__PURE__ */ new Set());
+      // tool calls this page has run
       __privateAdd(this, _listeners, /* @__PURE__ */ new Set());
-      __privateAdd(this, _entities, []);
-      // the last snapshot's
-      __privateAdd(this, _grant);
+      // The local copy of the session's timeline: a snapshot replaces it, every
+      // UI event updates it (#apply), and everything a caller waits for is
+      // derived from it (#derive). Live events and a reconnect's snapshot take
+      // the same path, so there is no recovery logic of its own to get wrong.
+      __privateAdd(this, _entities, /* @__PURE__ */ new Map());
+      __privateAdd(this, _seq, 0);
       __privateSet(this, _grant, grant);
       this.id = info.id;
       this.fresh = fresh;
@@ -1486,7 +1505,7 @@
       await __privateGet(this, _ready);
       if (__privateGet(this, _tools).length) await __privateMethod(this, _Session_instances, register_fn).call(this);
       return new Promise((resolve2, reject) => {
-        const run = { id: "", segments: /* @__PURE__ */ new Map(), order: [], visible: "", onText: o.onText, tools: new AbortController(), resolve: resolve2, reject };
+        const run = { id: "", text: "", onText: o.onText, tools: new AbortController(), resolve: resolve2, reject };
         __privateSet(this, _run, run);
         const onAbort = () => void this.stop();
         o.signal?.addEventListener("abort", onAbort, { once: true });
@@ -1498,8 +1517,9 @@
         run.resolve = (r) => (done(), resolve2(r));
         run.reject = (e) => (done(), reject(e));
         api2("POST", `/sessions/${this.id}/messages`, clean({ prompt, context: o.context })).then((a) => {
-          if (a?.messageId) run.id = a.messageId;
-          __privateMethod(this, _Session_instances, reconcile_fn).call(this, run);
+          if (!a?.messageId) throw fail("upstream_error", "the server did not name the run");
+          run.id = a.messageId;
+          __privateMethod(this, _Session_instances, derive_fn).call(this);
         }).catch((e) => run.reject(e));
       });
     }
@@ -1511,7 +1531,6 @@
     async history() {
       const v = await api2("GET", `/sessions/${this.id}`);
       this.info = v.session;
-      this.running = !!v.running;
       const out = [];
       for (const e of v.snapshot?.entities ?? []) {
         if (e.kind === "ChatMessage" && e.payload && !e.tombstone) out.push({ role: e.payload.role, text: e.payload.text ?? e.payload.content ?? "" });
@@ -1529,6 +1548,7 @@
       __privateGet(this, _run)?.reject(fail("cancelled", "the session was closed"));
     }
   };
+  _grant = new WeakMap();
   _tools = new WeakMap();
   _connection = new WeakMap();
   _executor = new WeakMap();
@@ -1537,10 +1557,10 @@
   _onReady = new WeakMap();
   _closed = new WeakMap();
   _run = new WeakMap();
-  _seen = new WeakMap();
+  _ran = new WeakMap();
   _listeners = new WeakMap();
   _entities = new WeakMap();
-  _grant = new WeakMap();
+  _seq = new WeakMap();
   _Session_instances = new WeakSet();
   register_fn = async function() {
     const ack = await api2("POST", `/sessions/${this.id}/tools/manifest`, {
@@ -1601,18 +1621,15 @@
     }
   };
   snapshot_fn = async function(snap) {
-    __privateSet(this, _entities, snap.entities ?? []);
+    __privateGet(this, _entities).clear();
+    const list = [...snap.entities ?? []].sort((a, b) => Number(a.createdOrdinal ?? 0) - Number(b.createdOrdinal ?? 0));
+    for (const e of list) if (!e.tombstone) __privateMethod(this, _Session_instances, put_fn).call(this, e.kind, e.id, e.payload ?? {});
     if (__privateGet(this, _tools).length) await __privateMethod(this, _Session_instances, register_fn).call(this).catch(() => {
     });
     __privateGet(this, _onReady).call(this);
-    if (__privateGet(this, _run)) __privateMethod(this, _Session_instances, reconcile_fn).call(this, __privateGet(this, _run));
-    for (const e of snap.entities ?? []) {
-      const p = e.payload;
-      if (e.kind === "ChatFrontendToolCall" && p && p.status === "requested") __privateMethod(this, _Session_instances, call_fn).call(this, p);
-    }
+    __privateMethod(this, _Session_instances, derive_fn).call(this);
   };
   event_fn = function(ev) {
-    const p = ev.payload ?? {};
     for (const fn of [...__privateGet(this, _listeners)]) {
       try {
         fn(ev);
@@ -1620,67 +1637,82 @@
         console.error(e);
       }
     }
-    const run = __privateGet(this, _run);
-    switch (ev.name) {
+    __privateMethod(this, _Session_instances, apply_fn).call(this, ev.name, ev.payload ?? {});
+    __privateMethod(this, _Session_instances, derive_fn).call(this);
+  };
+  put_fn = function(kind, id, payload) {
+    const k = kind + "/" + id;
+    const cur = __privateGet(this, _entities).get(k);
+    __privateGet(this, _entities).set(k, { kind, id, seq: cur ? cur.seq : ++__privateWrapper(this, _seq)._, payload });
+  };
+  get_fn = function(kind, id) {
+    return __privateGet(this, _entities).get(kind + "/" + id)?.payload;
+  };
+  // An event's change to the local copy, as chatapp projects it for the
+  // kinds this client reads (ChatRun, assistant ChatMessage segments,
+  // ChatFrontendToolCall).
+  apply_fn = function(name, p) {
+    const id = String(p.messageId ?? "");
+    switch (name) {
       case "ChatRunStarted":
-        this.running = true;
-        if (run && !run.id) run.id = p.messageId ?? "";
+        __privateMethod(this, _Session_instances, put_fn).call(this, "ChatRun", id, { ...__privateMethod(this, _Session_instances, get_fn).call(this, "ChatRun", id), messageId: id, status: "running" });
         return;
-      case "ChatFrontendToolCallRequested":
-        __privateMethod(this, _Session_instances, call_fn).call(this, p);
+      case "ChatRunFinished":
+        __privateMethod(this, _Session_instances, put_fn).call(this, "ChatRun", id, { ...__privateMethod(this, _Session_instances, get_fn).call(this, "ChatRun", id), messageId: id, status: "finished", truncated: !!p.truncated, reason: p.reason ?? "" });
+        return;
+      case "ChatRunFailed":
+        __privateMethod(this, _Session_instances, put_fn).call(this, "ChatRun", id, { ...__privateMethod(this, _Session_instances, get_fn).call(this, "ChatRun", id), messageId: id, status: "failed", code: p.code ?? "", error: p.error ?? "" });
+        return;
+      case "ChatRunStopped":
+        __privateMethod(this, _Session_instances, put_fn).call(this, "ChatRun", id, { ...__privateMethod(this, _Session_instances, get_fn).call(this, "ChatRun", id), messageId: id, status: "stopped" });
         return;
       case "ChatTextSegmentStarted":
       case "ChatTextPatch":
-      case "ChatTextSegmentFinished":
-        if (run && ownedBy(run, p.messageId)) __privateMethod(this, _Session_instances, text_fn).call(this, run, ev.name, p);
+      case "ChatTextSegmentFinished": {
+        const cur = __privateMethod(this, _Session_instances, get_fn).call(this, "ChatMessage", id);
+        let text = cur?.text ?? "";
+        if (name === "ChatTextSegmentFinished") text = p.content ?? p.text ?? text;
+        else if (name === "ChatTextPatch") {
+          if (p.mode === "CHAT_STREAM_PATCH_MODE_APPEND") text = text.slice(0, p.offset !== void 0 ? Number(p.offset) : text.length) + (p.text ?? "");
+          else if (p.text !== void 0) text = p.text;
+        }
+        __privateMethod(this, _Session_instances, put_fn).call(this, "ChatMessage", id, { ...cur, messageId: id, role: p.role || "assistant", text, parentMessageId: parentOf(id) });
         return;
-      case "ChatRunFinished":
-      case "ChatRunFailed":
-      case "ChatRunStopped":
-        this.running = false;
-        if (!run || run.id && p.messageId && p.messageId !== run.id) return;
-        if (ev.name === "ChatRunFinished") run.resolve(freeze({ text: run.visible, truncated: !!p.truncated }));
-        else if (ev.name === "ChatRunStopped") run.reject(fail("cancelled", "the answer was stopped", run.visible ? { text: run.visible } : void 0));
-        else run.reject(fail(p.code || "upstream_error", p.error || "the run failed", run.visible ? { text: run.visible } : void 0));
+      }
+      case "ChatFrontendToolCallRequested":
+        if (p.toolCallId) __privateMethod(this, _Session_instances, put_fn).call(this, "ChatFrontendToolCall", p.toolCallId, { ...p, status: "requested" });
+        return;
+      case "ChatFrontendToolResultReceived":
+        if (p.toolCallId) __privateMethod(this, _Session_instances, put_fn).call(this, "ChatFrontendToolCall", p.toolCallId, { ...__privateMethod(this, _Session_instances, get_fn).call(this, "ChatFrontendToolCall", p.toolCallId), status: p.status || "success" });
     }
   };
-  // A run whose end the stream did not deliver (it ended while the stream
-  // was down): its ChatRun entity says how, its segments what it answered.
-  reconcile_fn = function(run) {
-    if (!run.id || __privateGet(this, _run) !== run) return;
-    const state2 = __privateGet(this, _entities).find((e) => e.kind === "ChatRun" && e.id === run.id)?.payload;
-    if (!state2 || state2.status === "running") return;
-    const segs = __privateGet(this, _entities).filter((e) => e.kind === "ChatMessage" && e.payload?.role === "assistant" && e.payload?.parentMessageId === run.id).sort((a, b) => Number(a.createdOrdinal ?? 0) - Number(b.createdOrdinal ?? 0));
-    for (const e of segs) __privateMethod(this, _Session_instances, text_fn).call(this, run, "ChatTextSegmentFinished", { messageId: e.id, content: e.payload.text ?? e.payload.content ?? "" });
-    this.running = false;
-    const extra = run.visible ? { text: run.visible } : void 0;
-    if (state2.status === "finished") run.resolve(freeze({ text: run.visible, truncated: !!state2.truncated }));
-    else if (state2.status === "stopped") run.reject(fail("cancelled", "the answer was stopped", extra));
-    else run.reject(fail(state2.code || "upstream_error", state2.error || "the run failed", extra));
-  };
-  // The answer so far: every text segment of the run, in order, as sample's
-  // text is every round's text.
-  text_fn = function(run, name, p) {
-    const seg = String(p.messageId);
-    if (!run.segments.has(seg)) {
-      run.segments.set(seg, "");
-      run.order.push(seg);
+  // What callers wait for, from the local copy: whether a run is running,
+  // the pending send's text and outcome, and the tool calls to run here.
+  derive_fn = function() {
+    const ents = [...__privateGet(this, _entities).values()];
+    this.running = ents.some((e) => e.kind === "ChatRun" && e.payload?.status === "running");
+    const run = __privateGet(this, _run);
+    if (run && run.id) {
+      const text = ents.filter((e) => e.kind === "ChatMessage" && e.payload?.role === "assistant" && e.payload?.parentMessageId === run.id).sort((a, b) => a.seq - b.seq).map((e) => String(e.payload.text ?? "")).filter((t) => t !== "").join("\n\n");
+      if (text !== run.text) {
+        const before = run.text;
+        run.text = text;
+        run.onText?.({ text, delta: text.startsWith(before) ? text.slice(before.length) : "" });
+      }
+      const state2 = __privateMethod(this, _Session_instances, get_fn).call(this, "ChatRun", run.id);
+      if (state2 && terminal2.has(state2.status)) {
+        const extra = run.text ? { text: run.text } : void 0;
+        if (state2.status === "finished") run.resolve(freeze({ text: run.text, truncated: !!state2.truncated }));
+        else if (state2.status === "stopped") run.reject(fail("cancelled", "the answer was stopped", extra));
+        else run.reject(fail(state2.code || "upstream_error", state2.error || "the run failed", extra));
+      }
     }
-    let t = run.segments.get(seg);
-    if (name === "ChatTextSegmentFinished") t = p.content ?? p.text ?? t;
-    else if (name === "ChatTextPatch") {
-      if (p.mode === "CHAT_STREAM_PATCH_MODE_APPEND") t = t.slice(0, p.offset !== void 0 ? Number(p.offset) : t.length) + (p.text ?? "");
-      else if (p.text !== void 0) t = p.text;
-    }
-    run.segments.set(seg, t);
-    const before = run.visible;
-    run.visible = run.order.map((s) => run.segments.get(s)).filter((s) => s !== "").join("\n\n");
-    if (run.visible !== before) run.onText?.({ text: run.visible, delta: run.visible.startsWith(before) ? run.visible.slice(before.length) : "" });
+    for (const e of ents) if (e.kind === "ChatFrontendToolCall" && e.payload?.status === "requested") void __privateMethod(this, _Session_instances, call_fn).call(this, e.payload);
   };
   call_fn = async function(p) {
     const id = p.toolCallId;
-    if (!id || __privateGet(this, _seen).has(id) || !__privateGet(this, _executor) || p.executor?.assignmentId !== __privateGet(this, _executor).assignmentId) return;
-    __privateGet(this, _seen).add(id);
+    if (!id || __privateGet(this, _ran).has(id) || !__privateGet(this, _executor) || p.executor?.assignmentId !== __privateGet(this, _executor).assignmentId) return;
+    __privateGet(this, _ran).add(id);
     const tool = __privateGet(this, _tools).find((t) => t.name === p.toolName);
     const signal = __privateGet(this, _run)?.tools.signal ?? new AbortController().signal;
     let status = "success", result = null, error = "";
@@ -1697,7 +1729,6 @@
     await api2("POST", `/sessions/${this.id}/tools/results`, clean({ toolCallId: id, toolName: p.toolName, status, result, error, executor: __privateGet(this, _executor) })).catch(() => {
     });
   };
-  var ownedBy = (run, messageId) => !run.id || String(messageId ?? "").startsWith(run.id);
   function agent(grant) {
     return freeze({
       /** Resumes the session with this key, or creates it with these settings. */

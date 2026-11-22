@@ -20,6 +20,7 @@ let stream: ReadableStreamDefaultController<Uint8Array> | null = null;
 let streamOpened!: () => void;
 const opened = new Promise<void>((r) => (streamOpened = r));
 let streams = 0, runs = 0;
+let hold202: Promise<void> | null = null; // when set, the next 202 waits for it
 const enc = new TextEncoder();
 const json = (v: unknown, status = 200) => new Response(JSON.stringify(v), { status, headers: { "Content-Type": "application/json" } });
 
@@ -37,7 +38,11 @@ globalThis.fetch = (async (url: string, init?: RequestInit) => {
   if (url.startsWith("/_rt/agent/sessions?label=")) return json({ sessions: [] });
   if (url === "/_rt/agent/sessions" && method === "POST") return json({ sessionId: "s1", session: { id: "s1", labels: { key: body.labels.key, app: "bench" } } }, 201);
   if (url.endsWith("/tools/manifest")) return json({ accepted: true, executor: { assignmentId: "a1", connectionId: body.connectionId } });
-  if (url.endsWith("/messages")) return json({ sessionId: "s1", accepted: true, messageId: "r" + ++runs }, 202);
+  if (url.endsWith("/messages")) {
+    const id = "r" + ++runs;
+    if (hold202) await hold202;
+    return json({ sessionId: "s1", accepted: true, messageId: id }, 202);
+  }
   if (url.endsWith("/tools/results")) return json({ ok: true });
   if (url.endsWith("/stop")) return json({ sessionId: "s1", accepted: true }, 202);
   return json({ error: "no route " + url, code: "invalid_request" }, 404);
@@ -139,5 +144,39 @@ test("a run that ends while the stream is down settles from the next snapshot", 
   const r = await answer;
   assert.equal(r.text, "first part\n\nsecond part");
   assert.equal(r.truncated, true);
+});
+
+test("a run whose events all arrive before its 202 settles when the 202 names it", async () => {
+  let release!: () => void;
+  hold202 = new Promise((r) => (release = r));
+  const answer = s.send("fast run");
+  await waitFor(() => reqs.filter((r) => r.url.endsWith("/messages")).length === 5);
+  push("ChatRunStarted", { messageId: "r5" });
+  push("ChatTextSegmentFinished", { messageId: "r5:text:a", content: "done before you knew" });
+  push("ChatRunFinished", { messageId: "r5", status: "finished" });
+  await new Promise((r) => setTimeout(r, 20));
+  hold202 = null;
+  release();
+  const r = await answer;
+  assert.equal(r.text, "done before you knew");
+});
+
+test("a tool call requested while the stream was down runs from the next snapshot, once", async () => {
+  ran.length = 0;
+  const answer = s.send("tool while offline");
+  await waitFor(() => reqs.filter((r) => r.url.endsWith("/messages")).length === 6);
+  const before = streams;
+  stream!.close();
+  await waitFor(() => streams > before);
+  const results = () => reqs.filter((r) => r.url.endsWith("/tools/results") && r.body.toolCallId === "call6").length;
+  const call = { kind: "ChatFrontendToolCall", id: "call6", createdOrdinal: "40", payload: { toolCallId: "call6", toolName: "eval", input: { code: "1+1" }, status: "requested", executor: { assignmentId: "a1" } } };
+  const other = { kind: "ChatFrontendToolCall", id: "call7", createdOrdinal: "41", payload: { toolCallId: "call7", toolName: "eval", input: {}, status: "requested", executor: { assignmentId: "other-tab" } } };
+  stream!.enqueue(enc.encode(`event: snapshot\ndata: ${JSON.stringify({ sessionId: "s1", snapshotOrdinal: "41", entities: [{ kind: "ChatRun", id: "r6", createdOrdinal: "39", payload: { status: "running" } }, call, other] })}\n\n`));
+  await waitFor(() => results() === 1);
+  assert.deepEqual(ran, [{ code: "1+1" }], "only the call assigned to this page");
+  push("ChatTextPatch", { messageId: "r6:text:a", mode: "CHAT_STREAM_PATCH_MODE_APPEND", text: "eval returned: 42", offset: "0" });
+  push("ChatRunFinished", { messageId: "r6", status: "finished" });
+  assert.equal((await answer).text, "eval returned: 42");
+  assert.equal(results(), 1, "a call runs once, however many times the copy changes");
   s.close();
 });

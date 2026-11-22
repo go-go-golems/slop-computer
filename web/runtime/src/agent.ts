@@ -7,9 +7,10 @@
 // budget, held before every model round); the consent asked is agent's own,
 // since a page may declare agent without sample.
 //
-// A run is known by the id the server's 202 gives it, and every run's
-// outcome is a ChatRun entity in the snapshot: a send settles from the live
-// terminal event or, after a reconnect that missed it, from the snapshot.
+// A run is known only by the id the server's 202 gives it. The session keeps
+// a local copy of its timeline (snapshots replace it, events update it) and
+// a send settles from the copy's ChatRun entity: one path for live events
+// and for reconnects (SLOP3-025 design 02).
 import type { Grant } from "./consent.ts";
 import { request, rpc } from "./transport.ts";
 import { fail, freeze } from "./util.ts";
@@ -72,14 +73,23 @@ async function api(method: string, path: string, body?: unknown): Promise<any> {
 const clean = (o: Record<string, unknown>) => Object.fromEntries(Object.entries(o).filter(([, v]) => v !== undefined && v !== null && v !== ""));
 
 type Run = {
-  id: string;
-  segments: Map<string, string>;
-  order: string[];
-  visible: string;
+  id: string; // the 202's messageId; "" until it arrives
+  text: string;
   onText?: SendOptions["onText"];
   tools: AbortController;
   resolve: (r: Result) => void;
   reject: (e: unknown) => void;
+};
+
+// One timeline entity of the local copy; seq orders entities by creation.
+type Entity = { kind: string; id: string; seq: number; payload: any };
+
+const terminal = new Set(["finished", "failed", "stopped"]);
+
+// A text segment's id is "<run id>:text:<segment>" (chatapp).
+const parentOf = (segmentId: string) => {
+  const i = segmentId.lastIndexOf(":text:");
+  return i > 0 ? segmentId.slice(0, i) : "";
 };
 
 class Session {
@@ -88,7 +98,9 @@ class Session {
   /** True when open() created the session: the server has no conversation yet. */
   readonly fresh: boolean;
   info: any;
+  /** Whether a run of this session is running (from the timeline). */
   running = false;
+  readonly #grant: Grant;
   #tools: Tool[];
   #connection = "c-" + Math.random().toString(36).slice(2, 10);
   #executor: any = null;
@@ -97,11 +109,14 @@ class Session {
   #onReady!: () => void;
   #closed = false;
   #run: Run | null = null;
-  #seen = new Set<string>();
+  #ran = new Set<string>(); // tool calls this page has run
   #listeners = new Set<(e: UIEvent) => void>();
-  #entities: any[] = []; // the last snapshot's
-
-  readonly #grant: Grant;
+  // The local copy of the session's timeline: a snapshot replaces it, every
+  // UI event updates it (#apply), and everything a caller waits for is
+  // derived from it (#derive). Live events and a reconnect's snapshot take
+  // the same path, so there is no recovery logic of its own to get wrong.
+  #entities = new Map<string, Entity>();
+  #seq = 0;
 
   constructor(info: any, tools: Tool[], fresh: boolean, grant: Grant) {
     this.#grant = grant;
@@ -130,7 +145,7 @@ class Session {
     await this.#ready;
     if (this.#tools.length) await this.#register(); // the tab that sends runs the tools
     return new Promise<Result>((resolve, reject) => {
-      const run: Run = { id: "", segments: new Map(), order: [], visible: "", onText: o.onText, tools: new AbortController(), resolve, reject };
+      const run: Run = { id: "", text: "", onText: o.onText, tools: new AbortController(), resolve, reject };
       this.#run = run;
       const onAbort = () => void this.stop();
       o.signal?.addEventListener("abort", onAbort, { once: true });
@@ -143,8 +158,9 @@ class Session {
       run.reject = (e) => (done(), reject(e));
       api("POST", `/sessions/${this.id}/messages`, clean({ prompt, context: o.context }))
         .then((a) => {
-          if (a?.messageId) run.id = a.messageId; // the server's name for the run
-          this.#reconcile(run); // a snapshot that came in before the 202 may already hold its end
+          if (!a?.messageId) throw fail("upstream_error", "the server did not name the run");
+          run.id = a.messageId; // the only way a send learns its run
+          this.#derive(); // its events may have arrived before the 202
         })
         .catch((e) => run.reject(e));
     });
@@ -158,7 +174,6 @@ class Session {
   async history(): Promise<{ role: string; text: string }[]> {
     const v = await api("GET", `/sessions/${this.id}`);
     this.info = v.session;
-    this.running = !!v.running;
     const out: { role: string; text: string }[] = [];
     for (const e of v.snapshot?.entities ?? []) {
       if (e.kind === "ChatMessage" && e.payload && !e.tombstone) out.push({ role: e.payload.role, text: e.payload.text ?? e.payload.content ?? "" });
@@ -236,20 +251,17 @@ class Session {
     }
   }
 
+  // A snapshot replaces the local copy.
   async #snapshot(snap: any) {
-    this.#entities = snap.entities ?? [];
+    this.#entities.clear();
+    const list = [...(snap.entities ?? [])].sort((a, b) => Number(a.createdOrdinal ?? 0) - Number(b.createdOrdinal ?? 0));
+    for (const e of list) if (!e.tombstone) this.#put(e.kind, e.id, e.payload ?? {});
     if (this.#tools.length) await this.#register().catch(() => {});
     this.#onReady();
-    if (this.#run) this.#reconcile(this.#run);
-    // A call requested while the stream was down, assigned to this page.
-    for (const e of snap.entities ?? []) {
-      const p = e.payload;
-      if (e.kind === "ChatFrontendToolCall" && p && p.status === "requested") this.#call(p);
-    }
+    this.#derive();
   }
 
   #event(ev: UIEvent) {
-    const p = ev.payload ?? {};
     for (const fn of [...this.#listeners]) {
       try {
         fn(ev);
@@ -257,72 +269,92 @@ class Session {
         console.error(e);
       }
     }
-    const run = this.#run;
-    switch (ev.name) {
+    this.#apply(ev.name, ev.payload ?? {});
+    this.#derive();
+  }
+
+  #put(kind: string, id: string, payload: any) {
+    const k = kind + "/" + id;
+    const cur = this.#entities.get(k);
+    this.#entities.set(k, { kind, id, seq: cur ? cur.seq : ++this.#seq, payload });
+  }
+
+  #get(kind: string, id: string): any {
+    return this.#entities.get(kind + "/" + id)?.payload;
+  }
+
+  // An event's change to the local copy, as chatapp projects it for the
+  // kinds this client reads (ChatRun, assistant ChatMessage segments,
+  // ChatFrontendToolCall).
+  #apply(name: string, p: any) {
+    const id = String(p.messageId ?? "");
+    switch (name) {
       case "ChatRunStarted":
-        this.running = true;
-        if (run && !run.id) run.id = p.messageId ?? "";
+        this.#put("ChatRun", id, { ...this.#get("ChatRun", id), messageId: id, status: "running" });
         return;
-      case "ChatFrontendToolCallRequested":
-        this.#call(p);
+      case "ChatRunFinished":
+        this.#put("ChatRun", id, { ...this.#get("ChatRun", id), messageId: id, status: "finished", truncated: !!p.truncated, reason: p.reason ?? "" });
+        return;
+      case "ChatRunFailed":
+        this.#put("ChatRun", id, { ...this.#get("ChatRun", id), messageId: id, status: "failed", code: p.code ?? "", error: p.error ?? "" });
+        return;
+      case "ChatRunStopped":
+        this.#put("ChatRun", id, { ...this.#get("ChatRun", id), messageId: id, status: "stopped" });
         return;
       case "ChatTextSegmentStarted":
       case "ChatTextPatch":
-      case "ChatTextSegmentFinished":
-        if (run && ownedBy(run, p.messageId)) this.#text(run, ev.name, p);
+      case "ChatTextSegmentFinished": {
+        const cur = this.#get("ChatMessage", id);
+        let text: string = cur?.text ?? "";
+        if (name === "ChatTextSegmentFinished") text = p.content ?? p.text ?? text;
+        else if (name === "ChatTextPatch") {
+          if (p.mode === "CHAT_STREAM_PATCH_MODE_APPEND") text = text.slice(0, p.offset !== undefined ? Number(p.offset) : text.length) + (p.text ?? "");
+          else if (p.text !== undefined) text = p.text;
+        }
+        this.#put("ChatMessage", id, { ...cur, messageId: id, role: p.role || "assistant", text, parentMessageId: parentOf(id) });
         return;
-      case "ChatRunFinished":
-      case "ChatRunFailed":
-      case "ChatRunStopped":
-        this.running = false;
-        if (!run || (run.id && p.messageId && p.messageId !== run.id)) return;
-        if (ev.name === "ChatRunFinished") run.resolve(freeze({ text: run.visible, truncated: !!p.truncated }));
-        else if (ev.name === "ChatRunStopped") run.reject(fail("cancelled", "the answer was stopped", run.visible ? { text: run.visible } : undefined));
-        else run.reject(fail(p.code || "upstream_error", p.error || "the run failed", run.visible ? { text: run.visible } : undefined));
+      }
+      case "ChatFrontendToolCallRequested":
+        if (p.toolCallId) this.#put("ChatFrontendToolCall", p.toolCallId, { ...p, status: "requested" });
+        return;
+      case "ChatFrontendToolResultReceived":
+        if (p.toolCallId) this.#put("ChatFrontendToolCall", p.toolCallId, { ...this.#get("ChatFrontendToolCall", p.toolCallId), status: p.status || "success" });
     }
   }
 
-  // A run whose end the stream did not deliver (it ended while the stream
-  // was down): its ChatRun entity says how, its segments what it answered.
-  #reconcile(run: Run) {
-    if (!run.id || this.#run !== run) return;
-    const state = this.#entities.find((e) => e.kind === "ChatRun" && e.id === run.id)?.payload;
-    if (!state || state.status === "running") return;
-    const segs = this.#entities
-      .filter((e) => e.kind === "ChatMessage" && e.payload?.role === "assistant" && e.payload?.parentMessageId === run.id)
-      .sort((a, b) => Number(a.createdOrdinal ?? 0) - Number(b.createdOrdinal ?? 0));
-    for (const e of segs) this.#text(run, "ChatTextSegmentFinished", { messageId: e.id, content: e.payload.text ?? e.payload.content ?? "" });
-    this.running = false;
-    const extra = run.visible ? { text: run.visible } : undefined;
-    if (state.status === "finished") run.resolve(freeze({ text: run.visible, truncated: !!state.truncated }));
-    else if (state.status === "stopped") run.reject(fail("cancelled", "the answer was stopped", extra));
-    else run.reject(fail(state.code || "upstream_error", state.error || "the run failed", extra));
-  }
-
-  // The answer so far: every text segment of the run, in order, as sample's
-  // text is every round's text.
-  #text(run: Run, name: string, p: any) {
-    const seg = String(p.messageId);
-    if (!run.segments.has(seg)) {
-      run.segments.set(seg, "");
-      run.order.push(seg);
+  // What callers wait for, from the local copy: whether a run is running,
+  // the pending send's text and outcome, and the tool calls to run here.
+  #derive() {
+    const ents = [...this.#entities.values()];
+    this.running = ents.some((e) => e.kind === "ChatRun" && e.payload?.status === "running");
+    const run = this.#run;
+    if (run && run.id) {
+      const text = ents
+        .filter((e) => e.kind === "ChatMessage" && e.payload?.role === "assistant" && e.payload?.parentMessageId === run.id)
+        .sort((a, b) => a.seq - b.seq)
+        .map((e) => String(e.payload.text ?? ""))
+        .filter((t) => t !== "")
+        .join("\n\n");
+      if (text !== run.text) {
+        const before = run.text;
+        run.text = text;
+        run.onText?.({ text, delta: text.startsWith(before) ? text.slice(before.length) : "" });
+      }
+      const state = this.#get("ChatRun", run.id);
+      if (state && terminal.has(state.status)) {
+        const extra = run.text ? { text: run.text } : undefined;
+        if (state.status === "finished") run.resolve(freeze({ text: run.text, truncated: !!state.truncated }));
+        else if (state.status === "stopped") run.reject(fail("cancelled", "the answer was stopped", extra));
+        else run.reject(fail(state.code || "upstream_error", state.error || "the run failed", extra));
+      }
     }
-    let t = run.segments.get(seg)!;
-    if (name === "ChatTextSegmentFinished") t = p.content ?? p.text ?? t;
-    else if (name === "ChatTextPatch") {
-      if (p.mode === "CHAT_STREAM_PATCH_MODE_APPEND") t = t.slice(0, p.offset !== undefined ? Number(p.offset) : t.length) + (p.text ?? "");
-      else if (p.text !== undefined) t = p.text;
-    }
-    run.segments.set(seg, t);
-    const before = run.visible;
-    run.visible = run.order.map((s) => run.segments.get(s)!).filter((s) => s !== "").join("\n\n");
-    if (run.visible !== before) run.onText?.({ text: run.visible, delta: run.visible.startsWith(before) ? run.visible.slice(before.length) : "" });
+    for (const e of ents) if (e.kind === "ChatFrontendToolCall" && e.payload?.status === "requested") void this.#call(e.payload);
   }
 
   async #call(p: any) {
     const id = p.toolCallId;
-    if (!id || this.#seen.has(id) || !this.#executor || p.executor?.assignmentId !== this.#executor.assignmentId) return;
-    this.#seen.add(id);
+    if (!id || this.#ran.has(id) || !this.#executor || p.executor?.assignmentId !== this.#executor.assignmentId) return;
+    this.#ran.add(id);
     const tool = this.#tools.find((t) => t.name === p.toolName);
     const signal = this.#run?.tools.signal ?? new AbortController().signal;
     let status = "success", result: unknown = null, error = "";
@@ -340,9 +372,6 @@ class Session {
       .catch(() => {}); // late (the call timed out) or the run was stopped
   }
 }
-
-// A text segment's id is "<run id>:text:<segment>".
-const ownedBy = (run: Run, messageId: unknown) => !run.id || String(messageId ?? "").startsWith(run.id);
 
 export function agent(grant: Grant) {
   return freeze({
