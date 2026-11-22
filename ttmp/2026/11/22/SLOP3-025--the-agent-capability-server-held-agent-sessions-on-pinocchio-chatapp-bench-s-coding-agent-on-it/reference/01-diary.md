@@ -180,3 +180,161 @@ Commits: f903096 (runtime), ee6de7d (bench), 501e81a (hold keys).
   `earlier`, the `if (this.agent)` branch of `turn`); `pkg/doors/pages/agent/agent.go` (`call:` in `resolve`).
 - `make runtime-test`, `cd web/bench && npm test`, `go test -tags sqlite_fts5 ./pkg/doors/... ./pkg/host`;
   the e2e: `scripts/01-bench-agent-e2e.sh <repo> <scratch>` then benchdrive.
+
+## Step 3: PRs and the review of #56
+
+This step opened slop-computer#56 and fixed its two P2 review findings in the runtime. The second one also needed
+server support, added in pinocchio (b7b64ca: a run id in the `202`, a `ChatRun` entity per run).
+
+Commit: 9f4b923.
+
+### Prompt Context
+**User prompt (verbatim):** "ok, PRs?", then "Address code review issues, tell me if it would be possible to tighten
+our design / architecture / API design to make them impossible eto express"
+**Assistant interpretation:** Open the PR; fix the findings; report on making them structurally impossible.
+**Inferred user intent:** A mergeable PR, and a design that prevents repeats.
+**Commit (code):** 9f4b923
+
+### What I did
+- PR #56 from origin's `task/agent-capability`. A first `git push … | grep -E '->|…'` errored in ugrep (`invalid
+  option ->`), but the push itself had gone through; the upstream was set with a second push.
+- P2 (agent.ts:120): `send()` called `consent("sample")`, but `permissionStates()` lists only granted capabilities,
+  so an agent-only app had no `sample` state and every send was refused. Now `consent("agent")`.
+- P2 (agent.ts:229): a run that ended while the stream was down left `send()` pending (and later sends at
+  `run_active`). Now `run.id` comes from the `202`'s `messageId`, and `#reconcile` settles from the snapshot's
+  `ChatRun` entity, rebuilding the text from the run's assistant segments.
+- Tests: permissions initialized with `{agent: "granted"}` only; a new test closes the stream mid-run and sends a
+  snapshot with the finished run.
+
+### Why
+- Settling from server state, not from a cursor replay: httpapi's SSE has no replay (snapshot then live), and the
+  snapshot now holds every run's outcome.
+
+### What worked
+- Against `git show HEAD:web/runtime/src/agent.ts`, the new tests fail 4 of 5; with the fix, 5 of 5 pass.
+  `make runtime-test`: 22 pass. `go test ./pkg/doors/... ./pkg/host` pass.
+
+### What didn't work
+- My e2e didn't catch the consent bug: bench declares both `sample` and `agent`, and my host test never called
+  `send`.
+
+### What I learned
+- The runtime's permission states mirror granted capabilities one for one, so a capability that spends under
+  another's policy still needs its own consent name.
+
+### What was tricky to build
+- Events for a run can arrive before the `202`; `#reconcile` runs again when the id arrives, against the last snapshot.
+
+### What warrants a second pair of eyes
+- There are still two paths (live events and `#reconcile`); design doc 02 replaces them with one reducer.
+
+### What should be done in the future
+- Design doc 02: the session guard, grants, the reducer.
+
+### Code review instructions
+- `web/runtime/src/agent.ts` (`send`, `#snapshot`, `#reconcile`), `web/runtime/test/agent.test.ts`.
+
+## Step 4: Design 02 and change 2, a grant per capability
+
+This step wrote design doc 02 (`design-doc/02-design-making-the-review-s-bug-classes-impossible-to-express.md`):
+the session guard (pinocchio), a grant per capability, and one reducer for the agent client. It then implemented
+the grant in the runtime. Change 1, the guard, is pinocchio cedda17, in that repo's diary (step 10).
+
+Commits: fd99724 (design), c7a9d79 (grant).
+
+### Prompt Context
+**User prompt (verbatim):** "ok, do the three changes", then mid-turn "make a design doc, then cocommit at
+appropriate intervals and keep a detailed diary as you work (using the diary format from the skill) then retrigger
+@codex review once pushed"
+**Assistant interpretation:** Design first, then the three changes, each committed and recorded; push; re-request
+Codex's review.
+**Inferred user intent:** The bug classes from the review are closed structurally, with a written rationale.
+**Commit (code):** c7a9d79
+
+### What I did
+- Design doc 02: per change, the rule, the API, what enforces it, the tests.
+- `web/runtime/src/consent.ts`: permission state, `request` and `consent` are now private there. It exports
+  `initPermissions`, `permissions`, `grantFor(name) → Grant {name, consent(code?)}`.
+- `caps.ts` loses that code; `comments(h, grant)`. `sample(h, grant)` threads the grant into `call`;
+  `agent(grant)` hands it to each `Session`. `index.ts`'s `resolve(name)` passes `grantFor(name)`.
+- `test/consent.test.ts`: only `index.ts` calls `grantFor`, always with the variable `name`; other modules import only
+  the `Grant` type from `consent.ts`.
+
+### Why
+- The rule lives where capabilities are made (`resolve(name)`), so a capability cannot even hold another's grant.
+
+### What worked
+- A planted `import { grantFor, type Grant } …; const _other = () => grantFor("agent")` in `sample.ts` fails both
+  scans (`✖ only index.ts makes grants`, `✖ other modules import only the Grant type from consent.ts`).
+  `make runtime-test`: 25 pass.
+
+### What didn't work
+- `pnpm check` after the move: `src/caps.ts(6,15): error TS6133: 'boot' is declared but its value is never read`
+  (and `connect`); they belonged to the moved permission code; dropped from the import.
+
+### What I learned
+- The runtime's `noUnusedLocals` makes leftovers of a move show up at once.
+
+### What was tricky to build
+- `comments` lived in the same file as `consent`, so it could have kept calling it directly; moving the state to its
+  own module is what makes the rule hold for it too.
+
+### What warrants a second pair of eyes
+- The source scans are text matches (regexes), not a TypeScript AST.
+
+### What should be done in the future
+- Nothing for the grant.
+
+### Code review instructions
+- `web/runtime/src/consent.ts`, `src/index.ts` (`resolve`), `test/consent.test.ts`.
+
+## Step 5: Change 3, one reducer for the agent client
+
+This step replaced the agent client's two paths (live events and `#reconcile` after a snapshot) with one. A local
+copy of the timeline is replaced by snapshots and updated by events; whatever a caller waits for is derived from it.
+It was checked again in bench on a local server.
+
+Commit: 6a62fcb.
+
+### Prompt Context
+**User prompt (verbatim):** see Step 4.
+**Assistant interpretation:** Design 02, change 3.
+**Inferred user intent:** Reconnect correctness by construction, not by a second code path.
+**Commit (code):** 6a62fcb
+
+### What I did
+- `agent.ts`: `#entities` (kind/id → payload with a creation sequence), `#snapshot` (replace), `#apply(name,
+  payload)` for `ChatRun*`, `ChatText*`, `ChatFrontendToolCall*`, and `#derive()` (`running`; the pending run's text
+  from its assistant segments, joined by a blank line; its outcome from `ChatRun[id]`; the tool calls requested and
+  assigned to this page that have not run). The run id comes only from the `202`; a `202` without `messageId`
+  rejects. Removed: `ownedBy`, `#reconcile`, `#text`, the per-run segment map.
+- Tests: "a run whose events all arrive before its 202 settles when the 202 names it"; "a tool call requested while
+  the stream was down runs from the next snapshot, once" (and not one assigned to another tab).
+
+### Why
+- With both paths going through the same copy, a new kind of state that matters (a new entity) cannot be handled
+  live and forgotten on reconnect.
+
+### What worked
+- 7 of 7 agent tests; `make runtime-test` 27 pass.
+- bench end to end (rebuilt binary, `--llm fake`, benchdrive): `✓ eval 1 · files.list · 46 ms`, `eval returned:
+  "{\"ok\":true,\"value\":4}"`; a second message answered; `turns` 5; `llm_holds` 6, 6 settled.
+
+### What didn't work
+- Nothing failed. The two new tests also pass on the previous `agent.ts` (checked by swapping it in): the last
+  round's fix already had the behaviour, so they pin it rather than show a bug.
+
+### What I learned
+- Tool calls dedupe by id (`#ran`), so `#derive` can offer every requested call after every change.
+
+### What was tricky to build
+- Text order: segments sort by first sight (snapshot `createdOrdinal`, then arrival), the order chatapp creates them.
+
+### What warrants a second pair of eyes
+- `#apply` mirrors chatapp's projection for three kinds; if chatapp changes how it projects them, both need to change.
+
+### What should be done in the future
+- Push, re-request review (this step's end).
+
+### Code review instructions
+- `web/runtime/src/agent.ts` (`#apply`, `#derive`, `send`), `web/runtime/test/agent.test.ts`.
