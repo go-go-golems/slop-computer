@@ -111,6 +111,8 @@ github.com/go-go-golems/pinocchio v0.11.19 h1:IZBbwWR8wnVcAUvsOvULwY1knWerok+BPf
 github.com/go-go-golems/pinocchio v0.11.19/go.mod h1:TWfRNsvuktuOpjlxtVK7vsYC0EPWL4cgJ6bhPiXzYYk=
 github.com/go-go-golems/pinocchio v0.11.20-0.20261123014038-ea7ebbe8162d h1:mxaeDc+SPL1QqMMPUH/H6TNLbzIF4UeOwsmZtGdwKZQ=
 github.com/go-go-golems/pinocchio v0.11.20-0.20261123014038-ea7ebbe8162d/go.mod h1:TWfRNsvuktuOpjlxtVK7vsYC0EPWL4cgJ6bhPiXzYYk=
+github.com/go-go-golems/pinocchio v0.11.20-0.20261123025511-c76512406646 h1:41Ps9163NdiZUgR7h50XoeK5LrOf6IBvW6esYnaC4xI=
+github.com/go-go-golems/pinocchio v0.11.20-0.20261123025511-c76512406646/go.mod h1:TWfRNsvuktuOpjlxtVK7vsYC0EPWL4cgJ6bhPiXzYYk=
 github.com/go-go-golems/sessionstream v0.1.2 h1:aUthVFD8f8M08s6zH0Y42z9DsDtInGgetyNm7taVEM8=
 github.com/go-go-golems/sessionstream v0.1.2/go.mod h1:1PWviVKm2Xi7fNfX2Pk0eQOLmNOBFl0Ubjced3B8xfs=
 github.com/go-jose/go-jose/v4 v4.1.9 h1:pKfeQkig1NmgK4hJrZYXLEYURXfoJB61Larw0uIW4gY=
