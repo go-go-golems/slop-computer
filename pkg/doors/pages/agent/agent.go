@@ -15,8 +15,6 @@ import (
 	"encoding/json"
 	"fmt"
 	"net/http"
-	"os"
-	"path/filepath"
 	"strings"
 	"time"
 
@@ -29,12 +27,10 @@ import (
 	"github.com/go-go-golems/pinocchio/pkg/chatapp/frontendtools"
 	"github.com/go-go-golems/pinocchio/pkg/chatapp/httpapi"
 	"github.com/go-go-golems/pinocchio/pkg/chatapp/plugins"
-	"github.com/go-go-golems/pinocchio/pkg/chatapp/serverkit"
 	"github.com/go-go-golems/pinocchio/pkg/chatapp/sessions"
 	"github.com/go-go-golems/pinocchio/pkg/chatapp/toolkit/scripted"
 	"github.com/go-go-golems/pinocchio/pkg/chatapp/toolkit/toolexec"
 	infruntime "github.com/go-go-golems/pinocchio/pkg/inference/runtime"
-	chatstore "github.com/go-go-golems/pinocchio/pkg/persistence/chatstore"
 	"github.com/go-go-golems/slop-computer/pkg/ids"
 	"github.com/go-go-golems/slop-computer/pkg/llm"
 	"github.com/pkg/errors"
@@ -129,18 +125,13 @@ func New(cfg Config) (*Service, error) {
 		httpapi.WithAuthenticator(authenticate),
 		httpapi.WithAuthorizer(authorize),
 		httpapi.WithCreateHook(s.complete),
-		httpapi.WithBlocks(contextBlocks),
+		httpapi.WithBlocks(httpapi.ContextField(MaxContextBytes)),
 		httpapi.WithFrontendTools(frontendtools.NewManager()),
 		httpapi.WithChatPlugins(frontendtools.NewPlugin(), plugins.NewReasoningPlugin(), plugins.NewToolCallPlugin()),
 		httpapi.WithMaxBodyBytes(MaxSystemBytes + 64<<10),
 	}
 	if cfg.Dir != "" {
-		stores, err := s.openStores()
-		if err != nil {
-			_ = s.Close()
-			return nil, err
-		}
-		opts = append(opts, stores...)
+		opts = append(opts, httpapi.WithStateDir(cfg.Dir))
 	}
 	api, err := httpapi.New(opts...)
 	if err != nil {
@@ -152,29 +143,6 @@ func New(cfg Config) (*Service, error) {
 	api.Register(mux)
 	s.handler = mux
 	return s, nil
-}
-
-func (s *Service) openStores() ([]httpapi.Option, error) {
-	if err := os.MkdirAll(s.cfg.Dir, 0o700); err != nil {
-		return nil, errors.Wrap(err, "agent state directory")
-	}
-	store, err := sessions.NewSQLiteStore("file:" + filepath.Join(s.cfg.Dir, "sessions.db") + "?_busy_timeout=5000&_journal_mode=WAL")
-	if err != nil {
-		return nil, errors.Wrap(err, "open agent session store")
-	}
-	s.closers = append(s.closers, store.Close)
-	turnsDB := filepath.Join(s.cfg.Dir, "turns.db")
-	turnStore, err := chatstore.NewSQLiteTurnStore(turnsDB)
-	if err != nil {
-		return nil, errors.Wrap(err, "open agent turn store")
-	}
-	s.closers = append(s.closers, turnStore.Close)
-	return []httpapi.Option{
-		httpapi.WithSessionStore(store),
-		httpapi.WithTurnStore(turnStore),
-		httpapi.WithTurnsDBPath(turnsDB),
-		httpapi.WithHydrationStoreSpec(serverkit.StoreSpec{Backend: serverkit.StoreBackendSQLite, Path: filepath.Join(s.cfg.Dir, "timeline.db")}),
-	}, nil
 }
 
 // Close stops runs and closes the stores.
@@ -231,11 +199,6 @@ func authorize(_ context.Context, p httpapi.Principal, _ httpapi.Action, info *s
 	return nil
 }
 
-type codedError struct{ code, msg string }
-
-func (e codedError) Error() string { return e.msg }
-func (e codedError) Code() string  { return e.code }
-
 // complete is the create hook: the app label, the page's key once per
 // person and app, and the settings within slop's limits.
 func (s *Service) complete(ctx context.Context, p httpapi.Principal, info *sessions.Info) error {
@@ -245,7 +208,7 @@ func (s *Service) complete(ctx context.Context, p httpapi.Principal, info *sessi
 	info.Labels["app"] = p.Attrs["app"]
 	for k, v := range info.Labels {
 		if len(k) > 64 || len(v) > 256 {
-			return codedError{httpapi.CodeInvalidRequest, "a label is at most 64 bytes of key and 256 of value"}
+			return httpapi.Coded(httpapi.CodeInvalidRequest, "a label is at most 64 bytes of key and 256 of value")
 		}
 	}
 	if key := info.Labels["key"]; key != "" {
@@ -254,15 +217,15 @@ func (s *Service) complete(ctx context.Context, p httpapi.Principal, info *sessi
 			return err
 		}
 		if len(same) > 0 {
-			return codedError{httpapi.CodeSessionExists, fmt.Sprintf("a session with key %q exists: %s", key, same[0].ID)}
+			return httpapi.Coded(httpapi.CodeSessionExists, fmt.Sprintf("a session with key %q exists: %s", key, same[0].ID))
 		}
 	}
 	d, err := dataOf(*info)
 	if err != nil {
-		return codedError{httpapi.CodeInvalidRequest, err.Error()}
+		return httpapi.Coded(httpapi.CodeInvalidRequest, err.Error())
 	}
 	if len(d.System) > MaxSystemBytes {
-		return codedError{"prompt_too_large", fmt.Sprintf("a system prompt is at most %d bytes", MaxSystemBytes)}
+		return httpapi.Coded("prompt_too_large", fmt.Sprintf("a system prompt is at most %d bytes", MaxSystemBytes))
 	}
 	d.MaxRounds = clamp(d.MaxRounds, DefaultMaxRounds, MaxRounds)
 	d.ToolTimeout = int64(clamp(int(d.ToolTimeout), int(DefaultToolTimeout/time.Millisecond), int(MaxToolTimeout/time.Millisecond)))
@@ -296,32 +259,12 @@ func dataOf(info sessions.Info) (Data, error) {
 	return d, nil
 }
 
-// contextBlocks appends a message's "context" after the person's message.
-func contextBlocks(_ context.Context, _ sessions.Info, msg httpapi.MessageRequest) ([]turns.Block, error) {
-	if len(msg.Raw) == 0 {
-		return nil, nil
-	}
-	var extra struct {
-		Context string `json:"context"`
-	}
-	if err := json.Unmarshal(msg.Raw, &extra); err != nil {
-		return nil, err
-	}
-	if strings.TrimSpace(extra.Context) == "" {
-		return nil, nil
-	}
-	if len(extra.Context) > MaxContextBytes {
-		return nil, codedError{"prompt_too_large", fmt.Sprintf("a message's context is at most %d bytes", MaxContextBytes)}
-	}
-	return []turns.Block{turns.NewUserTextBlock(extra.Context)}, nil
-}
-
 // resolve builds one message's runtime: the engine for the session's tier,
 // metered for the person; the page's system prompt; the loop and tool limits.
 func (s *Service) resolve(ctx context.Context, r *http.Request, info sessions.Info, _ httpapi.MessageRequest) (*infruntime.ComposedRuntime, error) {
 	v, ok := ViewFrom(r.Context())
 	if !ok {
-		return nil, codedError{httpapi.CodeUnauthenticated, "no view"}
+		return nil, httpapi.Coded(httpapi.CodeUnauthenticated, "no view")
 	}
 	d, err := dataOf(info)
 	if err != nil {
@@ -366,6 +309,7 @@ func (s *Service) resolve(ctx context.Context, r *http.Request, info sessions.In
 		),
 		RuntimeKey:         "agent",
 		RuntimeFingerprint: "agent:" + model.Model,
+		Model:              model.Model,
 	}, nil
 }
 
@@ -375,7 +319,7 @@ func (s *Service) engine(ctx context.Context, opts llm.Options) (engine.Engine, 
 	b := s.cfg.Backend()
 	switch b := b.(type) {
 	case nil:
-		return nil, llm.EngineInfo{}, codedError{"unavailable", "this server has no model backend"}
+		return nil, llm.EngineInfo{}, httpapi.Coded("unavailable", "this server has no model backend")
 	case *llm.Fake:
 		return &scripted.Engine{Delay: s.cfg.ScriptDelay}, llm.EngineInfo{Model: scripted.Model.Ref}, nil
 	case Engines:
@@ -385,7 +329,7 @@ func (s *Service) engine(ctx context.Context, opts llm.Options) (engine.Engine, 
 		}
 		return eng, info, nil
 	}
-	return nil, llm.EngineInfo{}, codedError{"unavailable", "this server's model backend cannot run agents"}
+	return nil, llm.EngineInfo{}, httpapi.Coded("unavailable", "this server's model backend cannot run agents")
 }
 
 type handlerEngine struct{ handler middleware.HandlerFunc }

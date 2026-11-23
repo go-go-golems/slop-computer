@@ -155,6 +155,7 @@ test("a run that ends while the stream is down settles from the next snapshot", 
     ent("ChatMessage", "r3:text:a", 15, { role: "assistant", text: "another run", parentMessageId: "r3" }),
   ];
   stream!.enqueue(enc.encode(`event: snapshot\ndata: ${JSON.stringify({ sessionId: "s1", snapshotOrdinal: "30", entities })}\n\n`));
+  ordinal = 30; // events after a snapshot have higher ordinals (the server sends no older ones)
   const r = await answer;
   assert.equal(r.text, "first part\n\nsecond part");
   assert.equal(r.truncated, true);
@@ -186,6 +187,7 @@ test("a tool call requested while the stream was down runs from the next snapsho
   const call = { kind: "ChatFrontendToolCall", id: "call6", createdOrdinal: "40", payload: { toolCallId: "call6", toolName: "eval", input: { code: "1+1" }, status: "requested", executor: { assignmentId: "a1" } } };
   const other = { kind: "ChatFrontendToolCall", id: "call7", createdOrdinal: "41", payload: { toolCallId: "call7", toolName: "eval", input: {}, status: "requested", executor: { assignmentId: "other-tab" } } };
   stream!.enqueue(enc.encode(`event: snapshot\ndata: ${JSON.stringify({ sessionId: "s1", snapshotOrdinal: "41", entities: [{ kind: "ChatRun", id: "r6", createdOrdinal: "39", payload: { status: "running" } }, call, other] })}\n\n`));
+  ordinal = 41;
   await waitFor(() => results() === 1);
   assert.deepEqual(ran, [{ code: "1+1" }], "only the call assigned to this page");
   push("ChatTextPatch", { messageId: "r6:text:a", mode: "CHAT_STREAM_PATCH_MODE_APPEND", text: "eval returned: 42", offset: "0" });

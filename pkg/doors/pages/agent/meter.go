@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"github.com/go-go-golems/pinocchio/pkg/chatapp/httpapi"
 	"sync/atomic"
 
 	"github.com/go-go-golems/geppetto/pkg/events"
@@ -34,9 +35,9 @@ func (m *meteredEngine) RunInference(ctx context.Context, t *turns.Turn) (*turns
 	l := m.ledger.LLMFor(ctx, m.payer, m.audience)
 	switch {
 	case !l.Allowed:
-		return nil, codedError{"permission_denied", "no LLM access"}
+		return nil, httpapi.Coded("permission_denied", "no LLM access")
 	case l.Remaining != nil && *l.Remaining <= 0:
-		return nil, codedError{"quota_exceeded", "token budget used up for this month"}
+		return nil, httpapi.Coded("quota_exceeded", "token budget used up for this month")
 	}
 	meter := m.ledger.NewMeter(m.payer, l.Budget, m.call)
 	defer meter.Close()
@@ -44,7 +45,7 @@ func (m *meteredEngine) RunInference(ctx context.Context, t *turns.Turn) (*turns
 	capped, err := meter.Before(ctx, int(m.round.Add(1)-1), est)
 	var f *llm.Failure
 	if errors.As(err, &f) {
-		return nil, codedError{f.Code, f.Message}
+		return nil, httpapi.Coded(f.Code, f.Message)
 	}
 	if err != nil {
 		return nil, err
