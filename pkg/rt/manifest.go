@@ -14,8 +14,9 @@ import (
 //	  "comments": {"composer_only": true}, "artifact": {}, "sample": {"images": true},
 //	  "slop": {"permissions": ["versions:push"]}}}
 //
-// Every name but slop is the contract's; slop is slop's own extension: the
-// management API, for apps an admin approved.
+// Every name but slop and agent is the contract's; slop and agent are slop's
+// own extensions: the management API, for apps an admin approved, and
+// server-held agent sessions (SLOP3-025), granted like sample.
 type Manifest struct {
 	Capabilities map[string]json.RawMessage `json:"capabilities"`
 }
@@ -37,7 +38,7 @@ type Caps struct {
 // ContractCaps are the capability names a manifest may declare. permissions
 // is built in and never declared.
 var ContractCaps = map[string]bool{"artifact": true, "assets": true, "comments": true, "db": true, "downloads": true,
-	"files": true, "mcp": true, "room": true, "sample": true, "user": true, "slop": true}
+	"files": true, "mcp": true, "room": true, "sample": true, "user": true, "slop": true, "agent": true}
 
 var topicRe = regexp.MustCompile(`^[a-z][a-z0-9_.-]{0,47}$`)
 

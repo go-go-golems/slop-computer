@@ -2,7 +2,7 @@
 # are committed and embedded (go:embed), so there is no web build stage.
 # SQLite (mattn/go-sqlite3) needs cgo: the builder and the runtime image
 # are both Debian bookworm, so the binary finds the glibc it was linked with.
-FROM golang:1.26.10-bookworm AS server
+FROM golang:1.26.11-bookworm AS server
 WORKDIR /src
 ENV GOWORK=off CGO_ENABLED=1
 COPY go.mod go.sum ./

@@ -28,8 +28,11 @@ func (e policyEnv) declaredPolicyCaps(ctx context.Context, app string) ([]string
 	for _, c := range policy.PolicyCaps {
 		ok := false
 		switch c {
-		case "assets", "sample":
+		case "assets":
 			ok = m.Caps.Declared[c]
+		case "sample":
+			// the agent capability spends under the sample policy (SLOP3-025)
+			ok = m.Caps.Declared["sample"] || m.Caps.Declared["agent"]
 		case "user.email":
 			ok = m.Caps.Declared["user"] && m.Caps.Scopes["email"]
 		case "fetch":

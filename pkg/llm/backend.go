@@ -133,3 +133,10 @@ type AnswerUsage struct {
 	Input  int64 `json:"input"`
 	Output int64 `json:"output"`
 }
+
+// EngineInfo describes the model behind an agent engine (gepp's
+// Backend.Engine): its reference and its output limit (0: unknown).
+type EngineInfo struct {
+	Model     string
+	MaxTokens int
+}

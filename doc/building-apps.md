@@ -249,6 +249,32 @@ The catalog previews 93 free apps inside its own pages. What works:
   Read model answers leniently (find the JSON object, validate ids against
   your data) and show the raw text when it does not parse. The local `fake`
   backend answers "slop is connected.", which exercises that fallback.
+- **`agent`** (pages; slop's extension, SLOP3-025) is for a conversation with
+  tools, where `sample` would have the page resend the whole history every
+  message. The server keeps the conversation and runs the tool loop; the page
+  runs the tools it registers. Declare `"agent": {}`; it is granted and paid
+  exactly like `sample` (the `sample` policy cell, the person's LLM access and
+  budget, held before every model round).
+
+  ```js
+  const agent = await claude.use('agent')            // null: not declared or not granted
+  const s = await agent.open('thread-1', {           // one session per key, person and app
+    system: 'You help with …',                       // fixed for the session's life
+    tools: [{ name: 'eval', description: '…', inputSchema: { type: 'object' },
+              execute: async (input, { signal }) => result }],
+  })
+  const { text } = await s.send('Fix the header', {  // resolves when the answer is done
+    context: 'Files: …',                             // kept after the message: send what changed
+    onText: ({ text }) => show(text), signal,
+  })
+  ```
+
+  `s.stop()`, `s.history()`, `s.delete()`, `agent.list()`, `agent.limits()`.
+  Limits: 30 tool rounds by default (`maxRounds`, at most 60), 10 minutes per
+  tool call (`toolTimeout` in ms, at most 30 minutes), a system prompt of
+  256 KB and a context of 64 KB. With `--llm fake`, a message
+  `/tool <name> {json}` calls that tool and the answer is
+  `<name> returned: <result>`; any other message is echoed.
 
 ## 7. Actors and endpoints
 

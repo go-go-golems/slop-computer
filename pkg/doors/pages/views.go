@@ -116,6 +116,11 @@ func grantedCaps(v *rt.View) map[string]any {
 			if v.User != "" && v.Policy["sample"] {
 				out[name] = map[string]any{"images": v.Caps.Images}
 			}
+		case "agent":
+			// The same money as sample: the person's LLM access and budget.
+			if v.User != "" && v.Policy["sample"] {
+				out[name] = map[string]any{}
+			}
 		case "user":
 			scopes := []string{}
 			for sc := range v.Caps.Scopes {
@@ -562,6 +567,7 @@ func (s *Door) rpcTable() map[string]rpcMethod {
 		"user.profiles":               {authz.UserRead, s.rpcUserProfiles},
 		"user.search":                 {authz.UserRead, s.rpcUserSearch},
 		"sample.limits":               {authz.Sample, s.rpcSampleLimits},
+		"agent.limits":                {authz.Sample, s.rpcSampleLimits}, // the same budget (SLOP3-025)
 		"room.join":                   {authz.Room, s.rpcRoomJoin},
 		"room.leave":                  {authz.Room, s.rpcRoomLeave},
 		"room.presence":               {authz.Room, s.rpcRoomPresence},

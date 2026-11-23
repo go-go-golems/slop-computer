@@ -3,6 +3,6 @@
   "type": "bench",
   "page": "index.html",
   "actor": "actor.js",
-  "capabilities": { "db": {}, "user": {}, "sample": {}, "downloads": true },
+  "capabilities": { "db": {}, "user": {}, "sample": {}, "agent": {}, "downloads": true },
   "slop": { "modules": ["workshop"] }
 }

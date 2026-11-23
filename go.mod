@@ -1,6 +1,6 @@
 module github.com/go-go-golems/slop-computer
 
-go 1.26.6
+go 1.26.11
 
 require (
 	github.com/Masterminds/semver/v3 v3.5.0
@@ -8,10 +8,11 @@ require (
 	github.com/dop251/goja v0.0.0-20261103151521-97b96e1e55f5
 	github.com/dop251/goja_nodejs v0.0.0-20260918173711-b481721df8a2
 	github.com/evanw/esbuild v0.25.12
-	github.com/go-go-golems/geppetto v0.14.1
+	github.com/go-go-golems/geppetto v0.14.3
 	github.com/go-go-golems/glazed v1.4.3
 	github.com/go-go-golems/go-go-goja v0.10.8-0.20261108231830-9d7ede7027c7
-	github.com/go-jose/go-jose/v4 v4.1.8
+	github.com/go-go-golems/pinocchio v0.11.19
+	github.com/go-jose/go-jose/v4 v4.1.9
 	github.com/invopop/jsonschema v0.14.0
 	github.com/mattn/go-sqlite3 v1.14.52
 	github.com/pkg/errors v0.9.1
@@ -35,6 +36,7 @@ require (
 	cloud.google.com/go/auth/oauth2adapt v0.3.1 // indirect
 	cloud.google.com/go/compute/metadata v0.10.0 // indirect
 	cloud.google.com/go/longrunning v0.6.7 // indirect
+	filippo.io/edwards25519 v1.2.0 // indirect
 	github.com/Masterminds/goutils v1.1.1 // indirect
 	github.com/Masterminds/semver v1.5.0 // indirect
 	github.com/Masterminds/sprig v2.22.0+incompatible // indirect
@@ -45,16 +47,17 @@ require (
 	github.com/buger/jsonparser v1.2.0 // indirect
 	github.com/cenkalti/backoff/v4 v4.3.0 // indirect
 	github.com/cespare/xxhash/v2 v2.3.0 // indirect
-	github.com/clipperhouse/stringish v0.1.1 // indirect
-	github.com/clipperhouse/uax29/v2 v2.5.0 // indirect
+	github.com/clipperhouse/uax29/v2 v2.7.0 // indirect
 	github.com/dlclark/regexp2/v2 v2.11.0 // indirect
 	github.com/felixge/httpsnoop v1.1.0 // indirect
 	github.com/go-go-golems/logcopter v0.1.1 // indirect
+	github.com/go-go-golems/sessionstream v0.1.2 // indirect
 	github.com/go-logr/logr v1.4.4 // indirect
 	github.com/go-logr/stdr v1.2.2 // indirect
 	github.com/go-openapi/errors v0.22.0 // indirect
 	github.com/go-openapi/strfmt v0.23.0 // indirect
 	github.com/go-sourcemap/sourcemap v2.1.4+incompatible // indirect
+	github.com/go-sql-driver/mysql v1.10.0 // indirect
 	github.com/google/generative-ai-go v0.20.1 // indirect
 	github.com/google/go-cmp v0.7.0 // indirect
 	github.com/google/pprof v0.0.0-20250317173921-a4b03ec1a45e // indirect
@@ -110,9 +113,9 @@ require (
 	go.opentelemetry.io/otel/trace v1.47.0 // indirect
 	go.yaml.in/yaml/v3 v3.0.5 // indirect
 	go.yaml.in/yaml/v4 v4.0.0-rc.2 // indirect
-	golang.org/x/crypto v0.58.0 // indirect
-	golang.org/x/sys v0.49.0 // indirect
-	golang.org/x/text v0.43.0 // indirect
+	golang.org/x/crypto v0.59.0 // indirect
+	golang.org/x/sys v0.50.0 // indirect
+	golang.org/x/text v0.44.0 // indirect
 	golang.org/x/time v0.16.0 // indirect
 	google.golang.org/api v0.314.0 // indirect
 	google.golang.org/genai v1.77.0 // indirect
