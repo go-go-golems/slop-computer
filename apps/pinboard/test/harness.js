@@ -47,7 +47,7 @@ function load(files, opts = {}) {
   };
   const store = {};
   const sandbox = {
-    console, Blob, crypto: globalThis.crypto, setTimeout, clearTimeout, URL, performance, structuredClone, MessageChannel,
+    console, Blob, crypto: globalThis.crypto, setTimeout, clearTimeout, URL, performance, structuredClone, MessageChannel, AbortController, TextEncoder,
     requestAnimationFrame: (fn) => setTimeout(fn, 0), MutationObserver: class { observe() {} }, Event: class { constructor(t) { this.type = t; } },
     localStorage: { getItem: (k) => (k in store ? store[k] : null), setItem: (k, v) => { store[k] = String(v); } },
     CSS: { escape: (s) => s }, document, fetch: () => Promise.reject(new Error('no network in tests')),
