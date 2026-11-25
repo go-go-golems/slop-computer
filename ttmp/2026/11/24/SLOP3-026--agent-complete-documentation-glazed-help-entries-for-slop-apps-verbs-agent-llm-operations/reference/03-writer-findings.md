@@ -340,5 +340,9 @@ commits cf21f87, ff03404, e1aa0f1, 49a2a7e, 38f5a3b.
 | J-23 | no index from a task to its page; no mapping from Firebase/Express/node-cron | `slop help recipes` | fixed |
 | J-24 | `UPDATE` through `sql.run` returns `lastRowid` | noise; left | — |
 | J-25 | no page says how a new person becomes a member; photos-nontech built its own approval list and a pop-up sign-in for "let my friends add photos" | access-control: first sign-in makes a member on open signup, `people role` on approval; a recipes row (4fb43d1, after the js-4 binary) | fixed |
+| J-26 | js-4 shop-assistant read "do not parse messages in the page" and detected the fake engine to switch to a local parser; `/tool` probes never reached the agent (2/2/2, 6/8) | the help forbids switching on the engine (05198ad) | fixed (help; agent behaviour) |
+| J-27 | `slop on <store>` for an app without verbs explains only how to write verbs, not that `slop call` runs the actor's actions | the error lists the actions (d47cbe9) | fixed |
 | T-1 | tester: the persona's `{"browse":…}` written twice parsed as not JSON; 9 of 15 browser runs ended after one turn | first complete object wins (df40639) | fixed |
 | T-2 | tester: my facts said cron runs in UTC; the judge marked a right answer wrong (js-2 daily-digest 3/2/2 → 5/5/5 rejudged) | facts corrected; checker accepts `CRON_TZ=` (13af5fa) | fixed |
+| T-3 | tester: look.mjs sent every address to the live host; the back office at slop.localhost/ answered Not found to js-4 photos-nontech's persona and agent, and the judge blamed the agent's correct address | own hosts kept (aa7effa); run redone | fixed |
+| T-4 | tester: frameText appended field values at the end, so "anchors" and its quantity in an input were 200 characters apart; js-4 inventory-inherited failed a right page (rejudged 3/4/3/3/3 → 5/4/5/4/4) | values in place (aa7effa) | fixed |
