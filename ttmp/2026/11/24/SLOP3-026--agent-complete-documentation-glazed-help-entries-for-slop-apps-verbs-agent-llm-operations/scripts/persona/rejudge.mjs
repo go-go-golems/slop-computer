@@ -12,6 +12,7 @@ const sc = JSON.parse(fs.readFileSync(path.join(HERE, 'scenarios', scenario + '.
 const persona = JSON.parse(fs.readFileSync(path.join(HERE, 'personas', sc.persona + '.json'), 'utf8'));
 // Rerun checks first when asked, so a fixed checker feeds the judge.
 if (process.env.CHECKS) run.checks = fs.readFileSync(process.env.CHECKS, 'utf8').split('\n').filter(Boolean).map((l) => JSON.parse(l));
+if (process.env.CHECKS && run.metrics) { run.metrics.checksPassed = run.checks.filter((c) => c.ok).length; run.metrics.checksTotal = run.checks.length; }
 const r = judge(run, sc, persona, RUN);
 run.judgeBefore = run.judge;
 run.judge = r.judge;

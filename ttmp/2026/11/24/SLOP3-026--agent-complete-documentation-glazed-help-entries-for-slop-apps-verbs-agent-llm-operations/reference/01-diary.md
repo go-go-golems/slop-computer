@@ -614,3 +614,69 @@ persona, and what to run on an inherited app.
 
 ### Technical details
 - The extraction script for the example: the code blocks after `` `app.json`:``, `` `actor.js`:``, `` `index.html`:`` in "Example: a photo wall".
+
+## Step 11: The reruns, a model outage, a checker that left its mark, three review pages
+
+The nine reruns of js-2/js-3 runs cut short by the tester's JSON bug finished,
+but seven of them still showed a persona reply "not JSON". The replies were
+empty: the model service (lunaroute) answered `backend unavailable` for about
+an hour. Separately, the recheck of js-3 digest-nodecron failed two checks the
+first check had passed, and the judge blamed the agent for a race. The cause
+was the checker. This step makes the tester survive model outages and the
+checkers repeatable, reruns the seven runs, and publishes the review pages.
+
+### Prompt Context
+
+**User prompt (verbatim):** (see Step 6)
+
+**Assistant interpretation:** Finish the JS rounds' pending reruns and review pages alongside the fixes.
+
+**Inferred user intent:** Results that measure the docs, not the tester or the model service.
+
+**Commit (code):** e242ca3 — "SLOP3-026: retry model calls that fail; list such runs in the summary"; 3e3e647 — "SLOP3-026: checkers undo what they change, so a recheck sees the run's state"
+
+### What I did
+- `run.mjs`: `pi()` (persona) retries an empty reply 3 times (30 s, 60 s, 120 s); `agentTurn` reruns a turn that ran no tool and said nothing when the events carry an `errorMessage`; both record `run.infra`. `summarize.mjs` lists runs with `infra` entries or empty persona replies under "Model service failures (rerun these)".
+- Checked the service with one call (`Reply with the word ok.` → `ok`), then reran js-2 shop-assistant, team-dashboard and js-3 dash-public, guestbook-firebase, orders-nontech, tasks-admin-all, tasks-inherited on slop-js1.
+- `checks/js/daily-digest.mjs`: counts open tasks from `docs ls`, ticks an open one, and unticks it at the end. `tasks-admin-all.mjs` ticks an open task (by title) instead of t01. `dash-public.mjs` and `team-dashboard.mjs` remove `sales/s9` and `tickets/k10` before and after. `done` may be `true` or `"true"` (the CSV import keeps strings).
+- `rejudge.mjs` recounts `metrics.checksPassed/Total` when given new checks (the summary showed 6/7 after a 7/7 recheck).
+- Notes for js-2 and js-3 (`runs/*/notes.json`); `review.mjs js-1|js-2|js-3`; published.
+
+### Why
+- An empty persona reply is read as "gave up" (done, not satisfied), so an outage looked like a doc failure.
+- A checker that changes data makes its second run see a different app than the agent left.
+
+### What worked
+- All 7 reruns completed with no service failures; js-2 49/49 checks, js-3 58/59 → 59/59 with the digest-nodecron recheck.
+- digest-nodecron rechecked 7/7 and rejudged 5/5/4/4/5 (was 2/4/3/4/4).
+
+### What didn't work
+- The first recheck of digest-nodecron: `the page shows the summary (7 open)` false with `Open tasks: 6`, then `(6 after ticking one off)` false with `Open tasks: 7`. The first check had left t01 ticked; the recheck's toggle unticked it.
+- My first notes for photos-nontech and tasks-admin-all described judge findings I had not read. Reading `judge.issues` showed different reasons (misdiagnosed sign-in and a custom approval list; "admin is server-wide" and an unverified "checked as Kim"). Rewritten from the issues before publishing.
+
+### What I learned
+- The checks pass on photos-nontech while the agent replaced the platform's membership model with its own approval list. Checks test the outcome, not whether the build is the simple one; the judge caught it.
+- Writing a review note needs the same evidence as a finding.
+
+### What was tricky to build
+- Telling an outage from a real empty answer: pi's JSON events carry `errorMessage` on the failed message. The persona retry uses only "empty text" (a persona always has something to say); the agent retry also needs "no tools ran", because an agent turn that did work and then hit an error must not be resent.
+
+### What warrants a second pair of eyes
+- Resending an agent turn reuses the same session id, so the agent sees the message twice if the first attempt reached the model before failing.
+
+### What should be done in the future
+- A confirmation round on the binary with the fixes for the scenarios they target.
+- photos-nontech's custom approval list suggests a finding: the help says `@member` is "a normal account" but not how a new person gets one (the judge assumed signing in is enough; unverified). Find out and say it in access-control, so "let my friends add photos" does not lead to an invite system.
+
+### Code review instructions
+- `git show e242ca3 3e3e647`; `node summarize.mjs js-3`.
+
+### Technical details
+js-1 (no browser) vs js-2 (browser for agent and persona), same 7 scenarios, one run each:
+
+| | js-1 | js-2 |
+| --- | --- | --- |
+| checks passed | 48/49 | 49/49 |
+| judge total (5 scores, max 25), mean | 20.9 | 21.9 |
+| commands | 430 | 358 |
+| agent tokens | 27.8 M | 17.3 M |
