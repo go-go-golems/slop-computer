@@ -18,8 +18,8 @@
     "it says which time zone 7 o'clock is in"
   ],
   "facts": [
-    "Server-side schedules are actor alarms: `every: { name: { every: '0 7 * * *', run(ctx) {\u2026} } }` in defineActor; cron times are the server's (UTC here).",
-    "`slop alarm ls <store>` lists them; `slop alarm fire <store> <name>` runs one now."
+    "`slop alarm ls <store>` lists them; `slop alarm fire <store> <name>` runs one now.",
+    "Cron specs run in the server's local time zone; this test server's is America/New_York (the agent's shell and the checker run in UTC). A spec may start with CRON_TZ=<zone> (or TZ=<zone>) to pin a zone: slop's cron parser (robfig/cron v3) accepts it, though slop help does not mention it. `slop alarm ls` shows the next run as epoch milliseconds."
   ],
   "personaKnows": "You can sign in on the site."
 }

@@ -5,7 +5,7 @@ if (st) {
   const al = sl('alarm', 'ls', st), rows = Array.isArray(al) ? al : [];
   const rec = rows.filter((a) => a.every);
   emit('a recurring schedule on the server', rec.length > 0, JSON.stringify(rows).slice(0, 300));
-  emit('scheduled at 7 every day', rec.some((a) => /^0 7 \* \* \*$|^0 7 \*/.test(String(a.every).trim()) || /07:00|7:00/.test(String(a.every))), rec.map((a) => `${a.name}: ${a.every}`).join('; '));
+  emit('scheduled at 7 every day', rec.some((a) => /^((CRON_)?TZ=\S+\s+)?0 7 \*/.test(String(a.every).trim()) || /07:00|7:00/.test(String(a.every))), rec.map((a) => `${a.name}: ${a.every}`).join('; '));
   const name = (rec[0] || rows[0] || {}).name;
   const fire = () => { try { execFileSync(process.env.SLOP, ['alarm', 'fire', st, name], { stdio: 'ignore' }); return true; } catch { return false; } };
   const b = await browser();
