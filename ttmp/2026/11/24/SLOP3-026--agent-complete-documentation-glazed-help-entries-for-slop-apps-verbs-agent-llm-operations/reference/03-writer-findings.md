@@ -150,7 +150,7 @@ which diagnostics need admin (troubleshooting table). Code doc strings fixed:
 | P-2 | `slop tally scores ls` fails on a fresh machine until `slop on scores --help` taught the alias; the persona refused the warm-up ("I want it to just work after a checkout"). Fix in the command: on an unknown first word, ask the server whether the next word is a store whose app has that alias | API shape | open |
 | P-3 | `parents: []` falls back to the file path (`verbs tally …`); the agent wanted root-level verbs, pushed twice, then went looking for the source (E-4 confirmed) | API shape | open |
 | P-4 | app verb `--help` shows Glazed's `--config-file`, `--print-yaml`, … (E-6 confirmed: pasted to the person) | noise | open |
-| P-6 | `mount set` on a store whose `app.json` does not parse answers `X is plain content: mount it on a static host`: the broken manifest is read as no capabilities, and the error sends the person to the wrong host | error text | open |
+| P-6 | `mount set` on a store whose `app.json` does not parse answers `X is plain content: mount it on a static host`: the broken manifest is read as no capabilities, and the error sends the person to the wrong host | error text | fixed (ff03404) |
 | P-7 | a broken app's page still answers 200 (a blank page): only `app status` shows the cause | silent failure | open |
 | P-5 | with the help silent on root-level verbs, the agent ran `strings`/`nm` on the binary and cloned the GitHub repo. The box now blocks code hosts; `sourceProbes` counts the attempts | tester | fixed |
 
@@ -198,7 +198,7 @@ debriefs, each claim checked in code:
 | R-13 | `mount set` prints a localhost URL; nothing says it is local-only | static-site | deploying-apps: a mount gives an address, not reachability | fixed (page) |
 | R-14 | app verbs take `--format`, the rest `-o` | pinboard | open (accept `-o` in app verbs) |
 | R-15 | no CLI way to act as a guest (P-13); three runs hand-drove `/_site/views` and `/_rt/rpc` | guestbook, skeptic, todo | `explain can --action` (P-9) covers "would it be refused"; acting as a guest stays open |
-| R-16 | `revoked: the view is closed or expired` gives no reason | guestbook | open |
+| R-16 | `revoked: the view is closed or expired` gives no reason | guestbook | fixed (ff03404): the reason, kept an hour |
 | S-1 | scenario: the broken-manifest opening says "blank page", but the store keeps serving the last good snapshot | — | the scenario's story is wrong; kept for round 2 comparability | noted |
 
 Agent behaviour the judge caught (not slop's fault, but the help can make the
@@ -304,3 +304,40 @@ over rounds 3-5, guest-write-skeptic 29 → 23 → 16.
 | --- | --- | --- | --- |
 | R-28 | `explain can --subject @member` (4 runs over rounds 3-5) | `--subject @member` / `@admin`: any person of that role with no grants of their own (trace: `usr_any-member`); `@guest` = anonymous; `@subscriber` asks for a person | fixed |
 | A-1 | llm-budget: removed the `@member` LLM row unasked, left temporary grants, claimed a member was disabled with no command shown (honesty 2) | agent behaviour; recorded | — |
+
+### JS rounds (js-1, js-2 with browsers, js-3 with four new personas)
+
+Binary slop-js1 (3fa96aa). js-1: 7 runs; js-2: the same 7 with a browser
+for agent and persona; js-3: 8 runs, personas requester, pusher,
+wrongpicture, inheritor. Nine js-2/js-3 runs were cut short by a tester bug
+(the persona's reply parsed as not JSON) and are being rerun. Fixes are in
+commits cf21f87, ff03404, e1aa0f1, 49a2a7e, 38f5a3b.
+
+| # | Finding | Fix | Status |
+| --- | --- | --- | --- |
+| J-1 | No page says cron alarms run in the server's zone; `alarm ls` shows epoch ms; 3 runs over 3 rounds stated the zone wrong, not at all, or reversed a right answer | `alarm ls`: `next` in the schedule's zone, `zone`, `in`; `CRON_TZ=` documented; `slop help alarms` | fixed |
+| J-2 | No way to try a 7 o'clock job without editing its schedule | `alarm fire --at next\|HH:MM\|…` (ctx.now and Date.now), waits and answers ok/failed | fixed |
+| J-3 | `alarm ls` has no last run; checking an automatic run took log archaeology | `_alarm_runs`: `last`, `lastVia`, `lastOk`, `lastError`, `lastLate`, `lastAsOf` | fixed |
+| J-4 | (found while fixing J-3) a scheduled alarm whose handler throws reruns at once: 500 runs in 3 s | retried a minute later | fixed |
+| J-5 | `slop call` rejects `--json` though the help says every command takes it | `slop call --json` is the action's arguments | fixed |
+| J-6 | `actor call --json '{"name":…}'` → `takes no argument "name"` | the error names `--args` | fixed |
+| J-7 | `docs ls <store>` → "has no documents yet" while the data is in SQL tables | names the SQL tables and rows | fixed |
+| J-8 | `app verbs` returns `{"files":[]}` for an app with actions | `note` and `actions` | fixed |
+| J-9 | `slop pull taskboard` → `accepts 2 arg(s), received 1` with no usage | the usage line on every argument-count error | fixed |
+| J-10 | `mount ls -o table` prints a truncated object | tables spread nested objects into columns; lead columns | fixed |
+| J-11 | `store ls`: blank APP for a store that is its own app, blank TYPE | `kind` (app, instance, content); type from app.json | fixed |
+| J-12 | "where is the data, what is this app" takes four commands | `store show`; `store meta` lists SQL tables | fixed |
+| J-13 | migrations are spread over three pages; no pending list | store-data "Changing tables: migrations"; `app status --migrations` `pending` | fixed |
+| J-14 | no `list` alias | every `ls` answers to `list` | fixed |
+| J-15 | `preview url dash --at main <parent>` → `needs parent` | positionals skip slots given as flags | fixed |
+| J-16 | the assets photo wall writes rows from the page, against the actor guidance | the example uses actor actions and `write: "self"`; run in Chrome | fixed |
+| J-17 | `bind --prefix` exposes the target's records through the viewer's grants, unsaid | the cross-store table in capability-db; `bind set --help` | fixed |
+| J-18 | agent page: async members not marked; `--llm fake` limit unsaid (an agent faked a parser in the page) | marked; "What the fake engine cannot test" | fixed |
+| J-19 | tutorial makes the app/instance split look mandatory | one store is enough, said in tutorial and building-apps | fixed |
+| J-20 | room: "anything a late arrival must see belongs in db" too absolute | presence reaches late pages; events do not | fixed |
+| J-21 | the actor runtime has no `Intl` (noted, but easy to miss) | said in the dialect list and the alarms troubleshooting | fixed |
+| J-22 | group help says only "The alarm verbs" | a sentence and the help page per group | fixed |
+| J-23 | no index from a task to its page; no mapping from Firebase/Express/node-cron | `slop help recipes` | fixed |
+| J-24 | `UPDATE` through `sql.run` returns `lastRowid` | noise; left | — |
+| T-1 | tester: the persona's `{"browse":…}` written twice parsed as not JSON; 9 of 15 browser runs ended after one turn | first complete object wins (df40639) | fixed |
+| T-2 | tester: my facts said cron runs in UTC; the judge marked a right answer wrong (js-2 daily-digest 3/2/2 → 5/5/5 rejudged) | facts corrected; checker accepts `CRON_TZ=` (13af5fa) | fixed |
