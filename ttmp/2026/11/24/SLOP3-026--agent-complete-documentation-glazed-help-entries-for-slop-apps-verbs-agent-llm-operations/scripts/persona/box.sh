@@ -21,6 +21,15 @@ while [ "$1" != "--" ]; do ENVS+=("$1"); shift; done; shift
 NODE_DIR=$(dirname "$(dirname "$(command -v node)")")
 : "${NET_DIR:?NET_DIR: the directory of net.mjs's sockets}" "${NET_PORT:?NET_PORT: the test server's port}"
 P=http://127.0.0.1:3128
+# BROWSER=1: a browser for the agent too (look, Playwright and Chrome, ro). Chrome
+# reaches only what the box reaches: the test server on loopback.
+BX=() BE=()
+if [ "${BROWSER:-}" = 1 ]; then
+  : "${PW_DIR:?PW_DIR}" "${CHROME:?CHROME}"
+  BX=(--ro-bind "$PW_DIR/node_modules" /opt/pw/node_modules --ro-bind "$(dirname "$CHROME")" /opt/chrome
+      --ro-bind "$(dirname "$0")/look.mjs" /opt/look.mjs --ro-bind "$(dirname "$0")/look.sh" /opt/bin/look --tmpfs /dev/shm)
+  BE=(PW_DIR=/opt/pw CHROME=/opt/chrome/$(basename "$CHROME") PORT="$NET_PORT")
+fi
 exec bwrap --ro-bind /usr /usr --ro-bind /etc /etc --ro-bind "$(dirname "$0")/hosts.blocked" /etc/hosts --symlink usr/bin /bin --symlink usr/lib /lib \
   --symlink usr/sbin /sbin --ro-bind-try /lib64 /lib64 --proc /proc --dev /dev --tmpfs /tmp \
   --ro-bind-try /run/systemd/resolve /run/systemd/resolve \
@@ -30,9 +39,9 @@ exec bwrap --ro-bind /usr /usr --ro-bind /etc /etc --ro-bind "$(dirname "$0")/ho
   --ro-bind "$NODE_DIR/lib/node_modules/@earendil-works" /opt/node/lib/node_modules/@earendil-works \
   --symlink ../lib/node_modules/npm/bin/npm-cli.js /opt/node/bin/npm --symlink ../lib/node_modules/npm/bin/npx-cli.js /opt/node/bin/npx \
   --symlink ../lib/node_modules/@earendil-works/pi-coding-agent/dist/bundle/cli.js /opt/node/bin/pi --bind "$W" /home/agent/work \
-  --ro-bind "$SB" /opt/bin/slop --ro-bind "$NET_DIR" /opt/net --ro-bind "$(dirname "$0")/inbox.mjs" /opt/inbox.mjs \
+  --ro-bind "$SB" /opt/bin/slop --ro-bind "$NET_DIR" /opt/net --ro-bind "$(dirname "$0")/inbox.mjs" /opt/inbox.mjs "${BX[@]}" \
   --chdir /home/agent/work --unshare-pid --unshare-net --die-with-parent \
   /usr/bin/env -i HOME=/home/agent PATH=/opt/bin:/opt/node/bin:/usr/bin TZ=UTC TERM=dumb \
   HTTPS_PROXY=$P HTTP_PROXY=$P https_proxy=$P http_proxy=$P NODE_USE_ENV_PROXY=1 \
   NO_PROXY=localhost,127.0.0.1,::1,.localhost no_proxy=localhost,127.0.0.1,::1,.localhost \
-  "${ENVS[@]}" /opt/node/bin/node /opt/inbox.mjs "$NET_PORT" -- "$@"
+  "${BE[@]}" "${ENVS[@]}" /opt/node/bin/node /opt/inbox.mjs "$NET_PORT" -- "$@"

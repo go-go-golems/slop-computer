@@ -17,7 +17,9 @@ export function transcriptOf(run) {
     return [`## Turn ${i + 1}`, `PERSON: ${t.message}`, 'COMMANDS:',
       ...shown.map((x) => x === null ? `- … ${t.tools.length - 40} more commands …` :
         `- ${isFail(x) ? 'FAILED' : 'ok'}: ${(x.args.command || JSON.stringify(x.args)).slice(0, 200)}${isFail(x) ? '\n    → ' + x.output.split('\n').filter(Boolean).slice(0, 2).join(' | ').slice(0, 200) : ''}`),
-      `ASSISTANT: ${t.reply}`].join('\n');
+      `ASSISTANT: ${t.reply}`,
+      // What the person then saw in their browser, before their next message.
+      ...((t.persona && t.persona.browse) || []).map((b) => `PERSON'S BROWSER: ${JSON.stringify(b.actions).slice(0, 300)}\n    saw: ${b.seen.replace(/\s+/g, ' ').slice(0, 700)}`)].join('\n');
   }).join('\n\n');
 }
 

@@ -96,3 +96,19 @@ tokens of throwaway local servers).
    `slop help` page), a check for a silent mistake, and only then a page.
 3. Check every debrief claim against the transcript before acting on it.
 4. Rerun the same scenarios; compare.
+
+## Browsers (`--browser`, or `BROWSER=1` for batch.sh)
+
+With `--browser`, both sides of the conversation can see the site in real
+Chrome, as a team member (Sam), a second member (Kim) or a guest:
+
+- the agent gets a `look` command in its box (`look.sh` → `look.mjs`; Playwright
+  and Chrome are mounted read-only; Chrome reaches only the test server), and its
+  system prompt tells it to check what it builds there;
+- the persona may look up to three times before each message: it replies
+  `{"browse": [actions]}` and is told what is on the screen (page text, buttons,
+  fields, pictures, downloads, what did not work). Its looks are kept in
+  `run.json` (`turns[].persona.browse`), shown to the judge, and screenshotted to
+  `shots/persona-t<turn>-<n>-<who>.png`.
+
+Without it, the persona has no tools and only reads the agent's replies.

@@ -27,6 +27,9 @@ const { values: o, positionals } = parseArgs({
     out: { type: 'string', default: path.join(HERE, 'runs') },
     'agent-thinking': { type: 'string', default: 'high' },
     dry: { type: 'boolean', default: false }, // setup and checks only: test a scenario's setup and checker
+    // A real browser for both sides: the agent gets `look` in its box, the
+    // persona may look at the site before each answer (look.mjs).
+    browser: { type: 'boolean', default: process.env.BROWSER === '1' },
   },
 });
 const SCENARIO = positionals[0];
@@ -52,7 +55,7 @@ const SLOP = path.resolve(o.slop);
 const SERVER = `http://slop.localhost:${PORT}`;
 const HOSTENV = { ...process.env, SLOP_SERVER: SERVER, SLOP_CREDENTIALS: path.join(RUN, 'host/creds.json'), XDG_CONFIG_HOME: path.join(RUN, 'host/config') };
 const log = (...a) => console.error(`[${SCENARIO}]`, ...a);
-const run = { scenario: SCENARIO, persona: sc.persona, batch: o.batch, startedAt: new Date().toISOString(), turns: [], tokens: { agent: 0, persona: 0, judge: 0 } };
+const run = { scenario: SCENARIO, persona: sc.persona, batch: o.batch, browser: o.browser, startedAt: new Date().toISOString(), turns: [], tokens: { agent: 0, persona: 0, judge: 0 } };
 const save = () => fs.writeFileSync(path.join(RUN, 'run.json'), JSON.stringify(run, null, 2));
 
 // ---- server and login -------------------------------------------------------
@@ -123,6 +126,10 @@ fs.writeFileSync(SYSTEM, [
   'The `slop` command-line tool is installed and already logged in to the person\'s slop server.',
   'You do not have slop\'s source code. `slop help` is its documentation.',
   'Your working directory is ~/work.',
+  ...(o.browser ? [
+    'You can see the person\'s site in a real browser: `look --help` (signed in as a team member, as a second member, or as a guest).',
+    'Check what you build there the way the person will use it before you say it works.',
+  ] : []),
 ].join('\n'));
 
 let turnNo = 0;
@@ -139,7 +146,7 @@ async function agentTurn(message, tag) {
     ...MODEL, '--thinking', o['agent-thinking'], '--append-system-prompt', '/home/agent/system.md', message];
   const t0 = Date.now();
   // 30 minutes a turn: pilot-1 lost a whole reply at 15 (a 10-minute npm install).
-  const r = spawnSync('bash', args, { encoding: 'utf8', maxBuffer: 1 << 28, timeout: 30 * 60000, killSignal: 'SIGTERM', env: { ...process.env, NET_DIR, NET_PORT: String(PORT) } });
+  const r = spawnSync('bash', args, { encoding: 'utf8', maxBuffer: 1 << 28, timeout: 30 * 60000, killSignal: 'SIGTERM', env: { ...process.env, NET_DIR, NET_PORT: String(PORT), BROWSER: o.browser ? '1' : '', PW_DIR, CHROME } });
   fs.writeFileSync(out, r.stdout || '');
   if (r.stderr) fs.writeFileSync(out.replace(/\.jsonl$/, '.stderr.txt'), r.stderr);
   const ev = piEvents(out);
@@ -170,8 +177,34 @@ function json(text) {
 }
 
 // ---- the persona ---------------------------------------------------------------
+// look(actions, tag): what the persona sees in its browser (look.mjs).
+function look(actions, tag) {
+  const r = spawnSync('node', [path.join(HERE, 'look.mjs'), RUN, tag], { input: JSON.stringify(actions), encoding: 'utf8', timeout: 3 * 60000, env: { ...process.env, PORT, PW_DIR, CHROME } });
+  try { return JSON.parse(r.stdout); } catch { return { seen: 'The browser did not open (' + String(r.stderr || r.error || '').slice(0, 200) + ')', shots: [] }; }
+}
+const LOOKS = 3; // looks per answer
+const BROWSE = [
+  `You have the site open in your browser. It is at ${'http://apps.localhost:' + PORT}; you are signed in as Sam, a team member. You can also use a colleague's browser (Kim, another member) or a private window (not signed in).`,
+  `Before you write your message you may look, as many as ${LOOKS} times: instead of the message, reply with JSON only: {"browse": [actions…], "why": "a note for the tester"}. Actions, in order: {"as": "me"|"colleague"|"guest"}, {"open": "/path"}, {"click": "text on the button or link"}, {"type": "the field's label or placeholder", "text": "..."}, {"press": "Enter"}, {"choose_file": "photo"} (picks one of your pictures), {"wait": seconds}. Each look starts by opening a page. You will be told what you see on the screen.`,
+  `Look the way this person would: when the assistant says something is ready, try it yourself, as the people who will use it. Say what you saw, in your own words, if it does not work.`,
+].join('\n\n');
+
 function personaTurn() {
   const convo = run.turns.map((t) => `PERSON: ${t.message}\n\nASSISTANT: ${t.reply || '(no answer)'}`).join('\n\n---\n\n');
+  const browsed = [];
+  for (let n = 0; ; n++) {
+    const p = personaAsk(convo, browsed, n < LOOKS && o.browser);
+    if (p.browse && o.browser && n < LOOKS) {
+      const tag = `persona-t${run.turns.length}-${n + 1}`;
+      const r = look(p.browse, tag);
+      browsed.push({ actions: p.browse, why: p.why, seen: r.seen, shots: r.shots });
+      log(`persona looked: ${JSON.stringify(p.browse).slice(0, 100)}`);
+      continue;
+    }
+    return { ...p, browse: browsed };
+  }
+}
+function personaAsk(convo, browsed, mayLook) {
   const prompt = [
     `You play a person talking to a coding assistant in a terminal. Stay in character.`,
     `Who you are: ${persona.name}. ${persona.text}`,
@@ -182,7 +215,10 @@ function personaTurn() {
     `Write the next message as this person would: in your own words, briefly, without vocabulary you would not know. Answer the assistant's questions from what you know, or say you do not know. If its answer does not fit what you know, say so. You may ask it to show you that something works. Never write code, never mention that this is a test.`,
     `When you have what you wanted, or you would give up (you give up after ${persona.patience} answers that do not help), set done to true.`,
     `Reply with JSON only: {"message": "...", "done": false, "satisfied": true|false, "why": "a note for the tester, never shown"}`,
+    o.browser ? BROWSE : '',
     `The conversation so far:\n\n${convo}`,
+    ...browsed.map((b, i) => `WHAT YOU DID IN YOUR BROWSER JUST NOW (${i + 1}): ${JSON.stringify(b.actions)}\nWHAT YOU SAW:\n${b.seen}`),
+    o.browser ? (mayLook ? 'Now look at the site, or write your message.' : 'You have looked enough for now: write your message (JSON with "message").') : '',
   ].filter(Boolean).join('\n\n');
   const r = pi(prompt, 'low');
   run.tokens.persona += r.tokens;
@@ -198,7 +234,7 @@ for (let i = 0; i < (o.dry ? 0 : sc.maxTurns); i++) {
   save();
   if (i === sc.maxTurns - 1) break;
   const p = personaTurn();
-  run.turns.at(-1).persona = { done: p.done, satisfied: p.satisfied, why: p.why };
+  run.turns.at(-1).persona = { done: p.done, satisfied: p.satisfied, why: p.why, browse: p.browse };
   save();
   if (p.done || !p.message) break;
   message = p.message;
