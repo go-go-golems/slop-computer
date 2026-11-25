@@ -39,7 +39,7 @@ func (s *Door) serveAgentRoute(w http.ResponseWriter, r *http.Request) {
 	v := s.viewOf(r)
 	switch {
 	case v == nil:
-		httpx.Fail(w, 401, "session_expired", "the view is closed or expired")
+		httpx.Fail(w, 401, "session_expired", s.closedMsg(r))
 		return
 	case !s.sampler().Available():
 		httpx.Fail(w, 503, "unavailable", "this server has no model backend")

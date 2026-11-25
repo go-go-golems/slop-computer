@@ -72,6 +72,7 @@ type (
 		kernelEnv
 		Table *verbs.Table
 		Cache *appverbs.Cache
+		A     *actor.Manager // nil in tests without actors
 	}
 	mountEnv struct {
 		kernelEnv

@@ -261,15 +261,26 @@ func (e kernelEnv) noColl(ctx context.Context, p *access.Principal, id string) e
 		return err
 	}
 	colls, _ := s.Collections(ctx)
+	// Its data may be SQL tables instead (round js-2: "has no documents yet"
+	// read as "the inventory is empty" while items held six rows).
+	tables := ""
+	if t, _ := s.AppTables(ctx); len(t) > 0 {
+		names := make([]string, 0, len(t))
+		for name, n := range t {
+			names = append(names, fmt.Sprintf("%s (%d rows)", name, n))
+		}
+		sort.Strings(names)
+		tables = fmt.Sprintf("; its SQL tables are %s (slop sql query %s 'SELECT * FROM <table>', slop sql schema %s)", strings.Join(names, ", "), id, id)
+	}
 	if len(colls) == 0 {
-		return verbs.Errf("invalid_argument", "docs.ls needs coll: %s has no documents yet", id)
+		return verbs.Errf("invalid_argument", "docs.ls needs a collection (slop docs ls %s <coll>), but %s has no documents%s", id, id, tables)
 	}
 	names := make([]string, 0, len(colls))
 	for c, n := range colls {
 		names = append(names, fmt.Sprintf("%s (%d)", c, n))
 	}
 	sort.Strings(names)
-	return verbs.Errf("invalid_argument", "docs.ls needs coll: %s's collections are %s (slop docs ls %s <coll>)", id, strings.Join(names, ", "), id)
+	return verbs.Errf("invalid_argument", "docs.ls needs a collection: %s's collections are %s (slop docs ls %s <coll>)%s", id, strings.Join(names, ", "), id, tables)
 }
 
 type DocsLsIn struct {

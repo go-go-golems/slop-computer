@@ -208,7 +208,7 @@ func (s *Door) CloseEmbed(ctx context.Context, p *access.Principal, viewID, tool
 	if v == nil || !ok || p == nil || v.User != p.ID() || x.parent != s.toolOrigin(toolStore, toolApp) {
 		return nil, verbErr(rtErr("not_found", "no such embedded view"))
 	}
-	s.rt.views.Close(v, false)
+	s.rt.views.CloseFor(v, false, "the page that embedded it closed it")
 	s.rt.embeds.dropView(viewID)
 	return map[string]any{"closed": viewID}, nil
 }

@@ -139,7 +139,11 @@ func (s *Door) Tick(ctx context.Context, now time.Time) {
 func (s *Door) RunMethod(ctx context.Context, view, method string, args json.RawMessage) (any, error) {
 	v := s.rt.views.Get(view)
 	if v == nil {
-		return nil, &rtFail{Code: "revoked", Message: "the view is closed or expired"}
+		msg := "the view is closed or expired"
+		if why := s.rt.views.Why(view); why != "" {
+			msg = "the view is closed: " + why
+		}
+		return nil, &rtFail{Code: "revoked", Message: msg}
 	}
 	m, ok := s.rpcTable()[method]
 	if !ok {

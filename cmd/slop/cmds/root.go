@@ -70,7 +70,25 @@ func Root() *cobra.Command {
 	addAppCommands(root)
 	setupHelp(root)
 	strictGroups(root)
+	usageOnArgErrors(root)
 	return root
+}
+
+// usageOnArgErrors adds the usage line to a wrong number of positional
+// arguments, as SetFlagErrorFunc does for flags: "accepts 2 arg(s), received
+// 1" alone cost an agent a round trip to --help (round js-3, slop pull).
+func usageOnArgErrors(c *cobra.Command) {
+	for _, sub := range c.Commands() {
+		usageOnArgErrors(sub)
+	}
+	if check := c.Args; check != nil {
+		c.Args = func(cmd *cobra.Command, args []string) error {
+			if err := check(cmd, args); err != nil {
+				return fmt.Errorf("%w\nusage: %s (slop %s --help)", err, cmd.UseLine(), strings.TrimPrefix(cmd.CommandPath(), "slop "))
+			}
+			return nil
+		}
+	}
 }
 
 // strictGroups makes a group refuse an unknown subcommand. Cobra prints a

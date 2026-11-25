@@ -220,7 +220,16 @@ func checkMount(ctx context.Context, e mountEnv, m *registry.Mount) error {
 	case kind == "static" && r.Manifest.Live():
 		return verbs.Errf("invalid_argument", "%s runs a live app (capabilities or an actor): mount it on a live host", m.Store)
 	case kind == "live" && !r.Manifest.Live():
-		return verbs.Errf("invalid_argument", "%s is plain content: mount it on a static host", m.Store)
+		// Say why it looks like plain content: often its app has not been
+		// pushed, or its newest app.json did not activate (P-6: a manifest
+		// that did not parse sent the person to the static host).
+		switch {
+		case r.N == 0:
+			return verbs.Errf("invalid_argument", "%s has nothing pushed yet: push the app first (slop push <dir> --store %s), then mount it", m.Store, m.Store)
+		case r.Failed != nil:
+			return verbs.Errf("invalid_argument", "%s's newest version (snapshot %d) did not activate: %s; fix it and push again (slop app status %s)", m.Store, r.Failed.N, r.Failed.Why, m.Store)
+		}
+		return verbs.Errf("invalid_argument", "%s is plain content (its app.json declares no capabilities and no actor): mount it on a static host, or add capabilities to app.json and push", m.Store)
 	}
 	return nil
 }
