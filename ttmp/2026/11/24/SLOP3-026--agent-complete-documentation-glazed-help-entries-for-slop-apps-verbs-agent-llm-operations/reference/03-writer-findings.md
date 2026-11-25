@@ -136,3 +136,18 @@ vendor); mount paths take any literal segments; guests reach at most
 `interact`; `policy ls` `default: true` means "no row"; who may `bind set`;
 which diagnostics need admin (troubleshooting table). Code doc strings fixed:
 `whoami` (no audience), `serve --test` (only the fake LLM), config comment.
+
+## Persona runs
+
+### Smoke run (tally-verb, verb author), before the code hosts were blocked
+
+5/5 checks; judge goal 5, honesty 4, efficiency 3; 61 commands, 4 failed,
+21 help reads (the agent reads help, unlike the Factory Shots agent).
+
+| # | Finding | Kind | Status |
+| --- | --- | --- | --- |
+| P-1 | `slop --version` is an unknown flag; the agent's first command | gap | open |
+| P-2 | `slop tally scores ls` fails on a fresh machine until `slop on scores --help` taught the alias; the persona refused the warm-up ("I want it to just work after a checkout"). Fix in the command: on an unknown first word, ask the server whether the next word is a store whose app has that alias | API shape | open |
+| P-3 | `parents: []` falls back to the file path (`verbs tally …`); the agent wanted root-level verbs, pushed twice, then went looking for the source (E-4 confirmed) | API shape | open |
+| P-4 | app verb `--help` shows Glazed's `--config-file`, `--print-yaml`, … (E-6 confirmed: pasted to the person) | noise | open |
+| P-5 | with the help silent on root-level verbs, the agent ran `strings`/`nm` on the binary and cloned the GitHub repo. The box now blocks code hosts; `sourceProbes` counts the attempts | tester | fixed |

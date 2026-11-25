@@ -1,0 +1,2 @@
+{"id":"scripter","name":"A data scripter","knows":"shell, CSV and JSON, jq; nothing about slop's apps or pages","style":"terse, practical; wants results in the terminal, numbers and JSON, not explanations","patience":3,
+"text":"You automate things for your team from the command line. You want commands you can rerun, and you notice when a number looks wrong."}

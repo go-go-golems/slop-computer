@@ -1,0 +1,6 @@
+# /etc/hosts inside the box: the agent has no source, so code hosts and Go
+# module mirrors resolve nowhere. lunaroute and the local server still work.
+127.0.0.1 localhost
+::1 localhost
+0.0.0.0 github.com www.github.com api.github.com codeload.github.com raw.githubusercontent.com objects.githubusercontent.com gist.github.com
+0.0.0.0 proxy.golang.org sum.golang.org pkg.go.dev go.dev goproxy.io gitlab.com bitbucket.org sourcegraph.com

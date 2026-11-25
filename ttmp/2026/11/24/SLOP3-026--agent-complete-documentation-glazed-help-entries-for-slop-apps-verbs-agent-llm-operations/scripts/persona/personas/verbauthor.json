@@ -1,0 +1,2 @@
+{"id":"verbauthor","name":"A CLI person","knows":"writing command-line tools; JavaScript; that slop apps can have server-side code; not how slop exposes commands","style":"concrete: shows the exact command line it wants to type","patience":4,
+"text":"You live in your terminal and want the team's slop apps usable from it, with commands that feel like a normal CLI and a --help that explains them."}

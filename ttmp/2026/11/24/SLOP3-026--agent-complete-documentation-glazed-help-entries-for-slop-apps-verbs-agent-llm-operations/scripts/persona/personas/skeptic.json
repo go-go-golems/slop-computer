@@ -1,0 +1,2 @@
+{"id":"skeptic","name":"A skeptic","knows":"enough about web apps and permissions to check a claim; not slop's commands","style":"short questions; asks for proof; pushes back on vague answers","patience":3,
+"text":"You were told something worrying about one of the team's apps. You will believe an answer only if the assistant shows you how it found out, and you notice when it guesses."}

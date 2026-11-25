@@ -1,0 +1,10 @@
+{
+  "id": "csv-overdue", "persona": "scripter", "maxTurns": 5,
+  "setup": ["python3 \"$SETUP/tasks.py\" \"$WORK/tasks.csv\" \"$RUN/expected.txt\""],
+  "opening": "there's a tasks.csv in this folder. put the tasks on our slop server so the team can query them, then tell me how many are overdue (due date passed, not done).",
+  "goal": "the 50 tasks stored on the slop server in a form the team can query, and the correct number of overdue tasks",
+  "later": ["give me the command to list the overdue ones as JSON, so I can rerun it"],
+  "checklist": ["all 50 tasks are on the server", "the overdue count is correct and computed, not guessed", "a rerunnable command to query them is given", "answers are short"],
+  "facts": ["tasks.csv has 50 rows; overdue means due before today and done = no.", "The checker knows the correct overdue count."],
+  "personaKnows": "You know roughly a dozen tasks are late."
+}

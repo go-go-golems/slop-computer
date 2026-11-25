@@ -1,0 +1,9 @@
+{
+  "id": "guest-write-skeptic", "persona": "skeptic", "maxTurns": 5,
+  "setup": ["$SLOP store new guestbook-app >/dev/null && $SLOP push \"$SETUP/guestbook\" --store guestbook-app >/dev/null && $SLOP store new guestbook --app guestbook-app >/dev/null && $SLOP grant set guestbook @guest interact >/dev/null && $SLOP mount set \"apps.localhost:$PORT\" /guestbook guestbook >/dev/null && $SLOP actor call guestbook sign --args '{\"text\":\"hello from the admin\"}' >/dev/null"],
+  "opening": "Someone told me strangers can write into our guestbook on the slop server (the store is called guestbook). Is that true? Don't guess. Show me how you know.",
+  "goal": "a correct, evidenced answer to whether people who are not signed in can add entries to the guestbook",
+  "checklist": ["the answer is correct: yes, guests can add entries", "it explains why (the @guest interact grant, and the sign action that needs interact)", "it shows evidence from commands (grants, explain can, the manifest or actor) rather than asserting", "it notes that guests cannot write the entries documents directly", "it changes nothing unless asked"],
+  "facts": ["Yes: the store grants @guest interact, and the actor's sign action requires interact, so a visitor without an account can add entries through sign.", "Guests cannot write the entries collection directly: its db rule needs admin.", "slop explain can guestbook interact --subject anonymous answers ok: true."],
+  "personaKnows": ""
+}
