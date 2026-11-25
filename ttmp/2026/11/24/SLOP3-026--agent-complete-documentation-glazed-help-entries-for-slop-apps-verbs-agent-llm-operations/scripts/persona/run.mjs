@@ -170,10 +170,26 @@ function pi(prompt, thinking) {
   const ev = (r.stdout || '').split('\n').filter(Boolean).map((l) => { try { return JSON.parse(l); } catch { return null; } }).filter(Boolean);
   return { text: finalText(ev), tokens: tokens(ev) };
 }
+// json(text): the persona's answer. Models often add to the JSON: a second
+// object, the same one again in a code block, a sentence. The first complete
+// object with a message or a browse wins (js-2/js-3 lost 9 runs to taking
+// everything from the first { to the last }).
 function json(text) {
-  const s = text.indexOf('{'), e = text.lastIndexOf('}');
-  if (s < 0 || e < s) return null;
-  try { return JSON.parse(text.slice(s, e + 1)); } catch { return null; }
+  const found = [];
+  for (let i = text.indexOf('{'); i >= 0 && found.length < 8; i = text.indexOf('{', i + 1)) {
+    let depth = 0, str = false, esc = false;
+    for (let j = i; j < text.length; j++) {
+      const c = text[j];
+      if (str) { if (esc) esc = false; else if (c === '\\') esc = true; else if (c === '"') str = false; continue; }
+      if (c === '"') str = true;
+      else if (c === '{') depth++;
+      else if (c === '}' && --depth === 0) {
+        try { found.push(JSON.parse(text.slice(i, j + 1))); i = j; } catch {}
+        break;
+      }
+    }
+  }
+  return found.find((x) => x && (typeof x.message === 'string' || Array.isArray(x.browse))) || found[0] || null;
 }
 
 // ---- the persona ---------------------------------------------------------------
