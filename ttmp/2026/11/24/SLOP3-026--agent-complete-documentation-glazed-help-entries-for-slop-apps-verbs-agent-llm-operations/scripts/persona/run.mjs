@@ -64,10 +64,12 @@ process.on('exit', stop);
 const NET_DIR = path.join(RUN, 'net');
 fs.mkdirSync(NET_DIR, { recursive: true });
 const netProc = spawn('node', [path.join(HERE, 'net.mjs'), NET_DIR, String(PORT)], { stdio: 'ignore' });
+netProc.unref(); // or it keeps the event loop alive, and the exit handler below never runs
 process.on('exit', () => netProc.kill());
 for (let i = 0; i < 40 && !fs.existsSync(path.join(NET_DIR, 'ready')); i++) await new Promise((r) => setTimeout(r, 100));
 if (!fs.existsSync(path.join(NET_DIR, 'ready'))) throw new Error('net.mjs did not start');
 process.on('SIGINT', () => process.exit(130));
+process.on('SIGTERM', () => process.exit(143)); // exit handlers stop the server and net.mjs
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 for (let i = 0; ; i++) {
   const r = spawnSync('curl', ['-s', '-o', '/dev/null', '-w', '%{http_code}', '-H', `Host: slop.localhost:${PORT}`, `http://127.0.0.1:${PORT}/readyz`], { encoding: 'utf8' });
