@@ -59,6 +59,9 @@ type Source struct {
 	Include   []string `json:"include,omitempty"`
 	Unchanged bool     `json:"unchanged,omitempty"`
 	Files     []File   `json:"files"`
+	// Actions are the store's actor actions, sent when the app ships no
+	// verbs, so the error can point to slop call.
+	Actions []string `json:"actions,omitempty"`
 }
 
 // Key is the cache key of a source: app@snapshot.

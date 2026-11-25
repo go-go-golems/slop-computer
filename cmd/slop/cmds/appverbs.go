@@ -178,6 +178,12 @@ func runAppVerbs(cmd *cobra.Command, name string, alias *aliasInfo, args []strin
 		return err
 	}
 	if len(src.Files) == 0 {
+		// An agent reaching for slop on <store> usually wants to run
+		// something; with an actor, slop call does that (js-4
+		// inventory-inherited).
+		if len(src.Actions) > 0 {
+			return fmt.Errorf("%s runs %s, which ships no command-line verbs; its actor's actions are %s: run one with slop call %s <action> '{…}' (slop store show %s lists them). Verbs are verbs/*.js files in the app's tree, see slop help app-verbs", board.ID, src.App, strings.Join(src.Actions, ", "), board.ID, board.ID)
+		}
 		return fmt.Errorf("%s runs %s, which ships no command-line verbs: they are verbs/*.js files in the app's own tree (slop pull %s <dir>, add them and a slop.verbs block to app.json, slop push), see slop help app-verbs", board.ID, src.App, src.App)
 	}
 	rememberAlias(dir, src.Alias, aliasInfo{App: src.App, Type: src.Type, Title: src.Title})
