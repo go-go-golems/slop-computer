@@ -30,6 +30,7 @@ that holds the data (`slop help access-control`):
 | --- | --- | --- |
 | "Anyone can read it, only our team can add" | `@guest view`, `@member interact` | `slop explain can <store> interact --subject @guest` (false) |
 | "Only signed-in people can see it" | `@member view` (or `interact`), no `@guest` grant | `slop explain can <store> view --subject @guest` (false) |
+| "My friends should be able to add" | `@member interact`; each friend signs in once, which makes them a member on an open-signup server (no invite list in the app) | `slop people ls` after they sign in (role `member`) |
 | "Just make everyone admin" | Usually `@member interact`: admin also lets them change grants, mounts, code and data | `slop explain can <store> admin --subject @member` |
 | "Make the records readable to everyone so the dashboard works" | Usually no grant on the records: compute the numbers in the actor (below) | `slop explain can <records> view --subject @guest` (false) |
 

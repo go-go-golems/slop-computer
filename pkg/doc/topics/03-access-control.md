@@ -59,6 +59,18 @@ A user has a platform **role**, which an admin sets:
 | `admin` | Runs the server: `admin` level on every store, the admin-only verbs, and the only role that may push app code. |
 | `disabled` | Holds nothing. Disabling a person also ends their sessions and **revokes all their tokens**; setting the role back does not bring the tokens back, so they must log in again. |
 
+**How someone becomes a member.** A person signs in once (the **Sign in**
+link in the bar above every app) with their email; that creates their
+account. On a server with open signup, the default, the account is a
+`member` at once, so a grant to `@member` reaches them without anything
+else: "let my friends add photos" needs `@member interact` and "sign in
+once", not an invite list in the app. On a server with approval signup
+the account starts `pending` until an admin runs `slop people role
+<usr_…> member`. Which one a server uses is in its configuration
+(`signup: open` or `approval`); `slop people ls` (admins) shows each
+person's role after they have signed in. To let in one person rather than
+every member, grant to their `usr_…` id after their first sign-in.
+
 From the role (and a subscription, if billing is on) slop computes the
 caller's **audience**, one of `guest`, `member`, `subscriber`, `admin`, plus
 `store` for a store acting on its own. Audiences are also **groups** that
