@@ -25,7 +25,10 @@ fs.mkdirSync(STATE, { recursive: true });
 fs.mkdirSync(path.join(RUN, 'shots'), { recursive: true });
 
 const actions = (() => { try { const a = JSON.parse(fs.readFileSync(0, 'utf8')); return Array.isArray(a) ? a.slice(0, 12) : []; } catch { return []; } })();
-const b = await chromium.launch({ args: ['--host-resolver-rules=MAP *.localhost 127.0.0.1', '--no-proxy-server'], ...(process.env.CHROME ? { executablePath: process.env.CHROME } : {}) });
+const b = await chromium.launch({ args: ['--host-resolver-rules=MAP *.localhost 127.0.0.1', '--no-proxy-server',
+  // Chrome's own calls home (autofill, updates) are not the agent's: js-4
+  // photos-nontech counted 230 of them as egress.
+  '--disable-background-networking', '--disable-component-update', '--disable-sync', '--disable-features=AutofillServerCommunication,OptimizationHints,MediaRouter'], ...(process.env.CHROME ? { executablePath: process.env.CHROME } : {}) });
 const people = {}; // who → {ctx, page, downloads, dialogs, problems}
 const problems = [];
 const rx = (s) => new RegExp(String(s).replace(/[.*+?^${}()|[\]\\]/g, '\\$&').replace(/\s+/g, '\\s*'), 'i');
@@ -68,6 +71,12 @@ async function field(p, text) {
     for (const l of [f.getByLabel(rx(text)), f.getByPlaceholder(rx(text)), f.getByRole('textbox', { name: rx(text) })]) {
       for (let i = 0; i < await l.count(); i++) if (await l.nth(i).isVisible().catch(() => false)) return l.nth(i);
     }
+  }
+  // A label that is not linked to its field (no for/id): a person still
+  // sees "Email" beside the box; go by the field's name or id.
+  for (const f of /^[\w-]+$/.test(text) ? p.page.frames() : []) {
+    const l = f.locator(`input[name="${text}" i]:visible, textarea[name="${text}" i]:visible, input[id="${text}" i]:visible, textarea[id="${text}" i]:visible`);
+    if (await l.count()) return l.first();
   }
   // No label to go by: the only text field on the page.
   const all = [];
