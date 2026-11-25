@@ -83,6 +83,9 @@ type event struct {
 	visitor Visitor
 	via     string
 	late    bool
+	// now, when set, is the time the handler sees as ctx.now (slop alarm
+	// fire --at); the store's own clock (timestamps, rescheduling) stays real.
+	now int64
 	// run calls into JavaScript inside the turn; its value may be a promise.
 	run    func(a *Actor, ctx *goja.Object) (goja.Value, error)
 	reply  chan result
@@ -167,6 +170,15 @@ type turn struct {
 	rev    int64    // the store's rev when the turn began
 	alarms bool     // _alarms changed: refresh the schedule after the commit
 	view   *rt.View // the turn as a view of the store by its visitor (dbView)
+}
+
+// now is the time the handler sees: the turn's, or the one alarm fire --at
+// gave its event.
+func (t *turn) now() int64 {
+	if n := t.ev.root().now; n != 0 {
+		return n
+	}
+	return t.t.Now
 }
 
 // Actor is one store's running actor.
@@ -644,12 +656,14 @@ func (a *Actor) turnFor(ctx context.Context, ev *event) {
 			target.reply <- result{err: a.asError(err)}
 		} else {
 			// Nobody waits for a reactor or an alarm: the log is where
-			// its failure shows. Its turn rolled back and will be retried.
+			// its failure shows. Its turn rolled back; a scheduled alarm is
+			// retried a minute later (alarmDone).
 			what := target.kind
 			if target.name != "" {
 				what += " " + target.name
 			}
 			a.log("error", what+" failed: "+a.asError(err).Message)
+			a.alarmDone(target, a.asError(err).Message)
 		}
 		a.m.afterTurn(a, cur)
 		return
@@ -675,6 +689,7 @@ func (a *Actor) turnFor(ctx context.Context, ev *event) {
 	}
 	switch {
 	case root == nil:
+		a.alarmDone(target, "")
 		if target.reply != nil {
 			target.reply <- result{v: a.export(val)}
 		}
@@ -686,6 +701,11 @@ func (a *Actor) turnFor(ctx context.Context, ev *event) {
 	default:
 		if pk != nil {
 			a.parks--
+		}
+		if root.State() == goja.PromiseStateFulfilled {
+			a.alarmDone(target, "")
+		} else {
+			a.alarmDone(target, a.jsError(root.Result()).Message)
 		}
 		if target.reply != nil {
 			if root.State() == goja.PromiseStateFulfilled {
@@ -793,7 +813,10 @@ func (a *Actor) ctxObject(ev *event) *goja.Object {
 	_ = o.DefineAccessorProperty("storage", vm.ToValue(func() goja.Value { return a.storageModule() }), nil, goja.FLAG_FALSE, goja.FLAG_TRUE)
 	_ = o.DefineAccessorProperty("now", vm.ToValue(func() int64 {
 		if a.cur != nil {
-			return a.cur.t.Now
+			return a.cur.now()
+		}
+		if ev.root().now != 0 {
+			return ev.root().now
 		}
 		return time.Now().UnixMilli()
 	}), nil, goja.FLAG_FALSE, goja.FLAG_TRUE)

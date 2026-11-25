@@ -4,8 +4,11 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"slices"
+	"strconv"
 	"strings"
+	"time"
 
 	"github.com/go-go-golems/slop-computer/pkg/access"
 	"github.com/go-go-golems/slop-computer/pkg/actor"
@@ -224,16 +227,58 @@ func actorVerbs(e actorEnv) []*verbs.Verb {
 				if err != nil {
 					return nil, err
 				}
-				return s.ReadQuery(ctx, `SELECT name, at, every, running FROM _alarms ORDER BY at`)
+				rows, err := s.ReadQuery(ctx, `SELECT a.name, a.at, a.every, a.running, r.at AS last_at, r.now AS last_now,
+					r.via AS last_via, r.ok AS last_ok, r.error AS last_error, r.late AS last_late
+					FROM _alarms a LEFT JOIN _alarm_runs r USING (name) ORDER BY a.at`)
+				if err != nil {
+					return nil, err
+				}
+				return alarmRows(rows, time.Now()), nil
 			}}.Verb(),
 		verbs.Def[AlarmFireIn, AlarmFireOut]{Name: "alarm.fire", Doc: "Fire a store's alarm now.", Scope: verbs.Write, Action: authz.StoreAdmin,
 			Run: func(req verbs.Req, in AlarmFireIn) (AlarmFireOut, error) {
 				ctx := req.Context
 				p := req.Principal
-				if _, _, err := e.open(ctx, p, in.Store, rt.LevelAdmin, "firing alarms"); err != nil {
+				s, _, err := e.open(ctx, p, in.Store, rt.LevelAdmin, "firing alarms")
+				if err != nil {
 					return AlarmFireOut{}, err
 				}
-				return AlarmFireOut{Fired: in.Name}, actorErr(e.A.Fire(ctx, in.Store, in.Name))
+				rows, err := s.ReadQuery(ctx, `SELECT at, every FROM _alarms WHERE name = ?`, in.Name)
+				if err != nil {
+					return AlarmFireOut{}, err
+				}
+				if len(rows) == 0 {
+					return AlarmFireOut{}, &verbs.Error{Code: "not_found", Message: in.Store + " has no alarm " + strconvQuote(in.Name) + "; slop alarm ls " + in.Store + " lists them"}
+				}
+				spec, _ := rows[0]["every"].(string)
+				at, err := fireTime(in.At, spec, toMillis(rows[0]["at"]), time.Now())
+				if err != nil {
+					return AlarmFireOut{}, err
+				}
+				start := time.Now().UnixMilli()
+				if err := e.A.FireAt(ctx, in.Store, in.Name, at); err != nil {
+					return AlarmFireOut{}, actorErr(err)
+				}
+				out := AlarmFireOut{Fired: in.Name, Status: "running"}
+				if at != 0 {
+					out.Now = time.UnixMilli(at).In(actor.ScheduleZone(spec)).Format(time.RFC3339)
+				}
+				// Wait (up to 15 s) for the handler to end, so the answer says
+				// whether it worked; slop alarm ls shows it later too.
+				for deadline := time.Now().Add(15 * time.Second); time.Now().Before(deadline); time.Sleep(100 * time.Millisecond) {
+					r, err := s.ReadQuery(ctx, `SELECT ok, error FROM _alarm_runs WHERE name = ? AND at >= ?`, in.Name, start)
+					if err != nil || ctx.Err() != nil {
+						break
+					}
+					if len(r) > 0 {
+						out.Status = "ok"
+						if toMillis(r[0]["ok"]) == 0 {
+							out.Status, out.Error = "failed", fmt.Sprint(r[0]["error"])
+						}
+						break
+					}
+				}
+				return out, nil
 			}}.Verb(),
 		verbs.Def[BindLsIn, []registry.Binding]{Name: "bind.ls", Doc: "List a store's read aliases.", Scope: verbs.Read, Action: authz.StoreRead,
 			Run: func(req verbs.Req, in BindLsIn) ([]registry.Binding, error) {
@@ -361,6 +406,7 @@ type AlarmLsIn struct {
 type AlarmFireIn struct {
 	Store string `json:"store" slop:"pos=1"`
 	Name  string `json:"name" slop:"pos=2"`
+	At    string `json:"at,omitempty" jsonschema_description:"run it as if it were this time (ctx.now): next (its next scheduled run), HH:MM (the next such time in the schedule's zone), or RFC 3339; the store's data timestamps stay real"`
 }
 
 // BindLsIn is bind.ls's input.
@@ -424,7 +470,10 @@ type AppFollowOut struct {
 
 // AlarmFireOut is alarm.fire's result.
 type AlarmFireOut struct {
-	Fired string `json:"fired"`
+	Fired  string `json:"fired"`
+	Now    string `json:"now,omitempty"`   // the ctx.now its handler saw (--at)
+	Status string `json:"status"`          // ok, failed, or running (still going after 15 s)
+	Error  string `json:"error,omitempty"` // the handler's error, when it failed
 }
 
 // BindRmOut is bind.rm's result.
@@ -439,4 +488,95 @@ type AppModulesOut struct {
 	Calls    *map[string]int64  `json:"calls,omitempty"` // module calls since the process started (one app)
 	Modules  []map[string]any   `json:"modules"`
 	Trusted  []policy.AppModule `json:"trusted"`
+}
+
+func strconvQuote(s string) string { return strconv.Quote(s) }
+
+func toMillis(v any) int64 {
+	switch x := v.(type) {
+	case int64:
+		return x
+	case int:
+		return int64(x)
+	case float64:
+		return int64(x)
+	}
+	n, _ := strconv.ParseInt(fmt.Sprint(v), 10, 64)
+	return n
+}
+
+// alarmRows is alarm.ls's answer: each alarm's next run as a time in the
+// zone its schedule runs in, and how its last run went.
+func alarmRows(rows []map[string]any, now time.Time) []map[string]any {
+	out := make([]map[string]any, 0, len(rows))
+	for _, r := range rows {
+		spec, _ := r["every"].(string)
+		loc := actor.ScheduleZone(spec)
+		at := time.UnixMilli(toMillis(r["at"])).In(loc)
+		o := map[string]any{"name": r["name"], "at": r["at"], "every": r["every"], "running": r["running"],
+			"next": at.Format("2006-01-02 15:04 MST"), "zone": loc.String(), "in": until(at.Sub(now))}
+		if r["last_at"] != nil {
+			last := time.UnixMilli(toMillis(r["last_at"])).In(loc)
+			o["last"] = last.Format("2006-01-02 15:04 MST")
+			o["lastVia"] = r["last_via"]
+			o["lastOk"] = toMillis(r["last_ok"]) == 1
+			if r["last_error"] != nil {
+				o["lastError"] = r["last_error"]
+			}
+			if toMillis(r["last_late"]) == 1 {
+				o["lastLate"] = true
+			}
+			if n := toMillis(r["last_now"]); n != toMillis(r["last_at"]) && n != 0 {
+				o["lastAsOf"] = time.UnixMilli(n).In(loc).Format("2006-01-02 15:04 MST") // fired with --at
+			}
+		}
+		out = append(out, o)
+	}
+	return out
+}
+
+func until(d time.Duration) string {
+	if d < 0 {
+		return "due"
+	}
+	d = d.Round(time.Minute)
+	if d < time.Minute {
+		return "under a minute"
+	}
+	h, m := int(d.Hours()), int(d.Minutes())%60
+	switch {
+	case h >= 48:
+		return fmt.Sprintf("%dd %dh", h/24, h%24)
+	case h > 0:
+		return fmt.Sprintf("%dh %dm", h, m)
+	}
+	return fmt.Sprintf("%dm", m)
+}
+
+// fireTime is the ctx.now of alarm fire --at (0: none): next (the alarm's
+// next run), HH:MM (the next such time in the schedule's zone), or RFC 3339.
+func fireTime(at, spec string, next int64, now time.Time) (int64, error) {
+	at = strings.TrimSpace(at)
+	loc := actor.ScheduleZone(spec)
+	switch {
+	case at == "":
+		return 0, nil
+	case at == "next":
+		return next, nil
+	}
+	if t, err := time.Parse(time.RFC3339, at); err == nil {
+		return t.UnixMilli(), nil
+	}
+	if t, err := time.ParseInLocation("2006-01-02 15:04", at, loc); err == nil {
+		return t.UnixMilli(), nil
+	}
+	if t, err := time.ParseInLocation("15:04", at, loc); err == nil {
+		n := now.In(loc)
+		d := time.Date(n.Year(), n.Month(), n.Day(), t.Hour(), t.Minute(), 0, 0, loc)
+		if !d.After(n) {
+			d = d.AddDate(0, 0, 1)
+		}
+		return d.UnixMilli(), nil
+	}
+	return 0, &verbs.Error{Code: "invalid_argument", Message: "--at " + strconv.Quote(at) + ": give next, HH:MM (e.g. 07:00), \"YYYY-MM-DD HH:MM\" or RFC 3339 (2026-11-26T07:00:00-05:00)"}
 }

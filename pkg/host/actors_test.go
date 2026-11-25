@@ -3,10 +3,12 @@ package host
 // Tests from SLOP3-001 phase P3 (actors); formerly p3_test.go.
 
 import (
+	"context"
 	"encoding/json"
 	"fmt"
 	"strings"
 	"testing"
+	"time"
 )
 
 const trackerActor = `
@@ -337,5 +339,117 @@ func TestNothingUsableAfterFirstActivationFails(t *testing.T) {
 	e := h.fail(admin, "actor.call", map[string]any{"store": "nogo", "action": "count"}, "actor_error")
 	if !strings.Contains(e["message"].(string), "broken") {
 		t.Fatalf("actor.call on a never-activated version: %v", e)
+	}
+}
+
+// alarm fire --at runs a job as if it were its time; alarm ls shows the next
+// run in the schedule's zone and how the last run went (JS round, SLOP3-026).
+func TestAlarmFireAtAndLastRun(t *testing.T) {
+	h := newHarness(t)
+	admin := h.tokenFor("admin@example.com", "read", "write", "admin")
+	h.call(admin, "store.new", map[string]any{"id": "digest"})
+	h.push(admin, map[string]any{"store": "digest", "files": files(map[string]string{
+		"app.json": `{"title":"Digest","actor":"actor.js","capabilities":{"db":{}}}`,
+		"actor.js": `const db = use('db'); defineActor({ every: {
+		  morning: { every: 'CRON_TZ=Europe/Berlin 0 7 * * *', run(ctx) { db.doc('m/last').set({ now: ctx.now }); } },
+		  bad: { every: '1h', run() { throw new Error('boom'); } },
+		} });`,
+	})})
+	var rows []any
+	waitFor(t, "the alarms", func() bool {
+		rows = h.call(admin, "alarm.ls", map[string]any{"store": "digest"}).([]any)
+		return len(rows) == 2
+	})
+	var morning map[string]any
+	for _, r := range rows {
+		if r.(map[string]any)["name"] == "morning" {
+			morning = r.(map[string]any)
+		}
+	}
+	if morning == nil || morning["zone"] != "Europe/Berlin" || !strings.Contains(morning["next"].(string), " 07:00 ") || morning["last"] != nil {
+		t.Fatalf("alarm ls morning = %v", morning)
+	}
+	// --at 07:00: the handler sees 07:00 Berlin; the answer says it worked.
+	out := h.call(admin, "alarm.fire", map[string]any{"store": "digest", "name": "morning", "at": "07:00"}).(map[string]any)
+	if out["status"] != "ok" || !strings.Contains(out["now"].(string), "T07:00:00+01:00") {
+		t.Fatalf("alarm fire --at = %v", out)
+	}
+	d := h.call(admin, "docs.get", map[string]any{"store": "digest", "path": "m/last"}).(map[string]any)
+	seen := time.UnixMilli(int64(d["body"].(map[string]any)["now"].(float64))).In(time.FixedZone("CET", 3600))
+	if seen.Hour() != 7 || seen.Minute() != 0 {
+		t.Fatalf("ctx.now = %v", seen)
+	}
+	// A failing handler: fire says so, and ls keeps the error.
+	if out := h.call(admin, "alarm.fire", map[string]any{"store": "digest", "name": "bad"}).(map[string]any); out["status"] != "failed" || !strings.Contains(out["error"].(string), "boom") {
+		t.Fatalf("alarm fire bad = %v", out)
+	}
+	for _, r := range h.call(admin, "alarm.ls", map[string]any{"store": "digest"}).([]any) {
+		r := r.(map[string]any)
+		switch r["name"] {
+		case "morning":
+			if r["lastOk"] != true || r["lastVia"] != "alarm fire" || !strings.Contains(fmt.Sprint(r["lastAsOf"]), " 07:00 ") {
+				t.Fatalf("ls morning after fire = %v", r)
+			}
+		case "bad":
+			if r["lastOk"] != false || !strings.Contains(fmt.Sprint(r["lastError"]), "boom") {
+				t.Fatalf("ls bad after fire = %v", r)
+			}
+		}
+	}
+	h.fail(admin, "alarm.fire", map[string]any{"store": "digest", "name": "nope"}, "not_found")
+	h.fail(admin, "alarm.fire", map[string]any{"store": "digest", "name": "morning", "at": "seven"}, "invalid_argument")
+}
+
+// A scheduled alarm whose handler throws is retried a minute later, not on
+// every tick of the scheduler.
+func TestFailingAlarmBacksOff(t *testing.T) {
+	h := newHarness(t)
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	h.a.Start(ctx) // the scheduler (the harness serves without it)
+	admin := h.tokenFor("admin@example.com", "read", "write", "admin")
+	h.call(admin, "store.new", map[string]any{"id": "flaky"})
+	h.push(admin, map[string]any{"store": "flaky", "files": files(map[string]string{
+		"app.json": `{"title":"Flaky","actor":"actor.js","capabilities":{"db":{}}}`,
+		"actor.js": `defineActor({ every: { bad: { every: '1s', run() { throw new Error('boom'); } } } });`,
+	})})
+	waitFor(t, "a failed run", func() bool {
+		rows := h.call(admin, "alarm.ls", map[string]any{"store": "flaky"}).([]any)
+		return len(rows) == 1 && rows[0].(map[string]any)["lastOk"] == false
+	})
+	time.Sleep(3 * time.Second)
+	lines := h.call(admin, "app.logs", map[string]any{"store": "flaky"}).(map[string]any)["lines"].([]any)
+	n := 0
+	for _, l := range lines {
+		if strings.Contains(fmt.Sprint(l), "alarm bad failed") {
+			n++
+		}
+	}
+	if n != 1 {
+		t.Fatalf("the failing alarm ran %d times in ~3 s, want 1", n)
+	}
+}
+
+// Pointers for a store whose data is SQL and whose app has only actions
+// (rounds js-2 and js-3).
+func TestPointersForSQLAndActions(t *testing.T) {
+	h := newHarness(t)
+	admin := h.tokenFor("admin@example.com", "read", "write", "admin")
+	h.call(admin, "store.new", map[string]any{"id": "inv"})
+	h.push(admin, map[string]any{"store": "inv", "files": files(map[string]string{
+		"app.json":          `{"title":"Inv","actor":"actor.js","capabilities":{"db":{}}}`,
+		"actor.js":          `const sql = use('sql'); defineActor({ actions: { add: { requires: 'admin', run(ctx, a) { sql.run('INSERT INTO items (name, qty) VALUES (?, ?)', a.name, a.qty); } }, list() { return sql.all('SELECT * FROM items'); } } });`,
+		"sql/001_items.sql": "CREATE TABLE items (id INTEGER PRIMARY KEY, name TEXT, qty INTEGER);",
+	})})
+	h.call(admin, "actor.call", map[string]any{"store": "inv", "action": "add", "args": map[string]any{"name": "bolts", "qty": 3}})
+	if e := h.fail(admin, "docs.ls", map[string]any{"store": "inv"}, "invalid_argument"); !strings.Contains(e["message"].(string), "items (1 rows)") {
+		t.Fatalf("docs ls without coll = %v", e)
+	}
+	out := h.call(admin, "app.verbs", map[string]any{"store": "inv"}).(map[string]any)
+	if !strings.Contains(fmt.Sprint(out["note"]), "actions are add, list") {
+		t.Fatalf("app verbs = %v", out)
+	}
+	if e := h.fail(admin, "actor.call", map[string]any{"store": "inv", "action": "add", "name": "x"}, "invalid_argument"); !strings.Contains(e["message"].(string), "--args") {
+		t.Fatalf("actor call with the action's arguments = %v", e)
 	}
 }

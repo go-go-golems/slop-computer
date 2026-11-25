@@ -897,6 +897,21 @@ func nextTime(spec string, from time.Time) (time.Time, error) {
 	return s.Next(from), nil
 }
 
+// ScheduleZone is the time zone a schedule runs in: the zone of a
+// CRON_TZ=<zone> (or TZ=<zone>) prefix, else the server's local zone.
+func ScheduleZone(spec string) *time.Location {
+	spec = strings.TrimSpace(spec)
+	for _, p := range []string{"CRON_TZ=", "TZ="} {
+		if rest, ok := strings.CutPrefix(spec, p); ok {
+			name, _, _ := strings.Cut(rest, " ")
+			if loc, err := time.LoadLocation(name); err == nil {
+				return loc
+			}
+		}
+	}
+	return time.Local
+}
+
 // afterTurn refreshes a store's schedule when a turn touched its alarms.
 func (m *Manager) afterTurn(a *Actor, t *turn) {
 	if t.alarms || t.ev.kind == "alarm" {
@@ -945,7 +960,12 @@ func (m *Manager) Start(ctx context.Context) {
 }
 
 // Fire queues the store's due alarms (or one named alarm, now).
-func (m *Manager) Fire(ctx context.Context, id, name string) error {
+func (m *Manager) Fire(ctx context.Context, id, name string) error { return m.FireAt(ctx, id, name, 0) }
+
+// FireAt fires one named alarm now; its handler sees ctx.now = at (epoch
+// ms) when at is not 0, so a 7 o'clock job can be tried at any time. The
+// alarm is rescheduled from the real time, as by Fire.
+func (m *Manager) FireAt(ctx context.Context, id, name string, at int64) error {
 	a, err := m.Get(ctx, id)
 	if err != nil {
 		return err
@@ -957,9 +977,61 @@ func (m *Manager) Fire(ctx context.Context, id, name string) error {
 	// Push the schedule forward so the ticker does not queue it again
 	// while the alarm runs; afterTurn sets the real next time.
 	_ = m.K.Registry.SetSchedule(ctx, id, time.Now().Add(time.Minute).UnixMilli())
-	ev := &event{kind: "alarm", name: name, visitor: m.storeVisitor(ctx, id), via: "alarm",
+	via := "alarm"
+	if name != "" {
+		via = "alarm fire" // someone ran it by hand; the scheduler fires by time
+	}
+	ev := &event{kind: "alarm", name: name, visitor: m.storeVisitor(ctx, id), via: via, now: at,
 		run: func(a *Actor, cx *goja.Object) (goja.Value, error) { return a.alarm(cx, name) }}
 	return m.push(id, ev)
+}
+
+// alarmDone records how an alarm's handler ended (msg is its error, or ""),
+// for slop alarm ls. It is its own turn: a failed handler's turn rolled
+// back, and the record must outlive that. Writes to _alarm_runs are not app
+// changes, so the turn adds no revision.
+func (a *Actor) alarmDone(ev *event, msg string) {
+	if ev.kind != "alarm" || ev.name == "" {
+		return
+	}
+	now := time.Now().UnixMilli()
+	seen := ev.now
+	if seen == 0 {
+		seen = now
+	}
+	ok, late := 1, 0
+	if msg != "" {
+		ok = 0
+	}
+	if ev.late {
+		late = 1
+	}
+	_, err := a.st.Do(context.Background(), store.Who{ID: ev.visitor.ID, Via: ev.via, App: a.key}, func(t *store.Turn) error {
+		_, err := t.Exec(store.CallerKernel, `INSERT INTO _alarm_runs (name, at, now, via, ok, error, late) VALUES (?, ?, ?, ?, ?, ?, ?)
+			ON CONFLICT (name) DO UPDATE SET at = excluded.at, now = excluded.now, via = excluded.via, ok = excluded.ok, error = excluded.error, late = excluded.late`,
+			ev.name, now, seen, ev.via, ok, nullIfEmpty(msg), late)
+		if err != nil || msg == "" || ev.via != "alarm" {
+			return err
+		}
+		// A scheduled run that failed rolled back its own rescheduling, so
+		// the alarm is still due: without this the scheduler would run it
+		// again at once, hundreds of times a second. Retry in a minute.
+		_, err = t.Exec(store.CallerKernel, `UPDATE _alarms SET at = ? WHERE name = ? AND at < ?`, now+alarmRetry, ev.name, now+alarmRetry)
+		return err
+	})
+	if err != nil {
+		log.Printf("alarm %s %s: recording its run: %v", a.st.ID, ev.name, err)
+	}
+}
+
+// alarmRetry is how long a failed scheduled alarm waits before it runs again.
+const alarmRetry = 60_000
+
+func nullIfEmpty(s string) any {
+	if s == "" {
+		return nil
+	}
+	return s
 }
 
 // alarm runs the first due alarm (or the named one) and reschedules it.
@@ -991,6 +1063,7 @@ func (a *Actor) alarm(cx *goja.Object, only string) (goja.Value, error) {
 	} else if _, err := t.Exec(store.CallerKernel, `DELETE FROM _alarms WHERE name = ?`, name); err != nil {
 		return nil, err
 	}
+	a.cur.ev.late = late
 	_ = cx.Set("event", a.toJS(map[string]any{"kind": "alarm", "name": name, "late": late}))
 	f := a.fn("every", name)
 	if f == nil {
