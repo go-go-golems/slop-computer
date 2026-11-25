@@ -752,3 +752,69 @@ working through the third uncovered a product bug in the local sign-in form.
 | inventory-inherited | js-3 | 36 | 23 | 24 | 22 |
 | tasks-inherited | js-3 | 32 | 35 | 21 | 19 |
 | photos-nontech (3rd) | js-3 | 242 | 140 | 15 | 17 |
+
+## Step 13: js-5, three repeats of three scenarios; the remaining problems are the product's
+
+js-5 ran photos-nontech, shop-assistant and the held-out form-webhook three
+times each on a binary built at 3d79132 (membership help, the fake-engine
+rule). Five of the nine runs first came out low. All five were the tester's:
+four checker defects and one wrong judge fact. Rechecked and rejudged, every
+run has a goal score of 4 or 5. What the transcripts show instead are two
+problems a help page cannot fix: the fake engine, and "only our team".
+
+### Prompt Context
+
+**User prompt (verbatim):** "ok" (to: "one last small round of about 9 runs … photos-nontech, shop-assistant and the held-out form-webhook, three runs each, on the current binary")
+
+**Assistant interpretation:** Run the round; decide from it whether further help work pays.
+
+**Inferred user intent:** Know whether to keep iterating on the help or move on to product changes.
+
+**Commit (code):** c756fda — "form-webhook checker could not pass: POST with node:http, address from any reply"; 151ec29 — "batch.sh takes PORT_BASE"; f4a4d3f — "four tester defects from js-5 (webhook, shop tool, photo count, team fact)"
+
+### What I did
+- Proved the held-out checker on a reference inbox (`POST /submit`, public) before the round: it failed (421), fixed, 5/5, and a wrong address fails (405).
+- `PORT_BASE=18701/18704/18707 ./batch.sh js-5{a,b,c} 3 photos-nontech shop-assistant form-webhook`, in parallel; 40 minutes, no model-service failures.
+- Read every failing check against the page and the store; fixed the checkers; `recheck.sh` and `rejudge.mjs` for the seven affected runs; rechecked the five earlier photo runs with the new upload count.
+
+### Why
+- Three repeats separate a fix from noise; the held-out scenario tests whether the help generalises.
+
+### What worked
+- form-webhook (held out, never fixed against): 24, 23, 21 of 25; goal 5 in all three.
+- photos-nontech: 16, 23, 21 (js-3 15, js-4 17), commands 152/79/133.
+- shop-assistant: 20, 21, 22 (js-2 21, js-4 13); no page checks the engine.
+
+### What didn't work
+- `fetch(url, {headers: {Host: …}})` sends the URL's host; the server answered `421` for every probe.
+- js-5a form-webhook: `POST http://apps.localhost:18703/inbox/api/submit → 404` — the agent had moved to `?token=…` in a follow-up.
+- js-5a/b shop-assistant: `no tool definition found` / `not in the store export` — tools built by `addTool('add_item', …)`, or taking `items: [{name}]`.
+- js-5b/c photos-nontech: `0 uploaded image(s) shown` / `no file input in the page` for ana, whom the approval design rightly refuses.
+- js-4 photos-nontech's 7/7: on recheck, `sam@example.com: 0 more image(s) shown after the upload` — the old check had counted a photo already there.
+
+### What I learned
+- Every photos-nontech agent did the right first thing (`@member interact`) and said that open signup lets strangers in; every persona then said that is not what they want. The approval lists answer that, and js-5a built its list on `platform.grants.set({subject: usr_…, level: 'interact'})`.
+- The parser in the shop pages follows the persona's complaint, not the help: on the fake engine "add milk" echoes back, and the person reports it broken.
+
+### What was tricky to build
+- Telling "the agent's design refuses ana" from "the app is broken": the store's grants (`slop grant ls`, `slop people ls`) showed ana as a member with no grant, and Kim with `interact`.
+
+### What warrants a second pair of eyes
+- The shop checker sends up to 48 `/tool` messages (6 names × 8 shapes) and stops at the first that stores the item; a tool that stores something on every call would pass on a wrong shape.
+- The photos-nontech fallback to Kim/Sam applies only with `TEAM_ONLY=1` (photos-nontech.sh); photo-wall still requires ana.
+
+### What should be done in the future
+- Product: a fake engine that answers plain "add X"-style requests with a tool call, or a visible test-model notice on agent pages.
+- Product: show a server's signup mode to agents; a team (group) or invite that a grant can name.
+- Stop iterating on the help for these scenarios; repeats of the rest would only confirm.
+
+### Code review instructions
+- `git show c756fda f4a4d3f`; `./refcheck.sh form-webhook '<deploy>'` with `FINAL` naming the address.
+- `node summarize.mjs js-5a` (and b, c).
+
+### Technical details
+| Scenario | Run | Commands | Help | Checks | Judge | Total |
+| --- | --- | --- | --- | --- | --- | --- |
+| form-webhook | a / b / c | 39 / 42 / 53 | 12 / 11 / 21 | 5/5 ×3 | 5/5/5/4/5, 5/5/5/4/4, 5/4/4/3/5 | 24 / 23 / 21 |
+| photos-nontech | a / b / c | 152 / 79 / 133 | 34 / 18 / 19 | 8/8 ×3 | 4/3/3/2/4, 5/5/5/3/5, 5/4/4/4/4 | 16 / 23 / 21 |
+| shop-assistant | a / b / c | 81 / 70 / 46 | 16 / 11 / 14 | 8/8 ×3 | 5/4/4/3/4, 5/4/4/3/5, 5/4/4/4/5 | 20 / 21 / 22 |
