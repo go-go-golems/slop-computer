@@ -1,5 +1,7 @@
 # Persona runs against `slop help` (SLOP3-026, design 4.1)
 
+How to run a round end to end, from scenario to review page: PLAYBOOK.md.
+
 A run is one conversation: a coding agent works for a simulated person on
 its own fresh local slop server, with the `slop` binary and its help pages
 and **no source code**. Afterwards a checker settles the facts on the

@@ -1,0 +1,200 @@
+<!-- review/template.html: the review page of a persona batch.
+     review.mjs fills the JSON block at the bottom (id="data") with the batch;
+     the script after it renders the page from that data. Edit the look and the
+     layout here; the data shape is documented in PLAYBOOK.md (§ Review page). -->
+<title>slop persona review</title>
+<meta name="claude:viewport-fit-sides" content="cover">
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500&family=IBM+Plex+Sans:wght@400;500;600&family=Space+Grotesk:wght@500;600&display=swap">
+<style>
+/* Layout: a sticky index of runs, then one section per run: judgment and checks beside the screenshots, code and conversation folded below. */
+:root {
+  --c-kw: #8a3ab9; --c-str: #2f7a2f; --c-com: #7d8781; --c-num: #b4561b; --c-fn: #2557b3; --c-tag: #a1325a; --c-attr: #8a6a12;
+  --bg: #f6f7f5; --panel: #ffffff; --fg: #1c211e; --dim: #66706a; --rule: #dde2dd;
+  --accent: #2f6f5e; --ok: #23824f; --bad: #c0392b; --warn: #b7791f; --code: #eef1ee;
+  --display: "Space Grotesk", "IBM Plex Sans", system-ui, sans-serif;
+  --body: "IBM Plex Sans", system-ui, sans-serif;
+  --mono: "IBM Plex Mono", ui-monospace, monospace;
+}
+@media (prefers-color-scheme: dark) { :root:not([data-theme="light"]) {
+  --c-kw: #d59bf6; --c-str: #9bd68f; --c-com: #869189; --c-num: #f0a46b; --c-fn: #8fb6ff; --c-tag: #f08ab0; --c-attr: #e6c56e;
+  --bg: #121614; --panel: #1a1f1c; --fg: #e3e8e4; --dim: #94a09a; --rule: #2c3430;
+  --accent: #6cc3a6; --ok: #5cc98a; --bad: #ef7d6e; --warn: #e2b05a; --code: #20262299; color-scheme: dark } }
+:root[data-theme="dark"] {
+  --c-kw: #d59bf6; --c-str: #9bd68f; --c-com: #869189; --c-num: #f0a46b; --c-fn: #8fb6ff; --c-tag: #f08ab0; --c-attr: #e6c56e;
+  --bg: #121614; --panel: #1a1f1c; --fg: #e3e8e4; --dim: #94a09a; --rule: #2c3430;
+  --accent: #6cc3a6; --ok: #5cc98a; --bad: #ef7d6e; --warn: #e2b05a; --code: #20262299; color-scheme: dark }
+body { background: var(--bg); color: var(--fg); font: 15px/1.55 var(--body); }
+.wrap { max-width: 1180px; margin: 0 auto; padding-block: 28px 64px; padding-left: max(16px, env(safe-area-inset-left, 0px)); padding-right: max(16px, env(safe-area-inset-right, 0px)); }
+h1, h2 { font-family: var(--display); text-wrap: balance; margin: 0; }
+h1 { font-size: 30px; font-weight: 600; letter-spacing: -0.01em; }
+h2 { font-size: 21px; font-weight: 600; }
+h3 { font: 600 12px var(--body); letter-spacing: 0.08em; text-transform: uppercase; color: var(--dim); margin: 18px 0 8px; }
+h4 { font: 500 13px var(--mono); margin: 14px 0 4px; }
+.lede { max-width: 70ch; color: var(--dim); margin: 8px 0 18px; }
+.dim { color: var(--dim); font-weight: 400; text-transform: none; letter-spacing: 0; }
+code, pre { font-family: var(--mono); font-size: 12.5px; }
+p code { background: var(--code); padding: 1px 4px; border-radius: 3px; }
+nav.index { position: sticky; top: env(safe-area-inset-top, 0px); z-index: 5; background: var(--bg); border-bottom: 1px solid var(--rule); padding: 10px 0; display: flex; flex-wrap: wrap; gap: 6px; }
+body::before { content: ""; position: fixed; inset: 0 0 auto; height: env(safe-area-inset-top, 0px); z-index: 10; background: var(--bg); }
+nav.index a { color: var(--fg); text-decoration: none; font: 500 13px var(--mono); padding: 4px 9px; border: 1px solid var(--rule); border-radius: 4px; display: inline-flex; gap: 6px; align-items: center; background: var(--panel); }
+nav.index a:hover, nav.index a:focus-visible { border-color: var(--accent); outline: none; }
+.dot { width: 8px; height: 8px; border-radius: 50%; background: var(--ok); }
+.dot.bad { background: var(--bad); }
+.totals { display: flex; flex-wrap: wrap; gap: 28px; margin: 6px 0 4px; }
+.totals div { display: grid; }
+.totals b { font: 600 24px var(--display); font-variant-numeric: tabular-nums; }
+.totals span { font-size: 12px; color: var(--dim); text-transform: uppercase; letter-spacing: 0.06em; }
+.run { background: var(--panel); border: 1px solid var(--rule); border-radius: 6px; padding: 20px 22px; margin-top: 22px; scroll-margin-top: 64px; }
+.run-title { display: flex; flex-wrap: wrap; align-items: center; gap: 10px; }
+.ask { font-size: 16px; max-width: 75ch; margin: 10px 0 0; }
+.chip { font: 500 12px var(--mono); padding: 2px 8px; border-radius: 999px; border: 1px solid currentColor; }
+.chip.ok { color: var(--ok); } .chip.bad { color: var(--bad); } .chip.plain { color: var(--dim); }
+.grid { display: grid; grid-template-columns: minmax(0, 5fr) minmax(0, 6fr); gap: 28px; }
+@media (max-width: 860px) { .grid { grid-template-columns: minmax(0, 1fr); } }
+.col { min-width: 0; }
+.scores { border-collapse: collapse; width: 100%; }
+.scores th { font: 500 11px var(--body); color: var(--dim); text-transform: uppercase; letter-spacing: 0.05em; text-align: left; padding: 0 4px 4px 0; }
+.score { display: inline-grid; place-items: center; width: 30px; height: 30px; border-radius: 5px; font: 600 15px var(--display); font-variant-numeric: tabular-nums; color: #fff; background: var(--dim); }
+.score.s5, .score.s4 { background: var(--ok); } .score.s3 { background: var(--warn); } .score.s2, .score.s1 { background: var(--bad); }
+.summary { margin: 10px 0 6px; }
+.issues { margin: 0; padding-left: 18px; color: var(--dim); font-size: 14px; }
+.checks { list-style: none; margin: 0; padding: 0; display: grid; gap: 6px; }
+.checks li { display: grid; grid-template-columns: 20px minmax(0, 1fr); gap: 6px; font-size: 14px; }
+.checks .mark { font-weight: 700; }
+.checks li.ok .mark { color: var(--ok); } .checks li.bad .mark { color: var(--bad); }
+.checks small { display: block; color: var(--dim); font: 12px/1.45 var(--mono); overflow-wrap: anywhere; }
+.metrics { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 10px 16px; margin: 18px 0 0; }
+.metrics div { display: grid; }
+.metrics dt { font-size: 11px; color: var(--dim); text-transform: uppercase; letter-spacing: 0.05em; }
+.metrics dd { margin: 0; font: 600 18px var(--display); font-variant-numeric: tabular-nums; }
+.shots { display: grid; grid-template-columns: repeat(auto-fill, minmax(min(100%, 280px), 1fr)); gap: 12px; }
+figure { margin: 0; min-width: 0; }
+figure img { width: 100%; max-width: 100%; aspect-ratio: 16 / 10; object-fit: cover; object-position: left top; border: 1px solid var(--rule); border-radius: 4px; display: block; background: var(--code); }
+figure .zoom { display: block; width: 100%; padding: 0; border: 0; background: none; cursor: zoom-in; }
+figure .zoom:focus-visible img { outline: 2px solid var(--accent); }
+dialog.viewer { width: min(96vw, 1400px); max-height: 92vh; padding: 0; border: 1px solid var(--rule); border-radius: 6px; background: var(--panel); color: var(--fg); }
+dialog.viewer::backdrop { background: rgb(0 0 0 / .6); }
+.viewer-bar { position: sticky; top: 0; display: flex; justify-content: space-between; align-items: center; gap: 12px; padding: 8px 12px; background: var(--panel); border-bottom: 1px solid var(--rule); font: 13px var(--mono); }
+.viewer-bar button { font: 600 13px var(--body); padding: 4px 12px; border: 1px solid var(--rule); border-radius: 4px; background: var(--bg); color: var(--fg); cursor: pointer; }
+.viewer-body { overflow: auto; max-height: calc(92vh - 46px); }
+.viewer-body img { display: block; max-width: none; width: 100%; height: auto; }
+figcaption { font: 12px var(--mono); color: var(--dim); margin-top: 4px; }
+details { border-top: 1px solid var(--rule); margin-top: 16px; padding-top: 10px; }
+summary { cursor: pointer; font-weight: 600; }
+summary:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+/* highlight.js tokens, from the theme tokens (both themes) */
+.hljs-keyword, .hljs-built_in, .hljs-literal, .hljs-selector-tag, .hljs-meta .hljs-keyword { color: var(--c-kw); }
+.hljs-string, .hljs-regexp, .hljs-template-string, .hljs-attr .hljs-string { color: var(--c-str); }
+.hljs-comment, .hljs-quote, .hljs-meta { color: var(--c-com); font-style: italic; }
+.hljs-number, .hljs-symbol, .hljs-bullet { color: var(--c-num); }
+.hljs-title, .hljs-title.function_, .hljs-title.class_, .hljs-section { color: var(--c-fn); }
+.hljs-tag, .hljs-name, .hljs-selector-class, .hljs-selector-id { color: var(--c-tag); }
+.hljs-attr, .hljs-attribute, .hljs-property, .hljs-variable, .hljs-params, .hljs-template-variable { color: var(--c-attr); }
+pre { background: var(--code); padding: 10px 12px; border-radius: 4px; overflow-x: auto; max-height: 420px; }
+.shots.small { grid-template-columns: repeat(auto-fill, minmax(min(100%, 200px), 1fr)); margin-top: 8px; }
+.look { margin: 10px 0 4px; padding: 8px 10px; background: var(--code); border-radius: 4px; }
+.acts { display: block; font-size: 12px; overflow-wrap: anywhere; color: var(--dim); }
+details.seen { border: 0; margin: 6px 0 0; padding: 0; }
+details.seen summary { font-weight: 500; font-size: 13px; }
+.note { max-width: 85ch; margin: 12px 0 0; padding: 8px 12px; border-left: 3px solid var(--warn); background: var(--code); font-size: 14px; }
+.turn { border-left: 3px solid var(--rule); padding-left: 12px; margin: 14px 0; max-width: 85ch; min-width: 0; overflow-wrap: anywhere; }
+.who { font: 600 12px var(--body); text-transform: uppercase; letter-spacing: 0.06em; margin-top: 8px; }
+.who.person { color: var(--accent); } .who.agent { color: var(--dim); }
+</style>
+<div class="wrap">
+  <h1 id="title">slop persona review</h1>
+  <p class="lede" id="lede"></p>
+  <div class="totals" id="totals"></div>
+  <div id="batch-note"></div>
+  <nav class="index" aria-label="Runs" id="index"></nav>
+  <div id="runs"><p class="dim">Loading the batch…</p></div>
+</div>
+<dialog class="viewer" id="viewer" aria-label="Screenshot">
+  <div class="viewer-bar"><span id="viewer-name"></span><button type="button" id="viewer-close">Close</button></div>
+  <div class="viewer-body"><img id="viewer-img" alt=""></div>
+</dialog>
+<script type="application/json" id="data">/*DATA*/</script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/highlight.min.js"></script>
+<script>
+(() => {
+  const D = JSON.parse(document.getElementById('data').textContent);
+  const $ = (id) => document.getElementById(id);
+  const esc = (s) => String(s ?? '').replace(/[&<>"]/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' })[c]);
+  // Replies are markdown-ish: paragraphs, `code`, **bold**.
+  const para = (s) => esc(s).split(/\n{2,}/).map((p) => '<p>' + p.replace(/\n/g, '<br>').replace(/`([^`]+)`/g, '<code>$1</code>').replace(/\*\*([^*]+)\*\*/g, '<b>$1</b>') + '</p>').join('');
+  const secs = (ms) => Math.round((ms || 0) / 1000) + ' s';
+  const plural = (n, w) => n + ' ' + w + (n === 1 ? '' : 's');
+  const allPass = (r) => r.checks.length > 0 && r.checks.every((c) => c.ok);
+  const score = (n) => `<span class="score s${n ?? 0}">${n ?? '–'}</span>`;
+  const DIMS = ['goal', 'grounding', 'honesty', 'efficiency', 'communication'];
+  const LANG = { js: 'javascript', mjs: 'javascript', html: 'xml', css: 'css', json: 'json', sql: 'sql' };
+  const caption = (f) => f.replace(/\.png$/, '').replace(/^persona-t\d+-\d+-/, '').replace(/^agent-look-/, '').replace(/-/g, ' ');
+  const thumbs = (r, files, cls = '') => `<div class="shots ${cls}">${files.map((f) => {
+    const src = `shots/${r.id}/${f}`;
+    return `<figure><button type="button" class="zoom" data-full="${esc(src)}"><img src="${esc(src)}" alt="${esc(r.id + ': ' + caption(f))}" loading="lazy"></button><figcaption>${esc(caption(f))}</figcaption></figure>`;
+  }).join('')}</div>`;
+  const looks = (r, t) => (t.browse || []).map((b) => `<div class="look"><div class="who person">Person looks at the site</div>
+    <code class="acts">${esc(JSON.stringify(b.actions))}</code>
+    <details class="seen"><summary>What they saw</summary><pre>${esc(b.seen)}</pre></details>${thumbs(r, b.shots || [], 'small')}</div>`).join('');
+
+  function card(r) {
+    const j = r.judge || {}, m = r.metrics || {}, passed = r.checks.filter((c) => c.ok).length;
+    return `<section class="run" id="${esc(r.id)}">
+  <header class="run-head">
+    <div class="run-title"><h2>${esc(r.id)}</h2>
+      <span class="chip ${allPass(r) ? 'ok' : 'bad'}">${passed}/${r.checks.length} checks</span>
+      <span class="chip plain">${esc(r.persona)}</span>${r.browser ? '<span class="chip plain">browser</span>' : ''}</div>
+    <p class="ask">“${esc(r.opening)}”</p>
+    ${r.note ? `<p class="note"><b>Reviewer's note.</b> ${esc(r.note)}</p>` : ''}
+  </header>
+  <div class="grid">
+    <div class="col">
+      <h3>Judge</h3>
+      <table class="scores"><tr>${DIMS.map((k) => `<th>${k}</th>`).join('')}</tr><tr>${DIMS.map((k) => `<td>${score(j[k])}</td>`).join('')}</tr></table>
+      ${j.summary ? `<p class="summary">${esc(j.summary)}</p>` : `<p class="summary dim">${esc(j.error || 'no judgment')}</p>`}
+      ${(j.issues || []).length ? `<ul class="issues">${j.issues.map((i) => `<li>${esc(i)}</li>`).join('')}</ul>` : ''}
+      <h3>Checks <span class="dim">(on the server and in Chrome)</span></h3>
+      <ul class="checks">${r.checks.map((c) => `<li class="${c.ok ? 'ok' : 'bad'}"><span class="mark">${c.ok ? '✓' : '✗'}</span><div><b>${esc(c.check)}</b>${c.detail ? `<small>${esc(String(c.detail).slice(0, 400))}</small>` : ''}</div></li>`).join('')}</ul>
+      <dl class="metrics">${[['commands', m.commands], ['failed', m.failed], ['help reads', m.helpReads], ['turns', m.turns], ['agent time', secs(m.ms)], ['blocked egress', (m.egressDenied || []).length]]
+        .map(([k, v]) => `<div><dt>${k}</dt><dd>${esc(v ?? '–')}</dd></div>`).join('')}</dl>
+    </div>
+    <div class="col"><h3>What it built</h3>
+      ${r.shots.length ? thumbs(r, r.shots) : '<p class="dim">No screenshots (the page was not found).</p>'}</div>
+  </div>
+  <details><summary>The agent's code <span class="dim">(${plural(r.files.length, 'file')} in its work folder)</span></summary>
+    ${r.files.map((f) => `<h4>${esc(f.path)}</h4><pre><code class="language-${LANG[f.path.split('.').pop()] || 'plaintext'}">${esc(f.text)}</code></pre>`).join('') || '<p class="dim">None.</p>'}</details>
+  <details><summary>The conversation <span class="dim">(${plural(r.turns.length, 'turn')})</span></summary>
+    ${r.turns.map((t, i) => `<div class="turn"><div class="who person">Person · turn ${i + 1}</div>${para(t.message)}
+      <div class="who agent">Agent · ${plural(t.commands, 'command')} · ${secs(t.ms)}</div>${para(t.reply)}${looks(r, t)}</div>`).join('')}</details>
+  ${r.agentShots.length ? `<details><summary>The agent's own looks <span class="dim">(${plural(r.agentShots.length, 'screenshot')} from <code>look</code> in its box)</span></summary>${thumbs(r, r.agentShots, 'small')}</details>` : ''}
+  <details><summary>The agent's debrief</summary>${para(r.debrief)}</details>
+</section>`;
+  }
+
+  const runs = D.runs;
+  document.title = `slop persona review: ${D.batch}`;
+  $('title').textContent = D.title || 'slop persona review';
+  $('lede').innerHTML = `Batch <code>${esc(D.batch)}</code>${runs.some((r) => r.browser) ? ' (agent and person with a browser)' : ''}: ${esc(D.lede || '')}`;
+  const tot = runs.reduce((a, r) => ({ cmds: a.cmds + (r.metrics?.commands || 0), ms: a.ms + (r.metrics?.ms || 0), pass: a.pass + (allPass(r) ? 1 : 0) }), { cmds: 0, ms: 0, pass: 0 });
+  $('totals').innerHTML = [[`${tot.pass}/${runs.length}`, 'runs with every check passed'], [tot.cmds, 'commands'], [secs(tot.ms), 'agent time']]
+    .map(([v, k]) => `<div><b>${esc(v)}</b><span>${k}</span></div>`).join('');
+  if (D.note) $('batch-note').innerHTML = `<p class="note"><b>Reviewer's note.</b> ${esc(D.note)}</p>`;
+  $('index').innerHTML = runs.map((r) => `<a href="#${esc(r.id)}"><span class="dot ${allPass(r) ? '' : 'bad'}"></span>${esc(r.id)}</a>`).join('');
+  $('runs').innerHTML = runs.map(card).join('\n');
+  if (location.hash) document.getElementById(location.hash.slice(1))?.scrollIntoView();
+  try { hljs.highlightAll(); } catch (e) {} // plain code if the library did not load
+
+  // Screenshots open full size in the page: the viewer cannot open them in a tab.
+  const viewer = $('viewer');
+  document.addEventListener('click', (e) => {
+    const b = e.target.closest('.zoom');
+    if (b) {
+      $('viewer-img').src = b.dataset.full;
+      $('viewer-img').alt = b.querySelector('img').alt;
+      $('viewer-name').textContent = b.dataset.full.slice('shots/'.length);
+      viewer.showModal();
+      viewer.querySelector('.viewer-body').scrollTop = 0;
+    } else if (e.target === viewer || e.target.id === 'viewer-close') viewer.close();
+  });
+})();
+</script>
