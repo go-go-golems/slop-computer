@@ -12,10 +12,13 @@ import (
 	"strings"
 	"sync"
 
+	"github.com/go-go-golems/glazed/pkg/help"
+	help_cmd "github.com/go-go-golems/glazed/pkg/help/cmd"
 	"github.com/spf13/cobra"
 
 	"github.com/go-go-golems/slop-computer/pkg/client"
 	"github.com/go-go-golems/slop-computer/pkg/commands"
+	"github.com/go-go-golems/slop-computer/pkg/doc"
 	"github.com/go-go-golems/slop-computer/pkg/verbs"
 )
 
@@ -32,10 +35,23 @@ var listOnce sync.Once
 func Root() *cobra.Command {
 	listOnce.Do(func() { commands.Install(verbs.Default, nil) })
 	root := &cobra.Command{
-		Use:           "slop",
-		Short:         "slop: host apps on stores, with a CLI for people and agents",
+		Use:   "slop",
+		Short: "slop: host apps on stores, with a CLI for people and agents",
+		Long: "slop: host apps on stores, with a CLI for people and agents.\n\n" +
+			"Start with `slop help slop-overview` (what slop is) and `slop help agent-quickstart`\n" +
+			"(logging in and finding your way); `slop help --all` lists every page.\n" +
+			"Every verb has its own --help; `slop verbs` lists them all.",
 		SilenceUsage:  true,
 		SilenceErrors: true,
+		// Check -o before a verb runs: an unknown format used to print YAML
+		// after the verb had already done its work.
+		PersistentPreRunE: func(cmd *cobra.Command, args []string) error {
+			switch flagOutput {
+			case "yaml", "json", "table":
+				return nil
+			}
+			return fmt.Errorf("invalid_argument: -o %q: the formats are yaml, json and table", flagOutput)
+		},
 	}
 	root.PersistentFlags().StringVar(&flagServer, "server", "", "server origin (default: $SLOP_SERVER, then the default login)")
 	root.PersistentFlags().StringVarP(&flagOutput, "output", "o", "yaml", "output: yaml, json or table")
@@ -43,7 +59,87 @@ func Root() *cobra.Command {
 	addVerbCommands(root)
 	addExtraCommands(root)
 	addAppCommands(root)
+	setupHelp(root)
 	return root
+}
+
+// setupHelp gives the root Glazed's help system with slop's pages
+// (pkg/doc): slop help, slop help <slug>, slop help --all.
+func setupHelp(root *cobra.Command) {
+	hs := help.NewHelpSystem()
+	if err := doc.AddDocToHelpSystem(hs); err != nil {
+		fmt.Fprintln(os.Stderr, "warning: help pages:", err)
+	}
+	// Glazed renders command help as markdown. Examples are command lines:
+	// keep them verbatim, one per line, in a code block. Its footer names
+	// `help <command name>`, which is no page for a nested verb.
+	help_cmd.COBRA_COMMAND_USAGE_TEMPLATE = strings.Replace(help_cmd.COBRA_COMMAND_USAGE_TEMPLATE,
+		"## Examples:\n{{.Example}}", "## Examples:\n```\n{{.Example}}\n```", 1)
+	help_cmd.COBRA_COMMAND_HELP_TEMPLATE = strings.Replace(help_cmd.COBRA_COMMAND_HELP_TEMPLATE,
+		"For more help, run:\n`{{$.HelpCommand}} {{.Name}}`", "The help pages: `{{$.HelpCommand}} --all`.", 1)
+	help_cmd.SetupCobraRootCommand(hs, root)
+	// Short and Long are markdown too: `<store>` would vanish as an HTML tag
+	// and `preact@10.24.3` become a mail link. Escape them once, at the
+	// first help or usage render, so completions keep the plain text.
+	var once sync.Once
+	escape := func() { once.Do(func() { escapeHelpText(root) }) }
+	helpFn, usageFn := root.HelpFunc(), root.UsageFunc()
+	root.SetHelpFunc(func(c *cobra.Command, args []string) { escape(); helpFn(c, args) })
+	root.SetUsageFunc(func(c *cobra.Command) error { escape(); return usageFn(c) })
+}
+
+func escapeHelpText(c *cobra.Command) {
+	c.Short, c.Long = mdEscape(c.Short), mdEscape(c.Long)
+	for _, sub := range c.Commands() {
+		escapeHelpText(sub)
+	}
+}
+
+// mdEscape keeps cobra text literal under markdown: runs of indented lines
+// (command examples) become code blocks, and outside code < > are escaped
+// and @ is written as an entity, which no autolink matches.
+func mdEscape(s string) string {
+	var b strings.Builder
+	lines := strings.Split(s, "\n")
+	fence, indented := false, false
+	for i, line := range lines {
+		isIndented := !fence && strings.HasPrefix(line, "  ") && strings.TrimSpace(line) != "" &&
+			!strings.HasPrefix(strings.TrimSpace(line), "- ") && !strings.HasPrefix(strings.TrimSpace(line), "* ")
+		if isIndented && !indented {
+			b.WriteString("```\n")
+		} else if !isIndented && indented {
+			b.WriteString("```\n")
+		}
+		indented = isIndented
+		if strings.HasPrefix(strings.TrimSpace(line), "```") {
+			fence = !fence
+		}
+		if fence || indented || strings.HasPrefix(strings.TrimSpace(line), "```") {
+			b.WriteString(line)
+		} else {
+			inCode := false
+			for _, r := range line {
+				switch {
+				case r == '`':
+					inCode = !inCode
+				case inCode:
+				case r == '<' || r == '>':
+					b.WriteByte('\\')
+				case r == '@':
+					b.WriteString("&#64;")
+					continue
+				}
+				b.WriteRune(r)
+			}
+		}
+		if i < len(lines)-1 {
+			b.WriteByte('\n')
+		}
+	}
+	if indented {
+		b.WriteString("\n```")
+	}
+	return b.String()
 }
 
 // addVerbCommands makes `slop <group> <verb>` for every verb.
@@ -135,6 +231,11 @@ func verbCommand(v *verbs.Verb) *cobra.Command {
 		s := ""
 		vals[a.Name] = &s
 		cmd.Flags().StringVar(vals[a.Name], a.Name, "", a.Doc)
+		if a.Type == "bool" {
+			// `--all` alone means true; `--all=false` turns it off. Without
+			// this a bare bool flag took the next word as its value.
+			cmd.Flags().Lookup(a.Name).NoOptDefVal = "true"
+		}
 	}
 	cmd.Flags().StringVar(&jsonArgs, "json", "", "all arguments as a JSON object")
 	return cmd

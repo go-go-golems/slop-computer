@@ -256,3 +256,17 @@ func titleOf(c *client.Client, store, path string) string {
 	t, _ := m["title"].(string)
 	return t
 }
+
+// Explain adds what to do next to an error the root returns. An unknown
+// top-level command is often an app's alias (slop pb …) that this machine's
+// CLI has not learned yet: it learns an alias the first time it runs one of
+// that app's stores with slop on (SLOP3-026, G9).
+func Explain(err error) string {
+	msg := err.Error()
+	if strings.HasPrefix(msg, "unknown command ") && strings.Contains(strings.SplitN(msg, "\n", 2)[0], ` for "slop"`) {
+		return msg + "\n\nIf this is an app's alias (like `slop pb <board> …`), run `slop on <store> --help` once:\n" +
+			"the CLI learns an app's alias the first time it runs one of that app's stores.\n" +
+			"See `slop help using-app-verbs`; `slop help` lists every page."
+	}
+	return msg
+}

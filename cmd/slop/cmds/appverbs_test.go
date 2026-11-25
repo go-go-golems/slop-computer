@@ -24,3 +24,42 @@ func TestServerKeyKeepsSchemeAndPath(t *testing.T) {
 		t.Fatalf("not a readable directory name: %s", k)
 	}
 }
+
+// SLOP3-026 G9: an unknown top-level command says how aliases are learned.
+func TestUnknownCommandHintsAtAliases(t *testing.T) {
+	t.Setenv("XDG_CONFIG_HOME", t.TempDir()) // no learned aliases
+	root := Root()
+	root.SetArgs([]string{"zzalias", "board", "describe"})
+	root.SetOut(&strings.Builder{})
+	root.SetErr(&strings.Builder{})
+	err := root.Execute()
+	if err == nil {
+		t.Fatal("an unknown command succeeded")
+	}
+	if got := Explain(err); !strings.Contains(got, "slop on <store> --help") || !strings.Contains(got, "using-app-verbs") {
+		t.Fatalf("no alias hint: %s", got)
+	}
+	// cobra adds suggestions after the first line when a name is close.
+	root = Root()
+	root.SetArgs([]string{"ap", "kitchen"}) // close to "app"
+	root.SetOut(&strings.Builder{})
+	root.SetErr(&strings.Builder{})
+	if err := root.Execute(); err == nil || !strings.Contains(Explain(err), "slop on <store> --help") {
+		t.Fatalf("no alias hint for a name with suggestions: %v", err)
+	}
+	if got := Explain(errFor("permission_denied: no")); got != "permission_denied: no" {
+		t.Fatalf("other errors change: %s", got)
+	}
+}
+
+type errFor string
+
+func (e errFor) Error() string { return string(e) }
+
+func TestMdEscapeKeepsHelpTextLiteral(t *testing.T) {
+	got := mdEscape("Give store:<id> to @member, not `<x>`.\n\n  slop vendor add preact@10.24.3\n  slop vendor rm preact\n\nDone.")
+	want := "Give store:\\<id\\> to &#64;member, not `<x>`.\n\n```\n  slop vendor add preact@10.24.3\n  slop vendor rm preact\n```\n\nDone."
+	if got != want {
+		t.Fatalf("mdEscape:\n%q\nwant\n%q", got, want)
+	}
+}
