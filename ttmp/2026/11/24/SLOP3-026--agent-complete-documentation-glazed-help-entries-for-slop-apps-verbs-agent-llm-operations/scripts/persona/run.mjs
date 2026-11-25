@@ -25,6 +25,7 @@ const { values: o, positionals } = parseArgs({
     slop: { type: 'string', default: process.env.SLOP_BIN || '' },
     out: { type: 'string', default: path.join(HERE, 'runs') },
     'agent-thinking': { type: 'string', default: 'high' },
+    dry: { type: 'boolean', default: false }, // setup and checks only: test a scenario's setup and checker
   },
 });
 const SCENARIO = positionals[0];
@@ -82,7 +83,8 @@ for (let i = 0; ; i++) {
 }
 
 // ---- setup -------------------------------------------------------------------
-const shEnv = { ...HOSTENV, SLOP: SLOP, PORT, WORK: path.join(RUN, 'work'), SETUP: path.join(HERE, 'setup'), RUN };
+const REPO = path.resolve(HERE, '../../../../../../..'); // apps/ for setups that deploy shipped apps
+const shEnv = { ...HOSTENV, SLOP: SLOP, PORT, WORK: path.join(RUN, 'work'), SETUP: path.join(HERE, 'setup'), RUN, REPO };
 for (const cmd of sc.setup || []) {
   const r = spawnSync('bash', ['-c', cmd], { env: shEnv, encoding: 'utf8', cwd: path.join(HERE, 'setup') });
   if (r.status !== 0) throw new Error(`setup failed: ${cmd}\n${r.stdout}\n${r.stderr}`);
@@ -121,9 +123,13 @@ async function agentTurn(message, tag) {
     `SLOP_SERVER=${SERVER}`, '--',
     'pi', '-p', '--mode', 'json', '--session-dir', '/home/agent/.pi/sessions', '--session-id', 'run',
     '--no-context-files', '--no-skills', '--no-extensions', '-e', '/opt/pinpm/node_modules/@lunaroute/pi-extension',
+    // Built-in tools only: the lunaroute extension adds a document-fetch tool
+    // that runs outside the box (pilot-1 fetched slop's source through it).
+    '--tools', 'read,bash,edit,write',
     ...MODEL, '--thinking', o['agent-thinking'], '--append-system-prompt', '/home/agent/system.md', message];
   const t0 = Date.now();
-  const r = spawnSync('bash', args, { encoding: 'utf8', maxBuffer: 1 << 28, timeout: 15 * 60000 });
+  // 30 minutes a turn: pilot-1 lost a whole reply at 15 (a 10-minute npm install).
+  const r = spawnSync('bash', args, { encoding: 'utf8', maxBuffer: 1 << 28, timeout: 30 * 60000, killSignal: 'SIGTERM' });
   fs.writeFileSync(out, r.stdout || '');
   if (r.stderr) fs.writeFileSync(out.replace(/\.jsonl$/, '.stderr.txt'), r.stderr);
   const ev = piEvents(out);
@@ -136,7 +142,9 @@ async function agentTurn(message, tag) {
   const reply = finalText(ev);
   const tk = tokens(ev);
   run.tokens.agent += tk;
-  return { ms: Date.now() - t0, reply, tools, tokens: tk, exit: r.status, error: r.error ? String(r.error) : undefined };
+  const timedOut = !!(r.error && /ETIMEDOUT/.test(String(r.error)));
+  if (timedOut) log('agent turn timed out');
+  return { ms: Date.now() - t0, reply, tools, tokens: tk, exit: r.status, timedOut, error: r.error ? String(r.error) : undefined };
 }
 
 function pi(prompt, thinking) {
@@ -173,7 +181,7 @@ function personaTurn() {
 
 // ---- the conversation ----------------------------------------------------------
 let message = sc.opening;
-for (let i = 0; i < sc.maxTurns; i++) {
+for (let i = 0; i < (o.dry ? 0 : sc.maxTurns); i++) {
   log(`turn ${i + 1}: ${message.slice(0, 80)}`);
   const a = await agentTurn(message, 'turn');
   run.turns.push({ message, ...a });
@@ -189,11 +197,13 @@ for (let i = 0; i < sc.maxTurns; i++) {
 // ---- facts, before the debrief can change anything -----------------------------
 {
   fs.writeFileSync(path.join(RUN, 'replies.txt'), run.turns.map((t) => t.reply || '').join('\n\n'));
-  const r = spawnSync('bash', [path.join(HERE, 'checks', SCENARIO + '.sh')], { env: { ...shEnv, FINAL: run.turns.at(-1).reply || '' }, encoding: 'utf8', cwd: RUN });
+  const r = spawnSync('bash', [path.join(HERE, 'checks', SCENARIO + '.sh')], { env: { ...shEnv, FINAL: (run.turns.at(-1) || {}).reply || '' }, encoding: 'utf8', cwd: RUN });
   run.checks = r.stdout.split('\n').filter(Boolean).map((l) => { try { return JSON.parse(l); } catch { return { check: 'unparsed', ok: false, detail: l }; } });
   if (r.status !== 0) run.checks.push({ check: 'checker', ok: false, detail: (r.stderr || '').slice(0, 500) });
   save();
 }
+
+if (o.dry) { console.log(JSON.stringify(run.checks, null, 1)); stop(); process.exit(0); }
 
 // ---- debrief --------------------------------------------------------------------
 {
@@ -211,12 +221,13 @@ const isHelp = (c) => /\bslop\b[^|;&]*\b(help\b|--help\b|-h\b)/.test(c.cmd) || /
 const isFail = (c) => c.isError || /(^|\n)error: /.test(c.output);
 const outside = (c) => /\/home\/playback|\/opt\/pinpm|\/proc\/|find \/(\s|$)|\.\.\/\.\.|~\/\.pi/.test(c.cmd);
 // Looking for slop's source or inside its binary: a sign the help fell short.
-const probe = (c) => /git clone|github\.com|githubusercontent|\bstrings\b[^|]*slop|\bnm\b[^|]*slop|go tool nm|objdump|readelf|go doc|pkg\.go\.dev/.test(c.cmd);
+const probe = (c) => c.tool !== 'bash' && c.tool !== 'read' && c.tool !== 'edit' && c.tool !== 'write' || /git clone|github\.com|githubusercontent|\bstrings\b[^|]*slop|\bnm\b[^|]*slop|go tool nm|objdump|readelf|go doc|pkg\.go\.dev/.test(c.cmd);
 const fails = cmds.map((c, i) => ({ c, i })).filter(({ c }) => isFail(c));
 run.metrics = {
   turns: run.turns.length,
   commands: cmds.length,
   failed: fails.length,
+  timedOutTurns: run.turns.filter((t) => t.timedOut).length,
   helpReads: cmds.filter(isHelp).length,
   helpBeforeFirstFailure: cmds.slice(0, fails.length ? fails[0].i : cmds.length).filter(isHelp).length,
   failuresFollowedByHelp: fails.filter(({ i }) => cmds[i + 1] && isHelp(cmds[i + 1])).length,

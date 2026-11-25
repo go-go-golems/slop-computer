@@ -1,0 +1,9 @@
+{
+  "id": "static-site", "persona": "builder", "maxTurns": 4,
+  "setup": ["cp -r \"$SETUP/site\" \"$WORK/site\""],
+  "opening": "I've got a tiny site in the site folder here, just two pages. Can you put it online so anyone can read it, no sign-in needed? Tell me the address.",
+  "goal": "the two pages online on the static host, readable without signing in, with the address",
+  "checklist": ["both pages answer 200 without a login", "the link between them works", "it gives the address", "it does not build a live app for plain files"],
+  "facts": ["Plain files belong on the static host (site.localhost:<port> on this server); the live host is for apps."],
+  "personaKnows": ""
+}

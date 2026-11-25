@@ -150,4 +150,15 @@ which diagnostics need admin (troubleshooting table). Code doc strings fixed:
 | P-2 | `slop tally scores ls` fails on a fresh machine until `slop on scores --help` taught the alias; the persona refused the warm-up ("I want it to just work after a checkout"). Fix in the command: on an unknown first word, ask the server whether the next word is a store whose app has that alias | API shape | open |
 | P-3 | `parents: []` falls back to the file path (`verbs tally …`); the agent wanted root-level verbs, pushed twice, then went looking for the source (E-4 confirmed) | API shape | open |
 | P-4 | app verb `--help` shows Glazed's `--config-file`, `--print-yaml`, … (E-6 confirmed: pasted to the person) | noise | open |
+| P-6 | `mount set` on a store whose `app.json` does not parse answers `X is plain content: mount it on a static host`: the broken manifest is read as no capabilities, and the error sends the person to the wrong host | error text | open |
+| P-7 | a broken app's page still answers 200 (a blank page): only `app status` shows the cause | silent failure | open |
 | P-5 | with the help silent on root-level verbs, the agent ran `strings`/`nm` on the binary and cloned the GitHub repo. The box now blocks code hosts; `sourceProbes` counts the attempts | tester | fixed |
+
+### Pilot 1 (four scenarios): tester bugs found by reading every run
+
+- checker: `mount ls -o json` rows are `{kind, mount: {path, store}, url}`; `store export` is `{bundle: {docs: [{path, body}], tables}}`. Both checkers failed runs that had succeeded, and the judge, which trusts the checker, scored them goal 2. `recheck.sh` reruns a checker on saved data.
+- the lunaroute extension adds a document-fetch tool that runs outside the box: tally-verb fetched slop and go-go-goja source through it (24 probes). The agent now gets `--tools read,bash,edit,write`; any other tool counts as a source probe.
+- a 15-minute turn cap killed guestbook-new's first turn (10 minutes went to installing Playwright); the reply was lost and the persona re-asked. Now 30 minutes, and timed-out turns are counted.
+- `batch.sh`: `xargs -I` dropped the quoting; scenario and port are now arguments.
+
+With the checkers fixed, all four pilot runs met every check (guestbook 7/7, csv 2/2, tally 5/5, skeptic 2/2).

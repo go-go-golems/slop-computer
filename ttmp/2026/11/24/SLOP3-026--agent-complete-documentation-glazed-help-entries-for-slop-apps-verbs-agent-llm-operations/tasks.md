@@ -15,5 +15,5 @@
 - [x] C4 e2e scripts CHROME/createRequire <!-- t:gh7t -->
 - [x] C5 dgx runbook + refreshAfter <!-- t:i8mb -->
 - [x] Replace doc/*.md with pointers; README <!-- t:yjjv -->
-- [ ] Review all pages for consistency <!-- t:aouu -->
+- [x] Review all pages for consistency <!-- t:aouu -->
 - [ ] Acceptance test: persona matrix (design 4.1): harness, pilot of 4, round 1, fixes, round 2 <!-- t:tcde -->

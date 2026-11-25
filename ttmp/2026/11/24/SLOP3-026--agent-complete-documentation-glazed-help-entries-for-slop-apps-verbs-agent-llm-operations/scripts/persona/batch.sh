@@ -9,9 +9,8 @@ if [ $# -eq 0 ]; then
   set -- $(for f in scenarios/*.json; do python3 -c 'import json,sys; d=json.load(open(sys.argv[1])); print("" if d.get("heldOut") else d["id"])' "$f"; done)
 fi
 mkdir -p "runs/$B"
+export B
 i=0
-for s in "$@"; do
-  port=$((18701 + i)); i=$((i + 1))
-  echo "node run.mjs $s --slop $SLOP_BIN --port $port --batch $B > runs/$B/$s.log 2>&1 || echo \"$s failed (see runs/$B/$s.log)\""
-done | xargs -P "$N" -I{} bash -c '{}'
+for s in "$@"; do echo "$s $((18701 + i))"; i=$((i + 1)); done |
+  xargs -P "$N" -L 1 bash -c 'node run.mjs "$0" --slop "$SLOP_BIN" --port "$1" --batch "$B" > "runs/$B/$0.log" 2>&1 || echo "$0 failed: runs/$B/$0.log"'
 node summarize.mjs "$B"

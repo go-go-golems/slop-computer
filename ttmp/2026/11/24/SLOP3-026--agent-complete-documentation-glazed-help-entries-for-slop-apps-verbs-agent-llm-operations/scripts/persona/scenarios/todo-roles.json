@@ -1,0 +1,9 @@
+{
+  "id": "todo-roles", "persona": "builder", "maxTurns": 6,
+  "opening": "I'd like a shared to-do list at /todo for the team. Signed-in people can add items and tick them off, but only admins should be able to delete items. People who aren't signed in shouldn't see it at all.",
+  "goal": "a to-do page at /todo: signed-in people add and tick items, only admins delete, guests cannot open it",
+  "later": ["what happens if a normal team member tries to delete something?"],
+  "checklist": ["mounted at /todo, the page answers for a signed-in person", "guests get no access (not even view)", "members can add and tick (interact)", "deleting needs admin, enforced on the server (an actor action with requires admin, or a db rule), not only hidden in the page", "it explains what a member sees when deleting is refused"],
+  "facts": ["A guest is refused when the store gives @guest no grant; @member interact lets members add and tick.", "Hiding a button in the page is not enforcement: the server must refuse (action requires, or db rules)."],
+  "personaKnows": "You can sign in on the site."
+}
