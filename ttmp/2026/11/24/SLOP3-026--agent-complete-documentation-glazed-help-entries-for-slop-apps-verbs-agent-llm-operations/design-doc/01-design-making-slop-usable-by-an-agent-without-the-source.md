@@ -96,6 +96,12 @@ pointers (`slop help <slug>`, and the page's path), so there is never a second
 copy to drift. `doc/design/slop-v3.md` stays as it is: it is design history.
 `README.md` gains a "Documentation: `slop help`" line.
 
+As built: `doc/claude-apis/{state-storage,files,people-and-collaboration,sample-spec}.md`
+stay, because they are claude.ai's contract, copied unchanged so the runtime can
+be checked against it; only their README's slop-differences table became a
+pointer. `doc/production.md` keeps its "Importing francois releases" section,
+which uses this repository's scripts.
+
 ### 3.3 Two layers, no duplication with the verb table
 
 - **Reference per verb** stays generated: `slop <group> <verb> --help` and

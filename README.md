@@ -21,7 +21,10 @@ make build           # ./slop, server and CLI (cgo: SQLite)
 
 `slop.localhost:18300` is the main host (back office, sign-in, API),
 `apps.localhost:18300` the live host (apps in the shell),
-`site.localhost:18300` the static host. Production: `doc/production.md`.
+`site.localhost:18300` the static host.
+
+**Documentation is in the binary:** `slop help` (start with `slop help slop-overview`;
+`slop help --all` lists every page). The pages are `pkg/doc/`. Production: `slop help server-configuration`.
 
 ## Where things are
 
@@ -34,7 +37,8 @@ make build           # ./slop, server and CLI (cgo: SQLite)
 | `apps/upstream/` | Claude Blocks and Pinup: unmodified claude.ai artifacts with their build steps (`make blocks pinup`) |
 | `web/runtime` | the page runtime (`window.claude`), built into `pkg/doors/pages/assets/claude.js`; `conformance/` checks it in a browser (`make conformance`) |
 | `web/admin` | the back office, built into `pkg/doors/office/admin/` (`/admin`) and `apps/backoffice/` (`make admin`) |
-| `doc/` | the v3 design (`doc/design/slop-v3.md`), the claude.ai artifact guides (`doc/claude-apis/`), building and deploying apps (`doc/building-apps.md`), production notes |
+| `pkg/doc/` | the help pages `slop help` shows: building, deploying, every capability, actors, verbs, operations |
+| `doc/` | the v3 design (`doc/design/slop-v3.md`) and the claude.ai artifact guides slop's runtime is checked against (`doc/claude-apis/`) |
 | `scripts/` | `deploy-apps.sh`: every app and example with its mounts (`make deploy-apps`) |
 | `ttmp/` | tickets: designs, intern guides and diaries (v3: `ttmp/2026/11/01/SLOP3-*`) |
 

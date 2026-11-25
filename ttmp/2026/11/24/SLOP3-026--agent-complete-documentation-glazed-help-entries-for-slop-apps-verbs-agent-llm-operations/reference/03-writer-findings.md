@@ -68,6 +68,7 @@ triaged.
 
 | # | Finding | Kind | Status |
 | --- | --- | --- | --- |
+| O-1 | overview said `sampling_disabled`; the server never sends it (runtime table only) | doc | fixed |
 | D-1 | page runtime maps unknown server codes to `upstream_error` for sample (`permission_denied`, `quota_exceeded`, `unavailable`, `invalid_argument`, `authentication_error`); agent keeps them | bug | open |
 | D-2 | `--listen` with a config file without `hosts`: hosts derive from the file's port, not `--listen` | bug | open |
 | D-3 | `llm rm <email>` does not resolve the email and answers `removed:` when nothing matched | silent failure | open |
@@ -108,6 +109,7 @@ triaged.
 | E-6 | app verbs show Glazed's `--config-file` flag | noise | open |
 | E-7 | `Visitor.Payer` comment says the owner pays for alarms; code charges `store:<id>` (needs `policy … @store on` and `llm set store:<id> on`) | code comment | open |
 | E-8 | "created on visit": the path id is ignored, the new store gets `s-…` | surprise | documented |
+| E-10 | no CLI verb lists a store's actor actions (pages have `slop.actions()`); an agent must read `actor.js` | gap | open |
 | E-9 | `-o csv` etc. silently YAML (A-7) | silent failure | fixed: root `PersistentPreRunE` refuses unknown formats before the verb runs |
 
 ## Harness

@@ -97,7 +97,7 @@ same actor action, as you, with your level.
 | --- | --- | --- |
 | `permission_denied` | Your level on the store is below what the operation needs | `slop explain can <store> <level>` shows your level and the trace; ask the owner for a grant |
 | `not_granted` on a capability | The app does not declare it, or the policy is off for your audience | Check `app.json`; `slop policy ls <app>` |
-| `sampling_disabled`, model calls refused | No LLM access for you | `slop llm usage`; an admin runs `slop llm set` |
+| Model calls refused: `permission_denied: no LLM access` (CLI, `agent`), `upstream_error` "no LLM access" (`sample`) | No LLM access for you, or the budget is used up | `slop llm usage`; an admin runs `slop llm set`; see `llm-access` |
 | `unknown command` for an app alias | The CLI has not seen that app yet | Run `slop on <store> --help` once; see `using-app-verbs` |
 | You looked for docs under `slop docs` | `docs` is the document verbs | Use `slop help` |
 
@@ -107,3 +107,4 @@ same actor action, as you, with your level.
 - `slop help access-control` — levels, grants, groups and policy in depth
 - `slop help building-apps` — writing an app
 - `slop help using-app-verbs` — running an app's command-line verbs
+- `slop help troubleshooting` — every error code, what causes it, which page to read

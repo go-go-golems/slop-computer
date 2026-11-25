@@ -9,7 +9,7 @@
 - [x] Pages: cluster C2 (user, room, comments, files, downloads) <!-- t:a8rc -->
 - [x] Pages: cluster D (sample, agent, llm, server, pi) <!-- t:u808 -->
 - [x] Pages: cluster E (actors, app-verbs, using-app-verbs, pinboard) <!-- t:v32z -->
-- [ ] troubleshooting page <!-- t:xzkk -->
+- [x] troubleshooting page <!-- t:xzkk -->
 - [x] C2 unknown-alias hint <!-- t:7aof -->
 - [ ] C3 board ask output <!-- t:yy7b -->
 - [x] C4 e2e scripts CHROME/createRequire <!-- t:gh7t -->
