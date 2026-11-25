@@ -174,9 +174,20 @@ actions.ask = {
     const q = str(args && args.question, 4000).trim();
     if (!q) ctx.fail('invalid_argument', 'ask what? (question)');
     const canWrite = (RANK[ctx.visitor.level] || 0) >= RANK.interact;
+    // steps: each tool the model called, so a script can tell what changed.
+    const steps = [];
     const tools = AGENT_TOOLS.filter(t => canWrite || !t.write).map(t => ({
       name: t.name, description: t.description, inputSchema: t.schema,
-      execute: (input) => actions[t.name].run(ctx, Object.assign({}, input || {}, { via: 'agent' })),
+      execute: async (input) => {
+        const step = { tool: t.name, write: t.write, input: input || {} };
+        steps.push(step);
+        try {
+          return await actions[t.name].run(ctx, Object.assign({}, input || {}, { via: 'agent' }));
+        } catch (e) {
+          step.error = String((e && e.message) || e);
+          throw e;
+        }
+      },
     }));
     const meta = db.doc('board/meta').get().data() || {};
     const prompt = 'You are the agent of a shared pinboard called "' + (meta.title || 'Untitled board') + '", working for ' +
@@ -184,7 +195,7 @@ actions.ask = {
       'Use the tools to look at the board' + (canWrite ? ' and to change it when asked' : '') + '. Answer briefly, in plain text.\n\n' +
       'Request: ' + q;
     const r = await sample(prompt, { tools });
-    return { answer: r.text, model: r.model };
+    return { answer: r.text, model: r.model, steps };
   },
 };
 

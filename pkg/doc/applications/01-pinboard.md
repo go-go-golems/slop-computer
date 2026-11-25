@@ -185,6 +185,7 @@ with `pb`, a title. Positional arguments are shown in angle brackets.
 | `board describe` | — (prints text) | view |
 | `board log` | `--limit` (20) | view |
 | `board ask <question>` | the question, quoted (prints text; no `--format`) | view (writes need interact) |
+| `board ask-json <question>` | the same, as one row: `answer`, `model`, `steps` (each tool the agent called: `tool`, `input`, `write`, `error`) | view (writes need interact) |
 | `clip add` | `--text` or `--url`, `--title`, `--tags`, `--note` | interact |
 | `clip ls` | `--kind`, `--tag`, `--q`, `--limit` (50) | view |
 | `clip rm <id>` | the clip id | interact |
@@ -287,7 +288,11 @@ $ slop pb Kitchen board ask "which recipes take under half an hour?"
 action, with `sample`), with the board's actions as tools: the read tools
 for anyone who can view, the write tools only for `interact` and up. Its
 changes are logged as `agent (for <you>)`. It prints the answer as plain
-text, so it has no `--format`; it may take as long as the model does. The
+text, so it has no `--format`; it may take as long as the model does.
+From a script, use `board ask-json`: the same call as one row, with
+`steps` listing each tool the agent called (`write: true` for a change,
+`error` when the tool failed), so you can tell what it did without reading
+the log. The
 same verbs are MCP tools (`pb_board_ask`, `pb_clip_add`, …; `slop app tools`).
 
 Without the verbs, the same operations are actor actions:
@@ -304,7 +309,7 @@ Without the verbs, the same operations are actor actions:
 | `/boards` asks guests to sign in, or shows nothing | No grant on `pinboard-home` | `slop grant set pinboard-home @member view` |
 | The agent panel is only a console | No `sample` policy for your audience, or no LLM access | `slop policy set pinboard sample @member on`; `slop llm set @member on` |
 | `unavailable: this board's agent is off` from `board ask` | The `sample` policy is off for every audience | As above |
-| `unknown flag: --format` on `board ask` | It prints text | Read the answer as text |
+| `unknown flag: --format` on `board ask` | It prints text | `board ask-json … --format json` for the answer and the steps |
 | `unknown flag: --id` on `clip rm` | The id is positional | `slop pb <board> clip rm clip:…` |
 | `permission_denied: addClip needs interact; you have view` | You may only view this board | Ask the owner: `slop grant set <board> <you> interact` |
 | A new snapshot is not used | The board does not follow `main` | `slop app status <board>` |

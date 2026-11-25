@@ -11,9 +11,9 @@
 - [x] Pages: cluster E (actors, app-verbs, using-app-verbs, pinboard) <!-- t:v32z -->
 - [x] troubleshooting page <!-- t:xzkk -->
 - [x] C2 unknown-alias hint <!-- t:7aof -->
-- [ ] C3 board ask output <!-- t:yy7b -->
+- [x] C3 board ask output <!-- t:yy7b -->
 - [x] C4 e2e scripts CHROME/createRequire <!-- t:gh7t -->
 - [x] C5 dgx runbook + refreshAfter <!-- t:i8mb -->
-- [ ] Replace doc/*.md with pointers; README <!-- t:yjjv -->
+- [x] Replace doc/*.md with pointers; README <!-- t:yjjv -->
 - [ ] Review all pages for consistency <!-- t:aouu -->
 - [ ] Acceptance test: persona matrix (design 4.1): harness, pilot of 4, round 1, fixes, round 2 <!-- t:tcde -->
