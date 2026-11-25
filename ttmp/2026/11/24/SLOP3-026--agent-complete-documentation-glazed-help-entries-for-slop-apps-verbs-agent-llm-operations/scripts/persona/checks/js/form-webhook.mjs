@@ -8,11 +8,14 @@ if (st) {
   // the address the assistant gave: the last URL on this server in its
   // replies (any turn: a follow-up may not repeat it), else in the final one
   let said = process.env.FINAL || '';
-  try { said = JSON.parse(fs.readFileSync('run.json', 'utf8')).turns.map((t) => t.reply || '').join('\n') + '\n' + said; } catch {}
+  try { said = JSON.parse(fs.readFileSync((process.env.RUN ? process.env.RUN + '/' : '') + 'run.json', 'utf8')).turns.map((t) => t.reply || '').join('\n') + '\n' + said; } catch {}
   const urls = said.match(/https?:\/\/[a-z.]*localhost:\d+\/[^\s`'")\]*]*/g) || [];
-  const target = urls.filter((u) => !/\/inbox\/?$/.test(u)).at(-1) || urls.at(-1);
-  let ok = false, detail = 'no address in the final reply';
-  if (target) {
+  // Try each address the assistant gave, newest first: a follow-up may add
+  // a secret to the URL and mention the plain one as now refused (js-5a).
+  const cands = [...new Set(urls.filter((u) => !/\/inbox\/?$/.test(u) && !/[<>]/.test(u)))].reverse();
+  let ok = false, detail = 'no address in the replies';
+  const tried = [];
+  for (const target of cands) {
     const u = new URL(target);
     // node:http, not fetch: fetch drops a Host header set by hand, and the
     // server answers 421 for a host it does not serve (the first version
@@ -24,9 +27,10 @@ if (st) {
       rq.on('error', (e) => done({ status: e.message }));
       rq.end(body);
     });
-    detail = `POST ${target} → ${res.status}`;
-    ok = typeof res.status === 'number' && res.status < 300;
+    tried.push(`POST ${u.pathname}${u.search ? '?…' : ''} → ${res.status}`);
+    if (typeof res.status === 'number' && res.status < 300) { ok = true; break; }
   }
+  if (tried.length) detail = tried.join('; ');
   emit('a POSTed submission is accepted', ok, detail);
   const b = await browser();
   const c = await person(b, 'ana@example.com'); const p = await open(c, '/inbox', 4000); const t = await frameText(p);

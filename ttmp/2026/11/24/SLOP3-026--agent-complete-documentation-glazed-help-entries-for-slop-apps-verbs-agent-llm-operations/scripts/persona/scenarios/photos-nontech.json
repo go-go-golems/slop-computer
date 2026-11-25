@@ -15,7 +15,7 @@
   ],
   "facts": [
     "Uploads are the assets capability; guests get view through a grant on the store (@guest view) and no assets.",
-    "New team members: anyone who signs in is in @member; a grant to @member covers them."
+    "New team members: anyone who signs in is in @member, and a grant to @member covers them. With open signup (the default) that includes a stranger who signs in, and a good answer says so. If the person then wants only their own people to add, any of these meets it: grants to each person's usr_… id, approval signup (an admin setting), or an approval list in the app that works; what matters is that the team can add, a stranger who signs in cannot, and the person can let a new teammate in without a terminal."
   ],
   "personaKnows": "You have an account on the site and are signed in in your browser. You do not know what a store, mount, grant or capability is."
 }

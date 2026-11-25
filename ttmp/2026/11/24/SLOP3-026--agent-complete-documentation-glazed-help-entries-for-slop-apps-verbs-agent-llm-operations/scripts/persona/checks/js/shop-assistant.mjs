@@ -6,8 +6,15 @@ if (st) {
   const caps = Object.keys((JSON.parse((src.match(/--- app\.json\n([\s\S]*?)(\n--- |$)/) || [])[1] || '{}').capabilities) || {});
   emit('uses the agent or sample capability', caps.includes('agent') || caps.includes('sample'), caps.join(', '));
   // the tool's name and its first property, from the page or actor source
+  // A model reads the tool's schema; the checker cannot, so it finds the
+  // tools that add (defined with name: '…' or passed to a helper such as
+  // addTool('add_item', …), js-5b) and tries the usual argument shapes
+  // (js-5a's took items: [{name}], not a string).
   const tm = src.match(/name:\s*['"]([\w.-]+)['"][\s\S]{0,400}?(?:inputSchema|parameters|input_schema)[\s\S]{0,200}?properties:\s*\{\s*['"]?(\w+)/);
-  emit('a tool the assistant can call', !!tm, tm ? `${tm[1]}(${tm[2]})` : 'no tool definition found');
+  const named = [...src.matchAll(/name:\s*['"]([A-Za-z_][\w.-]*)['"]/g)].map((m) => m[1]);
+  const passed = [...src.matchAll(/\(\s*['"]([A-Za-z_][\w.-]*)['"]\s*,\s*['"`]/g)].map((m) => m[1]);   // helper('name', 'description')
+  const names = [...new Set([...(tm ? [tm[1]] : []), ...named, ...passed].filter((n) => /add/i.test(n)))];
+  emit('a tool the assistant can call', names.length > 0, names.length ? names.join(', ') : 'no tool definition found');
   const b = await browser();
   const ana = await person(b, 'ana@example.com');
   const pa = await open(ana, '/helper', 4000);
@@ -22,18 +29,32 @@ if (st) {
     return f.locator('input[type=text], input:not([type])').last();
   };
   const box = await pick();
-  if (tm && box && await box.count()) {
-    await box.fill(`/tool ${tm[1]} {"${tm[2]}":"oat milk"}`);
-    await box.press('Enter');
+  // a fresh name each run, so a rerun cannot pass on a probe left by the last one
+  const ITEM = 'oat milk ' + (Date.now() % 100000);
+  const storedNow = () => { try { return execFileSync(process.env.SLOP, ['store', 'export', st], { encoding: 'utf8', maxBuffer: 1 << 26 }).toLowerCase().includes(ITEM); } catch { return false; } };
+  if (names.length && box && await box.count()) {
+    const p = (tm && tm[2]) || 'items';
+    const shapes = [{ [p]: ITEM }, { [p]: [ITEM] }, { [p]: [{ name: ITEM }] }, { name: ITEM }, { item: ITEM }, { items: [ITEM] }, { items: [{ name: ITEM }] }, { text: ITEM }];
+    const seen = new Set(); let worked = '';
     const send = f.getByRole('button', { name: /send|ask|go|submit/i });
-    await pa.waitForTimeout(800);
-    if (await send.count() && (await box.inputValue().catch(() => '')).includes('/tool')) await send.first().click().catch(() => {});
-    await pa.waitForTimeout(8000);
+    for (const n of names.slice(0, 6)) {
+      for (const sh of shapes) {
+        const msg = `/tool ${n} ${JSON.stringify(sh)}`;
+        if (seen.has(msg)) continue; seen.add(msg);
+        for (let w = 0; w < 10 && await box.isDisabled().catch(() => false); w++) await pa.waitForTimeout(1000);
+        try { await box.fill(msg); await box.press('Enter'); } catch { continue; }
+        await pa.waitForTimeout(800);
+        if (await send.count() && (await box.inputValue().catch(() => '')).includes('/tool')) await send.first().click().catch(() => {});
+        await pa.waitForTimeout(4000);
+        if (storedNow()) { worked = msg; break; }
+      }
+      if (worked) break;
+    }
+    await pa.waitForTimeout(2000);
     const t = await frameText(pa);
-    let stored = '';
-    try { stored = execFileSync(process.env.SLOP, ['store', 'export', st], { encoding: 'utf8', maxBuffer: 1 << 26 }); } catch {}
-    emit('an item the assistant adds is stored on the server', /oat milk/i.test(stored), /oat milk/i.test(stored) ? 'found in the store' : 'not in the store export');
-    emit('the item appears in the list on the page', (t.match(/oat milk/ig) || []).length >= 2 || /oat milk/i.test(t.replace(/\/tool[^\n]*/g, '')), t.slice(0, 300));
+    emit('an item the assistant adds is stored on the server', !!worked, worked ? 'found in the store after ' + worked : `not in the store export after ${seen.size} tool calls`);
+    const tl = t.toLowerCase();
+    emit('the item appears in the list on the page', tl.split(ITEM).length - 1 >= 2 || tl.replace(/\/tool[^\n]*/g, '').includes(ITEM), t.slice(0, 300));
   } else emit('an item the assistant adds is stored on the server', false, box && await box.count() ? 'no tool to call' : 'no chat box in the page');
   await shot(pa, 'member-ana');
   const g = sl('explain', 'can', st, 'view', '--subject', 'anonymous');
