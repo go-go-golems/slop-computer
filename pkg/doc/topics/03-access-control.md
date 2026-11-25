@@ -459,8 +459,11 @@ error: not_found: guestbook has no action "sign"
 
 With no level the action is hidden (`not_found`), as the store is; with
 `view` it fails `permission_denied: sign needs interact; you have view`.
-`--as` takes only `anonymous`. For a person, `explain can --subject usr_…`
-predicts; there is no way to act as someone else. A page's direct `db`
+`--as` also takes a person, by `usr_…` id or email: the action runs with
+that person's level, audience and LLM access, writes what it writes in
+their name (`ctx.visitor.id`), and charges a model call to them. The call
+records the admin who made it (`via: cli (as bob@example.com, by usr_…)`).
+A group is not a person (`--as @member` fails): name one of its people. A page's direct `db`
 writes are not actions: `explain can <store> --path p --op write --subject
 anonymous` is the check for those.
 ## Troubleshooting

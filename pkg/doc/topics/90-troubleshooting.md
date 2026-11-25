@@ -99,7 +99,7 @@ what you expected.
 | `push` succeeds, the store is `broken` | Manifest error, actor error or a changed migration | `slop app status <store>` | `app-manifest` |
 | Every `claude.use()` is `null` | The page was opened on its sandbox URL without the shell, or as a file | Open it through its mount on a live host | `page-runtime` |
 | `window.claude` is undefined | The page is on the static host, which serves files byte for byte with no runtime | Mount the app on a live host | `building-apps` |
-| A page works for you and not for others | Their level or audience: policy cells and `db` rules apply per viewer | `slop explain can <store> --subject usr_…`; for a guest, `slop call <store> <action> --as anonymous` runs it | `access-control` |
+| A page works for you and not for others | Their level or audience: policy cells and `db` rules apply per viewer | `slop explain can <store> --subject usr_…`; `slop call <store> <action> --as anonymous` (or `--as usr_…`) runs it as them | `access-control` |
 | Old app verbs after a push | The store runs an older snapshot | `slop app status <store>` | `using-app-verbs` |
 | A model answer is empty with `--llm fake` | The fake engine echoes; `/tool <name> {json}` calls a tool, and a session without tools answers nothing | Use a real backend to test answers | `capability-agent` |
 | An option above a limit has no effect | Session options over a limit are lowered silently (`maxTokens`) | Stay within the limits on the page | `capability-agent` |

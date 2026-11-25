@@ -46,16 +46,21 @@ func actorVerbs(e actorEnv) []*verbs.Verb {
 				// --as anonymous runs the action as a fresh signed-out
 				// visitor: four persona agents had no way to prove what a
 				// guest gets but the page's own RPC (SLOP3-026, round 3).
+				// --as a person runs it with that person's level, audience
+				// and LLM access (and charges them); via names the admin.
 				caller, via := p, p.ViaLabel()
-				switch in.As {
-				case "":
-				case "anonymous":
+				if in.As != "" {
 					if !p.IsAdmin() {
-						return nil, verbs.Errf("permission_denied", "only platform admins call as anonymous")
+						return nil, verbs.Errf("permission_denied", "only platform admins call as someone else")
 					}
-					caller, via = nil, "cli (as anonymous, by "+p.ID()+")"
-				default:
-					return nil, verbs.Errf("invalid_argument", "--as takes anonymous (a signed-out visitor); to see what a person may do, slop explain can %s --action %s --subject <usr_…>", in.Store, in.Action)
+					if strings.HasPrefix(in.As, "store:") || strings.HasPrefix(in.As, "@") {
+						return nil, verbs.Errf("invalid_argument", "--as takes anonymous or a person (usr_… or an email), not %s; for a group, name one of its people", in.As)
+					}
+					q, err := e.subjectPrincipal(ctx, in.As)
+					if err != nil {
+						return nil, err
+					}
+					caller, via = q, "cli (as "+in.As+", by "+p.ID()+")"
 				}
 				var args any = map[string]any{}
 				if in.Args != nil {
@@ -309,7 +314,7 @@ type ActorCallIn struct {
 	Store  string `json:"store" slop:"pos=1"`
 	Action string `json:"action" slop:"pos=2"`
 	Args   any    `json:"args,omitempty"`
-	As     string `json:"as,omitempty" jsonschema_description:"anonymous: run the action as a signed-out visitor with the store's guest level (platform admins), to test what a stranger gets"`
+	As     string `json:"as,omitempty" jsonschema_description:"anonymous, or a person (usr_… or an email): run the action as them, with their level, audience and LLM access (platform admins), to test what they get"`
 }
 
 // AppLogsIn is app.logs's input.

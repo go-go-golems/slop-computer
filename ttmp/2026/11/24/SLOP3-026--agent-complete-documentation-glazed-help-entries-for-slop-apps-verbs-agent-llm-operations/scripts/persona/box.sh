@@ -7,12 +7,20 @@
 # Code hosts resolve nowhere (hosts.blocked): no git clone of slop.
 # Node is only node, npm and pi at /opt/node: the real install (under the real
 # home, with global packages) is not there (round 3 loaded puppeteer from it).
-# The environment is empty but for HOME, PATH, TZ=UTC, TERM and the KEY=VALs.
+# The environment is empty but for HOME, PATH, TZ=UTC, TERM, the proxy
+# variables and the KEY=VALs.
+# The network is the box's own (--unshare-net): loopback only. NET_DIR (the
+# sockets of net.mjs) and NET_PORT (the test server's port) come from the
+# caller's environment; inbox.mjs puts them on loopback, and the only way out
+# is the proxy, which admits the model provider alone. Round 4's agent, on the
+# host's network, probed the host's services and opened public tunnels.
 set -euo pipefail
 W=$1; H=$2; SB=$3; shift 3
 ENVS=()
 while [ "$1" != "--" ]; do ENVS+=("$1"); shift; done; shift
 NODE_DIR=$(dirname "$(dirname "$(command -v node)")")
+: "${NET_DIR:?NET_DIR: the directory of net.mjs's sockets}" "${NET_PORT:?NET_PORT: the test server's port}"
+P=http://127.0.0.1:3128
 exec bwrap --ro-bind /usr /usr --ro-bind /etc /etc --ro-bind "$(dirname "$0")/hosts.blocked" /etc/hosts --symlink usr/bin /bin --symlink usr/lib /lib \
   --symlink usr/sbin /sbin --ro-bind-try /lib64 /lib64 --proc /proc --dev /dev --tmpfs /tmp \
   --ro-bind-try /run/systemd/resolve /run/systemd/resolve \
@@ -22,5 +30,9 @@ exec bwrap --ro-bind /usr /usr --ro-bind /etc /etc --ro-bind "$(dirname "$0")/ho
   --ro-bind "$NODE_DIR/lib/node_modules/@earendil-works" /opt/node/lib/node_modules/@earendil-works \
   --symlink ../lib/node_modules/npm/bin/npm-cli.js /opt/node/bin/npm --symlink ../lib/node_modules/npm/bin/npx-cli.js /opt/node/bin/npx \
   --symlink ../lib/node_modules/@earendil-works/pi-coding-agent/dist/bundle/cli.js /opt/node/bin/pi --bind "$W" /home/agent/work \
-  --ro-bind "$SB" /opt/bin/slop --chdir /home/agent/work --unshare-pid --die-with-parent \
-  /usr/bin/env -i HOME=/home/agent PATH=/opt/bin:/opt/node/bin:/usr/bin TZ=UTC TERM=dumb "${ENVS[@]}" "$@"
+  --ro-bind "$SB" /opt/bin/slop --ro-bind "$NET_DIR" /opt/net --ro-bind "$(dirname "$0")/inbox.mjs" /opt/inbox.mjs \
+  --chdir /home/agent/work --unshare-pid --unshare-net --die-with-parent \
+  /usr/bin/env -i HOME=/home/agent PATH=/opt/bin:/opt/node/bin:/usr/bin TZ=UTC TERM=dumb \
+  HTTPS_PROXY=$P HTTP_PROXY=$P https_proxy=$P http_proxy=$P NODE_USE_ENV_PROXY=1 \
+  NO_PROXY=localhost,127.0.0.1,::1,.localhost no_proxy=localhost,127.0.0.1,::1,.localhost \
+  "${ENVS[@]}" /opt/node/bin/node /opt/inbox.mjs "$NET_PORT" -- "$@"

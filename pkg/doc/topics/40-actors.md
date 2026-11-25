@@ -210,8 +210,9 @@ error: not_found: t1 has no action "nope"
 `slop call <store> <action> [json]` and `slop actor call <store> <action>
 --args <json>` are the same verb (`actor.call`). Both run the action as you;
 a platform admin adds `--as anonymous` to run it as a signed-out visitor
-(`ctx.visitor.guest` true, the store's guest level), which is how to test
-what a stranger gets (`slop help access-control`).
+(`ctx.visitor.guest` true, the store's guest level), or `--as <usr_…|email>`
+to run it as that person, which is how to test what a stranger or a member
+gets (`slop help access-control`).
 
 ## Actions
 

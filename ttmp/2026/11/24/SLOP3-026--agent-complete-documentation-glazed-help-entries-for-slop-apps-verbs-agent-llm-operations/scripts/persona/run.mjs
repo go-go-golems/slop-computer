@@ -60,6 +60,13 @@ const server = spawn(SLOP, ['serve', '--local', '--llm', 'fake', '--admin-email'
   { stdio: ['ignore', fs.openSync(path.join(RUN, 'server.log'), 'w'), fs.openSync(path.join(RUN, 'server.log'), 'a')], detached: true });
 const stop = () => { try { process.kill(-server.pid, 'SIGTERM'); } catch {} };
 process.on('exit', stop);
+// The box's network (net.mjs): only the model provider and this server.
+const NET_DIR = path.join(RUN, 'net');
+fs.mkdirSync(NET_DIR, { recursive: true });
+const netProc = spawn('node', [path.join(HERE, 'net.mjs'), NET_DIR, String(PORT)], { stdio: 'ignore' });
+process.on('exit', () => netProc.kill());
+for (let i = 0; i < 40 && !fs.existsSync(path.join(NET_DIR, 'ready')); i++) await new Promise((r) => setTimeout(r, 100));
+if (!fs.existsSync(path.join(NET_DIR, 'ready'))) throw new Error('net.mjs did not start');
 process.on('SIGINT', () => process.exit(130));
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 for (let i = 0; ; i++) {
@@ -130,7 +137,7 @@ async function agentTurn(message, tag) {
     ...MODEL, '--thinking', o['agent-thinking'], '--append-system-prompt', '/home/agent/system.md', message];
   const t0 = Date.now();
   // 30 minutes a turn: pilot-1 lost a whole reply at 15 (a 10-minute npm install).
-  const r = spawnSync('bash', args, { encoding: 'utf8', maxBuffer: 1 << 28, timeout: 30 * 60000, killSignal: 'SIGTERM' });
+  const r = spawnSync('bash', args, { encoding: 'utf8', maxBuffer: 1 << 28, timeout: 30 * 60000, killSignal: 'SIGTERM', env: { ...process.env, NET_DIR, NET_PORT: String(PORT) } });
   fs.writeFileSync(out, r.stdout || '');
   if (r.stderr) fs.writeFileSync(out.replace(/\.jsonl$/, '.stderr.txt'), r.stderr);
   const ev = piEvents(out);
@@ -233,6 +240,8 @@ run.metrics = {
   failuresFollowedByHelp: fails.filter(({ i }) => cmds[i + 1] && isHelp(cmds[i + 1])).length,
   outsideReads: cmds.filter(outside).map((c) => c.cmd.slice(0, 160)),
   sourceProbes: cmds.filter(probe).map((c) => c.cmd.slice(0, 160)),
+  // Connections the box refused (net.mjs): anything but the model provider.
+  egressDenied: (() => { try { return fs.readFileSync(path.join(NET_DIR, 'denied.log'), 'utf8').split('\n').filter(Boolean); } catch { return []; } })(),
   errorCodes: fails.map(({ c }) => ((c.output.match(/error: ([a-z_]+):/) || [])[1]) || (c.output.match(/error: ([^\n]{0,60})/) || [])[1] || 'nonzero').reduce((m, k) => ((m[k] = (m[k] || 0) + 1), m), {}),
   checksPassed: run.checks.filter((c) => c.ok).length,
   checksTotal: run.checks.length,

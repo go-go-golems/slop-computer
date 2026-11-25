@@ -3,6 +3,7 @@ package host
 // Tests from SLOP3-001 phase P3 (actors); formerly p3_test.go.
 
 import (
+	"encoding/json"
 	"fmt"
 	"strings"
 	"testing"
@@ -78,6 +79,15 @@ func TestActors(t *testing.T) {
 	if row := h.call(admin, "store.new", map[string]any{"id": "t3", "app": "tracker", "type": "other"}).(map[string]any); row["type"] != "other" {
 		t.Fatalf("store.new --type = %v", row)
 	}
+	// --as a person: bob holds view on t2 through @member? He holds nothing yet.
+	h.fail(admin, "actor.call", map[string]any{"store": "t2", "action": "add", "args": map[string]any{"title": "b"}, "as": "bob@example.com"}, "not_found")
+	h.call(admin, "grant.set", map[string]any{"store": "t2", "subject": personID(t, h, "bob@example.com"), "level": "interact"})
+	if g := h.call(admin, "actor.call", map[string]any{"store": "t2", "action": "add", "args": map[string]any{"title": "b"}, "as": "bob@example.com"}).(map[string]any); g["audience"] != "member" || !strings.HasPrefix(g["by"].(string), "usr_") {
+		t.Fatalf("as bob = %v", g)
+	}
+	if b, _ := json.Marshal(h.call(admin, "log.show", map[string]any{"store": "t2"})); !strings.Contains(string(b), "as bob@example.com, by usr_") {
+		t.Fatalf("log after --as bob does not name the admin: %s", b)
+	}
 	// --as anonymous succeeds with a guest grant (on t2, so tracker's counts hold).
 	h.call(admin, "grant.set", map[string]any{"store": "t2", "subject": "@guest", "level": "interact"})
 	if g := h.call(admin, "actor.call", map[string]any{"store": "t2", "action": "add", "args": map[string]any{"title": "g"}, "as": "anonymous"}).(map[string]any); g["audience"] != "guest" {
@@ -107,7 +117,8 @@ func TestActors(t *testing.T) {
 	}
 	// --as anonymous: a signed-out visitor, admins only (round 3).
 	h.fail(bob, "actor.call", map[string]any{"store": "tracker", "action": "add", "as": "anonymous"}, "permission_denied")
-	h.fail(admin, "actor.call", map[string]any{"store": "tracker", "action": "add", "as": "bob@example.com"}, "invalid_argument")
+	h.fail(admin, "actor.call", map[string]any{"store": "tracker", "action": "add", "as": "@member"}, "invalid_argument")
+	h.fail(admin, "actor.call", map[string]any{"store": "tracker", "action": "add", "as": "nobody@example.com"}, "not_found")
 	// no level at all hides the action, as it hides it from bob above
 	h.fail(admin, "actor.call", map[string]any{"store": "tracker", "action": "add", "args": map[string]any{"title": "x"}, "as": "anonymous"}, "not_found")
 	h.call(admin, "grant.set", map[string]any{"store": "tracker", "subject": "@guest", "level": "view"})

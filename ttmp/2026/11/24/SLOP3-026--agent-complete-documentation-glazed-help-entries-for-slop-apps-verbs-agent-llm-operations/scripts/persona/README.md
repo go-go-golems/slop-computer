@@ -29,6 +29,18 @@ credentials) are not there; code hosts resolve to 0.0.0.0
 a date the checker computes is the agent's date (round 3: the host's EST
 day was one behind, and the checker, not the agent, was wrong).
 
+The box has its own network (`bwrap --unshare-net`): loopback only.
+`net.mjs`, started by `run.mjs` for each run, offers two unix sockets in
+`runs/<batch>/<scenario>/net/`: one pipes to the run's test server, the
+other is an HTTP CONNECT proxy that admits only `*.lunaroute.com:443`.
+`inbox.mjs` puts them back on loopback inside the box (the server's port on
+127.0.0.1 and ::1, the proxy on 3128, `HTTPS_PROXY` and
+`NODE_USE_ENV_PROXY=1` set), then starts the agent. Every refused
+connection is a line in `net/denied.log` and the run's `egressDenied`;
+admitted ones are in `net/allowed.log`. Round 4's agent, on the host's
+network, probed the host's own services and opened public SSH tunnels
+through localhost.run; in this box there is no DNS and no route out.
+
 `judge.mjs` is the judge, shared by `run.mjs` and `rejudge.mjs BATCH
 SCENARIO` (judge a finished run again after a judge fix; `CHECKS=<file>`
 feeds it rechecked facts from `recheck.sh`). A turn with more than 45

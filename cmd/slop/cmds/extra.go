@@ -258,7 +258,7 @@ func callCmd() *cobra.Command {
 			return printOut(res)
 		},
 	}
-	cmd.Flags().StringVar(&as, "as", "", "anonymous: run the action as a signed-out visitor with the store's guest level (platform admins)")
+	cmd.Flags().StringVar(&as, "as", "", "anonymous, or a person (usr_… or email): run the action as them, with their level and audience (platform admins)")
 	return cmd
 }
 
