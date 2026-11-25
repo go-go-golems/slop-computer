@@ -680,3 +680,75 @@ js-1 (no browser) vs js-2 (browser for agent and persona), same 7 scenarios, one
 | judge total (5 scores, max 25), mean | 20.9 | 21.9 |
 | commands | 430 | 358 |
 | agent tokens | 27.8 M | 17.3 M |
+
+## Step 12: js-4 on the binary with the fixes; three more tester defects and a sign-in bug
+
+js-4 ran ten scenarios on a binary built at 0949add, to see whether the fixes
+helped. Nine of them compare with their js-2/js-3 run. Three runs scored low,
+and only one of the three was about the help: two were tester defects, and
+working through the third uncovered a product bug in the local sign-in form.
+
+### Prompt Context
+
+**User prompt (verbatim):** "ok" (to: "A confirmation round on the new binary … Should I run it?")
+
+**Assistant interpretation:** Run the confirmation round, classify its results, fix what it finds.
+
+**Inferred user intent:** Evidence that the fixes work, not just that they were made.
+
+**Commit (code):** d47cbe9 — "slop on <store>: name the actor's actions when the app ships no verbs"; 05198ad — "help: do not switch the page to a demo mode on the fake engine"; aa7effa — "SLOP3-026: look keeps the server's own hosts; frameText puts field values in place"; da961b3 — "local sign-in: labels name their fields"; 0baa506 — "SLOP3-026: look finds unlinked fields by name; Chrome's own calls home off"
+
+### What I did
+- Rechecked copies of three js-2/js-3 runs with the new binary first (6/6, 7/7, 9/9), so the checkers were known to work with the changed output.
+- `./batch.sh js-4 4 …` (ten scenarios); 22 minutes, no model-service failures.
+- Classified the low runs (playbook section 9) and fixed: `frameText` (values in place), `look.mjs` (own hosts kept; field fallback by `name`/`id`; Chrome background networking off), the sign-in form (`for`/`id`, `autocomplete`, `TestLocalSignInLabels`), `slop on` (lists the actor's actions), the fake-engine help.
+- Reran photos-nontech twice (old runs kept in `runs/js-4-lookbug/`, `runs/js-4-labels/`); rechecked and rejudged inventory-inherited; recounted `checksPassed` in every run (js-1 inventory-migration was stale at 6/7).
+- Review page for js-4; js-1's republished.
+
+### Why
+- A score is evidence about the help only after the tester is ruled out.
+
+### What worked
+- Nine comparable scenarios: 458 → 356 commands, 144 → 90 help reads, 19.6 M → 15.2 M agent tokens; judge totals 200 → 188, two thirds of the drop from shop-assistant.
+- Unprompted use of the fixes: `store show` in 9 of 10 runs, `slop help recipes` 7 times, `slop help alarms` 4, `alarm fire --at` 6. daily-digest named the zone in its first answer and showed `alarm fire … --at 07:00`.
+- inventory-inherited rejudged 5/4/5/4/4 (was 3/4/3/3/3) after the `frameText` fix.
+
+### What didn't work
+- inventory-inherited: `the page shows anchors and 25` failed on a page that shows both (screenshot): values were appended after the text, 200 characters from their row.
+- photos-nontech, attempt 1: the persona's `{"open":"http://slop.localhost:18706/"}` answered `opening http://slop.localhost:18706/ gave 404`: look.mjs rewrote every host to the live host. The agent's back-office address was right.
+- photos-nontech, attempt 2: `guest: no field called "email"` on the local sign-in page: `<label>Email</label><input name="email" …>` links no label to its input. Also 230 egress denials, all Chrome's (`CONNECT content-autofill.googleapis.com:443`, `www.google.com:443`).
+- shop-assistant: the page's `usesTestModel(limits)` switches to a local parser on the fake engine; the checker's `/tool add_items {"items":"oat milk"}` got `I can help with the shopping list. Try "add milk and eggs"…` (6/8, 2/2/2).
+- My first js-4 vault-report draft claimed things I had not checked (a js-1 rejudge that did not happen, "most ran store show first", "the first answer gave the wrong zone" for a run the judge had found right); removed before committing.
+
+### What I learned
+- The js-3 photos-nontech agent had said "the labels are not linked"; the judge called it a misdiagnosis because the persona's tool could not do what a person can. The checker never hit the bug because it fills `input[name=email]`.
+- Agent behaviour that a help sentence forbids can reappear in a form that obeys the sentence's letter (the demo mode).
+
+### What was tricky to build
+- `frameText`: inserting spans beside each field in the live DOM, reading `innerText`, then removing them; `innerText` on a detached clone does not lay out, so it cannot be used.
+- Telling the third photos-nontech run apart from the first two: same low honesty score, different cause each time.
+
+### What warrants a second pair of eyes
+- `look.mjs`'s field fallback builds a CSS selector from the persona's text; it is used only when the text matches `^[\w-]+$`.
+
+### What should be done in the future
+- Rerun photos-nontech on a binary with 4fb43d1 (how someone becomes a member): attempt 3 built password accounts and an approval list (5/4/3/2/3) when the team lead asked for team-only uploads.
+- Three runs per scenario, to measure spread.
+
+### Code review instructions
+- `git show da961b3` (the form and its test); `git show aa7effa 0baa506` (harness).
+- `go test -tags sqlite_fts5 ./pkg/host/ -run TestLocalSignInLabels -count=1`; `node summarize.mjs js-4`.
+
+### Technical details
+| Scenario | Earlier | Commands | js-4 | Judge total | js-4 |
+| --- | --- | --- | --- | --- | --- |
+| daily-digest | js-2 | 68 | 47 | 23 | 23 |
+| inventory-migration | js-2 | 34 | 26 | 22 | 24 |
+| photo-wall | js-2 | 43 | 61 | 23 | 22 |
+| shop-assistant | js-2 | 58 | 56 | 21 | 13 |
+| team-dashboard | js-2 | 84 | 48 | 21 | 22 |
+| dash-public | js-3 | 41 | 28 | 22 | 22 |
+| digest-nodecron | js-3 | 62 | 32 | 23 | 21 |
+| inventory-inherited | js-3 | 36 | 23 | 24 | 22 |
+| tasks-inherited | js-3 | 32 | 35 | 21 | 19 |
+| photos-nontech (3rd) | js-3 | 242 | 140 | 15 | 17 |
