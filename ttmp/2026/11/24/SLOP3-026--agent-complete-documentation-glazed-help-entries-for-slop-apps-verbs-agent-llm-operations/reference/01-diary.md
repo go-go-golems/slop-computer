@@ -90,3 +90,52 @@ set up verbs, interact with apps, etc..."
 ### What didn't work
 
 - `NODE_PATH=… node script.mjs` → `ERR_MODULE_NOT_FOUND: playwright`.
+
+## Step 3: The writers' pages, their findings, and the CLI fixes they led to
+
+All six writers finished (28 pages, about 9,100 lines). Each ran every
+example on its own `slop serve --local --llm fake` and reported findings;
+they are in `reference/03-writer-findings.md` (about 55 open, triaged by kind).
+The user pointed at the persona-run reports (playback-vault Factory Shots
+playbook, Asset Studio, go-minitrace) and tulip/playback PR #1193
+(`tools/agent-eval`, `agent-prompt-playbook.md`); design section 4.1 now
+makes the acceptance test a persona matrix.
+
+### What I did
+
+- Fixed in the CLI, because the error is where an agent learns (4.1):
+  - bare bool flags of server verbs mean true (`NoOptDefVal`); `--desc`
+    used to take the next word, `store ls --all` failed outright. Checked on
+    a local server: `--desc`, `--desc=false`, `--desc --limit 1`.
+  - `-o` with an unknown format is refused in the root `PersistentPreRunE`,
+    before the verb runs (it printed YAML after the verb had acted).
+  - command help is markdown under Glazed: Examples are now code blocks,
+    Short/Long are escaped at first render (`mdEscape`: `<x>` kept, `@` as
+    `&#64;`, indented runs fenced), the footer names `slop help --all`.
+  - the alias hint matches the first line (cobra appends "Did you mean").
+  - `AddDocToHelpSystem` recovers: a bad page costs the help, not the CLI.
+- Updated seven pages that said bool flags need a value.
+- `topics/90-troubleshooting.md`: built from the 260 troubleshooting rows of
+  all pages, indexed by code; each row names the command that settles it.
+- Old guides point at `slop help`; `doc/claude-apis/*` spec copies stay.
+- C3: Pinboard `board ask-json` (answer, model, steps).
+- A fresh reviewer cross-checks the pages against each other and the code.
+
+### What didn't work
+
+- `slop help` and every command panicked at startup: writer B's page had
+  `Commands: - on`, a YAML bool, and Glazed's parser panics
+  (`interface {} is bool, not string`).
+- `@` escaped as `\@` prints the backslash in glamour; an entity works.
+- My alias-hint test passed on my machine only because it read the real
+  `~/.config/slop` (where `pb` is learned); now `t.Setenv("XDG_CONFIG_HOME")`.
+- I started a local server without `--admin-email`: the first person is a
+  member, the approval page offers no admin scope, and pushes fail with
+  `only admins change app code`. Not a bug; the brief has the flag.
+
+### What I learned
+
+- The overview I wrote said `sampling_disabled`; the server never sends it.
+  Writers checked claims more thoroughly than I had.
+- No CLI verb lists an actor's actions (E-10): an agent without source must
+  read `actor.js`. A candidate fix for the persona round.
