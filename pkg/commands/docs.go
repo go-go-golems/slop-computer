@@ -4,6 +4,9 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
+	"sort"
+	"strings"
 
 	"github.com/invopop/jsonschema"
 
@@ -38,6 +41,9 @@ func docsVerbs(e kernelEnv) []*verbs.Verb {
 			Run: func(req verbs.Req, in DocsLsIn) ([]store.Doc, error) {
 				ctx := req.Context
 				p := req.Principal
+				if in.Coll == "" {
+					return nil, e.noColl(ctx, p, in.Store)
+				}
 				return queryDocs(ctx, e, p, in.Store, rt.Query{Coll: in.Coll, Limit: int(in.Limit)})
 			}}.Verb(),
 		verbs.Def[DocsQueryIn, []store.Doc]{Name: "docs.query", Doc: "Query a collection: where [[field, op, value], …], orderBy, desc, limit.",
@@ -247,9 +253,28 @@ type DocsGetIn struct {
 }
 
 // DocsLsIn is docs.ls's input.
+// noColl is docs.ls without a collection: name the store's collections, the
+// next thing to type (SLOP3-026, round 3: three agents ran docs ls <store>).
+func (e kernelEnv) noColl(ctx context.Context, p *access.Principal, id string) error {
+	s, _, err := e.open(ctx, p, id, rt.LevelView, "reading")
+	if err != nil {
+		return err
+	}
+	colls, _ := s.Collections(ctx)
+	if len(colls) == 0 {
+		return verbs.Errf("invalid_argument", "docs.ls needs coll: %s has no documents yet", id)
+	}
+	names := make([]string, 0, len(colls))
+	for c, n := range colls {
+		names = append(names, fmt.Sprintf("%s (%d)", c, n))
+	}
+	sort.Strings(names)
+	return verbs.Errf("invalid_argument", "docs.ls needs coll: %s's collections are %s (slop docs ls %s <coll>)", id, strings.Join(names, ", "), id)
+}
+
 type DocsLsIn struct {
 	Store string `json:"store" slop:"pos=1"`
-	Coll  string `json:"coll" slop:"pos=2"`
+	Coll  string `json:"coll,omitempty" slop:"pos=2" jsonschema_description:"the collection; without it, the error lists the store's collections"`
 	Limit int64  `json:"limit,omitempty"`
 }
 

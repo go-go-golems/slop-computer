@@ -69,7 +69,31 @@ func Root() *cobra.Command {
 	addExtraCommands(root)
 	addAppCommands(root)
 	setupHelp(root)
+	strictGroups(root)
 	return root
+}
+
+// strictGroups makes a group refuse an unknown subcommand. Cobra prints a
+// group's help and exits 0 for `slop store list`, which two persona agents
+// read as an answer (SLOP3-026, round 3); now it fails and suggests `ls`.
+func strictGroups(c *cobra.Command) {
+	for _, sub := range c.Commands() {
+		strictGroups(sub)
+	}
+	if c.HasParent() && c.HasSubCommands() && c.Run == nil && c.RunE == nil {
+		c.Args = cobra.ArbitraryArgs
+		c.SuggestionsMinimumDistance = 2
+		c.RunE = func(cmd *cobra.Command, args []string) error {
+			if len(args) == 0 {
+				return cmd.Help()
+			}
+			hint := ""
+			if s := cmd.SuggestionsFor(args[0]); len(s) > 0 {
+				hint = fmt.Sprintf("; did you mean %q?", s[0])
+			}
+			return fmt.Errorf("unknown command %q for %q%s (%s --help lists them)", args[0], cmd.CommandPath(), hint, cmd.CommandPath())
+		}
+	}
 }
 
 // version is the build's module version and commit, from Go's build info

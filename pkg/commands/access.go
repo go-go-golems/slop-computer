@@ -34,7 +34,8 @@ func (e kernelEnv) subjectPrincipal(ctx context.Context, subject string) (*acces
 		p, err = e.K.People.Person(ctx, subject)
 	}
 	if err != nil {
-		return nil, verbs.Errf("not_found", "no person %s", subject)
+		// Agents typed --subject @member and --subject visitor (round 3).
+		return nil, verbs.Errf("not_found", "no person %s (--subject takes a person's usr_… id or email, store:<id>, or anonymous for a signed-out visitor; a group such as @member is not a subject: name one of its people)", subject)
 	}
 	return access.PersonPrincipal(p, ""), nil
 }

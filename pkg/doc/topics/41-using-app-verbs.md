@@ -13,7 +13,7 @@ Commands:
 Flags:
 - server
 - format
-IsTopLevel: false
+IsTopLevel: true
 IsTemplate: false
 ShowPerDefault: true
 SectionType: GeneralTopic

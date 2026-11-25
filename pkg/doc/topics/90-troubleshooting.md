@@ -62,7 +62,7 @@ same codes as `err.code` on a rejected promise, except as noted below.
 | `not_found: <store> has no actor` / `no action "x"` | `app.json` has no `actor`, the store runs another app, or a typo | `slop app status <store>`; the actor's `actions` in its `actor.js` | `actors` |
 | `not_found` for a document someone else wrote | A private path (`data/users/<id>/…`) or a rule that hides it from you | `slop explain can <store> --path p` | `capability-db` |
 | `not_granted` / `claude.use('x')` is `null` | The capability is not in `app.json`, its policy cell is off for this audience, or the viewer's level is too low | `slop policy ls <app>`; `slop app status <store>` | `page-runtime`, `app-manifest` |
-| `invalid_argument` | A bad value; the message names it. Also: a `db` write a rule refuses (`this viewer cannot write "p"`), `sql exec` without `--write` (`not authorized`), a grant subject that is not an id | The message; `slop <group> <verb> --help` | `cli-reference-guide`, `capability-db` |
+| `invalid_argument` | A bad value; the message names it. `docs.ls needs coll` lists the store's collections. Also: a `db` write a rule refuses (`this viewer cannot write "p"`), `sql exec` without `--write` (`not authorized`), a grant subject that is not an id | The message; `slop <group> <verb> --help` | `cli-reference-guide`, `capability-db` |
 | `conflict` | `--ifVersion` / `--ifAt` did not match: the document or ref moved, or a store follows another ref | Read the current version (`docs get`, `ref ls`) and retry | `store-data`, `deploying-apps` |
 | `missing_blobs` | A push or commit named file contents the server does not have | Retry the push; it uploads what is missing | `store-data` |
 | `quota_exceeded` / "token budget used up for this month" | The monthly LLM budget is spent | `slop llm usage` | `llm-access` |
@@ -81,6 +81,7 @@ same codes as `err.code` on a rejected promise, except as noted below.
 | Message | Cause | Fix |
 | --- | --- | --- |
 | `unknown command "x" for "slop"` | Not a command, and no store followed it (an app's alias is resolved through the store after it) | `slop x <store> …`, or `slop on <store> …`; `slop help using-app-verbs` |
+| `unknown command "x" (it may be an app's alias, but the CLI could not ask the server …)` | The alias is unknown on this machine and there is no login to look it up with (a fresh `XDG_CONFIG_HOME` hides `credentials.json` too) | `slop whoami`; `slop on <store> …` |
 | `unknown flag: --x` | Not an argument of this verb; the error ends with the verb's usage line | `slop <…> --help` |
 | `accepts at most N arg(s), received M` | More positional words than the usage line has, or a bool flag given its value with a space (`--desc false`) | Join it with `=`: `--desc=false` |
 | `invalid_argument: -o "csv": the formats are yaml, json and table` | Unknown output format | `-o yaml`, `-o json` or `-o table` |
@@ -98,7 +99,7 @@ what you expected.
 | `push` succeeds, the store is `broken` | Manifest error, actor error or a changed migration | `slop app status <store>` | `app-manifest` |
 | Every `claude.use()` is `null` | The page was opened on its sandbox URL without the shell, or as a file | Open it through its mount on a live host | `page-runtime` |
 | `window.claude` is undefined | The page is on the static host, which serves files byte for byte with no runtime | Mount the app on a live host | `building-apps` |
-| A page works for you and not for others | Their level or audience: policy cells and `db` rules apply per viewer | `slop explain can <store> --subject usr_…` | `access-control` |
+| A page works for you and not for others | Their level or audience: policy cells and `db` rules apply per viewer | `slop explain can <store> --subject usr_…`; for a guest, `slop call <store> <action> --as anonymous` runs it | `access-control` |
 | Old app verbs after a push | The store runs an older snapshot | `slop app status <store>` | `using-app-verbs` |
 | A model answer is empty with `--llm fake` | The fake engine echoes; `/tool <name> {json}` calls a tool, and a session without tools answers nothing | Use a real backend to test answers | `capability-agent` |
 | An option above a limit has no effect | Session options over a limit are lowered silently (`maxTokens`) | Stay within the limits on the page | `capability-agent` |

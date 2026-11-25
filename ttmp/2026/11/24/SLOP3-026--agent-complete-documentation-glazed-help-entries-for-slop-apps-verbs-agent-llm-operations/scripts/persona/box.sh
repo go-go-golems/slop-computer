@@ -5,7 +5,9 @@
 # (ro), pi's npm packages (ro, /opt/pinpm) and the slop binary (/opt/bin).
 # The repository, ~/.config, ~/.claude and the real ~/.pi are not there.
 # Code hosts resolve nowhere (hosts.blocked): no git clone of slop.
-# The environment is empty but for HOME, PATH, TERM and the KEY=VALs given.
+# Node is only node, npm and pi at /opt/node: the real install (under the real
+# home, with global packages) is not there (round 3 loaded puppeteer from it).
+# The environment is empty but for HOME, PATH, TZ=UTC, TERM and the KEY=VALs.
 set -euo pipefail
 W=$1; H=$2; SB=$3; shift 3
 ENVS=()
@@ -14,7 +16,11 @@ NODE_DIR=$(dirname "$(dirname "$(command -v node)")")
 exec bwrap --ro-bind /usr /usr --ro-bind /etc /etc --ro-bind "$(dirname "$0")/hosts.blocked" /etc/hosts --symlink usr/bin /bin --symlink usr/lib /lib \
   --symlink usr/sbin /sbin --ro-bind-try /lib64 /lib64 --proc /proc --dev /dev --tmpfs /tmp \
   --ro-bind-try /run/systemd/resolve /run/systemd/resolve \
-  --tmpfs /home --bind "$H" /home/agent --ro-bind "$NODE_DIR" "$NODE_DIR" \
-  --tmpfs /opt --ro-bind "$HOME/.pi/agent/npm" /opt/pinpm --bind "$W" /home/agent/work \
+  --tmpfs /home --bind "$H" /home/agent \
+  --tmpfs /opt --ro-bind "$HOME/.pi/agent/npm" /opt/pinpm \
+  --ro-bind "$NODE_DIR/bin/node" /opt/node/bin/node --ro-bind "$NODE_DIR/lib/node_modules/npm" /opt/node/lib/node_modules/npm \
+  --ro-bind "$NODE_DIR/lib/node_modules/@earendil-works" /opt/node/lib/node_modules/@earendil-works \
+  --symlink ../lib/node_modules/npm/bin/npm-cli.js /opt/node/bin/npm --symlink ../lib/node_modules/npm/bin/npx-cli.js /opt/node/bin/npx \
+  --symlink ../lib/node_modules/@earendil-works/pi-coding-agent/dist/bundle/cli.js /opt/node/bin/pi --bind "$W" /home/agent/work \
   --ro-bind "$SB" /opt/bin/slop --chdir /home/agent/work --unshare-pid --die-with-parent \
-  /usr/bin/env -i HOME=/home/agent "PATH=/opt/bin:$NODE_DIR/bin:/usr/bin" TERM=dumb "${ENVS[@]}" "$@"
+  /usr/bin/env -i HOME=/home/agent PATH=/opt/bin:/opt/node/bin:/usr/bin TZ=UTC TERM=dumb "${ENVS[@]}" "$@"

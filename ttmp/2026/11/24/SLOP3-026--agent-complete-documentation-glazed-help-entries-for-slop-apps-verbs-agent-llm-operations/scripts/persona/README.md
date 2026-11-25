@@ -18,10 +18,22 @@ All three models are lunaroute's `deepseek-4.1-flash` through pi:
 ## The box
 
 `box.sh` runs the agent in bubblewrap with only the system (`/usr`, `/etc`
-read-only), node and pi, pi's npm packages, the slop binary, a work dir and
-a home. The repository, `~/.config` (real slop logins), `~/.claude` and the
-real `~/.pi` (sessions, every provider's credentials) are not there. The
-environment is empty but for `HOME`, `PATH`, `TERM` and `SLOP_SERVER`.
+read-only), the node binary with npm and pi (bound one by one at
+`/opt/node`, not the whole install: round 3's agent loaded puppeteer from
+the global packages under the real home), pi's npm packages, the slop
+binary, a work dir and a home. The repository, `~/.config` (real slop
+logins), `~/.claude` and the real `~/.pi` (sessions, every provider's
+credentials) are not there; code hosts resolve to 0.0.0.0
+(`hosts.blocked`). The environment is empty but for `HOME`, `PATH`,
+`TZ=UTC`, `TERM` and `SLOP_SERVER`. Setup scripts run with `TZ=UTC` too, so
+a date the checker computes is the agent's date (round 3: the host's EST
+day was one behind, and the checker, not the agent, was wrong).
+
+`judge.mjs` is the judge, shared by `run.mjs` and `rejudge.mjs BATCH
+SCENARIO` (judge a finished run again after a judge fix; `CHECKS=<file>`
+feeds it rechecked facts from `recheck.sh`). A turn with more than 45
+commands shows the judge its first 30 and last 10: round 3's 133-command
+run got no answer from the judge at all.
 
 The agent's pi config (`AGENT_DIR`) holds only the lunaroute entries of
 `auth.json` and `models-store.json` and a minimal `settings.json`. Make it

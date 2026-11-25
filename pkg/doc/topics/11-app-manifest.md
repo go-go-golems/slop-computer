@@ -101,12 +101,17 @@ for the static host. `slop mount set` refuses the wrong host:
 `capabilities` is an object whose keys are capability names; each value
 configures one. It keeps the shape of claude.ai's artifact manifest, so
 pages written for claude.ai carry over. A capability that is not declared
-is `null` in the page (`await claude.use('x')`) and in the actor
-(`use('x')`).
+is `null` in the page (`await claude.use('x')`). The actor is different:
+it always has its own store's `db`, `sql`, `files`, `alarm`, `storage` and
+`log`, declared or not, and needs a declaration only for `sample` (and the
+`slop.fetch`, `slop.secrets`, `slop.platform` lists below). So an app whose
+data is reached only through its actor and verbs can declare `{}`
+(`slop help actors`, "Other modules").
 
 Each value may be `true`, `{}`, `null` or an object with options; the first
 three mean "declared, default options". An unknown name is an error:
-`app.json: capabilities: unknown capability "storage"`.
+`app.json: capabilities: unknown capability "storage" (the capabilities are …)`,
+followed by the list of valid names.
 
 | Name | Options | Notes |
 | --- | --- | --- |

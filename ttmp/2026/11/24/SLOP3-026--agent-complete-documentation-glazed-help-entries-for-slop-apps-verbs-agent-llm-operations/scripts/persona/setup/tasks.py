@@ -2,7 +2,9 @@
 # (due before today and not done), today being the day the run starts.
 import csv, datetime, random, sys
 random.seed(26)
-today = datetime.date.today()
+# UTC, as in the box (round 3: the host's EST date was a day behind the
+# agent's, and the checker's count was wrong, not the agent's).
+today = datetime.datetime.now(datetime.timezone.utc).date()
 owners = ["ana", "ben", "chris", "dana", "eli"]
 rows, overdue = [], 0
 for i in range(1, 51):

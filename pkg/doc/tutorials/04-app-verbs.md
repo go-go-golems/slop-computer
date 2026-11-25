@@ -15,7 +15,7 @@ Commands:
 - call
 Flags:
 - format
-IsTopLevel: false
+IsTopLevel: true
 IsTemplate: false
 ShowPerDefault: true
 SectionType: Tutorial

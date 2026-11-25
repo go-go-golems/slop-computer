@@ -43,6 +43,20 @@ func actorVerbs(e actorEnv) []*verbs.Verb {
 				if _, _, err := e.open(ctx, p, in.Store, rt.LevelView, "calling"); err != nil {
 					return nil, err
 				}
+				// --as anonymous runs the action as a fresh signed-out
+				// visitor: four persona agents had no way to prove what a
+				// guest gets but the page's own RPC (SLOP3-026, round 3).
+				caller, via := p, p.ViaLabel()
+				switch in.As {
+				case "":
+				case "anonymous":
+					if !p.IsAdmin() {
+						return nil, verbs.Errf("permission_denied", "only platform admins call as anonymous")
+					}
+					caller, via = nil, "cli (as anonymous, by "+p.ID()+")"
+				default:
+					return nil, verbs.Errf("invalid_argument", "--as takes anonymous (a signed-out visitor); to see what a person may do, slop explain can %s --action %s --subject <usr_…>", in.Store, in.Action)
+				}
 				var args any = map[string]any{}
 				if in.Args != nil {
 					args = norm(in.Args)
@@ -50,7 +64,7 @@ func actorVerbs(e actorEnv) []*verbs.Verb {
 						args = decodeJSON([]byte(s))
 					}
 				}
-				v, err := e.A.Call(ctx, in.Store, in.Action, args, e.A.VisitorOf(ctx, p, in.Store), p.ViaLabel())
+				v, err := e.A.Call(ctx, in.Store, in.Action, args, e.A.VisitorOf(ctx, caller, in.Store), via)
 				return v, actorErr(err)
 			}}.Verb(),
 		verbs.Def[AppLogsIn, AppLogsOut]{Name: "app.logs", Doc: "The recent log of a store's actor (console.log, ctx.log).", Scope: verbs.Read, Action: authz.StoreAdmin,
@@ -295,6 +309,7 @@ type ActorCallIn struct {
 	Store  string `json:"store" slop:"pos=1"`
 	Action string `json:"action" slop:"pos=2"`
 	Args   any    `json:"args,omitempty"`
+	As     string `json:"as,omitempty" jsonschema_description:"anonymous: run the action as a signed-out visitor with the store's guest level (platform admins), to test what a stranger gets"`
 }
 
 // AppLogsIn is app.logs's input.

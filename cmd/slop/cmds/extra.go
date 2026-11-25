@@ -230,12 +230,16 @@ func evalCmd() *cobra.Command {
 
 // callCmd is actor.call with the arguments as one JSON value.
 func callCmd() *cobra.Command {
-	return &cobra.Command{
+	var as string
+	cmd := &cobra.Command{
 		Use:   "call <store> <action> [json]",
 		Short: "Call an action of a store's actor",
 		Args:  cobra.RangeArgs(2, 3),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			in := map[string]any{"store": args[0], "action": args[1]}
+			if as != "" {
+				in["as"] = as
+			}
 			if len(args) == 3 {
 				var v any
 				if err := json.Unmarshal([]byte(args[2]), &v); err != nil {
@@ -254,6 +258,8 @@ func callCmd() *cobra.Command {
 			return printOut(res)
 		},
 	}
+	cmd.Flags().StringVar(&as, "as", "", "anonymous: run the action as a signed-out visitor with the store's guest level (platform admins)")
+	return cmd
 }
 
 // printLogs writes a program's console output to stderr.

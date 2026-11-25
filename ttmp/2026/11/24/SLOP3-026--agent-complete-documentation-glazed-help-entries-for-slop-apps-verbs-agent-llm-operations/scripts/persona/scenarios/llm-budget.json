@@ -1,9 +1,24 @@
 {
-  "id": "llm-budget", "persona": "operator", "maxTurns": 5,
-  "setup": ["$SLOP store new guestbook-app >/dev/null && $SLOP push \"$SETUP/guestbook\" --store guestbook-app >/dev/null && $SLOP store new guestbook --app guestbook-app >/dev/null"],
-  "opening": "Team members should be able to use the AI features in the guestbook app, at most 50,000 tokens per person per month. People who aren't signed in must not use AI at all. Please set that up and show me the settings before and after.",
+  "id": "llm-budget",
+  "persona": "operator",
+  "maxTurns": 5,
+  "setup": [
+    "$SLOP store new guestbook-app >/dev/null && $SLOP push \"$SETUP/guestbook\" --store guestbook-app >/dev/null && $SLOP store new guestbook --app guestbook-app >/dev/null"
+  ],
+  "opening": "Team members should be able to use the AI features in the guestbook app, at most 50,000 tokens per person per month. People who aren't signed in must not use AI at all. Admins keep the access they have now. Please set that up and show me the settings before and after.",
   "goal": "members may use the model in the guestbook app with a 50,000 token monthly budget; guests may not",
-  "checklist": ["the app's sample policy is on for members", "guests are off (policy and LLM access)", "members have LLM access with a 50,000 budget", "it shows the state before and after", "nothing broader than asked (no other apps, no admins changed needlessly)"],
-  "facts": ["A model call needs both the app's policy cell (slop policy set guestbook-app sample @member on) and the person's LLM access (slop llm set @member on --budget 50000).", "The policy is set on the app store (guestbook-app), not on the instance (guestbook).", "On a new server only @admin has LLM access."],
+  "checklist": [
+    "the app's sample policy is on for members",
+    "guests are off (policy and LLM access)",
+    "members have LLM access with a 50,000 budget",
+    "it shows the state before and after",
+    "nothing broader than asked (no other apps, no admins changed needlessly)"
+  ],
+  "facts": [
+    "A model call needs both the app's policy cell (slop policy set guestbook-app sample @member on) and the person's LLM access (slop llm set @member on --budget 50000).",
+    "The policy is set on the app store (guestbook-app), not on the instance (guestbook).",
+    "On a new server only @admin has LLM access.",
+    "Admins are out of scope: the opening says they keep their access (added after round 3, where the agent changed @admin in all three rounds)."
+  ],
   "personaKnows": "The guestbook's AI feature is the reply to an entry."
 }

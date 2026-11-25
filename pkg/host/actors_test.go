@@ -78,6 +78,11 @@ func TestActors(t *testing.T) {
 	if row := h.call(admin, "store.new", map[string]any{"id": "t3", "app": "tracker", "type": "other"}).(map[string]any); row["type"] != "other" {
 		t.Fatalf("store.new --type = %v", row)
 	}
+	// --as anonymous succeeds with a guest grant (on t2, so tracker's counts hold).
+	h.call(admin, "grant.set", map[string]any{"store": "t2", "subject": "@guest", "level": "interact"})
+	if g := h.call(admin, "actor.call", map[string]any{"store": "t2", "action": "add", "args": map[string]any{"title": "g"}, "as": "anonymous"}).(map[string]any); g["audience"] != "guest" {
+		t.Fatalf("as anonymous = %v", g)
+	}
 	// Policy belongs to the app: an instance is refused, naming it.
 	if e := h.fail(admin, "policy.ls", map[string]any{"app": "t2"}, "invalid_argument"); !strings.Contains(e["message"].(string), "slop policy ls tracker") {
 		t.Fatalf("policy.ls on an instance = %v", e)
@@ -100,6 +105,18 @@ func TestActors(t *testing.T) {
 	if !strings.Contains(e["message"].(string), "needs interact") {
 		t.Fatalf("need = %v", e)
 	}
+	// --as anonymous: a signed-out visitor, admins only (round 3).
+	h.fail(bob, "actor.call", map[string]any{"store": "tracker", "action": "add", "as": "anonymous"}, "permission_denied")
+	h.fail(admin, "actor.call", map[string]any{"store": "tracker", "action": "add", "as": "bob@example.com"}, "invalid_argument")
+	// no level at all hides the action, as it hides it from bob above
+	h.fail(admin, "actor.call", map[string]any{"store": "tracker", "action": "add", "args": map[string]any{"title": "x"}, "as": "anonymous"}, "not_found")
+	h.call(admin, "grant.set", map[string]any{"store": "tracker", "subject": "@guest", "level": "view"})
+	e = h.fail(admin, "actor.call", map[string]any{"store": "tracker", "action": "add", "args": map[string]any{"title": "x"}, "as": "anonymous"}, "permission_denied")
+	if !strings.Contains(e["message"].(string), "needs interact") {
+		t.Fatalf("as anonymous, guest view = %v", e)
+	}
+	h.call(admin, "grant.set", map[string]any{"store": "tracker", "subject": "@guest", "level": "interact"})
+	h.call(admin, "grant.rm", map[string]any{"store": "tracker", "subject": "@guest"})
 	// explain.can --action answers for the actor's actions (SLOP3-026):
 	// add requires interact, slow declares nothing, so it needs admin; an
 	// unknown name lists the actor's actions.
@@ -177,6 +194,10 @@ func TestActors(t *testing.T) {
 	// A read alias: the actor reads another store by a grant to store:tracker.
 	h.call(admin, "store.new", map[string]any{"id": "cat", "type": "catalog"})
 	h.call(admin, "docs.set", map[string]any{"store": "cat", "path": "items/a", "data": map[string]any{"name": "A"}})
+	// docs ls without a collection names the store's collections (round 3).
+	if e := h.fail(admin, "docs.ls", map[string]any{"store": "cat"}, "invalid_argument"); !strings.Contains(e["message"].(string), "items (1)") {
+		t.Fatalf("docs.ls without coll = %v", e)
+	}
 	h.call(admin, "bind.set", map[string]any{"store": "tracker", "alias": "catalog", "target": "cat"})
 	h.fail(admin, "actor.call", map[string]any{"store": "tracker", "action": "catalog"}, "permission_denied")
 	h.call(admin, "grant.set", map[string]any{"store": "cat", "subject": "store:tracker", "level": "view"})

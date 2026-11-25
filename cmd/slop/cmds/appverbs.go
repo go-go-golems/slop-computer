@@ -291,11 +291,17 @@ func RunUnknownAlias(err error, args []string) (handled bool, _ error) {
 	alias, store := words[0], words[1]
 	c, cerr := resolve()
 	if cerr != nil {
-		return false, err
+		// No login to ask with (round 3: a fresh XDG_CONFIG_HOME hid the
+		// credentials too): say so, or the plain error hides why.
+		return true, fmt.Errorf("unknown command %q (it may be an app's alias, but the CLI could not ask the server about %s: %v)", alias, store, cerr)
 	}
 	dir := verbsDir(c.Server)
 	src, ferr := appverbs.Fetch(c, store, dir)
 	if ferr != nil {
+		var ae *client.APIError
+		if errors.As(ferr, &ae) && ae.Code == "unauthenticated" {
+			return true, fmt.Errorf("unknown command %q (it may be an app's alias, but the CLI could not ask the server about %s: %v)", alias, store, ferr)
+		}
 		return false, err
 	}
 	if src.Alias != alias {

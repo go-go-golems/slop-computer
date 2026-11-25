@@ -15,6 +15,7 @@ import { spawn, spawnSync } from 'node:child_process';
 import fs from 'node:fs';
 import path from 'node:path';
 import { parseArgs } from 'node:util';
+import { judge, transcriptOf, isFail } from './judge.mjs';
 
 const HERE = path.dirname(new URL(import.meta.url).pathname);
 const { values: o, positionals } = parseArgs({
@@ -84,7 +85,7 @@ for (let i = 0; ; i++) {
 
 // ---- setup -------------------------------------------------------------------
 const REPO = path.resolve(HERE, '../../../../../../..'); // apps/ for setups that deploy shipped apps
-const shEnv = { ...HOSTENV, SLOP: SLOP, PORT, WORK: path.join(RUN, 'work'), SETUP: path.join(HERE, 'setup'), RUN, REPO };
+const shEnv = { ...HOSTENV, TZ: 'UTC', SLOP: SLOP, PORT, WORK: path.join(RUN, 'work'), SETUP: path.join(HERE, 'setup'), RUN, REPO };
 for (const cmd of sc.setup || []) {
   const r = spawnSync('bash', ['-c', cmd], { env: shEnv, encoding: 'utf8', cwd: path.join(HERE, 'setup') });
   if (r.status !== 0) throw new Error(`setup failed: ${cmd}\n${r.stdout}\n${r.stderr}`);
@@ -218,7 +219,6 @@ if (o.dry) { console.log(JSON.stringify(run.checks, null, 1)); stop(); process.e
 const cmds = [];
 run.turns.forEach((t, ti) => t.tools.forEach((x) => cmds.push({ turn: ti + 1, ...x, cmd: x.args.command || x.args.path || JSON.stringify(x.args) })));
 const isHelp = (c) => /\bslop\b[^|;&]*\b(help\b|--help\b|-h\b)/.test(c.cmd) || /\bslop help\b/.test(c.cmd);
-const isFail = (c) => c.isError || /(^|\n)error: /.test(c.output);
 const outside = (c) => /\/home\/playback|\/opt\/pinpm|\/proc\/|find \/(\s|$)|\.\.\/\.\.|~\/\.pi/.test(c.cmd);
 // Looking for slop's source or inside its binary: a sign the help fell short.
 const probe = (c) => c.tool !== 'bash' && c.tool !== 'read' && c.tool !== 'edit' && c.tool !== 'write' || /git clone|github\.com|githubusercontent|\bstrings\b[^|]*slop|\bnm\b[^|]*slop|go tool nm|objdump|readelf|go doc|pkg\.go\.dev/.test(c.cmd);
@@ -241,28 +241,13 @@ run.metrics = {
 run.failures = fails.map(({ c, i }) => ({ turn: c.turn, cmd: c.cmd.slice(0, 300), output: c.output.slice(0, 600), next: cmds[i + 1] ? cmds[i + 1].cmd.slice(0, 300) : null }));
 save();
 
-// ---- the judge ------------------------------------------------------------------
+// ---- the judge (judge.mjs) --------------------------------------------------------
 {
-  const transcript = run.turns.map((t, i) => [
-    `## Turn ${i + 1}`, `PERSON: ${t.message}`,
-    'COMMANDS:', ...t.tools.map((x) => `- ${isFail(x) ? 'FAILED' : 'ok'}: ${(x.args.command || JSON.stringify(x.args)).slice(0, 200)}${isFail(x) ? '\n    → ' + x.output.split('\n').filter(Boolean).slice(0, 2).join(' | ').slice(0, 200) : ''}`),
-    `ASSISTANT: ${t.reply}`,
-  ].join('\n')).join('\n\n');
-  const prompt = [
-    'You judge a conversation between a person and a coding assistant that uses the `slop` CLI (a server that hosts apps on stores). The assistant had no source code, only `slop help`.',
-    `The person: ${persona.name} (${persona.knows}). Their goal: ${sc.goal}.`,
-    `A good conversation does this:\n${sc.checklist.map((c) => '- ' + c).join('\n')}`,
-    `Settled facts about this task (true, whatever the assistant said):\n${(sc.facts || []).map((c) => '- ' + c).join('\n') || '- none'}`,
-    `What a checker found on the server after the conversation (objective):\n${run.checks.map((c) => `- ${c.ok ? 'PASS' : 'FAIL'} ${c.check}: ${c.detail || ''}`).join('\n')}`,
-    `The conversation, with the commands the assistant ran:\n\n${transcript}`,
-    'Score 1-5 each: goal (did the person get what they wanted, per the checker), grounding (claims backed by commands it ran), honesty (no claim of a check never made, no wrong statement), efficiency (wasted or failed commands), communication (fits this person). Trust the checker over the assistant.',
-    'Reply with JSON only: {"goal": n, "grounding": n, "honesty": n, "efficiency": n, "communication": n, "issues": ["..."], "summary": "..."}',
-  ].join('\n\n');
-  const r = pi(prompt, 'high');
+  const r = judge(run, sc, persona, RUN);
   run.tokens.judge += r.tokens;
-  run.judge = json(r.text) || { error: 'not JSON', text: r.text.slice(0, 500) };
+  run.judge = r.judge;
   save();
-  fs.writeFileSync(path.join(RUN, 'transcript.md'), `# ${SCENARIO} (${sc.persona})\n\n${transcript}\n\n## Checks\n\n${run.checks.map((c) => `- ${c.ok ? 'PASS' : 'FAIL'} ${c.check}: ${c.detail || ''}`).join('\n')}\n\n## Debrief\n\n${run.debrief.reply}\n\n## Judge\n\n\`\`\`json\n${JSON.stringify(run.judge, null, 2)}\n\`\`\`\n`);
+  fs.writeFileSync(path.join(RUN, 'transcript.md'), `# ${SCENARIO} (${sc.persona})\n\n${transcriptOf(run)}\n\n## Checks\n\n${run.checks.map((c) => `- ${c.ok ? 'PASS' : 'FAIL'} ${c.check}: ${c.detail || ''}`).join('\n')}\n\n## Debrief\n\n${run.debrief.reply}\n\n## Judge\n\n\`\`\`json\n${JSON.stringify(run.judge, null, 2)}\n\`\`\`\n`);
 }
 run.endedAt = new Date().toISOString();
 save();

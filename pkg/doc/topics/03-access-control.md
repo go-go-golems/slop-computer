@@ -424,8 +424,9 @@ slop explain can kitchen --subject anonymous                 # can a visitor wit
 
 An action of the store's actor takes the same flag: `--action sign` checks
 the action's `requires` against the subject's level, the check `actor call`,
-pages and app verbs meet before the action runs. This answers "can a guest
-add an entry?" without signing out:
+pages and app verbs meet before the action runs. It is a prediction: it
+runs nothing. This predicts "can a guest add an entry?" without signing
+out:
 
 ```text
 $ slop explain can guestbook --action sign --subject anonymous
@@ -442,6 +443,26 @@ trace:
 A name that is neither a platform action nor one of the actor's fails with
 `invalid_argument` and lists the actor's actions, which is also the way to
 see them from the CLI.
+
+To prove it, run the action as a guest. A platform admin's
+`slop call <store> <action> '<json>' --as anonymous` runs it as a fresh
+signed-out visitor, with the store's guest level and the guest audience,
+and returns what a stranger's page would get:
+
+```text
+$ slop call guestbook sign '{"text":"hello"}' --as anonymous
+id: emwvinpup
+$ slop grant rm guestbook @guest
+$ slop call guestbook sign '{"text":"hello"}' --as anonymous
+error: not_found: guestbook has no action "sign"
+```
+
+With no level the action is hidden (`not_found`), as the store is; with
+`view` it fails `permission_denied: sign needs interact; you have view`.
+`--as` takes only `anonymous`. For a person, `explain can --subject usr_…`
+predicts; there is no way to act as someone else. A page's direct `db`
+writes are not actions: `explain can <store> --path p --op write --subject
+anonymous` is the check for those.
 ## Troubleshooting
 
 | Problem | Cause | Solution |

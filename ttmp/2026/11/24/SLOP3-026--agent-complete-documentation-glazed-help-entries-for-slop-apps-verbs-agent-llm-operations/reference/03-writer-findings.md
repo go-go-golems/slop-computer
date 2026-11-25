@@ -220,3 +220,29 @@ invented board-title answer), llm-budget still capped `@admin` unasked.
 | R-17 | `policy ls guestbook` (an instance) showed an all-off matrix that looked authoritative | `policy ls`/`set` on an instance: `guestbook runs the app guestbook-app; policy belongs to the app: slop policy ls guestbook-app` | fixed |
 | R-18 | `scores runs tally, which ships no command-line verbs` gave no next step | it says where verbs live and how to add them, and names the page | fixed |
 | S-1 | the broken-manifest agent chased a "blank page" the server contradicted (the last good snapshot kept serving); its debrief blamed the new `app status` wording, which the code shows is right | scenario opening corrected ("the change never showed up"); the debrief claim rejected | fixed (scenario) |
+
+### Round 3 (nine scenarios and the held-out ai-chat, binary d32e29b)
+
+All 10 met every check once the tester's own bugs were fixed. Three were
+the tester's:
+
+| # | Tester bug | Fix |
+| --- | --- | --- |
+| T-1 | csv-overdue: the checker's count (14) was one day behind the agent's (16): setup ran in EST, the box in UTC after 19:00 | `TZ=UTC` for setup and the box; the run rechecked and rejudged (goal 3 → 5) |
+| T-2 | llm-budget: 133 commands; the judge returned nothing | `judge.mjs`: the transcript is capped per turn, the judge tries twice and records why; `rejudge.mjs` |
+| T-3 | guestbook-new: the agent ran puppeteer from the real node install's global packages (`/home/playback/.nvm/...`) | `box.sh` binds only node, npm and pi |
+
+The slop findings, each checked in code:
+
+| # | Finding | Fix | Status |
+| --- | --- | --- | --- |
+| R-15 | No way to act as a guest (4 of 10 runs: guestbook-new, guest-write-skeptic, todo-roles, and the skeptic again); agents read `shell.js` and called `/_site/views` + `/_rt/rpc` by hand | `slop call <store> <action> --as anonymous` (platform admins): a fresh signed-out visitor with the store's guest level; 3 pages; `--as <person>` deliberately not added | fixed |
+| R-19 | `slop store list`, `slop server show`, `slop auth ls` printed the group's help and exited 0 (2 runs read it as an answer) | groups refuse an unknown subcommand: `unknown command "list" for "slop store"; did you mean "ls"?`, exit 1 | fixed |
+| R-20 | `explain can --subject @member` / `visitor` → `no person @member` | the error names the accepted forms and says a group is not a subject | fixed |
+| R-21 | `docs ls <store>` without a collection: `docs.ls needs coll` (3 runs) | the error lists the collections: `guestbook's collections are entries (2)` | fixed |
+| R-22 | `unknown capability "storage"` did not list the valid names | it lists them | fixed |
+| R-23 | `tally`'s actor used `use('db')` with `"capabilities": {}`; `app-manifest` said an undeclared capability is null "in the actor", which is false for db/sql/files/alarm/storage/log | the page says what the actor always has | fixed |
+| R-24 | an alias lookup without a login (fresh `XDG_CONFIG_HOME`) said only `unknown command "tally"` | it says the CLI could not ask the server, and why | fixed |
+| R-25 | `app-verbs` and `using-app-verbs` were not in the top-level `slop help` list | IsTopLevel | fixed |
+| R-26 | `policy ls` prints `allowed: false, default: true, effective: true` without saying which is which (ai-chat) | — | open |
+| R-27 | `llm-budget` changed `@admin` unasked in all three rounds | the opening now says admins keep their access | scenario |
