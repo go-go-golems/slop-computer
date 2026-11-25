@@ -1,6 +1,9 @@
 import { base, browser, person, open, frameText, shot, emit, sl, EXPECTED } from '../browse.mjs';
 import { execFileSync } from 'node:child_process';
 const st = base('/dash');
+// A recheck starts from what the run left: drop an earlier check's additions.
+const undo = () => { for (const [s, p] of [['sales', 'sales/s9'], ['support', 'tickets/k10']]) { try { execFileSync(process.env.SLOP, ['docs', 'rm', s, p], { stdio: 'ignore' }); } catch {} } };
+if (st) undo();
 if (st) {
   const num = (n) => new RegExp(`\\b${n.toLocaleString('en-US').replace(',', '[,.\\u00a0 ]?')}(\\.00)?\\b`);
   const b = await browser();
@@ -15,4 +18,5 @@ if (st) {
   emit('members get no direct grant on sales/support (for the judge)', true, `sales: ${JSON.stringify(gs).slice(0, 200)} support: ${JSON.stringify(gk).slice(0, 200)}`);
   emit('no page errors', !c.errors.some((e) => /pageerror/.test(e)), c.errors.join(' | '));
   await b.close();
+  undo();
 }

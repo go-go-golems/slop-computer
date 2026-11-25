@@ -4,18 +4,21 @@ import { base, browser, person, open, inApp, shot, emit, sl } from '../browse.mj
 const st = base('/tasks');
 if (st) {
   const done = (id) => { const d = sl('docs', 'get', st, 'tasks/' + id); return d && d.body ? d.body.done : undefined; };
-  const before = done('t01');
+  const all = (() => { const d = sl('docs', 'ls', st, 'tasks'); return Array.isArray(d) ? d.map((x) => x.body || {}).filter((t) => t.id) : []; })();
+  const isDone = (t) => t.done === true || t.done === 'true';
+  const task = all.find((t) => !isDone(t) && t.title) || { id: 't01', title: 'Book venue' }; // an open one, so a recheck works too
+  const before = done(task.id);
   const b = await browser();
   const c = await person(b, 'ana@example.com');
   const p = await open(c, '/tasks', 3500);
   const f = inApp(p);
-  const box = f && f.getByRole('checkbox', { name: /book venue/i });
+  const box = f && f.getByRole('checkbox', { name: new RegExp(task.title.replace(/[.*+?^${}()|[\]\\]/g, '\\$&'), 'i') });
   if (box && await box.count()) {
     await box.first().click().catch(() => {});
     await p.waitForTimeout(2500);
-    const after = done('t01');
-    emit('a member ticks a task off on the page and it sticks', before === false && after === true, `t01 done: ${before} → ${after}`);
-  } else emit('a member ticks a task off on the page and it sticks', false, 'no checkbox for "Book venue" on the page');
+    const after = done(task.id);
+    emit('a member ticks a task off on the page and it sticks', String(before) === 'false' && String(after) === 'true', `${task.id} done: ${before} → ${after}`);
+  } else emit('a member ticks a task off on the page and it sticks', false, `no checkbox for "${task.title}" on the page`);
   await shot(p, 'member-ana');
   const gl = sl('grant', 'ls', st), rows = Array.isArray(gl) ? gl : [];
   const m = rows.find((g) => g.subject === '@member');

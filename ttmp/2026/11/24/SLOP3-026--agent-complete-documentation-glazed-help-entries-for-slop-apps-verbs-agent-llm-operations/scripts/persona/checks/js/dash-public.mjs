@@ -4,6 +4,9 @@
 import { base, browser, person, open, frameText, shot, emit, sl, EXPECTED } from '../browse.mjs';
 import { execFileSync } from 'node:child_process';
 const st = base('/dash');
+// A recheck starts from what the run left: drop an earlier check's additions.
+const undo = () => { for (const [s, p] of [['sales', 'sales/s9'], ['support', 'tickets/k10']]) { try { execFileSync(process.env.SLOP, ['docs', 'rm', s, p], { stdio: 'ignore' }); } catch {} } };
+if (st) undo();
 if (st) {
   const num = (n) => new RegExp(`\\b${n.toLocaleString('en-US').replace(',', '[,.\\u00a0 ]?')}(\\.00)?\\b`);
   const b = await browser();
@@ -25,4 +28,5 @@ if (st) {
   }
   emit('no page errors', !g.c.errors.some((x) => /pageerror/.test(x)), g.c.errors.join(' | '));
   await b.close();
+  undo();
 }
