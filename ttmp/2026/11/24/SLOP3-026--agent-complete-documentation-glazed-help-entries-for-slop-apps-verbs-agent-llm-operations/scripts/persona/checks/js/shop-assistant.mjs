@@ -12,7 +12,16 @@ if (st) {
   const ana = await person(b, 'ana@example.com');
   const pa = await open(ana, '/helper', 4000);
   const f = inApp(pa);
-  const box = f && f.locator('textarea, input[type=text], input:not([type])').first();
+  // The chat box, not another field: js-1's page had a manual "Add" field
+  // before the chat, and the probe went into it.
+  const pick = async () => {
+    if (!f) return null;
+    for (const sel of ['textarea', 'input[placeholder*=ask i], input[placeholder*=message i], input[placeholder*=chat i], input[aria-label*=ask i], input[aria-label*=message i], input[aria-label*=chat i]']) {
+      const l = f.locator(sel); if (await l.count()) return l.last();
+    }
+    return f.locator('input[type=text], input:not([type])').last();
+  };
+  const box = await pick();
   if (tm && box && await box.count()) {
     await box.fill(`/tool ${tm[1]} {"${tm[2]}":"oat milk"}`);
     await box.press('Enter');

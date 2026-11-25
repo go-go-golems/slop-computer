@@ -22,9 +22,14 @@ const runs = fs.readdirSync(B).filter((d) => fs.existsSync(path.join(B, d, 'run.
   const sc = JSON.parse(fs.readFileSync(path.join(HERE, 'scenarios', d + '.json'), 'utf8'));
   // screenshots
   const shotDir = path.join(B, d, 'shots');
-  const shots = fs.existsSync(shotDir) ? fs.readdirSync(shotDir).filter((f) => f.endsWith('.png')).sort() : [];
+  const all = fs.existsSync(shotDir) ? fs.readdirSync(shotDir).filter((f) => f.endsWith('.png')).sort() : [];
   fs.mkdirSync(path.join(OUT, 'shots', d), { recursive: true });
-  for (const f of shots) fs.copyFileSync(path.join(shotDir, f), path.join(OUT, 'shots', d, f));
+  for (const f of all) fs.copyFileSync(path.join(shotDir, f), path.join(OUT, 'shots', d, f));
+  const shots = all.filter((f) => !f.startsWith('persona-')); // the checker's; the persona's go with the conversation
+  // the agent's own looks (look in its box, --browser)
+  const lookDir = path.join(B, d, 'home/look/shots');
+  const agentShots = fs.existsSync(lookDir) ? fs.readdirSync(lookDir).filter((f) => f.endsWith('.png')).sort() : [];
+  for (const f of agentShots) fs.copyFileSync(path.join(lookDir, f), path.join(OUT, 'shots', d, 'agent-' + f));
   // the code the agent wrote: text files in its work dir
   const files = [];
   const walk = (dir, rel = '') => {
@@ -36,14 +41,18 @@ const runs = fs.readdirSync(B).filter((d) => fs.existsSync(path.join(B, d, 'run.
     }
   };
   if (fs.existsSync(path.join(B, d, 'work'))) walk(path.join(B, d, 'work'));
-  return { id: d, r, sc, shots, files };
+  return { id: d, r, sc, shots, agentShots, files };
 });
 
+// notes.json beside the runs: the reviewer's notes, per scenario and "_all".
+const NOTES = (() => { try { return JSON.parse(fs.readFileSync(path.join(B, 'notes.json'), 'utf8')); } catch { return {}; } })();
 const score = (n) => `<span class="score s${n ?? 0}">${n ?? '–'}</span>`;
 const secs = (ms) => `${Math.round((ms || 0) / 1000)} s`;
 const allPass = (r) => r.checks.length && r.checks.every((c) => c.ok);
 
-const card = ({ id, r, sc, shots, files }) => {
+const thumbs = (id, fs_) => `<div class="shots small">${fs_.map((f) => `<figure><a href="shots/${esc(id)}/${esc(f)}" target="_blank" rel="noopener"><img src="shots/${esc(id)}/${esc(f)}" alt="${esc(f)}" loading="lazy"></a><figcaption>${esc(f.replace('.png', '').replace(/^persona-t\d+-\d+-/, '').replace(/^agent-look-/, ''))}</figcaption></figure>`).join('')}</div>`;
+const looks = (id, t) => ((t.persona && t.persona.browse) || []).map((b) => `<div class="look"><div class="who person">Person looks at the site</div><code class="acts">${esc(JSON.stringify(b.actions))}</code><details class="seen"><summary>What they saw</summary><pre>${esc(clean(b.seen))}</pre></details>${thumbs(id, b.shots || [])}</div>`).join('');
+const card = ({ id, r, sc, shots, agentShots, files }) => {
   const m = r.metrics || {}, j = r.judge || {};
   const passed = r.checks.filter((c) => c.ok).length;
   return `
@@ -55,6 +64,7 @@ const card = ({ id, r, sc, shots, files }) => {
       <span class="chip plain">${esc(sc.persona)}</span>
     </div>
     <p class="ask">“${esc(sc.opening)}”</p>
+    ${NOTES[id] ? `<p class="note"><b>Reviewer's note.</b> ${esc(NOTES[id])}</p>` : ''}
   </header>
   <div class="grid">
     <div class="col">
@@ -83,8 +93,9 @@ const card = ({ id, r, sc, shots, files }) => {
     ${files.map((f) => `<h4>${esc(f.path)}</h4><pre><code>${esc(clean(f.text))}</code></pre>`).join('') || '<p class="dim">None.</p>'}
   </details>
   <details><summary>The conversation <span class="dim">(${r.turns.length} turn${r.turns.length === 1 ? '' : 's'})</span></summary>
-    ${r.turns.map((t, i) => `<div class="turn"><div class="who person">Person · turn ${i + 1}</div>${para(t.message)}<div class="who agent">Agent · ${t.tools.length} commands · ${secs(t.ms)}</div>${para(t.reply)}</div>`).join('')}
+    ${r.turns.map((t, i) => `<div class="turn"><div class="who person">Person · turn ${i + 1}</div>${para(t.message)}<div class="who agent">Agent · ${t.tools.length} commands · ${secs(t.ms)}</div>${para(t.reply)}${looks(id, t)}</div>`).join('')}
   </details>
+  ${agentShots.length ? `<details><summary>The agent's own looks <span class="dim">(${agentShots.length} screenshot${agentShots.length === 1 ? '' : 's'} from <code>look</code> in its box)</span></summary>${thumbs(id, agentShots.map((f) => 'agent-' + f))}</details>` : ''}
   <details><summary>The agent's debrief</summary>${para(r.debrief && r.debrief.reply)}</details>
 </section>`;
 };
@@ -161,18 +172,25 @@ details { border-top: 1px solid var(--rule); margin-top: 16px; padding-top: 10px
 summary { cursor: pointer; font-weight: 600; }
 summary:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
 pre { background: var(--code); padding: 10px 12px; border-radius: 4px; overflow-x: auto; max-height: 420px; }
+.shots.small { grid-template-columns: repeat(auto-fill, minmax(min(100%, 200px), 1fr)); margin-top: 8px; }
+.look { margin: 10px 0 4px; padding: 8px 10px; background: var(--code); border-radius: 4px; }
+.acts { display: block; font-size: 12px; overflow-wrap: anywhere; color: var(--dim); }
+details.seen { border: 0; margin: 6px 0 0; padding: 0; }
+details.seen summary { font-weight: 500; font-size: 13px; }
+.note { max-width: 85ch; margin: 12px 0 0; padding: 8px 12px; border-left: 3px solid var(--warn); background: var(--code); font-size: 14px; }
 .turn { border-left: 3px solid var(--rule); padding-left: 12px; margin: 14px 0; max-width: 85ch; min-width: 0; overflow-wrap: anywhere; }
 .who { font: 600 12px var(--body); text-transform: uppercase; letter-spacing: 0.06em; margin-top: 8px; }
 .who.person { color: var(--accent); } .who.agent { color: var(--dim); }
 </style>
 <div class="wrap">
   <h1>slop JS API review</h1>
-  <p class="lede">Batch <code>${esc(batch)}</code>: coding agents with only <code>slop help</code> built apps that need the JavaScript API (live rooms, uploads, downloads, alarms, SQL migrations, store bindings, agent tools). Each was checked on the server and in Chrome as members and guests, then judged. Screenshots are what those checks saw.</p>
+  <p class="lede">Batch <code>${esc(batch)}</code>${runs.some(({ r }) => r.browser) ? ' (agent and person with a browser)' : ''}: coding agents with only <code>slop help</code> built apps that need the JavaScript API (live rooms, uploads, downloads, alarms, SQL migrations, store bindings, agent tools). Each was checked on the server and in Chrome as members and guests, then judged. Screenshots are what those checks saw.</p>
   <div class="totals">
     <div><b>${tot.pass}/${runs.length}</b><span>runs with every check passed</span></div>
     <div><b>${tot.cmds}</b><span>commands</span></div>
     <div><b>${secs(tot.ms)}</b><span>agent time</span></div>
   </div>
+  ${NOTES._all ? `<p class="note"><b>Reviewer's note.</b> ${esc(NOTES._all)}</p>` : ''}
   <nav class="index" aria-label="Runs">${runs.map(({ id, r }) => `<a href="#${esc(id)}"><span class="dot ${allPass(r) ? '' : 'bad'}"></span>${esc(id)}</a>`).join('')}</nav>
   ${runs.map(card).join('\n')}
 </div>`;

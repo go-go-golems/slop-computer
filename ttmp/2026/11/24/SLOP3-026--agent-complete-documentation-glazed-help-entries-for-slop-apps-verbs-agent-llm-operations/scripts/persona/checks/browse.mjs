@@ -37,6 +37,9 @@ export async function person(b, email) {
     if (await go.count()) await Promise.all([p.waitForLoadState('load'), go.first().click()]).catch(() => {});
     ctx.signedIn = (await ctx.cookies()).some((c) => c.domain.startsWith('apps.localhost'));
     await p.close();
+    // The sign-in itself lands on / of the live host, which nothing is mounted
+    // at: its 404 is the harness's, not the app's (js-1 judges blamed agents).
+    errors.length = 0;
   }
   return ctx;
 }
@@ -59,7 +62,11 @@ export async function open(ctx, p, ms = 4000) {
 export async function frameText(pg) {
   const out = [];
   for (const f of pg.frames()) {
-    try { out.push(await f.evaluate(() => document.body ? document.body.innerText : '')); } catch {}
+    // innerText leaves out what fields hold: a page may show its data as
+    // editable values (js-1's inventory showed every shelf in an input).
+    try { out.push(await f.evaluate(() => !document.body ? '' : document.body.innerText + '\n' +
+      [...document.querySelectorAll('input:not([type=hidden]):not([type=file]):not([type=checkbox]):not([type=radio]), textarea, select')]
+        .map((e) => e.value).filter(Boolean).join('\n'))); } catch {}
   }
   return out.join('\n').replace(/\n{3,}/g, '\n\n');
 }
