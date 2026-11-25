@@ -353,15 +353,35 @@ It now retries a minute later.
 - `go test -tags sqlite_fts5 ./pkg/host/ -run 'TestAlarm|TestFailingAlarm|TestActors$' -count=1`.
 
 ### Technical details
+Real output, dev binary on a scratch copy of a dry-run server (the server's zone is America/New_York; the server's zone printed as `Local` until `ZoneName` in e1aa0f1):
 ```text
-$ slop alarm ls digest -o json
-[{"name":"morning","every":"CRON_TZ=Europe/Berlin 0 7 * * *","zone":"Europe/Berlin",
-  "next":"2026-11-26 07:00 CET","in":"10h 12m","at":1795672800000,"running":0,
-  "last":"2026-11-25 21:47 CET","lastVia":"alarm fire","lastOk":true,"lastAsOf":"2026-11-26 07:00 CET"}]
+$ slop alarm ls digest
+- at: 1795672800000
+  every: CRON_TZ=Europe/Berlin 0 7 * * *
+  in: 9h 56m
+  name: berlin
+  next: 2026-11-26 07:00 CET
+  running: 0
+  zone: Europe/Berlin
+- at: 1795694400000
+  every: 0 7 * * *
+  in: 15h 56m
+  name: morning
+  next: 2026-11-26 07:00 EST
+  running: 0
+  zone: America/New_York
 $ slop alarm fire digest morning --at 07:00
 fired: morning
-now: "2026-11-26T07:00:00+01:00"
+now: "2026-11-26T07:00:00-05:00"
 status: ok
+$ slop alarm fire digest berlin          # its handler throws
+error: 'Error: no data yet at run (actor.js:4:72(3))'
+fired: berlin
+status: failed
+$ slop alarm fire digest morning --at seven
+error: invalid_argument: --at "seven": give next, HH:MM (e.g. 07:00), "YYYY-MM-DD HH:MM" or RFC 3339 (2026-11-26T07:00:00-05:00)
+$ slop log show digest -o json | jq -c '.[0] | {rev, via, summary}'
+{"rev":5,"via":"alarm fire","summary":"set doc digest/today"}
 ```
 
 ## Step 7: Errors that say what to do next
@@ -417,3 +437,180 @@ the real reason.
 
 ### Technical details
 - Changed messages are listed in "What I did".
+
+## Step 8: store show, and output that says what a row is
+
+The inheritor persona needed four commands (`store ls`, `mount ls`, `app
+status`, `explain can`) to learn what `/tasks` is, and two agents complained
+that `mount ls -o table` printed a truncated object and that `store ls`
+left APP and TYPE blank. This step adds one command for "what is this
+store?" and makes the list output name what each row is.
+
+### Prompt Context
+
+**User prompt (verbatim):** (see Step 6)
+
+**Assistant interpretation:** The output group of the fixes, with `store show` as the new feature.
+
+**Inferred user intent:** An agent should orient itself in an unknown store in one step.
+
+**Commit (code):** e1aa0f1 — "store show; mount ls, store ls and tables that say what a row is"
+
+### What I did
+- `pkg/commands/mounts.go`: `store.show` (`mountEnv.show`): app, snapshot, broken, title, capabilities, and where the code is (`slop pull <id>` or the app store); mount URLs; collections and SQL tables with rows; aliases; grants and alarms (admins); actor actions; a `next` list of commands.
+- `app.status --migrations` adds `pending`: `sql/*.sql` files of the newest snapshot (failed or not yet activated) that the store has not run.
+- `pkg/commands/stores.go`: `store.ls` adds `kind` (`app`, `instance`, `content`) and fills a blank `type` from the manifest (`K.Peek`, which does not activate); `store.meta` adds `tables`.
+- `cmd/slop/cmds/root.go`: every `ls` verb also answers to `list`. `cmd/slop/cmds/output.go`: `leadCols` put `id, name, store, host, path, url, app, type, kind, level, …` first in tables.
+- `pkg/actor/manager.go` `ZoneName`: the server's zone from `$TZ` or `/etc/localtime` (it printed `Local`).
+- Tests: `TestPointersForSQLAndActions` (store show, store ls kinds, pending migrations).
+
+### Why
+- js-3 tasks-inherited / inventory-inherited and js-2 orders-export debriefs (quoted in Step 5's run data).
+
+### What worked
+- On a scratch server: `slop store show inventory` lists `tables: items: 7`, `actions: [add, list, set]`, `mounted: [http://apps.localhost:18787/inventory]` and `code: 'in this store: slop pull inventory <dir>, …'`.
+
+### What didn't work
+- Setting `app` to the store's own id for a store that is its own app broke `TestBenchFiles` (`jot in apps = map[]`): the bench app's actor treats a non-empty `app` as "an instance" (`apps/bench/actor.js:154`, `if (s.app) …`). Reverted; the new `kind` field carries the information and `app` keeps its meaning.
+- The pending-migrations test first used `"storage":1` at the top level of `app.json`, which is ignored, so the snapshot activated and nothing was pending. A broken snapshot needs the unknown capability inside `capabilities`.
+- I also made `mount ls` rows flat, on a debrief's claim that `mount set` answers flat. It does not (`{"mount": {…}, "note", "url"}`), so this made the two inconsistent and broke two tests; reverted in Step 9. The commit message of e1aa0f1 still says "mount ls rows are flat".
+
+### What I learned
+- A debrief's claim about output shape needs the same check as any other claim: run the command.
+- Field meanings are contracts with apps in the tree (the bench), not only with the CLI.
+
+### What was tricky to build
+- `store show` has to work for a viewer, not only admins: grants and alarms are added only at `admin`; everything else needs `view`.
+- `Peek` for each row of `store ls` opens every store; acceptable for the store counts here, but it is a cost per listed store.
+
+### What warrants a second pair of eyes
+- `store ls` now opens each store (Peek) on every call.
+- `pending` compares names only; an applied migration whose content changed shows as applied (activation reports that case as broken).
+
+### What should be done in the future
+- N/A
+
+### Code review instructions
+- `mountEnv.show` in `pkg/commands/mounts.go`; `store.ls` in `pkg/commands/stores.go`.
+- `go test -tags sqlite_fts5 ./pkg/host/ -run TestPointersForSQLAndActions -count=1`.
+
+### Technical details
+```text
+$ slop store ls -o table
+ID         APP  TYPE       KIND  LEVEL  CREATEDAT      OWNER
+inventory       inventory  app   owner  1795632800536  usr_a283cee15cc2347a3f8fa347
+```
+
+## Step 9: Positionals given as flags, group help, tables that spread nested rows
+
+Three CLI fixes, and the correction of Step 8's mistaken flattening. A
+js-1 agent lost a round trip to `preview url dash --at main <parent>`
+(`preview.url needs parent`): the parent filled `at`'s positional slot and
+`--at` then replaced it. Every group's help said only "The alarm verbs".
+
+### Prompt Context
+
+**User prompt (verbatim):** (see Step 6)
+
+**Assistant interpretation:** Continue the fixes; correct the mount ls shape.
+
+**Inferred user intent:** Commands behave the way their usage line suggests.
+
+**Commit (code):** 49a2a7e — "CLI: positionals skip slots given as flags; group help names its page; tables spread nested rows"
+
+### What I did
+- `cmd/slop/cmds/root.go` `verbCommand`: positional words fill the slots whose flag was not given; with more words than free slots, they fill all slots in order as before.
+- `groupShort`: a sentence and a help page for 17 groups (`alarm - Scheduled jobs of a store's actor: … (slop help alarms)`).
+- `pkg/commands/mounts.go`: `mount.ls` back to `{kind, mount, url}`; `cmd/slop/cmds/output.go` `spread` lifts a nested object's fields into the table row, so `mount ls -o table` shows `STORE HOST PATH URL KIND CHANGEDAT CHANGEDBY`.
+- `pkg/actor/actor.go`: `__slopNow` (behind `Date.now()`) returns `turn.now()`, so it follows `alarm fire --at` like `ctx.now`; the test checks both are equal.
+- `bind.set`'s doc says `--prefix` reads as the viewer, who needs their own grant on the target.
+
+### Why
+- See the opening paragraph; `Date.now()` differing from `ctx.now` under `--at` would have been a trap the help had to explain.
+
+### What worked
+- `slop preview url photos --at main http://slop.localhost:18787` and `slop preview url photos main http://slop.localhost:18787` both return a URL.
+
+### What didn't work
+- My first `sub()` for the test revert matched `m := x.(map[string]any)` more than once (`AssertionError … mount_api_test.go`); with more context it applied. The partial run had already removed the `encoding/json` use in `mounts.go` (`"encoding/json" imported and not used`).
+
+### What I learned
+- The table printer was the actual problem behind "mount ls is unreadable"; fixing it there fixes every verb with a nested result.
+
+### What was tricky to build
+- Positional slots and flags: the old code assigned positionals first and flags after, so a flag silently overwrote a positional that was meant for the next slot. The fix keeps the old behaviour when every slot is filled positionally.
+
+### What warrants a second pair of eyes
+- `spread` drops a nested object's own key from the table (its fields replace it); a row with two nested objects whose fields share a name shows only one.
+
+### What should be done in the future
+- N/A
+
+### Code review instructions
+- `git show 49a2a7e -- cmd/slop/cmds/`; `go test ./cmd/... -count=1`.
+
+### Technical details
+```text
+$ slop mount ls -o table
+STORE      HOST                  PATH        URL                                    KIND  CHANGEDAT      CHANGEDBY
+inventory  apps.localhost:18787  /inventory  http://apps.localhost:18787/inventory  live  1795632801099  usr_a283…
+```
+
+## Step 10: The help: alarms and recipes pages, the examples that misled
+
+Two new pages and fixes to twelve others. The alarms page answers the
+digest scenarios' questions in order (declare, zone, try, check, failure).
+The recipes page maps requests to patterns and pages, including how
+Firebase, Express and node-cron ideas map onto slop for the "wrong picture"
+persona, and what to run on an inherited app.
+
+### Prompt Context
+
+**User prompt (verbatim):** (see Step 6)
+
+**Assistant interpretation:** The help-page group of the fixes.
+
+**Inferred user intent:** The help leads agents to the safe pattern first time.
+
+**Commit (code):** 38f5a3b — "help: alarms and recipes pages; examples and wording the JS rounds tripped on"
+
+### What I did
+- New: `pkg/doc/topics/42-alarms.md` (`slop help alarms`), `pkg/doc/topics/05-recipes.md` (`slop help recipes`).
+- `22-capability-assets.md`: the photo wall now writes rows through actor actions `add`/`remove` (`write: "self"` rule; the upload id is the row id), with `@guest view` and `@member interact`; a callout that showing `/_blob/<id>` needs no level.
+- `21-capability-db.md`: a table of the ways to read another store (reads as, live, what the viewer needs, use for); `24-capability-slop.md` and `bind set --help` point to it.
+- `31-capability-agent.md`: async members marked; "What the fake engine cannot test".
+- `26-capability-room.md`: a late page gets everyone's presence, not past events.
+- `03-tutorial-first-app.md`, `10-building-apps.md`: one store is enough for one app.
+- `04-store-data.md`: "Changing tables: migrations" (rows too, failures, instances, pending); `40-actors.md` and `02-deploying-apps.md` point to it.
+- `40-actors.md`: alarm zone and `CRON_TZ=`, real `alarm ls`/`fire` output, `Date.now()` vs `new Date()`, no `Intl`.
+- `02-cli-reference-guide.md`, `01-agent-quickstart.md`, `90-troubleshooting.md`, `20-page-runtime.md`: `slop call --json`, `list`, the usage line, positionals as flags, `store show`, `store ls` kinds, the `revoked` reason.
+
+### Why
+- Each change answers a debrief or judge finding of js-1..js-3 (Step 5); the photo wall example was the one an agent said it had to "reconcile" with the actor guidance.
+
+### What worked
+- The photo wall example, extracted from the page and deployed on the scratch server: `slop call photos add` as admin wrote a row; with a malformed id → `invalid_argument: asset is an upload id`; `--as anonymous` → `permission_denied: add needs interact; you have view`; `slop docs set photos photos/forged` → `writing photos/forged needs self`. In Chrome (look.mjs), Sam (a member) uploaded `team-photo.png` through the page; the row has Sam's id; a guest sees the picture.
+- `go test ./pkg/doc/` passes; a script found no `slop help <slug>` reference to a missing page.
+
+### What didn't work
+- First draft of the photo actor used `db.collection('photos').doc()` for a new id; the actor db has no auto-id (`dbModule` has `doc(path)` and `collection(coll)` only). The upload id is unique, so it is the row id.
+- I first wrote that a reactor could follow the sales store; reactors follow only their own store's commits. Removed.
+- The alarms page said an empty `alarm ls` after a push meant "activates on its next use"; what I saw is that the actor registers them a moment after activation. Reworded.
+
+### What I learned
+- Checking an example by running it found the API mistake the reviewer would have missed (`doc()`).
+
+### What was tricky to build
+- The cross-store table had to be exact about who reads as whom: `--prefix` and `_stores` read as the viewer; a binding without `--prefix` is for the actor, which reads as the store. That distinction is the whole safety argument of the dashboard scenario.
+
+### What warrants a second pair of eyes
+- `05-recipes.md`'s Firebase/Express table is a mapping of concepts; each row points to a page that has the facts.
+
+### What should be done in the future
+- Rerun the scenarios whose findings changed, on a binary at 38f5a3b, to see whether the fixes help (daily-digest, digest-nodecron, inventory-*, photo-wall, shop-assistant, dash-public, tasks-inherited).
+
+### Code review instructions
+- `git show 38f5a3b --stat`; read `slop help alarms`, `slop help recipes` and the photo wall in `slop help capability-assets`.
+
+### Technical details
+- The extraction script for the example: the code blocks after `` `app.json`:``, `` `actor.js`:``, `` `index.html`:`` in "Example: a photo wall".
