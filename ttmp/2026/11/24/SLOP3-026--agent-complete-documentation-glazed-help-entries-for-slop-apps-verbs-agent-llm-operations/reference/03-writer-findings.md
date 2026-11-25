@@ -339,5 +339,6 @@ commits cf21f87, ff03404, e1aa0f1, 49a2a7e, 38f5a3b.
 | J-22 | group help says only "The alarm verbs" | a sentence and the help page per group | fixed |
 | J-23 | no index from a task to its page; no mapping from Firebase/Express/node-cron | `slop help recipes` | fixed |
 | J-24 | `UPDATE` through `sql.run` returns `lastRowid` | noise; left | — |
+| J-25 | no page says how a new person becomes a member; photos-nontech built its own approval list and a pop-up sign-in for "let my friends add photos" | access-control: first sign-in makes a member on open signup, `people role` on approval; a recipes row (4fb43d1, after the js-4 binary) | fixed |
 | T-1 | tester: the persona's `{"browse":…}` written twice parsed as not JSON; 9 of 15 browser runs ended after one turn | first complete object wins (df40639) | fixed |
 | T-2 | tester: my facts said cron runs in UTC; the judge marked a right answer wrong (js-2 daily-digest 3/2/2 → 5/5/5 rejudged) | facts corrected; checker accepts `CRON_TZ=` (13af5fa) | fixed |
