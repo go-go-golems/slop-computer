@@ -307,8 +307,13 @@ shows answers and errors, and that budgets and permissions hold, by sending
 `/tool …` messages yourself. Whether a real model picks the right tool for
 what people type needs a server with a real LLM. Do not add code to the page
 that parses messages itself to make the fake engine look smart: it is not
-the agent, and it stays in the app when a real model answers. Say instead
-which part you tested with the fake engine and which needs a real one.
+the agent, and it stays in the app when a real model answers. Do not detect
+the fake engine (`limits().models`) and switch the page to a local parser
+or a "demo mode" either: then `/tool …` messages never reach the agent, so
+neither you nor anyone checking the app can test the tools, and what you
+tested is not what runs with a real model. Leave the page the same on every
+engine and say which part you tested with the fake engine and which needs
+a real one.
 
 ## Errors
 
