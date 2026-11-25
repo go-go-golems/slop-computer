@@ -132,6 +132,14 @@ func TestActors(t *testing.T) {
 	// add requires interact, slow declares nothing, so it needs admin; an
 	// unknown name lists the actor's actions.
 	ex := h.call(bob, "explain.can", map[string]any{"store": "tracker", "action": "add"}).(map[string]any)
+	// --subject @member: any member with no grants of their own (round 5).
+	if g := h.call(admin, "explain.can", map[string]any{"store": "tracker", "subject": "@member"}).(map[string]any); g["ok"] != true || g["audience"] != "member" || g["level"] != "view" {
+		t.Fatalf("explain @member = %v", g)
+	}
+	h.fail(admin, "explain.can", map[string]any{"store": "tracker", "subject": "@subscriber"}, "invalid_argument")
+	if g := h.call(admin, "explain.can", map[string]any{"store": "tracker", "subject": "@guest"}).(map[string]any); g["audience"] != "guest" {
+		t.Fatalf("explain @guest = %v", g)
+	}
 	if ex["ok"] != false || ex["need"] != "interact" || ex["level"] != "view" {
 		t.Fatalf("explain add = %v", ex)
 	}

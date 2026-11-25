@@ -419,7 +419,13 @@ slop explain can notes interact                              # may I write docum
 slop explain can kitchen --action store.admin                # may I push, grant, fire alarms?
 slop explain can kitchen admin --subject store:notes         # can notes' actor administer kitchen?
 slop explain can kitchen --subject anonymous                 # can a visitor without an id see it?
+slop explain can kitchen interact --subject @member          # can any member, with no grant of their own?
 ```
+
+`--subject @member` and `--subject @admin` stand for any person of that role
+with no grants of their own: only the group grants count, and the trace
+names the subject `usr_any-member`. `@guest` is the same as `anonymous`.
+`@subscriber` needs a real subscriber (`--subject usr_…`).
 
 
 An action of the store's actor takes the same flag: `--action sign` checks

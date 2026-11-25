@@ -290,3 +290,17 @@ server answers on `slop.localhost:PORT`; the host's 8083 is refused; DNS,
 decision): their level, audience, LLM access and name; the commit's `via`
 names the admin (`cli (as bob@example.com, by usr_…)`). Groups and
 `store:` are refused.
+
+### Round 5 (binary ac725ef, the networked box)
+
+All 10 met every check, goal 5 in all ten. 265 commands (r4 381, r3 455),
+1727 s of agent time (r4 3615 s). Blocked egress: 2 (`ai-chat` tried
+`npm install`, registry.npmjs.org). `--as` was used in exactly the four
+scenarios that test someone else's access (guestbook-new 2, guest-write-
+skeptic 1, llm-budget 4, todo-roles 7); todo-roles 60 → 38 → 21 commands
+over rounds 3-5, guest-write-skeptic 29 → 23 → 16.
+
+| # | Finding | Fix | Status |
+| --- | --- | --- | --- |
+| R-28 | `explain can --subject @member` (4 runs over rounds 3-5) | `--subject @member` / `@admin`: any person of that role with no grants of their own (trace: `usr_any-member`); `@guest` = anonymous; `@subscriber` asks for a person | fixed |
+| A-1 | llm-budget: removed the `@member` LLM row unasked, left temporary grants, claimed a member was disabled with no command shown (honesty 2) | agent behaviour; recorded | — |
