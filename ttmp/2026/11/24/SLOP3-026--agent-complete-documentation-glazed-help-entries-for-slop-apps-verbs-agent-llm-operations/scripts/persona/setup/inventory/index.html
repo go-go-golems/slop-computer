@@ -1,0 +1,13 @@
+<!doctype html>
+<html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1"><title>Inventory</title>
+<style>body{font:15px/1.5 system-ui,sans-serif;margin:2rem;color:#222}td,th{padding:4px 10px;border-bottom:1px solid #ddd;text-align:left}</style></head>
+<body><h1>Inventory</h1>
+<table><thead><tr><th>Item</th><th>Quantity</th></tr></thead><tbody id="rows"></tbody></table>
+<script>
+(async () => {
+  const slop = await claude.use('slop');
+  const esc = (s) => String(s == null ? '' : s).replace(/[&<>"]/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' })[c]);
+  const rows = await slop.actions.list();
+  document.getElementById('rows').innerHTML = rows.map((r) => `<tr><td>${esc(r.name)}</td><td>${r.qty}</td></tr>`).join('');
+})();
+</script></body></html>

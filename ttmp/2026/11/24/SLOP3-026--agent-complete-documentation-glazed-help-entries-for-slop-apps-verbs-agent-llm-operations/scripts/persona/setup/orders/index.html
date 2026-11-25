@@ -1,0 +1,15 @@
+<!doctype html>
+<html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1"><title>Orders</title>
+<style>body{font:15px/1.5 system-ui,sans-serif;margin:2rem;color:#222}table{border-collapse:collapse}td,th{padding:4px 10px;border-bottom:1px solid #ddd;text-align:left}</style></head>
+<body><h1>Orders</h1>
+<table><thead><tr><th>Order</th><th>Customer</th><th>Amount</th><th>Date</th></tr></thead><tbody id="rows"></tbody></table>
+<script>
+(async () => {
+  const db = await claude.use('db');
+  const esc = (s) => String(s == null ? '' : s).replace(/[&<>"]/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' })[c]);
+  db.collection('orders').orderBy('date', 'desc').onSnapshot((s) => {
+    document.getElementById('rows').innerHTML = s.docs.map((d) => d.data())
+      .map((o) => `<tr><td>${esc(o.id)}</td><td>${esc(o.customer)}</td><td>${esc(o.amount)}</td><td>${esc(o.date)}</td></tr>`).join('');
+  });
+})();
+</script></body></html>

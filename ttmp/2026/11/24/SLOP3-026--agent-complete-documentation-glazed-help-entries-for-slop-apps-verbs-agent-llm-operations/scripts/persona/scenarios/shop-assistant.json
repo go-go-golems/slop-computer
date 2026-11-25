@@ -1,0 +1,22 @@
+{
+  "id": "shop-assistant",
+  "persona": "builder",
+  "maxTurns": 6,
+  "opening": "I'd like a page at /helper where team members can chat with an assistant about our shopping list, and ask it to add things to the list \u2014 and it should really add them, so they show up in the list on that page.",
+  "goal": "a page at /helper where members chat with an assistant that can really add items to a shopping list shown on the same page",
+  "later": [
+    "who pays for the assistant, and is there a limit?"
+  ],
+  "checklist": [
+    "mounted at /helper, members can open it",
+    "the page has a chat with the assistant",
+    "the assistant has a tool that adds an item, and an item it adds appears in the list and is stored on the server",
+    "guests cannot use it, or it says what they get",
+    "it explains the cost/limit question from the platform's LLM access"
+  ],
+  "facts": [
+    "An assistant with tools is the agent capability (sessions with page tools) or sample with tools; members need the sample policy cell on and LLM access (slop llm set).",
+    "This server runs --llm fake: a message `/tool <name> {json}` makes the model call that tool; other answers echo."
+  ],
+  "personaKnows": "You can sign in on the site."
+}

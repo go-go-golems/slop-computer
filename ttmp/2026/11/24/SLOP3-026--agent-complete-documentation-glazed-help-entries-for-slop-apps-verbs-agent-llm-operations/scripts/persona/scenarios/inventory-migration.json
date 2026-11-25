@@ -1,0 +1,25 @@
+{
+  "id": "inventory-migration",
+  "persona": "builder",
+  "maxTurns": 6,
+  "setup": [
+    "python3 \"$SETUP/jsdata.py\" \"$RUN/data-in\" \"$RUN/expected.json\" && $SLOP store new inventory >/dev/null && $SLOP push \"$SETUP/inventory\" --store inventory >/dev/null && for i in bolts:120 nuts:340 washers:75 hinges:18 brackets:42 screws:500; do $SLOP actor call inventory add --args \"{\\\"name\\\":\\\"${i%%:*}\\\",\\\"qty\\\":${i##*:}}\" >/dev/null; done && $SLOP grant set inventory @member interact >/dev/null && $SLOP mount set \"apps.localhost:$PORT\" /inventory inventory >/dev/null"
+  ],
+  "opening": "Our inventory page at /inventory lists items and quantities. We now need to record which shelf each item is on. Please add that, and don't lose anything we already have \u2014 the existing items can show \"unknown\" for now.",
+  "goal": "each inventory item has a shelf, shown on /inventory; the existing items and quantities are kept and show 'unknown'",
+  "later": [
+    "how would we set the shelf for an item?"
+  ],
+  "checklist": [
+    "the app is not broken",
+    "the existing 6 items and their quantities are kept",
+    "a shelf (or location) column exists; existing items show 'unknown'",
+    "the change is a new migration, the original is not edited",
+    "it says how a shelf gets set"
+  ],
+  "facts": [
+    "Tables change only through migrations: add sql/002_\u2026.sql (ALTER TABLE items ADD COLUMN \u2026); editing sql/001_items.sql after it was applied breaks activation.",
+    "`slop app status <store> --migrations` lists applied migrations; `slop sql query <store> <sql>` reads the tables."
+  ],
+  "personaKnows": "You can sign in on the site."
+}
