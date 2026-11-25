@@ -244,5 +244,5 @@ The slop findings, each checked in code:
 | R-23 | `tally`'s actor used `use('db')` with `"capabilities": {}`; `app-manifest` said an undeclared capability is null "in the actor", which is false for db/sql/files/alarm/storage/log | the page says what the actor always has | fixed |
 | R-24 | an alias lookup without a login (fresh `XDG_CONFIG_HOME`) said only `unknown command "tally"` | it says the CLI could not ask the server, and why | fixed |
 | R-25 | `app-verbs` and `using-app-verbs` were not in the top-level `slop help` list | IsTopLevel | fixed |
-| R-26 | `policy ls` prints `allowed: false, default: true, effective: true` without saying which is which (ai-chat) | — | open |
+| R-26 | `policy ls` prints `allowed: false, default: true, effective: true` without saying which is which (ai-chat) | each cell has a `why` (`on through @member, which subscriber is inside …`); `deploying-apps` explains the four fields and that there is no deny | fixed |
 | R-27 | `llm-budget` changed `@admin` unasked in all three rounds | the opening now says admins keep their access | scenario |

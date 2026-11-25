@@ -429,7 +429,22 @@ error: invalid_argument: guestbook does not declare fetch, so it cannot be turne
 ```
 
 A cell turned on for `@member` is in effect for subscribers and admins too.
-The `store` column is the store acting on its own (alarms, reactors).
+The `store` column is the store acting on its own (alarms, reactors). Each
+cell has four fields: `allowed` is that audience's own cell, `default` is
+true when no cell was ever set (so `allowed` is the default), `effective`
+is what the audience gets, through its own cell or a group it is inside,
+and `why` says which:
+
+```text
+- audience: subscriber
+  allowed: false
+  default: true
+  effective: true
+  why: on through @member, which subscriber is inside (off by default (no cell set); a cell cannot turn a group's on off for those inside it)
+```
+
+There is no deny: to keep subscribers out while members are in, the app
+checks `ctx.visitor.audience` itself.
 
 A model call also needs the **person's LLM access** (or the store's, for
 alarms): `slop llm set @member on --budget 200000`. See
