@@ -13,3 +13,10 @@ console.log('|' + ' --- |'.repeat(16));
 for (const r of runs) console.log('| ' + row(r) + ' |');
 console.log('\nFailed commands:');
 for (const r of runs) for (const f of r.failures || []) console.log(`- ${r.scenario} t${f.turn}: ${f.cmd.replace(/\n/g, ' ').slice(0, 140)}\n    → ${f.output.split('\n').filter(Boolean).slice(0, 2).join(' | ').slice(0, 200)}\n    next: ${(f.next || '').replace(/\n/g, ' ').slice(0, 140)}`);
+// Runs that met a model-service failure: their scores may say nothing about
+// the docs (an empty persona reply reads as giving up).
+const hit = runs.filter((r) => (r.infra || []).length || (r.turns || []).some((t) => /not JSON: $/.test((t.persona && t.persona.why) || '')));
+if (hit.length) {
+  console.log('\nModel service failures (rerun these):');
+  for (const r of hit) console.log(`- ${r.scenario}: ${(r.infra || ['empty persona reply']).join('; ')}`);
+}

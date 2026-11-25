@@ -145,11 +145,20 @@ async function agentTurn(message, tag) {
     '--tools', 'read,bash,edit,write',
     ...MODEL, '--thinking', o['agent-thinking'], '--append-system-prompt', '/home/agent/system.md', message];
   const t0 = Date.now();
-  // 30 minutes a turn: pilot-1 lost a whole reply at 15 (a 10-minute npm install).
-  const r = spawnSync('bash', args, { encoding: 'utf8', maxBuffer: 1 << 28, timeout: 30 * 60000, killSignal: 'SIGTERM', env: { ...process.env, NET_DIR, NET_PORT: String(PORT), BROWSER: o.browser ? '1' : '', PW_DIR, CHROME } });
-  fs.writeFileSync(out, r.stdout || '');
-  if (r.stderr) fs.writeFileSync(out.replace(/\.jsonl$/, '.stderr.txt'), r.stderr);
-  const ev = piEvents(out);
+  let r, ev;
+  for (let attempt = 0; ; attempt++) {
+    // 30 minutes a turn: pilot-1 lost a whole reply at 15 (a 10-minute npm install).
+    r = spawnSync('bash', args, { encoding: 'utf8', maxBuffer: 1 << 28, timeout: 30 * 60000, killSignal: 'SIGTERM', env: { ...process.env, NET_DIR, NET_PORT: String(PORT), BROWSER: o.browser ? '1' : '', PW_DIR, CHROME } });
+    fs.writeFileSync(out, r.stdout || '');
+    if (r.stderr) fs.writeFileSync(out.replace(/\.jsonl$/, '.stderr.txt'), r.stderr);
+    ev = piEvents(out);
+    // A turn that did nothing because the model service failed is run
+    // again (its message is resent to the same session).
+    const idle = !ev.some((e) => e.type === 'tool_execution_end') && !finalText(ev).trim();
+    if (!(idle && modelDown(ev)) || attempt === 3) break;
+    (run.infra = run.infra || []).push(`agent ${tag} turn: backend unavailable, retry ${attempt + 1}`);
+    nap(30 * 2 ** attempt);
+  }
   const starts = new Map(ev.filter((e) => e.type === 'tool_execution_start').map((e) => [e.toolCallId, e]));
   const tools = ev.filter((e) => e.type === 'tool_execution_end').map((e) => {
     const s = starts.get(e.toolCallId) || {};
@@ -164,11 +173,27 @@ async function agentTurn(message, tag) {
   return { ms: Date.now() - t0, reply, tools, tokens: tk, exit: r.status, timedOut, error: r.error ? String(r.error) : undefined };
 }
 
+// modelDown: the events say the model service failed (lunaroute answered
+// "backend unavailable" for an hour of the js-3 reruns; the persona's empty
+// reply read as giving up, and an agent turn did nothing).
+function modelDown(ev) {
+  return ev.some((e) => e && (e.errorMessage || (e.message && e.message.errorMessage)));
+}
+const nap = (s) => spawnSync('sleep', [String(s)]);
+
 function pi(prompt, thinking) {
-  const r = spawnSync('pi', ['-p', '--no-session', '--no-tools', '--no-context-files', '--no-skills', '--no-extensions', '-e', LUNA, ...MODEL,
-    '--thinking', thinking, '--mode', 'json', prompt], { encoding: 'utf8', maxBuffer: 1 << 26, timeout: 10 * 60000, cwd: RUN });
-  const ev = (r.stdout || '').split('\n').filter(Boolean).map((l) => { try { return JSON.parse(l); } catch { return null; } }).filter(Boolean);
-  return { text: finalText(ev), tokens: tokens(ev) };
+  for (let attempt = 0; ; attempt++) {
+    const r = spawnSync('pi', ['-p', '--no-session', '--no-tools', '--no-context-files', '--no-skills', '--no-extensions', '-e', LUNA, ...MODEL,
+      '--thinking', thinking, '--mode', 'json', prompt], { encoding: 'utf8', maxBuffer: 1 << 26, timeout: 10 * 60000, cwd: RUN });
+    const ev = (r.stdout || '').split('\n').filter(Boolean).map((l) => { try { return JSON.parse(l); } catch { return null; } }).filter(Boolean);
+    const text = finalText(ev);
+    if (text.trim() || attempt === 3) {
+      if (!text.trim()) (run.infra = run.infra || []).push(`model call failed 4 times (${thinking})`);
+      return { text, tokens: tokens(ev) };
+    }
+    (run.infra = run.infra || []).push(`model call empty${modelDown(ev) ? ' (backend unavailable)' : ''}, retry ${attempt + 1}`);
+    nap(30 * 2 ** attempt);
+  }
 }
 // json(text): the persona's answer. Models often add to the JSON: a second
 // object, the same one again in a code block, a sentence. The first complete
