@@ -98,7 +98,7 @@ How push behaves:
 
   ```bash
   $ slop push guestbook -m "v2" --ifAt 0
-  Error: conflict: main points at 1, not 0: it moved since you looked
+  error: conflict: main points at 1, not 0: it moved since you looked
   ```
 
   Use `--ifAt` in scripts when you want "only if nobody published since I
@@ -304,7 +304,8 @@ $ slop mount set apps.localhost:18300 /g/:store --storeParam store --type guestb
   no store, answers `no_instance: nothing is here yet`.
 - `--type` and `--createApp` go only with `--storeParam`.
 
-Valid paths are `/`, `/name`, `/name/:param` and `/name/*`. Among mounts on
+A path is `/`, or literal segments (`/name`, `/site/list`), optionally ending in
+one `:param` or `*` (`/name/:param`, `/name/*`). Among mounts on
 one host, a literal segment beats a `:param`, and a longer path beats a
 shorter one.
 
@@ -326,7 +327,8 @@ At a path with no store yet, the shell offers to create one of the app
 (`member` by default, or `subscriber`, `admin`) says who may. `--type`
 defaults to the app's manifest `type`. Only live hosts create stores.
 `--aliases '[{"alias":…,"target":…}]'` binds a read alias in every store the
-mount creates (`slop help store-data`).
+mount creates (`slop help capability-db`, "Other stores"; pages read them with
+`stores.open`, `slop help capability-slop`).
 
 ### Actor routes and the API policy: `--api`
 
@@ -352,7 +354,8 @@ $ slop mount routes apps.localhost:18300 /journal
 
 - **`defaultMin` is `view`** when you write an API policy: a public route
   answers `404` to guests until you set `"defaultMin": "public"`.
-- A route the visitor may not reach answers `404`, not `401`/`403`.
+- A route outside the allowlist, or a visitor with no level, answers `404`;
+  a visitor whose level is too low answers `403` `permission_denied`.
 - Fields: `routes` (required allowlist, `"METHOD /pattern"`), `prefix`,
   `floors` (`[{route, min?, audience?}]`), `defaultMin`, `middleware`
   (`rateLimit` `{per: ip|visitor, limit, window?, burst?}`, `cors`
@@ -566,6 +569,7 @@ $ slop vendor          # list, and check every file against vendor/vendor.json
 - `slop help building-apps` — choosing the kind of app and its capabilities
 - `slop help app-manifest` — every field of `app.json`
 - `slop help access-control` — levels, groups, grants, links, policy
-- `slop help store-data` — files, snapshots, refs, aliases
+- `slop help store-data` — files, snapshots, refs
+- `slop help capability-db` — other stores: aliases and `_stores`
 - `slop help llm-access` — model access and budgets
 - `slop help actors` — actor routes, alarms, migrations

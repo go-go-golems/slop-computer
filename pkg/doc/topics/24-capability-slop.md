@@ -44,8 +44,9 @@ Nothing has to be declared. The manifest may carry a `slop` entry:
 
 `permissions` must name known management permissions (`artifacts:read`,
 `versions:read`, `versions:push`, `routes:read`, `routes:write`,
-`threads:read`, `threads:write`, `events:read`); an unknown one fails the
-push (`capabilities.slop: unknown permission "x"`). In this version the list
+`threads:read`, `threads:write`, `events:read`); an unknown one breaks the
+app (`slop app status` shows `capabilities.slop: unknown permission "x"`; the push
+itself succeeds). In this version the list
 is checked but **grants nothing**: leave it out.
 
 ## API

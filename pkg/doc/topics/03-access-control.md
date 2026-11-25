@@ -65,7 +65,7 @@ caller's **audience**, one of `guest`, `member`, `subscriber`, `admin`, plus
 nest:
 
 ```text
-@guest ⊂ @member ⊂ @subscriber ⊂ @admin        (@store stands apart)
+@admin ⊆ @subscriber ⊆ @member ⊆ @guest        (as sets of people; @store stands apart)
 ```
 
 so a grant or a policy cell for `@member` also covers subscribers and
@@ -319,6 +319,11 @@ $ slop policy set shelf sample @member on
 $ slop policy set shelf db @member on
 error: invalid_argument: shelf does not declare db, so it cannot be turned on
 ```
+
+In a cell, `allowed` is the cell's own value, `default: true` means no row
+was set and the built-in default applies (it does **not** mean "on by
+default"), and `effective` is the answer: on for this audience through its
+own cell or a group it is inside.
 
 `policy.set` takes the app (the app store, not an instance), the capability,
 the audience (`@member` or `member`) and `on`/`off`; it restarts the app's

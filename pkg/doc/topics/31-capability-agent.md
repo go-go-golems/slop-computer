@@ -37,7 +37,8 @@ Use `agent` for chat panels and tool-using assistants. Use `sample`
 - the app's policy cell **`sample`** is on for the viewer's audience
   (`slop policy set <app> sample @member on`); an app that declares only
   `agent` still shows a `sample` row in `slop policy ls <app>`;
-- the viewer is a signed-in person with LLM access and budget
+- the viewer has an id (a signed-in person, or a guest with a `vis_…` id) and
+  LLM access and budget
   (`slop help llm-access`);
 - the server has a model backend.
 

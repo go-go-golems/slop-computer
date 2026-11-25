@@ -76,7 +76,8 @@ without events; it is rebuilt transparently on the next event. Variables at
 the top level of `actor.js` therefore live only as long as one runtime:
 keep anything that must survive in documents or tables, never in globals.
 
-A complete working actor (the "Tally" app used in `slop help app-verbs`):
+A complete working actor. It is a fuller Tally than the one in `slop help
+app-verbs` (more actions, routes and alarms); the two are separate examples:
 
 ```js
 // Tally: a counter per name (SQL) and a list of items (documents).
@@ -467,9 +468,10 @@ Three rules that bite:
 - **The default floor is view.** `defaultMin` is `view`: without `"defaultMin": "public"` a public route
   still needs `view` on that mount, so guests get 404. The effective level is
   the higher of the route's `level` and the floor.
-- **Every route of the actor must be in the allowlist of some mount that
-  serves the store**, or the actor fails to load: `route POST /api/count/:name
-  is in no API allowlist of the mounts serving t1 (…)`. That breaks the
+- **A mount without `--api` serves every route.** The actor fails to load
+  only when every mount serving the store has an API policy and none of them
+  lists a route: `route POST /api/count/:name is in no API allowlist of the
+  mounts serving t1 (…)`. That breaks the
   store's actions too, not only HTTP. Fix the `--api` (or remove the route),
   then `slop app restart <store>`.
 - With a `prefix`, only paths below it reach the actor; other paths go to the

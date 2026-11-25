@@ -40,7 +40,7 @@ office and in these pages.
 | **Mount** | A host plus a path pattern pointing at a store: `/boards` → the store `pinboard-home`, or `/pb/:id` → whichever store the path names. A mount never names code; the store's app does. |
 | **Person** | Someone who signed in (`usr_…`), with a **role**: `pending` (signed up, waiting), `member`, `admin` or `disabled`. Visitors without an account are **guests** (`vis_…`). |
 | **Token** | What the CLI holds after `slop auth login` (`tok_…`). It acts as its person, limited by its **scopes** (`read`, `write`, `admin`). |
-| **Audience and groups** | Every caller falls in one audience: guest, member, subscriber or admin. Groups nest: `@guest` ⊂ `@member` ⊂ `@subscriber` ⊂ `@admin`, so a rule for `@member` covers subscribers and admins too. `@store` is a store acting on its own. |
+| **Audience and groups** | Every caller falls in one audience: guest, member, subscriber or admin. Groups nest, as sets of people: `@admin` ⊆ `@subscriber` ⊆ `@member` ⊆ `@guest`, so a rule for `@member` covers subscribers and admins too. `@store` is a store acting on its own. |
 | **Level** | Your standing on one store: `view` < `interact` < `admin` < `owner`. A store's creator owns it; platform admins are admin everywhere. |
 | **Grant** | Gives a subject (a person, a guest, `store:<id>`, or a group like `@member`) a level on a store: `slop grant set <store> @member view`. |
 | **Capability** | A named API an app's pages or actor ask for with `use(name)` / `claude.use(name)`: `db`, `user`, `room`, `assets`, `sample`, `agent`… An app declares what it uses in `app.json`. |

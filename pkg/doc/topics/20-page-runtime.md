@@ -121,7 +121,7 @@ A value is `{}`, `true`, or an object with options:
 }
 ```
 
-An unknown name fails the push (`capabilities: unknown capability "x"`).
+An unknown name breaks the app: the push succeeds, then `slop app status <store>` shows `broken: 'app.json: capabilities: unknown capability "x"'` and the store stays on its last good snapshot.
 `slop app status <store>` shows the capabilities of the snapshot a store
 runs. Every option is described on `slop help app-manifest` and on each
 capability's page.
@@ -285,7 +285,7 @@ over.
 | `window.claude` is undefined | The file is not served as an app document (a fragment, not starting with `<!doctype`/`<html>`/`<head>`) or the mount is on a static host | Start the page with `<!doctype html>`; mount on a live host |
 | The page reloads by itself | `main` moved (a push or a publish) or the viewer's access changed | Expected; keep unsent input in `sessionStorage` if it must survive |
 | Calls fail with `revoked` | The view was closed for good | Render the degraded state; a reload opens a new view if access remains |
-| `push` fails with `unknown capability` | A typo, or a name slop does not know | Use one of the names in the table above |
+| `slop app status` shows `broken: … unknown capability` after a push | A typo, or a name slop does not know | Use one of the names in the table above |
 
 ## See Also
 

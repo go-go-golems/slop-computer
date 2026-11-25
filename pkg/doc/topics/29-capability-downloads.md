@@ -150,7 +150,7 @@ so they reject at once.
 
 | Problem | Cause | Solution |
 | --- | --- | --- |
-| `claude.use("downloads")` is `null` | Not declared in this snapshot, the app is broken, or the page is on the static host | Declare `"downloads": true`, `slop push`; check `slop app status <store>` |
+| `claude.use("downloads")` is `null` | Not declared in this snapshot, or the app is broken. On the static host `window.claude` is undefined (no runtime) | Declare `"downloads": true`, `slop push`; check `slop app status <store>` |
 | `rejected_extension` for `report.xlsx` | Office formats are not offered | Export `.csv` |
 | `bad_request` for `exports/2026.csv` | Slashes are not allowed | Use `exports-2026.csv` |
 | Nothing happens on click, no error yet | The dialog is open in the shell, outside the frame | Look at the top of the window; the promise settles when the viewer answers |

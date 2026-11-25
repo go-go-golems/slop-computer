@@ -68,7 +68,7 @@ month (UTC). No budget means no limit; `--budget 0` means nothing can be spent.
 | Subject | Example | Applies to |
 | --- | --- | --- |
 | a person | `usr_…`, `vis_…`, or an email | that person; `llm set` resolves an email to the id |
-| a group | `@guest`, `@member`, `@subscriber`, `@admin` | everyone in that audience **and above**: groups nest, `@guest` ⊂ `@member` ⊂ `@subscriber` ⊂ `@admin` |
+| a group | `@guest`, `@member`, `@subscriber`, `@admin` | everyone in that audience **and above**: groups nest, as sets of people `@admin` ⊆ `@subscriber` ⊆ `@member` ⊆ `@guest` |
 | `@store` | `@store` | every store acting on its own (alarms, reactors, setup) |
 | one store | `store:<id>` | that store acting on its own |
 

@@ -162,7 +162,7 @@ Every command prints its result on stdout as YAML by default. Choose with
 | `json` | For parsing. Numbers keep every digit. Prefer this in scripts. |
 | `table` | Columns, for lists of objects; cells longer than 60 characters are cut with `...`. A result that is not a list prints as YAML. |
 
-Any other value prints YAML. Errors and progress always go to stderr.
+Any other value is refused before the command runs. Errors and progress always go to stderr.
 
 ```text
 $ slop store ls -o table

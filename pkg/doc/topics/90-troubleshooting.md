@@ -25,12 +25,15 @@ is the index.
 Run these before changing anything. They answer from the server, not from
 what you remember about it.
 
-| Command | Answers |
-| --- | --- |
-| `slop whoami` | Who you act as, on which server, with which token scopes |
-| `slop explain can <store> [level]` | Your level on a store and the trace of grants and rules that decided it. Add `--path p --op write` for one document, `--action x` for an actor action, `--subject usr_…`/`anonymous`/`store:<id>` for someone else |
-| `slop app status <store>` | Which app and snapshot a store runs, and `broken: …` with the reason if activation failed (manifest, actor, migration). A push can succeed and still leave the store broken; this is where it shows |
-| `slop app logs <store>` | The actor's recent `console.log` / `ctx.log` lines and errors |
+| Command | Answers | Who may run it |
+| --- | --- | --- |
+| `slop whoami` | Who you act as, on which server, with which token scopes | anyone with a login |
+| `slop explain can <store> [level]` | Your level on a store and the trace of grants and rules that decided it. Add `--path p --op write` for one document, `--action store.admin` (or another platform floor: `doc.write`, `code.push`, …) for a platform operation, `--subject usr_…`/`anonymous`/`store:<id>` for someone else | anyone, for yourself; `--subject` (someone else) is for platform admins |
+| `slop app status <store>` | Which app and snapshot a store runs, and `broken: …` with the reason if activation failed (manifest, actor, migration). A push can succeed and still leave the store broken; this is where it shows | `view` on the store |
+| `slop app logs <store>` | The actor's recent `console.log` / `ctx.log` lines and errors | `admin` on the store |
+
+`slop policy ls <app>` and `slop mount routes` are for platform admins: a
+member who needs them asks an admin.
 
 ## How an error looks
 
@@ -93,7 +96,8 @@ what you expected.
 | --- | --- | --- | --- |
 | `push` succeeds, the page does not change | The store follows another ref, or activation failed | `slop app status <store>` | `deploying-apps` |
 | `push` succeeds, the store is `broken` | Manifest error, actor error or a changed migration | `slop app status <store>` | `app-manifest` |
-| Every `claude.use()` is `null` | The page is served from the static host, or opened as a file | Mount it on a live host | `page-runtime` |
+| Every `claude.use()` is `null` | The page was opened on its sandbox URL without the shell, or as a file | Open it through its mount on a live host | `page-runtime` |
+| `window.claude` is undefined | The page is on the static host, which serves files byte for byte with no runtime | Mount the app on a live host | `building-apps` |
 | A page works for you and not for others | Their level or audience: policy cells and `db` rules apply per viewer | `slop explain can <store> --subject usr_…` | `access-control` |
 | Old app verbs after a push | The store runs an older snapshot | `slop app status <store>` | `using-app-verbs` |
 | A model answer is empty with `--llm fake` | The fake engine echoes; `/tool <name> {json}` calls a tool, and a session without tools answers nothing | Use a real backend to test answers | `capability-agent` |

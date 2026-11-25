@@ -58,7 +58,7 @@ func serveCmd() *cobra.Command {
 	cmd.Flags().StringVar(&listen, "listen", "", "address to listen on (default 127.0.0.1:18300)")
 	cmd.Flags().StringVar(&data, "data", "", "data directory (default ./data)")
 	cmd.Flags().BoolVar(&local, "local", false, "local sign-in form instead of OIDC (development)")
-	cmd.Flags().BoolVar(&test, "test", false, "test mode: loopback only, X-Slop-As, fake LLM")
+	cmd.Flags().BoolVar(&test, "test", false, "test mode: the fake LLM unless --llm is given")
 	cmd.Flags().StringArrayVar(&admins, "admin-email", nil, "an email that becomes admin when it signs in (repeatable)")
 	cmd.Flags().StringVar(&llmBackend, "llm", "", "model backend for sample: pi (Pi's models through Geppetto, from ~/.pi/agent) or fake (default: off)")
 	return cmd

@@ -218,7 +218,6 @@ Needs the `profile` scope. Resolves an array of `Profile`, at most 20.
 | `avatarUrl` is always renderable | `""` today |
 | `can(unknown)` is `false` | `null` |
 | `me()` has the contract's fields | adds `audience`, `level`, `guest`, `subscribed`, `llm` |
-| — | on the static host (`slop help deploying-apps`) `user` is an anonymous viewer: no id, `can()` `false`, `profiles()` `{}` |
 
 The same viewer facts are available without `user` through
 `(await claude.use("slop")).visitor()` (see `slop help capability-slop`).

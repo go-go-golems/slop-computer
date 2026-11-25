@@ -148,7 +148,7 @@ from `claude.use`. The claude.ai codes (`consent_required`, `forbidden`,
 `invalid`, `not_found`, `rate_limited`, `unavailable`, `upstream_error`,
 `claude_unavailable`, `not_granted`) matter only for the claude.ai branch of
 a shared page. Errors from the `db` fallback are `db` errors
-(`permission_denied` and friends, `slop help capability-db`).
+(a write a rule refuses is `invalid_argument: this viewer cannot write "p"`; `slop help capability-db`).
 
 ## Troubleshooting
 
@@ -157,7 +157,7 @@ a shared page. Errors from the `db` fallback are `db` errors
 | `claude.use("comments")` is `null` | slop does not serve comments | Hide comment controls, or build notes on `db` as above |
 | A claude.ai page shows a dead "Comment" button on slop | It checks a method, not the object | Check `if (comments)` before showing the control |
 | `onSendToClaude` is missing | Not implemented on slop | Call `sample` or `agent` from your own control |
-| Notes refuse to save with `permission_denied` | The viewer is below `interact`, or the document id is not their own id under a `{self}` rule | Grant `interact` (`slop grant set <store> @member interact`), write to `notes/<me.id>` |
+| Notes refuse to save with `invalid_argument: this viewer cannot write …` | The viewer is below `interact`, or the document id is not their own id under a `{self}` rule | Grant `interact` (`slop grant set <store> @member interact`), write to `notes/<me.id>` |
 | You expected `slop` CLI verbs for comments | There are none | Read notes as documents: `slop docs query <store> notes` |
 
 ## See Also

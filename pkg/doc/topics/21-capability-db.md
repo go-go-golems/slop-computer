@@ -98,7 +98,7 @@ A viewer holds one **level** on the store (`view` < `interact` < `admin` <
   `vis_…` for a guest): `votes/{self}` is `votes/<my id>`. It may only be
   the last segment.
 - A rule at the prefix of a `{self}` rule must set both `read` and `write`,
-  or the push fails (`the rule at "votes" must set both read and write`).
+  or the app is broken (`slop app status` shows `the rule at "votes" must set both read and write`; the push itself succeeds).
 - The level `self` is one nobody holds: `{"path": "log", "read": "view",
   "write": "self"}` makes `log` read-only to every page and CLI user, even
   the owner. The actor still writes it (an actor writes its own store
@@ -128,7 +128,8 @@ slop explain can poll --path votes/usr_someone --op write --subject anonymous
 
 A page sees its own store at the root. Two ways reach other stores:
 
-- **An alias with a prefix.** The store's owner maps a top-level name of
+- **An alias with a prefix.** Someone with `admin` on the store, who also
+  holds the alias's level on the target (`admin` there with `--assets`), maps a top-level name of
   the page to a collection of another store:
   `slop bind set <store> contacts crm --prefix contacts --level interact`.
   The page then reads and writes `contacts/c1`, which is `contacts/c1` in
@@ -379,7 +380,7 @@ slop docs ls poll votes -o table
 | `_stores is not open to this app` | No `stores` in the manifest, or the `stores` policy cell is off for the viewer's audience | Add `"stores": "view"`; `slop policy set <app> stores @member on` |
 | The 65th subscription stops with `resource_exhausted` | 64 live subscriptions per view | Unsubscribe; subscribe to a collection instead of many documents |
 | The owner cannot write a path | The rule says `write: "self"`, or `_stores` ceiling is `view` | Write it in an actor action, or raise the level |
-| `push` fails: `the rule at "x" must set both read and write` | A `{self}` rule below a rule that sets only one level | Give the prefix rule both `read` and `write` |
+| `slop app status` shows `broken: … the rule at "x" must set both read and write` | A `{self}` rule below a rule that sets only one level | Give the prefix rule both `read` and `write` |
 
 ## See Also
 

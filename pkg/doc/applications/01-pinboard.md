@@ -168,7 +168,7 @@ from their own budget. Both need:
 
 Missing pieces show as: the panel offering only the console; `board ask`
 failing with `unavailable: this board's agent is off: an admin must allow
-sample for the pinboard app`; `sampling_disabled` or `no LLM access` for a
+sample for the pinboard app`; `no LLM access` for a
 person without access. With `slop serve --llm fake`, `board ask` answers
 `The browser tool completed successfully.` (the fake calls the first tool
 once), and in the panel a message `/tool eval {"code":"return 6 * 7"}` runs a

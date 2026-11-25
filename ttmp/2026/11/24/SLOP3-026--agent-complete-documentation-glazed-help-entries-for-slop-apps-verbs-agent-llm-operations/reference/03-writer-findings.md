@@ -117,3 +117,22 @@ triaged.
 | # | Finding | Kind | Status |
 | --- | --- | --- | --- |
 | H-1 | a bare `- on` in frontmatter `Commands:` is a YAML bool; Glazed's parser panics (`interface {} is bool, not string`) and the binary died at startup | bug | fixed: quoted; `AddDocToHelpSystem` recovers; doc_test catches it |
+
+## Cross-page review (fresh reviewer, after all writers)
+
+All fixed in the pages unless marked: push never validates `app.json` (the
+store goes `broken`, `app status` shows it; five pages said "fails the push");
+the static host has no runtime (`window.claude` undefined; four pages said
+`use()` is null or `user` anonymous); a mount without `--api` serves every
+route; refused routes are 404 (no level, unlisted) or 403 (level too low);
+a rule-refused page write is `invalid_argument`; an actor's sample off for the
+audience is `permission_denied: this app may not use sample for <audience>`;
+`mount.set`/`mount.routes` are admin-only; `explain can --action` checks
+platform floors and `--subject` is for platform admins; `error:` prefix;
+`agent`/`sample` go to any viewer with an id (guests with `vis_` included);
+group nesting is `@admin ⊆ @subscriber ⊆ @member ⊆ @guest` (written backwards
+on three pages, including my overview); wrong See Also targets (aliases,
+vendor); mount paths take any literal segments; guests reach at most
+`interact`; `policy ls` `default: true` means "no row"; who may `bind set`;
+which diagnostics need admin (troubleshooting table). Code doc strings fixed:
+`whoami` (no audience), `serve --test` (only the fake LLM), config comment.

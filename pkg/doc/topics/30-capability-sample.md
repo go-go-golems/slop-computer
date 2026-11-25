@@ -73,8 +73,8 @@ capability resolved.
 
 `claude.use('sample')` resolves the callable function, or `null`. It is
 `null` when the app does not declare `sample`, when the policy cell is off
-for the viewer's audience, on a static host, or when the page is not running
-in a slop view.
+for the viewer's audience, or when the page is not running in a slop view.
+On the static host there is no runtime at all: `window.claude` is undefined.
 
 A non-`null` function does **not** mean the viewer may spend: the person may
 have no LLM access, an empty budget, or the server may have no backend. Ask
@@ -291,7 +291,7 @@ defineActor({
 Actor tools are `{name, description, inputSchema, execute}`; each `execute`
 runs as a new turn of the same event, so its writes commit, and it has 60 s
 to settle. A whole actor call has 3 minutes. Refusals throw actor errors with
-the codes `not_granted`, `permission_denied` (no LLM access), `quota_exceeded`,
+the codes `permission_denied` (`this app may not use sample for <audience>`: the policy cell is off; or no LLM access), `quota_exceeded`,
 `invalid_argument`, `prompt_too_large` and `unavailable` (no backend, or the
 provider failed).
 

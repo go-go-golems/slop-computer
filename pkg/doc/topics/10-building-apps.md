@@ -156,8 +156,8 @@ the store. See `slop help llm-access`.
 These come from the apps that ship with slop (Pinboard, the catalog, the
 examples) and were each learned the hard way.
 
-- **Check the visitor before offering writes.** A guest has an id but only
-  `view`. Read `await (await claude.use('user')).me()` (or
+- **Check the visitor before offering writes.** A guest has an id and at most
+  `interact` (often only `view`, as with a `@guest view` grant). Read `await (await claude.use('user')).me()` (or
   `slop.visitor()`, which gives `{id, name, audience, level, guest,
   subscribed, llm}`) and offer `slop.signIn()` instead of a form the store
   will refuse.

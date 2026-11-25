@@ -62,7 +62,7 @@ Each verb has an **effect**, shown by `slop verbs`:
 Admin-only verbs also need the admin role and a token with the `admin`
 scope: `people.*`, `policy.*`, `llm.ls/set/rm/reset`, `secret.*`,
 `sql.query`, `sql.exec`, `app.follow`, `app.trust`, `app.untrust`,
-`mount.rm`, `mount.undo`, `store.type`, `log.system`, `guest.sweep`,
+`mount.set`, `mount.routes`, `mount.rm`, `mount.undo`, `store.type`, `log.system`, `guest.sweep`,
 `sub.grant/ls/revoke`. Their doc line usually says "(admins)".
 
 ## Arguments: positional, flags, and --json
@@ -124,7 +124,7 @@ The result goes to stdout; choose the format with `-o` / `--output`:
 | `json` | The result as indented JSON; numbers keep every digit. Use it to parse. |
 | `table` | A list of objects as columns (headers upper-cased, columns sorted, cells cut at 60 characters). Anything else prints as YAML. |
 
-An unknown `-o` value prints YAML, without an error.
+An unknown `-o` value is refused before the verb runs: `invalid_argument: -o "csv": the formats are yaml, json and table`.
 
 Messages that are not the result go to stderr: device-login prompts,
 `eval` console output, the parts of a `stream` verb as they arrive, and the
@@ -267,7 +267,7 @@ call verbs underneath and follow the same output and error rules.
 | `slop push <dir>` | Replace a store's tree with a folder and snapshot it onto a ref (default `main`); only missing bytes are sent | `store-data`, `deploying-apps` |
 | `slop pull <store> <dir>` | Write a store's tree (default `--at main`) into a folder | `store-data` |
 | `slop dev <dir>` | Push a folder to an app's `draft` on every change and run it in your dev instance | `deploying-apps` |
-| `slop vendor add/rm` | Add npm packages to an app as pinned, checked files | `building-apps` |
+| `slop vendor add/rm` | Add npm packages to an app as pinned, checked files | `deploying-apps` |
 | `slop on <store> …` | Run the command-line verbs of the app a store runs | `using-app-verbs` |
 | `slop import docs/table/files/folder` | Load CSV, JSONL, JSON or an exported folder | `store-data` |
 | `slop store export <id> --folder <dir>` | Write a store as a folder | `store-data` |
