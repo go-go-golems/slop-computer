@@ -434,7 +434,7 @@ $ slop rsvp party answers ls --coming --format json
 ]
 ```
 
-App verbs take `--format` (table, json, jsonl, csv, tsv, yaml), not `-o`.
+App verbs take `--format` (table, json, jsonl, csv, tsv, yaml); `-o json` means the same.
 The documents themselves are readable with the document verbs:
 
 ```bash

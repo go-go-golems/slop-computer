@@ -18,6 +18,16 @@ import (
 
 // declaredPolicyCaps are the policy capabilities an app's current version
 // declares: matrix rows appear only for those (guide §8.2).
+// policyApp refuses a store that runs another app: policy belongs to the
+// app store, and cells set on an instance are never consulted. A persona
+// agent read an instance's all-off matrix as the app's (SLOP3-026, round 2).
+func (e policyEnv) policyApp(ctx context.Context, id string) error {
+	if r, err := e.K.Running(ctx, id); err == nil && r.App != "" && r.App != id {
+		return verbs.Errf("invalid_argument", "%s runs the app %s; policy belongs to the app: slop policy ls %s", id, r.App, r.App)
+	}
+	return nil
+}
+
 func (e policyEnv) declaredPolicyCaps(ctx context.Context, app string) ([]string, *apps.Manifest) {
 	r, err := e.K.Running(ctx, app)
 	if err != nil || r.Manifest == nil {
@@ -66,6 +76,9 @@ func policyVerbs(e policyEnv) []*verbs.Verb {
 		verbs.Def[PolicyLsIn, PolicyLsOut]{Name: "policy.ls", Doc: "Show an app's policy matrix: which policy capabilities each audience may use.", Scope: verbs.Read, AdminOnly: true, Action: authz.PlatformAdmin,
 			Run: func(req verbs.Req, in PolicyLsIn) (PolicyLsOut, error) {
 				ctx := req.Context
+				if err := e.policyApp(ctx, in.App); err != nil {
+					return PolicyLsOut{}, err
+				}
 				caps, m := e.declaredPolicyCaps(ctx, in.App)
 				if m == nil {
 					return PolicyLsOut{}, verbs.Errf("not_found", "%s is not an app (no app.json)", in.App)
@@ -77,6 +90,9 @@ func policyVerbs(e policyEnv) []*verbs.Verb {
 			Run: func(req verbs.Req, in PolicySetIn) (PolicySetOut, error) {
 				ctx := req.Context
 				p := req.Principal
+				if err := e.policyApp(ctx, in.App); err != nil {
+					return PolicySetOut{}, err
+				}
 				caps, m := e.declaredPolicyCaps(ctx, in.App)
 				if m == nil {
 					return PolicySetOut{}, verbs.Errf("not_found", "%s is not an app (no app.json)", in.App)

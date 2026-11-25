@@ -393,8 +393,8 @@ at,n,name
   into rows: an array gives one row per element, an object one row, a plain
   value one row with a `value` column. `--format table|json|jsonl|csv|tsv|yaml`
   chooses the form, `--output-fields a,b` the columns. An empty array prints
-  nothing. The CLI's own `-o` does not apply here: `-o json` fails with
-  `unknown shorthand flag: 'o'`.
+  nothing. `-o json` and `--output json` are read as `--format json`, as on
+  the rest of the CLI (unless the verb has its own `output` field).
 - **Text** (`output: "text"`). The returned string is printed as is, and
   there is no `--format` flag (`unknown flag: --format`). Use it for answers
   meant to be read, such as Pinboard's `board ask` and `board describe`.
@@ -434,7 +434,6 @@ each push.
 | `unknown flag: --x` | The flag name differs (kebab case), or the field is positional | `slop on <store> <words> --help` |
 | `accepts between 1 and 1 arg(s), received 0` | A positional argument is missing | Give it, or give the field a `default` |
 | `unknown flag: --format` | The verb has `output: "text"` | It prints text only |
-| `unknown shorthand flag: 'o'` | App verbs use `--format`, not `-o` | `--format json` |
 | `Invalid module` | `require` of a Node module or a file outside `include` | Verbs have only `slop`; add shared files to `include` |
 | `this command runs on <store> only` | `board()` was given another store | A verb works on the store on its command line only |
 | `is a file field, which reads files` | A file-reading field type | Take the content as a string flag |

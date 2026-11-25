@@ -108,8 +108,8 @@ error: accepts between 1 and 1 arg(s), received 0
 - Flag names are kebab case: a field `orderBy` is `--order-by`.
 - List flags repeat or take commas: `--tags a --tags b` = `--tags a,b`.
 - `--format table|json|jsonl|csv|tsv|yaml` chooses the output of verbs that
-  return rows (`--output-fields` picks columns). The CLI's global `-o` is not
-  accepted here (`unknown shorthand flag: 'o'`).
+  return rows (`--output-fields` picks columns). `-o json` works too: on an
+  app verb it means `--format json`.
 - Verbs that print text (Pinboard's `board ask`, `board describe`) have no
   `--format` (`unknown flag: --format`). Their help shows no `--format` flag.
 - A verb that returns nothing prints nothing.
@@ -202,7 +202,6 @@ command is never added: use `slop on` for that app.
 | `… which ships no command-line verbs` | The app has no `slop.verbs` | Use the app's pages or `slop call <store> <action>` |
 | `unknown flag: --x` / `accepts between 1 and 1 arg(s)` | A positional argument given as a flag, or missing | Read the usage line: `<name>` is positional |
 | `unknown flag: --format` | A text verb | It prints text only |
-| `unknown shorthand flag: 'o'` | `-o` is not an app-verb flag | `--format json` |
 | `permission_denied: … needs interact; you have view` | Your level on that store | `slop explain can <store> interact`; ask the owner for a grant |
 | `<app>@N's verbs: …` | The app's verb files have an error | Tell the app's author; `slop call <store> <action>` still works |
 | Old verbs after a push | The store does not follow `main`, or the push went to another ref | `slop app status <store>` shows the snapshot it runs |

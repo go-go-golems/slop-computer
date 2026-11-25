@@ -254,6 +254,30 @@ func hideGlazedFlags(c *cobra.Command) {
 	}
 }
 
+// outputAsFormat reads slop's -o/--output as Glazed's --format on an app
+// verb that has --format and no output flag of its own: the rest of the CLI
+// takes -o json, and two persona agents typed it here (SLOP3-026, R-14).
+func outputAsFormat(parent *cobra.Command, args []string) []string {
+	target, _, err := parent.Find(args)
+	if err != nil || target == nil || target.Flags().Lookup("format") == nil || target.Flags().Lookup("output") != nil {
+		return args
+	}
+	out := make([]string, 0, len(args))
+	for _, a := range args {
+		switch {
+		case a == "-o" || a == "--output":
+			out = append(out, "--format")
+		case strings.HasPrefix(a, "--output="):
+			out = append(out, "--format="+strings.TrimPrefix(a, "--output="))
+		case strings.HasPrefix(a, "-o") && len(a) > 2 && !strings.HasPrefix(a, "--"):
+			out = append(out, "--format="+strings.TrimPrefix(strings.TrimPrefix(a, "-o"), "="))
+		default:
+			out = append(out, a)
+		}
+	}
+	return out
+}
+
 // Lookup finds a verb by its command path ("clip add", or "add" at the top).
 func Lookup(reg *jsverbs.Registry, fullPath string) (*jsverbs.VerbSpec, bool) {
 	for _, v := range reg.Verbs() {
@@ -315,6 +339,7 @@ func Execute(ctx context.Context, src *Source, c Caller, b Board, use []string, 
 		return err
 	}
 	hideGlazedFlags(parent)
+	args = outputAsFormat(parent, args)
 	top.SetArgs(append(append([]string{}, use[1:]...), args...))
 	top.SetOut(stdout)
 	top.SetErr(stderr)

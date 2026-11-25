@@ -78,6 +78,10 @@ func TestActors(t *testing.T) {
 	if row := h.call(admin, "store.new", map[string]any{"id": "t3", "app": "tracker", "type": "other"}).(map[string]any); row["type"] != "other" {
 		t.Fatalf("store.new --type = %v", row)
 	}
+	// Policy belongs to the app: an instance is refused, naming it.
+	if e := h.fail(admin, "policy.ls", map[string]any{"app": "t2"}, "invalid_argument"); !strings.Contains(e["message"].(string), "slop policy ls tracker") {
+		t.Fatalf("policy.ls on an instance = %v", e)
+	}
 	// Migration and setup ran in activation.
 	rows := h.call(admin, "sql.query", map[string]any{"store": "tracker", "sql": "SELECT title FROM tasks"}).([]any)
 	if len(rows) != 1 || rows[0].(map[string]any)["title"] != "welcome" {

@@ -178,7 +178,7 @@ func runAppVerbs(cmd *cobra.Command, name string, alias *aliasInfo, args []strin
 		return err
 	}
 	if len(src.Files) == 0 {
-		return fmt.Errorf("%s runs %s, which ships no command-line verbs", board.ID, src.App)
+		return fmt.Errorf("%s runs %s, which ships no command-line verbs: they are verbs/*.js files in the app's own tree (slop pull %s <dir>, add them and a slop.verbs block to app.json, slop push), see slop help app-verbs", board.ID, src.App, src.App)
 	}
 	rememberAlias(dir, src.Alias, aliasInfo{App: src.App, Type: src.Type, Title: src.Title})
 	label := board.ID

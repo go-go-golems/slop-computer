@@ -256,3 +256,20 @@ func TestVerbHelpShowsArguments(t *testing.T) {
 		t.Fatalf("help: %v\n%s", err, h)
 	}
 }
+
+// -o json works on an app verb as it does on the rest of the CLI (R-14).
+func TestVerbTakesDashO(t *testing.T) {
+	src := &Source{Store: "s-1", Type: "t", App: "t", Snapshot: 1, Alias: "tl", Files: []File{
+		{Path: "verbs/index.js", Source: "function ls() { return [{a:1}] }\n__verb__(\"ls\", { short: \"List\" });\n"},
+	}}
+	for _, flag := range [][]string{{"-o", "json"}, {"--output=json"}, {"-ojson"}} {
+		var errw bytes.Buffer
+		out, err := stdout(t, func() error {
+			return Execute(context.Background(), src, &fake{}, Board{ID: "s-1", Title: "T", Type: "t", App: "t"},
+				[]string{"slop", "tl", "T"}, "t's verbs", append([]string{"ls"}, flag...), &errw, &errw)
+		})
+		if err != nil || !strings.Contains(out, `"a": 1`) {
+			t.Fatalf("%v: %v %q %s", flag, err, out, errw.String())
+		}
+	}
+}

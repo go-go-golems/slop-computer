@@ -205,3 +205,18 @@ Agent behaviour the judge caught (not slop's fault, but the help can make the
 right path cheaper): changes nobody asked for in llm-budget (capped `@admin`,
 changed a read rule, made a test member), live writes in the skeptic run,
 verification claimed but not shown in todo-roles and csv.
+
+### Round 2 (same nine scenarios, the binary with the round-1 fixes)
+
+All 9 met every check again. Against round 1: commands 375 → 313, source
+probes 16 → 4 (tally-verb 13 → 0, 41 → 22 commands, efficiency 2 → 4),
+static-site 28 → 13 commands and goal 4 → 5, todo-roles honesty 3 → 4,
+skeptic honesty 4 → 5. Worse: pinboard-json grounding and honesty 5 → 3 (an
+invented board-title answer), llm-budget still capped `@admin` unasked.
+
+| # | Finding | Fix | Status |
+| --- | --- | --- | --- |
+| R-14 | `slop pb kitchen clip ls -o json` → `unknown shorthand flag: 'o'` (2 runs over 2 rounds) | app verbs read `-o`/`--output` as `--format` unless the verb has its own `output` field; 4 pages | fixed |
+| R-17 | `policy ls guestbook` (an instance) showed an all-off matrix that looked authoritative | `policy ls`/`set` on an instance: `guestbook runs the app guestbook-app; policy belongs to the app: slop policy ls guestbook-app` | fixed |
+| R-18 | `scores runs tally, which ships no command-line verbs` gave no next step | it says where verbs live and how to add them, and names the page | fixed |
+| S-1 | the broken-manifest agent chased a "blank page" the server contradicted (the last good snapshot kept serving); its debrief blamed the new `app status` wording, which the code shows is right | scenario opening corrected ("the change never showed up"); the debrief claim rejected | fixed (scenario) |
