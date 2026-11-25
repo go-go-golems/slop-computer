@@ -351,7 +351,7 @@ func TestAlarmFireAtAndLastRun(t *testing.T) {
 	h.push(admin, map[string]any{"store": "digest", "files": files(map[string]string{
 		"app.json": `{"title":"Digest","actor":"actor.js","capabilities":{"db":{}}}`,
 		"actor.js": `const db = use('db'); defineActor({ every: {
-		  morning: { every: 'CRON_TZ=Europe/Berlin 0 7 * * *', run(ctx) { db.doc('m/last').set({ now: ctx.now }); } },
+		  morning: { every: 'CRON_TZ=Europe/Berlin 0 7 * * *', run(ctx) { db.doc('m/last').set({ now: ctx.now, date: Date.now() }); } },
 		  bad: { every: '1h', run() { throw new Error('boom'); } },
 		} });`,
 	})})
@@ -378,6 +378,9 @@ func TestAlarmFireAtAndLastRun(t *testing.T) {
 	seen := time.UnixMilli(int64(d["body"].(map[string]any)["now"].(float64))).In(time.FixedZone("CET", 3600))
 	if seen.Hour() != 7 || seen.Minute() != 0 {
 		t.Fatalf("ctx.now = %v", seen)
+	}
+	if body := d["body"].(map[string]any); body["date"] != body["now"] {
+		t.Fatalf("Date.now() %v != ctx.now %v", body["date"], body["now"])
 	}
 	// A failing handler: fire says so, and ls keeps the error.
 	if out := h.call(admin, "alarm.fire", map[string]any{"store": "digest", "name": "bad"}).(map[string]any); out["status"] != "failed" || !strings.Contains(out["error"].(string), "boom") {

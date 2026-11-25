@@ -2,7 +2,6 @@ package commands
 
 import (
 	"context"
-	"encoding/json"
 	"errors"
 	"fmt"
 	"slices"
@@ -47,16 +46,9 @@ func mountVerbs(e mountEnv) []*verbs.Verb {
 						}
 					}
 				}
-				// Flat rows, the shape mount set answers with, plus kind and
-				// url (round js-2: the nested "mount" made -o table print
-				// truncated JSON and cost a wrong jq query).
 				out := []map[string]any{}
 				for _, m := range ms {
-					row := map[string]any{}
-					b, _ := json.Marshal(m)
-					_ = json.Unmarshal(b, &row)
-					row["kind"], row["url"] = e.Cfg.HostKind(m.Host), e.Cfg.Origin(m.Host)+m.Path
-					out = append(out, row)
+					out = append(out, map[string]any{"mount": m, "kind": e.Cfg.HostKind(m.Host), "url": e.Cfg.Origin(m.Host) + m.Path})
 				}
 				return out, nil
 			}}.Verb(),

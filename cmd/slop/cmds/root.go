@@ -222,6 +222,29 @@ func mdEscape(s string) string {
 	return b.String()
 }
 
+// groupShort says what a command group is for and which help page explains
+// it ("The alarm verbs" sent an agent to read a long page to learn what an
+// alarm is: round js-2).
+var groupShort = map[string]string{
+	"actor":   "A store's actor (actor.js): call its actions (slop help actors)",
+	"alarm":   "Scheduled jobs of a store's actor: list them, run one now or as of a time (slop help alarms)",
+	"app":     "The app a store runs: status, logs, restart, verbs, trust (slop help deploying-apps)",
+	"bind":    "Read aliases: let a store's actor and pages read another store (slop help store-data)",
+	"docs":    "A store's JSON documents (slop help store-data)",
+	"explain": "Why someone can or cannot do something on a store (slop help access-control)",
+	"files":   "A store's file tree and uploads (slop help store-data)",
+	"grant":   "Who has which level on a store: view, interact, admin (slop help access-control)",
+	"import":  "Load CSV, JSON or a folder into a store (slop help store-data)",
+	"link":    "Share links that give a level on a store (slop help access-control)",
+	"llm":     "LLM access and budgets (slop help llm-access)",
+	"log":     "A store's commits: what changed, by whom, via what (slop help store-data)",
+	"mount":   "Where stores are served: host and path (slop help deploying-apps)",
+	"policy":  "An app's capability policy per audience (slop help access-control)",
+	"ref":     "A store's refs: which snapshot main and others point at (slop help deploying-apps)",
+	"sql":     "A store's SQL tables: query, schema (slop help store-data)",
+	"store":   "Stores: list, make, show one, settings (slop store show <store> answers most questions)",
+}
+
 // addVerbCommands makes `slop <group> <verb>` for every verb.
 func addVerbCommands(root *cobra.Command) {
 	groups := map[string]*cobra.Command{}
@@ -234,7 +257,11 @@ func addVerbCommands(root *cobra.Command) {
 		}
 		g, ok := groups[v.Group()]
 		if !ok {
-			g = &cobra.Command{Use: v.Group(), Short: "The " + v.Group() + " verbs"}
+			short := groupShort[v.Group()]
+			if short == "" {
+				short = "The " + v.Group() + " verbs"
+			}
+			g = &cobra.Command{Use: v.Group(), Short: short}
 			groups[v.Group()] = g
 			root.AddCommand(g)
 		}
@@ -276,8 +303,22 @@ func verbCommand(v *verbs.Verb) *cobra.Command {
 					return fmt.Errorf("--json: %w", err)
 				}
 			}
+			// A positional given as a flag leaves its slot to the next
+			// argument: preview url dash --at main <parent> put the parent
+			// in at's slot and then lost it to --at (round js-1). With more
+			// arguments than free slots, they fill the slots in order.
+			slots := pos
+			free := []verbs.Arg{}
+			for _, a := range pos {
+				if !cmd.Flags().Changed(a.Name) {
+					free = append(free, a)
+				}
+			}
+			if len(args) <= len(free) {
+				slots = free
+			}
 			for i, s := range args {
-				in[pos[i].Name] = convert(pos[i], s)
+				in[slots[i].Name] = convert(slots[i], s)
 			}
 			for _, a := range v.Args {
 				if cmd.Flags().Changed(a.Name) {

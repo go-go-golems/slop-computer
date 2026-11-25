@@ -289,7 +289,7 @@ func actorVerbs(e actorEnv) []*verbs.Verb {
 				}
 				return e.K.Registry.Bindings(ctx, in.Store)
 			}}.Verb(),
-		verbs.Def[BindSetIn, registry.Binding]{Name: "bind.set", Doc: "Point a store's read alias at another store (grant store:<store> view there for actors); with --prefix, also map it into the store's pages' db: <alias>/… reads the target's <prefix>/… as the viewer, at most at --level.", Scope: verbs.Write, Action: authz.StoreAdmin,
+		verbs.Def[BindSetIn, registry.Binding]{Name: "bind.set", Doc: "Point a store's read alias at another store (grant store:<store> view there for actors); with --prefix, also map it into the store's pages' db: <alias>/… reads the target's <prefix>/… as the viewer, at most at --level. --prefix needs the viewer to hold a grant on the target, which lets them read those records anywhere: for totals of records viewers must not see, read them in the actor (slop help capability-db).", Scope: verbs.Write, Action: authz.StoreAdmin,
 			Run: func(req verbs.Req, in BindSetIn) (registry.Binding, error) {
 				ctx := req.Context
 				p := req.Principal

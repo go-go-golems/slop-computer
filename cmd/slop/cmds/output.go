@@ -63,6 +63,7 @@ func normalize(v any) any {
 var leadCols = []string{"id", "name", "store", "host", "path", "url", "app", "type", "kind", "level", "subject", "next", "in", "every", "zone", "last", "lastOk"}
 
 func printTable(rows []any) error {
+	rows = spread(rows)
 	cols := []string{}
 	seen := map[string]bool{}
 	present := map[string]bool{}
@@ -123,4 +124,33 @@ func cell(v any) string {
 		s = s[:57] + "..."
 	}
 	return s
+}
+
+// spread lifts the fields of a nested object into its row, for a table:
+// mount ls rows are {kind, mount: {host, path, store, …}, url}, and the
+// MOUNT column showed a truncated object (round js-2). A field the row
+// already has keeps the row's value.
+func spread(rows []any) []any {
+	out := make([]any, len(rows))
+	for i, r := range rows {
+		m, ok := r.(map[string]any)
+		if !ok {
+			out[i] = r
+			continue
+		}
+		flat := map[string]any{}
+		for k, v := range m {
+			if inner, ok := v.(map[string]any); ok && len(inner) > 0 {
+				for ik, iv := range inner {
+					if _, has := m[ik]; !has {
+						flat[ik] = iv
+					}
+				}
+				continue
+			}
+			flat[k] = v
+		}
+		out[i] = flat
+	}
+	return out
 }

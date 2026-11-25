@@ -298,7 +298,7 @@ func (a *Actor) load(files map[string][]byte, entry string, src []byte) error {
 	_ = g.Set("console", console)
 	_ = g.Set("__slopNow", func() int64 {
 		if a.cur != nil {
-			return a.cur.t.Now
+			return a.cur.now() // with alarm fire --at, the time given
 		}
 		return time.Now().UnixMilli()
 	})
