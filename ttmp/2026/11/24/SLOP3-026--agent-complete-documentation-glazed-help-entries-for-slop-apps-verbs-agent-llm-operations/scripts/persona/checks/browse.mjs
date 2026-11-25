@@ -64,9 +64,17 @@ export async function frameText(pg) {
   for (const f of pg.frames()) {
     // innerText leaves out what fields hold: a page may show its data as
     // editable values (js-1's inventory showed every shelf in an input).
-    try { out.push(await f.evaluate(() => !document.body ? '' : document.body.innerText + '\n' +
-      [...document.querySelectorAll('input:not([type=hidden]):not([type=file]):not([type=checkbox]):not([type=radio]), textarea, select')]
-        .map((e) => e.value).filter(Boolean).join('\n'))); } catch {}
+    // Each value is put beside its field for the read, so "anchors" and its
+    // quantity stay on one line (js-4: appended at the end, they were 200
+    // characters apart and a right page failed).
+    try { out.push(await f.evaluate(() => {
+      if (!document.body) return '';
+      const marks = [...document.querySelectorAll('input:not([type=hidden]):not([type=file]):not([type=checkbox]):not([type=radio]):not([type=submit]):not([type=button]), textarea, select')]
+        .filter((e) => e.value).map((e) => { const m = document.createElement('span'); m.textContent = ' ' + e.value + ' '; e.after(m); return m; });
+      const t = document.body.innerText;
+      marks.forEach((m) => m.remove());
+      return t;
+    })); } catch {}
   }
   return out.join('\n').replace(/\n{3,}/g, '\n\n');
 }

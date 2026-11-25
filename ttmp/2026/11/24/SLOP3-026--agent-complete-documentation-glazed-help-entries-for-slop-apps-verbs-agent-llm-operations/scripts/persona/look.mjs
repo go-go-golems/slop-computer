@@ -89,7 +89,12 @@ for (const a of actions) {
   try {
     if (a.as) { if (!(a.as in WHO)) { problems.push(`nobody called "${a.as}"; use me, colleague or guest`); continue; } cur = await person(a.as); continue; }
     if (a.open !== undefined) {
-      const u = /^https?:/.test(a.open) ? a.open.replace(/^https?:\/\/[^/]+/, LIVE) : LIVE + (a.open.startsWith('/') ? '' : '/') + a.open;
+      // The server's own hosts (main: back office and sign-in; static; live)
+      // stay as given; any other host is read as a path on the live host.
+      // js-4: every address went to the live host, so the back office at
+      // slop.localhost/ answered "Not found" and the judge blamed the agent.
+      const own = new RegExp(`^https?://(slop|apps|site)\\.localhost:${PORT}(/|$)`);
+      const u = /^https?:/.test(a.open) ? (own.test(a.open) ? a.open : a.open.replace(/^https?:\/\/[^/]+/, LIVE)) : LIVE + (a.open.startsWith('/') ? '' : '/') + a.open;
       if (!cur.page) {
         cur.page = await cur.ctx.newPage();
         cur.page.on('download', (d) => cur.downloads.push(d));
