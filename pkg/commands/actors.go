@@ -514,7 +514,7 @@ func alarmRows(rows []map[string]any, now time.Time) []map[string]any {
 		loc := actor.ScheduleZone(spec)
 		at := time.UnixMilli(toMillis(r["at"])).In(loc)
 		o := map[string]any{"name": r["name"], "at": r["at"], "every": r["every"], "running": r["running"],
-			"next": at.Format("2006-01-02 15:04 MST"), "zone": loc.String(), "in": until(at.Sub(now))}
+			"next": at.Format("2006-01-02 15:04 MST"), "zone": actor.ZoneName(loc), "in": until(at.Sub(now))}
 		if r["last_at"] != nil {
 			last := time.UnixMilli(toMillis(r["last_at"])).In(loc)
 			o["last"] = last.Format("2006-01-02 15:04 MST")

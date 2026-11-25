@@ -6,7 +6,9 @@ import (
 	"errors"
 	"fmt"
 	"log"
+	"os"
 	"path"
+	"path/filepath"
 	"slices"
 	"sort"
 	"strconv"
@@ -910,6 +912,32 @@ func ScheduleZone(spec string) *time.Location {
 		}
 	}
 	return time.Local
+}
+
+// ZoneName is a zone's IANA name; for the server's own zone (time.Local,
+// whose String is "Local") the name from $TZ or /etc/localtime, else its
+// abbreviation and offset (EST, UTC-05:00).
+func ZoneName(loc *time.Location) string {
+	if loc != time.Local {
+		return loc.String()
+	}
+	if tz := strings.TrimPrefix(os.Getenv("TZ"), ":"); tz != "" {
+		return tz
+	}
+	if p, err := filepath.EvalSymlinks("/etc/localtime"); err == nil {
+		if _, name, ok := strings.Cut(p, "zoneinfo/"); ok {
+			return name
+		}
+	}
+	name, off := time.Now().Zone()
+	return fmt.Sprintf("%s, UTC%+03d:%02d", name, off/3600, abs(off%3600)/60)
+}
+
+func abs(n int) int {
+	if n < 0 {
+		return -n
+	}
+	return n
 }
 
 // afterTurn refreshes a store's schedule when a turn touched its alarms.

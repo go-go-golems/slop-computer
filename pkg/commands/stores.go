@@ -40,7 +40,24 @@ func storeVerbs(e kernelEnv) []*verbs.Verb {
 				out := []map[string]any{}
 				for _, r := range rows {
 					d := e.K.Access.Level(ctx, p, r)
-					out = append(out, map[string]any{"id": r.ID, "type": r.Type, "app": r.App, "owner": r.Owner,
+					// kind says what the blank APP column meant (round js-2: a
+					// store that is its own app looked like plain content);
+					// app keeps its meaning, the app store an instance runs.
+					// A store made without --type takes its app.json's type.
+					// Peek does not activate.
+					kind, typ := "instance", r.Type
+					if r.App == "" {
+						kind = "content"
+					}
+					if run, err := e.K.Peek(ctx, r.ID); err == nil && run.Manifest != nil {
+						if r.App == "" {
+							kind = "app"
+						}
+						if typ == "" {
+							typ = run.Manifest.Type
+						}
+					}
+					out = append(out, map[string]any{"id": r.ID, "kind": kind, "type": typ, "app": r.App, "owner": r.Owner,
 						"createdAt": r.CreatedAt, "level": d.LevelName()})
 				}
 				return out, nil
@@ -107,7 +124,8 @@ func storeVerbs(e kernelEnv) []*verbs.Verb {
 				row, _ := e.K.Registry.StoreByID(ctx, s.ID)
 				colls, _ := s.Collections(ctx)
 				refs, _ := s.Refs(ctx)
-				return StoreMetaOut{Store: row, Meta: s.AllMeta(), Head: s.Head(), Docs: s.CountDocs(ctx), Collections: colls, Refs: refs, Level: d.LevelName(), Audience: d.Audience}, nil
+				tables, _ := s.AppTables(ctx)
+				return StoreMetaOut{Store: row, Meta: s.AllMeta(), Head: s.Head(), Docs: s.CountDocs(ctx), Collections: colls, Tables: tables, Refs: refs, Level: d.LevelName(), Audience: d.Audience}, nil
 			}}.Verb(),
 		verbs.Def[GrantLsIn, []sysdb.Grant]{Name: "grant.ls", Doc: "List a store's grants.", Scope: verbs.Read, Action: authz.StoreAdmin,
 			Run: func(req verbs.Req, in GrantLsIn) ([]sysdb.Grant, error) {
@@ -305,6 +323,7 @@ type StoreMetaOut struct {
 	Meta        map[string]string `json:"meta"`
 	Refs        map[string]int64  `json:"refs"`
 	Store       sysdb.StoreRow    `json:"store"`
+	Tables      map[string]int64  `json:"tables"` // the app's SQL tables and their rows (docs: 0 is not "empty")
 }
 
 // GrantRmOut is grant.rm's result.

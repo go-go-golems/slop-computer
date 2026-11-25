@@ -658,7 +658,7 @@ func TestMountAliasTemplate(t *testing.T) {
 
 	h.call(admin, "mount.set", mount)
 	ms := h.call(admin, "mount.ls", map[string]any{"host": live}).([]any)
-	if got := ms[0].(map[string]any)["mount"].(map[string]any)["aliases"]; got == nil {
+	if got := ms[0].(map[string]any)["aliases"]; got == nil {
 		t.Fatalf("mount.ls: %v", ms)
 	}
 
@@ -685,7 +685,7 @@ func TestMountAliasTemplate(t *testing.T) {
 	h.call(admin, "mount.set", mount)
 	h.call(admin, "mount.undo", map[string]any{"host": live, "path": "/d/:id"})
 	ms = h.call(admin, "mount.ls", map[string]any{"host": live}).([]any)
-	if got := ms[0].(map[string]any)["mount"].(map[string]any)["aliases"].([]any); len(got) != 1 {
+	if got := ms[0].(map[string]any)["aliases"].([]any); len(got) != 1 {
 		t.Fatalf("after undo: %v", ms)
 	}
 }

@@ -260,10 +260,15 @@ func verbCommand(v *verbs.Verb) *cobra.Command {
 	}
 	vals := map[string]*string{}
 	var jsonArgs string
+	var aliases []string
+	if v.Short() == "ls" {
+		aliases = []string{"list"} // slop store list (round 3, js-1): agents type it
+	}
 	cmd := &cobra.Command{
-		Use:   use,
-		Short: v.Doc,
-		Args:  cobra.MaximumNArgs(len(pos)),
+		Use:     use,
+		Aliases: aliases,
+		Short:   v.Doc,
+		Args:    cobra.MaximumNArgs(len(pos)),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			in := map[string]any{}
 			if jsonArgs != "" {

@@ -57,9 +57,27 @@ func normalize(v any) any {
 	return v
 }
 
+// leadCols come first in a table, in this order (then the rest by name):
+// what a row is before its details (round js-2: mount ls led with
+// CHANGEDAT and a truncated object).
+var leadCols = []string{"id", "name", "store", "host", "path", "url", "app", "type", "kind", "level", "subject", "next", "in", "every", "zone", "last", "lastOk"}
+
 func printTable(rows []any) error {
 	cols := []string{}
 	seen := map[string]bool{}
+	present := map[string]bool{}
+	for _, r := range rows {
+		m, _ := r.(map[string]any)
+		for k := range m {
+			present[k] = true
+		}
+	}
+	for _, k := range leadCols {
+		if present[k] {
+			seen[k] = true
+			cols = append(cols, k)
+		}
+	}
 	for _, r := range rows {
 		m, _ := r.(map[string]any)
 		keys := make([]string, 0, len(m))

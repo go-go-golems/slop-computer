@@ -452,4 +452,31 @@ func TestPointersForSQLAndActions(t *testing.T) {
 	if e := h.fail(admin, "actor.call", map[string]any{"store": "inv", "action": "add", "name": "x"}, "invalid_argument"); !strings.Contains(e["message"].(string), "--args") {
 		t.Fatalf("actor call with the action's arguments = %v", e)
 	}
+	// store show: one answer for "what is this store?"
+	show := h.call(admin, "store.show", map[string]any{"store": "inv"}).(map[string]any)
+	if show["data"].(map[string]any)["tables"].(map[string]any)["items"] != 1.0 || fmt.Sprint(show["actions"]) != "[add list]" ||
+		!strings.Contains(fmt.Sprint(show["app"].(map[string]any)["code"]), "slop pull inv") {
+		t.Fatalf("store show = %v", show)
+	}
+	// store ls: a store that is its own app says so; app keeps its meaning.
+	h.call(admin, "store.new", map[string]any{"id": "inv2", "app": "inv"})
+	kinds := map[string]string{}
+	for _, r := range h.call(admin, "store.ls", map[string]any{}).([]any) {
+		r := r.(map[string]any)
+		kinds[r["id"].(string)] = fmt.Sprint(r["kind"], " ", r["app"])
+	}
+	if kinds["inv"] != "app " || kinds["inv2"] != "instance inv" {
+		t.Fatalf("store ls kinds = %v", kinds)
+	}
+	// app status --migrations names what the newest snapshot would still run.
+	h.push(admin, map[string]any{"store": "inv", "files": files(map[string]string{
+		"app.json":          `{"title":"Inv","actor":"actor.js","capabilities":{"db":{},"storage":{}}}`,
+		"sql/001_items.sql": "CREATE TABLE items (id INTEGER PRIMARY KEY, name TEXT, qty INTEGER);",
+		"sql/002_more.sql":  "ALTER TABLE items ADD COLUMN shelf TEXT;",
+		"actor.js":          `defineActor({ actions: { add() {}, list() {} } });`,
+	})})
+	st := h.call(admin, "app.status", map[string]any{"store": "inv", "migrations": true}).(map[string]any)
+	if fmt.Sprint(st["pending"]) != "[sql/002_more.sql]" {
+		t.Fatalf("pending migrations = %v", st)
+	}
 }

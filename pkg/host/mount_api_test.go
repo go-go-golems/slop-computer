@@ -159,7 +159,7 @@ func TestMountAPIPolicy(t *testing.T) {
 	}
 	ms := h.call(admin, "mount.ls", map[string]any{"host": live}).([]any)
 	for _, x := range ms {
-		m := x.(map[string]any)["mount"].(map[string]any)
+		m := x.(map[string]any)
 		if m["path"] == "/japi" {
 			b, _ := json.Marshal(m["api"])
 			if !strings.Contains(string(b), `"maxBodyBytes":10`) || strings.Contains(string(b), "text/html") {
