@@ -61,7 +61,7 @@ func TestPinboardVerbsScan(t *testing.T) {
 		got = append(got, v.FullPath())
 	}
 	sort.Strings(got)
-	want := "board ask,board describe,board log,clip add,clip ls,clip rm,clip tag,coll insert,coll ls,coll query"
+	want := "board ask,board ask-json,board describe,board log,clip add,clip ls,clip rm,clip tag,coll insert,coll ls,coll query"
 	if strings.Join(got, ",") != want {
 		t.Fatalf("verbs: %v", got)
 	}
@@ -194,7 +194,7 @@ func TestVerbOpensNoFiles(t *testing.T) {
 	var errw bytes.Buffer
 	out, err := stdout(t, func() error {
 		return Execute(context.Background(), src, &fake{}, Board{ID: "s-1", Title: "M", Type: "maps", App: "maps"},
-			[]string{"slop", "mp", "M"}, "maps' verbs", []string{"verbs", "where", "where"}, &errw, &errw)
+			[]string{"slop", "mp", "M"}, "maps' verbs", []string{"where", "where"}, &errw, &errw)
 	})
 	if err != nil || !strings.Contains(out, "Error: x") || strings.Contains(out, "outside.ts") {
 		t.Fatalf("where: %v %q %s", err, out, errw.String())
@@ -211,9 +211,48 @@ func TestTypeScriptVerbs(t *testing.T) {
 	var errw bytes.Buffer
 	out, err := stdout(t, func() error {
 		return Execute(context.Background(), src, &fake{}, Board{ID: "s-1", Title: "N", Type: "notes", App: "notes"},
-			[]string{"slop", "nt", "N"}, "notes' verbs", []string{"verbs", "hello", "hello"}, &errw, &errw)
+			[]string{"slop", "nt", "N"}, "notes' verbs", []string{"hello", "hello"}, &errw, &errw)
 	})
 	if err != nil || strings.TrimSpace(out) != "hello ts" {
 		t.Fatalf("hello: %v %q %s", err, out, errw.String())
+	}
+}
+
+// A verb without parents is placed under its file's path inside the verbs
+// folder: verbs/index.js at the top, verbs/tally.js under "tally" (P-3).
+func TestVerbsWithoutParents(t *testing.T) {
+	src := &Source{Store: "s-1", Type: "tally", App: "tally", Snapshot: 1, Alias: "tl", Files: []File{
+		{Path: "verbs/index.js", Source: "function add(name) { return 'added ' + name }\n__verb__(\"add\", { short: \"Add one\", output: \"text\", fields: { name: { argument: true } } });\n"},
+		{Path: "verbs/tally.js", Source: "function ls() { return 'all' }\n__verb__(\"ls\", { short: \"List\", output: \"text\" });\n"},
+	}}
+	for _, c := range []struct {
+		args []string
+		want string
+	}{{[]string{"add", "bob"}, "added bob"}, {[]string{"tally", "ls"}, "all"}} {
+		var errw bytes.Buffer
+		out, err := stdout(t, func() error {
+			return Execute(context.Background(), src, &fake{}, Board{ID: "s-1", Title: "T", Type: "tally", App: "tally"},
+				[]string{"slop", "tl", "T"}, "tally's verbs", c.args, &errw, &errw)
+		})
+		if err != nil || strings.TrimSpace(out) != c.want {
+			t.Fatalf("%v: %v %q %s", c.args, err, out, errw.String())
+		}
+	}
+}
+
+// An app verb's help lists its positional arguments with their help, and
+// hides the flags Glazed adds to every command (P-4, P-8).
+func TestVerbHelpShowsArguments(t *testing.T) {
+	src := &Source{Store: "s-1", Type: "tally", App: "tally", Snapshot: 1, Alias: "tl", Files: []File{
+		{Path: "verbs/index.js", Source: "function add(name, by) { return name }\n__verb__(\"add\", { short: \"Add one\", output: \"text\", fields: { name: { argument: true, help: \"Who gets the point\" }, by: { type: \"int\", help: \"How many\" } } });\n"},
+	}}
+	var errw bytes.Buffer
+	_, err := stdout(t, func() error {
+		return Execute(context.Background(), src, &fake{}, Board{ID: "s-1", Title: "T", Type: "tally", App: "tally"},
+			[]string{"slop", "tl", "T"}, "tally's verbs", []string{"add", "--help"}, &errw, &errw)
+	})
+	h := errw.String()
+	if err != nil || !strings.Contains(h, "<name>") || !strings.Contains(h, "Who gets the point") || !strings.Contains(h, "--by") || strings.Contains(h, "print-yaml") || strings.Contains(h, "config-file") {
+		t.Fatalf("help: %v\n%s", err, h)
 	}
 }

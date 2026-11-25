@@ -246,8 +246,13 @@ How rules apply:
 - At most 64 rules. Levels are `view`, `interact`, `admin`, `owner`, `self`.
 
 The rules come from the app the store runs, at the snapshot it runs; a store
-without an app uses the defaults. They apply to pages, actors acting for a
-visitor, and the CLI alike:
+without an app uses the defaults. They apply to pages and the CLI alike. They
+do **not** apply to the store's own actor: an action writes any path, which is
+how a page makes a checked write it may not make itself (a guestbook entry
+through `sign`, with `write: "self"` on `entries`). So "can a guest write X?"
+has two answers: the rules for direct writes, and the `requires` of every
+action that writes X. An actor reading *another* store through `stores` gets
+that store's read rules at the level granted to `store:<id>`.
 
 ```text
 $ slop docs set kitchen shelves/usr_other --data '{"books":1}'
@@ -407,6 +412,27 @@ slop explain can kitchen admin --subject store:notes         # can notes' actor 
 slop explain can kitchen --subject anonymous                 # can a visitor without an id see it?
 ```
 
+
+An action of the store's actor takes the same flag: `--action sign` checks
+the action's `requires` against the subject's level, the check `actor call`,
+pages and app verbs meet before the action runs. This answers "can a guest
+add an entry?" without signing out:
+
+```text
+$ slop explain can guestbook --action sign --subject anonymous
+action: sign
+level: interact
+need: interact
+ok: true
+trace:
+    - audience guest (an anonymous visitor)
+    - grant @guest interact on guestbook (direct)
+    - action sign of guestbook's actor requires interact
+```
+
+A name that is neither a platform action nor one of the actor's fails with
+`invalid_argument` and lists the actor's actions, which is also the way to
+see them from the CLI.
 ## Troubleshooting
 
 | Problem | Cause | Solution |

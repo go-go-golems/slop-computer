@@ -28,7 +28,7 @@ what you remember about it.
 | Command | Answers | Who may run it |
 | --- | --- | --- |
 | `slop whoami` | Who you act as, on which server, with which token scopes | anyone with a login |
-| `slop explain can <store> [level]` | Your level on a store and the trace of grants and rules that decided it. Add `--path p --op write` for one document, `--action store.admin` (or another platform floor: `doc.write`, `code.push`, …) for a platform operation, `--subject usr_…`/`anonymous`/`store:<id>` for someone else | anyone, for yourself; `--subject` (someone else) is for platform admins |
+| `slop explain can <store> [level]` | Your level on a store and the trace of grants and rules that decided it. Add `--path p --op write` for one document, `--action store.admin` (or another platform floor: `doc.write`, `code.push`, …) for a platform operation, `--action sign` for an action of the store's actor (its `requires`; an unknown name lists the actor's actions), `--subject usr_…`/`anonymous`/`store:<id>` for someone else | anyone, for yourself; `--subject` (someone else) is for platform admins |
 | `slop app status <store>` | Which app and snapshot a store runs, and `broken: …` with the reason if activation failed (manifest, actor, migration). A push can succeed and still leave the store broken; this is where it shows | `view` on the store |
 | `slop app logs <store>` | The actor's recent `console.log` / `ctx.log` lines and errors | `admin` on the store |
 

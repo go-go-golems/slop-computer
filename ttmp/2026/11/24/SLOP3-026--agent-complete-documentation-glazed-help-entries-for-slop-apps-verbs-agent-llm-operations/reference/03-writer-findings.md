@@ -162,3 +162,16 @@ which diagnostics need admin (troubleshooting table). Code doc strings fixed:
 - `batch.sh`: `xargs -I` dropped the quoting; scenario and port are now arguments.
 
 With the checkers fixed, all four pilot runs met every check (guestbook 7/7, csv 2/2, tally 5/5, skeptic 2/2).
+
+### Pilot 2: the tester holds; first fixes (from the debriefs, each checked in code)
+
+| # | Finding | Fix |
+| --- | --- | --- |
+| P-3 | no way to a top-level verb; the agent disassembled the binary (26 probes) and found `__package__({name: "/"})` by accident | verb paths are read from inside the verbs folder: `verbs/index.js` without parents is the top level, `verbs/tally.js` is `tally …` (was `verbs tally …`); page updated |
+| P-4 | Glazed's `--config-file`, `--print-*` in every app verb's help | hidden (they still work) |
+| P-8 | a positional field's `help` never shown | an Arguments block in the verb's help |
+| P-9 | `explain can --action sign`: `"sign" is not an action`; two agents reverse-engineered `/_rt/rpc` to prove a guest's call | `--action` takes an actor action (its `requires`); an unknown name lists the actor's actions (closes E-10) |
+| P-10 | access-control said db rules apply to "actors acting for a visitor"; the code and the actors page say an actor's own db has no rules | access-control corrected, with the two answers to "can a guest write X?" |
+| P-11 | `import docs`: "booleans are typed" but `yes`/`no` stay strings; dates compare as strings | open (page) |
+| P-12 | `mount ls -o json` rows nest `{mount: {host, path, store}}`; an agent read `.host` as null | open (shape or page) |
+| P-13 | no way to act as a guest from the CLI | open |

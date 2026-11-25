@@ -598,6 +598,21 @@ func (a *Actor) mayCall(action string, vis Visitor) error {
 	return fail("permission_denied", "%s needs %s; you have %s", action, need, have)
 }
 
+// Requires is the level an action of a store's actor needs, and whether it
+// declared it (an action without requires needs admin). ok is false when the
+// store has no actor or no such action. explain.can reports it (SLOP3-026).
+func (m *Manager) Requires(ctx context.Context, storeID, action string) (need rt.Level, declared, ok bool) {
+	a, err := m.Get(ctx, storeID)
+	if err != nil || a == nil || !slices.Contains(a.keys("actions"), action) {
+		return rt.LevelNone, false, false
+	}
+	need, known := a.requires[action]
+	if !known {
+		need = rt.LevelAdmin
+	}
+	return need, known && !slices.Contains(a.undeclared, action), true
+}
+
 // Actions lists the actions of a store's actor.
 func (m *Manager) Actions(ctx context.Context, storeID string) []string {
 	a, err := m.Get(ctx, storeID)

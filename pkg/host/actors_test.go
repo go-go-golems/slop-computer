@@ -89,6 +89,21 @@ func TestActors(t *testing.T) {
 	if !strings.Contains(e["message"].(string), "needs interact") {
 		t.Fatalf("need = %v", e)
 	}
+	// explain.can --action answers for the actor's actions (SLOP3-026):
+	// add requires interact, slow declares nothing, so it needs admin; an
+	// unknown name lists the actor's actions.
+	ex := h.call(bob, "explain.can", map[string]any{"store": "tracker", "action": "add"}).(map[string]any)
+	if ex["ok"] != false || ex["need"] != "interact" || ex["level"] != "view" {
+		t.Fatalf("explain add = %v", ex)
+	}
+	ex = h.call(admin, "explain.can", map[string]any{"store": "tracker", "action": "slow"}).(map[string]any)
+	if ex["ok"] != true || ex["need"] != "admin" || !strings.Contains(fmt.Sprint(ex["trace"]), "declares no requires") {
+		t.Fatalf("explain slow = %v", ex)
+	}
+	e = h.fail(admin, "explain.can", map[string]any{"store": "tracker", "action": "nope"}, "invalid_argument")
+	if !strings.Contains(e["message"].(string), "add, boom, catalog") {
+		t.Fatalf("explain nope = %v", e)
+	}
 
 	// An await on real I/O ends the turn: two commits, the second later.
 	logBefore := len(h.call(admin, "log.show", map[string]any{"store": "tracker", "after": 0, "limit": 1000}).([]any))

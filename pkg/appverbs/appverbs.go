@@ -17,8 +17,10 @@ import (
 	"fmt"
 	"io"
 	"os"
+	"path"
 	"path/filepath"
 	"regexp"
+	"slices"
 	"strings"
 
 	"github.com/dop251/goja"
@@ -164,17 +166,124 @@ func scanOptions() jsverbs.ScanOptions {
 // core.js) are there for require().
 func Scan(src *Source) (*jsverbs.Registry, error) {
 	files := make([]jsverbs.SourceFile, 0, len(src.Files))
+	strip := commonDir(src.Files)
 	for _, f := range src.Files {
-		files = append(files, jsverbs.SourceFile{Path: f.Path, Source: []byte(f.Source)})
+		files = append(files, jsverbs.SourceFile{Path: strings.TrimPrefix(f.Path, strip), Source: []byte(f.Source)})
 	}
 	reg, err := jsverbs.ScanSources(files, scanOptions())
 	if err != nil {
 		return nil, err
 	}
+	if err := topLevel(reg); err != nil {
+		return nil, err
+	}
+	argumentHelp(reg)
 	if err := checkTypes(reg); err != nil {
 		return nil, err
 	}
 	return reg, nil
+}
+
+// topLevel moves the verbs of the folder's index.js that give no parents to
+// the top (jsverbs names them "index …"). Look verbs up with Lookup, not
+// reg.Verb, which still knows them by the old path.
+func topLevel(reg *jsverbs.Registry) error {
+	seen := map[string]string{}
+	for _, v := range reg.Verbs() {
+		if v.File != nil && v.File.RelPath == "index"+path.Ext(v.File.RelPath) && len(v.Parents) == 1 && v.Parents[0] == "index" {
+			v.Parents = nil
+		}
+		if other, dup := seen[v.FullPath()]; dup {
+			return fmt.Errorf("two verbs named %q (%s, %s)", v.FullPath(), other, v.SourceRef())
+		}
+		seen[v.FullPath()] = v.SourceRef()
+	}
+	return nil
+}
+
+// argumentHelp adds an Arguments block to the help of each verb with
+// positional fields: Glazed lists only flags, so a field's help for <name>
+// was never shown (SLOP3-026, P-8).
+func argumentHelp(reg *jsverbs.Registry) {
+	for _, v := range reg.Verbs() {
+		var names []string
+		for _, p := range v.Params {
+			if f := v.Fields[p.Name]; f != nil && f.Argument {
+				names = append(names, p.Name)
+			}
+		}
+		for n, f := range v.Fields {
+			if f.Argument && !slices.Contains(names, n) {
+				names = append(names, n)
+			}
+		}
+		if len(names) == 0 {
+			continue
+		}
+		var b strings.Builder
+		for _, n := range names {
+			f, help := v.Fields[n], v.Fields[n].Help
+			if help == "" {
+				help = "(no help given)"
+			}
+			if f.Required {
+				help += " (required)"
+			}
+			fmt.Fprintf(&b, "\n  %-14s %s", "<"+n+">", help)
+		}
+		long := strings.TrimSpace(v.Long)
+		if long == "" {
+			long = v.Short
+		}
+		v.Long = long + "\n\nArguments:" + b.String()
+	}
+}
+
+// glazedOnly are the flags Glazed adds to every command, which mean nothing
+// to an app verb's user (SLOP3-026, P-4). They still work; help hides them.
+var glazedOnly = []string{"config-file", "print-parsed-fields", "print-schema", "print-yaml"}
+
+func hideGlazedFlags(c *cobra.Command) {
+	for _, n := range glazedOnly {
+		if c.Flags().Lookup(n) != nil {
+			_ = c.Flags().MarkHidden(n)
+		}
+	}
+	for _, sub := range c.Commands() {
+		hideGlazedFlags(sub)
+	}
+}
+
+// Lookup finds a verb by its command path ("clip add", or "add" at the top).
+func Lookup(reg *jsverbs.Registry, fullPath string) (*jsverbs.VerbSpec, bool) {
+	for _, v := range reg.Verbs() {
+		if v.FullPath() == fullPath {
+			return v, true
+		}
+	}
+	return nil, false
+}
+
+// commonDir is the folder every verb file is in ("verbs/"), or "". A verb
+// without parents is placed under its file's path, read from inside that
+// folder: verbs/index.js puts it at the top (slop tl <store> add, see topLevel), and
+// verbs/tally.js under "tally". Read from the tree's root, the folder's name
+// came first (verbs tally add) and nothing reached the top (SLOP3-026, P-3).
+// Requires between the files stay relative, so they resolve the same.
+func commonDir(files []File) string {
+	if len(files) == 0 {
+		return ""
+	}
+	dir := path.Dir(files[0].Path)
+	for _, f := range files[1:] {
+		for dir != "." && dir != "/" && !strings.HasPrefix(f.Path, dir+"/") {
+			dir = path.Dir(dir)
+		}
+	}
+	if dir == "." || dir == "/" {
+		return ""
+	}
+	return dir + "/"
 }
 
 // Execute runs one command line (the words after the store) against a
@@ -205,6 +314,7 @@ func Execute(ctx context.Context, src *Source, c Caller, b Board, use []string, 
 	})); err != nil {
 		return err
 	}
+	hideGlazedFlags(parent)
 	top.SetArgs(append(append([]string{}, use[1:]...), args...))
 	top.SetOut(stdout)
 	top.SetErr(stderr)

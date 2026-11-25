@@ -205,7 +205,7 @@ func (e appVerbsEnv) runVerb(ctx context.Context, p *access.Principal, in AppVer
 	if err != nil {
 		return AppVerbOut{}, verbs.Errf("app_error", "%s's verbs: %v", o.App, err)
 	}
-	verb, ok := reg.Verb(strings.Join(strings.Fields(in.Verb), " "))
+	verb, ok := appverbs.Lookup(reg, strings.Join(strings.Fields(in.Verb), " "))
 	if !ok {
 		return AppVerbOut{}, verbs.Errf("not_found", "%s has no verb %q", o.App, in.Verb)
 	}

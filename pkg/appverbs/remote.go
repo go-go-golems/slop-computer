@@ -291,7 +291,7 @@ func InputSchema(reg *jsverbs.Registry, verb *jsverbs.VerbSpec, extra map[string
 // JSON, on b through c: the remote invoker. Console output goes to logs.
 // The verb is interrupted when ctx ends or after limit.
 func Run(ctx context.Context, reg *jsverbs.Registry, path string, in map[string]any, c Caller, b Board, logs io.Writer, limit time.Duration) (any, error) {
-	verb, ok := reg.Verb(path)
+	verb, ok := Lookup(reg, path)
 	if !ok {
 		return nil, verbs.Errf("not_found", "%s has no verb %q", b.App, path)
 	}

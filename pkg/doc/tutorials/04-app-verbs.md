@@ -229,7 +229,7 @@ options must be a literal object.
 | Option | Meaning |
 | --- | --- |
 | `name` | The command word (default: the function's name). Lets two groups each have an `add`. |
-| `parents` | The command path above it: `["counter"]` makes `counter add`. **Always give it.** Without it the verb is placed under the file's path: `verbs/tally.js` puts `count` at `verbs tally count`. |
+| `parents` | The command path above it: `["counter"]` makes `counter add`. Without it (or with `[]`) the verb is placed under its file's name inside the verbs folder: `verbs/tally.js` puts `count` at `tally count`, and `verbs/index.js` puts it **at the top**: `slop ty <store> count`. That is the only way to a top-level verb. |
 | `short` | One line for the command list. |
 | `long` | The help text (or use a `doc` block, below). |
 | `output` | `"glaze"` (default): the result is rows, printed by `--format`. `"text"`: the result is printed as a string, and the command has no `--format`. |
@@ -428,7 +428,8 @@ each push.
 | --- | --- | --- |
 | `unknown command "ty" for "slop"` | This machine has not learned the alias | `slop on <store> --help` once; see `slop help using-app-verbs` |
 | `<store> runs <app>, which ships no command-line verbs` | No `slop.verbs` in the running snapshot's `app.json` | Add the block, push, and check `slop app status <store>` shows the new snapshot |
-| Verbs appear under `verbs <file> …` | `parents` was not given | Add `parents: ["group"]` to each `__verb__` |
+| Verbs appear under the file's name (`tally count`) | `parents` was not given, so the file names the group | Give `parents: ["group"]`, or move the verbs to `verbs/index.js` to put them at the top |
+| A verb you want at the top (`slop ty <store> add`) is under a group | Only `verbs/index.js` without `parents` reaches the top level | Move it to `verbs/index.js` and drop `parents` |
 | `references unknown function "x"` | `__verb__`'s first argument is not a function declared in the file | Use the function's name; set the command word with `name:` |
 | `unknown flag: --x` | The flag name differs (kebab case), or the field is positional | `slop on <store> <words> --help` |
 | `accepts between 1 and 1 arg(s), received 0` | A positional argument is missing | Give it, or give the field a `default` |
