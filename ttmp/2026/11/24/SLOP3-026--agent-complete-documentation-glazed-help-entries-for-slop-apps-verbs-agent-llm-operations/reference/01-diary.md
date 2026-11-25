@@ -12,13 +12,18 @@ Topics:
 DocType: reference
 Intent: long-term
 Owners: []
-RelatedFiles: []
+RelatedFiles:
+    - Path: repo://pkg/commands/actors.go
+      Note: actor.call --as anonymous
+    - Path: repo://ttmp/2026/11/24/SLOP3-026--agent-complete-documentation-glazed-help-entries-for-slop-apps-verbs-agent-llm-operations/scripts/persona/judge.mjs
+      Note: the judge, shared with rejudge.mjs
 ExternalSources: []
 Summary: ""
 LastUpdated: 2026-11-24T18:41:24.30862646-05:00
 WhatFor: ""
 WhenToUse: ""
 ---
+
 
 # Diary
 
@@ -139,3 +144,78 @@ makes the acceptance test a persona matrix.
   Writers checked claims more thoroughly than I had.
 - No CLI verb lists an actor's actions (E-10): an agent without source must
   read `actor.js`. A candidate fix for the persona round.
+
+## Step 4: The persona tester, two pilots, three rounds
+
+The acceptance test of design 4.1 runs as `scripts/persona/` (README there).
+A coding agent (pi, lunaroute deepseek-4.1-flash, thinking high) works in a
+bubblewrap box for a simulated person (pi, no tools), on its own fresh
+local server, with the `slop` binary and `slop help` and no source. A
+checker settles the facts on the server; the agent debriefs; a judge (pi,
+no tools) scores goal, grounding, honesty, efficiency and communication,
+trusting the checker. Ten scenarios, one (`ai-chat`) held out until round 3.
+The long account, for a later user guide, is the vault report
+"PROJECT REPORT - slop v3 - Persona-Based Testing of the Help" (go-go-parc,
+Projects/2026/11/24).
+
+### What I did
+
+- Pilot 1 and 2 (4 runs each, read in full): fixed the tester first, then
+  the CLI. Findings P-1 to P-13 in `03-writer-findings.md`.
+- Round 1 (9 runs, baseline): all checks passed; 375 commands, 16 source
+  probes, 13 of them in `tally-verb`. Fixes R-1 to R-16 (top-level
+  `index.js` verbs, `explain can --action <actor action>`, alias learning
+  on a fresh machine, `store new` type default, flag errors with the usage
+  line, `slop --version`, …), commit `a2e3b08`.
+- Round 2: 313 commands, 4 probes; `tally-verb` 41 → 22 commands with no
+  probe. Fixes R-14, R-17, R-18 (`-o` on app verbs, `policy ls` on an
+  instance, "ships no verbs" hint), commit `d32e29b`.
+- Round 3 (10 runs, with `ai-chat`): all checks passed after three tester
+  fixes. Fixes R-15 and R-19 to R-26 (`slop call --as anonymous`, strict
+  groups, four error messages, the manifest page's actor sentence, top-level
+  app-verb pages, `policy ls` why), commits `26a6576`, `0331d7c`.
+
+### What didn't work
+
+- `batch.sh` with `xargs -I` stripped the quotes: every run failed in a
+  second and the batch exited 0.
+- Checkers guessed JSON shapes (`mount ls` nests under `mount`, `store
+  export` under `bundle`) and failed runs that had succeeded; `recheck.sh`
+  reruns a checker on a finished run (it needs the run's port: logins are
+  keyed by URL).
+- The sandbox leaked four times, each found by the agent: the inherited
+  environment, the CLI verb cache, provider-side fetch (`--tools` now lists
+  only built-ins), `git clone` (code hosts resolve to 0.0.0.0), and in round
+  3 the global npm packages of the host's Node (now node, npm and pi are
+  bound one by one).
+- Round 3's `csv-overdue` scored goal 3 because setup computed "today" in
+  EST and the box in UTC: the checker was wrong. `TZ=UTC` for both.
+- Round 3's 133-command `llm-budget` run got an empty judge reply.
+  `judge.mjs` caps a turn at 45 commands, retries, records why;
+  `rejudge.mjs` judges a finished run again.
+- The broken-manifest scenario said the page was blank; the server serves
+  the last good snapshot. The round-2 debrief blamed my correct status text;
+  the code settled it (`kernel/apps.go`: a failed newest version keeps
+  `N = cur, Active = true`), and the scenario was fixed instead.
+- I ran the round-3 binary once without isolated credentials (it would
+  have used the default DGX login); the permission check refused it. Every
+  slop call outside a run now uses `env -i` with an empty config.
+
+### What I learned
+
+- This agent reads the help: 8–30 help reads per run. When the help was
+  silent (top-level verbs), it went to the binary; when it was fixed, it
+  stopped.
+- The most useful debrief claims name a concrete output; the least useful
+  propose a redesign. Every claim gets checked in code before a fix.
+- Four of ten agents needed to act as a guest; `explain can` predicts, and
+  they said so. `--as` takes only `anonymous`: acting as a person is a
+  product decision left to the user.
+
+### How to review
+
+- `go test -tags sqlite_fts5 ./...`.
+- `node summarize.mjs round-3` (runs are not committed; they hold throwaway
+  tokens of local servers).
+- `reference/03-writer-findings.md`, sections "Persona runs" through
+  "Round 3", for each finding, its fix and its status.
