@@ -1,0 +1,24 @@
+{
+  "id": "digest-nodecron",
+  "persona": "wrongpicture",
+  "maxTurns": 6,
+  "setup": [
+    "python3 \"$SETUP/jsdata.py\" \"$RUN/data-in\" \"$RUN/expected.json\" && $SLOP store new taskboard >/dev/null && $SLOP push \"$SETUP/taskboard\" --store taskboard >/dev/null && $SLOP import docs \"$RUN/data-in/tasks.csv\" --store taskboard --coll tasks --id id >/dev/null && $SLOP grant set taskboard @member interact >/dev/null && $SLOP mount set \"apps.localhost:$PORT\" /tasks taskboard >/dev/null"
+  ],
+  "opening": "We have a task list at /tasks. I'd like a small Node script using node-cron that runs every morning at 7, counts the open tasks and writes the number somewhere the page can show it at the top. Can you npm install node-cron on the server and set that up?",
+  "goal": "every morning at 7 the number of open tasks is computed on the server and shown at the top of /tasks, done the slop way, with an explanation of how node-cron maps onto it",
+  "later": [
+    "what time zone is 7 o'clock in, and how do I see it run without waiting?"
+  ],
+  "checklist": [
+    "a recurring schedule at 7 every day on the server (an actor alarm), not a separate process",
+    "running it writes the open count and the page shows it",
+    "it explains why there is no npm install or node-cron, and what replaces it",
+    "it says which time zone 7 o'clock is in and how to run it now"
+  ],
+  "facts": [
+    "Server-side schedules are actor alarms: every: { name: { every: '0 7 * * *', run(ctx) {\u2026} } }; cron times are the server's local time zone.",
+    "slop alarm ls / slop alarm fire <store> <name>."
+  ],
+  "personaKnows": "You can sign in on the site."
+}
