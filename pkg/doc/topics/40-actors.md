@@ -343,10 +343,13 @@ Tables are created only by **migrations**: files `sql/NNN_name.sql` at the
 top of the app's tree, applied in name order at activation, each once per
 store. A migration may create, alter and drop tables, indexes, views,
 triggers and FTS5 virtual tables whose names do not start with `_`,
-`sqlite_` or `slop_`. Never edit an applied migration: the next activation
-fails with `migration sql/001_hits.sql changed after it was applied; add a
-new migration instead`. Add `sql/002_….sql`. `slop app status <store>
---migrations` lists what a store has applied.
+`sqlite_` or `slop_`, and fill or fix rows (`UPDATE items SET …`). Never
+edit an applied migration: the next activation fails with `migration
+sql/001_hits.sql changed after it was applied; add a new migration
+instead`. Add `sql/002_….sql`. `slop app status <store> --migrations` lists
+what a store has applied and what is pending. The whole workflow (failures,
+instances, one-off fixes) is in `slop help store-data`, "Changing tables:
+migrations".
 
 Actors read every table and write the app's tables; they cannot run DDL,
 `ATTACH`, `PRAGMA` writes or temp objects.
@@ -372,6 +375,11 @@ The spec is a Go duration (`'30s'`, `'5m'`, `'1h'`, at least 1s),
 line (`'0 9 * * 1'`). They are (re)registered at each activation; names a
 new version drops are removed.
 
+**Cron lines run in the server's local time zone**, not the viewer's and not
+UTC. `slop alarm ls <store>` names that zone and the next run in it. To pin
+an alarm to a zone, start its spec with `CRON_TZ=<IANA zone>`:
+`'CRON_TZ=Europe/Berlin 0 7 * * *'` is 07:00 in Berlin on any server.
+
 **One-shot** alarms are set from code and handled in `alarms`:
 
 ```js
@@ -385,25 +393,38 @@ alarm.list();                   // [{name, at, every, running}]
 A recurring alarm set from code is removed at the next activation (a new
 snapshot) unless `every` declares it; declare schedules in `every`.
 
-Alarms are at-least-once: a handler that throws rolls back and runs again
-later, and an alarm missed while the server was down fires once, late
-(`ctx.event.late`). The alarm's handler runs as the store itself. Inspect
-and trigger them from the CLI:
+Alarms are at-least-once. A handler that throws rolls back its turn; a
+scheduled run that failed runs again a minute later, and an alarm missed
+while the server was down fires once, late (`ctx.event.late`). The handler
+runs as the store itself. `ctx.now` and `Date.now()` are the time the alarm
+is run for; `new Date()` without arguments is the wall clock, so write
+`new Date(ctx.now)`.
 
 ```sh
-$ slop alarm ls t1
-- at: 1795564540641
-  every: null
-  name: remind
-- at: 1795567993266
-  every: 1h
-  name: snapshot
-$ slop alarm fire t1 snapshot
-fired: snapshot
+$ slop alarm ls digest
+- at: 1795694400000
+  every: 0 7 * * *
+  in: 15h 56m
+  last: 2026-11-25 15:04 EST
+  lastAsOf: 2026-11-26 07:00 EST
+  lastOk: true
+  lastVia: alarm fire
+  name: morning
+  next: 2026-11-26 07:00 EST
+  running: 0
+  zone: America/New_York
+$ slop alarm fire digest morning --at 07:00     # run it now as if it were 07:00
+fired: morning
+now: "2026-11-26T07:00:00-05:00"
+status: ok
 ```
 
-A failing alarm leaves a line in `slop app logs <store>` (`alarm digest
-failed: …`); nobody else sees the error.
+`slop alarm fire` waits for the handler (up to 15 s) and answers `ok`, or
+`failed` with the error. `--at` (`next`, `HH:MM`, `"YYYY-MM-DD HH:MM"` or RFC
+3339) sets the `ctx.now` the handler sees; data timestamps and the schedule
+stay real. `last…` in `alarm ls` is the last run: when, by the scheduler
+(`lastVia: alarm`) or by hand (`alarm fire`), and its error. `slop help
+alarms` has the whole workflow.
 
 ## Reactors: on
 
@@ -612,9 +633,13 @@ Actors run on goja, an ECMAScript engine in Go, not Node.js or a browser.
 - **Not available:** `import`/`export` (ES modules), async generators,
   `setTimeout`/`setInterval` (use alarms or `time.sleep`), `fetch` as a
   global (use `use('fetch')`), `process`, a global `Buffer`, `TextEncoder`,
-  `URL`, `atob`, `structuredClone`, `Intl` (`toLocaleDateString` ignores
-  locales), npm packages unless vendored into the tree.
-- `Date.now()` is the turn's time; `Math.random()` works.
+  `URL`, `atob`, `structuredClone`, `Intl`, npm packages unless vendored
+  into the tree.
+- `Date.now()` is the turn's time (with `slop alarm fire --at`, the time
+  given); `new Date()` without arguments is the wall clock, so prefer
+  `new Date(ctx.now)`. `Math.random()` works.
+- No `Intl`: format dates and numbers yourself, or in the page (which has
+  it). `toLocaleString` and `toLocaleDateString` ignore locales and zones.
 
 ## Limits and timeouts
 

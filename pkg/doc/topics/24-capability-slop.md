@@ -115,6 +115,9 @@ await crm.file("app.json");       // {path, type, text}
 - They are one-off reads, not subscriptions, and they cannot write. To show
   another store live, or to write to it, bind it with `--prefix` and use
   `db` (`slop help capability-db`, "Other stores"), or do it in the actor.
+  Both page ways read as the viewer: the viewer needs their own grant on the
+  target and can then read every document it lets them. To show visitors
+  only a total, compute it in the actor (the table in capability-db).
 - `query` takes the same filters and bounds as db queries
   (`op` is one of `==` `!=` `<` `<=` `>` `>=` `in` `not-in` `array-contains`).
 - `files()` and `file()` read the target's `main` snapshot; a store with

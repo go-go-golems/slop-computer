@@ -22,8 +22,14 @@ open page is a **peer**. Peers share **presence** (one small object each: a
 cursor, a selection, a mode) and send **events** on named topics. Nothing is
 stored: a peer's presence goes when its page closes, an event reaches only
 the pages open when it is sent, and a new snapshot of the app reloads every
-page, which empties the room. Anything a late arrival must see belongs in
-`db` (`slop help capability-db`).
+page, which empties the room.
+
+What a page that opens late gets: **everyone's current presence** (the first
+`onPeers` call lists every peer as `joined`), so "who is here" and "who is
+ready" need nothing else. It does not get **events sent before it opened**,
+nor the presence of anyone who already left. Keep in `db` what must outlast
+the people in the room: a history, results, anything to read tomorrow
+(`slop help capability-db`).
 
 The room belongs to the **store**, not the app: two boards running Pinboard
 have two separate rooms. slop implements the claude.ai `room` contract with

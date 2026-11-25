@@ -315,7 +315,15 @@ itself succeeds either way, so always look.
 ## Step 6: a store that runs it, with grants and a mount
 
 An event is a store that **runs** the app, with its own data. Make one, say
-who may do what, and give it an address:
+who may do what, and give it an address.
+
+Two stores, the app (`rsvp`, its code) and an event (`party`, its data), are
+a choice, not a rule. They pay off when one app serves many events, or when
+you want to change the code in a dev instance while the real event keeps its
+data (step 9). For a single page with its own data, one store is enough:
+push the app into it and mount that store itself (`slop store new guestbook`,
+`slop push ./guestbook --store guestbook`, `slop mount set … /guestbook
+guestbook`); its data lives next to its code, and grants go on that store.
 
 ```bash
 $ slop store new party --app rsvp --type rsvp

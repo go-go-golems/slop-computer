@@ -121,23 +121,26 @@ from another tab on the same session).
 
 ### The rest of a session
 
+Members marked *async* return a promise: `await` them.
+
 | Member | Meaning |
 | --- | --- |
 | `id`, `key`, `info` | The session's id, its key, and its record (`labels`: `tier`, `model`, `effort`; `data`: the settings after limits; `usage`) |
 | `fresh` | `true` when this `open` created it |
 | `running` | Whether a run is in progress (another tab's included) |
-| `stop()` | Stops the running message |
-| `history()` | `[{role, text}]`: `user`, `assistant` (and `thinking`, `error` entries) |
+| `send(text, o)` *async* | Runs one message (above) |
+| `stop()` *async* | Stops the running message |
+| `history()` *async* | `[{role, text}]`: `user`, `assistant` (and `thinking`, `error` entries) |
 | `on(fn)` | Calls `fn(event)` for every event (`ChatRunStarted`, `ChatTextPatch`, `ChatFrontendToolCallRequested`, `ChatRunFinished`, `ChatRunStopped`, …); returns an unsubscribe function |
 | `close()` | Ends this page's event stream. A run in progress keeps going on the server. Later `send`s reject `cancelled`. |
-| `delete()` | Closes and deletes the session and its history |
+| `delete()` *async* | Closes and deletes the session and its history |
 
 ### agent.list() and agent.limits()
 
-`agent.list()` returns the person's sessions in this store:
+Both are *async*, as is `agent.open()`. `agent.list()` resolves to the person's sessions in this store:
 `[{id, key, title, created, updated, running, usage: {input, output, calls}}]`.
 
-`agent.limits()` is the same answer as `sample.limits()`: `available`,
+`agent.limits()` resolves to the same answer as `sample.limits()`: `available`,
 `allowed`, `remaining`, `models`, `modelTiers`. The session limits are the
 table above; they are not in `limits()`.
 
@@ -296,6 +299,16 @@ engine. The message is the script:
 
 `context` does not change the script. Usage is reported roughly (a token per
 four characters), so budgets are exercised.
+
+**What the fake engine cannot test.** It does not read plain language: "add
+milk to the list" is answered `echo: add milk to the list` and calls no
+tool. So with `--llm fake` you can test that your tools work, that the page
+shows answers and errors, and that budgets and permissions hold, by sending
+`/tool …` messages yourself. Whether a real model picks the right tool for
+what people type needs a server with a real LLM. Do not add code to the page
+that parses messages itself to make the fake engine look smart: it is not
+the agent, and it stays in the app when a real model answers. Say instead
+which part you tested with the fake engine and which needs a real one.
 
 ## Errors
 

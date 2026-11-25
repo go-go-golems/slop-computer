@@ -146,6 +146,21 @@ A page sees its own store at the root. Two ways reach other stores:
 
 Another store's `data/users/…` documents are never reachable either way.
 
+Both of these read **as the viewer**: what a page shows from `crm`, the
+viewer could read from `crm` directly, with `slop docs ls` or their own
+page. To show people a number computed from records they must not see (a
+sales total on an office screen), read the records in the actor instead:
+
+| Way | Reads as | Live on the page | The viewer needs on the target | Use it for |
+| --- | --- | --- | --- | --- |
+| `bind set dash sales sales` (no `--prefix`) and `grant set sales store:dash view`; the actor reads `use('stores')` | the store `dash` | Not by itself: the page calls an action, or an alarm writes the result into `dash`'s own documents, which the page follows | Nothing | Totals and summaries of records the viewer may not see |
+| `bind set … --prefix` | the viewer | Yes | Their own grant (`view` or more); every document under the prefix is then readable to them | Records the viewer may see anyway, in another store |
+| `_stores/<id>/…` | the viewer | Yes | Their own grant, and the `stores` policy cell | Admin tools across stores |
+
+Granting `@guest view` or `@member view` on the target so that a `--prefix`
+page works for them opens every record to them, not only what the page
+shows.
+
 ## API
 
 ```js

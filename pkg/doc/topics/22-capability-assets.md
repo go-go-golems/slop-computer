@@ -26,6 +26,13 @@ keeps no names or meaning: write the id into a `db` document right after the
 upload, and that document is the asset's index. Pages show an asset at
 `/_blob/<id>` on their own origin.
 
+> **Uploading and showing are separate.** Uploading needs `interact` on the
+> store and the app's `assets` policy cell for the viewer's audience (on for
+> members by default, off for guests). Showing an uploaded file needs
+> nothing: any page that knows the id shows `/_blob/<id>`, so a guest with
+> `view` sees the photos while `claude.use("assets")` is `null` for them.
+> The photo wall below is the whole pattern: guests look, members add.
+
 This page covers who gets the capability, its three methods with their
 return shapes, the accepted types and sizes, how assets are served, how to
 see them from the CLI, and the error codes.
@@ -132,17 +139,48 @@ A file you put this way with a name that has no `/` shows up in the page's
 
 ## Example: a photo wall
 
+Guests and everyone else see the photos; signed-in members add them; each
+photo row records who added it, and only that person or an admin removes
+it. The page uploads the file, then asks the actor to write the row: an
+action writes as the store, so nobody can forge a row in someone else's
+name (the `write: "self"` rule keeps pages from writing `photos` at all).
+
 `app.json`:
 
 ```json
 {
   "title": "Photos",
   "page": "index.html",
+  "actor": "actor.js",
   "capabilities": {
-    "db": {},
-    "assets": {}
+    "db": { "rules": [{ "path": "photos", "read": "view", "write": "self" }] },
+    "assets": {},
+    "slop": {}
   }
 }
+```
+
+`actor.js`:
+
+```js
+const db = use('db');
+defineActor({
+  actions: {
+    add: { requires: 'interact', run(ctx, { asset, name }) {
+      if (!/^a[0-9a-f]{32}$/.test(asset || '')) ctx.fail('invalid_argument', 'asset is an upload id');
+      // the upload id is unique: it is the row's id too
+      db.doc('photos/' + asset).set({ asset, name: String(name || '').slice(0, 200), by: ctx.visitor.id, at: ctx.now });
+      return { id: asset };
+    } },
+    remove: { requires: 'interact', run(ctx, { id }) {
+      const d = db.doc('photos/' + id).get();
+      if (!d.exists) return { removed: false };
+      if (d.data().by !== ctx.visitor.id) ctx.need('admin');   // others' photos: admins only
+      db.doc('photos/' + id).delete();
+      return { removed: true, asset: d.data().asset };
+    } },
+  },
+});
 ```
 
 `index.html`:
@@ -158,18 +196,17 @@ A file you put this way with a name that has no `/` shows up in the page's
 const $ = (id) => document.getElementById(id);
 const TYPES = { png: "image/png", jpg: "image/jpeg", jpeg: "image/jpeg", gif: "image/gif", webp: "image/webp" };
 (async () => {
-  const db = await claude.use("db");
+  const [db, slop] = await Promise.all([claude.use("db"), claude.use("slop")]);
   if (!db) { $("msg").textContent = "Open this page through its mount."; return; }
-  const assets = await claude.use("assets"); // null: this viewer cannot upload
-  const photos = db.collection("photos");
+  const assets = await claude.use("assets"); // null for guests: they only look
 
-  photos.orderBy("at", "desc").onSnapshot((snap) => {
+  db.collection("photos").orderBy("at", "desc").onSnapshot((snap) => {
     $("grid").replaceChildren(...snap.docs.map((d) => {
       const img = new Image();
       img.alt = d.data().name;
       img.src = "/_blob/" + d.data().asset;           // the stored id, never a saved URL
       img.onerror = () => { img.alt = "(deleted)"; };
-      if (assets) img.ondblclick = () => remove(d.id, d.data().asset);
+      if (assets) img.ondblclick = () => remove(d.id);
       return img;
     }));
   }, (e) => { $("msg").textContent = e.code; });
@@ -182,14 +219,16 @@ const TYPES = { png: "image/png", jpg: "image/jpeg", jpeg: "image/jpeg", gif: "i
     const ext = file.name.split(".").pop().toLowerCase();
     try {
       const up = await assets.upload(file, { type: TYPES[ext] || file.type });
-      await photos.add({ asset: up.id, name: file.name, at: Date.now() }); // the row is the index
+      await slop.call("add", { asset: up.id, name: file.name });   // the row is the index
     } catch (e) {
       $("msg").textContent = { too_large: "Over 20 MiB.", unsupported_type: "Not an image type this app takes." }[e.code] || "Upload failed: " + e.code;
     }
   }
-  async function remove(rowId, assetId) {
-    await assets.delete(assetId);
-    await photos.doc(rowId).delete();
+  async function remove(id) {
+    try {
+      const r = await slop.call("remove", { id });
+      if (r.removed) await assets.delete(r.asset);
+    } catch (e) { $("msg").textContent = e.code === "permission_denied" ? "Only the person who added it can remove it." : e.code; }
   }
 })();
 </script>
@@ -199,9 +238,15 @@ const TYPES = { png: "image/png", jpg: "image/jpeg", jpeg: "image/jpeg", gif: "i
 ```bash
 slop store new photos
 slop push ./photos --store photos -m "first"
+slop grant set photos @guest view          # anyone sees the wall, signed in or not
+slop grant set photos @member interact     # members add (the assets policy cell is on for them by default)
 slop mount set apps.example /photos photos
-slop grant set photos @member interact     # members upload (the policy cell is on for them by default)
+slop explain can photos interact --subject @guest    # false: guests cannot add
 ```
+
+Guests see the pictures although `claude.use("assets")` is `null` for them:
+showing `/_blob/<id>` needs no level (see "Serving"); only uploading needs
+`interact` and the policy cell.
 
 ## Errors
 

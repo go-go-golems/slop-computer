@@ -32,7 +32,9 @@ ship with slop. Each section links to the page with the details.
 
 New to slop? Read `slop help slop-overview` for the words (store, snapshot,
 mount, level, grant, policy), then build one app end to end with
-`slop help tutorial-first-app`.
+`slop help tutorial-first-app`. For a particular request (a photo wall, a
+public dashboard, a job every morning), `slop help recipes` names the
+pattern and the page.
 
 ## Four kinds of app
 
@@ -64,6 +66,11 @@ The rules behind the table:
 - **Use an actor-only app for an API**: routes built with
   `require('express')`, mounted with an API policy that lists them. The mount
   root without a page answers 404.
+- **One store is enough for one app with its data.** Push the app into a
+  store and mount that store: its code and its data live together, and
+  grants go on it. Make separate stores that run the app (`slop store new
+  <id> --app <app>`) only for several instances with separate data, or to
+  try changes in a dev instance (`slop help deploying-apps`).
 
 ## The files of an app
 
@@ -76,7 +83,7 @@ something; everything else is served as a file.
 | `index.html` (or `page`) and its CSS/JS | The page | the visitor's browser, on the sandbox origin | `slop help page-runtime` |
 | other `*.html` | More pages of the app; each gets the runtime too | the browser | |
 | `actor.js` (or `actor`) | The actor: actions, routes, alarms, reactors | the server, one instance per store | `slop help actors` |
-| `sql/*.sql` | Migrations for the store's tables, applied in name order on activation; add only | the server | `slop help actors` |
+| `sql/*.sql` | Migrations for the store's tables, applied in name order on activation; add only | the server | `slop help store-data` ("Changing tables") |
 | `verbs/*.js` (per `slop.verbs.include`) | Command-line verbs | the CLI user's machine, as them | `slop help app-verbs` |
 | `vendor/` | npm packages bundled by `slop vendor` | browser or actor | `slop help deploying-apps` |
 
@@ -130,7 +137,7 @@ visitor's audience (`slop policy set <app> <cap> @member on`).
 | `db` | Shared JSON documents with live listeners and per-path rules | `slop help capability-db` |
 | `user` | Who is viewing: id, name (`profile`), email (`email`, **policy** `user.email`) | `slop help capability-user` |
 | `room` | Presence (who is here) and broadcast events between open pages | `slop help capability-room` |
-| `assets` | Uploading images and files (**policy**, on for members by default) | `slop help capability-assets` |
+| `assets` | Uploading images and files (**policy**, on for members by default); showing them needs no level, so guests see what members upload | `slop help capability-assets` |
 | `downloads` | Handing the viewer a file to save, through a confirmation | `slop help capability-downloads` |
 | `files` | Reading another store's tree as a project | `slop help capability-files` |
 | `sample` | One model call per request (**policy** `sample`, plus LLM access) | `slop help capability-sample` |

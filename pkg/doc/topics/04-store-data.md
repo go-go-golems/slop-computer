@@ -298,6 +298,44 @@ rowsAffected: 1
   they do not allow.
 - `sql query` and `sql exec` are admin-only; `sql schema` needs the `admin`
   level on the store.
+
+### Changing tables: migrations
+
+This is the one place for how a store's tables change; the actor page has
+the SQL API (`slop help actors`).
+
+A table is created and changed only by **migrations**: files
+`sql/NNN_name.sql` in the app's tree. When a new version of the app
+activates in a store (after `slop push`, on the store's next use), the
+migrations that store has not run yet run in name order, once each, in one
+transaction with the rest of the activation. Existing rows stay.
+
+```text
+sql/001_items.sql    CREATE TABLE items (id INTEGER PRIMARY KEY, name TEXT NOT NULL, qty INTEGER NOT NULL);
+sql/002_shelf.sql    ALTER TABLE items ADD COLUMN shelf TEXT;
+                     UPDATE items SET shelf = 'A' WHERE shelf IS NULL;   -- a migration may write rows too
+```
+
+- **Add a new file, never edit one that ran.** An edited applied migration
+  breaks activation: `migration sql/001_items.sql changed after it was
+  applied; add a new migration instead`.
+- **A migration that fails changes nothing.** The new version does not
+  activate and the store keeps serving the version before it, with its
+  tables as they were; `slop app status <store>` shows why
+  (`broken: snapshot 3: …`). Fix it with a new push.
+- **Each store runs them itself.** An app with several instances migrates
+  each one when that instance next activates.
+- **See where a store is:** `slop app status <store> --migrations` lists
+  `applied` (name and sha256) and `pending`, the migrations of the newest
+  snapshot it has not run (non-empty only when that snapshot failed or has
+  not activated yet).
+- Allowed: `CREATE`/`ALTER`/`DROP` of tables, indexes, views and triggers,
+  FTS5 virtual tables, and `INSERT`/`UPDATE`/`DELETE` on the app's tables.
+  Names may not start with `_`, `sqlite_` or `slop_`.
+
+To change a table's data once without a new version, an admin runs
+`slop sql exec <store> "UPDATE …" --write`; to change it from the app, an
+actor action writes with `use('sql')`.
 - A write through `sql exec` is a commit like any other (it has a rev).
 
 ## The log

@@ -80,13 +80,17 @@ slop explain can <store> [level] [flags]
 - `[name]`: optional positional.
 - Every argument, positional or not, is **also a flag** of the same name:
   `slop docs get notes tasks/t1` equals
-  `slop docs get --store notes --path tasks/t1`.
+  `slop docs get --store notes --path tasks/t1`. A positional given as a
+  flag leaves its place to the next word: `slop preview url dash --at main
+  https://apps.example` puts the origin in `parent`, the third positional.
 - Some required arguments are flags only. They are listed in the verb's
   schema (`slop verbs tools files.commit` → `required: [store, base, changes]`)
   and, when missing, the server answers
   `invalid_argument: files.commit needs base`.
-- More positional words than the usage line allows is a CLI error:
-  `accepts at most 2 arg(s), received 3`.
+- More positional words than the usage line allows is a CLI error, with
+  the usage line: `accepts at most 2 arg(s), received 3` and
+  `usage: slop docs get <store> <path> [flags] (slop docs get --help)`.
+- Every `ls` also answers to `list` (`slop store list`).
 
 **Types.** Flags are text on the command line and are converted by type:
 
@@ -239,7 +243,8 @@ message: no document nope
 ## slop call: an actor action
 
 `slop call <store> <action> [json]` calls an action of the store's actor
-(the verb `actor.call`), with the arguments as one JSON value:
+(the verb `actor.call`), with the action's arguments as one JSON value,
+given as the third word or as `--json`:
 
 ```bash
 $ slop call myjournal draft '{"title":"Hello","body":"first post"}'
@@ -252,8 +257,12 @@ error: not_found: myjournal has no action "nosuch"
 
 The action decides what level it needs (its `requires`); a too-low level
 answers `permission_denied: draft needs interact; you have view`. The same
-call is `slop actor call <store> <action> --args '{…}'`. An app's own
-command-line verbs (`slop on`) are usually friendlier than raw actions.
+call is `slop actor call <store> <action> --args '{…}'`: there, as for every
+other verb, `--json` holds the verb's own arguments (`store`, `action`,
+`args`, `as`), so `slop actor call t1 add --json '{"name":"x"}'` is refused
+with a pointer to `--args`. An app's own command-line verbs (`slop on`) are
+usually friendlier than raw actions. `slop app verbs <store>` says whether
+the app ships any and, when it does not, lists the actor's actions.
 
 ## Commands that are not verbs
 

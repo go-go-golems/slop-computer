@@ -148,7 +148,14 @@ store: guestbook
   `broken: 'app.json: capabilities: unknown capability "storage"'`,
   `broken: 'activation of journal@2 failed: migration sql/001_posts.sql changed after it was applied; add a new migration instead'`.
 - `--peek` reports without activating; `--migrations` lists the
-  SQL migrations the store has applied, with their sha256.
+  SQL migrations the store has applied, with their sha256, and `pending`:
+  those of the newest snapshot it has not run (`slop help store-data`,
+  "Changing tables: migrations").
+- `slop store show <store>` puts this together with where the store is
+  mounted, where its code is, its data, grants and actions.
+- `slop mount set` on a live host refuses a store with nothing pushed
+  (`push the app first`) and one whose newest version did not activate
+  (`snapshot 2 did not activate: …; fix it and push again`).
 - `slop app logs <store>` shows the actor's recent `console.log` and
   `ctx.log` lines; `slop app restart <store>` clears a broken actor and
   retries activation.

@@ -188,7 +188,7 @@ Codes common to every capability:
 | Code | Meaning | What the page should do |
 | --- | --- | --- |
 | `unavailable` | No shell around the page, no view yet, the server did not answer, or a transient failure | Retry once after a short random delay; subscriptions retry on their own |
-| `revoked` | The view was closed: access withdrawn or expired for good | Render the read-only or signed-out state; every call fails from now on |
+| `revoked` | The view was closed: access withdrawn or expired for good. The message says why when the server still knows (`the view is closed: the viewer no longer has access to notes (a grant, mount or policy changed)`, `… the page closed it`, `… it expired`) | Render the read-only or signed-out state; every call fails from now on |
 | `not_granted` | The view was not granted that capability, or the call needs more access than the view has (`assets.list needs more access than this view has`) | Hide the feature |
 | `capability_removed` | A method this server does not serve (`artifact.edit`) | Do not call it |
 | `invalid_argument` | Bad arguments, or a write the viewer may not make | Fix the call, or switch to read-only |

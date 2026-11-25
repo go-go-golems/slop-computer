@@ -192,7 +192,8 @@ slop grant set <store> <subject> <level> [flags]
 ```
 
 Every argument is also a flag (`--store notes` works as well as `notes`), and
-`--json '{…}'` passes all arguments as one JSON object. A boolean flag alone
+`--json '{…}'` passes all arguments as one JSON object. (`slop call <store>
+<action>` is the one shortcut where `--json` is the action's own arguments.) A boolean flag alone
 means true (`--desc`); turn one off with `--desc=false`. See `slop help cli-reference-guide`.
 
 **Verbs newer than your CLI.** The verb table is built into the binary. If
@@ -267,19 +268,26 @@ The commands below ran against a local server; outputs are trimmed. The
 
 ```text
 $ slop store ls -o table
-APP      CREATEDAT      ID         LEVEL  OWNER                         TYPE
-shelf    1795564336711  kitchen    owner  usr_968742abdb3c7862154e0636
-         1795564112513  notes      owner  usr_968742abdb3c7862154e0636
+ID       APP    TYPE   KIND      LEVEL  CREATEDAT      OWNER
+kitchen  shelf  shelf  instance  owner  1795564336711  usr_968742abdb3c7862154e0636
+notes                  content   owner  1795564112513  usr_968742abdb3c7862154e0636
 ```
 
 `store ls` lists the stores you own or hold a grant on (admins add
-`--all` for every store). `LEVEL` is your level on each. Look inside one:
+`--all` for every store). `LEVEL` is your level on each; `KIND` is `app`
+(the store holds an app's code and runs it), `instance` (it runs the app
+named in `APP`) or `content` (documents and files, no app). Look inside one:
 
 ```bash
-slop store meta notes            # head rev, collections, refs, your level
+slop store show kitchen          # everything at once: app, code, mounts, data, grants, actions, what to run next
+slop store meta notes            # head rev, collections, SQL tables, refs, your level
 slop docs ls notes tasks         # the documents of the collection tasks
 slop docs get notes tasks/t1     # one document
 ```
+
+`store show` is the place to start with a store you did not build: it says
+where its code is (`slop pull …`), where it is mounted, whether its data are
+documents or SQL tables, and which commands come next.
 
 ```yaml
 $ slop docs get notes tasks/t1
@@ -332,6 +340,9 @@ slop log show notes --limit 3 -o table
 | Work with documents, files, snapshots, tables, the log | `slop help store-data` |
 | Understand levels, grants, policy, share links | `slop help access-control` |
 | Build and deploy an app | `slop help building-apps`, `slop help tutorial-first-app` |
+| Find the page for a task ("a photo wall", "every morning at 7") | `slop help recipes` |
+| Run something on a schedule | `slop help alarms` |
+| Look after an app someone else built | `slop store show <store>`, then `slop help recipes` ("You inherited an app") |
 | Run an app's own commands | `slop help using-app-verbs` |
 
 ## Troubleshooting
