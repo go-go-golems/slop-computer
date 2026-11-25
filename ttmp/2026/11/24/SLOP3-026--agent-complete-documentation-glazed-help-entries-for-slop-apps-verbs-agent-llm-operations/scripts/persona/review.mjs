@@ -46,11 +46,12 @@ const runs = fs.readdirSync(B).filter((d) => fs.existsSync(path.join(B, d, 'run.
 
 // notes.json beside the runs: the reviewer's notes, per scenario and "_all".
 const NOTES = (() => { try { return JSON.parse(fs.readFileSync(path.join(B, 'notes.json'), 'utf8')); } catch { return {}; } })();
+const LANG = { js: 'javascript', mjs: 'javascript', html: 'xml', css: 'css', json: 'json', sql: 'sql' };
 const score = (n) => `<span class="score s${n ?? 0}">${n ?? '–'}</span>`;
 const secs = (ms) => `${Math.round((ms || 0) / 1000)} s`;
 const allPass = (r) => r.checks.length && r.checks.every((c) => c.ok);
 
-const thumbs = (id, fs_) => `<div class="shots small">${fs_.map((f) => `<figure><a href="shots/${esc(id)}/${esc(f)}" target="_blank" rel="noopener"><img src="shots/${esc(id)}/${esc(f)}" alt="${esc(f)}" loading="lazy"></a><figcaption>${esc(f.replace('.png', '').replace(/^persona-t\d+-\d+-/, '').replace(/^agent-look-/, ''))}</figcaption></figure>`).join('')}</div>`;
+const thumbs = (id, fs_) => `<div class="shots small">${fs_.map((f) => `<figure><button type="button" class="zoom" data-full="shots/${esc(id)}/${esc(f)}"><img src="shots/${esc(id)}/${esc(f)}" alt="${esc(f)}" loading="lazy"></button><figcaption>${esc(f.replace('.png', '').replace(/^persona-t\d+-\d+-/, '').replace(/^agent-look-/, ''))}</figcaption></figure>`).join('')}</div>`;
 const looks = (id, t) => ((t.persona && t.persona.browse) || []).map((b) => `<div class="look"><div class="who person">Person looks at the site</div><code class="acts">${esc(JSON.stringify(b.actions))}</code><details class="seen"><summary>What they saw</summary><pre>${esc(clean(b.seen))}</pre></details>${thumbs(id, b.shots || [])}</div>`).join('');
 const card = ({ id, r, sc, shots, agentShots, files }) => {
   const m = r.metrics || {}, j = r.judge || {};
@@ -86,11 +87,11 @@ const card = ({ id, r, sc, shots, agentShots, files }) => {
     </div>
     <div class="col">
       <h3>What it built</h3>
-      ${shots.length ? `<div class="shots">${shots.map((f) => `<figure><a href="shots/${esc(id)}/${esc(f)}" target="_blank" rel="noopener"><img src="shots/${esc(id)}/${esc(f)}" alt="${esc(id)}: ${esc(f.replace('.png', ''))}" loading="lazy"></a><figcaption>${esc(f.replace('.png', '').replace(/-/g, ' '))}</figcaption></figure>`).join('')}</div>` : '<p class="dim">No screenshots (the page was not found).</p>'}
+      ${shots.length ? `<div class="shots">${shots.map((f) => `<figure><button type="button" class="zoom" data-full="shots/${esc(id)}/${esc(f)}"><img src="shots/${esc(id)}/${esc(f)}" alt="${esc(id)}: ${esc(f.replace('.png', ''))}" loading="lazy"></button><figcaption>${esc(f.replace('.png', '').replace(/-/g, ' '))}</figcaption></figure>`).join('')}</div>` : '<p class="dim">No screenshots (the page was not found).</p>'}
     </div>
   </div>
   <details><summary>The agent's code <span class="dim">(${files.length} file${files.length === 1 ? '' : 's'} in its work folder)</span></summary>
-    ${files.map((f) => `<h4>${esc(f.path)}</h4><pre><code>${esc(clean(f.text))}</code></pre>`).join('') || '<p class="dim">None.</p>'}
+    ${files.map((f) => `<h4>${esc(f.path)}</h4><pre><code class="language-${LANG[f.path.split('.').pop()] || 'plaintext'}">${esc(clean(f.text))}</code></pre>`).join('') || '<p class="dim">None.</p>'}
   </details>
   <details><summary>The conversation <span class="dim">(${r.turns.length} turn${r.turns.length === 1 ? '' : 's'})</span></summary>
     ${r.turns.map((t, i) => `<div class="turn"><div class="who person">Person · turn ${i + 1}</div>${para(t.message)}<div class="who agent">Agent · ${t.tools.length} commands · ${secs(t.ms)}</div>${para(t.reply)}${looks(id, t)}</div>`).join('')}
@@ -107,6 +108,7 @@ const html = `<title>slop JS API review</title>
 <style>
 /* Layout: a sticky index of runs, then one section per run: judgment and checks beside the screenshots, code and conversation folded below. */
 :root {
+  --c-kw: #8a3ab9; --c-str: #2f7a2f; --c-com: #7d8781; --c-num: #b4561b; --c-fn: #2557b3; --c-tag: #a1325a; --c-attr: #8a6a12;
   --bg: #f6f7f5; --panel: #ffffff; --fg: #1c211e; --dim: #66706a; --rule: #dde2dd;
   --accent: #2f6f5e; --ok: #23824f; --bad: #c0392b; --warn: #b7791f; --code: #eef1ee;
   --display: "Space Grotesk", "IBM Plex Sans", system-ui, sans-serif;
@@ -114,9 +116,11 @@ const html = `<title>slop JS API review</title>
   --mono: "IBM Plex Mono", ui-monospace, monospace;
 }
 @media (prefers-color-scheme: dark) { :root:not([data-theme="light"]) {
+  --c-kw: #d59bf6; --c-str: #9bd68f; --c-com: #869189; --c-num: #f0a46b; --c-fn: #8fb6ff; --c-tag: #f08ab0; --c-attr: #e6c56e;
   --bg: #121614; --panel: #1a1f1c; --fg: #e3e8e4; --dim: #94a09a; --rule: #2c3430;
   --accent: #6cc3a6; --ok: #5cc98a; --bad: #ef7d6e; --warn: #e2b05a; --code: #20262299; color-scheme: dark } }
 :root[data-theme="dark"] {
+  --c-kw: #d59bf6; --c-str: #9bd68f; --c-com: #869189; --c-num: #f0a46b; --c-fn: #8fb6ff; --c-tag: #f08ab0; --c-attr: #e6c56e;
   --bg: #121614; --panel: #1a1f1c; --fg: #e3e8e4; --dim: #94a09a; --rule: #2c3430;
   --accent: #6cc3a6; --ok: #5cc98a; --bad: #ef7d6e; --warn: #e2b05a; --code: #20262299; color-scheme: dark }
 body { background: var(--bg); color: var(--fg); font: 15px/1.55 var(--body); }
@@ -166,11 +170,26 @@ nav.index a:hover, nav.index a:focus-visible { border-color: var(--accent); outl
 .shots { display: grid; grid-template-columns: repeat(auto-fill, minmax(min(100%, 280px), 1fr)); gap: 12px; }
 figure { margin: 0; min-width: 0; }
 figure img { width: 100%; max-width: 100%; aspect-ratio: 16 / 10; object-fit: cover; object-position: left top; border: 1px solid var(--rule); border-radius: 4px; display: block; background: var(--code); }
-figure a:focus-visible img { outline: 2px solid var(--accent); }
+figure .zoom { display: block; width: 100%; padding: 0; border: 0; background: none; cursor: zoom-in; }
+figure .zoom:focus-visible img { outline: 2px solid var(--accent); }
+dialog.viewer { width: min(96vw, 1400px); max-height: 92vh; padding: 0; border: 1px solid var(--rule); border-radius: 6px; background: var(--panel); color: var(--fg); }
+dialog.viewer::backdrop { background: rgb(0 0 0 / .6); }
+.viewer-bar { position: sticky; top: 0; display: flex; justify-content: space-between; align-items: center; gap: 12px; padding: 8px 12px; background: var(--panel); border-bottom: 1px solid var(--rule); font: 13px var(--mono); }
+.viewer-bar button { font: 600 13px var(--body); padding: 4px 12px; border: 1px solid var(--rule); border-radius: 4px; background: var(--bg); color: var(--fg); cursor: pointer; }
+.viewer-body { overflow: auto; max-height: calc(92vh - 46px); }
+.viewer-body img { display: block; max-width: none; width: 100%; height: auto; }
 figcaption { font: 12px var(--mono); color: var(--dim); margin-top: 4px; }
 details { border-top: 1px solid var(--rule); margin-top: 16px; padding-top: 10px; }
 summary { cursor: pointer; font-weight: 600; }
 summary:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+/* highlight.js tokens, from the theme tokens (both themes) */
+.hljs-keyword, .hljs-built_in, .hljs-literal, .hljs-selector-tag, .hljs-meta .hljs-keyword { color: var(--c-kw); }
+.hljs-string, .hljs-regexp, .hljs-template-string, .hljs-attr .hljs-string { color: var(--c-str); }
+.hljs-comment, .hljs-quote, .hljs-meta { color: var(--c-com); font-style: italic; }
+.hljs-number, .hljs-symbol, .hljs-bullet { color: var(--c-num); }
+.hljs-title, .hljs-title.function_, .hljs-title.class_, .hljs-section { color: var(--c-fn); }
+.hljs-tag, .hljs-name, .hljs-selector-class, .hljs-selector-id { color: var(--c-tag); }
+.hljs-attr, .hljs-attribute, .hljs-property, .hljs-variable, .hljs-params, .hljs-template-variable { color: var(--c-attr); }
 pre { background: var(--code); padding: 10px 12px; border-radius: 4px; overflow-x: auto; max-height: 420px; }
 .shots.small { grid-template-columns: repeat(auto-fill, minmax(min(100%, 200px), 1fr)); margin-top: 8px; }
 .look { margin: 10px 0 4px; padding: 8px 10px; background: var(--code); border-radius: 4px; }
@@ -193,6 +212,26 @@ details.seen summary { font-weight: 500; font-size: 13px; }
   ${NOTES._all ? `<p class="note"><b>Reviewer's note.</b> ${esc(NOTES._all)}</p>` : ''}
   <nav class="index" aria-label="Runs">${runs.map(({ id, r }) => `<a href="#${esc(id)}"><span class="dot ${allPass(r) ? '' : 'bad'}"></span>${esc(id)}</a>`).join('')}</nav>
   ${runs.map(card).join('\n')}
-</div>`;
+</div>
+<dialog class="viewer" id="viewer" aria-label="Screenshot">
+  <div class="viewer-bar"><span id="viewer-name"></span><button type="button" id="viewer-close">Close</button></div>
+  <div class="viewer-body"><img id="viewer-img" alt=""></div>
+</dialog>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/highlight.min.js"></script>
+<script>
+try { hljs.highlightAll(); } catch (e) {} // plain code if the library did not load
+// Screenshots open full size in the page: the viewer cannot open them in a tab.
+const viewer = document.getElementById('viewer');
+document.addEventListener('click', (e) => {
+  const b = e.target.closest('.zoom');
+  if (b) {
+    const img = document.getElementById('viewer-img');
+    img.src = b.dataset.full; img.alt = b.querySelector('img').alt;
+    document.getElementById('viewer-name').textContent = b.dataset.full.slice('shots/'.length);
+    viewer.showModal();
+    viewer.querySelector('.viewer-body').scrollTop = 0;
+  } else if (e.target === viewer || e.target.id === 'viewer-close') viewer.close();
+});
+</script>`;
 fs.writeFileSync(path.join(OUT, 'index.html'), html);
 console.log(path.join(OUT, 'index.html'), runs.length, 'runs');
