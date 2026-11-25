@@ -98,7 +98,7 @@ same actor action, as you, with your level.
 | `permission_denied` | Your level on the store is below what the operation needs | `slop explain can <store> <level>` shows your level and the trace; ask the owner for a grant |
 | `not_granted` on a capability | The app does not declare it, or the policy is off for your audience | Check `app.json`; `slop policy ls <app>` |
 | Model calls refused: `permission_denied: no LLM access` (CLI, `agent`), `upstream_error` "no LLM access" (`sample`) | No LLM access for you, or the budget is used up | `slop llm usage`; an admin runs `slop llm set`; see `llm-access` |
-| `unknown command` for an app alias | The CLI has not seen that app yet | Run `slop on <store> --help` once; see `using-app-verbs` |
+| `unknown command` for an app alias | No store after the alias, so the CLI could not ask which app it is | `slop <alias> <store> …`, or `slop on <store> …`; see `using-app-verbs` |
 | You looked for docs under `slop docs` | `docs` is the document verbs | Use `slop help` |
 
 ## See Also

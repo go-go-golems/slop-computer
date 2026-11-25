@@ -151,26 +151,26 @@ until then.
 
 ## A fresh machine: aliases are learned
 
-The CLI only knows an alias after it has run that app's verbs once, on that
-machine (any server it has cached verbs for). On a fresh machine, or with an
-empty config directory:
+The CLI keeps the aliases it has seen in its config directory. On a fresh
+machine, or with an empty config directory, it does not know `pb` yet, so it
+asks the server: when the first word is not a command and a store follows it,
+the CLI fetches that store's verbs, and if the store's app has that alias it
+learns it and runs the command. Nothing has to run first:
 
 ```text
-$ slop pb s-e3owvugb board describe
-error: unknown command "pb" for "slop"
-
-Did you mean this?
-	app
-	sub
-	on
+$ slop pb s-e3owvugb board describe       # first use on this machine: works, and learns pb
 ```
 
-Run any `slop on` on a store of that app once; from then on the alias works:
+If the store runs another app, the error names that app's alias:
 
-```sh
-slop on s-e3owvugb --help      # learns pb
-slop pb s-e3owvugb board describe
+```text
+$ slop pb scores ls
+error: unknown command "pb": scores runs tally, whose alias is tally (slop tally scores …), or use slop on scores …
 ```
+
+`slop on <store> …` always works, with or without an alias. A word with no
+store after it (`slop pb` alone) stays `unknown command` until the alias is
+learned.
 
 To find which stores run which app: `slop store ls` (the `app` and `type`
 columns). Board-like apps usually have a mount where people create their
@@ -195,7 +195,7 @@ command is never added: use `slop on` for that app.
 
 | Problem | Cause | Solution |
 | --- | --- | --- |
-| `unknown command "pb" for "slop"` | The alias has not been learned on this machine, or this config directory is new | `slop on <store> --help` once; `slop store ls` to find a store of that app |
+| `unknown command "pb" for "slop"` | No store after the alias (`slop pb` alone), or the word is not an alias of any app the CLI knows | Give a store: `slop pb <store> …` (the CLI asks the server); or `slop on <store> …`; `slop store ls` to find a store of that app |
 | `no store "X" (give a store id; …)` | A title given to `slop on`, or a typo | Use the id (`slop store ls`), or the alias with the title |
 | `none of your pinboards is called "X"` | No store of yours of that type has that title | `slop store ls`; titles are case-insensitive but exact |
 | `N of your pinboards are called "X": a, b` | Two stores share a title | Give the id |

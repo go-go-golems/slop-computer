@@ -109,6 +109,13 @@ For one person in one audience:
    smaller one. A member is in `@guest` and `@member`; an admin in all four.
 3. No row: no access.
 
+Two consequences surprise people. A budget on `@member` does not limit
+admins: they are also in `@admin`, whose row on a new server is on with no
+budget, and the most generous row wins. To cap admins too, give `@admin` a
+budget or the person their own row. And budgets are per person per month,
+across every app: there is no per-app budget. A policy cell only turns an
+app's model use on or off for an audience.
+
 A store acting on its own is decided the same way, with `store:<id>` as its
 own row and `@store` as its group.
 

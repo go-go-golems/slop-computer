@@ -276,7 +276,8 @@ call verbs underneath and follow the same output and error rules.
 | `slop help [slug]` | These pages: `slop help --all`, `--topics`, `--tutorials`, `--command <cmd>` | |
 
 An app can also give itself an **alias**, a top-level command such as
-`slop pb <board> …`, once the CLI has seen it through `slop on`.
+`slop pb <board> …`. On a machine that has not seen the alias, the CLI asks
+the server which app the store after it runs, and learns the alias then.
 
 ## Global flags and environment
 
@@ -302,7 +303,7 @@ An app can also give itself an **alias**, a top-level command such as
 | `eval_error: SyntaxError … Unexpected …` with `await` | Calls in `eval` are synchronous | Drop `await` |
 | `-o table` prints YAML | The result is not a list of objects | Use `-o json` |
 | The command is missing from `slop --help` | It is newer than the CLI, or an app verb | `slop verb <name> --json …`; `slop on <store> --help` |
-| `unknown command "x" for "slop"` | Not a command; maybe an app alias the CLI has not seen | `slop on <store> --help` once teaches it the alias |
+| `unknown command "x" for "slop"` | Not a command, and no store after it to resolve an app alias through | `slop x <store> …`, or `slop on <store> …` |
 
 ## See Also
 

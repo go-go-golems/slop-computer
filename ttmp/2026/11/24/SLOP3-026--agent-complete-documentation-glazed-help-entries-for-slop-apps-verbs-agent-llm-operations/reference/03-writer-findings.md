@@ -175,3 +175,33 @@ With the checkers fixed, all four pilot runs met every check (guestbook 7/7, csv
 | P-11 | `import docs`: "booleans are typed" but `yes`/`no` stay strings; dates compare as strings | open (page) |
 | P-12 | `mount ls -o json` rows nest `{mount: {host, path, store}}`; an agent read `.host` as null | open (shape or page) |
 | P-13 | no way to act as a guest from the CLI | open |
+
+### Round 1 (nine scenarios, the binary before the pilot-2 fixes)
+
+All 9 runs met every check (judge goal 5 in 7, 4 in 2). Failures, probes and
+debriefs, each claim checked in code:
+
+| # | Finding | Seen in | Fix | Status |
+| --- | --- | --- | --- | --- |
+| R-1 | `slop pull --folder` guessed 3 times; `app logs --limit` | skeptic, tally, guestbook | a wrong flag prints the usage line and the `--help` to read (root FlagErrorFunc) | fixed |
+| R-2 | `slop pull guestbook` (an instance) → `no snapshot or ref main` | skeptic | names the app it runs: `… it runs the app guestbook-app (slop pull guestbook-app <dir>)` | fixed |
+| R-3 | `slop --version` (P-1, again) | llm-budget | `--version` from the build info (module version, commit, time) | fixed |
+| R-4 | cold alias (P-2): `slop tally scores ls`, Pinboard page leads with `slop pb` | tally, pinboard | an unknown first word with a store after it: the CLI asks the server for that store's verbs, learns the alias if it matches, runs; a mismatch names the store's alias; pages updated (7) | fixed |
+| R-5 | `app status`: `broken` names no snapshot, while `n` and `manifest` are the older one still served; the agent diffed snapshots | broken-manifest | `broken: snapshot 2: … (the store still serves snapshot 1: n and manifest are that one)`, and `failedN` | fixed |
+| R-6 | `mount ls --host apps.localhost` → `[]` (the host has a port) | broken-manifest | a host without a port matches by name | fixed |
+| R-7 | `store new --app` leaves `type` empty | guestbook-new | defaults to the app's `app.json` type; two tutorials updated | fixed |
+| R-8 | `--where` comparison semantics unstated; 14 vs 16 overdue detour | csv (2 runs) | store-data: same-kind compare, strings byte order, no date type, put the date in the query | fixed (page) |
+| R-9 | `import docs` "booleans are typed": `yes`/`no` stay strings (P-11) | csv | store-data: only `true`/`false`; numbers; every other value a string | fixed (page) |
+| R-10 | a `@member` budget does not cap admins (most generous row wins); no per-app budget; the agent capped `@admin` unasked | llm-budget | llm-access: both stated | fixed (page) |
+| R-11 | no deny: anything `@guest` holds, members hold | llm-budget | access-control: stated, with the actor-action way out | fixed (page) |
+| R-12 | an admin token without the admin scope still owns the admin's stores: no stand-in for a member | todo-roles | access-control: stated, pointing at `explain can --subject/--action` | fixed (page) |
+| R-13 | `mount set` prints a localhost URL; nothing says it is local-only | static-site | deploying-apps: a mount gives an address, not reachability | fixed (page) |
+| R-14 | app verbs take `--format`, the rest `-o` | pinboard | open (accept `-o` in app verbs) |
+| R-15 | no CLI way to act as a guest (P-13); three runs hand-drove `/_site/views` and `/_rt/rpc` | guestbook, skeptic, todo | `explain can --action` (P-9) covers "would it be refused"; acting as a guest stays open |
+| R-16 | `revoked: the view is closed or expired` gives no reason | guestbook | open |
+| S-1 | scenario: the broken-manifest opening says "blank page", but the store keeps serving the last good snapshot | — | the scenario's story is wrong; kept for round 2 comparability | noted |
+
+Agent behaviour the judge caught (not slop's fault, but the help can make the
+right path cheaper): changes nobody asked for in llm-budget (capped `@admin`,
+changed a read rule, made a test member), live writes in the skeptic run,
+verification claimed but not shown in todo-roles and csv.

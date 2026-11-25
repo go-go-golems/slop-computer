@@ -139,6 +139,11 @@ Rules and limits:
   conditions; fields are top-level (no `a.b`), and `--orderBy` takes a
   top-level field. A query that breaks these answers
   `invalid_argument: invalid query`.
+- `<`, `<=`, `>`, `>=` compare values of the same kind only: numbers as
+  numbers, strings byte by byte. A value of another kind, or a missing field,
+  never matches. There is no date type and no "today": store dates as ISO
+  strings (`"2026-11-24"`), which order correctly as strings, and put the
+  date in the query (`[["due","<","2026-11-24"]]`).
 - `--limit` is at most 1000.
 - Who may read and write each path is decided by the app's document rules;
   see `access-control`.
@@ -385,8 +390,9 @@ tables: 0
 ```
 
 - `import docs` makes one commit per 500 records; `--id` names the field
-  used as document id (default: generated); CSV numbers and booleans are
-  typed unless `--raw`. The format comes from the extension, or
+  used as document id (default: generated); in CSV, `true` and `false`
+  become booleans and integers and decimals become numbers, unless `--raw`.
+  Every other value stays a string (`yes`, `no`, `2026-11-24`). The format comes from the extension, or
   `--format csv|jsonl|json`.
 - `import table` needs the table to exist (from a migration).
 - `store export --folder` writes `store.json`, `docs.jsonl`, `schema.sql`,

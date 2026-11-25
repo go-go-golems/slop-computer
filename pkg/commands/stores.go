@@ -52,7 +52,16 @@ func storeVerbs(e kernelEnv) []*verbs.Verb {
 				if !e.K.Access.In(ctx, p, access.GroupMember) {
 					return sysdb.StoreRow{}, verbs.Errf("permission_denied", "only members make stores")
 				}
-				row, _, err := e.K.CreateStore(ctx, p, kernel.NewStore{ID: in.ID, Type: in.Type, App: in.App})
+				// A store that runs an app takes the app's declared type unless
+				// one is given: typed mounts (/pb/:id --type pinboard) serve it
+				// with no store type step (SLOP3-026, persona round 1).
+				typ := in.Type
+				if typ == "" && in.App != "" {
+					if r, err := e.K.Peek(ctx, in.App); err == nil && r.Manifest != nil {
+						typ = r.Manifest.Type
+					}
+				}
+				row, _, err := e.K.CreateStore(ctx, p, kernel.NewStore{ID: in.ID, Type: typ, App: in.App})
 				if errors.Is(err, registry.ErrExists) {
 					return sysdb.StoreRow{}, verbs.Errf("conflict", "store %s exists", in.ID)
 				}
@@ -234,7 +243,7 @@ type StoreLsIn struct {
 // StoreNewIn is store.new's input.
 type StoreNewIn struct {
 	ID   string `json:"id,omitempty" slop:"pos=1" jsonschema_description:"lowercase slug; empty makes s-xxxxxxxx"`
-	Type string `json:"type,omitempty"`
+	Type string `json:"type,omitempty" jsonschema_description:"decides which typed mounts serve it; default: the type in the app's app.json"`
 	App  string `json:"app,omitempty" jsonschema_description:"the app store it runs"`
 }
 

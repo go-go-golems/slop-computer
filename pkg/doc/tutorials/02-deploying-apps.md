@@ -167,9 +167,10 @@ type: guestbook
 ```
 
 - `--app` names the app store. The new store follows the app's `main`.
-- `--type` sets the store type. It is not copied from the manifest's
-  `type`, so pass it if a typed mount or the app's CLI alias should find
-  this store. `slop store type <id> <type>` changes it later.
+- `--type` sets the store type, which typed mounts and the app's CLI alias
+  use to find the store. Without it the store takes the `type` in the app's
+  `app.json`, so `--type` is only needed for a different one.
+  `slop store type <id> <type>` changes it later.
 - Without an id, `store new` makes one (`s-maq7jj2a`).
 
 Each store activates a new snapshot of its ref on its next view or event.
@@ -255,6 +256,13 @@ and let `slop dev` make again.
 A **mount** is a host plus a path pattern pointing at a store. It never
 names code; the store's app does. `slop mount set <host> <path> [store]`
 takes the host, path and store as positional arguments.
+
+A mount gives an address on the server's hosts; it does not make the server
+reachable. With `slop serve --local` the hosts are `*.localhost` and the
+server listens on `127.0.0.1`, so the URL `mount set` prints opens only on
+that machine. For other machines, the server needs host names they resolve
+(`hosts.live`, `hosts.static` in `slop.yaml`) and a `listen` address they can
+reach; a mount cannot add a host (see `slop help server-configuration`).
 
 ### Live or static host
 

@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"os"
+	"runtime/debug"
 	"slices"
 	"sort"
 	"strconv"
@@ -53,14 +54,51 @@ func Root() *cobra.Command {
 			return fmt.Errorf("invalid_argument: -o %q: the formats are yaml, json and table", flagOutput)
 		},
 	}
+	// slop --version: the first command an agent tried in two persona runs.
+	root.Version = version()
+	root.SetVersionTemplate("slop {{.Version}}\n")
 	root.PersistentFlags().StringVar(&flagServer, "server", "", "server origin (default: $SLOP_SERVER, then the default login)")
 	root.PersistentFlags().StringVarP(&flagOutput, "output", "o", "yaml", "output: yaml, json or table")
+	// A wrong flag shows the usage line: persona agents guessed
+	// `slop pull --folder` three times before reading --help.
+	root.SetFlagErrorFunc(func(c *cobra.Command, err error) error {
+		return fmt.Errorf("%w\nusage: %s (slop %s --help)", err, c.UseLine(), strings.TrimPrefix(c.CommandPath(), "slop "))
+	})
 	root.AddCommand(serveCmd(), authCmd(), verbsCmd(), verbCmd())
 	addVerbCommands(root)
 	addExtraCommands(root)
 	addAppCommands(root)
 	setupHelp(root)
 	return root
+}
+
+// version is the build's module version and commit, from Go's build info
+// (nothing stamps a version at link time).
+func version() string {
+	bi, ok := debug.ReadBuildInfo()
+	if !ok {
+		return "(unknown)"
+	}
+	v, rev, at, dirty := bi.Main.Version, "", "", ""
+	for _, s := range bi.Settings {
+		switch s.Key {
+		case "vcs.revision":
+			rev = s.Value
+		case "vcs.time":
+			at = s.Value
+		case "vcs.modified":
+			if s.Value == "true" {
+				dirty = ", modified"
+			}
+		}
+	}
+	if len(rev) > 12 {
+		rev = rev[:12]
+	}
+	if rev != "" {
+		v += " (" + rev + " " + at + dirty + ")"
+	}
+	return v
 }
 
 // setupHelp gives the root Glazed's help system with slop's pages

@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"slices"
+	"strings"
 
 	"github.com/go-go-golems/slop-computer/pkg/access"
 	"github.com/go-go-golems/slop-computer/pkg/actor"
@@ -29,6 +30,20 @@ func mountVerbs(e mountEnv) []*verbs.Verb {
 				ms, err := e.K.Registry.Mounts(ctx, in.Host)
 				if err != nil {
 					return nil, err
+				}
+				// --host apps.localhost on a server whose host is
+				// apps.localhost:8080: match the name without the port, not
+				// nothing (SLOP3-026, persona round 1 read [] as "no mounts").
+				if len(ms) == 0 && in.Host != "" && !strings.Contains(in.Host, ":") {
+					all, err := e.K.Registry.Mounts(ctx, "")
+					if err != nil {
+						return nil, err
+					}
+					for _, m := range all {
+						if h, _, ok := strings.Cut(m.Host, ":"); ok && h == in.Host {
+							ms = append(ms, m)
+						}
+					}
 				}
 				out := []map[string]any{}
 				for _, m := range ms {
@@ -356,6 +371,7 @@ type MountUndoOut struct {
 type AppStatusOut struct {
 	App      string            `json:"app"`
 	Broken   string            `json:"broken"`
+	FailedN  int64             `json:"failedN,omitempty"`  // the snapshot that failed, when an older one still serves
 	Manifest map[string]any    `json:"manifest,omitempty"` // set only to a non-empty object
 	N        int64             `json:"n"`
 	Next     int64             `json:"next,omitempty"`    // with peek: the version it activates on its next use
@@ -377,6 +393,17 @@ func statusOf(ctx context.Context, e kernelEnv, a *actor.Manager, st *store.Stor
 		return AppStatusOut{}, err
 	}
 	out := AppStatusOut{Store: r.Store, App: r.App, Ref: st.Meta("app_ref"), N: r.N, Next: r.Next, Broken: r.Broken()}
+	// The newest snapshot failed and an older one still serves: n and the
+	// manifest below are that older one. Say so, or the manifest seems to
+	// contradict the error (SLOP3-026, persona round 1).
+	if f := r.Failed; f != nil && f.N != r.N {
+		out.FailedN = f.N
+		if r.N > 0 && r.Active {
+			out.Broken = fmt.Sprintf("snapshot %d: %s (the store still serves snapshot %d: n and manifest are that one)", f.N, f.Why, r.N)
+		} else {
+			out.Broken = fmt.Sprintf("snapshot %d: %s", f.N, f.Why)
+		}
+	}
 	if out.Broken == "" && a != nil {
 		// a build that failed after activation (a mount's route
 		// policy, SLOP3-012): "app@n: why"

@@ -80,7 +80,7 @@ same codes as `err.code` on a rejected promise, except as noted below.
 
 | Message | Cause | Fix |
 | --- | --- | --- |
-| `unknown command "x" for "slop"` | Not a command; if it is an app's alias, this machine has not learned it yet | `slop on <store> --help` once; `slop help using-app-verbs` |
+| `unknown command "x" for "slop"` | Not a command, and no store followed it (an app's alias is resolved through the store after it) | `slop x <store> …`, or `slop on <store> …`; `slop help using-app-verbs` |
 | `unknown flag: --x` | Not an argument of this verb. App verbs take `--format`, not `-o` | `slop <…> --help` |
 | `accepts at most N arg(s), received M` | More positional words than the usage line has, or a bool flag given its value with a space (`--desc false`) | Join it with `=`: `--desc=false` |
 | `invalid_argument: -o "csv": the formats are yaml, json and table` | Unknown output format | `-o yaml`, `-o json` or `-o table` |

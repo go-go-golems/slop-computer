@@ -71,6 +71,13 @@ func TestActors(t *testing.T) {
 	if st["broken"] != "" || st["n"] != 1.0 {
 		t.Fatalf("status = %v", st)
 	}
+	// A store that runs the app takes its declared type (SLOP3-026).
+	if row := h.call(admin, "store.new", map[string]any{"id": "t2", "app": "tracker"}).(map[string]any); row["type"] != "tracker" {
+		t.Fatalf("store.new --app type = %v", row)
+	}
+	if row := h.call(admin, "store.new", map[string]any{"id": "t3", "app": "tracker", "type": "other"}).(map[string]any); row["type"] != "other" {
+		t.Fatalf("store.new --type = %v", row)
+	}
 	// Migration and setup ran in activation.
 	rows := h.call(admin, "sql.query", map[string]any{"store": "tracker", "sql": "SELECT title FROM tasks"}).([]any)
 	if len(rows) != 1 || rows[0].(map[string]any)["title"] != "welcome" {
@@ -180,6 +187,10 @@ func TestActors(t *testing.T) {
 	st = h.call(admin, "app.status", map[string]any{"store": "tracker"}).(map[string]any)
 	if st["n"] != 1.0 || !strings.Contains(st["broken"].(string), "002_bad") {
 		t.Fatalf("broken status = %v", st)
+	}
+	// It names the failed snapshot and the one still served (SLOP3-026).
+	if st["failedN"] != 2.0 || !strings.Contains(st["broken"].(string), "snapshot 2:") || !strings.Contains(st["broken"].(string), "still serves snapshot 1") {
+		t.Fatalf("broken names no snapshots: %v", st)
 	}
 	if n := h.call(admin, "actor.call", map[string]any{"store": "tracker", "action": "count"}); n != 4.0 {
 		t.Fatalf("old version still runs: %v", n)

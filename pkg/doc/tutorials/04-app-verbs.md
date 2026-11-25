@@ -426,7 +426,7 @@ each push.
 
 | Problem | Cause | Solution |
 | --- | --- | --- |
-| `unknown command "ty" for "slop"` | This machine has not learned the alias | `slop on <store> --help` once; see `slop help using-app-verbs` |
+| `unknown command "ty" for "slop"` | No store after the alias, or the store's app has another alias (the error then names it) | `slop ty <store> …`; `slop on <store> …`; see `slop help using-app-verbs` |
 | `<store> runs <app>, which ships no command-line verbs` | No `slop.verbs` in the running snapshot's `app.json` | Add the block, push, and check `slop app status <store>` shows the new snapshot |
 | Verbs appear under the file's name (`tally count`) | `parents` was not given, so the file names the group | Give `parents: ["group"]`, or move the verbs to `verbs/index.js` to put them at the top |
 | A verb you want at the top (`slop ty <store> add`) is under a group | Only `verbs/index.js` without `parents` reaches the top level | Move it to `verbs/index.js` and drop `parents` |

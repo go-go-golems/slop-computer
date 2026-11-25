@@ -176,8 +176,8 @@ step.
 
 ## The verbs: slop pb
 
-Learn the alias once per machine with `slop on <board> --help` (see
-`slop help using-app-verbs`). In the commands below `<board>` is an id or,
+`slop pb <board> …` works on a fresh machine: the CLI asks the server which
+app the board runs and learns the alias (see `slop help using-app-verbs`). In the commands below `<board>` is an id or,
 with `pb`, a title. Positional arguments are shown in angle brackets.
 
 | Verb | Arguments | Level |
@@ -303,7 +303,7 @@ Without the verbs, the same operations are actor actions:
 
 | Problem | Cause | Solution |
 | --- | --- | --- |
-| `unknown command "pb" for "slop"` | The CLI has not learned the alias on this machine | `slop on <board> --help` once |
+| `unknown command "pb" for "slop"` | No board after `pb`, or the store is not a pinboard (the error then names its app) | `slop pb <board> …`; `slop on <board> …` |
 | `/pb/kitchen` opened a board called `s-…` | Boards created from the page get a fresh id | Use the id it redirected to, or `slop store new kitchen --app pinboard --type pinboard` |
 | "There is nothing here yet" without a create button | You are not signed in, or not in the mount's create audience | Sign in; `slop mount set … --createAudience member` |
 | `/boards` asks guests to sign in, or shows nothing | No grant on `pinboard-home` | `slop grant set pinboard-home @member view` |

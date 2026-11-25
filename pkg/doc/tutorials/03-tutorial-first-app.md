@@ -343,7 +343,8 @@ $ slop app status party -o json | jq -c '{store, app, n, ref, broken}'
 {"store":"party","app":"rsvp","n":1,"ref":"main","broken":""}
 ```
 
-- `--type rsvp` is needed: `store new` does not copy the manifest's type.
+- `--type rsvp` is what `store new` would take from the manifest's `type`
+  anyway; it is spelled out here so you see where the store type comes from.
 - `@guest view`: anyone, signed in or not, can open the page and read the
   answers. Without it, `mount set` notes `guests cannot read party` and
   visitors must sign in.
@@ -412,7 +413,8 @@ coming: false
 id: usr_d9f77f667dc0772b2db2fee6
 ```
 
-After `slop on party` has run once, the CLI knows the alias `rsvp`:
+The app's alias `rsvp` works too (the CLI asks the server which app `party`
+runs, the first time):
 
 ```bash
 $ slop rsvp party answers ls
@@ -501,7 +503,7 @@ in a script; `slop help deploying-apps` has an idempotent one.
 | The form is missing for a signed-in person | Their level is `view` | `slop grant set party @member interact`; check with `slop explain can party interact --subject <email>` |
 | `invalid_argument: … is plain content: mount it on a static host` | The app declares no capability and no actor, or never had a good manifest | Check `slop app status rsvp` |
 | `slop on party answers ls` prints the usage of `slop on party` (exit status 0) instead of rows | No verb at that path: without `parents` it sits at `verbs answers ls` | Add `parents: ['answers']`; `slop on party --help` lists the real paths |
-| `unknown command "rsvp" for "slop"` | The CLI has not learned the alias yet | Run `slop on party --help` once |
+| `unknown command "rsvp" for "slop"` | No store after the alias, or `party` runs another app | `slop rsvp party …`; `slop on party …` |
 | `error: unknown shorthand flag: 'o' in -o` | App verbs use `--format` | `--format json` |
 | `conflict: store rsvp exists` | You ran `store new` twice | Harmless; skip it, or use the script in `deploying-apps` |
 

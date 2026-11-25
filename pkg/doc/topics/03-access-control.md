@@ -69,7 +69,10 @@ nest:
 ```
 
 so a grant or a policy cell for `@member` also covers subscribers and
-admins, and a grant for `@guest` covers everyone, signed in or not.
+admins, and a grant for `@guest` covers everyone, signed in or not. There is
+no deny: whatever `@guest` holds, members hold too. "Guests may read the
+entries, members may not" cannot be expressed with grants or rules; it needs
+an actor action that checks `ctx.visitor` itself.
 
 People commands (admins):
 
@@ -96,6 +99,12 @@ A token acts as its person, limited by its **scopes**:
 | `read` | Verbs with effect `read` |
 | `write` | Also verbs that change things (implies `read`) |
 | `admin` | Acting with the person's admin role. **Without it, an admin's token acts as a member**: no admin level on other stores, no admin-only verbs, no code push. |
+
+Scopes do not change what a person *owns*: an admin's token without `admin`
+is still the owner of the admin's own stores, so it cannot stand in for a
+member there. To see what a member or a guest may do, ask the server instead:
+`slop explain can <store> <level> --subject <usr_…|anonymous>`, or
+`--action <action>` for an action of the store's actor.
 
 Members may give a token `read` and `write`; admins also `admin`. A token
 lives 0–366 days (0: no expiry); a token with `admin` must expire within

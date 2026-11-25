@@ -36,7 +36,7 @@ func TestUnknownCommandHintsAtAliases(t *testing.T) {
 	if err == nil {
 		t.Fatal("an unknown command succeeded")
 	}
-	if got := Explain(err); !strings.Contains(got, "slop on <store> --help") || !strings.Contains(got, "using-app-verbs") {
+	if got := Explain(err); !strings.Contains(got, "name a store after it") || !strings.Contains(got, "using-app-verbs") {
 		t.Fatalf("no alias hint: %s", got)
 	}
 	// cobra adds suggestions after the first line when a name is close.
@@ -44,7 +44,7 @@ func TestUnknownCommandHintsAtAliases(t *testing.T) {
 	root.SetArgs([]string{"ap", "kitchen"}) // close to "app"
 	root.SetOut(&strings.Builder{})
 	root.SetErr(&strings.Builder{})
-	if err := root.Execute(); err == nil || !strings.Contains(Explain(err), "slop on <store> --help") {
+	if err := root.Execute(); err == nil || !strings.Contains(Explain(err), "name a store after it") {
 		t.Fatalf("no alias hint for a name with suggestions: %v", err)
 	}
 	if got := Explain(errFor("permission_denied: no")); got != "permission_denied: no" {
