@@ -115,7 +115,7 @@ agent, run it against a **reference app** built from the help's own example:
 
 ```bash
 node run.mjs <id> --slop $SLOP_BIN --port 1876x --batch dry --dry   # setup + checker, no agent
-$S/refcheck.sh <id> "\$SLOP push $REF/<app> --store <store> && ..." # deploy the reference, run the checker
+./refcheck.sh <id> "\$SLOP push $REF/<app> --store <store> && ..." # deploy the reference, run the checker
 ```
 
 Every check must pass on the reference. This found nothing wrong with the help
