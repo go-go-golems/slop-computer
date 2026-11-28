@@ -11,7 +11,7 @@ require (
 	github.com/go-go-golems/geppetto v0.14.3
 	github.com/go-go-golems/glazed v1.4.3
 	github.com/go-go-golems/go-go-goja v0.10.8-0.20261108231830-9d7ede7027c7
-	github.com/go-go-golems/pinocchio v0.11.19
+	github.com/go-go-golems/pinocchio v0.11.20-0.20261123025511-c76512406646
 	github.com/go-jose/go-jose/v4 v4.1.9
 	github.com/invopop/jsonschema v0.14.0
 	github.com/mattn/go-sqlite3 v1.14.52
