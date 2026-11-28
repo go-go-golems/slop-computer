@@ -47,6 +47,10 @@ type Kernel struct {
 	// OnActivated hears that a store moved to a new version (P3, actors).
 	Activate    Activator
 	OnActivated func(store string, r Running)
+	// OnDeleted hears that a store was deleted: whatever holds its open
+	// handle (a running actor) must let go, or a store made again with
+	// the same id is used through the deleted one's closed connection.
+	OnDeleted func(store string)
 
 	subMu sync.RWMutex
 	subs  map[int]func(*store.Commit)
@@ -201,6 +205,9 @@ func (k *Kernel) DeleteStore(ctx context.Context, p *access.Principal, id string
 	}
 	k.mu.Unlock()
 	k.forgetStore(id)
+	if k.OnDeleted != nil {
+		k.OnDeleted(id)
+	}
 	if err := os.RemoveAll(k.dir(id)); err != nil {
 		return fmt.Errorf("store %s unregistered but its files remain: %w", id, err)
 	}

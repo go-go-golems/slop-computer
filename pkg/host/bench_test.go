@@ -11,6 +11,8 @@ import (
 	"net/url"
 	"strings"
 	"testing"
+
+	"github.com/go-go-golems/slop-computer/pkg/client"
 )
 
 // fmtJSON is v as JSON, for looking for text in a decoded answer.
@@ -510,4 +512,248 @@ func TestBenchPublish(t *testing.T) {
 	if st := h.call(admin, "app.status", map[string]any{"store": "jot-1", "peek": true, "migrations": true}).(map[string]any); !strings.Contains(fmtJSON(st["applied"]), `"sql/002.sql"`) {
 		t.Fatalf("app.status migrations = %v", st)
 	}
+}
+
+// The bench's actions declare their arguments (SLOP3-024 phase 2): a wrong
+// shape is refused before run, naming the place, and the schemas give the
+// bench a valid actions.d.ts.
+func TestBenchArgs(t *testing.T) {
+	h := newHarness(t)
+	admin := h.tokenFor("admin@example.com", "read", "write", "admin")
+	installBench(t, h, admin)
+	for _, c := range []struct {
+		action string
+		args   map[string]any
+		want   string
+	}{
+		{"files", map[string]any{"app": "jot", "at": "3"}, "files: at /at: got string, want integer"},
+		{"files", map[string]any{"app": "Not An Id", "at": 1}, "at /app: 'Not An Id' does not match pattern"},
+		{"head", map[string]any{"app": "jot", "ref": "main"}, "at /ref:"},
+		{"commit", map[string]any{"app": "jot", "ref": "draft", "base": 1, "changes": []any{}}, "at /changes: minItems"},
+		{"commit", map[string]any{"app": "jot", "ref": "draft", "base": 1, "changes": []any{map[string]any{"text": "no path"}}}, "at /changes/0: missing property 'path'"},
+		{"embed", map[string]any{"app": "jot", "kind": "staging"}, "at /kind:"},
+		{"closeProposal", map[string]any{"app": "jot", "ref": "proposal/x", "status": "merged", "ifAt": 1}, "at /status:"},
+		{"logEvents", map[string]any{"app": "jot", "events": []any{map[string]any{"kind": "note", "ref": "draft", "n": 0}}}, "at /events/0/n: minimum"},
+	} {
+		e := h.fail(admin, "actor.call", map[string]any{"store": "bench", "action": c.action, "args": c.args}, "invalid_argument")
+		if msg, _ := e["message"].(string); !strings.Contains(msg, c.want) {
+			t.Errorf("%s(%v): %q, want %q", c.action, c.args, msg, c.want)
+		}
+	}
+
+	// The page's checker gets the same declarations through the bench's
+	// types action (workshop.types → app.types).
+	tr := h.call(admin, "actor.call", map[string]any{"store": "bench", "action": "types", "args": map[string]any{"app": "bench"}}).(map[string]any)
+	if fs, _ := tr["files"].([]any); len(fs) != 4 || !strings.Contains(fmtJSON(fs), "interface AppActions") {
+		t.Fatalf("types = %.300s", fmtJSON(tr))
+	}
+	decl := appTypes(h, admin, "bench")
+	actions := decl[client.TypesDir+"/actions.d.ts"]
+	for _, want := range []string{
+		"  files(args: {\n    /** a store id: lowercase letters, digits and - */\n    app: string;\n    at: number;\n",
+		"    kind: \"dev\" | \"test\" | \"prop\";\n",
+		"    status: \"accepted\" | \"rejected\" | \"discarded\";\n",
+		"  apps(args?: Record<string, unknown>): unknown;",
+	} {
+		if !strings.Contains(actions, want) {
+			t.Fatalf("the bench's actions.d.ts lacks %q:\n%s", want, actions)
+		}
+	}
+	tsc := tscPath()
+	if tsc == "" {
+		t.Skip("no tsc: the bench's actions.d.ts is not type-checked")
+	}
+	dir := t.TempDir()
+	writeTree(t, dir, decl)
+	for name, cfg := range client.Tsconfigs("actor.js", false) {
+		writeTree(t, dir, map[string]string{name: string(cfg)})
+	}
+	writeTree(t, dir, map[string]string{"main.ts": `const slop = await claude.use('slop')
+if (slop) {
+  await slop.actions.files({ app: 'jot', at: 3 })
+  await slop.actions.commit({ app: 'jot', ref: 'draft', base: 3, changes: [{ path: 'a', text: 'x' }], event: { who: 'you', thread: null } })
+  await slop.actions.instance({ app: 'jot', kind: 'prop', ref: 'proposal/x' })
+}
+`})
+	if out, ok := tscCheck(tsc, dir, "tsconfig.json"); !ok {
+		t.Fatalf("tsc on the bench's actions:\n%s", out)
+	}
+}
+
+// The page's checker checks a proposal against its own instance's actions:
+// a proposal whose actor renames an action gets declarations with the new
+// name, while draft's keep the old (a persona review found the proposal
+// checked against draft's actor, "types ok" over a call to a missing action).
+func TestBenchTypesFollowRef(t *testing.T) {
+	h := newHarness(t)
+	admin := h.tokenFor("admin@example.com", "read", "write", "admin")
+	installBench(t, h, admin)
+	act := func(action string, args map[string]any) map[string]any {
+		t.Helper()
+		return h.call(admin, "actor.call", map[string]any{"store": "bench", "action": action, "args": args}).(map[string]any)
+	}
+	app := devApp()
+	app["actor.js"] = `defineActor({ actions: { list: { requires: 'view', run() { return []; } } } });`
+	h.call(admin, "store.new", map[string]any{"id": "jot"})
+	h.push(admin, map[string]any{"store": "jot", "files": files(app), "ref": "draft"})
+	draft := h.refAt(admin, "jot", "draft")
+	act("instance", map[string]any{"app": "jot", "kind": "dev"})
+	ref := act("propose", map[string]any{"app": "jot", "title": "Board"})["ref"].(string)
+	act("commit", map[string]any{"app": "jot", "ref": ref, "base": draft, "changes": []any{map[string]any{"path": "actor.js",
+		"text": `defineActor({ actions: { board: { requires: 'view', run() { return []; } } } });`}}})
+	act("instance", map[string]any{"app": "jot", "kind": "prop", "ref": ref})
+
+	actionsOf := func(args map[string]any) string {
+		t.Helper()
+		for _, f := range act("types", args)["files"].([]any) {
+			if m := f.(map[string]any); m["path"] == "actions.d.ts" {
+				return m["text"].(string)
+			}
+		}
+		t.Fatalf("types(%v) has no actions.d.ts", args)
+		return ""
+	}
+	if a := actionsOf(map[string]any{"app": "jot"}); !strings.Contains(a, "  list(") || strings.Contains(a, "board(") {
+		t.Fatalf("draft's actions.d.ts:\n%s", a)
+	}
+	if a := actionsOf(map[string]any{"app": "jot", "ref": ref}); !strings.Contains(a, "  board(") || strings.Contains(a, "list(") {
+		t.Fatalf("the proposal's actions.d.ts:\n%s", a)
+	}
+	// a proposal without an instance yet falls back to the dev instance
+	other := act("propose", map[string]any{"app": "jot", "title": "Other"})["ref"].(string)
+	if a := actionsOf(map[string]any{"app": "jot", "ref": other}); !strings.Contains(a, "  list(") {
+		t.Fatalf("a proposal without an instance:\n%s", a)
+	}
+}
+
+// Resetting an instance deletes its store; the next use makes it again
+// under the same id. Its actor must start over on the new store: the old
+// one held the deleted store's closed connection, and every SQL call
+// failed with "sql: connection is already closed" (a persona review found
+// it: a scenario could run once).
+func TestBenchResetRestartsTheActor(t *testing.T) {
+	h := newHarness(t)
+	admin := h.tokenFor("admin@example.com", "read", "write", "admin")
+	installBench(t, h, admin)
+	act := func(action string, args map[string]any) map[string]any {
+		t.Helper()
+		return h.call(admin, "actor.call", map[string]any{"store": "bench", "action": action, "args": args}).(map[string]any)
+	}
+	h.call(admin, "store.new", map[string]any{"id": "jot"})
+	h.push(admin, map[string]any{"store": "jot", "files": files(devApp()), "ref": "draft"})
+	id := act("instance", map[string]any{"app": "jot", "kind": "test"})["id"].(string)
+	tables := func() string {
+		t.Helper()
+		return fmtJSON(h.call(admin, "actor.call", map[string]any{"store": id, "action": "tables"}))
+	}
+	if got := tables(); !strings.Contains(got, "notes") {
+		t.Fatalf("tables before the reset = %s", got)
+	}
+	act("reset", map[string]any{"app": "jot", "kind": "test"})
+	act("instance", map[string]any{"app": "jot", "kind": "test"})
+	if got := tables(); !strings.Contains(got, "notes") {
+		t.Fatalf("tables after the reset = %s", got)
+	}
+}
+
+// After a publish the person asks for their link: the bench's addresses
+// action lists the mounts serving the app (none until one is set).
+func TestBenchAddresses(t *testing.T) {
+	h := newHarness(t)
+	admin := h.tokenFor("admin@example.com", "read", "write", "admin")
+	installBench(t, h, admin)
+	h.call(admin, "store.new", map[string]any{"id": "jot"})
+	h.push(admin, map[string]any{"store": "jot", "files": files(devApp())})
+	addr := func() string {
+		t.Helper()
+		return fmtJSON(h.call(admin, "actor.call", map[string]any{"store": "bench", "action": "addresses", "args": map[string]any{"app": "jot"}}))
+	}
+	if got := addr(); got != `{"urls":[]}` {
+		t.Fatalf("addresses before a mount = %s", got)
+	}
+	h.call(admin, "mount.set", map[string]any{"host": h.cfg.Hosts.Live[0], "path": "/jot", "store": "jot"})
+	if got := addr(); !strings.Contains(got, `"kind":"live"`) || !strings.Contains(got, "/jot\"") {
+		t.Fatalf("addresses after a mount = %s", got)
+	}
+}
+
+// Only admins change app code (D9): the bench's me action tells the page
+// before a member tries to create an app.
+func TestBenchMe(t *testing.T) {
+	h := newHarness(t)
+	admin := h.tokenFor("admin@example.com", "read", "write", "admin")
+	installBench(t, h, admin)
+	if got := fmtJSON(h.call(admin, "actor.call", map[string]any{"store": "bench", "action": "me", "args": map[string]any{}})); got != `{"audience":"admin","canBuild":true}` {
+		t.Fatalf("me as admin = %s", got)
+	}
+}
+
+// A person removes one row of their dev data (exec, under drop's rule);
+// the app's own store is refused.
+func TestBenchExec(t *testing.T) {
+	h := newHarness(t)
+	admin := h.tokenFor("admin@example.com", "read", "write", "admin")
+	installBench(t, h, admin)
+	act := func(action string, args map[string]any) any {
+		t.Helper()
+		return h.call(admin, "actor.call", map[string]any{"store": "bench", "action": action, "args": args})
+	}
+	h.call(admin, "store.new", map[string]any{"id": "jot"})
+	h.push(admin, map[string]any{"store": "jot", "files": files(devApp()), "ref": "draft"})
+	act("instance", map[string]any{"app": "jot", "kind": "dev"})
+	act("seed", map[string]any{"app": "jot", "kind": "dev", "tables": map[string]any{"notes": []any{map[string]any{"id": "a"}, map[string]any{"id": "b"}}}})
+	act("exec", map[string]any{"app": "jot", "kind": "dev", "query": "DELETE FROM notes WHERE id = ?", "args": []any{"a"}})
+	if got := fmtJSON(act("sql", map[string]any{"app": "jot", "kind": "dev", "query": "SELECT id FROM notes", "args": []any{}})); got != `[{"id":"b"}]` {
+		t.Fatalf("dev notes after the delete = %s", got)
+	}
+	// (the app store and production instances are refused: TestWorkshopDevInstances)
+}
+
+// Seeding with replace: the named tables hold exactly the fixture's rows,
+// and the bench's own keys (__rowid) are dropped (round 5: fixtures saved
+// from the Data view carried __rowid, and their ids clashed with rows the
+// migrations seeded).
+func TestBenchSeedReplace(t *testing.T) {
+	h := newHarness(t)
+	admin := h.tokenFor("admin@example.com", "read", "write", "admin")
+	installBench(t, h, admin)
+	act := func(action string, args map[string]any) any {
+		t.Helper()
+		return h.call(admin, "actor.call", map[string]any{"store": "bench", "action": action, "args": args})
+	}
+	h.call(admin, "store.new", map[string]any{"id": "jot"})
+	h.push(admin, map[string]any{"store": "jot", "files": files(devApp()), "ref": "draft"})
+	act("instance", map[string]any{"app": "jot", "kind": "test"})
+	act("seed", map[string]any{"app": "jot", "kind": "test", "tables": map[string]any{"notes": []any{map[string]any{"id": "a"}, map[string]any{"id": "b"}}}})
+	act("seed", map[string]any{"app": "jot", "kind": "test", "replace": true, "tables": map[string]any{"notes": []any{map[string]any{"id": "a", "__rowid": 1}, map[string]any{"id": "c", "__rowid": 2}}}})
+	if got := fmtJSON(act("sql", map[string]any{"app": "jot", "kind": "test", "query": "SELECT id FROM notes ORDER BY id", "args": []any{}})); got != `[{"id":"a"},{"id":"c"}]` {
+		t.Fatalf("test notes after a replacing seed = %s", got)
+	}
+}
+
+// An administrator gives a published app its web address from the bench:
+// /<app> on the live host; again is a no-op; a path another store holds
+// is refused; an unpublished app is refused.
+func TestBenchPutOnline(t *testing.T) {
+	h := newHarness(t)
+	admin := h.tokenFor("admin@example.com", "read", "write", "admin")
+	installBench(t, h, admin)
+	put := func(app string) map[string]any {
+		t.Helper()
+		return h.call(admin, "actor.call", map[string]any{"store": "bench", "action": "putOnline", "args": map[string]any{"app": app}}).(map[string]any)
+	}
+	h.call(admin, "store.new", map[string]any{"id": "jot"})
+	h.push(admin, map[string]any{"store": "jot", "files": files(devApp()), "ref": "draft"})
+	h.fail(admin, "actor.call", map[string]any{"store": "bench", "action": "putOnline", "args": map[string]any{"app": "jot"}}, "failed_precondition")
+	h.push(admin, map[string]any{"store": "jot", "files": files(devApp())})
+	if m := put("jot"); !strings.HasSuffix(m["url"].(string), "/jot") || m["existed"] != nil {
+		t.Fatalf("putOnline = %v", m)
+	}
+	if m := put("jot"); m["existed"] != true {
+		t.Fatalf("putOnline again = %v", m)
+	}
+	h.call(admin, "store.new", map[string]any{"id": "other"})
+	h.push(admin, map[string]any{"store": "other", "files": files(devApp())})
+	h.call(admin, "mount.set", map[string]any{"host": h.cfg.Hosts.Live[0], "path": "/other", "store": "jot"})
+	h.fail(admin, "actor.call", map[string]any{"store": "bench", "action": "putOnline", "args": map[string]any{"app": "other"}}, "already_exists")
 }

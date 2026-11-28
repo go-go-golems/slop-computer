@@ -42,9 +42,11 @@ export function svgEl(tag, attrs = {}, ...kids) {
 }
 
 let toastT
-export function toast(msg, ms = 2600) {
+// action: { label, run } adds a button (Undo)
+export function toast(msg, ms = 2600, action = null) {
   let el = $('#toast'); if (!el) { el = h('div#toast'); document.body.appendChild(el) }
   el.textContent = msg; el.hidden = false; clearTimeout(toastT); toastT = setTimeout(() => { el.hidden = true }, ms)
+  if (action) el.append(' ', h('button.btn.sm', { on: { click: () => { el.hidden = true; action.run() } } }, action.label))
 }
 export function modal({ title, body, actions = [], onClose, wide }) {
   const close = () => { wrap.remove(); document.removeEventListener('keydown', key); onClose && onClose() }

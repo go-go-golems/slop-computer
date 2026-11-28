@@ -1,4 +1,4 @@
-/* the bench, built from web/bench: do not edit. source sha256:2e97dfe45b852f54fa6dc1a8e58eb0e95a17d3b38d7fe8aed3b8b80bc4fc1528 */
+/* the bench, built from web/bench: do not edit. source sha256:e626fe49fe3aa44185f2337fda84cfa23c82260d03fee81b18ae0be790283175 */
 // The bench: a live dev environment for slop apps. Built from web/bench/src.
 (() => {
   // src/lib/util.js
@@ -141,7 +141,7 @@
     return el;
   }
   var toastT;
-  function toast(msg, ms = 2600) {
+  function toast(msg, ms = 2600, action = null) {
     let el = $("#toast");
     if (!el) {
       el = h("div#toast");
@@ -153,6 +153,10 @@
     toastT = setTimeout(() => {
       el.hidden = true;
     }, ms);
+    if (action) el.append(" ", h("button.btn.sm", { on: { click: () => {
+      el.hidden = true;
+      action.run();
+    } } }, action.label));
   }
   function modal({ title, body, actions = [], onClose, wide }) {
     const close2 = () => {
@@ -1414,6 +1418,15 @@
           }
           break;
         }
+        case "invalid":
+          if (!this.headless) toast('Not sent: "' + m.field + '": ' + m.message, 5e3);
+          break;
+        case "modekey":
+          if (!this.headless) document.dispatchEvent(new KeyboardEvent("keydown", { key: String(m.key || "") }));
+          break;
+        case "print":
+          if (!this.headless) toast("Printing does not work inside the bench's frame. It works when the app is open in its own browser tab (after Publish, at its web address).", 7e3);
+          break;
         case "log": {
           const l = { t: now(), level: m.level, text: m.text, src: m.src || "", frame: this.route, fid: this.fid };
           this.logs.push(l);
@@ -1504,6 +1517,8 @@
     openPin: () => {
     },
     textEdit: () => {
+    },
+    reveal: () => {
     }
   };
   addEventListener("message", async (e) => {
@@ -1665,11 +1680,25 @@
 
   // src/agent/api/app.js
   var READ_KINDS = ["dev", "test"];
+  var argsOpts = (args, o) => args && typeof args === "object" && !Array.isArray(args) && o === void 0 ? [[], args] : [args || [], o];
   var kindOf = (o) => {
     const k = o && o.kind || "dev";
     if (!READ_KINDS.includes(k)) throw Object.assign(new Error("kind is dev or test"), { kind: "invalid" });
     return k;
   };
+  var onInstance = async (ctx, o, call) => {
+    try {
+      return await call();
+    } catch (e) {
+      if (!/no store/i.test(String(e && e.message))) throw e;
+      await Instances.ensure(ctx.project, kindOf(o));
+      return call();
+    }
+  };
+  var readOnly = (p) => p.catch((e) => {
+    if (/not authorized/i.test(String(e && e.message))) throw Object.assign(new Error("app.sql only reads (SELECT): to change rows of the dev or test instance use app.exec(query, args, {kind})"), { kind: "invalid" });
+    throw e;
+  });
   var APP = {
     "app.info": {
       sig: "",
@@ -1679,31 +1708,54 @@
         return { app: P.app, refs: P.refs, entry: Instances.entry(P), workspace: ctx.ws, instances: { dev: st.dev || null, test: st.test || null, props: st.props || [] } };
       }
     },
+    "app.addresses": { sig: "", doc: "{urls: [{url, kind}]}: where the published app is on the web (the mounts serving it); none means an administrator has not given it an address yet. Tell the person their link after a publish.", run: (ctx) => Slop.call("addresses", { app: ctx.project.app }) },
     "app.status": { sig: "", doc: "where the refs are and what each instance runs: {refs, dev, test, prop} ({id, ref, n, broken})", run: (ctx) => Slop.call("status", { app: ctx.project.app }) },
     "app.logs": {
       sig: "{limit, kind}?",
-      doc: "{broken, lines: [{at, level, text}]}: the instance's actor console, setup and activation failures",
+      doc: "{broken, lines: [{at, level, text}]}: the instance's actor console, setup and activation failures (kind: dev, test, or prop for the proposal this eval writes to)",
       run: async (ctx, o = {}) => {
-        const r = await Slop.call("logs", { app: ctx.project.app, kind: kindOf(o) });
+        const prop = o && o.kind === "prop";
+        if (prop && !/^proposal\//.test(ctx.ws || "")) throw Object.assign(new Error("kind prop is the proposal this eval writes to, and it writes to " + (ctx.ws || "draft")), { kind: "invalid" });
+        const r = await Slop.call("logs", prop ? { app: ctx.project.app, kind: "prop", ref: ctx.ws } : { app: ctx.project.app, kind: kindOf(o) });
         return { broken: r.broken || "", lines: (r.lines || []).slice(-clamp(+o.limit || 50, 1, 300)) };
       }
     },
-    "app.docs": { sig: "coll, {kind}?", doc: "the documents of a collection", run: (ctx, coll, o) => Slop.call("docs", { app: ctx.project.app, kind: kindOf(o), coll }) },
-    "app.doc": { sig: "path, {kind}?", doc: 'one document ("coll/id")', run: (ctx, path, o) => Slop.call("doc", { app: ctx.project.app, kind: kindOf(o), path }) },
-    "app.sql": { sig: "query, args?, {kind}?", doc: "rows (read-only SQL on the instance's tables)", run: (ctx, query, args, o) => Slop.call("sql", { app: ctx.project.app, kind: kindOf(o), query, args: args || [] }) },
+    "app.docs": { sig: "coll, {kind}?", ret: "[{path, body}]", doc: "the documents of a collection", run: (ctx, coll, o) => onInstance(ctx, o, () => Slop.call("docs", { app: ctx.project.app, kind: kindOf(o), coll })) },
+    "app.doc": { sig: "path, {kind}?", doc: 'one document ("coll/id")', run: (ctx, path, o) => onInstance(ctx, o, () => Slop.call("doc", { app: ctx.project.app, kind: kindOf(o), path })) },
+    "app.sql": { sig: "query, args?, {kind}?", ret: "[{column: value, \u2026}]: rows as objects", doc: "rows (read-only SQL on the instance's tables)", run: (ctx, query, a0, o0) => {
+      const [args, o] = argsOpts(a0, o0);
+      return readOnly(onInstance(ctx, o, () => Slop.call("sql", { app: ctx.project.app, kind: kindOf(o), query, args: args || [] })));
+    } },
+    "app.exec": {
+      sig: "query, args?, {kind}?",
+      doc: "runs SQL that may write (INSERT, UPDATE, DELETE) on the dev instance's tables (or the test instance: {kind: 'test'}); for removing the test rows you added, one by one",
+      writes: "dev",
+      run: (ctx, query, a0, o0) => {
+        const [args, o] = argsOpts(a0, o0);
+        return onInstance(ctx, o, () => Slop.call("exec", { app: ctx.project.app, kind: kindOf(o), query, args: args || [] }));
+      }
+    },
     "app.seed": {
       sig: "{docs, tables}",
       doc: "adds data to the dev instance: docs {coll: [rows]} (a row's id field names its document), tables {name: [rows]} (tables a migration made)",
       writes: "dev",
-      run: (ctx, spec) => Slop.call("seed", { app: ctx.project.app, kind: "dev", docs: spec.docs || {}, tables: spec.tables || {} })
+      run: async (ctx, spec) => {
+        const r = await Slop.call("seed", { app: ctx.project.app, kind: "dev", docs: spec.docs || {}, tables: spec.tables || {} });
+        await Promise.all([...FrameHosts].filter((fh) => fh.project === ctx.project && fh.kind === "dev").map((fh) => fh.load({ keepState: true })));
+        return r;
+      }
     },
     "app.reset": {
-      sig: "",
-      doc: "a fresh dev instance on draft, with no data (its migrations run again)",
+      sig: "{why}",
+      doc: "asks the person with an approval card, then drops ALL the dev instance's data (what they entered too) for a fresh one on draft. Only when a migration changed in a way old rows cannot follow; never to clean up test data",
       writes: "dev",
       long: true,
-      run: async (ctx) => {
-        const P = ctx.project, r = await Instances.reset(P, "dev");
+      run: async (ctx, o = {}) => {
+        const P = ctx.project;
+        const ok = await ctx.approve("Reset the dev data of " + P.app + "?", "Every row and document in your dev instance goes, including what you entered yourself. The app's code is not touched." + (o && o.why ? "\nWhy: " + o.why : ""));
+        if (!ok) throw Object.assign(new Error("the person declined the reset"), { kind: "approval" });
+        const r = await Instances.reset(P, "dev");
+        await Instances.ensure(P, "dev");
         await Promise.all([...FrameHosts].filter((fh) => fh.project === P && fh.kind === "dev").map((fh) => fh.load({ keepState: false })));
         return r;
       }
@@ -1871,6 +1923,7 @@
     "files.exists": { sig: "path", doc: "bool", run: (ctx, path) => ctx.tx.has(path) },
     "files.lines": {
       sig: "path, from?, to?",
+      ret: "one string, a numbered line per line (.split('\\n') for an array)",
       doc: 'numbered lines "12| \u2026" (200 by default)',
       run: (ctx, path, from = 1, to) => {
         const ls = readText(ctx.tx, path).split("\n");
@@ -2146,6 +2199,7 @@
 
   // src/agent/api/frames.js
   var frameOf = (ctx, id) => {
+    if (id && typeof id === "object") id = id.id;
     const P = ctx.project, f = id ? P.frame(id) : P.board().frames[0];
     if (!f) throw missing("no frame " + id + ". Frames: " + (P.board().frames.map((x) => x.id + " " + x.route).join(", ") || "none"));
     return f;
@@ -2164,6 +2218,7 @@
     "frames.list": { sig: "", doc: "[{id, label, route, w, h, x, y, errors, issues}]", run: (ctx) => ctx.project.board().frames.map(info) },
     "frames.open": {
       sig: "route, {w, h, x, y, label, new}?",
+      ret: "{id, label, route, w, h, x, y, errors, issues, reused?}",
       doc: "a frame (reuses one showing that page at that size unless new: true)",
       run: (ctx, route, o = {}) => {
         const P = ctx.project, w = o.w || 375, hh = o.h || 720;
@@ -2175,11 +2230,13 @@
           changed(P);
         }
         canvasLog(ctx, "opened " + route + " " + w + "\xD7" + hh);
+        FrameHost.ui.reveal(f.id);
         return info(f);
       }
     },
     "frames.update": {
       sig: "frameId, {route, w, h, x, y, label}",
+      ret: "{id, label, route, w, h, x, y, errors, issues}",
       run: (ctx, id, o) => {
         const f = frameOf(ctx, id);
         if (o.w != null) f.w = clamp(Math.round(+o.w) || f.w, 240, 2400);
@@ -2200,6 +2257,7 @@
     "frames.label": { sig: "frameId, label?", run: (ctx, id, label2) => FRAMES["frames.update"].run(ctx, id, { label: label2 || null }) },
     "frames.close": {
       sig: "frameId",
+      ret: "{closed, remaining}",
       run: (ctx, id) => {
         const f = frameOf(ctx, id);
         ctx.project.removeFrame(f.id);
@@ -2247,6 +2305,7 @@
     },
     "frames.outline": {
       sig: "frameId?",
+      ret: "a string, one element per line",
       doc: "the DOM as an indented tree, with @file:line for each element",
       run: async (ctx, id) => {
         const nodes = await (await hostOf(ctx, id)).call("outline", [300]);
@@ -2263,13 +2322,37 @@
       }
     },
     "frames.query": { sig: "frameId, selector", doc: "matches, each with attrs (data-*, href, name, value, checked, aria-*)", run: async (ctx, id, sel) => (await hostOf(ctx, id)).call("query", [sel]) },
-    "frames.count": { sig: "frameId, selector", run: async (ctx, id, sel) => {
+    "frames.look": {
+      sig: "frameId, question, {target}?",
+      ret: "{answer, kind, target, size}",
+      long: true,
+      doc: "looks at a drawing (a <canvas> or <svg>: a chart, what frames.text cannot read) with a model that sees images, and answers the question: overlapping or cut-off labels, the shape of a line, the colours. It can misread words that overlap: take exact labels and numbers from the data, and use it for what the eye sees. target: a selector (default the largest canvas or svg)",
+      run: async (ctx, id, question, o = {}) => {
+        if (!ctx.agent || !ctx.agent.sample) throw Object.assign(new Error("Claude is not available in this view"), { kind: "unavailable" });
+        ctx.llmCalls = (ctx.llmCalls || 0) + 1;
+        if (ctx.llmCalls > 24) throw Object.assign(new Error("model calls (llm, frames.look) are capped at 24 per turn"), { kind: "budget" });
+        const fh = await hostOf(ctx, id);
+        const pic = await fh.call("image", [o.target || null], 15e3);
+        const b64 = String(pic.data).split(",")[1] || "", bin = atob(b64), bytes = new Uint8Array(bin.length);
+        for (let i = 0; i < bin.length; i++) bytes[i] = bin.charCodeAt(i);
+        const blob = new Blob([bytes], { type: "image/png" });
+        const prompt = "The image is a " + pic.kind + " from a web page, " + pic.w + "\xD7" + pic.h + " CSS pixels, shown in a frame " + pic.frameWidth + " px wide. Answer the question from what is visible in the image only. Be specific (which labels, where); say plainly when text overlaps, is cut off or is too small to read, and say when you cannot tell.\n\nQuestion: " + String(question || "Describe what this drawing shows and anything that looks wrong.");
+        let res;
+        try {
+          res = await ctx.agent.sample(prompt, { images: [blob], modelTier: "quick", cache: false, signal: ctx.signal });
+        } catch (e) {
+          throw Object.assign(new Error(e && e.code === "images_unavailable" ? "no model that reads images is configured on this server (an administrator sets pi.models.vision)" : e && e.message || String(e)), { kind: "llm" });
+        }
+        return { answer: (res && res.text || "").trim(), kind: pic.kind, target: pic.selector, size: [pic.w, pic.h] };
+      }
+    },
+    "frames.count": { sig: "frameId, selector", ret: "a number", run: async (ctx, id, sel) => {
       const fh = await hostOf(ctx, id);
       await fh.call("settle", [600], 2e3).catch(() => {
       });
       return fh.call("count", [sel]);
     } },
-    "frames.text": { sig: "frameId?, target?", doc: "visible text", run: async (ctx, id, target) => (await hostOf(ctx, id)).call("text", [target || null]) },
+    "frames.text": { sig: "frameId?, target?", ret: "a string", doc: "visible text", run: async (ctx, id, target) => (await hostOf(ctx, id)).call("text", [target || null]) },
     "frames.click": { sig: "frameId, target", run: async (ctx, id, target) => {
       const r = await (await hostOf(ctx, id)).call("click", [target]);
       await sleep(120);
@@ -2285,13 +2368,14 @@
       }
     },
     "frames.console": { sig: "frameId?", run: async (ctx, id) => (await hostOf(ctx, id)).logs.slice(-30).map((l) => l.level + ": " + l.text + (l.src ? " @" + l.src : "")) },
-    "frames.reload": { sig: "frameId?", run: async (ctx, id) => {
+    "frames.reload": { sig: "frameId?", ret: "{route, errors}", run: async (ctx, id) => {
       const fh = await hostOf(ctx, id);
       await fh.load({ keepState: false });
       return { route: fh.route, errors: fh.errors };
     } },
     "frames.layout": {
       sig: "frameId?, {near}?",
+      ret: "{route, width, height, count, items: [{key, tag, box: [x, y, w, h], text, src, hidden?}]}: an object; the elements are in .items (at most 150)",
       doc: "every rendered element: key, tag, box [x, y, w, h], own text, src",
       run: async (ctx, id, o = {}) => {
         const fh = await hostOf(ctx, id), L = await fh.call("layout", [], 5e3);
@@ -2305,6 +2389,7 @@
     },
     "frames.snapshot": {
       sig: "frameId?, label?",
+      ret: "{id, route, w, ws, label, t}",
       doc: "a frozen copy of the page and its layout",
       run: async (ctx, id, label2) => {
         const m = await Snaps.take(ctx.project, await hostOf(ctx, id), { label: label2 || null, by: ctx.who });
@@ -2315,6 +2400,7 @@
     // draft by default; in draft, against the newest snapshot of the page)
     "frames.compare": {
       sig: "frameId, {with}?",
+      ret: "{frame, from, to, changes, summary}",
       doc: "layout differences against draft (from a proposal), a proposal ref, or a snapshot id",
       run: async (ctx, id, o = {}) => {
         const P = ctx.project, f = frameOf(ctx, id), cur = await layoutIn(P, f, ctx.ws, { headless: true });
@@ -2466,6 +2552,11 @@
     if (e.fixedIssues) parts.push("fixed " + plural(e.fixedIssues.length, "issue"));
     if (e.newIssues) parts.push(plural(e.newIssues.length, "new issue"));
     if (e.newErrors) parts.push(plural(e.newErrors.length, "new error"));
+    if (e.types && e.types.skipped) parts.push("types not checked");
+    else if (e.types) {
+      if (e.types.new.length) parts.push(plural(e.types.new.length + (e.types.more || 0), "new type error"));
+      if (e.types.fixed) parts.push("fixed " + plural(e.types.fixed, "type error"));
+    }
     if (e.layout) parts.push("layout changed on " + e.layout.map((l) => l.frame.split(" ")[0]).filter((x, i, a) => a.indexOf(x) === i).join(", "));
     return parts.join(" \xB7 ");
   }
@@ -2589,7 +2680,20 @@
   // src/core/scenario.js
   var SCEN_DIR = "scenarios/";
   var FIX_DIR = "fixtures/";
-  var STEP_KINDS = ["go", "click", "type", "waitFor", "wait", "expect", "sql", "docs", "snapshot"];
+  var STEP_KINDS = ["go", "click", "type", "waitFor", "wait", "expect", "sql", "docs", "download", "snapshot"];
+  var STEP_KEYS = {
+    go: ["go"],
+    click: ["click"],
+    type: ["type", "text"],
+    waitFor: ["waitFor"],
+    wait: ["wait"],
+    expect: ["expect", "text", "exact", "match", "count", "visible", "value"],
+    sql: ["sql", "args", "count", "value", "rows"],
+    docs: ["docs", "where", "count"],
+    snapshot: ["snapshot"],
+    download: ["download", "text", "exact", "match"]
+  };
+  var ANY_STEP = ["timeout", "note"];
   var fixturePath = (name) => FIX_DIR + String(name).replace(/\.json$/, "") + ".json";
   function checkFixture(spec) {
     if (!spec || typeof spec !== "object" || Array.isArray(spec)) return "a fixture is an object: { docs?: { coll: [rows] }, tables?: { name: [rows] } }";
@@ -2611,6 +2715,16 @@
       if (k === "expect" && typeof s.expect !== "string") return "step " + (i + 1) + ": expect is a selector";
       if (k === "sql" && typeof s.sql !== "string") return "step " + (i + 1) + ": sql is a query";
       if (k === "docs" && typeof s.docs !== "string") return "step " + (i + 1) + ": docs is a collection";
+      const extra = Object.keys(s).filter((x) => !STEP_KEYS[k].includes(x) && !ANY_STEP.includes(x));
+      if (extra.length) return "step " + (i + 1) + " (" + k + "): unknown " + (extra.length > 1 ? "keys " : "key ") + extra.join(", ") + "; a " + k + " step takes " + STEP_KEYS[k].join(", ") + " (and timeout, note)";
+      if (k === "download" && typeof s.download !== "string") return "step " + (i + 1) + ': download is the file name ("" for any)';
+      if ((k === "expect" || k === "download") && s.match != null) {
+        try {
+          new RegExp(String(s.match));
+        } catch (e) {
+          return "step " + (i + 1) + ": match is not a regular expression: " + e.message;
+        }
+      }
     }
     if (spec.size && (!Array.isArray(spec.size) || spec.size.length !== 2)) return "size is [width, height]";
     return null;
@@ -2623,10 +2737,11 @@
     if (s.type) return 'type "' + String(s.text ?? "").slice(0, 30) + '" into ' + s.type;
     if (s.waitFor) return "wait for " + s.waitFor;
     if (s.wait != null) return "wait " + s.wait + " ms";
+    if (s.download != null) return "download " + (s.download || "(any file)") + (s.text != null ? (s.exact ? " is exactly " : " has ") + '"' + String(s.text).slice(0, 30) + '"' : "") + (s.match != null ? " matches /" + s.match + "/" : "");
     if (s.expect) {
-      return "expect " + s.expect + count + (s.text != null ? ' has "' + String(s.text).slice(0, 30) + '"' : "") + (s.value != null ? ' value "' + s.value + '"' : "") + (s.visible === false ? " hidden" : "");
+      return "expect " + s.expect + count + (s.text != null ? ' has "' + String(s.text).slice(0, 30) + '"' : "") + (s.exact ? " (exactly)" : "") + (s.match != null ? " matches /" + s.match + "/" : "") + (s.value != null ? ' value "' + s.value + '"' : "") + (s.visible === false ? " hidden" : "");
     }
-    if (s.sql) return "sql " + s.sql.slice(0, 60) + count;
+    if (s.sql) return "sql " + s.sql.slice(0, 60) + count + (s.value !== void 0 ? " = " + JSON.stringify(s.value) : "") + (s.rows ? " rows " + JSON.stringify(s.rows).slice(0, 60) : "");
     if (s.docs) return "docs " + s.docs + (s.where ? " " + JSON.stringify(s.where) : "") + count;
     if (s.snapshot != null) return "snapshot" + (s.snapshot ? ' "' + s.snapshot + '"' : "");
     return JSON.stringify(s);
@@ -2645,6 +2760,12 @@
       return { name, path, spec, error, description: spec && spec.description || "", parts };
     });
   }
+  function specKey(spec) {
+    const t = JSON.stringify(spec);
+    let x = 5381;
+    for (let i = 0; i < t.length; i++) x = (x << 5) + x + t.charCodeAt(i) | 0;
+    return (x >>> 0).toString(36);
+  }
   function scenarioList(P, ws) {
     return P.list(ws).filter((p) => p.startsWith(SCEN_DIR) && p.endsWith(".json")).map((path) => {
       const name = path.slice(SCEN_DIR.length, -5);
@@ -2655,7 +2776,9 @@
       } catch (e) {
         error = "not valid JSON: " + e.message;
       }
-      return { name, path, spec, error, last: (P.meta.runs || {})[ws + "|" + name] || null };
+      let last = (P.meta.runs || {})[ws + "|" + name] || null;
+      if (last && spec && last.key && last.key !== specKey(spec)) last = { ...last, stale: true };
+      return { name, path, spec, error, last };
     });
   }
 
@@ -2686,7 +2809,7 @@
     }
     await Instances.reset(P, "test");
     await Instances.ensure(P, "test", ws === "draft" ? void 0 : ws);
-    if (spec) await Slop.call("seed", { app: P.app, kind: "test", docs: spec.docs || {}, tables: spec.tables || {} });
+    if (spec) await Slop.call("seed", { app: P.app, kind: "test", docs: spec.docs || {}, tables: spec.tables || {}, replace: true });
     Fixtures.current = name || null;
     for (const fh of FrameHosts) if (fh.project === P && fh.kind === "test") fh.load({ keepState: false });
     Fixtures.ev.emit("applied", Fixtures.current);
@@ -2754,8 +2877,22 @@
           else if (s.expect) verify(s, await poll(s, () => expectStep(fh, s)));
           else if (s.sql) verify(s, await poll(s, async () => {
             const rows = await Slop.call("sql", { app: P.app, kind: "test", query: s.sql, args: s.args || [] });
-            const n = Array.isArray(rows) ? rows.length : 0;
+            const list = Array.isArray(rows) ? rows : [], n = list.length;
+            if (s.value !== void 0) {
+              const v = n ? Object.values(list[0])[0] : void 0;
+              const same = typeof s.value === "number" && v != null ? Number(v) === s.value : JSON.stringify(v) === JSON.stringify(s.value);
+              return { ok: same, got: n ? JSON.stringify(v) : "no rows" };
+            }
+            if (s.rows) return { ok: JSON.stringify(list) === JSON.stringify(s.rows), got: JSON.stringify(list).slice(0, 160) };
             return s.count != null ? { ok: n === +s.count, got: n + " rows" } : { ok: n > 0, got: "0 rows" };
+          }));
+          else if (s.download != null) verify(s, await poll(s, async () => {
+            const d = await fh.call("download", []);
+            if (!d) return { ok: false, got: "no download yet" };
+            if (s.download && d.name !== s.download) return { ok: false, got: 'downloaded "' + d.name + '"' };
+            const t = d.text == null ? "" : String(d.text);
+            const ok = s.exact ? t === String(s.text) : s.match != null ? new RegExp(String(s.match)).test(t) : s.text != null ? t.includes(String(s.text)) : true;
+            return { ok, got: 'downloaded "' + d.name + '": ' + JSON.stringify(t.slice(0, 120)) };
           }));
           else if (s.docs) verify(s, await poll(s, async () => {
             const docs = (await Slop.call("docs", { app: P.app, kind: "test", coll: s.docs })).map((d) => d.body || {});
@@ -2788,7 +2925,7 @@
     res.ms = now() - t0;
     if (keep && name !== "unsaved") {
       P.meta.runs = P.meta.runs || {};
-      P.meta.runs[ws + "|" + name] = { t: res.t, ok: res.ok, ms: res.ms, failedAt: res.failedAt, steps: res.steps.map((s) => ({ label: s.label, ok: s.ok, error: s.error, ms: s.ms })), snaps: res.snaps };
+      P.meta.runs[ws + "|" + name] = { key: specKey(spec), t: res.t, ok: res.ok, ms: res.ms, failedAt: res.failedAt, steps: res.steps.map((s) => ({ label: s.label, ok: s.ok, error: s.error, ms: s.ms })), snaps: res.snaps };
       P.saveMeta();
     }
     const note = name + (res.ok ? " passed (" + plural(res.steps.length, "step") + ")" : " failed at step " + (res.failedAt + 1) + ": " + res.steps[res.failedAt].error);
@@ -2805,9 +2942,20 @@
     }
     if (!n) return { ok: false, got: "nothing matches" };
     const els = await fh.call("all", [s.expect, 20]);
+    const texts = s.text != null || s.match != null ? await fh.call("texts", [s.expect, 20]).catch(() => els.map((e) => e.text)) : [];
+    const got = () => 'text "' + texts.join(" | ").slice(0, 160) + '"';
+    if (s.match != null) {
+      let re;
+      try {
+        re = new RegExp(String(s.match));
+      } catch (e) {
+        return { ok: false, got: "match is not a regular expression: " + e.message };
+      }
+      return { ok: texts.some((t) => re.test(t)), got: got() };
+    }
     if (s.text != null) {
-      const want = String(s.text).toLowerCase();
-      return { ok: els.some((e) => e.text.toLowerCase().includes(want)), got: 'text "' + els.map((e) => e.text).join(" | ").slice(0, 120) + '"' };
+      const norm = (t) => String(t).replace(/\s+/g, " ").trim().toLowerCase(), want = norm(s.text);
+      return { ok: texts.some((t) => s.exact ? norm(t) === want : t.toLowerCase().includes(String(s.text).toLowerCase())), got: got() };
     }
     if (s.value != null) {
       const v = (els[0].attrs || {}).value;
@@ -2862,16 +3010,19 @@
     // the dev instance's rows as a fixture: tables by name, docs by collection
     "fixtures.capture": {
       sig: "name, {tables, docs, description}",
-      doc: "saves rows of the dev instance as a fixture",
+      ret: "{path, tables: [names], docs: [collections]}",
+      doc: 'saves rows of the dev instance as a fixture: tables is a list of table names (["orders"]), docs a list of collections; all their rows go in',
       writes: "files",
       pathOf: ([name]) => fixturePath(fileName(name)),
       run: async (ctx, name, o) => {
         const app = ctx.project.app, spec = { description: o.description || "captured from the dev instance", docs: {}, tables: {} };
-        for (const t of o.tables || []) {
+        const names = (v) => Array.isArray(v) ? v : v && typeof v === "object" ? Object.keys(v) : v ? [v] : [];
+        o = { ...o || {}, tables: names((o || {}).tables), docs: names((o || {}).docs) };
+        for (const t of o.tables) {
           if (!/^\w+$/.test(t)) throw invalid3("table names are words: " + t);
           spec.tables[t] = await Slop.call("sql", { app, kind: "dev", query: 'SELECT * FROM "' + t + '"', args: [] });
         }
-        for (const c of o.docs || []) {
+        for (const c of o.docs) {
           spec.docs[c] = (await Slop.call("docs", { app, kind: "dev", coll: c })).map((d) => ({ id: d.path.split("/").pop(), ...d.body }));
         }
         const path = fixturePath(fileName(name));
@@ -2895,10 +3046,10 @@
         steps: s.spec && Array.isArray(s.spec.steps) ? s.spec.steps.length : 0,
         fixture: s.spec && s.spec.fixture || void 0,
         error: s.error || void 0,
-        last: s.last ? s.last.ok ? "passed" : "failed at step " + (s.last.failedAt + 1) : void 0
+        last: s.last ? s.last.stale ? "edited since its last run (not run since)" : s.last.ok ? "passed" : "failed at step " + (s.last.failedAt + 1) : void 0
       }))
     },
-    "scenarios.read": { sig: "name", run: (ctx, name) => read(ctx, name) },
+    "scenarios.read": { sig: "name", ret: "the spec {description, page, size?, fixture?, steps}", run: (ctx, name) => read(ctx, name) },
     "scenarios.save": {
       sig: "name, spec",
       writes: "files",
@@ -2913,13 +3064,15 @@
     },
     "scenarios.run": {
       sig: "nameOrSpec",
-      doc: '{ok, failedAt, steps: ["\u2713 \u2026", "\u2717 \u2026: why"], snapshots}',
+      ret: '{name, workspace, ok, ms, failedAt, steps: ["\u2713 \u2026", "\u2717 \u2026: why"], snapshots}',
+      doc: "runs it on the scenarios and code of this eval's workspace (a proposal's, when you write to one)",
       long: true,
       run: async (ctx, target) => {
         const name = typeof target === "string" ? target : "unsaved", spec = typeof target === "string" ? read(ctx, target) : target;
         const r = await runScenario(ctx.project, spec, { ...runOpts(ctx), name });
         return {
           name,
+          workspace: ctx.ws,
           ok: r.ok,
           ms: r.ms,
           failedAt: r.ok ? void 0 : r.failedAt + 1,
@@ -2929,12 +3082,15 @@
       }
     },
     "scenarios.runAll": {
+      // which copy of the app ran: a proposal's results differed from the person's Run all on draft, and
+      // nothing said why (round 5: "the agent's results contradict what I saw")
       sig: "",
-      doc: "{passed, failed, results}",
+      ret: "{workspace, passed, failed, results}",
+      doc: "every saved scenario of this eval's workspace; the person's Run all runs the workspace they view, so say which one yours ran on",
       long: true,
       run: async (ctx) => {
         const rs = await runAllScenarios(ctx.project, { ...runOpts(ctx), files: files(ctx) });
-        return { passed: rs.filter((r) => r.ok).length, failed: rs.filter((r) => !r.ok).length, results: rs.map((r) => (r.ok ? "\u2713 " : "\u2717 ") + r.name + (r.error ? " (step " + ((r.failedAt ?? -1) + 1) + "): " + r.error : "")) };
+        return { workspace: ctx.ws, passed: rs.filter((r) => r.ok).length, failed: rs.filter((r) => !r.ok).length, results: rs.map((r) => (r.ok ? "\u2713 " : "\u2717 ") + r.name + (r.error ? " (step " + ((r.failedAt ?? -1) + 1) + "): " + r.error : "")) };
       }
     }
   };
@@ -3027,6 +3183,179 @@
       }
     },
     "dry.discard": { sig: "id", internal: true, run: (ctx, id) => ctx.changesets.delete(id) }
+  };
+
+  // src/agent/types.js
+  var devKey = (st, ref = "draft") => {
+    const inst = !st ? null : ref === "draft" ? st.dev : (st.props || []).find((p) => p.ref === ref);
+    return inst ? inst.n + (inst.broken ? ":broken" : "") : "none";
+  };
+  var CODE = /\.(ts|tsx|mts|cts)$/;
+  var RELEVANT = (p) => CODE.test(p) || p === "app.json" || p === "tsconfig.json" || p === "vendor/tsconfig.vendor.json";
+  var Types = {
+    worker: null,
+    state: "off",
+    version: "",
+    seq: 0,
+    waits: /* @__PURE__ */ new Map(),
+    decl: /* @__PURE__ */ new Map(),
+    // the shell's (ui/app.js): the app's status as last polled ({dev: {n, broken}}), or null
+    status: () => null,
+    // Whether a view is an app the checker looks at: it has TypeScript of its own.
+    wants(view) {
+      return view.list().some((p) => CODE.test(p) && !p.endsWith(".d.ts") && !p.startsWith("vendor/") && !p.startsWith("node_modules/"));
+    },
+    // The view's files the checker reads, taken now (a later write does not change them).
+    filesOf(view) {
+      const out = {};
+      for (const p of view.list()) if (RELEVANT(p)) {
+        const t = view.read(p);
+        if (typeof t === "string") out[p] = t;
+      }
+      return out;
+    },
+    spawn() {
+      if (this.worker) return;
+      this.state = "loading";
+      const attach = (w) => {
+        w.onmessage = (e) => {
+          const m = e.data || {};
+          if (m.type === "ready") {
+            this.state = "ready";
+            this.version = m.version;
+            return;
+          }
+          const wait = this.waits.get(m.id);
+          if (wait) {
+            this.waits.delete(m.id);
+            wait(m);
+          }
+        };
+        w.onerror = (e) => {
+          e.preventDefault && e.preventDefault();
+          this.fail("the checker could not start");
+        };
+        this.worker = w;
+      };
+      try {
+        attach(new Worker("checker.js"));
+      } catch {
+        fetch("checker.js").then((r) => r.text()).then((src) => attach(new Worker(URL.createObjectURL(new Blob([src], { type: "text/javascript" }))))).catch(() => this.fail("the checker could not load"));
+      }
+    },
+    fail(why2) {
+      this.state = "off";
+      this.worker = null;
+      for (const [, w] of this.waits) w({ ok: false, error: why2 });
+      this.waits.clear();
+    },
+    // Sends a message; resolves with the answer, or {timeout} after ms (the
+    // answer, when it comes, is dropped: the worker answers in order).
+    post(msg, ms) {
+      this.spawn();
+      const id = ++this.seq;
+      return new Promise((resolve) => {
+        const t = setTimeout(() => {
+          if (this.waits.delete(id)) resolve({ ok: false, timeout: true });
+        }, ms);
+        this.waits.set(id, (m) => {
+          clearTimeout(t);
+          resolve(m);
+        });
+        const send = () => this.worker ? this.worker.postMessage({ ...msg, id }) : setTimeout(send, 50);
+        send();
+      });
+    },
+    // The declarations ({name: text}) for a ref of the app: its actions are
+    // those of the instance running that ref (a proposal's actor may differ
+    // from draft's). Cached per app, ref and the version that instance runs.
+    declarations(P, ref = "draft") {
+      const pre = P.app + "|" + ref + "|", key = pre + devKey(this.status(P), ref);
+      let d = this.decl.get(key);
+      if (!d) {
+        d = Slop.call("types", { app: P.app, ...ref !== "draft" ? { ref } : {} }).then((r) => Object.fromEntries((r.files || []).map((f) => [f.path, f.text])));
+        d.catch(() => {
+          if (this.decl.get(key) === d) this.decl.delete(key);
+        });
+        for (const k of [...this.decl.keys()]) if (k.startsWith(pre)) this.decl.delete(k);
+        this.decl.set(key, d);
+      }
+      return d;
+    },
+    invalidate(P) {
+      for (const k of [...this.decl.keys()]) if (k.startsWith(P.app + "|")) this.decl.delete(k);
+    },
+    // Type errors in a view: {diags: [{file, line, col, code, message,
+    // program}], ms} or {skipped: why}.
+    async check(P, view, { timeoutMs = 2e3, ref = "draft" } = {}) {
+      const files2 = this.filesOf(view);
+      let decl;
+      try {
+        decl = await this.declarations(P, ref);
+      } catch (e) {
+        return { skipped: "no declarations from the server: " + (e.message || e) };
+      }
+      const r = await this.post({ type: "check", files: files2, decl }, timeoutMs);
+      if (r.timeout) return { skipped: this.state === "ready" ? "the check took longer than " + Math.round(timeoutMs / 1e3) + " s" : "the checker was still loading" };
+      if (!r.ok) return { skipped: r.error || "the checker failed" };
+      return { diags: r.diags, ms: r.ms };
+    },
+    // The type at a position in a file of the view: {text, doc} or null.
+    async info(P, view, path, pos, ref = "draft") {
+      let decl;
+      try {
+        decl = await this.declarations(P, ref);
+      } catch {
+        return null;
+      }
+      const r = await this.post({ type: "info", files: this.filesOf(view), decl, path, pos }, 3e3);
+      return r.ok && r.text ? { text: r.text, doc: r.doc || "" } : null;
+    },
+    // An eval's TypeScript body with its types stripped: {code} or {error, line}.
+    async transpile(code) {
+      const r = await this.post({ type: "transpile", code }, 2e4);
+      if (r.timeout) return { error: "the checker did not load in time to compile TypeScript" };
+      return r.ok ? { code: r.code } : { error: r.error, line: r.line };
+    },
+    // What an eval did to the types: the errors after that were not there
+    // before (by file, code and message: an error that only moved lines is
+    // the same error), and how many before are gone. {new, fixed, total} or
+    // {skipped}.
+    diff(before, after, cap = 8) {
+      if (after.skipped) return { skipped: after.skipped };
+      if (before.skipped) return { skipped: "no check from before the eval (" + before.skipped + ")", total: after.diags.length };
+      const key = (d) => d.file + "|" + d.code + "|" + d.message;
+      const left = /* @__PURE__ */ new Map();
+      for (const d of before.diags) left.set(key(d), (left.get(key(d)) || 0) + 1);
+      const added = [];
+      for (const d of after.diags) {
+        const n = left.get(key(d)) || 0;
+        if (n) left.set(key(d), n - 1);
+        else added.push({ file: d.file, line: d.line, message: d.message });
+      }
+      const fixed = [...left.values()].reduce((a, b) => a + b, 0);
+      const out = { new: added.slice(0, cap), fixed, total: after.diags.length };
+      if (added.length > cap) out.more = added.length - cap;
+      return out;
+    }
+  };
+  var headView = (d) => ({ list: () => d.list(), read: (p) => d.read(p) });
+
+  // src/agent/api/types.js
+  var TYPES = {
+    "types.check": {
+      sig: "{file}?",
+      long: true,
+      doc: "{errors: [{file, line, col, message, program}], count} for the files as this eval sees them (its own writes included), or {skipped}: TypeScript errors in the pages and the actor, checked against the app's declarations",
+      run: async (ctx, o = {}) => {
+        const view = ctx.tx || headView(ctx.draft);
+        if (!Types.wants(view)) return { errors: [], count: 0, note: "the app has no TypeScript files" };
+        const r = await Types.check(ctx.project, view, { timeoutMs: 2e4, ref: ctx.draft.ref });
+        if (r.skipped) return { skipped: r.skipped };
+        const errors = r.diags.filter((d) => !o.file || d.file === o.file).map((d) => ({ file: d.file, line: d.line, col: d.col, message: d.message, program: d.program }));
+        return { errors: errors.slice(0, 50), count: errors.length };
+      }
+    }
   };
 
   // src/agent/api/ui.js
@@ -3136,7 +3465,7 @@
           if (e.internal) continue;
           const ns = name.includes(".") ? name.slice(0, name.indexOf(".")) : "";
           if (!groups.has(ns)) groups.set(ns, []);
-          groups.get(ns).push(name + "(" + e.sig + ")" + (e.doc ? " \u2014 " + e.doc : ""));
+          groups.get(ns).push(name + "(" + e.sig + ")" + (e.ret ? " \u2192 " + e.ret : "") + (e.doc ? " \u2014 " + e.doc : ""));
         }
         return [...groups].map(([ns, lines]) => lines.join("\n") + (notes[ns] ? "\n  " + notes[ns].trim().split("\n").join("\n  ") : "")).join("\n");
       }
@@ -3155,11 +3484,11 @@
   }
 
   // src/agent/api/index.js
-  var API = defineAPI(FILES, APP, FRAMES, TESTS, SESSION, UI, LIB, TX, AGENTS);
+  var API = defineAPI(FILES, APP, FRAMES, TESTS, SESSION, UI, LIB, TX, AGENTS, TYPES);
 
   // src/model/templates.js
   var esc = (s) => String(s).replace(/[<&"]/g, "");
-  var page = (title, body, script) => `<!doctype html>
+  var page = (title, body) => `<!doctype html>
 <html lang="en">
 <head>
 <meta charset="utf-8">
@@ -3171,49 +3500,74 @@
 <main>
 ${body}
 </main>
-<script type="module">
-${script}
-<\/script>
+<script type="module" src="main.ts"><\/script>
 </body>
 </html>
 `;
+  var TYPES2 = `Files are TypeScript; the server compiles them (types are stripped, not
+checked). To check them, pull the app and run \`slop types <app>\`: it writes
+the declarations into \`.slop/types/\` and the tsconfig files, then
+\`tsc -p tsconfig.json\` checks the pages`;
   var STYLES = `body { font: 16px/1.5 system-ui, sans-serif; margin: 0; color: #1a1a1a; }
 main { max-width: 40rem; margin: 3rem auto; padding: 0 1rem; }
 form { display: flex; gap: .5rem; margin: 1rem 0; }
 input { flex: 1; font: inherit; padding: .4rem .6rem; border: 1px solid #bbb; }
 button { font: inherit; padding: .4rem .9rem; border: 1px solid #1a1a1a; background: #fff; cursor: pointer; }
 li { padding: .25rem 0; }
+.starter { color: #6b6b6b; font-size: 14px; border-left: 3px solid #d0d0d0; padding-left: 10px; }
 `;
   var APP_TEMPLATES = [
     {
       id: "blank",
-      name: "Page",
-      blurb: "One page that keeps its data in the app's document database.",
+      name: "Simple page",
+      blurb: "One page. What people type into it is saved, without any server code. Good for a form, a list or a notebook.",
       frames: [{ route: "index.html", w: 1024, h: 700 }, { route: "index.html", w: 375, h: 700 }],
       files: ({ title }) => ({
         "app.json": JSON.stringify({ title: esc(title), page: "index.html", capabilities: { db: {} } }, null, 2) + "\n",
         "index.html": page(esc(title), `<h1>${esc(title)}</h1>
+<p class="starter">A starting point: a small list that works. Tell Claude in the chat what you want here, and this page becomes it.</p>
 <form id="add"><input name="text" placeholder="Something to remember" required><button>Add</button></form>
-<ul id="list"></ul>`, `const db = await window.claude.use('db')
-const list = document.getElementById('list')
-async function show() {
-  const snap = await db.collection('notes').get()
-  list.replaceChildren(...snap.docs.map(d => Object.assign(document.createElement('li'), { textContent: d.data().text })))
+<ul id="list"></ul>`),
+        "main.ts": `// The page: notes in the app's document database.
+interface Note {
+  text: string
+  at: number
 }
-document.getElementById('add').addEventListener('submit', async e => {
+
+const db = await claude.use('db')
+const list = document.querySelector<HTMLUListElement>('#list')!
+const form = document.querySelector<HTMLFormElement>('#add')!
+
+async function show() {
+  if (!db) return
+  const snap = await db.collection<Note>('notes').orderBy('at').get()
+  list.replaceChildren(...snap.docs.map(d => {
+    const li = document.createElement('li')
+    li.textContent = d.data()?.text ?? ''
+    return li
+  }))
+}
+
+form.addEventListener('submit', async e => {
   e.preventDefault()
-  const text = e.target.text.value.trim()
-  if (!text) return
-  await db.collection('notes').add({ text, at: Date.now() })
-  e.target.reset()
+  const input = form.elements.namedItem('text') as HTMLInputElement
+  const text = input.value.trim()
+  if (!text || !db) return
+  const note: Note = { text, at: Date.now() }
+  await db.collection<Note>('notes').add(note)
+  form.reset()
   await show()
 })
-await show()`),
+await show()
+`,
         "styles.css": STYLES,
         "README.md": `# ${esc(title)}
 
-A slop app: \`app.json\` is its manifest, \`index.html\` its page. The page
-keeps notes in the app's document database (\`window.claude.use('db')\`).
+A slop app: \`app.json\` is its manifest, \`index.html\` its page, and
+\`main.ts\` the page's script. It keeps notes in the app's document database
+(\`claude.use('db')\`).
+
+${TYPES2}.
 
 Edits in the bench go to the \`draft\` ref and your dev instance runs them;
 publishing moves \`main\`, which production instances run.
@@ -3222,33 +3576,53 @@ publishing moves \`main\`, which production instances run.
     },
     {
       id: "actor",
-      name: "Page and actor",
-      blurb: "A page that calls its actor, which keeps rows in SQL (a migration in sql/).",
+      name: "Page with server code",
+      blurb: "A page plus code that runs on the server (an actor) and keeps a table of rows (SQL). Good when many people share the same data, or for rules people must not get around.",
       frames: [{ route: "index.html", w: 1024, h: 700 }, { route: "index.html", w: 375, h: 700 }],
       files: ({ title }) => ({
-        "app.json": JSON.stringify({ title: esc(title), page: "index.html", actor: "actor.js", capabilities: { user: {} } }, null, 2) + "\n",
-        "actor.js": `// The app's server half: actions the page calls, rows in SQL.
-const sql = use('sql');
+        // the profile scope: ctx.visitor.name is the person's name (without it, "")
+        "app.json": JSON.stringify({ title: esc(title), page: "index.html", actor: "actor.ts", capabilities: { user: { scopes: ["profile"] } } }, null, 2) + "\n",
+        "actor.ts": `// The app's server half: actions the page calls, rows in SQL. Each action
+// declares its arguments' JSON Schema (checked before run: a wrong shape is
+// refused) and its result's; defineAction types run from them, and the
+// page's types come from them too (slop types writes actions.d.ts).
+const sql = use('sql')
 
 defineActor({
   actions: {
-    list: {
+    list: defineAction({
       requires: 'view',
+      args: { type: 'object', properties: {} },
+      result: {
+        type: 'array',
+        items: {
+          type: 'object',
+          required: ['id', 'text', 'by', 'at'],
+          properties: { id: { type: 'integer' }, text: { type: 'string' }, by: { type: 'string' }, at: { type: 'integer' } },
+        },
+      },
       run(ctx) {
-        return sql.all('SELECT id, text, by, at FROM items ORDER BY at DESC LIMIT 100');
+        return sql.all('SELECT id, text, by, at FROM items ORDER BY at DESC LIMIT 100')
       },
-    },
-    add: {
+    }),
+    add: defineAction({
       requires: 'interact',
-      run(ctx, { text }) {
-        const t = String(text || '').trim().slice(0, 500);
-        if (!t) ctx.fail('invalid_argument', 'text is empty');
-        sql.run('INSERT INTO items (text, by, at) VALUES (?, ?, ?)', t, ctx.visitor.name || ctx.visitor.id, Date.now());
-        return { added: t };
+      args: {
+        type: 'object',
+        required: ['text'],
+        additionalProperties: false,
+        properties: { text: { type: 'string', minLength: 1, maxLength: 500 } },
       },
-    },
+      result: { type: 'object', required: ['added'], properties: { added: { type: 'string' } } },
+      run(ctx, { text }) {
+        const t = text.trim()
+        if (!t) ctx.fail('invalid_argument', 'text is empty')
+        sql.run('INSERT INTO items (text, by, at) VALUES (?, ?, ?)', t, ctx.visitor.name || 'someone', Date.now())
+        return { added: t }
+      },
+    }),
   },
-});
+})
 `,
         "sql/001_items.sql": `-- The app's rows. A migration runs once per instance; change the schema
 -- with a new file (sql/002_\u2026.sql), never by editing this one after it ran.
@@ -3260,25 +3634,46 @@ CREATE TABLE items (
 );
 `,
         "index.html": page(esc(title), `<h1>${esc(title)}</h1>
+<p class="starter">A starting point: a small list that works. Tell Claude in the chat what you want here, and this page becomes it.</p>
 <form id="add"><input name="text" placeholder="Add an item" required><button>Add</button></form>
-<ul id="list"></ul>`, `const slop = await window.claude.use('slop')
-const list = document.getElementById('list')
+<ul id="list"></ul>`),
+        "main.ts": `// The page: it calls the actor's actions, typed by their schemas
+// (actions.d.ts, from slop types).
+const slop = await claude.use('slop')
+const list = document.querySelector<HTMLUListElement>('#list')!
+const form = document.querySelector<HTMLFormElement>('#add')!
+
 async function show() {
+  if (!slop) return
   const rows = await slop.actions.list({})
-  list.replaceChildren(...rows.map(r => Object.assign(document.createElement('li'), { textContent: r.text + ' \xB7 ' + r.by })))
+  list.replaceChildren(...rows.map(r => {
+    const li = document.createElement('li')
+    li.textContent = r.text + ' \xB7 ' + r.by
+    return li
+  }))
 }
-document.getElementById('add').addEventListener('submit', async e => {
+
+form.addEventListener('submit', async e => {
   e.preventDefault()
-  await slop.actions.add({ text: e.target.text.value })
-  e.target.reset()
+  if (!slop) return
+  const input = form.elements.namedItem('text') as HTMLInputElement
+  await slop.actions.add({ text: input.value })
+  form.reset()
   await show()
 })
-await show()`),
+await show()
+`,
         "styles.css": STYLES,
         "README.md": `# ${esc(title)}
 
-A slop app with an actor: \`index.html\` calls the actions in \`actor.js\`,
-which keeps rows in SQL (\`sql/001_items.sql\`).
+A slop app with an actor: the page (\`index.html\`, \`main.ts\`) calls the
+actions in \`actor.ts\`, which keeps rows in SQL (\`sql/001_items.sql\`).
+Each action declares the JSON Schema of its arguments, which the server
+checks before the action runs, and of its result. They are the contract:
+\`defineAction\` types the action's code from them, and \`slop types\`
+declares the page's \`slop.actions\` from them (\`.slop/types/actions.d.ts\`).
+
+${TYPES2}, and \`tsc -p tsconfig.actor.json\` the actor.
 
 Edits in the bench go to the \`draft\` ref and your dev instance runs them;
 publishing moves \`main\`, which production instances run (their migrations
@@ -3399,13 +3794,51 @@ run then).
         }, 1e3);
         this.runs.set(id, run);
         const sigs = Object.fromEntries([...api.entries].map(([n, e]) => [n, e.sig]));
-        this.worker.postMessage({ type: "eval", id, code, api: api.names(), sigs, long: api.long(), roles, timeoutMs: clamp(timeoutMs, 1e3, 12e4), sid, restore: restore || null, lib: lib || [] });
+        const docs = Object.fromEntries([...api.entries].map(([n, e]) => [n, [e.ret ? "\u2192 " + e.ret : "", e.doc ? "\u2014 " + e.doc : ""].filter(Boolean).join(" ")]));
+        this.worker.postMessage({ type: "eval", id, code, api: api.names(), sigs, docs, long: api.long(), roles, timeoutMs: clamp(timeoutMs, 1e3, 12e4), sid, restore: restore || null, lib: lib || [] });
       });
     },
     drop(sid) {
       if (this.worker) this.worker.postMessage({ type: "drop", sid });
     }
   };
+
+  // src/agent/hints.js
+  function notAFunctionHint(error, code, api) {
+    if (!error || !/not a function|is not a function/.test(error.message || "") || !error.line) return "";
+    const text = String(code || "").split("\n")[error.line - 1];
+    if (text == null) return "";
+    const names = api && api.names ? api.names() : [];
+    const unknown = [];
+    for (const m of text.matchAll(/\b([a-z][A-Za-z]*)\.([A-Za-z]+)\s*\(/g)) {
+      const name = m[1] + "." + m[2];
+      const ns = names.filter((n) => n.startsWith(m[1] + "."));
+      if (ns.length && !names.includes(name) && !unknown.some((u) => u.name === name)) {
+        const close2 = names.filter((n) => n.endsWith("." + m[2]) || n.startsWith(m[1] + "." + m[2].slice(0, 3))).slice(0, 4);
+        unknown.push({ name, hint: close2.length ? close2.join(", ") : ns.slice(0, 6).join(", ") });
+      }
+    }
+    return " \u2014 the line: `" + text.trim().slice(0, 160) + "`" + unknown.map((u) => ". " + u.name + " is not in the API (did you mean " + u.hint + "?)").join("");
+  }
+  var FAKED_EVAL = /\[evals?\b[^\]\n]{0,12}\n?[\s\S]{0,400}?\bawait\s+(files|app|frames|scenarios|fixtures|session|types|lib|ui|publish)\.\w+\(|```(js|javascript|ts)?\s*\n[\s\S]{0,600}?\bawait\s+(files|app|frames|scenarios|fixtures|session|types|lib|ui|publish)\.\w+\(/;
+  function fitPrompt(msgs, max = 24e4) {
+    const enc = new TextEncoder(), size = (s) => enc.encode(s).length;
+    const out = msgs.map((m) => ({ ...m })), cut = [];
+    let total = out.reduce((a, m) => a + size(m.content), 0);
+    for (let guard2 = 0; total > max && guard2 < 50; guard2++) {
+      const order = out.map((m, i2) => i2).sort((a, b) => out[b].content.length - (b === out.length - 1 ? 1e9 : 0) - (out[a].content.length - (a === out.length - 1 ? 1e9 : 0)));
+      let i = order.find((k) => out[k].content.length > 4e3);
+      if (i === void 0) i = order[0];
+      const c = out[i].content, before = size(c), over = total - max;
+      const keep = Math.max(1500, c.length - Math.ceil(over * 1.1) - 400), half = Math.floor(keep / 2);
+      if (keep >= c.length) break;
+      out[i].content = c.slice(0, half) + "\n\u2026(" + (c.length - keep) + " characters cut here to fit the prompt; session.message(n) reads a message in full)\u2026\n" + c.slice(c.length - half);
+      const after = size(out[i].content);
+      cut.push({ i, from: before, to: after });
+      total += after - before;
+    }
+    return { msgs: out, cut };
+  }
 
   // src/agent/eval.js
   var AgentUI = {
@@ -3459,6 +3892,7 @@ run then).
     const line = firstLine(code), t0 = now();
     const before = parent ? null : await framesBefore(P, ctx.ws);
     const tx = parent ? parent.child({ label: "eval" }) : d.begin({ label: "eval", event: { who: ctx.who, thread: ctx.thread, note: line } });
+    const typesBefore = !parent && Types.wants(tx) ? Types.check(P, tx, { timeoutMs: 15e3, ref: d.ref }) : null;
     ctx.tx = tx;
     ctx.stack = [];
     ctx.logs = [];
@@ -3473,6 +3907,7 @@ run then).
       ctx.tx = null;
     }
     if (ctx.logs.length) r.logs = [...r.logs || [], ...ctx.logs.map((text) => ({ level: "log", text }))];
+    if (!r.ok && r.error) r.error.message += notAFunctionHint(r.error, code, ctx.api);
     const effects = {};
     if (!r.ok) {
       if (tx.changes.size) effects.rolledBack = tx.paths();
@@ -3485,6 +3920,11 @@ run then).
         Object.assign(effects, { files: files2, commit: { ref: d.ref, n: c.n, merged: c.merged } });
         if (c.activated.length) effects.instances = c.activated.map((a) => ({ store: a.store, n: a.n, broken: a.broken || a.error || void 0 }));
         Object.assign(effects, await afterCommit(ctx, c, before, t0));
+        if (typesBefore || Types.wants(tx)) {
+          if (c.activated.length) Types.invalidate(P);
+          const t = Types.diff(typesBefore ? await typesBefore : { diags: [] }, await Types.check(P, tx, { ref: d.ref }));
+          if (t.skipped || t.new.length || t.fixed) effects.types = t;
+        }
       } else {
         tx.abort();
         r.ok = false;
@@ -3545,21 +3985,22 @@ run then).
     files: `Paths are relative ("index.html", "css/app.css"). Binary files and files over 240 KB are kept by hash: list, copy and remove them; they cannot be read as text.`,
     app: `kind is 'dev' (default) or 'test' (the instance scenarios ran on). app.seed and app.reset change the dev instance at once: they are not part of the eval's transaction, and dry runs refuse them.`,
     publish: `Publishing is the person's call. Run publish.check first; publish.run shows them an approval card and publishes only if they approve. Never edit a migration that main has run: add a new one.`,
-    frames: `target is a CSS selector or {src: "index.html:12"}; a selector may end in :has-text("words") (e.g. 'button:has-text("Add")').
+    frames: `target is a CSS selector or {src: "index.html:12"}. Selectors take :has-text("words") (visible text contains the words; :text() is the same): at the end ('button:has-text("Add")'), followed by more ('article:has-text("Pack boxes") input[name=phone]'), or inside :has ('article:has(h2:has-text("Pack")) button').
 Reads wait until the page has settled (data loaded, DOM quiet). Arranging, labelling and closing frames changes only the canvas: allowed in every mode.`,
-    fixtures: `A fixture (fixtures/<name>.json) is the data the test instance starts from: { description, docs: { coll: [rows] }, tables: { name: [rows] } }. A row's id field names its document; tables are those your migrations make.`,
+    fixtures: `A fixture (fixtures/<name>.json) is the data the test instance starts from: { description, docs: { coll: [rows] }, tables: { name: [rows] } }. A row's id field names its document; tables are those your migrations make. A table the fixture names holds exactly its rows (rows your migrations seeded are replaced), so a fixture captured from dev data loads as it is.`,
     scenarios: `A scenario (scenarios/<name>.json) runs in a fresh frame of your test instance, after it is reset and seeded with the fixture, and passes or fails:
 { description, page: "index.html", size?: [375, 720], fixture?: name, steps: [
   { click: sel }, { type: sel, text }, { go: "#/cart" }, { waitFor: sel }, { wait: ms },
-  { expect: sel } (visible) | { expect: sel, text } (contains) | { expect: sel, count } | { expect: sel, visible: false } | { expect: sel, value },
-  { sql: "SELECT \u2026 FROM notes WHERE \u2026", args?, count? } | { docs: coll, where?: {field: value}, count? } (the test instance's data), { snapshot: label } ] }
-Checks retry until they pass or time out ({ timeout } on a step or the scenario, default 2000 ms). A failure keeps a snapshot.`,
+  { expect: sel } (visible) | { expect: sel, text } (contains, ignoring case) | { expect: sel, text, exact: true } (the whole text) | { expect: sel, match: "^12 kg$" } (a regular expression) | { expect: sel, count } | { expect: sel, visible: false } | { expect: sel, value },
+  { download: "orders.csv", text } | { download, text, exact: true } | { download, match } (the last file the page downloaded: its name, "" for any, and its content; click the button that downloads first) |
+  { sql: "SELECT \u2026 FROM notes WHERE \u2026", args?, count? } | { sql: "SELECT sum(kg) FROM \u2026", value: 30.5 } (the first column of the first row) | { sql, rows: [{\u2026}] } (exactly these rows) | { docs: coll, where?: {field: value}, count? } (the test instance's data), { snapshot: label } ] }
+A step with a key its kind does not take is an error (the scenario does not run). To check a total, check it both on the page and in the data: { expect, text, exact } and { sql, value }. A number is checked with exact or match, never contains: "12" is contained in "128" and "312". Checks retry until they pass or time out ({ timeout } on a step or the scenario, default 2000 ms). A failure keeps a snapshot.`,
     session: `Long threads: older messages are folded into a summary at the top of your context; session.recall and session.message reach what it left out.`,
     ui: ``
   };
   var INTRO = `You are the coding agent inside the bench, where a person builds a slop app (pages, an optional actor, SQL migrations) and watches it run live in frames on a canvas.
 
-You act through ONE tool, eval. Each call runs a JavaScript async function body in a QuickJS sandbox: no DOM, no network, no window. Use await, and \`return\` the value you want back (the last expression is not returned automatically). console.log output comes back too.
+You act through ONE tool, eval. Code runs only when you call it: code written into your reply runs nothing (the "[evals: \u2026]" lines in the history are the bench's notes of past calls, not a format to write), and you report only results a call returned. Each call runs a JavaScript async function body in a QuickJS sandbox: no DOM, no network, no window, no Intl (toLocaleString ignores locales; the person's local date and zone are at the top of Current state). Use await, and \`return\` the value you want back (the last expression is not returned automatically). console.log output comes back too.
 
 Your evals share a scope: top-level \`const\`/\`let\`/\`function\`/\`class\` declarations persist to your later evals in this thread (and across reloads, if they are JSON). Read once, keep the result in a variable, use it next time. vars() lists them; forget('name') drops one, forget() all.
 
@@ -3591,12 +4032,18 @@ Subagents. delegate(role, task, { output, evals, proposal }) runs another Claude
     return `How this app runs (the app store "${P.app}" on a slop server):
 - Workspaces. draft is where the app is developed; main is what people use, and only the person publishes it. A proposal (proposal/<id>) is a copy of draft the person reviews and accepts onto draft (or rejects). session.workspace() says where your writes go.
 - Instances run the app on data of their own. The canvas frames show the person's dev instance, which follows draft (a proposal is shown on their prop instance); scenarios run on their test instance, reset and seeded per run. Production instances follow main.
-- app.json is the manifest: { "title", "page": "${Instances.entry(P)}" (the entry page), "actor": "actor.js"?, "capabilities": { "db": {}, "user": {}, \u2026 }, "type"? }. Read it first, and README.md.
-- Only the entry page gets the runtime; other .html files are served as plain files. Build one page and navigate inside it (hash routes: location.hash).
-- Pages use window.claude: const db = await window.claude.use('db'), then db.doc('notes/a').set({\u2026}), (await db.doc('notes/a').get()).data(), (await db.collection('notes').get()).docs, db.collection('notes').add({\u2026}), onSnapshot(\u2026). const slop = await window.claude.use('slop'); await slop.actions.<name>(args) calls the actor. Capabilities the manifest does not declare are null.
-- actor.js: defineActor({ actions: { name: { requires: 'view' | 'interact' | 'admin', async run(ctx, args) { \u2026 } } }, setup(ctx) { \u2026 } }). ctx.visitor is {id, name, level}. use('sql') runs SQL on the instance's own tables, synchronously, each argument a separate parameter (never an array): sql.all(query, ...args) -> rows, sql.one(query, ...args) -> row or null, sql.run(query, ...args).
+- app.json is the manifest: { "title", "page": "${Instances.entry(P)}" (the entry page), "actor": "actor.ts"?, "capabilities": { "db": {}, "user": {}, \u2026 }, "type"? }. Read it first, and README.md.
+- Write TypeScript (.ts; .tsx for JSX): the server compiles it when it serves a page or loads the actor. It strips the types and does not check them, so write them with care: the person checks them with slop types and tsc. Apps written in .js keep working; do not convert one unless asked.
+- Imports name the file with its extension: import { fmt } from './lib/fmt.ts', import type { Actions } from './api.ts'. There is no npm and no node_modules: a package is available only when the person has vendored it (vendor/, named in app.json's slop.imports). A new app's page starts with a <p class="starter"> note saying it is a starting point; remove it (and the starter list, if it isn't wanted) when you build the person's page. Never copy a package's code into the app. If the person wants a library for a page, give them the three real options in plain words and let them choose: (1) build it without one (a bar or line chart is a few dozen lines of SVG); (2) load it in the page from a CDN at a pinned version (<script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.9/dist/chart.umd.min.js">): it works today, and every visitor's browser fetches it from that site; (3) a developer adds it to the app with the slop command line, so the app serves it itself: slop vendor add --store <app> <package>@<version> for pages, with --actor for the actor (server code), which can use only vendored packages. Give that exact command, with this app's id and a pinned version. Answer the same way each time: don't call an option impossible that is not.
+- Only the entry page gets the runtime; other .html files are served as plain files. Build one page and navigate inside it (hash routes: location.hash). Its script is a file: <script type="module" src="main.ts"><\/script>.
+- Pages use claude (window.claude): const db = await claude.use('db'), then db.doc('notes/a').set({\u2026}), (await db.doc('notes/a').get()).data(), (await db.collection('notes').get()).docs, db.collection('notes').add({\u2026}), onSnapshot(\u2026). Capabilities the manifest does not declare are null: check before use.
+- Live updates between people (a vote count on every phone, a board two people edit): don't poll. Either keep the shared state in db and render from onSnapshot, or, with an actor, send a room moment after each change so every open page refetches at once: const room = await claude.use('room'); room.on('votes', refetch); after a change, room.emit('votes', {}). Declare the topic in app.json: "capabilities": {"room": {"topics": {"votes": "interact"}}}. Say which you chose and why.
+- The contract is each action's schemas: add: defineAction({ requires: 'interact', args: { type: 'object', required: ['text'], additionalProperties: false, properties: { text: { type: 'string', maxLength: 500 } } }, result: { type: 'object', required: ['id'], properties: { id: { type: 'integer' } } }, run(ctx, { text }) { \u2026 } }). The server checks args before run (a wrong shape is invalid_argument naming the place, and run never sees it), so do not re-check types by hand; check meaning (empty after trim, ownership). defineAction types run's args and result from them; the page's slop.actions are typed from them (const slop = await claude.use('slop')). Give every action args (and a result when the page uses it). Results arrive as JSON (a Date becomes a string). An app may instead keep a types-only api.ts (defineActor({ \u2026 } satisfies ActorOf<Actions>), claude.use<Actions>('slop')): follow what the app does.
+- actor.ts: defineActor({ actions: { name: { requires: 'view' | 'interact' | 'admin', async run(ctx, args) { \u2026 } } }, setup(ctx) { \u2026 } }). ctx.visitor is {id, name, level}. use('sql') runs SQL on the instance's own tables, synchronously, each argument a separate parameter (never an array): sql.all(query, ...args) -> rows, sql.one(query, ...args) -> row or null, sql.run(query, ...args). Files only the actor uses go under server/.
 - sql/NNN_name.sql are migrations, applied once per instance, in order. Never edit one that has run; add a new file. app.reset() gives you a fresh dev instance when you must.
-- After writing actor.js or a migration, look at effects.instances and effects.actorLogs (or app.logs()) before going on.
+- After writing the actor or a migration, look at effects.instances and effects.actorLogs (or app.logs()) before going on.
+- In an app with TypeScript, the bench type-checks the pages and the actor against the app's declarations (the same check as tsc with slop types). An eval's effects.types says what it did: {new: [{file, line, message}], fixed, total} (or {skipped} when the checker was not ready). Fix the type errors your eval introduced in your next eval; they are real mistakes (a misspelled field, a wrong argument), even though the page may still run. types.check() lists all of them, as your eval sees the files. Do not chase errors that were there before you, unless asked.
+- Your eval code may be TypeScript too: pass ts: true with it (the types are stripped, not checked).
 Markdown files (README.md, notes, specs) render in the Docs panel. Keep README.md current when you change pages, the actor or migrations.`;
   }
   var RULES = `Working rules:
@@ -3609,6 +4056,20 @@ Markdown files (README.md, notes, specs) render in the Docs panel. Keep README.m
 - Mark milestones with session.mark("short label"); mark decisions and guesses with their kind, so the person can audit them later.
 - When you will need something again (a file list, rows, frame ids), keep it in a top-level variable. When a helper will be useful in later sessions, save it with lib.def.
 - In a proposal, say what you changed so the person can judge it. Say which draft your change made; publishing is the person's call.
+- Do not name your variables after the API's namespaces (files, app, frames, tests, session, ui, lib, types, \u2026): const [info, files] = \u2026 makes files a variable for the whole eval, and files.list() then fails.
+- Talk to the person in their words, not the bench's internals: "your proposal "Add a heading"" (its title), not proposal/mwk3\u2026; "the preview of your proposal", not "the prop instance"; "the draft", not "draft 14". Explain a term the first time a person who does not program would meet it (a proposal: a copy of the app with your changes, which they look at and accept or reject).
+- A button that is only a symbol (\u2715, \u2190, \u2192) gets an aria-label naming its item ("Delete card: Draft the launch announcement"): a list of identical \u2715 says nothing to a screen reader or to frames.click (round 5). A two-click confirm says it is waiting, and says when it gave up.
+- A page never shows an action's error text as it is ("listRoster: at /code: minLength: got 0, want 1" reached a volunteer, round 5): catch it, say in plain words what to do, and don't call an action whose arguments are not ready (an empty code).
+- A chart drawn on a <canvas> or in an <svg> is invisible to frames.text and frames.layout: check it with frames.look(frame, 'at this width, do any labels overlap or get cut off?') at each size you care about (375 px too), and fix what it reports (round 5: overlapping district names at 375 px passed every text check).
+- Check behaviour, not your own text. Reading back a file you just wrote proves only that you wrote it: before you call a change done, use it (frames.click / frames.type and frames.text in the dev frame, or a scenario run) and look at types.check; an action called with the wrong argument shape or a misspelled field passes a read-back and fails a click.
+- Say only what the effects show. A failed eval wrote nothing (its writes were rolled back: effects.rolledBack lists them), so a file it was making does not exist until an eval that succeeds writes it. Check before you tell the person something is done.
+- Leave nothing of your own testing in the app: a probe action, a scratch file, a deliberate type error to see what the checker says. Remove it in the same turn, or do the probing in an eval that does not write.
+- Start with what the person will see: a page they can look at and try, then the server code and tests behind it. Someone who does not program judges progress by the page.
+- Tell the person everything they need to use what you made: a code or password you chose, which page to open, where to click, that a result appears below the fold.
+- Questions about the bench itself are part of the job: how to try a change safely (a proposal), how to keep it (Accept in the chat or the Review tab), how to undo it (Reject; the Timeline restores earlier versions), how to see the data (the Data view), how to publish (Publish in the header; an administrator then gets a "Give it a web address" button, and app.addresses() tells you the link). Answer them plainly.
+- Data you add to try things (rows, documents, test sign-ups) goes in the test instance (scenarios and fixtures), not the dev instance the person looks at: test rows in dev show up on their page. If some ended up in dev, remove just those rows (app.exec('DELETE FROM t WHERE id = ?', [id])), and say so. Never reset the dev instance to clean up: app.reset drops everything the person entered too.
+- A scenario passes only if it checks what the person cares about: the numbers or words on the page, the rows in the data. Make each one fail once on purpose (change the expected value) to show it can, then put it back.
+- Keep the app's README.md true: when the app's purpose or files change, update it in the same turn.
 - Finish with a short summary in Markdown (short paragraphs, bullets, \`code\`; no big headings): what you changed, where, and anything left to do. Cite places as \`file:line\` (for example \`styles.css:73\`): they become links that open the file.`;
   function guide(P, api) {
     return INTRO + "\n\n" + appGuide(P) + "\n\nThe API (each call returns a Step; await it to run):\n" + api.reference(NOTES) + "\n\n" + RULES;
@@ -3616,6 +4077,8 @@ Markdown files (README.md, notes, specs) render in the Docs panel. Keep README.m
 
   // src/agent/agent.js
   var BUDGET = 30;
+  var CALL_EVALS = 9;
+  var MAX_CONTINUES = 2;
   var firstLine2 = (code) => (code.split("\n").find((l) => l.trim() && !l.trim().startsWith("//")) || "").trim().slice(0, 90);
   var Agent = {
     sample: null,
@@ -3666,7 +4129,15 @@ Markdown files (README.md, notes, specs) render in the Docs panel. Keep README.m
       for (const fh of FrameHosts) if (!fh.headless && fh.project === P) for (const i of fh.issues) issues.push(fh.route + " " + fh.w + "px: " + i.message + (i.src ? " @" + i.src : ""));
       const props = P.openProposals().map((p) => p.ref + ' "' + p.title + '"').join("; ") || "none";
       const where = ws === "draft" ? "draft " + P.draftOf(ws).head : "proposal " + ws + ' "' + (P.proposals.get(ws) || {}).title + '" at ' + P.draftOf(ws).head;
-      return 'App "' + P.title + '" (' + P.app + "). Your writes go to " + where + "; main is " + (P.refs.main ?? "not published yet") + ".\nFiles: " + files2 + "\nInstances: " + inst + "\nFrames: " + frames + "\nOpen proposals: " + props + "\nSelected: " + sel + "\nOpen pins:\n" + pins2 + "\nCurrent check issues: " + (issues.slice(0, 8).join("; ") || "none") + "\nSaved lib functions: " + (libEntries(view).map((l) => "lib." + l.name + "(" + l.params.join(", ") + ")" + (l.description ? " \u2014 " + l.description : "")).join("; ") || "none") + "\nYour variables from earlier evals: " + (th && th.scope ? (scopeSummary(th.scope) || "none") + (th.scope.skipped && th.scope.skipped.length ? " (not kept: " + th.scope.skipped.join(", ") + ")" : "") : "none");
+      const d = /* @__PURE__ */ new Date(), tz = (() => {
+        try {
+          return Intl.DateTimeFormat().resolvedOptions().timeZone;
+        } catch {
+          return "";
+        }
+      })();
+      const when = "The person's local time: " + d.toLocaleString("en-GB", { weekday: "short", day: "numeric", month: "long", year: "numeric", hour: "2-digit", minute: "2-digit" }) + (tz ? " (" + tz + ")" : "") + "; dates you tell them use this, not UTC.\n";
+      return when + 'App "' + P.title + '" (' + P.app + "). Your writes go to " + where + "; main is " + (P.refs.main ?? "not published yet") + ".\nFiles: " + files2 + "\nInstances: " + inst + "\nFrames: " + frames + "\nOpen proposals: " + props + "\nSelected: " + sel + "\nOpen pins:\n" + pins2 + "\nCurrent check issues: " + (issues.slice(0, 8).join("; ") || "none") + "\nSaved lib functions: " + (libEntries(view).map((l) => "lib." + l.name + "(" + l.params.join(", ") + ")" + (l.description ? " \u2014 " + l.description : "")).join("; ") || "none") + "\nYour variables from earlier evals: " + (th && th.scope ? (scopeSummary(th.scope) || "none") + (th.scope.skipped && th.scope.skipped.length ? " (still in the sandbox while this bench page stays open, but not saved for after a reload: " + th.scope.skipped.join(", ") + ")" : "") : "none");
     },
     HIST_CHARS: 28e3,
     KEEP_CHARS: 12e3,
@@ -3676,6 +4147,7 @@ Markdown files (README.md, notes, specs) render in the Docs panel. Keep README.m
     renderMsg(m, detail) {
       if (m.role === "user") return (m.from ? "(from the " + m.from + ") " : "") + (m.text || "");
       const steps = m.steps || [], wrote = [...new Set(steps.flatMap((s) => (s.calls || []).filter((c) => /write|replace|remove|copy|save|seed|reset/.test(c))))];
+      if (!steps.length && FAKED_EVAL.test(m.text || "")) return "(this reply wrote eval code as text; none of it ran, and what it reported did not happen)";
       const t = m.text || (m.error ? "(failed: " + m.error + ")" : "(no reply)");
       if (!steps.length) return t;
       if (!detail) return t + "\n[" + plural(steps.length, "eval") + (wrote.length ? ", used " + wrote.join(", ") : "") + "]";
@@ -3709,7 +4181,7 @@ Markdown files (README.md, notes, specs) render in the Docs panel. Keep README.m
       let text = "", by = "claude";
       try {
         if (this.sample) {
-          const r = await this.sample(prompt, { modelTier: "quick", cache: false, signal });
+          const r = await this.sample(fitPrompt([{ role: "user", content: prompt }]).msgs[0].content, { modelTier: "quick", cache: false, signal });
           text = (r && r.text || "").trim();
         }
       } catch (e) {
@@ -3825,9 +4297,9 @@ Markdown files (README.md, notes, specs) render in the Docs panel. Keep README.m
       const tool = {
         name: "eval",
         description: "Run a JavaScript async function body in the bench sandbox with the host API in scope (files, app, frames, fixtures, scenarios, session, ui, lib, publish) and the step core (step, seq, par, delegate, \u2026). Use `return` for the result. Returns {ok, value, logs, error, effects}.",
-        inputSchema: { type: "object", properties: { code: { type: "string", description: "JavaScript statements; may use await; return the value you want back" } }, required: ["code"] },
+        inputSchema: { type: "object", properties: { code: { type: "string", description: "JavaScript statements; may use await; return the value you want back" }, ts: { type: "boolean", description: "the code is TypeScript: its types are stripped before it runs (they are not checked)" } }, required: ["code"] },
         execute: async (input) => {
-          const code = String(input && input.code || "");
+          let code = String(input && input.code || "");
           const step = { code, t: now(), status: "running" };
           msg.steps.push(step);
           this.ev.emit("step", th.id);
@@ -3855,7 +4327,23 @@ Markdown files (README.md, notes, specs) render in the Docs panel. Keep README.m
             step.status = "running";
             this.ev.emit("step", th.id);
           }
-          const r = await runEval(ctx, code, { sid: th.id, restore: th.scope && th.scope.vars });
+          if (input && input.ts) {
+            const t = await Types.transpile(code);
+            if (t.error) {
+              Object.assign(step, { ok: false, status: "error", out: "syntax: " + t.error + (t.line ? " (line " + t.line + ")" : "") });
+              this.ev.emit("step", th.id);
+              return JSON.stringify({ ok: false, error: { kind: "syntax", message: "the TypeScript does not compile: " + t.error, line: t.line || void 0 } });
+            }
+            code = t.code;
+          }
+          let r = await runEval(ctx, code, { sid: th.id, restore: th.scope && th.scope.vars });
+          if (!r.ok && !(input && input.ts) && r.error && r.error.kind === "SyntaxError" && /\w\s*\??\s*:\s*[\w[{(<'"]|\bas\s+[A-Z\w[]|\b(interface|type)\s+\w+/.test(code)) {
+            const t = await Types.transpile(code).catch(() => ({ error: "no transpiler" }));
+            if (!t.error && t.code && t.code !== code) {
+              r = await runEval(ctx, t.code, { sid: th.id, restore: th.scope && th.scope.vars });
+              step.note = "ran as TypeScript (pass ts: true for TypeScript)";
+            }
+          }
           Object.assign(step, { ok: r.ok, ms: r.ms, engine: r.engine, calls: r.calls, effects: r.effects || void 0 });
           if (ctx.children.length) step.children = ctx.children.splice(0);
           if (r.scope) th.scope = r.scope;
@@ -3903,12 +4391,59 @@ Markdown files (README.md, notes, specs) render in the Docs panel. Keep README.m
         delete msg.note;
         this.ev.emit("text", th.id);
       }
-      const res = await this.sample(this.messages(P, th, o.ws, text, head), { tools: [tool], onText: ({ text: t }) => {
-        msg.text = t;
+      let msgs = this.messages(P, th, o.ws, text, head), res = null, prev = "", faked = false;
+      for (let call = 0; ; call++) {
+        const before = msg.steps.length;
+        const fit = fitPrompt(msgs);
+        if (fit.cut.length) msg.promptCut = { parts: msgs.map((m) => m.role[0] + m.content.length), cut: fit.cut };
+        res = await this.sample(fit.msgs, { tools: [tool], onText: ({ text: t }) => {
+          msg.text = (prev ? prev + "\n\n" : "") + t;
+          this.ev.emit("text", th.id);
+        }, signal: o.signal, modelTier: th.tier || "default", cache: false, ...th.model ? { model: th.model } : {} });
+        const made = msg.steps.length - before, left = o.budget.max - o.budget.used;
+        if (!made && !faked && FAKED_EVAL.test(res && res.text || "") && left > 0 && !(o.signal && o.signal.aborted)) {
+          faked = true;
+          msg.text = prev;
+          this.ev.emit("text", th.id);
+          msgs = [
+            ...msgs,
+            { role: "assistant", content: "(a reply with eval code written as text)" },
+            { role: "user", content: "(From the bench, not the person: your last reply wrote eval code as text instead of calling the eval tool, so none of it ran and nothing it described happened. Call the eval tool to run code, and report only results you saw in its output.)" }
+          ];
+          continue;
+        }
+        if (o.signal && o.signal.aborted) break;
+        const silent = made > 0 && !(res && res.text || "").trim();
+        if (made < CALL_EVALS && !silent) break;
+        if (silent || left <= 0 || call >= MAX_CONTINUES) {
+          prev = (prev ? prev + "\n\n" : "") + (res && res.text || "").trim();
+          const fin = fitPrompt([
+            ...msgs,
+            { role: "assistant", content: this.renderMsg({ ...msg, text: res && res.text || "" }, true) || "(evals)" },
+            { role: "user", content: "(From the bench, not the person: " + (silent && left > 0 && call < MAX_CONTINUES ? "your last call ran evals and then said nothing." : "this turn has used all its evals.") + " Reply to the person now, without evals: what you changed, what you checked and how, what is not done or not verified yet, and any temporary code (probes, console.log) still in the files. They can send a message to let you go on.)" }
+          ]);
+          try {
+            res = await this.sample(fin.msgs, { onText: ({ text: t }) => {
+              msg.text = (prev ? prev + "\n\n" : "") + t;
+              this.ev.emit("text", th.id);
+            }, signal: o.signal, modelTier: th.tier || "default", cache: false, ...th.model ? { model: th.model } : {} });
+          } catch (e) {
+            if (o.signal && o.signal.aborted) throw e;
+            res = { text: "(The turn used all its evals before Claude could report; send a message to go on.)" };
+          }
+          break;
+        }
+        prev = (prev ? prev + "\n\n" : "") + (res && res.text || "").trim();
+        msg.text = prev;
         this.ev.emit("text", th.id);
-      }, signal: o.signal, modelTier: th.tier || "default", cache: false, ...th.model ? { model: th.model } : {} });
+        msgs = [
+          ...msgs,
+          { role: "assistant", content: this.renderMsg({ ...msg, text: res && res.text || "" }, true) || "(evals)" },
+          { role: "user", content: "(From the bench, not the person: that model call reached its limit of " + CALL_EVALS + " evals. This turn has " + left + " evals left. Carry on with the work where you stopped; when it is done, or you need the person, reply to them.)" }
+        ];
+      }
       if (res && res.modelApplied) msg.model = res.modelApplied;
-      msg.text = res && res.text || msg.text;
+      msg.text = (prev ? prev + (res && res.text ? "\n\n" + res.text : "") : res && res.text) || msg.text;
       if (res && res.truncated) msg.text += "\n[reply truncated]";
       return msg.text;
     },
@@ -3973,6 +4508,7 @@ Markdown files (README.md, notes, specs) render in the Docs panel. Keep README.m
           }
         }
         msg.summary = changed2.length ? plural(changed2.length, "file") + ' changed in "' + P.proposals.get(ws).title + '"' : "";
+        if (msg.status === "done" && !(msg.text || "").trim() && msg.steps.length) msg.text = autoSummary(msg, changed2, ws === "draft" ? null : (P.proposals.get(ws) || {}).title), msg.auto = true;
         P.log({ kind: "turn", who: "agent", ref: ws, thread: th.id, ok: msg.status === "done", note: (msg.text || msg.error || "").split("\n")[0].slice(0, 140), evals: msg.steps.length });
         P.saveThread(th);
         P.ev.emit("threads");
@@ -4059,6 +4595,15 @@ Markdown files (README.md, notes, specs) render in the Docs panel. Keep README.m
       if (t) t.abort.abort();
     }
   };
+  function autoSummary(msg, changed2, proposal) {
+    const files2 = /* @__PURE__ */ new Set(), bad = msg.steps.filter((st) => st.status === "error").length;
+    for (const st of msg.steps) for (const f of st.effects && st.effects.files || []) files2.add(f.path);
+    const parts = [];
+    if (files2.size) parts.push("Changed " + [...files2].slice(0, 6).join(", ") + (files2.size > 6 ? " and " + (files2.size - 6) + " more" : "") + (proposal ? ' in the proposal "' + proposal + '" (a copy of your app: look at it, then accept it to keep the changes)' : " in the draft") + ".");
+    else parts.push("Looked at the app; nothing was changed.");
+    if (bad) parts.push(plural(bad, "step") + " failed along the way.");
+    return parts.join(" ");
+  }
 
   // src/ui/dock.js
   var Views = {};
@@ -5531,6 +6076,10 @@ Markdown files (README.md, notes, specs) render in the Docs panel. Keep README.m
       const r = await Slop.call("thread", { id });
       t.msgs = r.messages;
       t.saved = t.msgs.map((m) => JSON.stringify(m));
+      for (const m of t.msgs) if (m.role === "agent" && m.status === "running" && Date.now() - (m.t || 0) > 15 * 6e4) {
+        m.status = "stopped";
+        m.error = m.error || "Interrupted: the bench was closed or reloaded while this reply ran. Send a message to go on.";
+      }
       return t;
     }
     // Saves the thread's fields and the messages from the first that changed
@@ -5826,7 +6375,7 @@ Markdown files (README.md, notes, specs) render in the Docs panel. Keep README.m
   var App = {
     P: null,
     ws: "draft",
-    mode: "select",
+    mode: "play",
     sel: null,
     logs: [],
     ev: emitter(),
@@ -5844,7 +6393,14 @@ Markdown files (README.md, notes, specs) render in the Docs panel. Keep README.m
       let n = 0;
       for (const fh of FrameHosts) if (!fh.headless && fh.project === this.P) n += fh.issues.length + fh.errors;
       if (Watch.status && Watch.status.dev && Watch.status.dev.broken) n++;
-      return n;
+      return n + this.typeErrors.length;
+    },
+    // the type checker's errors in the workspace shown (the Code view keeps them: ui/code.js)
+    typeErrors: [],
+    setTypeErrors(diags) {
+      this.typeErrors = diags || [];
+      this.ev.emit("health");
+      this.paintHeader();
     },
     hostFor(fid) {
       return this.canvas ? this.canvas.hostFor(fid) : null;
@@ -5955,6 +6511,7 @@ Markdown files (README.md, notes, specs) render in the Docs panel. Keep README.m
     setWs(ws) {
       if (ws !== "draft" && (!this.proposal(ws) || this.proposal(ws).status !== "open")) ws = "draft";
       this.ws = ws;
+      if (this.P) Prefs.set("ws|" + this.P.app, ws);
       if (ws === "draft" && this.canvas) this.canvas.compare = false;
       this.ev.emit("ws", ws);
       if (this.canvas) this.canvas.sync();
@@ -6006,6 +6563,7 @@ Markdown files (README.md, notes, specs) render in the Docs panel. Keep README.m
       this.ws = "draft";
       this.sel = null;
       this.logs = [];
+      this.typeErrors = [];
       this.offs.push(
         P.ev.on("files", (ws, paths) => {
           this.ev.emit("files", ws, paths);
@@ -6037,7 +6595,12 @@ Markdown files (README.md, notes, specs) render in the Docs panel. Keep README.m
       Watch.start(P);
       Snaps.open(P).catch(() => {
       });
+      const head = headView(P.draftOf("draft"));
+      if (Types.wants(head)) Types.check(P, head, { timeoutMs: 3e4 }).catch(() => {
+      });
       this.ev.emit("project", P);
+      const was = Prefs.get("ws|" + P.app, "draft");
+      if (was !== "draft" && (P.proposals.get(was) || {}).status === "open") this.setWs(was);
       if (this.canvas) this.canvas.sync();
       this.paintHeader();
       return true;
@@ -6066,7 +6629,11 @@ Markdown files (README.md, notes, specs) render in the Docs panel. Keep README.m
       let pick = APP_TEMPLATES[0].id;
       const id = h("input.txt", { value: "", placeholder: "id: lowercase letters, digits and -", style: { width: "100%" } });
       const title = h("input.txt", { value: "", placeholder: "Title (optional)", style: { width: "100%" } });
-      const cards = h("div.tcards");
+      const cards = h("div.tcards"), who = h("div");
+      Slop.call("me", {}).then((me) => {
+        if (me && !me.canBuild) who.append(h("p.note", { style: { color: "var(--accent)" } }, "Only this server's administrators can create or change apps. You can use the apps you have access to; ask an administrator to create one for you."));
+      }).catch(() => {
+      });
       const paint = () => {
         clear(cards);
         for (const t of APP_TEMPLATES) cards.appendChild(h("button" + (t.id === pick ? ".on" : ""), { on: { click: () => {
@@ -6095,7 +6662,7 @@ Markdown files (README.md, notes, specs) render in the Docs panel. Keep README.m
       if (!files2) paint();
       modal({
         title: files2 ? "Import as a new app" : "New app",
-        body: [h("p.note", files2 ? plural(files2.length, "file") + " go to the new app's draft." : "An app store with app.json and a page. Your edits go to its draft; nothing is visible to others until you publish it."), files2 ? null : cards, id, files2 ? null : title],
+        body: [who, h("p.note", files2 ? plural(files2.length, "file") + " go to the new app's draft." : "A new app. Your changes stay private (its draft) until you publish it."), files2 ? null : cards, id, files2 ? null : title],
         actions: [{ label: "Cancel" }, { label: "Create", primary: true, run: go }]
       });
       setTimeout(() => id.focus(), 0);
@@ -6203,9 +6770,14 @@ Markdown files (README.md, notes, specs) render in the Docs panel. Keep README.m
       modal({
         title: "Publish " + P.app,
         wide: true,
-        body: [h("p.note", "Publishing moves main to this draft. Production instances run it on their next view; a migration runs on each. You can roll back."), h("div.mono", { style: { fontSize: "12px" } }, lines)],
+        // plain words first (a persona review: "moves main to this draft … production instances" lost a baker); the technical lines under Details
+        body: [
+          h("p", pf.refs.main ? "Publishing makes this version the one people use. Anyone who has the app open gets it the next time they load it. If something goes wrong, you can roll back to the version before." : "Publishing makes this version the one people use. This is the first publish: nobody uses the app yet."),
+          h("details", { open: blocked }, h("summary.note", blocked ? "Why it can't be published yet" : "Details"), h("div.mono", { style: { fontSize: "12px", marginTop: "6px" } }, lines))
+        ],
         actions: [{ label: "Cancel" }, ...nothing || blocked ? [] : [{
-          label: "Publish draft " + pf.refs.draft,
+          label: "Publish",
+          title: "Publish draft " + pf.refs.draft,
           primary: true,
           run: async () => {
             try {
@@ -6247,13 +6819,45 @@ Markdown files (README.md, notes, specs) render in the Docs panel. Keep README.m
         }
       };
       paint(pf.production);
-      if (!pf.production.length) list.append(h("div", "No production instance follows main yet. Mount the app or make an instance (slop store new <id> --app " + P.app + ")."));
+      if (!pf.production.length) list.append(h("div.note", "No other copy of the app follows main."));
+      const where = h("div", h("p.note", "Looking up where the app is on the web\u2026"));
+      Slop.call("addresses", { app: P.app }).then((r) => {
+        clear(where);
+        const live = (urls) => h("p", h("b", "Your app is live at: "), ...urls.map((u, i) => [i ? ", " : "", h("a", { href: u.url, target: "_blank", rel: "noopener" }, u.url)]));
+        if (r.urls.length) {
+          where.append(live(r.urls));
+          return;
+        }
+        const none = h("p", h("b", "Your app is published, but it has no web address yet. "), "An administrator of this server gives it one; ask them, and the link will show here.");
+        where.append(none);
+        Slop.call("me", {}).then((me) => {
+          if (!me || !me.canBuild) return;
+          clear(none);
+          none.append(h("b", "Your app is published, but it has no web address yet. "));
+          const btn = h("button.btn.sm.primary", { on: { click: async () => {
+            btn.disabled = true;
+            try {
+              const m = await Slop.call("putOnline", { app: P.app });
+              clear(where);
+              where.append(live([{ url: m.url }]));
+            } catch (e) {
+              btn.disabled = false;
+              toast("No address: " + (e.message || e), 6e3);
+            }
+          } } }, "Give it a web address (/" + P.app + ")");
+          none.append(btn);
+        }).catch(() => {
+        });
+      }).catch(() => {
+        clear(where);
+      });
       modal({
         title: "Published draft " + n,
         wide: true,
-        body: [h("p.note", "Instances that follow main:"), list],
-        actions: [{ label: from ? "Roll back to " + from : "Close", danger: !!from, run: async () => {
+        body: [where, h("p.note", "Instances that follow main:"), list],
+        actions: [{ label: from ? "Undo this publish\u2026" : "Close", run: async () => {
           if (!from) return;
+          if (!await confirmBox("Undo this publish?", "People get the version from before (" + from + ") again. Your draft keeps everything.", "Undo the publish")) return false;
           try {
             await Publish.rollback(P, from, n);
             toast("main is back at " + from);
@@ -6262,6 +6866,10 @@ Markdown files (README.md, notes, specs) render in the Docs panel. Keep README.m
           }
         } }, ...from ? [{ label: "Done", primary: true }] : []]
       });
+    },
+    // the dev instance's data changed under the frames (a seed): show it
+    reloadDev() {
+      for (const fh of FrameHosts) if (fh.project === this.P && fh.kind === "dev") fh.load({ keepState: true });
     },
     async resetDev() {
       const P = this.P;
@@ -6301,7 +6909,7 @@ Markdown files (README.md, notes, specs) render in the Docs panel. Keep README.m
         H.agent,
         H.store,
         H.publish,
-        h("button.btn.hide-s", { title: "Bookmark this moment on the timeline", on: { click: () => this.addMark() } }, "+ Mark"),
+        h("button.btn.hide-s.markbtn", { title: "Bookmark this moment on the timeline", on: { click: () => this.addMark() } }, "+ Mark"),
         h("div.rel", h("button.btn", { on: { click: (e) => this.layoutMenu(e.currentTarget) } }, "Layout")),
         h("button.ibtn", { title: "Theme", on: { click: () => this.theme({ auto: "dark", dark: "light", light: "auto" }[this.prefs.theme || "auto"]) } }, "\u25D0")
       );
@@ -6325,7 +6933,14 @@ Markdown files (README.md, notes, specs) render in the Docs panel. Keep README.m
       clear(H.store).append(h("b", l.edits || l.draft), h("span", l.dev || "no dev instance"));
     },
     projectMenu(btn) {
-      const recent = Projects.recent(), items = [{ group: "Recent" }];
+      const recent = Projects.recent(), items = [
+        { label: "New app\u2026", sub: "start one from a template", run: () => this.newAppDialog() },
+        { label: "Import app\u2026", sub: "a .zip of an app's files", run: () => this.importDialog() },
+        // also here, not only in the header: a persona looked for it in the menus (round 5)
+        ...this.P ? [{ label: "Publish " + this.P.app + "\u2026", sub: "draft to main: what people use", run: () => this.publishDialog() }] : [],
+        { hr: true },
+        { group: "Recent" }
+      ];
       for (const id of recent) {
         const a = Slop.app(id);
         items.push({ label: id, sub: a ? [a.refs.draft != null ? "draft " + a.refs.draft : "", a.refs.main != null ? "main " + a.refs.main : "not published"].filter(Boolean).join(" \xB7 ") : "", on: this.P && id === this.P.app, run: () => {
@@ -6336,7 +6951,6 @@ Markdown files (README.md, notes, specs) render in the Docs panel. Keep README.m
       const apps = Slop.apps.filter((a) => !recent.includes(a.id));
       for (const a of apps.slice(0, 30)) items.push({ label: a.id, sub: [a.refs.draft != null ? "draft " + a.refs.draft : "", a.refs.main != null ? "main " + a.refs.main : "not published", plural(a.instances.length, "instance")].filter(Boolean).join(" \xB7 "), run: () => this.openProject(a.id) });
       if (!apps.length) items.push({ note: Slop.error || "Every app you can develop is listed above." });
-      items.push({ hr: true }, { label: "New app\u2026", sub: "an app store from a template, on draft", run: () => this.newAppDialog() }, { label: "Import app\u2026", sub: "a .zip of an app's files", run: () => this.importDialog() });
       if (this.P) {
         items.push(
           { hr: true },
@@ -6375,7 +6989,12 @@ Markdown files (README.md, notes, specs) render in the Docs panel. Keep README.m
           });
         }
       }
-      if (items.length === 1) items.push({ note: "No issues in the frames on the canvas." });
+      if (this.typeErrors.length) {
+        items.push({ group: "Type errors" });
+        for (const d of this.typeErrors.slice(0, 6)) items.push({ label: d.file + ":" + d.line, sub: d.message.split("\n")[0].slice(0, 70), run: () => this.reveal(d.file, d.line) });
+        if (this.typeErrors.length > 6) items.push({ note: this.typeErrors.length - 6 + " more in the Code view" });
+      }
+      if (items.length === 1) items.push({ note: "No issues in the frames on the canvas, and no type errors." });
       else items.push({ hr: true }, { label: "Ask Claude to fix these", run: () => this.askAgent("Fix the check issues and errors the frames report.") });
       popMenu(btn, items, { right: true });
     },
@@ -6411,7 +7030,14 @@ Markdown files (README.md, notes, specs) render in the Docs panel. Keep README.m
         ready: (fh) => this.ev.emit("frameready", fh),
         hostFor: (fid) => this.hostFor(fid),
         log: (fh, l) => this.consoleAdd(l),
-        pick: (fh, info2) => this.select(info2),
+        reveal: (fid) => setTimeout(() => this.canvas && this.canvas.focusFrame && this.canvas.focusFrame(fid), 400),
+        pick: (fh, info2) => {
+          this.select(info2);
+          if (!this.playHinted && /^(button|a|input|select|textarea|label|summary)\b/i.test(info2.tag || "")) {
+            this.playHinted = true;
+            toast("Select mode: that click picked the " + String(info2.tag).split(/[.#]/)[0] + " to inspect it. To use your app (press buttons, type), switch to Play (P) in the header.", 8e3);
+          }
+        },
         placePin: (fh, m) => this.placePin(fh, m),
         openPin: (fh, id) => this.openPin(id, fh),
         textEdit: (fh, m) => this.textEdit(fh, m)
@@ -6435,6 +7061,7 @@ Markdown files (README.md, notes, specs) render in the Docs panel. Keep README.m
       Dock.ev.on("changed", () => this.savePrefs());
     },
     async boot() {
+      Types.status = (P) => Watch.P === P ? Watch.status : null;
       if (/(^|\.)localhost$|^127\.0\.0\.1$/.test(location.hostname)) window.__SB = { App, Snaps, Headless, Agent, Slop, Watch, Projects };
       const root = $("#app");
       clear(root);
@@ -6445,7 +7072,7 @@ Markdown files (README.md, notes, specs) render in the Docs panel. Keep README.m
       await Slop.init();
       this.prefs = Prefs.get("prefs", {});
       this.theme(this.prefs.theme || "auto");
-      this.mode = this.prefs.mode || "select";
+      this.mode = this.prefs.mode || "play";
       const valid = (l) => {
         try {
           let ok = true;
@@ -6587,7 +7214,7 @@ Markdown files (README.md, notes, specs) render in the Docs panel. Keep README.m
         ))));
       }
       function card(p, s) {
-        const live = S.live[s.name], last = s.last, shown = S.open[s.name] ?? (!!live || last && !last.ok);
+        const live = S.live[s.name], last = s.last && !s.last.stale ? s.last : null, stale = !!(s.last && s.last.stale), shown = S.open[s.name] ?? (!!live || last && !last.ok);
         const state = live ? live.done ? live.ok ? "ok" : "bad" : "run" : last ? last.ok ? "ok" : "bad" : "none";
         const icon = { ok: "\u2713", bad: "\u2717", run: "\u25CC", none: "\u25CB" }[state];
         const head = h(
@@ -6600,7 +7227,7 @@ Markdown files (README.md, notes, specs) render in the Docs panel. Keep README.m
           s.spec && s.spec.description ? h("span.note", s.spec.description) : null,
           h("span.sp"),
           s.spec ? h("span.note", s.spec.page + (s.spec.fixture ? " \xB7 fixture " + s.spec.fixture : "") + " \xB7 " + plural(s.spec.steps.length, "step")) : null,
-          last && !live ? h("span.note", fmtAgo(last.t)) : null,
+          last && !live ? h("span.note", fmtAgo(last.t)) : stale && !live ? h("span.note", { title: "Its steps changed after its last run" }, "edited: run it again") : null,
           h("button.btn.sm", { disabled: !!s.error || S.busy, on: { click: () => run(s) } }, "Run"),
           h("button.btn.sm", { on: { click: () => App.reveal(s.path, 1) } }, "Edit")
         );
@@ -6670,7 +7297,7 @@ Markdown files (README.md, notes, specs) render in the Docs panel. Keep README.m
         const p = P(), n = await promptBox("New scenario", "A name (letters, digits, -). You can also record one from a frame's \u22EF menu.", "add-a-note");
         if (!n) return;
         const page2 = Instances.entry(p), path = SCEN_DIR + n.replace(/[^\w-]+/g, "-") + ".json";
-        if (p.read(path, App.ws) === null) p.write(path, JSON.stringify({ description: "", page: page2, steps: [{ waitFor: "body" }, { expect: "h1" }] }, null, 2) + "\n", App.ws);
+        if (p.read(path, App.ws) === null) p.write(path, JSON.stringify({ description: "What this scenario proves (edit me)", page: page2, steps: [{ waitFor: "body" }, { expect: "h1", text: "The words the page must show (edit me)", exact: true }] }, null, 2) + "\n", App.ws);
         App.reveal(path, 1);
       }
       async function newFixture() {
@@ -6797,10 +7424,11 @@ Markdown files (README.md, notes, specs) render in the Docs panel. Keep README.m
           C.fitted = false;
           return;
         }
-        const z = clamp(Math.min((r.width - 60) / (b.x1 - b.x0), (r.height - 60) / (b.y1 - b.y0)), 0.1, 1.2);
+        const hud2 = 44;
+        const z = clamp(Math.min((r.width - 60) / (b.x1 - b.x0), (r.height - 60 - hud2) / (b.y1 - b.y0)), 0.1, 1.2);
         C.z = z;
         C.x = (r.width - (b.x1 - b.x0) * z) / 2 - b.x0 * z;
-        C.y = (r.height - (b.y1 - b.y0) * z) / 2 - b.y0 * z;
+        C.y = (r.height - hud2 - (b.y1 - b.y0) * z) / 2 - b.y0 * z;
         apply();
         saveView();
       }
@@ -6889,7 +7517,10 @@ Markdown files (README.md, notes, specs) render in the Docs panel. Keep README.m
           clear(routeSel);
           for (const r of App.P.list(host.ws).filter((x) => /\.html?$/.test(x))) routeSel.appendChild(h("option", { value: r, selected: r === host.route }, r));
           routeSel.hidden = role === "m";
-          if (![...routeSel.options].some((o) => o.value === host.route)) routeSel.appendChild(h("option", { value: host.route, selected: true }, host.route + " (missing)"));
+          if (![...routeSel.options].some((o) => o.value === host.route)) {
+            const file = String(host.route).split(/[?#]/)[0];
+            routeSel.appendChild(h("option", { value: host.route, selected: true }, host.route + (App.P.list(host.ws).includes(file) ? "" : " (missing)")));
+          }
           back.hidden = role === "m" || host.route === v.fr.route;
           back.title = "Back to " + v.fr.route;
           flabel.textContent = v.fr.label || "";
@@ -7052,7 +7683,7 @@ Markdown files (README.md, notes, specs) render in the Docs panel. Keep README.m
       function hudPaint() {
         clear(hud);
         hud.append(h("span.chip.on", App.mode), h("span.chip", App.ws === "draft" ? "draft" : "proposal: " + (App.proposal() || {}).title));
-        if (App.mode === "select") hud.append(h("span.note", "click to select \xB7 double-click text to edit"));
+        if (App.mode === "select") hud.append(h("span.note", "clicks pick elements to inspect \xB7 double-click text to edit \xB7 Play (P) to use the app"));
         if (App.mode === "comment") hud.append(h("span.note", "click to drop a pin"));
       }
       function addFrameMenu(btn) {
@@ -7515,7 +8146,7 @@ Markdown files (README.md, notes, specs) render in the Docs panel. Keep README.m
 
   // src/ui/code.js
   var isMd = (p) => /\.(md|markdown)$/i.test(p || "");
-  var CODE = {
+  var CODE2 = {
     title: "Code",
     sub: "files",
     make() {
@@ -7533,8 +8164,10 @@ Markdown files (README.md, notes, specs) render in the Docs panel. Keep README.m
       const code = h("div.code", band, pre, ta), ed = h("div.ed", bcol, gutter, code);
       const prev = h("div.mdprev", { hidden: true }), edrow = h("div.edrow", ed, prev);
       const foot = h("div.efoot"), empty = h("p.empty", "Open a file from the list, or select an element on the canvas to jump to its source.");
-      const main = h("div.cmain", tabs, edrow, foot, empty);
-      const el = h("div", h("div.cview", side, main));
+      const filesBtn = h("button.btn.sm.fbtn", { title: "Show or hide the file list", on: { click: () => cv.classList.toggle("showfiles") } }, "Files");
+      const main = h("div.cmain", h("div.ftop", filesBtn, tabs), edrow, foot, empty);
+      const cv = h("div.cview", side, main);
+      const el = h("div", cv);
       const snapOf = () => S.snap && S.snap.path === S.cur ? S.snap : null;
       const mdMode = () => isMd(S.cur) ? S.view[S.cur] || (main.clientWidth >= 640 ? "split" : "code") : "code";
       function paintPreview() {
@@ -7598,7 +8231,12 @@ Markdown files (README.md, notes, specs) render in the Docs panel. Keep README.m
         pre.innerHTML = highlight(S.cur, ta.value) + "\n";
         const n = ta.value.split("\n").length;
         let s = "";
-        for (let i = 1; i <= n; i++) s += "<div" + (i === S.hiLine ? ' class="hit"' : "") + ">" + i + "</div>";
+        const errs = /* @__PURE__ */ new Map();
+        for (const d of S.tdiags || []) if (d.file === S.cur) errs.set(d.line, (errs.has(d.line) ? errs.get(d.line) + "\n" : "") + d.message);
+        for (let i = 1; i <= n; i++) {
+          const cls = [i === S.hiLine ? "hit" : "", errs.has(i) ? "terr" : ""].filter(Boolean).join(" ");
+          s += "<div" + (cls ? ' class="' + cls + '"' : "") + (errs.has(i) ? ' title="' + escHtml(errs.get(i)) + '"' : "") + ">" + i + "</div>";
+        }
         gin.innerHTML = s;
         paintBlame();
         scroll();
@@ -7682,11 +8320,14 @@ Markdown files (README.md, notes, specs) render in the Docs panel. Keep README.m
         const ws = App.ws, prop = App.proposal(), d = P().draftOf(ws), nv = S.versions ? S.versions.length : 0;
         const pos = ta.value.slice(0, ta.selectionStart).split("\n");
         const conflict = d.conflict && d.conflict.conflicts.includes(S.cur) ? d.conflict : null;
+        const terrs = (S.tdiags || []).filter((x) => x.file === S.cur);
         put(
           foot,
           h("b", S.cur),
           h("span", "Ln " + pos.length + ", Col " + (pos[pos.length - 1].length + 1)),
           h("span", prop ? 'editing proposal "' + prop.title + '"' : "editing draft"),
+          S.tdiags ? h("button.link" + (terrs.length ? ".terr" : ""), { title: "TypeScript errors in this file (and in the app)", on: { click: (ev) => typeMenu(ev.currentTarget) } }, terrs.length ? plural(terrs.length, "type error") : "types ok", S.tdiags.length > terrs.length ? " (" + S.tdiags.length + " in the app)" : "") : null,
+          S.tinfo ? h("span.mono.tinfo", { title: S.tinfo }, S.tinfo.length > 70 ? S.tinfo.slice(0, 70) + "\u2026" : S.tinfo) : null,
           S.pending || d.edits && d.edits.changes.has(S.cur) ? h("span", conflict ? "" : "saving\u2026") : null,
           S.trace ? h(
             "span",
@@ -7747,6 +8388,7 @@ Markdown files (README.md, notes, specs) render in the Docs panel. Keep README.m
         const snap = snapOf(), has = !!S.cur && !!P() && (!!snap || P().read(S.cur, App.ws) !== null);
         edrow.hidden = foot.hidden = !has;
         empty.hidden = has;
+        cv.classList.toggle("hasfile", has);
         ta.readOnly = !!snap;
         edrow.classList.toggle("hist", !!snap);
         foot.classList.toggle("hist", !!snap);
@@ -7779,6 +8421,49 @@ Markdown files (README.md, notes, specs) render in the Docs panel. Keep README.m
         if (!same) loadVersions();
         if (line) goto(line);
       }
+      const typeView = () => {
+        const d = P().draftOf(App.ws);
+        return d.edits && d.edits.open ? d.edits : headView(d);
+      };
+      const typesSoon = debounce(async () => {
+        const p = P();
+        if (!p || S.snap) return;
+        const view = typeView();
+        if (!Types.wants(view)) {
+          if (S.tdiags) {
+            S.tdiags = null;
+            paintCode();
+            paintFoot();
+            App.setTypeErrors([]);
+          }
+          return;
+        }
+        const r = await Types.check(p, view, { timeoutMs: 2e4, ref: App.ws });
+        if (r.skipped || P() !== p) return;
+        S.tdiags = r.diags;
+        paintCode();
+        paintFoot();
+        App.setTypeErrors(r.diags);
+      }, 500);
+      const infoSoon = debounce(async () => {
+        const p = P(), path = S.cur;
+        if (!p || !path || S.snap || !/\.(ts|tsx|mts|cts)$/.test(path) || !S.tdiags) {
+          if (S.tinfo) {
+            S.tinfo = "";
+            paintFoot();
+          }
+          return;
+        }
+        const i = await Types.info(p, typeView(), path, ta.selectionStart, App.ws);
+        if (S.cur !== path) return;
+        S.tinfo = i ? i.text : "";
+        paintFoot();
+      }, 300);
+      function typeMenu(anchor) {
+        const all = S.tdiags || [];
+        if (!all.length) return toast("No type errors");
+        popMenu(anchor, all.slice(0, 40).map((d) => ({ label: d.file + ":" + d.line + " " + d.message.split("\n")[0].slice(0, 90), sub: d.program, run: () => d.file === S.cur ? goto(d.line) : open2(d.file, d.line) })));
+      }
       function goto(line) {
         const off = offsetOfLine(ta.value, line);
         ta.focus({ preventScroll: true });
@@ -7804,9 +8489,22 @@ Markdown files (README.md, notes, specs) render in the Docs panel. Keep README.m
         } catch (e) {
           toast(e.message);
         }
+        const b = S.burst;
+        if (b && b.path === path && b.keys <= 3 && b.before !== null && b.before !== text) {
+          toast("Changed " + path + " (" + plural(b.keys, "key") + ", saved)", 8e3, { label: "Undo", run: () => {
+            P().write(path, b.before, ws);
+            S.burst = null;
+            load(true);
+            toast("Undone: " + path + " is back as it was");
+          } });
+        }
         paintFoot();
+        typesSoon();
       }
       ta.addEventListener("input", () => {
+        if (!S.burst || S.burst.path !== S.cur || Date.now() - S.burst.at > 4e3) S.burst = { path: S.cur, before: P() ? P().read(S.cur, App.ws) : null, keys: 0 };
+        S.burst.keys++;
+        S.burst.at = Date.now();
         S.pending = { path: S.cur, ws: App.ws, text: ta.value };
         paintCode();
         commitSoon();
@@ -7816,10 +8514,12 @@ Markdown files (README.md, notes, specs) render in the Docs panel. Keep README.m
       ta.addEventListener("keyup", () => {
         paintFoot();
         traceSoon();
+        infoSoon();
       });
       ta.addEventListener("click", () => {
         paintFoot();
         traceSoon();
+        infoSoon();
       });
       const traceSoon = debounce(async () => {
         let t = null;
@@ -7855,7 +8555,7 @@ Markdown files (README.md, notes, specs) render in the Docs panel. Keep README.m
         }
       });
       async function newFile() {
-        const p = await promptBox("New file", "Path, like about.html or css/theme.css", "about.html");
+        const p = await promptBox("New file", "Its path, like about.html or css/theme.css", "");
         if (!p) return;
         const bad = checkPath(p);
         if (bad) return toast(bad);
@@ -7864,15 +8564,25 @@ Markdown files (README.md, notes, specs) render in the Docs panel. Keep README.m
         P().write(p, tpl, App.ws);
         open2(p);
       }
+      Watch.ev.on("status", (st) => {
+        const k = App.ws + "|" + devKey(st, App.ws);
+        if (k !== S.devKey) {
+          S.devKey = k;
+          typesSoon();
+        }
+      });
       App.ev.on("project", () => {
         S.tabs = [];
         S.cur = null;
         S.pending = null;
         S.snap = null;
+        S.tdiags = null;
+        S.tinfo = "";
         paintTabs();
         paintList();
         load();
         refreshChanged();
+        typesSoon();
       });
       App.ev.on("ws", () => {
         commit();
@@ -7882,12 +8592,14 @@ Markdown files (README.md, notes, specs) render in the Docs panel. Keep README.m
         load(true);
         refreshChanged();
         if (S.cur) loadVersions();
+        typesSoon();
       });
       const changedSoon = debounce(refreshChanged, 400);
       App.ev.on("files", (ws, paths) => {
         if (ws !== App.ws) return;
         paintList();
         changedSoon();
+        typesSoon();
         if (S.snap) {
           paintFoot();
           return;
@@ -8120,7 +8832,7 @@ return { files: list.map(f => f.path), issues }`;
         const card = h("div.block", h("header", h("h3", "Running\u2026"), h("span.sub", fmtTime(t0))));
         res.prepend(card);
         const P = App.P, ws = App.ws;
-        const r = await runEval(makeContext(P, { ws, who: "you", mode: "auto" }), code, { sid: "repl:" + P.app, restore: P.meta.replScope && P.meta.replScope.vars });
+        const r = await runEval(makeContext(P, { ws, who: "you", mode: "auto", agent: Agent }), code, { sid: "repl:" + P.app, restore: P.meta.replScope && P.meta.replScope.vars });
         if (r.scope) {
           P.meta.replScope = r.scope;
           P.saveMeta();
@@ -8214,7 +8926,7 @@ return { files: list.map(f => f.path), issues }`;
       const P = () => App.P;
       const tl = h("div.tlist"), head = h("div.toolbar"), grid = h("div.scroll");
       const el = h("div", h("div.dview", tl, h("div.cmain", head, grid)));
-      const call = (action, args) => Slop.call(action, { app: P().app, kind: S.kind, ...args });
+      const call = (action, args) => Slop.call(action, { app: P().app, kind: S.kind, ...S.kind === "prop" ? { ref: App.ws } : {}, ...args });
       async function loadTables() {
         const my = ++S.seq;
         try {
@@ -8230,14 +8942,44 @@ return { files: list.map(f => f.path), issues }`;
         if (S.cur) await loadRows();
         else paint();
       }
+      async function runQuery(q) {
+        if (/^\s*(select|with|pragma|explain)\b/i.test(q)) {
+          S.query = q;
+          S.coll = "";
+          loadRows();
+          return;
+        }
+        const where = S.kind === "dev" ? "your dev data" : S.kind === "prop" ? "the proposal's preview data" : "your test data";
+        if (!await confirmBox("Change " + where + "?", q.slice(0, 300), "Run it")) return;
+        try {
+          const r = await call("exec", { query: q, args: [] });
+          toast("Done" + (r && r.changes != null ? ": " + plural(r.changes, "row") + " changed" : ""));
+          S.query = "";
+          loadRows();
+          if (S.kind === "dev") App.reloadDev();
+        } catch (e) {
+          toast("Not run: " + (e.message || e), 6e3);
+        }
+      }
       async function loadRows() {
         const my = ++S.seq;
+        const q = S.query || 'SELECT rowid AS __rowid, * FROM "' + S.cur + '" LIMIT 300';
         try {
-          S.rows = await call("sql", { query: S.query || 'SELECT * FROM "' + S.cur + '" LIMIT 300', args: [] });
+          S.rows = await call("sql", { query: q, args: [] });
           S.error = "";
         } catch (e) {
-          S.rows = null;
-          S.error = e.message || String(e);
+          if (!S.query) {
+            try {
+              S.rows = await call("sql", { query: 'SELECT * FROM "' + S.cur + '" LIMIT 300', args: [] });
+              S.error = "";
+            } catch (e2) {
+              S.rows = null;
+              S.error = e2.message || String(e2);
+            }
+          } else {
+            S.rows = null;
+            S.error = e.message || String(e);
+          }
         }
         if (my === S.seq) paint();
       }
@@ -8257,7 +8999,8 @@ return { files: list.map(f => f.path), issues }`;
         clear(head);
         clear(grid);
         if (!P()) return;
-        tl.appendChild(h("div.seg.sm", { style: { margin: "6px" } }, [["dev", "Dev"], ["test", "Test"]].map(([k, l]) => h("button" + (S.kind === k ? ".on" : ""), { title: k === "dev" ? "Your dev instance: what the canvas shows" : "Your test instance: where the last scenario ran", on: { click: () => {
+        const kinds = [["dev", "Draft", "Your dev instance: the draft, what the canvas shows on draft"], ...App.ws !== "draft" ? [["prop", "Proposal", "The proposal's preview: what the canvas shows while you look at the proposal"]] : [], ["test", "Test", "Your test instance: where the last scenario ran"]];
+        tl.appendChild(h("div.seg.sm", { style: { margin: "6px" } }, kinds.map(([k, l, t]) => h("button" + (S.kind === k ? ".on" : ""), { title: t, on: { click: () => {
           S.kind = k;
           S.cur = null;
           S.rows = null;
@@ -8282,12 +9025,8 @@ return { files: list.map(f => f.path), issues }`;
           }
         } } }, S.coll ? "collection " + S.coll : "a collection\u2026"));
         tl.appendChild(h("button.fi", { style: { color: "var(--ink-2)" }, on: { click: async () => {
-          const q = await promptBox("Query", "Read-only SQL on this instance", S.query || "SELECT * FROM " + (S.cur || "notes") + " LIMIT 50");
-          if (q) {
-            S.query = q;
-            S.coll = "";
-            loadRows();
-          }
+          const q = await promptBox("Query", "SQL on this instance: SELECT reads; UPDATE, INSERT or DELETE change its data (asked first; never the published app's)", S.query || "SELECT * FROM " + (S.cur || "notes") + " LIMIT 50");
+          if (q) runQuery(q);
         } } }, "SQL query\u2026"));
         put(
           head,
@@ -8310,7 +9049,13 @@ return { files: list.map(f => f.path), issues }`;
             grid.appendChild(h("p.empty", "No documents in " + S.coll + "."));
             return;
           }
-          grid.appendChild(h("div.rows", { style: { padding: "6px 10px" } }, S.docs.slice(0, 300).map((d) => h("div", h("b.mono", d.path), h("span.mono.note", { style: { flex: 1, whiteSpace: "pre-wrap" } }, JSON.stringify(d.body))))));
+          const docs = S.docs.slice(0, 300), keys = [...new Set(docs.flatMap((d) => d.body && typeof d.body === "object" ? Object.keys(d.body) : []))];
+          grid.appendChild(h("p.note", { style: { padding: "6px 10px 0" } }, S.docs.length + " document" + (S.docs.length === 1 ? "" : "s") + " in " + S.coll + (S.docs.length > 300 ? " (the first 300 shown)" : "")));
+          grid.appendChild(h(
+            "table.grid.ro",
+            h("thead", h("tr", h("th", "id"), keys.map((k) => h("th", k)))),
+            h("tbody", docs.map((d) => h("tr", h("td.mono", d.path.split("/").pop()), keys.map((k) => h("td", cell(d.body ? d.body[k] : void 0))))))
+          ));
           return;
         }
         if (!S.rows) return;
@@ -8318,8 +9063,20 @@ return { files: list.map(f => f.path), issues }`;
           grid.appendChild(h("p.empty", "No rows."));
           return;
         }
-        const cols = [...new Set(S.rows.flatMap((r) => Object.keys(r)))];
-        grid.appendChild(h("table.grid.ro", h("thead", h("tr", cols.map((c) => h("th", c)))), h("tbody", S.rows.map((r) => h("tr", cols.map((c) => h("td", cell(r[c]))))))));
+        const cols = [...new Set(S.rows.flatMap((r) => Object.keys(r)))].filter((c) => c !== "__rowid");
+        const del = (r) => async () => {
+          if (!await confirmBox("Delete this row?", "From " + S.cur + " in your " + (S.kind === "dev" ? "dev" : S.kind === "prop" ? "proposal's preview" : "test") + " data: " + cols.slice(0, 4).map((c) => c + " " + cell(r[c]).slice(0, 30)).join(", "), "Delete")) return;
+          try {
+            await call("exec", { query: 'DELETE FROM "' + S.cur + '" WHERE rowid = ?', args: [r.__rowid] });
+            toast("Deleted the row");
+            loadRows();
+            if (S.kind === "dev") App.reloadDev();
+          } catch (e) {
+            toast("Not deleted: " + (e.message || e), 6e3);
+          }
+        };
+        const canDel = !S.query && S.rows.some((r) => r.__rowid != null);
+        grid.appendChild(h("table.grid.ro", h("thead", h("tr", cols.map((c) => h("th", c)), canDel ? h("th", "") : null)), h("tbody", S.rows.map((r) => h("tr", cols.map((c) => h("td", cell(r[c]))), canDel ? h("td", h("button.link.note", { title: "Delete this row", on: { click: del(r) } }, "\u2715")) : null)))));
         if (S.rows.length >= 300) grid.appendChild(h("p.note", { style: { padding: "0 10px" } }, "The first 300 rows."));
       }
       function seedMenu(btn) {
@@ -8329,12 +9086,28 @@ return { files: list.map(f => f.path), issues }`;
           sub: f.error || f.parts.join(", ") || "empty",
           disabled: !!f.error,
           run: async () => {
-            try {
-              await Slop.call("seed", { app: P().app, kind: "dev", docs: f.spec.docs || {}, tables: f.spec.tables || {} });
-              toast("Seeded the dev instance from " + f.name);
+            const seed = () => Slop.call("seed", { app: P().app, kind: "dev", docs: f.spec.docs || {}, tables: f.spec.tables || {} });
+            const done = () => {
+              toast("Seeded the dev instance from " + f.name + "; the frames reload");
+              App.reloadDev();
               loadTables();
+            };
+            try {
+              await seed();
+              done();
             } catch (e) {
-              toast("Not seeded: " + (e.message || e), 5e3);
+              if (!/UNIQUE|constraint/i.test(e.message || "")) {
+                toast("Not seeded: " + (e.message || e), 6e3);
+                return;
+              }
+              if (!await confirmBox("Replace your dev data?", "Some rows of " + f.name + " are already in your dev data (the same ids), so nothing was added. Replace your dev data with " + f.name + "? Your dev instance is reset, then seeded.", "Replace")) return;
+              try {
+                await Instances.reset(P(), "dev");
+                await seed();
+                done();
+              } catch (e2) {
+                toast("Not seeded: " + (e2.message || e2), 6e3);
+              }
             }
           }
         })), ...fx.length ? [] : [{ note: "No fixtures yet: save rows as one, or write fixtures/<name>.json." }]]);
@@ -8351,7 +9124,7 @@ return { files: list.map(f => f.path), issues }`;
           }
         }
         spec.tables = spec.tables || {};
-        spec.tables[S.cur] = S.rows;
+        spec.tables[S.cur] = S.rows.map(({ __rowid, ...r }) => r);
         const bad = checkFixture(spec);
         if (bad) return toast(path + ": " + bad);
         P().write(path, JSON.stringify(spec, null, 2) + "\n", App.ws);
@@ -8366,6 +9139,16 @@ return { files: list.map(f => f.path), issues }`;
         S.coll = "";
         S.kind = "dev";
         later();
+      });
+      App.ev.on("ws", (ws) => {
+        const k = ws === "draft" ? "dev" : "prop";
+        if (S.kind !== "test" && S.kind !== k) {
+          S.kind = k;
+          S.cur = null;
+          S.rows = null;
+          S.docs = null;
+          later();
+        }
       });
       App.ev.on("scenarios", () => {
         if (S.kind === "test") later();
@@ -8594,7 +9377,7 @@ return { files: list.map(f => f.path), issues }`;
             App.setWs(p.ref);
             App.compare(true);
           } } }, "Compare"),
-          h("button.btn.sm.primary", { disabled: !n, on: { click: () => accept(P, p, list.filter((x) => pick[x.path]).map((x) => x.path)) } }, "Accept " + (n === all ? "all" : n)),
+          h("button.btn.sm.primary", { disabled: !n, on: { click: () => accept(P, p, list.filter((x) => pick[x.path]).map((x) => x.path), list.filter((x) => !pick[x.path]).map((x) => x.path)) } }, "Accept " + (n === all ? "all" : n + " of " + all)),
           h("button.btn.sm.danger", { on: { click: async () => {
             if (!all || await confirmBox('Reject "' + p.title + '"?', "Its " + plural(all, "change") + " are discarded with the proposal. The timeline keeps its commits.", "Reject")) {
               await P.reject(p.ref);
@@ -8614,10 +9397,14 @@ return { files: list.map(f => f.path), issues }`;
           } } });
           files2.appendChild(h(
             "div",
+            h("label", { title: "Include this file when you accept" }, cb),
+            text ? h("button.link", { style: { padding: 0 }, on: { click: (e) => {
+              e.preventDefault();
+              S.shown[key] = !shown;
+              paint();
+            } } }, x.path) : h("span", x.path),
             h(
-              "label",
-              cb,
-              h("span", x.path),
+              "span",
               h("span.note", !x.existed ? "new" : !x.entry ? "deleted" : st ? "+" + st.add + " \u2212" + st.del : "replaced (kept by hash)"),
               h("span.sp"),
               text ? h("button.link.note", { on: { click: (e) => {
@@ -8639,7 +9426,8 @@ return { files: list.map(f => f.path), issues }`;
         if (all) c.appendChild(checksPanel(P, p));
         return c;
       }
-      async function accept(P, p, paths) {
+      async function accept(P, p, paths, left = []) {
+        if (left.length && !await confirmBox("Accept " + paths.length + " of " + (paths.length + left.length) + " files?", "Left out, and discarded with the proposal: " + left.join(", ") + ". Files that belong together (a migration and the code that uses it) should go in together.", "Accept " + paths.length)) return;
         const r = await P.accept(p.ref, paths, "you").catch((e) => ({ status: "failed", error: e.message }));
         if (r.status === "committed") {
           toast("Accepted " + plural(paths.length, "change") + " into draft " + r.n + (r.merged ? " (merged with what changed since)" : ""));
@@ -8721,6 +9509,15 @@ return { files: list.map(f => f.path), issues }`;
   };
 
   // src/ui/threads.js
+  function elapsedText(since, steps, note) {
+    const s = Math.max(0, Math.round((Date.now() - since) / 1e3));
+    const d = s < 60 ? s + " s" : Math.floor(s / 60) + " min " + s % 60 + " s";
+    const what = note || (steps ? "writing its next step (" + plural(steps, "step") + " done)" : "reading your app and planning");
+    return "Working for " + d + ": " + what + (s >= 240 ? ". A long one: you can Stop it and ask for a smaller step." : ".");
+  }
+  setInterval(() => {
+    for (const e of document.querySelectorAll(".elapsed")) e.textContent = elapsedText(+e.dataset.since, +e.dataset.steps, e.dataset.note);
+  }, 1e3);
   var MODELS = [
     { v: "quick", label: "Quick" },
     { v: "default", label: "Default" },
@@ -8919,6 +9716,28 @@ return { files: list.map(f => f.path), issues }`;
         paintChat();
         paintChips();
       }
+      async function acceptProp(prop) {
+        const r = await P().accept(prop.ref, null, "you").catch((e) => ({ status: "failed", error: e.message }));
+        if (r.status === "committed") {
+          toast('Accepted "' + prop.title + '": the changes are in your draft now (test data you entered in its preview stays behind)', 6e3);
+          if (App.ws === prop.ref) App.setWs("draft");
+        } else if (r.status === "conflict") toast("Not accepted: the draft also changed " + r.conflicts.join(", ") + ". Open Review to sort it out.", 8e3);
+        else toast("Not accepted: " + (r.error || r.status), 6e3);
+        paintChat();
+      }
+      function stepsEl(m) {
+        const steps = m.steps || [];
+        if (!steps.length || m.status === "running") return steps.map(stepEl);
+        const files2 = [...new Set(steps.flatMap((s) => (s.effects && s.effects.files || []).map((f) => f.path)))], bad = steps.filter((s) => s.status === "error").length;
+        const d = h(
+          "details.steps",
+          { open: Prefs.get("stepsOpen", false) },
+          h("summary.note", plural(steps.length, "step") + (files2.length ? " \xB7 changed " + files2.slice(0, 4).join(", ") + (files2.length > 4 ? " +" + (files2.length - 4) : "") : " \xB7 nothing changed") + (bad ? " \xB7 " + bad + " failed" : "")),
+          steps.map(stepEl)
+        );
+        d.addEventListener("toggle", () => Prefs.set("stepsOpen", d.open));
+        return d;
+      }
       function msgEl(m, i, t) {
         if (m.role === "user") return h("div.msg.user", h("div.who", m.from ? "From the " + m.from : "You", h("span", fmtTime(m.t)), m.ctx && m.ctx.sel ? h("span.tag", m.ctx.sel.tag + " " + m.ctx.sel.src) : null), h("div.body", m.text));
         const prop = m.ws && m.ws !== "draft" ? P().proposals.get(m.ws) : null;
@@ -8936,12 +9755,15 @@ return { files: list.map(f => f.path), issues }`;
               toast("Marked on the timeline");
             } } }, "\u2606 mark")
           ),
-          (m.steps || []).map(stepEl),
+          stepsEl(m),
           (m.panels || []).map((id) => {
             const pn = Panels.get(P(), id);
             return pn ? panelEl(P(), pn, { inline: true }) : null;
           }),
-          m.text ? renderMarkdown(m.text, (file) => P().read(file, "draft") !== null || !!prop && prop.status === "open" && P().read(file, m.ws) !== null) : m.status === "running" && !(m.steps || []).length ? h("div.body.note", m.note || "Thinking\u2026") : null,
+          m.auto ? h("div.note", "Claude ended without a reply; the bench says what happened:") : null,
+          m.text ? renderMarkdown(m.text, (file) => P().read(file, "draft") !== null || !!prop && prop.status === "open" && P().read(file, m.ws) !== null) : null,
+          // a running turn says how long and what it is doing (persona reviews: 9-13 minute turns showed only "Working")
+          m.status === "running" ? h("div.note.elapsed", { "data-since": String(m.t || Date.now()), "data-steps": String((m.steps || []).length), "data-note": m.note || "" }, elapsedText(m.t || Date.now(), (m.steps || []).length, m.note)) : null,
           m.error ? h("div.note", { style: { color: "var(--accent)" } }, m.error) : null,
           m.approval ? h(
             "div.approval",
@@ -8949,10 +9771,23 @@ return { files: list.map(f => f.path), issues }`;
             m.approval.detail ? h("pre", m.approval.detail) : null,
             h("div", { style: { display: "flex", gap: "6px" } }, h("button.btn.sm.primary", { on: { click: () => m.approval && m.approval.decide(true) } }, "Approve"), h("button.btn.sm", { on: { click: () => m.approval && m.approval.decide(false) } }, "Decline"))
           ) : null,
-          prop ? h("div.ctx", prop.status === "open" ? [h("span.tag.ws", "proposal"), " ", m.summary || 'working in "' + prop.title + '"', " ", h("button.link", { on: { click: () => {
-            App.setWs(prop.ref);
-            Dock.open("review");
-          } } }, "Review")] : h("span", '"' + prop.title + '" was ' + prop.status)) : null
+          prop ? h("div.ctx", prop.status === "open" ? [
+            h("span.tag.ws", "proposal"),
+            " ",
+            m.summary || 'working in "' + prop.title + '"',
+            m.summary && m.status !== "running" ? h("div.note", "These changes are in a proposal: a copy of your app. Your app does not change until you accept them. What you type into its preview stays with the preview: accepting takes the changes, not that test data.") : null,
+            // real buttons, Accept first and filled: as grey links at the foot of a reply they were missed (round 3)
+            h(
+              "div",
+              { style: { display: "flex", gap: "6px", marginTop: "6px", flexWrap: "wrap" } },
+              m.summary && m.status !== "running" ? h("button.btn.sm.primary", { title: "Take these changes into your app", on: { click: () => acceptProp(prop) } }, "Accept the changes") : null,
+              h("button.btn.sm", { on: { click: () => {
+                App.setWs(prop.ref);
+                Dock.open("review");
+              } } }, "Review them"),
+              App.ws !== prop.ref ? h("button.btn.sm", { on: { click: () => App.setWs(prop.ref) } }, "Show it") : null
+            )
+          ] : prop.status === "discarded" ? h("span.note", "Nothing in the app changed in this turn.") : h("span", 'The proposal "' + prop.title + '" was ' + prop.status + ".")) : null
         );
       }
       let raf = 0;
@@ -9133,7 +9968,7 @@ return { files: list.map(f => f.path), issues }`;
     console: CONSOLE,
     data: DATA,
     scenarios: SCENARIOS,
-    code: CODE,
+    code: CODE2,
     docs: DOCS,
     review: REVIEW,
     inspector: INSPECTOR,

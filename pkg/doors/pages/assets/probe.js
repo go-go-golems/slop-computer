@@ -1,4 +1,4 @@
-/* the bench, built from web/bench: do not edit. source sha256:2e97dfe45b852f54fa6dc1a8e58eb0e95a17d3b38d7fe8aed3b8b80bc4fc1528 */
+/* the bench, built from web/bench: do not edit. source sha256:e626fe49fe3aa44185f2337fda84cfa23c82260d03fee81b18ae0be790283175 */
 // slop's dev probe (SLOP3-022): the bench's PROBE from web/bench/src/frames/probe.js,
 // which the sandbox adds to dev embeds only, after the runtime. It answers the
 // tool that framed the view (the boot data's parentOrigin) and nothing else.
@@ -27,6 +27,34 @@ function PROBE(CFG) {
   for (const l of ['log', 'info', 'warn', 'error']) { const o = console[l].bind(console); console[l] = (...a) => { o(...a); post({ ev: 'log', level: l, text: a.map(fmt).join(' ').slice(0, 2000) }) } }
   addEventListener('error', e => post({ ev: 'log', level: 'error', text: e.message, src: e.filename && !/^about:/.test(e.filename) ? e.filename.split('/').pop() + (e.lineno ? ':' + e.lineno : '') : '' }))
   addEventListener('unhandledrejection', e => post({ ev: 'log', level: 'error', text: 'Unhandled rejection: ' + fmt(e.reason && e.reason.message || e.reason) }))
+  // downloads the page makes (an <a download> clicked, attached or not; a blob or data: URL): the last one's
+  // name and text, for a scenario's { download } step (a CSV export could not be checked: round 4)
+  let lastDl = null
+  const blobs = new Map()
+  try { const cou = URL.createObjectURL; URL.createObjectURL = function (b) { const u = cou.call(URL, b); try { if (b instanceof Blob) blobs.set(u, b) } catch (e) { /* not a blob */ } return u } } catch (e) { /* read-only */ }
+  const recDl = a => {
+    if (!a || !a.hasAttribute || !a.hasAttribute('download')) return
+    const name = a.getAttribute('download') || '', href = a.href || '', done = text => { lastDl = { name, text, t: Date.now() } }
+    const b = blobs.get(href)
+    if (b) b.text().then(done, () => done(null))
+    else if (href.startsWith('data:')) { try { const c = href.indexOf(','), head = href.slice(0, c), data = href.slice(c + 1); done(head.includes(';base64') ? atob(data) : decodeURIComponent(data)) } catch (e) { done(null) } }
+    else done(null)
+  }
+  try { const A = window.HTMLAnchorElement.prototype, ac = A.click; A.click = function () { recDl(this); return ac.call(this) } } catch (e) { /* read-only */ }
+  addEventListener('click', e => { const a = e.target && e.target.closest && e.target.closest('a[download]'); if (a) recDl(a) }, true)
+  // a form the browser refused (a required field empty, a bad format) shows a bubble that is easy to miss on
+  // a zoomed canvas, and that an agent never sees: "Add did nothing" (rounds 4 and 5). Say which field and why
+  let lastInvalid = 0
+  addEventListener('invalid', e => {
+    const t = e.target, now = Date.now()
+    if (now - lastInvalid < 800) return
+    lastInvalid = now
+    const lab = (t.labels && t.labels[0] && t.labels[0].innerText.trim()) || t.getAttribute('aria-label') || t.name || t.id || t.tagName.toLowerCase()
+    post({ ev: 'log', level: 'warn', text: 'The form was not sent: "' + String(lab).slice(0, 60) + '": ' + (t.validationMessage || 'not valid'), src: srcOf(t) })
+    post({ ev: 'invalid', field: String(lab).slice(0, 60), message: t.validationMessage || 'not valid' })
+  }, true)
+  // print() does nothing in a sandboxed frame: say so instead of nothing (a florist pressed Print twice, round 4)
+  try { window.print = () => post({ ev: 'print' }) } catch (e) { /* not writable: the page prints as it can */ }
 
   let mode = CFG.mode || 'select', pins = CFG.pins || [], selected = null, recording = !!CFG.record
   // a file of the app, from a URL of an embedded view (/e/<token>/v/<n>/<path>)
@@ -43,16 +71,38 @@ function PROBE(CFG) {
     if (!el) throw new Error('no element matches ' + q)
     return el
   }
-  // CSS selectors, plus a trailing :has-text("words"): elements whose visible text contains the words (innermost first)
-  function qsa(q) {
-    const m = /^(.*?):has-text\((["']?)(.*)\2\)$/.exec(String(q).trim())
-    let list
-    try { list = [...document.querySelectorAll(m ? (m[1].trim() || '*') : q)] } catch (e) { throw new Error('bad selector ' + q) }
-    if (!m) return list
-    const want = m[3].toLowerCase().replace(/\s+/g, ' ').trim()
-    const hits = list.filter(el => (el.innerText || el.textContent || '').toLowerCase().replace(/\s+/g, ' ').includes(want))
-    return hits.filter(el => !hits.some(o => o !== el && el.contains(o)))
+  // qsa:begin — CSS selectors, plus the Playwright-style text forms agents write (persona reviews):
+  //   button:has-text("Add")                  elements whose visible text contains the words (innermost first)
+  //   article:has-text("Pack boxes") input    … then a selector inside each of them
+  //   article:has(h2:has-text("Pack")) input  elements that contain such an element
+  //   :text("Add") is :has-text("Add")
+  function qsa(q, root) {
+    root = root || document
+    q = String(q).trim().replace(/:text\(/g, ':has-text(')
+    const all = sel => { try { return [...root.querySelectorAll(root === document ? sel : ':scope ' + sel)] } catch (e) { throw new Error('bad selector ' + q + ' (CSS, plus :has-text("words"), which may be followed by more selector or sit inside :has(…))') } }
+    const at = q.indexOf(':has-text(')
+    if (at < 0) return q ? all(q) : []
+    // the text argument, quoted or not, up to its closing parenthesis
+    let k = at + 10, quote = q[k] === '"' || q[k] === "'" ? q[k] : '', text = ''
+    if (quote) { const e = q.indexOf(quote, k + 1); if (e < 0) throw new Error('bad selector ' + q); text = q.slice(k + 1, e); k = e + 1 } else { const e = q.indexOf(')', k); if (e < 0) throw new Error('bad selector ' + q); text = q.slice(k, e); k = e }
+    if (q[k] !== ')') throw new Error('bad selector ' + q)
+    const end = k + 1
+    // is it inside a :has( … )? find the innermost unclosed ":has(" before it
+    let depth = 0, hasAt = -1
+    for (let x = at - 1; x >= 0; x--) { if (q[x] === ')') depth++; else if (q[x] === '(') { if (depth) depth--; else { if (q.slice(x - 4, x) === ':has') hasAt = x - 4; break } } }
+    const want = text.toLowerCase().replace(/\s+/g, ' ').trim()
+    const withText = els => { const hits = els.filter(el => (el.innerText || el.textContent || '').toLowerCase().replace(/\s+/g, ' ').includes(want)); return hits.filter(el => !hits.some(o => o !== el && el.contains(o))) }
+    const then = (els, rest) => { rest = rest.trim() ? rest : ''; if (!rest) return els; const out = new Set(); for (const el of els) for (const x of qsa((/^[>+~ ]/.test(rest) ? '' : ' ') + rest, el)) out.add(x); return [...out] }
+    if (hasAt < 0) return then(withText(q.slice(0, at).trim() ? all(q.slice(0, at)) : all('*')), q.slice(end))
+    // base:has(inner) rest — inner holds the :has-text
+    let d = 0, close = -1
+    for (let x = hasAt + 5; x < q.length; x++) { if (q[x] === '(') d++; else if (q[x] === ')') { if (!d) { close = x; break } d-- } }
+    if (close < 0) throw new Error('bad selector ' + q)
+    const base = q.slice(0, hasAt).trim(), inner = q.slice(hasAt + 5, close)
+    const els = all(base || '*').filter(el => qsa(inner, el).length)
+    return then(els.filter(el => !els.some(o => o !== el && el.contains(o))), q.slice(close + 1))
   }
+  // qsa:end
   // a selector a recording can replay: the shortest of several that picks out exactly this element
   function stableSel(el) {
     const uniq = q => { try { const l = qsa(q); return l.length === 1 && l[0] === el } catch (e) { return false } }
@@ -100,7 +150,7 @@ function PROBE(CFG) {
     for (const at of el.attributes) if (/^(data-(?!src)|href$|type$|name$|alt$|role$|aria-|disabled$|placeholder$|for$|title$)/.test(at.name)) a[at.name] = at.value.slice(0, 120)
     if ('value' in el && /^(INPUT|SELECT|TEXTAREA)$/.test(el.tagName)) a.value = String(el.value).slice(0, 120)
     if (el.type === 'checkbox' || el.type === 'radio') a.checked = el.checked
-    return Object.keys(a).length ? a : undefined
+    return a // always an object: c.attrs['data-x'] on an element without attributes threw (round 4)
   }
   // settle: no DOM changes for a moment (a page renders after its data arrives)
   let lastMut = performance.now()
@@ -273,6 +323,14 @@ function PROBE(CFG) {
       btn.form.dispatchEvent(new (window.SubmitEvent || Event)('submit', { bubbles: true, cancelable: true, submitter: btn }))
     }
   }, true)
+  // outside Play the app is not in use: the bench's mode keys (P, V, C, Escape) go up to the bench, which
+  // otherwise never sees them once a frame has focus ("the P key didn't take", round 5)
+  addEventListener('keydown', e => {
+    if (mode === 'play' || e.metaKey || e.ctrlKey || e.altKey) return
+    const t = e.target
+    if (t && t.closest && t.closest('input, textarea, select, [contenteditable]')) return
+    if (/^(p|v|c|escape)$/i.test(e.key)) { e.preventDefault(); post({ ev: 'modekey', key: e.key }) }
+  }, true)
   addEventListener('keydown', e => {
     if (mode !== 'play' || e.key !== 'Enter' || !e.target.form || e.target.tagName === 'TEXTAREA') return
     const f = e.target.form
@@ -394,10 +452,37 @@ function PROBE(CFG) {
       }
     },
     count: q => qsa(q).length,
+    // a picture of a <canvas> or an <svg> (a chart: what no text tool can read), on white, for frames.look:
+    // the target, or the largest visible canvas or svg. An svg gets its computed styles inlined first.
+    image: async q => {
+      const vis = el => { const r = el.getBoundingClientRect(); return r.width > 4 && r.height > 4 }
+      const el = q ? find(q) : [...document.querySelectorAll('canvas, svg')].filter(e => vis(e) && !(e instanceof SVGElement && e.ownerSVGElement)).sort((a, b) => { const ra = a.getBoundingClientRect(), rb = b.getBoundingClientRect(); return rb.width * rb.height - ra.width * ra.height })[0]
+      if (!el) throw new Error('no canvas or svg on this page' + (q ? ' matches ' + q : '') + ': frames.look reads drawings; for HTML use frames.text and frames.layout')
+      // at least 2× (small text read at 1× came back with invented words), at most 1568 px a side (the runtime's limit)
+      const r = el.getBoundingClientRect(), dpr = Math.min(Math.max(2, window.devicePixelRatio || 1), 1568 / Math.max(r.width, r.height, 1))
+      const out = document.createElement('canvas'); out.width = Math.max(1, Math.round(r.width * dpr)); out.height = Math.max(1, Math.round(r.height * dpr))
+      const g = out.getContext('2d'); g.fillStyle = '#fff'; g.fillRect(0, 0, out.width, out.height)
+      if (el.tagName === 'CANVAS') g.drawImage(el, 0, 0, out.width, out.height)
+      else if (el instanceof SVGElement) {
+        const clone = el.cloneNode(true), src = [el, ...el.querySelectorAll('*')], dst = [clone, ...clone.querySelectorAll('*')]
+        const props = ['fill', 'stroke', 'stroke-width', 'stroke-dasharray', 'opacity', 'fill-opacity', 'stroke-opacity', 'font-family', 'font-size', 'font-weight', 'text-anchor', 'dominant-baseline', 'visibility', 'display']
+        src.forEach((s, i) => { const cs = getComputedStyle(s); dst[i].setAttribute('style', props.map(p => p + ':' + cs.getPropertyValue(p)).join(';')) })
+        clone.setAttribute('width', r.width); clone.setAttribute('height', r.height)
+        if (!clone.getAttribute('xmlns')) clone.setAttribute('xmlns', 'http://www.w3.org/2000/svg')
+        const img = new Image()
+        await new Promise((res, rej) => { img.onload = res; img.onerror = () => rej(new Error('the svg could not be drawn as an image')); img.src = 'data:image/svg+xml;charset=utf-8,' + encodeURIComponent(new XMLSerializer().serializeToString(clone)) })
+        g.drawImage(img, 0, 0, out.width, out.height)
+      } else throw new Error(q + ' is a ' + el.tagName.toLowerCase() + ', not a canvas or svg: frames.look reads drawings; for HTML use frames.text and frames.layout')
+      return { data: out.toDataURL('image/png'), w: Math.round(r.width), h: Math.round(r.height), kind: el.tagName.toLowerCase(), selector: selPath(el), frameWidth: innerWidth }
+    },
+    download: () => lastDl,
     all: (q, max = 50) => qsa(q).slice(0, max).map(info),
+    // the whole text of each match (info's is cut at 120 characters: a scenario's text check missed rows)
+    texts: (q, max = 20) => qsa(q).slice(0, max).map(el => (el.innerText || el.textContent || '').trim().replace(/\s+/g, ' ').slice(0, 100000)),
     record: on => { recording = !!on; return recording },
     stableSel: t => stableSel(find(t)),
-    click: t => { const el = find(t); const m = mode; mode = 'play'; try { el.click() } finally { mode = m } return info(el) },
+    // an SVG element has no click(): a dispatched click works on every element ("el.click is not a function", round 5)
+    click: t => { const el = find(t); const m = mode; mode = 'play'; try { if (typeof el.click === 'function') el.click(); else el.dispatchEvent(new MouseEvent('click', { bubbles: true, cancelable: true, view: window })) } finally { mode = m } return info(el) },
     type: (t, text) => { const el = find(t); el.focus(); el.value = String(text); el.dispatchEvent(new Event('input', { bubbles: true })); el.dispatchEvent(new Event('change', { bubbles: true })); return info(el) },
     text: t => { const el = t ? find(t) : document.body; return (el.innerText || '').slice(0, 6000) },
     state: () => ({ scroll: [scrollX, scrollY], fields: [...document.querySelectorAll('input, textarea, select')].map((e, i) => ({ k: (e.dataset.src || '') + '|' + (e.name || i), v: e.value, c: e.checked })) }),

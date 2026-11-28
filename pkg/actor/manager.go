@@ -97,6 +97,7 @@ func New(k *kernel.Kernel) *Manager {
 	m := &Manager{K: k, actors: map[string]*Actor{}, inboxes: map[string]*inbox{}, broken: map[string]string{}, files: map[string]map[string][]byte{}, logs: map[string][]LogLine{}}
 	k.Activate = m.activate
 	k.OnActivated = m.onActivated
+	k.OnDeleted = m.Restart // a deleted store's actor holds its closed connection
 	k.Subscribe(m.onCommit)
 	m.followSystem()
 	m.registerBuiltins()
@@ -569,6 +570,11 @@ func (m *Manager) Call(ctx context.Context, storeID, action string, args any, vi
 	// The action's declared requires, checked before any of its code runs:
 	// one check for the actor.call verb, page calls and store-to-store calls.
 	if err := a.mayCall(action, vis); err != nil {
+		return nil, err
+	}
+	// Then its args schema, if it declares one: run never sees a wrong shape.
+	args, err = a.checkArgs(action, args)
+	if err != nil {
 		return nil, err
 	}
 	return a.send(ctx, &event{kind: "action", name: action, visitor: vis, via: via,

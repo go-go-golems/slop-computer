@@ -37,7 +37,7 @@ jobs:
     with:
       dockerfile: ./Dockerfile
       build_context: .
-      test_command: go test -tags sqlite_fts5 ./... -count=1
+      test_command: make test-ci
       go_version_file: go.mod
       image_name: ghcr.io/go-go-golems/slop-computer
       platforms: linux/amd64

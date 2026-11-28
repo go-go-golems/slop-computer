@@ -11,17 +11,49 @@ const roomRe = /^[a-z0-9][a-z0-9_.-]{0,47}$/;
 type WirePeer = { peer: string; by: string | null; kind: string; guest: boolean; presence: Body; updatedAt: number };
 type Peer = Readonly<WirePeer & { isMe: boolean; sameTab: boolean }>;
 
+// --- the types apps see (page.d.ts, SLOP3-024) -----------------------------
+
+/** Someone in a room: a view (peer), whose person (by, null for a guest), and their presence. */
+export type RoomPeer = Peer;
+/** A moment someone emitted on a topic. */
+export type RoomMessage<T = unknown> = Readonly<{ topic: string; data: T; peer: string; by: string | null; isMe: boolean; sameTab: boolean; kind: string; guest: boolean }>;
+/** Who joined, left or changed their presence; peers is everyone now. */
+export type PeersChange = Readonly<{ peers: readonly RoomPeer[]; joined: readonly RoomPeer[]; left: readonly RoomPeer[]; updated: readonly RoomPeer[] }>;
+/** What every room offers: moments by topic, presence, the peers. Nothing persists. */
+export interface RoomChannel {
+  /** Sends data (JSON) to whoever is in the room now; dropped while disconnected. */
+  emit(topic: string, data?: unknown): Promise<void>;
+  on<T = unknown>(topic: string, h: (m: RoomMessage<T>) => void, onError?: (e: unknown) => void): () => void;
+  /** Merges into this view's presence; a null field removes it. */
+  presence(patch: Record<string, unknown>): Promise<void>;
+  peers(): readonly RoomPeer[];
+  onPeers(h: (c: PeersChange) => void, onError?: (e: unknown) => void): () => void;
+  connected(): boolean;
+  onConnection(h: (connected: boolean) => void, onError?: (e: unknown) => void): () => void;
+}
+/** A named room (lobby.join(name)). */
+export interface NamedRoom extends RoomChannel {
+  readonly name: string;
+  leave(): Promise<void>;
+}
+/** claude.use('room'): the lobby, everyone on this target, and the way into named rooms. */
+export interface Lobby extends RoomChannel {
+  join(name: string): Promise<NamedRoom>;
+  sendToClaudeSession(data: Record<string, unknown>, opts?: { deliver?: "stage" | "send"; attachPresence?: boolean }): Promise<Readonly<Record<string, unknown>>>;
+  canSendToClaudeSession(): Promise<string>;
+}
+
 type Room = {
   name: string;
   joined: boolean;
   left: boolean;
   presence: Body;
   peers: readonly Peer[];
-  topics: Map<string, Set<(m: unknown) => void>>;
-  peerHandlers: Set<(c: unknown) => void>;
+  topics: Map<string, Set<(m: RoomMessage) => void>>;
+  peerHandlers: Set<(c: PeersChange) => void>;
   connHandlers: Set<(c: boolean) => void>;
   errHandlers: Set<(e: unknown) => void>;
-  api?: unknown;
+  api?: Lobby | NamedRoom;
 };
 
 const rooms = new Map<string, Room>();
@@ -97,7 +129,7 @@ async function join(r: Room) {
   if (r.peers === EMPTY) r.peers = Object.freeze(res.peers.map((p) => asPeer(p)));
 }
 
-function api(r: Room) {
+function api(r: Room): RoomChannel {
   const check = () => {
     if (r.left) throw fail("invalid_argument", "you left this room");
     if (state.terminal) throw fail(state.terminal, "this view was closed");
@@ -120,11 +152,11 @@ function api(r: Room) {
       if (!state.connected) return; // dropped, never queued
       await rpc("room.emit", { room: r.name, topic, data: d });
     },
-    on(topic: string, h: (m: unknown) => void, onError?: (e: unknown) => void) {
+    on<T = unknown>(topic: string, h: (m: RoomMessage<T>) => void, onError?: (e: unknown) => void) {
       if (!topicRe.test(topic)) throw fail("invalid_argument", `a topic matches ${topicRe}`);
       let set = r.topics.get(topic);
       if (!set) r.topics.set(topic, (set = new Set()));
-      return listen(set, h, onError);
+      return listen(set, h as (m: RoomMessage) => void, onError);
     },
     async presence(patch: Record<string, unknown>) {
       check();
@@ -142,7 +174,7 @@ function api(r: Room) {
       if (state.connected) await rpc("room.presence", { room: r.name, patch });
     },
     peers: () => r.peers,
-    onPeers(h: (c: unknown) => void, onError?: (e: unknown) => void) {
+    onPeers(h: (c: PeersChange) => void, onError?: (e: unknown) => void) {
       const off = listen(r.peerHandlers, h, onError);
       queueMicrotask(() => {
         if (r.peerHandlers.has(h) && r.peers !== EMPTY) safe(() => h(Object.freeze({ peers: r.peers, joined: r.peers, left: EMPTY, updated: EMPTY })));
@@ -158,7 +190,7 @@ function api(r: Room) {
   };
 }
 
-export async function lobby() {
+export async function lobby(): Promise<Lobby> {
   const r = roomOf("");
   if (!r.api) {
     await join(r);
@@ -168,14 +200,14 @@ export async function lobby() {
       async join(name: string) {
         if (typeof name !== "string" || !roomRe.test(name)) throw fail("invalid_argument", `a room name matches ${roomRe}`);
         const nr = roomOf(name);
-        if (nr.api && !nr.left) return nr.api;
+        if (nr.api && !nr.left) return nr.api as NamedRoom;
         nr.left = false;
         try {
           await join(nr);
         } catch (e: any) {
           throw e?.code === "limit_reached" ? e : fail(e?.code === "invalid_argument" ? e.code : "upstream_error", e?.message || "join failed");
         }
-        nr.api = Object.freeze({
+        const named: NamedRoom = Object.freeze({
           name,
           ...api(nr),
           async leave() {
@@ -189,16 +221,17 @@ export async function lobby() {
             await rpc("room.leave", { room: name }).catch(() => {});
           },
         });
-        return nr.api;
+        nr.api = named;
+        return named;
       },
       async sendToClaudeSession(data: Record<string, unknown>, opts?: { deliver?: string; attachPresence?: boolean }) {
         if (!isPlain(data) || !Object.keys(data).length) throw fail("invalid_argument", "send a non-empty plain object");
         const body: Body = { ...(plain(data) as Body) };
         if (opts?.attachPresence !== false && Object.keys(r.presence).length) body.presence = r.presence;
-        return Object.freeze(await rpc("room.sendToClaudeSession", { data: body, deliver: opts?.deliver === "send" ? "send" : "stage" }));
+        return Object.freeze(await rpc<Record<string, unknown>>("room.sendToClaudeSession", { data: body, deliver: opts?.deliver === "send" ? "send" : "stage" }));
       },
       canSendToClaudeSession: () => rpc<string>("room.canSendToClaudeSession").catch(() => "off"),
-    });
+    } satisfies Lobby);
   }
-  return r.api;
+  return r.api as Lobby;
 }

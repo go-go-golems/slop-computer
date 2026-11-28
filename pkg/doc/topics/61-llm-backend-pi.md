@@ -120,8 +120,14 @@ error (`modelApplied` is then absent in a page's result).
 then every other available model, with `reasoning`, `thinkingLevels` and
 `images`.
 
-A model without image input answers `images_unavailable` to a call with
-images: pick an image model for the tier pages send images on.
+A call with images whose tier's model has no image input runs on the
+`vision` model when `pi.models` names one (for example
+`vision: lunaroute/deepseek-4.1-flash`); the server refuses to start if that
+model can't read images (`the vision model "…" cannot read images`). Without
+a `vision` entry, such a call answers `images_unavailable`: pick an image
+model for the tier pages send images on, or add `vision`. The bench's
+`frames.look`, which reads charts drawn on a canvas or in an SVG, needs one
+of the two.
 
 ## Thinking levels
 
@@ -249,7 +255,7 @@ hosts. Restart the pod after changing either object.
 | `upstream_error` "The model provider request failed…" | Network, a wrong `baseUrl`, an unset `$NAME`, or a local/HTTP endpoint | Check the URL is public HTTPS and the environment variable is set |
 | `rate_limited` | The provider's rate limit | Wait; spread load over tiers |
 | Codex stops working after a while | `auth.json` is read-only, or the same login is used elsewhere | A writable directory and a login of its own |
-| `images_unavailable` | The tier's model has no image input | Map that tier to an image model (`"input": ["text", "image"]`) |
+| `images_unavailable` | The tier's model has no image input, and no `vision` model is set | Set `pi.models.vision` to an image model, or map that tier to one (`"input": ["text", "image"]`) |
 | A change to the agent directory has no effect | It is read at start | Restart slop |
 
 ## See Also

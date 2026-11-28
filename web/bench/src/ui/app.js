@@ -25,11 +25,12 @@ import { Publish } from '../server/publish.js';
 import { Sandbox } from '../agent/sandbox.js';
 import { Slop } from '../server/slop.js';
 import { Snaps } from '../frames/layout.js';
+import { Types, headView } from '../agent/types.js';
 import { appZip, readArchive, saveFile, slug } from './archive.js';
 import { clone, debounce, emitter, lineOf, now, offsetOfLine, plural } from '../lib/util.js';
 
 export const App = {
-  P: null, ws: 'draft', mode: 'select', sel: null, logs: [], ev: emitter(), prefs: {}, canvas: null, offs: [], traceTarget: null,
+  P: null, ws: 'draft', mode: 'play', sel: null, logs: [], ev: emitter(), prefs: {}, canvas: null, offs: [], traceTarget: null,
   // set by views when they are made: what other views may ask of them
   code: null, docs: null, agentView: null, timeline: null,
 
@@ -38,8 +39,11 @@ export const App = {
     let n = 0
     for (const fh of FrameHosts) if (!fh.headless && fh.project === this.P) n += fh.issues.length + fh.errors
     if (Watch.status && Watch.status.dev && Watch.status.dev.broken) n++
-    return n
+    return n + this.typeErrors.length
   },
+  // the type checker's errors in the workspace shown (the Code view keeps them: ui/code.js)
+  typeErrors: [],
+  setTypeErrors(diags) { this.typeErrors = diags || []; this.ev.emit('health'); this.paintHeader() },
   hostFor(fid) { return this.canvas ? this.canvas.hostFor(fid) : null },
   hostByFid(fid) { for (const fh of FrameHosts) if (fh.fid === fid) return fh; return null },
   firstHost() { for (const fh of FrameHosts) if (!fh.headless && fh.project === this.P) return fh; return null },
@@ -97,6 +101,7 @@ export const App = {
   setWs(ws) {
     if (ws !== 'draft' && (!this.proposal(ws) || this.proposal(ws).status !== 'open')) ws = 'draft'
     this.ws = ws
+    if (this.P) Prefs.set('ws|' + this.P.app, ws) // a reload comes back to it
     if (ws === 'draft' && this.canvas) this.canvas.compare = false
     this.ev.emit('ws', ws)
     if (this.canvas) this.canvas.sync()
@@ -130,7 +135,7 @@ export const App = {
     this.offs.forEach(f => f()); this.offs = []
     if (this.canvas) this.canvas.reset()
     Headless.clear()
-    this.P = P; this.ws = 'draft'; this.sel = null; this.logs = []
+    this.P = P; this.ws = 'draft'; this.sel = null; this.logs = []; this.typeErrors = []
     this.offs.push(
       P.ev.on('files', (ws, paths) => { this.ev.emit('files', ws, paths); this.paintHeader() }),
       P.ev.on('proposals', () => {
@@ -148,7 +153,14 @@ export const App = {
       ...this.autoMarks(P))
     Watch.start(P)
     Snaps.open(P).catch(() => { })
+    // an app with TypeScript: warm the checker now (its first check parses
+    // the DOM's types, about a second), so the first eval's check is quick
+    const head = headView(P.draftOf('draft'))
+    if (Types.wants(head)) Types.check(P, head, { timeoutMs: 30000 }).catch(() => { })
     this.ev.emit('project', P)
+    // the workspace the person was in, if its proposal is still open
+    const was = Prefs.get('ws|' + P.app, 'draft')
+    if (was !== 'draft' && (P.proposals.get(was) || {}).status === 'open') this.setWs(was)
     if (this.canvas) this.canvas.sync()
     this.paintHeader()
     return true
@@ -177,7 +189,9 @@ export const App = {
     let pick = APP_TEMPLATES[0].id
     const id = h('input.txt', { value: '', placeholder: 'id: lowercase letters, digits and -', style: { width: '100%' } })
     const title = h('input.txt', { value: '', placeholder: 'Title (optional)', style: { width: '100%' } })
-    const cards = h('div.tcards')
+    const cards = h('div.tcards'), who = h('div')
+    // only admins change app code (decision D9): say so up front, not as a failed Create
+    Slop.call('me', {}).then(me => { if (me && !me.canBuild) who.append(h('p.note', { style: { color: 'var(--accent)' } }, 'Only this server\'s administrators can create or change apps. You can use the apps you have access to; ask an administrator to create one for you.')) }).catch(() => { })
     const paint = () => { clear(cards); for (const t of APP_TEMPLATES) cards.appendChild(h('button' + (t.id === pick ? '.on' : ''), { on: { click: () => { pick = t.id; paint() } } }, h('b', t.name), h('small', t.blurb))) }
     const go = async () => {
       const v = id.value.trim()
@@ -191,7 +205,7 @@ export const App = {
     if (!files) paint()
     modal({
       title: files ? 'Import as a new app' : 'New app',
-      body: [h('p.note', files ? plural(files.length, 'file') + ' go to the new app\'s draft.' : 'An app store with app.json and a page. Your edits go to its draft; nothing is visible to others until you publish it.'), files ? null : cards, id, files ? null : title],
+      body: [who, h('p.note', files ? plural(files.length, 'file') + ' go to the new app\'s draft.' : 'A new app. Your changes stay private (its draft) until you publish it.'), files ? null : cards, id, files ? null : title],
       actions: [{ label: 'Cancel' }, { label: 'Create', primary: true, run: go }]
     })
     setTimeout(() => id.focus(), 0)
@@ -252,9 +266,11 @@ export const App = {
     const lines = Publish.lines(pf).map(l => h('div', { style: { margin: '2px 0', color: /^BLOCKED/.test(l) ? 'var(--bad, #c00)' : '' } }, l))
     modal({
       title: 'Publish ' + P.app, wide: true,
-      body: [h('p.note', 'Publishing moves main to this draft. Production instances run it on their next view; a migration runs on each. You can roll back.'), h('div.mono', { style: { fontSize: '12px' } }, lines)],
+      // plain words first (a persona review: "moves main to this draft … production instances" lost a baker); the technical lines under Details
+      body: [h('p', pf.refs.main ? 'Publishing makes this version the one people use. Anyone who has the app open gets it the next time they load it. If something goes wrong, you can roll back to the version before.' : 'Publishing makes this version the one people use. This is the first publish: nobody uses the app yet.'),
+        h('details', { open: blocked }, h('summary.note', blocked ? 'Why it can\'t be published yet' : 'Details'), h('div.mono', { style: { fontSize: '12px', marginTop: '6px' } }, lines))],
       actions: [{ label: 'Cancel' }, ...(nothing || blocked ? [] : [{
-        label: 'Publish draft ' + pf.refs.draft, primary: true, run: async () => {
+        label: 'Publish', title: 'Publish draft ' + pf.refs.draft, primary: true, run: async () => {
           try { const r = await Publish.run(P, pf); toast('Published draft ' + r.n + ' to main'); this.rolloutDialog(r.n, r.from) } catch (e) { toast('Not published: ' + (e.message || e), 6000) }
         }
       }])]
@@ -274,12 +290,33 @@ export const App = {
       }
     }
     paint(pf.production)
-    if (!pf.production.length) list.append(h('div', 'No production instance follows main yet. Mount the app or make an instance (slop store new <id> --app ' + P.app + ').'))
+    if (!pf.production.length) list.append(h('div.note', 'No other copy of the app follows main.'))
+    // the person's question after a publish: what is my link?
+    const where = h('div', h('p.note', 'Looking up where the app is on the web…'))
+    Slop.call('addresses', { app: P.app }).then(r => {
+      clear(where)
+      const live = urls => h('p', h('b', 'Your app is live at: '), ...urls.map((u, i) => [i ? ', ' : '', h('a', { href: u.url, target: '_blank', rel: 'noopener' }, u.url)]))
+      if (r.urls.length) { where.append(live(r.urls)); return }
+      const none = h('p', h('b', 'Your app is published, but it has no web address yet. '), 'An administrator of this server gives it one; ask them, and the link will show here.')
+      where.append(none)
+      // an administrator (who can build here) can give it one now: /<app> on the server's live host
+      Slop.call('me', {}).then(me => {
+        if (!me || !me.canBuild) return
+        clear(none); none.append(h('b', 'Your app is published, but it has no web address yet. '))
+        const btn = h('button.btn.sm.primary', { on: { click: async () => {
+          btn.disabled = true
+          try { const m = await Slop.call('putOnline', { app: P.app }); clear(where); where.append(live([{ url: m.url }])) } catch (e) { btn.disabled = false; toast('No address: ' + (e.message || e), 6000) }
+        } } }, 'Give it a web address (/' + P.app + ')')
+        none.append(btn)
+      }).catch(() => { })
+    }).catch(() => { clear(where) })
     modal({
-      title: 'Published draft ' + n, wide: true, body: [h('p.note', 'Instances that follow main:'), list],
-      actions: [{ label: from ? 'Roll back to ' + from : 'Close', danger: !!from, run: async () => { if (!from) return; try { await Publish.rollback(P, from, n); toast('main is back at ' + from) } catch (e) { toast('Not rolled back: ' + (e.message || e), 6000) } } }, ...(from ? [{ label: 'Done', primary: true }] : [])]
+      title: 'Published draft ' + n, wide: true, body: [where, h('p.note', 'Instances that follow main:'), list],
+      actions: [{ label: from ? 'Undo this publish…' : 'Close', run: async () => { if (!from) return; if (!await confirmBox('Undo this publish?', 'People get the version from before (' + from + ') again. Your draft keeps everything.', 'Undo the publish')) return false; try { await Publish.rollback(P, from, n); toast('main is back at ' + from) } catch (e) { toast('Not rolled back: ' + (e.message || e), 6000) } } }, ...(from ? [{ label: 'Done', primary: true }] : [])]
     })
   },
+  // the dev instance's data changed under the frames (a seed): show it
+  reloadDev() { for (const fh of FrameHosts) if (fh.project === this.P && fh.kind === 'dev') fh.load({ keepState: true }) },
   async resetDev() {
     const P = this.P
     if (!await confirmBox('Reset dev data?', 'Your dev instance of ' + P.app + ' and its data are dropped, and a fresh one runs draft. The app and its other instances are not touched.', 'Reset')) return
@@ -303,7 +340,7 @@ export const App = {
     return h('header.bar', h('div.brand', 'Bench', h('i', 'slop app workbench')),
       h('div.rel', H.proj), h('div.rel', H.ws), H.modes, h('span.sp'),
       h('div.rel', H.health), H.agent, H.store, H.publish,
-      h('button.btn.hide-s', { title: 'Bookmark this moment on the timeline', on: { click: () => this.addMark() } }, '+ Mark'),
+      h('button.btn.hide-s.markbtn', { title: 'Bookmark this moment on the timeline', on: { click: () => this.addMark() } }, '+ Mark'),
       h('div.rel', h('button.btn', { on: { click: e => this.layoutMenu(e.currentTarget) } }, 'Layout')),
       h('button.ibtn', { title: 'Theme', on: { click: () => this.theme({ auto: 'dark', dark: 'light', light: 'auto' }[this.prefs.theme || 'auto']) } }, '◐'))
   },
@@ -325,13 +362,15 @@ export const App = {
     clear(H.store).append(h('b', l.edits || l.draft), h('span', l.dev || 'no dev instance'))
   },
   projectMenu(btn) {
-    const recent = Projects.recent(), items = [{ group: 'Recent' }]
+    // New app first: below a long list of apps it was out of sight (a persona working by eye, round 3)
+    const recent = Projects.recent(), items = [{ label: 'New app…', sub: 'start one from a template', run: () => this.newAppDialog() }, { label: 'Import app…', sub: 'a .zip of an app\'s files', run: () => this.importDialog() },
+      // also here, not only in the header: a persona looked for it in the menus (round 5)
+      ...(this.P ? [{ label: 'Publish ' + this.P.app + '…', sub: 'draft to main: what people use', run: () => this.publishDialog() }] : []), { hr: true }, { group: 'Recent' }]
     for (const id of recent) { const a = Slop.app(id); items.push({ label: id, sub: a ? [a.refs.draft != null ? 'draft ' + a.refs.draft : '', a.refs.main != null ? 'main ' + a.refs.main : 'not published'].filter(Boolean).join(' · ') : '', on: this.P && id === this.P.app, run: () => { if (!this.P || id !== this.P.app) this.openProject(id) } }) }
     items.push({ group: 'Apps on this server' })
     const apps = Slop.apps.filter(a => !recent.includes(a.id))
     for (const a of apps.slice(0, 30)) items.push({ label: a.id, sub: [a.refs.draft != null ? 'draft ' + a.refs.draft : '', a.refs.main != null ? 'main ' + a.refs.main : 'not published', plural(a.instances.length, 'instance')].filter(Boolean).join(' · '), run: () => this.openProject(a.id) })
     if (!apps.length) items.push({ note: Slop.error || 'Every app you can develop is listed above.' })
-    items.push({ hr: true }, { label: 'New app…', sub: 'an app store from a template, on draft', run: () => this.newAppDialog() }, { label: 'Import app…', sub: 'a .zip of an app\'s files', run: () => this.importDialog() })
     if (this.P) {
       items.push({ hr: true }, { label: 'Download ' + this.P.app, sub: '.zip of draft, with transcripts and the timeline', run: () => this.downloadProject() },
         { label: 'Reset dev data…', sub: 'drop your dev instance and start a fresh one', run: () => this.resetDev() },
@@ -361,7 +400,12 @@ export const App = {
         })
       }
     }
-    if (items.length === 1) items.push({ note: 'No issues in the frames on the canvas.' })
+    if (this.typeErrors.length) {
+      items.push({ group: 'Type errors' })
+      for (const d of this.typeErrors.slice(0, 6)) items.push({ label: d.file + ':' + d.line, sub: d.message.split('\n')[0].slice(0, 70), run: () => this.reveal(d.file, d.line) })
+      if (this.typeErrors.length > 6) items.push({ note: (this.typeErrors.length - 6) + ' more in the Code view' })
+    }
+    if (items.length === 1) items.push({ note: 'No issues in the frames on the canvas, and no type errors.' })
     else items.push({ hr: true }, { label: 'Ask Claude to fix these', run: () => this.askAgent('Fix the check issues and errors the frames report.') })
     popMenu(btn, items, { right: true })
   },
@@ -380,7 +424,15 @@ export const App = {
     Object.assign(FrameHost.ui, {
       mode: () => this.mode, pinsFor: r => this.pinsFor(r), preview: () => Preview.payload(), health: () => this.ev.emit('health'),
       ready: fh => this.ev.emit('frameready', fh), hostFor: fid => this.hostFor(fid), log: (fh, l) => this.consoleAdd(l),
-      pick: (fh, info) => this.select(info), placePin: (fh, m) => this.placePin(fh, m), openPin: (fh, id) => this.openPin(id, fh), textEdit: (fh, m) => this.textEdit(fh, m)
+      reveal: fid => setTimeout(() => this.canvas && this.canvas.focusFrame && this.canvas.focusFrame(fid), 400),
+      pick: (fh, info) => {
+        this.select(info)
+        // a person who clicks a button in Select mode meant to press it (two persona reviews in a row)
+        if (!this.playHinted && /^(button|a|input|select|textarea|label|summary)\b/i.test(info.tag || '')) {
+          this.playHinted = true
+          toast('Select mode: that click picked the ' + String(info.tag).split(/[.#]/)[0] + ' to inspect it. To use your app (press buttons, type), switch to Play (P) in the header.', 8000)
+        }
+      }, placePin: (fh, m) => this.placePin(fh, m), openPin: (fh, id) => this.openPin(id, fh), textEdit: (fh, m) => this.textEdit(fh, m)
     })
     Object.assign(AgentUI, {
       ws: () => this.ws, setWs: ws => this.setWs(ws), selection: () => this.sel,
@@ -393,6 +445,7 @@ export const App = {
     Dock.ev.on('changed', () => this.savePrefs())
   },
   async boot() {
+    Types.status = P => (Watch.P === P ? Watch.status : null)
     if (/(^|\.)localhost$|^127\.0\.0\.1$/.test(location.hostname)) window.__SB = { App, Snaps, Headless, Agent, Slop, Watch, Projects }   // local test runs only
     const root = $('#app')
     clear(root)
@@ -402,7 +455,7 @@ export const App = {
     this.wire()
     await Slop.init()
     this.prefs = Prefs.get('prefs', {})
-    this.theme(this.prefs.theme || 'auto'); this.mode = this.prefs.mode || 'select'
+    this.theme(this.prefs.theme || 'auto'); this.mode = this.prefs.mode || 'play' // a first visit uses the app: three personas in round 5 clicked their page in Select mode and picked elements; a chosen mode is remembered
     const valid = l => { try { let ok = true; walkTiles(normalize(clone(l)), t => { t.views = t.views.filter(v => Views[v]); if (!t.views.length) ok = false }); return ok } catch { return false } }
     Dock.set(this.prefs.layout && valid(this.prefs.layout) ? clone(this.prefs.layout) : LAYOUTS.Build(), this.prefs.floats || [])
     const first = Projects.recent().find(id => Slop.app(id)) || (Slop.apps[0] || {}).id

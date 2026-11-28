@@ -150,6 +150,7 @@ defineActor({
     async publish(ctx, { app, n, ifAt }) { return await ws.publish(app, n, { ifAt }); },
     async logs(ctx, { id }) { return await ws.logs(id); },
     async drop(ctx, { id }) { return await ws.drop(id); },
+    async exec(ctx, { id, sql }) { return await ws.exec(id, sql, []); },
   },
 });
 `
@@ -201,6 +202,10 @@ func TestWorkshopDevInstances(t *testing.T) {
 	h.fail(admin, "actor.call", map[string]any{"store": "devbench", "action": "drop", "args": map[string]any{"id": "jot-shop"}}, "permission_denied")
 	h.fail(admin, "actor.call", map[string]any{"store": "devbench", "action": "drop", "args": map[string]any{"id": "jot"}}, "permission_denied")
 	h.call(admin, "app.status", map[string]any{"store": "jot-shop"})
+	// exec writes under the same rule: never a production instance or the app store
+	for _, id := range []string{"jot-shop", "jot"} {
+		h.fail(admin, "actor.call", map[string]any{"store": "devbench", "action": "exec", "args": map[string]any{"id": id, "sql": "DELETE FROM notes"}}, "permission_denied")
+	}
 }
 
 const embedBenchActor = `
@@ -401,6 +406,38 @@ func TestSlopDev(t *testing.T) {
 	for _, x := range h.call(admin, "store.ls", map[string]any{"all": true}).([]any) {
 		if m := x.(map[string]any); m["id"] == inst && m["type"] != "jot" {
 			t.Fatalf("the instance's type is %q, not app.json's", m["type"])
+		}
+	}
+
+	// slop types writes the declarations and the two tsconfigs, never over
+	// the app's own; slop dev refreshes the declarations of an app that has
+	// them, and never pushes them (SLOP3-024).
+	write("tsconfig.json", `{"compilerOptions": {"jsx": "react-jsx"}}`)
+	wrote, err := c.Types("jot", dir, true, inst)
+	if err != nil || strings.Join(wrote, " ") != ".slop/types/page.d.ts .slop/types/actor.d.ts .slop/types/modules.d.ts .slop/types/actions.d.ts tsconfig.actor.json" {
+		t.Fatalf("slop types wrote %v (%v)", wrote, err)
+	}
+	if b, _ := os.ReadFile(filepath.Join(dir, "tsconfig.json")); string(b) != `{"compilerOptions": {"jsx": "react-jsx"}}` {
+		t.Fatalf("the app's tsconfig.json was overwritten: %s", b)
+	}
+	if b, _ := os.ReadFile(filepath.Join(dir, "tsconfig.actor.json")); !strings.Contains(string(b), `"actor.js"`) || !strings.Contains(string(b), `".slop/types/modules.d.ts"`) {
+		t.Fatalf("tsconfig.actor.json:\n%s", b)
+	}
+	_ = os.Remove(filepath.Join(dir, ".slop/types/page.d.ts"))
+	var again syncBuf
+	if err := c.Dev(context.Background(), dir, client.DevOptions{App: "jot", Once: true, Out: &again}); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := os.Stat(filepath.Join(dir, ".slop/types/page.d.ts")); err != nil || !strings.Contains(again.String(), "types: .slop/types refreshed") {
+		t.Fatalf("slop dev did not refresh the types (%v):\n%s", err, again.String())
+	}
+	// actions.d.ts declares the dev instance's actor's actions (ping).
+	if b, _ := os.ReadFile(filepath.Join(dir, ".slop/types/actions.d.ts")); !strings.Contains(string(b), "ping(args?: unknown): unknown;") || !strings.Contains(string(b), inst+"'s actor") {
+		t.Fatalf("actions.d.ts:\n%s", b)
+	}
+	for _, f := range h.call(admin, "files.ls", map[string]any{"store": "jot", "at": "draft"}).([]any) {
+		if p := f.(map[string]any)["path"].(string); strings.HasPrefix(p, ".slop/") {
+			t.Fatalf("slop dev pushed %s", p)
 		}
 	}
 

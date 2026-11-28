@@ -58,8 +58,10 @@ export const CANVAS = {
     }
     function fit() {
       const b = bounds(), r = cv.getBoundingClientRect(); if (!b || !r.width) { C.fitted = false; return }
-      const z = clamp(Math.min((r.width - 60) / (b.x1 - b.x0), (r.height - 60) / (b.y1 - b.y0)), 0.1, 1.2)
-      C.z = z; C.x = (r.width - (b.x1 - b.x0) * z) / 2 - b.x0 * z; C.y = (r.height - (b.y1 - b.y0) * z) / 2 - b.y0 * z; apply(); saveView()
+      // the mode bar (SELECT · DRAFT) sits on the canvas's bottom edge: fit above it (a frame's form hid behind it, round 4)
+      const hud = 44
+      const z = clamp(Math.min((r.width - 60) / (b.x1 - b.x0), (r.height - 60 - hud) / (b.y1 - b.y0)), 0.1, 1.2)
+      C.z = z; C.x = (r.width - (b.x1 - b.x0) * z) / 2 - b.x0 * z; C.y = (r.height - hud - (b.y1 - b.y0) * z) / 2 - b.y0 * z; apply(); saveView()
     }
     const saveView = debounce(() => { const P = App.P; if (P) { P.meta.view = { x: C.x, y: C.y, z: C.z }; P.saveMeta() } }, 800)
 
@@ -104,7 +106,8 @@ export const CANVAS = {
         const p = v.pos(); Object.assign(v.el.style, { left: p.x + 'px', top: p.y + 'px', width: v.fr.w + 'px' })
         clear(routeSel); for (const r of App.P.list(host.ws).filter(x => /\.html?$/.test(x))) routeSel.appendChild(h('option', { value: r, selected: r === host.route }, r))
         routeSel.hidden = role === 'm'
-        if (![...routeSel.options].some(o => o.value === host.route)) routeSel.appendChild(h('option', { value: host.route, selected: true }, host.route + ' (missing)'))
+        // a route the list lacks: a page's #hash or ?query is that page (index.html#/host), only a file that is gone is missing
+        if (![...routeSel.options].some(o => o.value === host.route)) { const file = String(host.route).split(/[?#]/)[0]; routeSel.appendChild(h('option', { value: host.route, selected: true }, host.route + (App.P.list(host.ws).includes(file) ? '' : ' (missing)'))) }
         back.hidden = role === 'm' || host.route === v.fr.route; back.title = 'Back to ' + v.fr.route
         flabel.textContent = v.fr.label || ''; flabel.hidden = !v.fr.label; routeSel.classList.toggle('sub', !!fr.label)
         meta.textContent = v.fr.w + '×' + v.fr.h + (host.errors ? ' · ' + plural(host.errors, 'error') : '') + (host.issues.length ? ' · ' + plural(host.issues.length, 'issue') : '')
@@ -195,7 +198,7 @@ export const CANVAS = {
     function hudPaint() {
       clear(hud)
       hud.append(h('span.chip.on', App.mode), h('span.chip', App.ws === 'draft' ? 'draft' : 'proposal: ' + (App.proposal() || {}).title))
-      if (App.mode === 'select') hud.append(h('span.note', 'click to select · double-click text to edit'))
+      if (App.mode === 'select') hud.append(h('span.note', 'clicks pick elements to inspect · double-click text to edit · Play (P) to use the app'))
       if (App.mode === 'comment') hud.append(h('span.note', 'click to drop a pin'))
     }
     function addFrameMenu(btn) {

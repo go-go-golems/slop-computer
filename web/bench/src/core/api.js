@@ -5,6 +5,7 @@
 //   'files.write': {
 //     sig: 'path, text',                  // a parameter ending in ? is optional; ...x is the rest
 //     doc: 'creates or replaces the whole file',
+//     ret: '{path, lines}',               // what awaiting it gives, when doc does not say (the reference shows "→ ret")
 //     writes: 'files',                    // what it changes: files (the eval's transaction) | dev (the dev
 //                                         // instance's data) | main (publishing); absent: reads and canvas views
 //     pathOf: (args, ctx) => args[0],     // writes: 'files': the path (or paths) it writes (default args[0])
@@ -83,7 +84,7 @@ export function defineAPI(...tables) {
         if (e.internal) continue
         const ns = name.includes('.') ? name.slice(0, name.indexOf('.')) : ''
         if (!groups.has(ns)) groups.set(ns, [])
-        groups.get(ns).push(name + '(' + e.sig + ')' + (e.doc ? ' — ' + e.doc : ''))
+        groups.get(ns).push(name + '(' + e.sig + ')' + (e.ret ? ' → ' + e.ret : '') + (e.doc ? ' — ' + e.doc : ''))
       }
       return [...groups].map(([ns, lines]) => lines.join('\n') + (notes[ns] ? '\n  ' + notes[ns].trim().split('\n').join('\n  ') : '')).join('\n')
     },

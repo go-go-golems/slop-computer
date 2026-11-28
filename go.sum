@@ -154,10 +154,6 @@ github.com/go-go-golems/go-go-goja v0.10.8-0.20261108231830-9d7ede7027c7 h1:wrT3
 github.com/go-go-golems/go-go-goja v0.10.8-0.20261108231830-9d7ede7027c7/go.mod h1:SzjO3fs74cZ3cDV3cmsGXY+P8UxP9WPx7oEWSn1E8bI=
 github.com/go-go-golems/logcopter v0.1.1 h1:/zrfmA7057hZyBoes+X9EpASP+aZQJx3kip89eRQqXM=
 github.com/go-go-golems/logcopter v0.1.1/go.mod h1:GUB5A7JwPVdYAu/8CKURcIaJb0h16nz8mKbkf5opzqo=
-github.com/go-go-golems/pinocchio v0.11.19 h1:IZBbwWR8wnVcAUvsOvULwY1knWerok+BPfF6RL3kdMQ=
-github.com/go-go-golems/pinocchio v0.11.19/go.mod h1:TWfRNsvuktuOpjlxtVK7vsYC0EPWL4cgJ6bhPiXzYYk=
-github.com/go-go-golems/pinocchio v0.11.20-0.20261123014038-ea7ebbe8162d h1:mxaeDc+SPL1QqMMPUH/H6TNLbzIF4UeOwsmZtGdwKZQ=
-github.com/go-go-golems/pinocchio v0.11.20-0.20261123014038-ea7ebbe8162d/go.mod h1:TWfRNsvuktuOpjlxtVK7vsYC0EPWL4cgJ6bhPiXzYYk=
 github.com/go-go-golems/pinocchio v0.11.20-0.20261123025511-c76512406646 h1:41Ps9163NdiZUgR7h50XoeK5LrOf6IBvW6esYnaC4xI=
 github.com/go-go-golems/pinocchio v0.11.20-0.20261123025511-c76512406646/go.mod h1:TWfRNsvuktuOpjlxtVK7vsYC0EPWL4cgJ6bhPiXzYYk=
 github.com/go-go-golems/sessionstream v0.1.2 h1:aUthVFD8f8M08s6zH0Y42z9DsDtInGgetyNm7taVEM8=
@@ -369,6 +365,8 @@ github.com/ryanuber/go-glob v1.0.0 h1:iQh3xXAumdQ+4Ufa5b25cRpC5TYKlno6hsv6Cb3pkB
 github.com/ryanuber/go-glob v1.0.0/go.mod h1:807d1WSdnB0XRJzKNil9Om6lcp/3a0v4qIHxIXzX/Yc=
 github.com/sahilm/fuzzy v0.1.1 h1:ceu5RHF8DGgoi+/dR5PsECjCDH1BE3Fnmpo7aVXOdRA=
 github.com/sahilm/fuzzy v0.1.1/go.mod h1:VFvziUEIMCrT6A6tw2RFIXPXXmzXbOsSHF0DOI8ZK9Y=
+github.com/santhosh-tekuri/jsonschema/v6 v6.0.2 h1:KRzFb2m7YtdldCEkzs6KqmJw4nqEVZGK7IN2kJkjTuQ=
+github.com/santhosh-tekuri/jsonschema/v6 v6.0.2/go.mod h1:JXeL+ps8p7/KNMjDQk3TCwPpBy0wYklyWTfbkIzdIFU=
 github.com/sashabaranov/go-openai v1.43.0 h1:HNRpO8TAQ01ssO7aPXO/68QRlcCCYQQ5GfHbFceRZcY=
 github.com/sashabaranov/go-openai v1.43.0/go.mod h1:lj5b/K+zjTSFxVLijLSTDZuP7adOgerWeFyZLUhAKRg=
 github.com/scylladb/termtables v0.0.0-20191203121021-c4c0b6d42ff4/go.mod h1:C1a7PQSMz9NShzorzCiG2fk9+xuCgLkPeCvMHYR2OWg=

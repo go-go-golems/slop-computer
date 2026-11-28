@@ -5,6 +5,7 @@
 //
 // Public API: CONSOLE, EVAL (views).
 import { API } from '../agent/api/index.js';
+import { Agent } from '../agent/agent.js';
 import { App } from './app.js';
 import { Dock } from './dock.js';
 import { LIB_DIR, libEntries } from '../agent/api/lib.js';
@@ -62,7 +63,7 @@ export const EVAL = {
       // the project and workspace the eval started on keep its results, even
       // if another project is opened while it runs
       const P = App.P, ws = App.ws
-      const r = await runEval(makeContext(P, { ws, who: 'you', mode: 'auto' }), code, { sid: 'repl:' + P.app, restore: P.meta.replScope && P.meta.replScope.vars })
+      const r = await runEval(makeContext(P, { ws, who: 'you', mode: 'auto', agent: Agent }), code, { sid: 'repl:' + P.app, restore: P.meta.replScope && P.meta.replScope.vars })
       if (r.scope) { P.meta.replScope = r.scope; P.saveMeta(); if (App.P === P) paintScope() }
       clear(card)
       if (r.effects) card.appendChild(h('div.fx', effectsLine(r.effects)))

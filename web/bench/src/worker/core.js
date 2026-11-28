@@ -134,7 +134,11 @@ async function __exec(t, x, rc) {
     case 'par': {
       if (Array.isArray(t.kids)) return Promise.all(t.kids.map(k => __exec(k, x, rc)))
       const ks = Object.keys(t.kids), vs = await Promise.all(ks.map(k => __exec(t.kids[k], x, rc)))
-      return Object.fromEntries(ks.map((k, i) => [k, vs[i]]))
+      // named results that also destructure as a list, in key order: const [status, logs] = await par({ status, logs })
+      // failed twice in round 4 ("value is not iterable")
+      const out = Object.fromEntries(ks.map((k, i) => [k, vs[i]]))
+      Object.defineProperty(out, Symbol.iterator, { value: function* () { yield* vs }, enumerable: false })
+      return out
     }
     case 'alt': {
       const key = __isStep(t.router) ? await __exec(t.router, x, rc) : await t.router(x, { input: rc.input })
@@ -333,10 +337,12 @@ function help(x) {
     'roles     ' + __ROLES.join(', ') + ' · delegate(role, task) runs a subagent and returns its result',
     'scope     vars() forget(name) · lib.def(name, fn, { description }) lib.list()'
   ].join('\n')
-  if (x && typeof x === 'object' && typeof x.__ns === 'string' && !__isStep(x)) return __byNs()[x.__ns] ? __byNs()[x.__ns].map(v => v + '(' + (__SIGS[v] || '') + ')').join('\n') : x.__ns + ': no verbs'
-  if (typeof x === 'function' && x.verb) { const v = x.verb; return v + '(' + (__SIGS[v] || '') + ') → Step · effect ' + (__WRITE.test(v) ? 'write' : __CANVAS.test(v) ? 'canvas' : 'read') + (__FIRST[v] ? ' · a missing first argument comes from the input' : '') }
+  if (x && typeof x === 'object' && typeof x.__ns === 'string' && !__isStep(x)) return __byNs()[x.__ns] ? __byNs()[x.__ns].map(__line).join('\n') : x.__ns + ': no verbs'
+  if (typeof x === 'function' && x.verb) { const v = x.verb; return __line(v) + '\n  a Step: await it to run it · effect ' + (__WRITE.test(v) ? 'write' : __CANVAS.test(v) ? 'canvas' : 'read') + (__FIRST[v] ? ' · a missing first argument comes from the input' : '') }
   if (__isStep(x)) return __explain(x)
-  if (typeof x === 'string' && __byNs()[x]) return __byNs()[x].map(v => v + '(' + (__SIGS[v] || '') + ')').join('\n')
+  if (typeof x === 'string' && __byNs()[x]) return __byNs()[x].map(__line).join('\n')
   return 'help() lists everything; help(files) or help("files") a module; help(files.read) one verb; help(step) a plan'
 }
+// one verb as the reference shows it: name(sig) → what awaiting it gives — what it does
+function __line(v) { const d = typeof __DOCS === 'object' && __DOCS[v]; return v + '(' + (__SIGS[v] || '') + ')' + (d ? ' ' + d : '') }
 function __byNs() { const o = {}; for (const v of Object.keys(__SIGS)) { const [a] = v.split('.'); if (v.includes('.')) (o[a] = o[a] || []).push(v) } return o }

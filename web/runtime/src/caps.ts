@@ -10,18 +10,46 @@ import { bytes, fail, freeze } from "./util.ts";
 
 type Profile = { id: string; name?: string; avatar?: string; color: string; email?: string };
 
-const profileCache = new Map<string, Readonly<Record<string, unknown>>>();
-function asProfile(p: Profile, meId: string | null) {
+/** A person as this view may see them (name and avatar need the profile scope, email the email scope). */
+export type UserProfile = Readonly<{ id: string; name: string; avatarUrl: string; color: string; email: string | null; isMe: boolean; guest: boolean }>;
+/** The viewer: who they are, and who they are to the platform (the facts an actor reads from ctx.visitor). */
+export type Viewer = Readonly<{
+  id: string | null; name: string; avatarUrl: string; color: string; email: string | null;
+  isOwner: boolean; canEdit: boolean;
+  audience: string; level: string; guest: boolean; subscribed: boolean;
+  llm: Readonly<{ allowed: boolean; remaining: number | null }>;
+}>;
+/**
+ * claude.use('user'). id and profiles need the user capability declared;
+ * name, avatarUrl and search its profile scope; email its email scope.
+ */
+export interface User {
+  isOwner(): Promise<boolean>;
+  canEdit(): Promise<boolean>;
+  /** A named permission of the viewer; null when the app has none by that name. */
+  can(name: string): Promise<boolean | null>;
+  me(): Promise<Viewer>;
+  id?(): Promise<string | null>;
+  /** Profiles by id; an unknown id gets an empty profile. Never rejects. */
+  profiles?(ids: readonly string[] | string): Promise<Readonly<Record<string, UserProfile>>>;
+  name?(): Promise<string>;
+  avatarUrl?(): Promise<string | null>;
+  search?(q: string): Promise<readonly UserProfile[]>;
+  email?(): Promise<string | null>;
+}
+
+const profileCache = new Map<string, UserProfile>();
+function asProfile(p: Profile, meId: string | null): UserProfile {
   return freeze({ id: p.id, name: p.name ?? "", avatarUrl: p.avatar ?? "", color: p.color, email: p.email ?? null, isMe: p.id === meId, guest: false });
 }
 
-export function user(h: Hello) {
+export function user(h: Hello): User {
   const me = h.me;
   const declared = !!h.caps.user;
   const scopes = new Set<string>(((h.caps.user as any)?.scopes as string[]) ?? []);
   const meId = declared ? (me.id ?? null) : null;
   const prof = (me.profile ?? {}) as Profile;
-  const viewer = freeze({
+  const viewer: Viewer = freeze({
     id: meId, name: scopes.has("profile") ? (prof.name ?? "") : "", avatarUrl: scopes.has("profile") ? (prof.avatar ?? "") : "",
     color: prof.color ?? "hsl(210 50% 45%)", email: scopes.has("email") ? (prof.email ?? null) : null, isOwner: me.isOwner, canEdit: me.canEdit,
     // Guide §10: the visitor as the platform sees them, the same facts an
@@ -29,7 +57,7 @@ export function user(h: Hello) {
     audience: me.audience ?? "guest", level: me.level ?? h.level, guest: me.guest ?? !meId,
     subscribed: !!me.subscribed, llm: me.llm ?? { allowed: false, remaining: null },
   });
-  const base: Record<string, unknown> = {
+  const base: User = {
     isOwner: async () => me.isOwner,
     canEdit: async () => me.canEdit,
     can: async (name: string) => (name in me.can ? me.can[name] : null),
@@ -48,7 +76,7 @@ export function user(h: Hello) {
           /* reads never reject */
         }
       }
-      const out: Record<string, unknown> = {};
+      const out: Record<string, UserProfile> = {};
       for (const id of list) out[id] = profileCache.get(id) ?? freeze({ id, name: "", avatarUrl: "", color: "hsl(0 0% 55%)", email: null, isMe: id === meId, guest: false });
       return freeze(out);
     };
@@ -86,16 +114,34 @@ function anchorOf(el: Element) {
   return freeze({ path: path.join(" > "), x: r.width ? 0.5 : 0, y: r.height ? 0.5 : 0 });
 }
 
-export function comments(h: Hello, grant: Grant) {
+/** Where a comment points: what anchorFor returns. */
+export type CommentAnchor = Readonly<Record<string, unknown>>;
+/**
+ * claude.use('comments'). With composer_only, only openComposer and
+ * anchorFor; otherwise the view writes comments itself (after the
+ * viewer's consent).
+ */
+export interface Comments {
+  openComposer(t: { element?: Element; range?: Range }): Promise<{ opened: boolean }>;
+  anchorFor(el: Element): Promise<CommentAnchor>;
+  create?(o: { anchor: CommentAnchor; text: string }): Promise<{ threadId: string; commentId: string }>;
+  reply?(threadId: string, text: string): Promise<{ commentId: string }>;
+  resolve?(threadId: string, resolved: boolean): Promise<void>;
+  delete?(threadId: string): Promise<void>;
+  sendToClaude?(t: { anchor?: CommentAnchor; threadId?: string; text: string }): Promise<{ threadId: string; commentId: string }>;
+  canSendToClaude?(): Promise<"available" | "no_session">;
+}
+
+export function comments(h: Hello, grant: Grant): Comments {
   const composerOnly = !!(h.caps.comments as any)?.composer_only;
-  const base: Record<string, unknown> = {
+  const base: Comments = {
     async openComposer(t: { element?: Element; range?: Range }) {
       const el = t?.element ?? (t?.range ? (t.range.commonAncestorContainer as Element).parentElement ?? document.body : null);
       if (!el) throw fail("invalid", "openComposer takes {element} or {range}");
       const res = await ask("compose", { anchor: anchorOf(el), text: (el.textContent ?? "").slice(0, 200) });
       return freeze({ opened: !!res.opened });
     },
-    anchorFor: async (el: Element) => anchorOf(el),
+    anchorFor: async (el: Element) => anchorOf(el) as CommentAnchor,
   };
   if (composerOnly) return Object.freeze(base);
   const text = (t: unknown) => {
@@ -139,8 +185,11 @@ export function comments(h: Hello, grant: Grant) {
 
 // --- assets -------------------------------------------------------------------
 
+/** An uploaded file: url is where pages load it from. */
+export type Asset = Readonly<{ id: string; url: string; sizeBytes: number; contentType: string }>;
+
 export const assets = Object.freeze({
-  async upload(blob: Blob, opts?: { type?: string }) {
+  async upload(blob: Blob, opts?: { type?: string }): Promise<Asset> {
     if (!(blob instanceof Blob)) throw fail("invalid_request", "upload takes a Blob");
     const type = opts?.type || blob.type || "application/octet-stream";
     if (type === "image/svg+xml") throw fail("unsupported_type", "SVG uploads are not accepted yet");
@@ -149,14 +198,14 @@ export const assets = Object.freeze({
     if (!r.ok) throw fail(body?.error?.code || "upstream_error", body?.error?.message || "upload failed");
     return freeze(body);
   },
-  async list() {
+  async list(): Promise<Readonly<{ assets: readonly Asset[]; usage: Readonly<{ files: number; bytes: number; maxFiles: number; maxBytes: number }> }>> {
     const r: any = await rpc("assets.list");
     return freeze({ assets: r.assets, usage: { files: r.usage.count, bytes: r.usage.bytes, maxFiles: 1000, maxBytes: 1 << 30 } });
   },
-  async delete(ref: string) {
+  async delete(ref: string): Promise<Readonly<{ deleted: boolean }>> {
     const id = String(ref).replace(/^.*\/_blob\//, "");
     try {
-      return freeze(await rpc("assets.delete", { id }));
+      return freeze(await rpc<{ deleted: boolean }>("assets.delete", { id }));
     } catch (e: any) {
       if (e?.code === "not_found") return freeze({ deleted: false });
       throw e;
@@ -218,16 +267,30 @@ export const artifact = Object.freeze({
 
 // slop's own namespace (slop v3): the store's actor actions, read aliases,
 // who is visiting, and asking the shell to sign in.
+/** A document of a bound store, as stores.open(alias) reads it. */
+export type StoreDoc<T = Record<string, unknown>> = Readonly<{ path: string; exists: true; version: number; body: T } | { path: string; exists: false }>;
+/** A file of a bound store's main snapshot. */
+export type StoreFile = Readonly<{ path: string; sha256: string; size: number; type: string }>;
+/** A store of a type the visitor can open (stores.list). */
+export type StoreListing = Readonly<{ id: string; app: string; level: string; mine: boolean; createdAt: number; title?: string }>;
+/** stores.open(alias): reads of a store bound to this app, as the visitor. */
+export interface BoundStore {
+  doc<T = Record<string, unknown>>(path: string): Promise<StoreDoc<T>>;
+  query<T = Record<string, unknown>>(coll: string, query?: { filters?: { field: string; op: string; value: unknown }[]; order?: string; desc?: boolean; limit?: number }): Promise<{ docs: (StoreDoc<T> & { exists: true })[] }>;
+  file(path: string): Promise<Readonly<{ path: string; type: string; text: string }>>;
+  files(): Promise<readonly StoreFile[]>;
+}
+
 export function slop(h: Hello) {
   const cfg = (h.caps.slop as Record<string, unknown> | undefined) ?? {};
   // A governance change the actor makes for the visitor (roles, policy,
   // budgets…) needs their approval in the shell, outside this frame: the
   // call fails with confirmation_required, the shell asks, and an allowed
   // call is repeated (the approval holds for this view and call).
-  const call = async (action: string, args?: unknown) => {
+  const call = async (action: string, args?: unknown): Promise<unknown> => {
     for (let asked = 0; ; asked++) {
       try {
-        return await rpc("slop.call", { action: String(action), args: args ?? {} });
+        return await rpc<unknown>("slop.call", { action: String(action), args: args ?? {} });
       } catch (e: any) {
         if (e?.code !== "confirmation_required" || !e.confirm || asked >= 4) throw e;
         const r = await ask("confirm", { confirm: e.confirm }).catch(() => null);
@@ -238,12 +301,12 @@ export function slop(h: Hello) {
   const actions = new Proxy({} as Record<string, (args?: unknown) => Promise<unknown>>, {
     get: (_t, name) => (typeof name === "string" && name !== "then" ? (args?: unknown) => call(name, args) : undefined),
   });
-  const open = (alias: string) =>
+  const open = (alias: string): BoundStore =>
     freeze({
       doc: (path: string) => rpc("slop.read", { alias, op: "get", path }),
       query: (coll: string, query?: unknown) => rpc("slop.read", { alias, op: "query", coll, query: query ?? {} }),
       file: (path: string) => rpc("slop.read", { alias, op: "file", path }),
-      files: () => rpc("slop.read", { alias, op: "files" }),
+      files: () => rpc<StoreFile[]>("slop.read", { alias, op: "files" }),
     });
   return freeze({
     actions,
@@ -251,7 +314,7 @@ export function slop(h: Hello) {
     // open(alias) reads a store bound to this app; list({type, title?}) lists
     // the stores of a type the visitor can open (a "my boards" page), with
     // each one's title read from the document at `title` (e.g. board/meta).
-    stores: freeze({ open, list: async (o: { type: string; title?: string }) => ((await rpc("slop.stores", o ?? {})) as any).stores }),
+    stores: freeze({ open, list: async (o: { type: string; title?: string }): Promise<readonly StoreListing[]> => (await rpc<{ stores: StoreListing[] }>("slop.stores", o ?? {})).stores }),
     visitor: async () => (h.me as Record<string, unknown>).visitor ?? null,
     signIn: () => post({ type: "signin" }),
     subscribeUrl: () => String(cfg.subscribeUrl ?? ""),

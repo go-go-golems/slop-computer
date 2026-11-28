@@ -15,6 +15,8 @@ import { clamp, plural, sleep } from '../../lib/util.js';
 import { missing } from './files.js';
 
 const frameOf = (ctx, id) => {
+  // what frames.open returned works as well as its id (round 4: "no frame [object Object]")
+  if (id && typeof id === 'object') id = id.id
   const P = ctx.project, f = id ? P.frame(id) : P.board().frames[0]
   if (!f) throw missing('no frame ' + id + '. Frames: ' + (P.board().frames.map(x => x.id + ' ' + x.route).join(', ') || 'none'))
   return f
@@ -30,7 +32,7 @@ const changed = P => { P.saveMeta(); P.ev.emit('frames') }
 export const FRAMES = {
   'frames.list': { sig: '', doc: '[{id, label, route, w, h, x, y, errors, issues}]', run: ctx => ctx.project.board().frames.map(info) },
   'frames.open': {
-    sig: 'route, {w, h, x, y, label, new}?', doc: 'a frame (reuses one showing that page at that size unless new: true)',
+    sig: 'route, {w, h, x, y, label, new}?', ret: '{id, label, route, w, h, x, y, errors, issues, reused?}', doc: 'a frame (reuses one showing that page at that size unless new: true)',
     run: (ctx, route, o = {}) => {
       const P = ctx.project, w = o.w || 375, hh = o.h || 720
       const ex = !o.new && P.board().frames.find(f => info(f).route === route && f.w === w && f.h === hh)
@@ -38,11 +40,14 @@ export const FRAMES = {
       const f = P.addFrame({ route, w, h: hh, x: o.x, y: o.y })
       if (o.label) { f.label = String(o.label).slice(0, 60); changed(P) }
       canvasLog(ctx, 'opened ' + route + ' ' + w + '×' + hh)
+      // a frame the agent opens off screen is brought into view (a florist found two new sheets only by
+      // pressing Fit, round 5)
+      FrameHost.ui.reveal(f.id)
       return info(f)
     }
   },
   'frames.update': {
-    sig: 'frameId, {route, w, h, x, y, label}',
+    sig: 'frameId, {route, w, h, x, y, label}', ret: '{id, label, route, w, h, x, y, errors, issues}',
     run: (ctx, id, o) => {
       const f = frameOf(ctx, id)
       if (o.w != null) f.w = clamp(Math.round(+o.w) || f.w, 240, 2400)
@@ -58,7 +63,7 @@ export const FRAMES = {
   'frames.move': { sig: 'frameId, x, y', run: (ctx, id, x, y) => FRAMES['frames.update'].run(ctx, id, { x, y }) },
   'frames.label': { sig: 'frameId, label?', run: (ctx, id, label) => FRAMES['frames.update'].run(ctx, id, { label: label || null }) },
   'frames.close': {
-    sig: 'frameId',
+    sig: 'frameId', ret: '{closed, remaining}',
     run: (ctx, id) => { const f = frameOf(ctx, id); ctx.project.removeFrame(f.id); canvasLog(ctx, 'closed ' + (f.label || f.route)); return { closed: f.id, remaining: ctx.project.board().frames.length } }
   },
   'frames.arrange': {
@@ -85,7 +90,7 @@ export const FRAMES = {
     run: async (ctx, id) => { const fh = await hostOf(ctx, id), issues = await fh.call('check', [], 4000); return { route: fh.route, errors: fh.logs.filter(l => l.level === 'error').map(l => l.text + (l.src ? ' @' + l.src : '')).slice(-10), issues } }
   },
   'frames.outline': {
-    sig: 'frameId?', doc: 'the DOM as an indented tree, with @file:line for each element',
+    sig: 'frameId?', ret: 'a string, one element per line', doc: 'the DOM as an indented tree, with @file:line for each element',
     run: async (ctx, id) => {
       const nodes = await (await hostOf(ctx, id)).call('outline', [300])
       return nodes.map(n => '  '.repeat(n.d) + n.tag + (n.id ? '#' + n.id : '') + (n.cls ? '.' + n.cls : '') + (n.text ? ' "' + n.text + '"' : '') + (n.src ? '  @' + n.src : '')).join('\n')
@@ -96,8 +101,28 @@ export const FRAMES = {
     run: async (ctx, id, target) => { const r = await (await hostOf(ctx, id)).call('inspect', [target]); r.rules = r.rules.map(x => ({ file: x.file, selector: x.selector, media: x.media || undefined, css: x.text })); return r }
   },
   'frames.query': { sig: 'frameId, selector', doc: 'matches, each with attrs (data-*, href, name, value, checked, aria-*)', run: async (ctx, id, sel) => (await hostOf(ctx, id)).call('query', [sel]) },
-  'frames.count': { sig: 'frameId, selector', run: async (ctx, id, sel) => { const fh = await hostOf(ctx, id); await fh.call('settle', [600], 2000).catch(() => { }); return fh.call('count', [sel]) } },
-  'frames.text': { sig: 'frameId?, target?', doc: 'visible text', run: async (ctx, id, target) => (await hostOf(ctx, id)).call('text', [target || null]) },
+  'frames.look': {
+    sig: 'frameId, question, {target}?', ret: '{answer, kind, target, size}', long: true,
+    doc: 'looks at a drawing (a <canvas> or <svg>: a chart, what frames.text cannot read) with a model that sees images, and answers the question: overlapping or cut-off labels, the shape of a line, the colours. It can misread words that overlap: take exact labels and numbers from the data, and use it for what the eye sees. target: a selector (default the largest canvas or svg)',
+    run: async (ctx, id, question, o = {}) => {
+      if (!ctx.agent || !ctx.agent.sample) throw Object.assign(new Error('Claude is not available in this view'), { kind: 'unavailable' })
+      ctx.llmCalls = (ctx.llmCalls || 0) + 1
+      if (ctx.llmCalls > 24) throw Object.assign(new Error('model calls (llm, frames.look) are capped at 24 per turn'), { kind: 'budget' })
+      const fh = await hostOf(ctx, id)
+      const pic = await fh.call('image', [o.target || null], 15000)
+      const b64 = String(pic.data).split(',')[1] || '', bin = atob(b64), bytes = new Uint8Array(bin.length)
+      for (let i = 0; i < bin.length; i++) bytes[i] = bin.charCodeAt(i)
+      const blob = new Blob([bytes], { type: 'image/png' })
+      const prompt = 'The image is a ' + pic.kind + ' from a web page, ' + pic.w + '×' + pic.h + ' CSS pixels, shown in a frame ' + pic.frameWidth + ' px wide. Answer the question from what is visible in the image only. Be specific (which labels, where); say plainly when text overlaps, is cut off or is too small to read, and say when you cannot tell.\n\nQuestion: ' + String(question || 'Describe what this drawing shows and anything that looks wrong.')
+      let res
+      try { res = await ctx.agent.sample(prompt, { images: [blob], modelTier: 'quick', cache: false, signal: ctx.signal }) } catch (e) {
+        throw Object.assign(new Error((e && e.code === 'images_unavailable' ? 'no model that reads images is configured on this server (an administrator sets pi.models.vision)' : (e && e.message) || String(e))), { kind: 'llm' })
+      }
+      return { answer: ((res && res.text) || '').trim(), kind: pic.kind, target: pic.selector, size: [pic.w, pic.h] }
+    }
+  },
+  'frames.count': { sig: 'frameId, selector', ret: 'a number', run: async (ctx, id, sel) => { const fh = await hostOf(ctx, id); await fh.call('settle', [600], 2000).catch(() => { }); return fh.call('count', [sel]) } },
+  'frames.text': { sig: 'frameId?, target?', ret: 'a string', doc: 'visible text', run: async (ctx, id, target) => (await hostOf(ctx, id)).call('text', [target || null]) },
   'frames.click': { sig: 'frameId, target', run: async (ctx, id, target) => { const r = await (await hostOf(ctx, id)).call('click', [target]); await sleep(120); return r } },
   'frames.type': { sig: 'frameId, target, text', run: async (ctx, id, target, text) => (await hostOf(ctx, id)).call('type', [target, text]) },
   'frames.waitFor': {
@@ -105,9 +130,9 @@ export const FRAMES = {
     run: async (ctx, id, sel, o = {}) => { const fh = await hostOf(ctx, id), t = clamp(+o.timeout || 2000, 50, 15000); return fh.call('waitFor', [sel, t], t + 1500) }
   },
   'frames.console': { sig: 'frameId?', run: async (ctx, id) => (await hostOf(ctx, id)).logs.slice(-30).map(l => l.level + ': ' + l.text + (l.src ? ' @' + l.src : '')) },
-  'frames.reload': { sig: 'frameId?', run: async (ctx, id) => { const fh = await hostOf(ctx, id); await fh.load({ keepState: false }); return { route: fh.route, errors: fh.errors } } },
+  'frames.reload': { sig: 'frameId?', ret: '{route, errors}', run: async (ctx, id) => { const fh = await hostOf(ctx, id); await fh.load({ keepState: false }); return { route: fh.route, errors: fh.errors } } },
   'frames.layout': {
-    sig: 'frameId?, {near}?', doc: 'every rendered element: key, tag, box [x, y, w, h], own text, src',
+    sig: 'frameId?, {near}?', ret: '{route, width, height, count, items: [{key, tag, box: [x, y, w, h], text, src, hidden?}]}: an object; the elements are in .items (at most 150)', doc: 'every rendered element: key, tag, box [x, y, w, h], own text, src',
     run: async (ctx, id, o = {}) => {
       const fh = await hostOf(ctx, id), L = await fh.call('layout', [], 5000)
       let items = L.items
@@ -116,7 +141,7 @@ export const FRAMES = {
     }
   },
   'frames.snapshot': {
-    sig: 'frameId?, label?', doc: 'a frozen copy of the page and its layout',
+    sig: 'frameId?, label?', ret: '{id, route, w, ws, label, t}', doc: 'a frozen copy of the page and its layout',
     run: async (ctx, id, label) => {
       const m = await Snaps.take(ctx.project, await hostOf(ctx, id), { label: label || null, by: ctx.who })
       return { id: m.id, route: m.route, w: m.w, ws: m.ws, label: m.label, t: new Date(m.t).toISOString() }
@@ -125,7 +150,7 @@ export const FRAMES = {
   // layout differences: this workspace against another (a proposal against
   // draft by default; in draft, against the newest snapshot of the page)
   'frames.compare': {
-    sig: 'frameId, {with}?', doc: 'layout differences against draft (from a proposal), a proposal ref, or a snapshot id',
+    sig: 'frameId, {with}?', ret: '{frame, from, to, changes, summary}', doc: 'layout differences against draft (from a proposal), a proposal ref, or a snapshot id',
     run: async (ctx, id, o = {}) => {
       const P = ctx.project, f = frameOf(ctx, id), cur = await layoutIn(P, f, ctx.ws, { headless: true })
       let what = o.with, other

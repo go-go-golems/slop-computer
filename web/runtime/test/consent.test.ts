@@ -16,11 +16,14 @@ test("only index.ts makes grants", () => {
   }
 });
 
+// types.ts is declarations only (build.mjs emits it into page.d.ts; it is not
+// in the bundle), so it may name permissions' type too, but only as a type.
 test("other modules import only the Grant type from consent.ts", () => {
   for (const f of files) {
     if (f === "consent.ts" || f === "index.ts") continue;
     for (const m of readFileSync(new URL(f, dir), "utf8").matchAll(/import\s+(type\s+)?\{([^}]*)\}\s+from\s+"\.\/consent\.ts"/g)) {
-      assert.ok(m[1] && m[2].trim() === "Grant", `${f} imports ${m[0]}`);
+      const allowed = f === "types.ts" ? ["Grant", "permissions"] : ["Grant"];
+      assert.ok(m[1] && allowed.includes(m[2].trim()), `${f} imports ${m[0]}`);
     }
   }
 });

@@ -18,8 +18,10 @@
 // send, stop, delegate, busy, anyBusy, compact, sample, agent, ev 'ready' |
 // 'turn' | 'step' | 'text').
 import { AgentUI, makeContext, runEval } from './eval.js';
+import { FAKED_EVAL, fitPrompt } from './hints.js';
 import { FrameHost, FrameHosts } from '../frames/host.js';
 import { MAX_DEPTH, ROLES } from './roles.js';
+import { Types } from './types.js';
 import { Watch } from '../server/instances.js';
 import { diffText, parseJSONReply, toYAML } from '../lib/text.js';
 import { effectsLine, scopeSummary } from './effects.js';
@@ -28,6 +30,9 @@ import { guide } from './guide.js';
 import { libEntries } from './api/lib.js';
 
 const BUDGET = 30
+// evals one model call can run: the server's tool rounds for a page's sample call (pkg/llm/request.go,
+// MaxRounds 10), less the last round, which offers no tools; and how often a turn continues a full call
+const CALL_EVALS = 9, MAX_CONTINUES = 2
 const firstLine = code => (code.split('\n').find(l => l.trim() && !l.trim().startsWith('//')) || '').trim().slice(0, 90)
 
 export const Agent = {
@@ -59,17 +64,24 @@ export const Agent = {
     for (const fh of FrameHosts) if (!fh.headless && fh.project === P) for (const i of fh.issues) issues.push(fh.route + ' ' + fh.w + 'px: ' + i.message + (i.src ? ' @' + i.src : ''))
     const props = P.openProposals().map(p => p.ref + ' "' + p.title + '"').join('; ') || 'none'
     const where = ws === 'draft' ? 'draft ' + P.draftOf(ws).head : 'proposal ' + ws + ' "' + (P.proposals.get(ws) || {}).title + '" at ' + P.draftOf(ws).head
-    return 'App "' + P.title + '" (' + P.app + '). Your writes go to ' + where + '; main is ' + (P.refs.main ?? 'not published yet') +
+    // the person's own date and zone: an eval's new Date() prints UTC, and a persona near midnight
+    // was told "today is 17 November" while the app printed the 16th (round 3)
+    const d = new Date(), tz = (() => { try { return Intl.DateTimeFormat().resolvedOptions().timeZone } catch { return '' } })()
+    const when = 'The person\'s local time: ' + d.toLocaleString('en-GB', { weekday: 'short', day: 'numeric', month: 'long', year: 'numeric', hour: '2-digit', minute: '2-digit' }) + (tz ? ' (' + tz + ')' : '') + '; dates you tell them use this, not UTC.\n'
+    return when + 'App "' + P.title + '" (' + P.app + '). Your writes go to ' + where + '; main is ' + (P.refs.main ?? 'not published yet') +
       '.\nFiles: ' + files + '\nInstances: ' + inst + '\nFrames: ' + frames + '\nOpen proposals: ' + props + '\nSelected: ' + sel + '\nOpen pins:\n' + pins +
       '\nCurrent check issues: ' + (issues.slice(0, 8).join('; ') || 'none') +
       '\nSaved lib functions: ' + (libEntries(view).map(l => 'lib.' + l.name + '(' + l.params.join(', ') + ')' + (l.description ? ' — ' + l.description : '')).join('; ') || 'none') +
-      '\nYour variables from earlier evals: ' + (th && th.scope ? (scopeSummary(th.scope) || 'none') + (th.scope.skipped && th.scope.skipped.length ? ' (not kept: ' + th.scope.skipped.join(', ') + ')' : '') : 'none')
+      '\nYour variables from earlier evals: ' + (th && th.scope ? (scopeSummary(th.scope) || 'none') + (th.scope.skipped && th.scope.skipped.length ? ' (still in the sandbox while this bench page stays open, but not saved for after a reload: ' + th.scope.skipped.join(', ') + ')' : '') : 'none')
   },
   HIST_CHARS: 28000, KEEP_CHARS: 12000, KEEP_MIN: 4, MAX_MSGS: 30,
   // one message as history; detail adds a line per eval (what it ran, how it went, what it changed)
   renderMsg(m, detail) {
     if (m.role === 'user') return (m.from ? '(from the ' + m.from + ') ' : '') + (m.text || '')
     const steps = m.steps || [], wrote = [...new Set(steps.flatMap(s => (s.calls || []).filter(c => /write|replace|remove|copy|save|seed|reset/.test(c))))]
+    // a past reply that wrote evals as text (from before FAKED_EVAL was caught) would teach the model to do
+    // it again (a thread in round 4 did it twice in a row): the history says what it was instead
+    if (!steps.length && FAKED_EVAL.test(m.text || '')) return '(this reply wrote eval code as text; none of it ran, and what it reported did not happen)'
     const t = m.text || (m.error ? '(failed: ' + m.error + ')' : '(no reply)')
     if (!steps.length) return t
     if (!detail) return t + '\n[' + plural(steps.length, 'eval') + (wrote.length ? ', used ' + wrote.join(', ') : '') + ']'
@@ -99,7 +111,7 @@ export const Agent = {
       'Be specific (file:line, names, numbers). Do not add anything that is not in the messages. Reply with the summary only.\n\n' +
       'Previous summary:\n' + (th.summary ? th.summary.text : '(none: this is the start of the thread)') + '\n\nMessages ' + (start + 1) + '–' + cut + ':\n' + trunc(transcript, 40000) + (marks.length ? '\n\nMarks on the timeline from this stretch:\n' + marks.join('\n') : '')
     let text = '', by = 'claude'
-    try { if (this.sample) { const r = await this.sample(prompt, { modelTier: 'quick', cache: false, signal }); text = ((r && r.text) || '').trim() } } catch (e) { if (signal && signal.aborted) throw e }
+    try { if (this.sample) { const r = await this.sample(fitPrompt([{ role: 'user', content: prompt }]).msgs[0].content, { modelTier: 'quick', cache: false, signal }); text = ((r && r.text) || '').trim() } } catch (e) { if (signal && signal.aborted) throw e }
     if (text.length < 40) { by = 'fallback'; text = this.plainSummary(th, start, cut) }
     th.summary = { upTo: cut, text: trunc(text, 6000), by, t: now(), t0: lastT, chars: total }
     P.saveThread(th)
@@ -186,9 +198,9 @@ export const Agent = {
     const tool = {
       name: 'eval',
       description: 'Run a JavaScript async function body in the bench sandbox with the host API in scope (files, app, frames, fixtures, scenarios, session, ui, lib, publish) and the step core (step, seq, par, delegate, …). Use `return` for the result. Returns {ok, value, logs, error, effects}.',
-      inputSchema: { type: 'object', properties: { code: { type: 'string', description: 'JavaScript statements; may use await; return the value you want back' } }, required: ['code'] },
+      inputSchema: { type: 'object', properties: { code: { type: 'string', description: 'JavaScript statements; may use await; return the value you want back' }, ts: { type: 'boolean', description: 'the code is TypeScript: its types are stripped before it runs (they are not checked)' } }, required: ['code'] },
       execute: async input => {
-        const code = String((input && input.code) || '')
+        let code = String((input && input.code) || '')
         const step = { code, t: now(), status: 'running' }
         msg.steps.push(step); this.ev.emit('step', th.id)
         const b = o.budget
@@ -201,7 +213,24 @@ export const Agent = {
           if (!ok) { step.status = 'skipped'; this.ev.emit('step', th.id); return JSON.stringify({ ok: false, error: { kind: 'declined', message: 'the person declined to run this eval; ask or try something else' } }) }
           step.status = 'running'; this.ev.emit('step', th.id)
         }
-        const r = await runEval(ctx, code, { sid: th.id, restore: th.scope && th.scope.vars })
+        if (input && input.ts) {
+          const t = await Types.transpile(code)
+          if (t.error) {
+            Object.assign(step, { ok: false, status: 'error', out: 'syntax: ' + t.error + (t.line ? ' (line ' + t.line + ')' : '') }); this.ev.emit('step', th.id)
+            return JSON.stringify({ ok: false, error: { kind: 'syntax', message: 'the TypeScript does not compile: ' + t.error, line: t.line || undefined } })
+          }
+          code = t.code
+        }
+        let r = await runEval(ctx, code, { sid: th.id, restore: th.scope && th.scope.vars })
+        // TypeScript sent without ts: true ("catch (e: any)", "const rows: Row[] = …") fails to parse, so nothing
+        // ran: it is run again with its types stripped (two evals in round 5)
+        // (and typed parameters, "(p: string, from: number) =>", which the first pattern missed: the chess thread on
+        // staging). A syntax error means nothing ran, so any one is tried once as TypeScript; the run counts only if
+        // stripping the types changed the code
+        if (!r.ok && !(input && input.ts) && r.error && r.error.kind === 'SyntaxError' && /\w\s*\??\s*:\s*[\w[{(<'"]|\bas\s+[A-Z\w[]|\b(interface|type)\s+\w+/.test(code)) {
+          const t = await Types.transpile(code).catch(() => ({ error: 'no transpiler' }))
+          if (!t.error && t.code && t.code !== code) { r = await runEval(ctx, t.code, { sid: th.id, restore: th.scope && th.scope.vars }); step.note = 'ran as TypeScript (pass ts: true for TypeScript)' }
+        }
         Object.assign(step, { ok: r.ok, ms: r.ms, engine: r.engine, calls: r.calls, effects: r.effects || undefined })
         if (ctx.children.length) step.children = ctx.children.splice(0)
         if (r.scope) th.scope = r.scope
@@ -236,9 +265,49 @@ export const Agent = {
       await this.compact(P, th, { end: th.msgs.length - 2, signal: o.signal, onStart: n => { msg.note = 'Summarizing ' + plural(n, 'earlier message') + '…'; this.ev.emit('text', th.id) } })
     } catch (e) { if (o.signal && o.signal.aborted) throw e }
     if (msg.note) { delete msg.note; this.ev.emit('text', th.id) }
-    const res = await this.sample(this.messages(P, th, o.ws, text, head), { tools: [tool], onText: ({ text: t }) => { msg.text = t; this.ev.emit('text', th.id) }, signal: o.signal, modelTier: th.tier || 'default', cache: false, ...(th.model ? { model: th.model } : {}) })
+    // One model call runs at most CALL_EVALS evals (the server's tool rounds, less the last, which
+    // has no tools). A call that used them all, with turn budget left, is continued: the model sees
+    // what it did in this turn and a note from the bench. 60 of 97 turns in the persona reviews
+    // stopped at exactly 9 evals, mid-task, and the person had to say "continue".
+    let msgs = this.messages(P, th, o.ws, text, head), res = null, prev = '', faked = false
+    for (let call = 0; ; call++) {
+      const before = msg.steps.length
+      const fit = fitPrompt(msgs)
+      if (fit.cut.length) msg.promptCut = { parts: msgs.map(m => m.role[0] + m.content.length), cut: fit.cut }
+      res = await this.sample(fit.msgs, { tools: [tool], onText: ({ text: t }) => { msg.text = (prev ? prev + '\n\n' : '') + t; this.ev.emit('text', th.id) }, signal: o.signal, modelTier: th.tier || 'default', cache: false, ...(th.model ? { model: th.model } : {}) })
+      const made = msg.steps.length - before, left = o.budget.max - o.budget.used
+      // evals written as text: a model imitating the history's "[evals: …]" wrote code into its reply,
+      // never called the tool, and reported results it invented (round 4: "written and verified", and
+      // nothing landed). Its text is dropped, and it is told once that nothing ran.
+      if (!made && !faked && FAKED_EVAL.test((res && res.text) || '') && left > 0 && !(o.signal && o.signal.aborted)) {
+        faked = true; msg.text = prev; this.ev.emit('text', th.id)
+        msgs = [...msgs, { role: 'assistant', content: '(a reply with eval code written as text)' },
+          { role: 'user', content: '(From the bench, not the person: your last reply wrote eval code as text instead of calling the eval tool, so none of it ran and nothing it described happened. Call the eval tool to run code, and report only results you saw in its output.)' }]
+        continue
+      }
+      if (o.signal && o.signal.aborted) break
+      // a call that ran evals and then said nothing ends the turn on a half sentence (round 5: 27 evals, then
+      // only "Feature 2 it is — … makes 'exactly one winn"): it gets the same report call as a spent turn
+      const silent = made > 0 && !((res && res.text) || '').trim()
+      if (made < CALL_EVALS && !silent) break
+      // out of evals or continuations mid-work, or silent: one more call without the tool, for a report to the
+      // person (a turn ended on "Now verifying the refactor live —" after 27 evals, and the person had nothing: round 4)
+      if (silent || left <= 0 || call >= MAX_CONTINUES) {
+        prev = (prev ? prev + '\n\n' : '') + ((res && res.text) || '').trim()
+        const fin = fitPrompt([...msgs, { role: 'assistant', content: this.renderMsg({ ...msg, text: (res && res.text) || '' }, true) || '(evals)' },
+          { role: 'user', content: '(From the bench, not the person: ' + (silent && left > 0 && call < MAX_CONTINUES ? 'your last call ran evals and then said nothing.' : 'this turn has used all its evals.') + ' Reply to the person now, without evals: what you changed, what you checked and how, what is not done or not verified yet, and any temporary code (probes, console.log) still in the files. They can send a message to let you go on.)' }])
+        try {
+          res = await this.sample(fin.msgs, { onText: ({ text: t }) => { msg.text = (prev ? prev + '\n\n' : '') + t; this.ev.emit('text', th.id) }, signal: o.signal, modelTier: th.tier || 'default', cache: false, ...(th.model ? { model: th.model } : {}) })
+        } catch (e) { if (o.signal && o.signal.aborted) throw e; res = { text: '(The turn used all its evals before Claude could report; send a message to go on.)' } }
+        break
+      }
+      prev = (prev ? prev + '\n\n' : '') + ((res && res.text) || '').trim()
+      msg.text = prev; this.ev.emit('text', th.id)
+      msgs = [...msgs, { role: 'assistant', content: this.renderMsg({ ...msg, text: (res && res.text) || '' }, true) || '(evals)' },
+        { role: 'user', content: '(From the bench, not the person: that model call reached its limit of ' + CALL_EVALS + ' evals. This turn has ' + left + ' evals left. Carry on with the work where you stopped; when it is done, or you need the person, reply to them.)' }]
+    }
     if (res && res.modelApplied) msg.model = res.modelApplied
-    msg.text = (res && res.text) || msg.text
+    msg.text = (prev ? prev + (res && res.text ? '\n\n' + res.text : '') : (res && res.text)) || msg.text
     if (res && res.truncated) msg.text += '\n[reply truncated]'
     return msg.text
   },
@@ -297,6 +366,9 @@ export const Agent = {
         if (!changed.length) { th.proposal = null; if (AgentUI.ws() === ws) AgentUI.setWs('draft') }
       }
       msg.summary = changed.length ? plural(changed.length, 'file') + ' changed in "' + P.proposals.get(ws).title + '"' : ''
+      // A turn that ran evals but said nothing leaves the person with a row of
+      // ticks (a persona review found it): the bench says what happened.
+      if (msg.status === 'done' && !(msg.text || '').trim() && msg.steps.length) msg.text = autoSummary(msg, changed, ws === 'draft' ? null : (P.proposals.get(ws) || {}).title), msg.auto = true
       P.log({ kind: 'turn', who: 'agent', ref: ws, thread: th.id, ok: msg.status === 'done', note: (msg.text || msg.error || '').split('\n')[0].slice(0, 140), evals: msg.steps.length })
       P.saveThread(th); P.ev.emit('threads')
       this.ev.emit('turn', th.id)
@@ -360,4 +432,16 @@ export const Agent = {
     }
   },
   stop(tid) { const t = this.turns.get(tid); if (t) t.abort.abort() }
+}
+
+// What a turn did, in words, from its evals' effects: for a turn whose
+// model ended without a reply.
+function autoSummary(msg, changed, proposal) {
+  const files = new Set(), bad = msg.steps.filter(st => st.status === 'error').length
+  for (const st of msg.steps) for (const f of (st.effects && st.effects.files) || []) files.add(f.path)
+  const parts = []
+  if (files.size) parts.push('Changed ' + [...files].slice(0, 6).join(', ') + (files.size > 6 ? ' and ' + (files.size - 6) + ' more' : '') + (proposal ? ' in the proposal "' + proposal + '" (a copy of your app: look at it, then accept it to keep the changes)' : ' in the draft') + '.')
+  else parts.push('Looked at the app; nothing was changed.')
+  if (bad) parts.push(plural(bad, 'step') + ' failed along the way.')
+  return parts.join(' ')
 }

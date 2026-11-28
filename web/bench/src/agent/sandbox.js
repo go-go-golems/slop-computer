@@ -73,7 +73,9 @@ export const Sandbox = {
       }, 1000)
       this.runs.set(id, run)
       const sigs = Object.fromEntries([...api.entries].map(([n, e]) => [n, e.sig]))
-      this.worker.postMessage({ type: 'eval', id, code, api: api.names(), sigs, long: api.long(), roles, timeoutMs: clamp(timeoutMs, 1000, 120000), sid, restore: restore || null, lib: lib || [] })
+      // help(files) and help(files.read) show what a call gives back and what it does, as the reference does
+      const docs = Object.fromEntries([...api.entries].map(([n, e]) => [n, [e.ret ? '→ ' + e.ret : '', e.doc ? '— ' + e.doc : ''].filter(Boolean).join(' ')]))
+      this.worker.postMessage({ type: 'eval', id, code, api: api.names(), sigs, docs, long: api.long(), roles, timeoutMs: clamp(timeoutMs, 1000, 120000), sid, restore: restore || null, lib: lib || [] })
     })
   },
   drop(sid) { if (this.worker) this.worker.postMessage({ type: 'drop', sid }) }

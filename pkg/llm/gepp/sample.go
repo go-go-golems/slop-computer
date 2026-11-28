@@ -24,10 +24,25 @@ import (
 // results (images excluded), as the Node worker does.
 const maxContextBytes = 512 << 10
 
+// wrapAllowance is how far past maxContextBytes a turn may go for its last,
+// tool-less round (nudgeFull).
+const wrapAllowance = 160 << 10
+
+// nudgeFull asks a model whose turn outgrew the budget for its reply.
+const nudgeFull = "(From the system, not the person: this turn has used up its room for tool results. Do not call tools. Reply to the person now: what you did, what changed, what is left to do, and anything they must know.)"
+
 // failure ends a call with a contract error code.
 type failure struct{ code, message string }
 
 func (f *failure) Error() string { return f.message }
+
+// nudgeReply asks a model that ended silently after using its tools for
+// its reply.
+const nudgeReply = "(From the system, not the person: you ended without replying. Reply to the person now, in a few plain sentences: what you did, what changed, and what they should do next. Do not call tools.)"
+
+// nudgeTextCall tells a model that wrote a tool call as text that it did
+// not run.
+const nudgeTextCall = "(From the system, not the person: your last message wrote a tool call as text (<tool_call>…); it did not run. Call the tool through the tool interface instead, or reply to the person if you are done.)"
 
 var (
 	errEmpty      = &failure{"empty_completion", "Empty completion"}
@@ -97,7 +112,11 @@ func (c *call) run(ctx context.Context) error {
 	ch, applied := c.b.pick(c.r.Options)
 	m := ch.model
 	if len(c.r.Images) > 0 && !m.Images() {
-		return errImages
+		// the tier's model can't read images: the configured vision model can
+		if c.b.vision == nil {
+			return errImages
+		}
+		ch, m, applied = *c.b.vision, c.b.vision.model, c.b.vision.model.Ref()
 	}
 	res, err := c.b.dir.Resolve(ctx, m.Ref(), pi.ResolveOptions{Thinking: c.level(ch)})
 	if err != nil {
@@ -121,15 +140,26 @@ func (c *call) run(ctx context.Context) error {
 	if c.r.MaxRounds == 0 {
 		rounds = 5
 	}
+	nudged := false  // asked once for a reply after a silent end
+	textCalls := 0   // rounds whose tool call came as text (told so, at most twice)
+	wrapped := false // the conversation outgrew the budget: one last round, no tools, to reply
 	for round := 0; round < rounds; round++ {
-		if contextBytes(t) > maxContextBytes {
-			return errContext
+		if n := contextBytes(t); n > maxContextBytes {
+			// A long turn's tool results outgrew the budget: rather than lose the
+			// turn ("exceeds local context budget" mid-answer, a persona review),
+			// the model gets one round without tools to tell the person what it
+			// did and what is left, within a small allowance.
+			if round == 0 || wrapped || n > maxContextBytes+wrapAllowance {
+				return errContext
+			}
+			wrapped = true
+			turns.AppendBlock(t, turns.NewUserTextBlock(nudgeFull))
 		}
 		perRound, err := budget.next(m.MaxTokens)
 		if err != nil {
 			return err
 		}
-		offersTools := round < rounds-1 && len(c.r.Tools) > 0 // the last round offers no tools
+		offersTools := round < rounds-1 && len(c.r.Tools) > 0 && !nudged && !wrapped // the last round, and a reply asked for, offer none
 		if c.r.Meter != nil {
 			// Hold this round's cost before the provider is contacted
 			// (SLOP3-007): one token per byte of context is conservative,
@@ -179,8 +209,29 @@ func (c *call) run(ctx context.Context) error {
 		budget.consume(s.output)
 		t = out
 		calls := toolblocks.ExtractPendingToolCalls(t)
+		// A model that writes its tool call as text (GLM's "<tool_call>name
+		// <arg_key>…" markup) made no call: the turn would end mid-task with
+		// the markup as its reply (a persona review saw it). It is told, and
+		// the round runs again, at most twice.
+		if len(calls) == 0 && offersTools && textCalls < 2 && budget.remaining > 0 && strings.Contains(s.text, "<tool_call>") {
+			textCalls++
+			turns.AppendBlock(t, turns.NewUserTextBlock(nudgeTextCall))
+			continue
+		}
 		if len(calls) == 0 || budget.remaining <= 0 {
 			if strings.TrimSpace(c.visible) == "" {
+				// A model that used its tools and then stopped without a
+				// word leaves the person with a row of results and no
+				// answer (a persona review of the bench saw it often):
+				// it is asked once, without tools, for its reply.
+				if round > 0 && !nudged && len(calls) == 0 && budget.remaining > 0 {
+					nudged = true
+					turns.AppendBlock(t, turns.NewUserTextBlock(nudgeReply))
+					if round == rounds-1 {
+						rounds++
+					}
+					continue
+				}
 				return errEmpty
 			}
 			final := s.text

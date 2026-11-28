@@ -99,7 +99,7 @@ secret_key_file: /run/secrets/slop/secret-key                 # optional: else <
 llm: pi                                                        # pi, fake, or empty (off)
 pi:
   agent_dir: /var/lib/slop/pi
-  models: { quick: lunaroute/small, default: lunaroute/medium, complex: lunaroute/large:high }
+  models: { quick: lunaroute/small, default: lunaroute/medium, complex: lunaroute/large:high, vision: lunaroute/deepseek-4.1-flash }
 actors:
   runtime: engine               # the only runtime; "direct" was removed
 local: false

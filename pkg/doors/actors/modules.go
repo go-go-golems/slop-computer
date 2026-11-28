@@ -58,10 +58,14 @@ func (s *Door) Install(m *actor.Manager) {
 		}
 		return s.platformModule(a)
 	})
-	m.Register(actor.Module{Name: "system", Class: actor.ClassTrusted, Doc: "People, grants, links, mounts, policy, LLM budgets, comps, secrets and the system log, as the visitor.",
-		Load: func(st actor.Setup) goja.Value { return s.systemModule(st.Actor) }})
-	m.Register(actor.Module{Name: "workshop", Class: actor.ClassTrusted, Doc: "Stores, snapshots, refs and files of any store the visitor may read; commit or push to draft, publish, run drafts in dev instances (create, seed, read, drop).",
-		Load: func(st actor.Setup) goja.Value { return s.workshopModule(st.Actor) }})
+	const systemDoc = "People, grants, links, mounts, policy, LLM budgets, comps, secrets and the system log, as the visitor."
+	const workshopDoc = "Stores, snapshots, refs and files of any store the visitor may read; commit or push to draft, publish, run drafts in dev instances (create, seed, read, drop)."
+	m.Register(actor.Module{Name: "system", Class: actor.ClassTrusted, Doc: systemDoc,
+		TypeScript: moduleTypeScript(s.Verbs, "SystemModule", "use('system'): "+systemDoc, systemFuncs, systemExtraTS),
+		Load:       func(st actor.Setup) goja.Value { return s.systemModule(st.Actor) }})
+	m.Register(actor.Module{Name: "workshop", Class: actor.ClassTrusted, Doc: workshopDoc,
+		TypeScript: moduleTypeScript(s.Verbs, "WorkshopModule", "use('workshop'): "+workshopDoc, workshopFuncs, workshopExtraTS),
+		Load:       func(st actor.Setup) goja.Value { return s.workshopModule(st.Actor) }})
 }
 
 // verbModule builds a module's object from its functions.
