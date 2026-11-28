@@ -67,6 +67,11 @@ type AppVerbsOut struct {
 	Include   []string      `json:"include,omitempty"`
 	Unchanged bool          `json:"unchanged,omitempty"`
 	Files     []AppVerbFile `json:"files"`
+	// Actions and Note, for an app without command-line verbs: what its
+	// actor offers instead (round js-2: an empty files list read as "this
+	// app does nothing").
+	Actions []string `json:"actions,omitempty"`
+	Note    string   `json:"note,omitempty"`
 }
 
 // AppVerbIn is app.verb's input.
@@ -131,6 +136,14 @@ func (e appVerbsEnv) verbSources(ctx context.Context, p *access.Principal, store
 	}
 	out := AppVerbsOut{Store: store, Type: st.Meta("type"), App: run.App, Snapshot: run.N, Files: []AppVerbFile{}}
 	if run.N == 0 || run.Manifest == nil || run.Manifest.Slop.Verbs == nil {
+		out.Note = store + " runs " + orNone(run.App) + ", which ships no command-line verbs (slop on " + store + " has nothing to run)"
+		if e.A != nil && run.Manifest != nil && run.Manifest.Actor != "" {
+			if acts := e.A.Actions(ctx, store); len(acts) > 0 {
+				sort.Strings(acts)
+				out.Actions = acts
+				out.Note += "; its actor's actions are " + strings.Join(acts, ", ") + ": run one with slop call " + store + " <action> '{…}'"
+			}
+		}
 		return out, nil
 	}
 	v := run.Manifest.Slop.Verbs
@@ -205,7 +218,7 @@ func (e appVerbsEnv) runVerb(ctx context.Context, p *access.Principal, in AppVer
 	if err != nil {
 		return AppVerbOut{}, verbs.Errf("app_error", "%s's verbs: %v", o.App, err)
 	}
-	verb, ok := reg.Verb(strings.Join(strings.Fields(in.Verb), " "))
+	verb, ok := appverbs.Lookup(reg, strings.Join(strings.Fields(in.Verb), " "))
 	if !ok {
 		return AppVerbOut{}, verbs.Errf("not_found", "%s has no verb %q", o.App, in.Verb)
 	}

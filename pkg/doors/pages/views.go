@@ -116,6 +116,11 @@ func grantedCaps(v *rt.View) map[string]any {
 			if v.User != "" && v.Policy["sample"] {
 				out[name] = map[string]any{"images": v.Caps.Images}
 			}
+		case "agent":
+			// The same money as sample: the person's LLM access and budget.
+			if v.User != "" && v.Policy["sample"] {
+				out[name] = map[string]any{}
+			}
 		case "user":
 			scopes := []string{}
 			for sc := range v.Caps.Scopes {
@@ -214,6 +219,15 @@ type originStore struct{}
 
 // viewOf finds the calling view from its secret; on a sandbox origin the
 // view must belong to that origin's store.
+// closedMsg is the message for a call on a view that is gone: why it
+// closed, when the registry still knows.
+func (s *Door) closedMsg(r *http.Request) string {
+	if why := s.rt.views.Why(strings.TrimPrefix(r.Header.Get("Authorization"), "Bearer ")); why != "" {
+		return "the view is closed: " + why
+	}
+	return "the view is closed or expired"
+}
+
 func (s *Door) viewOf(r *http.Request) *rt.View {
 	bearer := r.Header.Get("Authorization")
 	if !strings.HasPrefix(bearer, "Bearer "+rt.SecretPrefix) {
@@ -263,7 +277,7 @@ func (s *Door) hello(ctx context.Context, v *rt.View, head int64) map[string]any
 func (s *Door) viewEvents(w http.ResponseWriter, r *http.Request) {
 	v := s.viewOf(r)
 	if v == nil {
-		httpx.Fail(w, 401, "revoked", "the view is closed or expired")
+		httpx.Fail(w, 401, "revoked", s.closedMsg(r))
 		return
 	}
 	flusher, ok := w.(http.Flusher)
@@ -562,6 +576,7 @@ func (s *Door) rpcTable() map[string]rpcMethod {
 		"user.profiles":               {authz.UserRead, s.rpcUserProfiles},
 		"user.search":                 {authz.UserRead, s.rpcUserSearch},
 		"sample.limits":               {authz.Sample, s.rpcSampleLimits},
+		"agent.limits":                {authz.Sample, s.rpcSampleLimits}, // the same budget (SLOP3-025)
 		"room.join":                   {authz.Room, s.rpcRoomJoin},
 		"room.leave":                  {authz.Room, s.rpcRoomLeave},
 		"room.presence":               {authz.Room, s.rpcRoomPresence},
@@ -591,7 +606,7 @@ func viewMay(v *rt.View, act authz.Action) bool {
 func (s *Door) viewRPC(w http.ResponseWriter, r *http.Request) {
 	v := s.viewOf(r)
 	if v == nil {
-		httpx.JSON(w, 401, map[string]any{"error": map[string]string{"code": "revoked", "message": "the view is closed or expired"}})
+		httpx.JSON(w, 401, map[string]any{"error": map[string]string{"code": "revoked", "message": s.closedMsg(r)}})
 		return
 	}
 	var in struct {

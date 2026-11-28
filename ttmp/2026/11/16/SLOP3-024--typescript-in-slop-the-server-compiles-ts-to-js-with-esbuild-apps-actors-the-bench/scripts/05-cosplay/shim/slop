@@ -1,0 +1,5 @@
+#!/bin/sh
+# Personas have the bench only: the slop command line is not theirs (a persona
+# in round 3 found the real CLI, logged in as the operator, on PATH).
+echo "slop: command not found" >&2
+exit 127

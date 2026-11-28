@@ -38,7 +38,7 @@ WhenToUse: Before implementing any part of SLOP3-024, or when touching how slop 
 
 **The server compiles, slop's APIs come with types, and the bench checks.**
 
-Status: decided, 2026-11-16 (section 11 lists the decisions). Phases 0 and 0b are merged (PRs #53 and #54). Phase 1 is in PR #55, except the TypeScript templates and the agent's guide, which follow SLOP3-023 (#51). The evidence was gathered against slop-computer `main` at 407a3f9. The goja source-map loader from section 4.4 shipped first, as a separate fix (PR #52).
+Status: decided, 2026-11-16 (section 11 lists the decisions). Phases 0 and 0b are merged (PRs #53 and #54). Phases 1 and 2 are in PR #55. Phase 2 as built: `defineAction` types `run` (inference straight from `defineActor` does not work), and `actions.d.ts` comes from a running actor (the dev instance's). The evidence was gathered against slop-computer `main` at 407a3f9. The goja source-map loader from section 4.4 shipped first, as a separate fix (PR #52).
 
 ## 1. Summary
 

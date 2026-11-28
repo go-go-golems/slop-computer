@@ -9,6 +9,7 @@ package cmds
 // has seen it.
 
 import (
+	"context"
 	"crypto/sha256"
 	"encoding/hex"
 	"encoding/json"
@@ -177,7 +178,13 @@ func runAppVerbs(cmd *cobra.Command, name string, alias *aliasInfo, args []strin
 		return err
 	}
 	if len(src.Files) == 0 {
-		return fmt.Errorf("%s runs %s, which ships no command-line verbs", board.ID, src.App)
+		// An agent reaching for slop on <store> usually wants to run
+		// something; with an actor, slop call does that (js-4
+		// inventory-inherited).
+		if len(src.Actions) > 0 {
+			return fmt.Errorf("%s runs %s, which ships no command-line verbs; its actor's actions are %s: run one with slop call %s <action> '{…}' (slop store show %s lists them). Verbs are verbs/*.js files in the app's tree, see slop help app-verbs", board.ID, src.App, strings.Join(src.Actions, ", "), board.ID, board.ID)
+		}
+		return fmt.Errorf("%s runs %s, which ships no command-line verbs: they are verbs/*.js files in the app's own tree (slop pull %s <dir>, add them and a slop.verbs block to app.json, slop push), see slop help app-verbs", board.ID, src.App, src.App)
 	}
 	rememberAlias(dir, src.Alias, aliasInfo{App: src.App, Type: src.Type, Title: src.Title})
 	label := board.ID
@@ -255,4 +262,76 @@ func titleOf(c *client.Client, store, path string) string {
 	}
 	t, _ := m["title"].(string)
 	return t
+}
+
+// RunUnknownAlias handles `slop <alias> <store> …` on a machine whose CLI
+// has not learned <alias>: when the root answers "unknown command", it asks
+// the server for the verbs of <store>, and if that store's app has the
+// alias, learns it and runs the command (SLOP3-026, P-2: a person refused to
+// run `slop on <store> --help` first). handled is false when the word is not
+// an alias of that store's app; the caller then reports err as before.
+func RunUnknownAlias(err error, args []string) (handled bool, _ error) {
+	msg := err.Error()
+	if !strings.HasPrefix(msg, "unknown command ") || !strings.Contains(strings.SplitN(msg, "\n", 2)[0], ` for "slop"`) {
+		return false, err
+	}
+	words := []string{}
+	for i := 0; i < len(args); i++ {
+		switch a := args[i]; {
+		case (a == "--server" || a == "-o" || a == "--output") && i+1 < len(args):
+			if a == "--server" {
+				flagServer = args[i+1]
+			}
+			i++
+		case strings.HasPrefix(a, "--server="):
+			flagServer = strings.TrimPrefix(a, "--server=")
+		case strings.HasPrefix(a, "-"):
+		default:
+			words = append(words, args[i:]...)
+			i = len(args)
+		}
+	}
+	if len(words) < 2 || strings.HasPrefix(words[1], "-") {
+		return false, err
+	}
+	alias, store := words[0], words[1]
+	c, cerr := resolve()
+	if cerr != nil {
+		// No login to ask with (round 3: a fresh XDG_CONFIG_HOME hid the
+		// credentials too): say so, or the plain error hides why.
+		return true, fmt.Errorf("unknown command %q (it may be an app's alias, but the CLI could not ask the server about %s: %v)", alias, store, cerr)
+	}
+	dir := verbsDir(c.Server)
+	src, ferr := appverbs.Fetch(c, store, dir)
+	if ferr != nil {
+		var ae *client.APIError
+		if errors.As(ferr, &ae) && ae.Code == "unauthenticated" {
+			return true, fmt.Errorf("unknown command %q (it may be an app's alias, but the CLI could not ask the server about %s: %v)", alias, store, ferr)
+		}
+		return false, err
+	}
+	if src.Alias != alias {
+		if src.Alias != "" {
+			return true, fmt.Errorf("unknown command %q: %s runs %s, whose alias is %s (slop %s %s …), or use slop on %s …", alias, store, src.App, src.Alias, src.Alias, store, store)
+		}
+		return true, fmt.Errorf("unknown command %q: %s runs %s, which has no alias; use slop on %s …", alias, store, orStore(src.App), store)
+	}
+	info := aliasInfo{App: src.App, Type: src.Type, Title: src.Title}
+	rememberAlias(dir, alias, info)
+	cmd := appCommand(alias, &info)
+	cmd.SetContext(context.Background())
+	return true, runAppVerbs(cmd, alias, &info, words[1:])
+}
+
+// Explain adds what to do next to an error the root returns. An unknown
+// top-level command with a store after it was already tried as an alias
+// (RunUnknownAlias); without one, the hint says to name a store (G9, P-2).
+func Explain(err error) string {
+	msg := err.Error()
+	if strings.HasPrefix(msg, "unknown command ") && strings.Contains(strings.SplitN(msg, "\n", 2)[0], ` for "slop"`) {
+		return msg + "\n\nIf this is an app's alias, name a store after it (`slop pb <board> …`): the CLI asks\n" +
+			"the server which app that store runs. `slop on <store> …` works without an alias.\n" +
+			"See `slop help using-app-verbs`; `slop help` lists every page."
+	}
+	return msg
 }

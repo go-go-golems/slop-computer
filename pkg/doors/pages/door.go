@@ -10,6 +10,7 @@ import (
 	"encoding/json"
 	"net/http"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/go-go-golems/slop-computer/pkg/actor"
@@ -17,6 +18,7 @@ import (
 	capsdb "github.com/go-go-golems/slop-computer/pkg/caps/db"
 	caproom "github.com/go-go-golems/slop-computer/pkg/caps/room"
 	"github.com/go-go-golems/slop-computer/pkg/config"
+	capagent "github.com/go-go-golems/slop-computer/pkg/doors/pages/agent"
 	"github.com/go-go-golems/slop-computer/pkg/doors/web"
 	"github.com/go-go-golems/slop-computer/pkg/identity"
 	"github.com/go-go-golems/slop-computer/pkg/kernel"
@@ -54,6 +56,10 @@ type Door struct {
 	CatchUpGap func()
 
 	rt *rtState
+	// agent is the agent capability's service, built on first use.
+	agentOnce sync.Once
+	agent     *capagent.Service
+	agentErr  error
 	// reg serves the registry as documents (pkg/registry); follow is the
 	// door's place in the system log (registry.go).
 	reg     *registry.Docs
@@ -133,7 +139,11 @@ func (s *Door) Tick(ctx context.Context, now time.Time) {
 func (s *Door) RunMethod(ctx context.Context, view, method string, args json.RawMessage) (any, error) {
 	v := s.rt.views.Get(view)
 	if v == nil {
-		return nil, &rtFail{Code: "revoked", Message: "the view is closed or expired"}
+		msg := "the view is closed or expired"
+		if why := s.rt.views.Why(view); why != "" {
+			msg = "the view is closed: " + why
+		}
+		return nil, &rtFail{Code: "revoked", Message: msg}
 	}
 	m, ok := s.rpcTable()[method]
 	if !ok {

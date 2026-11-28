@@ -1,0 +1,19 @@
+<!doctype html>
+<html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1"><title>Event tasks</title>
+<style>body{font:15px/1.5 system-ui,sans-serif;margin:2rem;color:#222}li{list-style:none;margin:4px 0}.done{color:#999;text-decoration:line-through}.open{font-weight:600}</style></head>
+<body><h1>Event tasks</h1>
+<p id="open" class="open"></p>
+<ul id="list"></ul>
+<script>
+(async () => {
+  const [db, slop] = await Promise.all([claude.use('db'), claude.use('slop')]);
+  const esc = (s) => String(s == null ? '' : s).replace(/[&<>"]/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' })[c]);
+  db.collection('tasks').orderBy('id').onSnapshot((s) => {
+    const all = s.docs.map((d) => d.data());
+    document.getElementById('open').textContent = all.filter((t) => !t.done).length + ' tasks still open';
+    document.getElementById('list').innerHTML = s.docs.map((d) => d.data()).map((t) =>
+      `<li><label class="${t.done ? 'done' : ''}"><input type="checkbox" data-id="${esc(t.id)}" ${t.done ? 'checked' : ''}> ${esc(t.title)}</label></li>`).join('');
+  });
+  document.getElementById('list').onchange = (e) => { if (e.target.dataset.id) slop.actions.toggle({ id: e.target.dataset.id }).catch((err) => alert(err.message)); };
+})();
+</script></body></html>

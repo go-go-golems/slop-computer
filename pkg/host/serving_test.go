@@ -108,6 +108,12 @@ func TestStaticSite(t *testing.T) {
 		"app.json": `{"title":"Board","capabilities":{"db":{}}}`, "index.html": "board"})})
 	h.fail(admin, "mount.set", map[string]any{"host": static, "path": "/board", "store": "board"}, "invalid_argument")
 	h.fail(admin, "mount.set", map[string]any{"host": h.cfg.Hosts.Live[0], "path": "/weft", "store": "weft"}, "invalid_argument")
+	// P-6: an app whose app.json does not parse is not called plain content.
+	h.call(admin, "store.new", map[string]any{"id": "bad"})
+	h.push(admin, map[string]any{"store": "bad", "files": files(map[string]string{"app.json": `{"title":`, "index.html": "x"})})
+	if e := h.fail(admin, "mount.set", map[string]any{"host": h.cfg.Hosts.Live[0], "path": "/bad", "store": "bad"}, "invalid_argument"); !strings.Contains(e["message"].(string), "did not activate") {
+		t.Fatalf("mount a broken app = %v", e)
+	}
 	h.fail(admin, "mount.set", map[string]any{"host": h.cfg.Hosts.Main, "path": "/x", "store": "weft"}, "invalid_argument")
 	st := h.call(admin, "app.status", map[string]any{"store": "board"}).(map[string]any)
 	if m := st["manifest"].(map[string]any); m["title"] != "Board" || m["live"] != true {

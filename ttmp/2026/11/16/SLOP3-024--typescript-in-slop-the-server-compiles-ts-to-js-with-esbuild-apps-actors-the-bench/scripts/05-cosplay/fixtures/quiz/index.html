@@ -1,0 +1,48 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Weekly Science Quiz</title>
+<style>
+body { font: 17px/1.5 system-ui, sans-serif; margin: 0; background: #f5f7fb; color: #1d2433; }
+main { max-width: 38rem; margin: 2rem auto; padding: 0 1rem; }
+.q { background: #fff; border-radius: 10px; padding: 1rem 1.2rem; margin: 1rem 0; box-shadow: 0 1px 3px rgba(0,0,0,.08); }
+label { display: block; padding: .2rem 0; }
+button { font: inherit; padding: .5rem 1.2rem; border: 0; border-radius: 8px; background: #2b5fd9; color: #fff; cursor: pointer; }
+#result { font-size: 1.3rem; font-weight: 600; }
+</style>
+</head>
+<body>
+<main>
+<h1>Weekly Science Quiz</h1>
+<form id="quiz"></form>
+<p id="result"></p>
+</main>
+<script type="module">
+const slop = await window.claude.use('slop')
+const form = document.getElementById('quiz')
+const qs = await slop.actions.questions({})
+for (const q of qs) {
+  const box = document.createElement('div'); box.className = 'q'
+  box.innerHTML = '<p><b></b></p>'
+  box.querySelector('b').textContent = q.text
+  q.choices.forEach((c, i) => {
+    const l = document.createElement('label')
+    l.innerHTML = '<input type="radio" required> '
+    l.querySelector('input').name = 'q' + q.id; l.querySelector('input').value = i
+    l.append(c); box.append(l)
+  })
+  form.append(box)
+}
+const b = document.createElement('button'); b.textContent = 'Submit'; form.append(b)
+form.addEventListener('submit', async e => {
+  e.preventDefault()
+  const answers = {}
+  for (const q of qs) answers[q.id] = Number(new FormData(form).get('q' + q.id))
+  const r = await slop.actions.submit({ answers })
+  document.getElementById('result').textContent = 'You scored ' + r.score + ' / ' + r.of
+})
+</script>
+</body>
+</html>

@@ -43,6 +43,18 @@ topics:
       description: 'Authorization: levels, grants, groups, credentials'
     - slug: security
       description: Security-relevant design and fixes
+    - slug: agent
+      description: Agent sessions, tool loops
+    - slug: bench
+      description: The bench (coding-agent workbench app)
+    - slug: runtime
+      description: The page runtime (window.claude)
+    - slug: chatapp
+      description: pinocchio's chat runtime and HTTP API
+    - slug: documentation
+      description: Docs, help entries and their discoverability
+    - slug: cli
+      description: The slop command-line client
 docTypes:
     - slug: design-doc
       description: Structured rationale and architecture notes

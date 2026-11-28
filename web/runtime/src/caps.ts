@@ -1,7 +1,9 @@
-// The smaller capabilities: user, permissions, comments, assets, downloads,
-// artifact and slop (slop's own: actions, read aliases, the visitor).
+// The smaller capabilities: user, comments, assets, downloads, artifact and
+// slop (slop's own: actions, read aliases, the visitor). Permissions are in
+// consent.ts.
+import type { Grant } from "./consent.ts";
 import { limits } from "./limits.ts";
-import { ask, boot, connect, post, request as fetchView, rpc, type Hello } from "./transport.ts";
+import { ask, post, request as fetchView, rpc, type Hello } from "./transport.ts";
 import { bytes, fail, freeze } from "./util.ts";
 
 // --- user -------------------------------------------------------------------
@@ -95,68 +97,6 @@ export function user(h: Hello): User {
   return Object.freeze(base);
 }
 
-// --- permissions --------------------------------------------------------------
-
-let states: Record<string, string> = {};
-const denied = new Set<string>(); // a "no" is final for the page load
-
-export function initPermissions(h: Hello | null) {
-  states = { ...(h?.permissions ?? {}) };
-}
-
-function stateOf(name: string): string {
-  if (denied.has(name)) return "denied";
-  return states[name] ?? "unavailable";
-}
-
-/** Asks the shell's dialog for capabilities still at "prompt". */
-export async function request(names?: readonly string[]): Promise<Record<string, string>> {
-  const want = (names ?? Object.keys(states)).filter((n) => stateOf(n) === "prompt");
-  if (want.length) {
-    try {
-      const res = await ask("consent", { names: want, app: boot.runtime?.app });
-      const got = (res.states ?? {}) as Record<string, string>;
-      for (const n of want) {
-        if (got[n] === "granted") states[n] = "granted";
-        else denied.add(n);
-      }
-    } catch {
-      for (const n of want) denied.add(n);
-    }
-  }
-  const out: Record<string, string> = {};
-  for (const n of names ?? Object.keys(states)) out[n] = stateOf(n);
-  return freeze(out);
-}
-
-/** Before a capability call that needs consent: asks once, then holds. */
-export async function consent(name: string, code = "not_granted") {
-  if (stateOf(name) === "granted") return;
-  const r = await request([name]);
-  if (r[name] !== "granted") throw fail(code, `the viewer has not allowed ${name}`);
-}
-
-export const permissions = Object.freeze({
-  async state(name?: string) {
-    await connect();
-    if (typeof name === "string") return stateOf(name);
-    const out: Record<string, string> = {};
-    for (const n of Object.keys(states)) out[n] = stateOf(n);
-    return freeze(out);
-  },
-  async request(names?: readonly string[]) {
-    await connect();
-    return request(names);
-  },
-  async manage() {
-    try {
-      await ask("permissions", {});
-    } catch {
-      throw fail("unavailable", "the permissions panel did not open");
-    }
-  },
-});
-
 // --- comments -----------------------------------------------------------------
 
 function anchorOf(el: Element) {
@@ -192,7 +132,7 @@ export interface Comments {
   canSendToClaude?(): Promise<"available" | "no_session">;
 }
 
-export function comments(h: Hello): Comments {
+export function comments(h: Hello, grant: Grant): Comments {
   const composerOnly = !!(h.caps.comments as any)?.composer_only;
   const base: Comments = {
     async openComposer(t: { element?: Element; range?: Range }) {
@@ -209,7 +149,7 @@ export function comments(h: Hello): Comments {
     return t;
   };
   const call = async (method: string, args: unknown) => {
-    await consent("comments", "consent_required");
+    await grant.consent("consent_required");
     try {
       return await rpc(method, args);
     } catch (e: any) {

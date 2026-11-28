@@ -1,0 +1,10 @@
+# /etc/hosts inside the box: the agent has no source, so code hosts and Go
+# module mirrors resolve nowhere. lunaroute and the local server still work.
+# The box has no DNS (--unshare-net), and Go's resolver, unlike curl and
+# Chrome, does not map *.localhost to loopback itself: the slop CLI needs the
+# server's names here (static-site in the new box: "lookup slop.localhost on
+# 127.0.0.53:53: connection refused").
+127.0.0.1 localhost slop.localhost apps.localhost site.localhost sbx.localhost
+::1 localhost slop.localhost apps.localhost site.localhost sbx.localhost
+0.0.0.0 github.com www.github.com api.github.com codeload.github.com raw.githubusercontent.com objects.githubusercontent.com gist.github.com
+0.0.0.0 proxy.golang.org sum.golang.org pkg.go.dev go.dev goproxy.io gitlab.com bitbucket.org sourcegraph.com

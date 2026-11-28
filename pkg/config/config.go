@@ -49,7 +49,7 @@ type Config struct {
 	// (0: identity.GuestsPerHour, 30).
 	GuestsPerHour int    `yaml:"guests_per_hour"`
 	Local         bool   `yaml:"local"` // local sign-in form instead of OIDC (development)
-	Test          bool   `yaml:"test"`  // loopback only: X-Slop-As, fake LLM, virtual clock
+	Test          bool   `yaml:"test"`  // defaults llm to fake; nothing else yet
 	TrustProxy    bool   `yaml:"trust_proxy_headers"`
 	OIDC          OIDC   `yaml:"oidc"`
 	Stripe        Stripe `yaml:"stripe"`

@@ -1,0 +1,6 @@
+{
+  "title": "Tally",
+  "actor": "actor.js",
+  "type": "tally",
+  "capabilities": {}
+}

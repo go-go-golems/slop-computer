@@ -1,0 +1,10 @@
+{
+  "id": "pinboard-json", "persona": "scripter", "maxTurns": 5,
+  "setup": ["$SLOP store new pinboard >/dev/null && $SLOP push \"$REPO/apps/pinboard\" --store pinboard >/dev/null && $SLOP store new kitchen --app pinboard --type pinboard >/dev/null && $SLOP mount set \"apps.localhost:$PORT\" /pb/:id --storeParam id --type pinboard >/dev/null"],
+  "opening": "there's a pinboard called kitchen on our slop server. add three recipe links to it tagged dinner (any real-looking recipe urls), then give me everything tagged dinner as json.",
+  "goal": "three dinner-tagged recipe links on the kitchen board, and the dinner items as JSON in the terminal",
+  "later": ["what's the one command I'd rerun to get that json again?"],
+  "checklist": ["three links tagged dinner are on the board", "the JSON is real output of a command, not typed by hand", "a rerunnable command is given", "short answers"],
+  "facts": ["Pinboard ships command-line verbs (alias pb): slop pb kitchen clip add …, clip ls --tag dinner --format json.", "The CLI learns the pb alias the first time it runs a pinboard store (slop on kitchen --help)."],
+  "personaKnows": ""
+}

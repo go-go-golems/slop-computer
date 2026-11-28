@@ -3,7 +3,9 @@
 // into pkg/apptypes/page.d.ts, which app.types returns and
 // `slop types` writes into an app. The types are the implementation's own,
 // so the declaration changes when the runtime does.
-import type { artifact, assets, Comments, downloads, files, permissions, slop, User } from "./caps.ts";
+import type { agent } from "./agent.ts";
+import type { artifact, assets, Comments, downloads, files, slop, User } from "./caps.ts";
+import type { permissions } from "./consent.ts";
 import type { Db } from "./db.ts";
 import type { Lobby } from "./room.ts";
 import type { sample } from "./sample.ts";
@@ -22,6 +24,8 @@ export interface Capabilities {
   /** The same as artifact. */
   self: typeof artifact;
   sample: ReturnType<typeof sample>;
+  /** Agent sessions on the server; agent.open(key) resumes or creates one. */
+  agent: ReturnType<typeof agent>;
   slop: ReturnType<typeof slop>;
   permissions: typeof permissions;
 }

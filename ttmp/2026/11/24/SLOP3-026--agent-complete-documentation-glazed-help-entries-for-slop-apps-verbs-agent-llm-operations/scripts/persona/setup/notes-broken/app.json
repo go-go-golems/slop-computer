@@ -1,0 +1,9 @@
+{
+  "title": "Notes",
+  "page": "index.html",
+  "type": "notes",
+  "capabilities": {
+    "db": { "rules": [{ "path": "notes", "read": "view", "write": "interact" }] },
+    "storage": {}
+  }
+}

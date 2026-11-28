@@ -1,0 +1,6 @@
+{
+  "title": "Weekly Science Quiz",
+  "page": "index.html",
+  "actor": "actor.js",
+  "capabilities": { "user": { "scopes": ["profile"] } }
+}

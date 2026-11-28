@@ -69,6 +69,10 @@ type PolicyCell struct {
 	Allowed    bool   `json:"allowed"`
 	Default    bool   `json:"default"`   // no row: the default applies
 	Effective  bool   `json:"effective"` // on for this audience, through its own cell or a group it is inside
+	// Why says in words what decides effective: an agent read
+	// allowed false, default true, effective true as a contradiction
+	// (SLOP3-026, round 3).
+	Why string `json:"why"`
 }
 
 // PolicyMatrix returns an app's cells for the capabilities given.
@@ -104,10 +108,31 @@ func (d *Governance) PolicyMatrix(ctx context.Context, app string, caps []string
 		on[c.Capability+"/"+c.Audience] = c.Allowed
 	}
 	for i, c := range out {
+		via := ""
 		for _, g := range sysdb.GroupsOf(c.Audience) {
 			if on[c.Capability+"/"+g] {
 				out[i].Effective = true
+				if via == "" && g != c.Audience {
+					via = g
+				}
 			}
+		}
+		cell := "its own cell is off"
+		switch {
+		case c.Allowed && c.Default:
+			cell = "on by default (no cell set)"
+		case c.Allowed:
+			cell = "its own cell is on"
+		case c.Default:
+			cell = "off by default (no cell set)"
+		}
+		switch {
+		case c.Allowed:
+			out[i].Why = "on: " + cell
+		case out[i].Effective:
+			out[i].Why = "on through @" + via + ", which " + c.Audience + " is inside (" + cell + "; a cell cannot turn a group's on off for those inside it)"
+		default:
+			out[i].Why = "off: " + cell
 		}
 	}
 	return out, rows.Err()

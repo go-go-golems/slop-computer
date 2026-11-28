@@ -1,6 +1,26 @@
-/* slop page runtime (window.claude), built from web/runtime: do not edit. source sha256:9cbcfa2adee1d8ec50cb0027aeaefd2cb943d1418c539091bc608a6a102b3c24 */
+/* slop page runtime (window.claude), built from web/runtime: do not edit. source sha256:ff195744ce9942c1581db8d4a37cdfb2e65aa445a5a0c8b8fcd7b0b8d7c9f2eb */
 "use strict";
 (() => {
+  var __defProp = Object.defineProperty;
+  var __typeError = (msg) => {
+    throw TypeError(msg);
+  };
+  var __defNormalProp = (obj, key, value) => key in obj ? __defProp(obj, key, { enumerable: true, configurable: true, writable: true, value }) : obj[key] = value;
+  var __publicField = (obj, key, value) => __defNormalProp(obj, typeof key !== "symbol" ? key + "" : key, value);
+  var __accessCheck = (obj, member, msg) => member.has(obj) || __typeError("Cannot " + msg);
+  var __privateGet = (obj, member, getter) => (__accessCheck(obj, member, "read from private field"), getter ? getter.call(obj) : member.get(obj));
+  var __privateAdd = (obj, member, value) => member.has(obj) ? __typeError("Cannot add the same private member more than once") : member instanceof WeakSet ? member.add(obj) : member.set(obj, value);
+  var __privateSet = (obj, member, value, setter) => (__accessCheck(obj, member, "write to private field"), setter ? setter.call(obj, value) : member.set(obj, value), value);
+  var __privateMethod = (obj, member, method) => (__accessCheck(obj, member, "access private method"), method);
+  var __privateWrapper = (obj, member, setter, getter) => ({
+    set _(value) {
+      __privateSet(obj, member, value, setter);
+    },
+    get _() {
+      return __privateGet(obj, member, getter);
+    }
+  });
+
   // src/limits.ts
   var limits = {
     MaxDocBytes: 256 << 10,
@@ -442,58 +462,6 @@
     }
     return Object.freeze(base);
   }
-  var states = {};
-  var denied = /* @__PURE__ */ new Set();
-  function initPermissions(h) {
-    states = { ...h?.permissions ?? {} };
-  }
-  function stateOf(name) {
-    if (denied.has(name)) return "denied";
-    return states[name] ?? "unavailable";
-  }
-  async function request2(names) {
-    const want = (names ?? Object.keys(states)).filter((n) => stateOf(n) === "prompt");
-    if (want.length) {
-      try {
-        const res = await ask("consent", { names: want, app: boot.runtime?.app });
-        const got = res.states ?? {};
-        for (const n of want) {
-          if (got[n] === "granted") states[n] = "granted";
-          else denied.add(n);
-        }
-      } catch {
-        for (const n of want) denied.add(n);
-      }
-    }
-    const out = {};
-    for (const n of names ?? Object.keys(states)) out[n] = stateOf(n);
-    return freeze(out);
-  }
-  async function consent(name, code = "not_granted") {
-    if (stateOf(name) === "granted") return;
-    const r = await request2([name]);
-    if (r[name] !== "granted") throw fail(code, `the viewer has not allowed ${name}`);
-  }
-  var permissions = Object.freeze({
-    async state(name) {
-      await connect();
-      if (typeof name === "string") return stateOf(name);
-      const out = {};
-      for (const n of Object.keys(states)) out[n] = stateOf(n);
-      return freeze(out);
-    },
-    async request(names) {
-      await connect();
-      return request2(names);
-    },
-    async manage() {
-      try {
-        await ask("permissions", {});
-      } catch {
-        throw fail("unavailable", "the permissions panel did not open");
-      }
-    }
-  });
   function anchorOf(el2) {
     const r = el2.getBoundingClientRect();
     const path = [];
@@ -508,7 +476,7 @@
     }
     return freeze({ path: path.join(" > "), x: r.width ? 0.5 : 0, y: r.height ? 0.5 : 0 });
   }
-  function comments(h) {
+  function comments(h, grant) {
     const composerOnly = !!h.caps.comments?.composer_only;
     const base = {
       async openComposer(t) {
@@ -525,7 +493,7 @@
       return t;
     };
     const call3 = async (method, args) => {
-      await consent("comments", "consent_required");
+      await grant.consent("consent_required");
       try {
         return await rpc(method, args);
       } catch (e) {
@@ -725,6 +693,63 @@
     ]);
     return Object.freeze({ list, read, download, asSampleTools });
   }
+
+  // src/consent.ts
+  var states = {};
+  var denied = /* @__PURE__ */ new Set();
+  function initPermissions(h) {
+    states = { ...h?.permissions ?? {} };
+  }
+  function stateOf(name) {
+    if (denied.has(name)) return "denied";
+    return states[name] ?? "unavailable";
+  }
+  async function request2(names) {
+    const want = (names ?? Object.keys(states)).filter((n) => stateOf(n) === "prompt");
+    if (want.length) {
+      try {
+        const res = await ask("consent", { names: want, app: boot.runtime?.app });
+        const got = res.states ?? {};
+        for (const n of want) {
+          if (got[n] === "granted") states[n] = "granted";
+          else denied.add(n);
+        }
+      } catch {
+        for (const n of want) denied.add(n);
+      }
+    }
+    const out = {};
+    for (const n of names ?? Object.keys(states)) out[n] = stateOf(n);
+    return freeze(out);
+  }
+  async function consent(name, code = "not_granted") {
+    if (stateOf(name) === "granted") return;
+    const r = await request2([name]);
+    if (r[name] !== "granted") throw fail(code, `the viewer has not allowed ${name}`);
+  }
+  function grantFor(name) {
+    return Object.freeze({ name, consent: (code) => consent(name, code) });
+  }
+  var permissions = Object.freeze({
+    async state(name) {
+      await connect();
+      if (typeof name === "string") return stateOf(name);
+      const out = {};
+      for (const n of Object.keys(states)) out[n] = stateOf(n);
+      return freeze(out);
+    },
+    async request(names) {
+      await connect();
+      return request2(names);
+    },
+    async manage() {
+      try {
+        await ask("permissions", {});
+      } catch {
+        throw fail("unavailable", "the permissions panel did not open");
+      }
+    }
+  });
 
   // src/diff.ts
   function diff(a, b) {
@@ -1399,6 +1424,966 @@
     return r.api;
   }
 
+  // src/chatapp/timeline.ts
+  var TERMINAL = /* @__PURE__ */ new Set(["finished", "failed", "stopped"]);
+  var num = (v) => typeof v === "number" ? v : typeof v === "string" && v !== "" ? Number(v) : 0;
+  var str = (v) => typeof v === "string" ? v : "";
+  var first = (...vs) => {
+    for (const v of vs) if (typeof v === "string" && v !== "") return v;
+    return "";
+  };
+  var TEXT_SEP = ":text:";
+  var parentOf = (segmentId) => {
+    const i = segmentId.lastIndexOf(TEXT_SEP);
+    return i > 0 ? segmentId.slice(0, i) : "";
+  };
+  var APPEND = /* @__PURE__ */ new Set(["CHAT_STREAM_PATCH_MODE_APPEND", "CHAT_STREAM_PATCH_MODE_UNSPECIFIED", "", void 0]);
+  var applyPatch2 = (current, patch, mode) => APPEND.has(mode) ? current + patch : patch;
+  var mergeCorrelation = (a, b) => {
+    if (!b) return a;
+    const out = { ...a || {} };
+    for (const [k, v] of Object.entries(b)) if (v !== "" && v !== void 0 && v !== null) out[k] = v;
+    return out;
+  };
+  var addUsage = (a, b) => {
+    const out = {};
+    for (const k of ["inputTokens", "outputTokens", "cachedTokens", "cacheCreationInputTokens", "cacheReadInputTokens"]) {
+      const v = num(a?.[k]) + num(b?.[k]);
+      if (v) out[k] = v;
+    }
+    return out;
+  };
+  var _entities, _ordinal, _fallback, _Timeline_instances, get_fn, put_fn, run_fn, reduce_fn, text_fn, thinking_fn, toolCall_fn;
+  var Timeline = class {
+    constructor() {
+      __privateAdd(this, _Timeline_instances);
+      __privateAdd(this, _entities, /* @__PURE__ */ new Map());
+      __privateAdd(this, _ordinal, 0);
+      // the ordinal the copy is current at
+      __privateAdd(this, _fallback, 0);
+      // creation order for events without an ordinal
+      /** Increases with every change. */
+      __publicField(this, "version", 0);
+    }
+    /** The ordinal of the last snapshot or event applied. */
+    get ordinal() {
+      return __privateGet(this, _ordinal);
+    }
+    /** A snapshot replaces the copy. */
+    reset(snap) {
+      __privateGet(this, _entities).clear();
+      for (const e of snap.entities ?? []) {
+        if (!e.tombstone) __privateGet(this, _entities).set(e.kind + "/" + e.id, { kind: e.kind, id: e.id, created: num(e.createdOrdinal), payload: e.payload ?? {} });
+      }
+      __privateSet(this, _ordinal, num(snap.snapshotOrdinal));
+      this.version++;
+    }
+    /** Applies one UI event; true when the copy changed. An event the copy already reflects is ignored. */
+    apply(ev) {
+      const ord = num(ev.ordinal);
+      if (ord && ord <= __privateGet(this, _ordinal)) return false;
+      const changed = __privateMethod(this, _Timeline_instances, reduce_fn).call(this, ev.name, ev.payload ?? {}, ord);
+      if (ord) __privateSet(this, _ordinal, ord);
+      if (changed) this.version++;
+      return changed;
+    }
+    entity(kind, id) {
+      return __privateGet(this, _entities).get(kind + "/" + id);
+    }
+    /** Entities (of one kind), in creation order. */
+    entities(kind) {
+      const out = [...__privateGet(this, _entities).values()].filter((e) => !kind || e.kind === kind);
+      return out.sort((a, b) => a.created - b.created);
+    }
+    /** Whether a run of the session is running. */
+    get running() {
+      return this.entities("ChatRun").some((e) => e.payload.status === "running");
+    }
+    /** The conversation: each question with its answer, in order. */
+    answers() {
+      const turns = /* @__PURE__ */ new Map();
+      const turnOf = (run, order) => {
+        let t = turns.get(run);
+        if (!t) turns.set(run, t = { turn: { question: null, answer: null }, order });
+        t.order = Math.min(t.order, order);
+        return t.turn;
+      };
+      const answers = /* @__PURE__ */ new Map();
+      for (const e of this.entities("ChatRun")) {
+        const a = toAnswer(e.payload, e.id);
+        answers.set(e.id, a);
+        turnOf(e.id, e.created).answer = a;
+      }
+      const tools = /* @__PURE__ */ new Map();
+      const parts = [];
+      for (const e of this.entities()) {
+        const p = e.payload;
+        if (e.kind === "ChatMessage") {
+          if (p.role === "user") {
+            const run = e.id.endsWith("-user") ? e.id.slice(0, -5) : e.id;
+            turnOf(run, e.created).question = { id: e.id, text: first(p.text, p.content), at: num(p.startedAtMs) };
+          } else if (p.role === "assistant" || p.role === "thinking") {
+            parts.push({
+              run: str(p.parentMessageId),
+              created: e.created,
+              part: { kind: p.role === "thinking" ? "thinking" : "text", id: e.id, text: first(p.text, p.content), streaming: !!p.streaming, startedAt: num(p.startedAtMs), finishedAt: num(p.finishedAtMs) }
+            });
+          }
+        } else if (e.kind === "ChatToolCall" || e.kind === "ChatToolResult" || e.kind === "ChatFrontendToolCall") {
+          const call3 = str(p.toolCallId) || e.id;
+          let t = tools.get(call3);
+          if (!t) {
+            t = { part: { kind: "tool", id: call3, name: "", input: void 0, result: void 0, error: "", status: "", state: "", where: "server", mode: "", executor: null, startedAt: 0, finishedAt: 0 }, created: e.created };
+            tools.set(call3, t);
+            parts.push({ run: str(e.kind === "ChatFrontendToolCall" ? p.parentMessageId : p.messageId), created: e.created, part: t.part });
+          }
+          mergeTool(t.part, e.kind, p);
+          const run = str(e.kind === "ChatFrontendToolCall" ? p.parentMessageId : p.messageId);
+          const holder = parts.find((x) => x.part === t.part);
+          if (holder && !holder.run && run) holder.run = run;
+        }
+      }
+      parts.sort((a, b) => a.created - b.created);
+      for (const { run, part } of parts) {
+        const a = answers.get(run);
+        if (a) a.parts.push(part);
+      }
+      for (const a of answers.values()) a.text = a.parts.filter((x) => x.kind === "text").map((x) => x.text).join("\n\n");
+      return [...turns.values()].sort((a, b) => a.order - b.order).map((t) => t.turn);
+    }
+    /** One answer by its run's message id. */
+    answer(id) {
+      for (const t of this.answers()) if (t.answer?.id === id) return t.answer;
+      return null;
+    }
+  };
+  _entities = new WeakMap();
+  _ordinal = new WeakMap();
+  _fallback = new WeakMap();
+  _Timeline_instances = new WeakSet();
+  get_fn = function(kind, id) {
+    return __privateGet(this, _entities).get(kind + "/" + id)?.payload;
+  };
+  put_fn = function(kind, id, payload, ord) {
+    const key = kind + "/" + id;
+    const cur = __privateGet(this, _entities).get(key);
+    __privateGet(this, _entities).set(key, { kind, id, created: cur ? cur.created : ord || ++__privateWrapper(this, _fallback)._, payload });
+    return true;
+  };
+  run_fn = function(id, ord, fn) {
+    if (!id) return false;
+    const r = { ...__privateMethod(this, _Timeline_instances, get_fn).call(this, "ChatRun", id) ?? {}, messageId: id };
+    fn(r);
+    return __privateMethod(this, _Timeline_instances, put_fn).call(this, "ChatRun", id, r, ord);
+  };
+  reduce_fn = function(name, p, ord) {
+    const id = str(p.messageId).trim();
+    switch (name) {
+      case "ChatUserMessageAccepted": {
+        if (!id) return false;
+        const content = first(p.content, p.text);
+        return __privateMethod(this, _Timeline_instances, put_fn).call(this, "ChatMessage", id, {
+          messageId: id,
+          role: first(p.role, "user"),
+          prompt: p.prompt,
+          content,
+          text: content,
+          status: first(p.status, "accepted"),
+          attachments: p.attachments,
+          startedAtMs: p.atMs,
+          finishedAtMs: p.atMs
+        }, ord);
+      }
+      case "ChatRunStarted":
+        return __privateMethod(this, _Timeline_instances, run_fn).call(this, id, ord, (r) => Object.assign(r, { status: "running", prompt: p.prompt, model: p.model, startedAtMs: p.startedAtMs }));
+      case "ChatRunFinished":
+        return __privateMethod(this, _Timeline_instances, run_fn).call(this, id, ord, (r) => Object.assign(r, { status: "finished", truncated: p.truncated, reason: p.reason, finishedAtMs: p.finishedAtMs }));
+      case "ChatRunStopped":
+        return __privateMethod(this, _Timeline_instances, run_fn).call(this, id, ord, (r) => Object.assign(r, { status: "stopped", finishedAtMs: p.finishedAtMs }));
+      case "ChatRunFailed": {
+        if (!id) return false;
+        __privateMethod(this, _Timeline_instances, run_fn).call(this, id, ord, (r) => Object.assign(r, { status: "failed", code: p.code, error: p.error, finishedAtMs: p.finishedAtMs }));
+        const content = first(p.error, "Chat run failed");
+        return __privateMethod(this, _Timeline_instances, put_fn).call(this, "ChatMessage", id, {
+          messageId: id,
+          role: "error",
+          content,
+          text: content,
+          status: first(p.status, "failed"),
+          final: true,
+          correlation: p.correlation,
+          startedAtMs: p.finishedAtMs,
+          finishedAtMs: p.finishedAtMs
+        }, ord);
+      }
+      case "ChatProviderCallFinished":
+        return __privateMethod(this, _Timeline_instances, run_fn).call(this, id, ord, (r) => {
+          r.usage = addUsage(r.usage, p.usage);
+          r.providerCalls = num(r.providerCalls) + 1;
+        });
+      case "ChatTextSegmentStarted":
+      case "ChatTextPatch":
+      case "ChatTextSegmentFinished":
+        return __privateMethod(this, _Timeline_instances, text_fn).call(this, name, id, p, ord);
+      case "ChatReasoningSegmentStarted":
+      case "ChatReasoningPatch":
+      case "ChatReasoningSegmentFinished":
+        return __privateMethod(this, _Timeline_instances, thinking_fn).call(this, name, id, p, ord);
+      case "ChatToolCallStarted":
+      case "ChatToolArgumentsPatch":
+      case "ChatToolCallRequested":
+      case "ChatToolExecutionStarted":
+      case "ChatToolCallFinished":
+        return __privateMethod(this, _Timeline_instances, toolCall_fn).call(this, name, p, ord);
+      case "ChatToolResultReady": {
+        const call3 = str(p.toolCallId);
+        if (!call3) return false;
+        return __privateMethod(this, _Timeline_instances, put_fn).call(this, "ChatToolResult", call3 + ":result", {
+          messageId: p.messageId,
+          toolCallId: call3,
+          toolName: p.toolName,
+          result: p.result,
+          status: p.status,
+          correlation: p.correlation
+        }, ord);
+      }
+      case "ChatToolCallProgress": {
+        const call3 = str(p.toolCallId);
+        if (!call3) return false;
+        const cur = { ...__privateMethod(this, _Timeline_instances, get_fn).call(this, "ChatToolCall", call3) ?? {}, toolCallId: call3 };
+        if (!cur.messageId) cur.messageId = p.messageId;
+        cur.state = p.state;
+        return __privateMethod(this, _Timeline_instances, put_fn).call(this, "ChatToolCall", call3, cur, ord);
+      }
+      case "ChatFrontendToolCallRequested": {
+        const call3 = str(p.toolCallId);
+        if (!call3) return false;
+        return __privateMethod(this, _Timeline_instances, put_fn).call(this, "ChatFrontendToolCall", call3, {
+          toolCallId: call3,
+          toolName: p.toolName,
+          parentMessageId: p.messageId,
+          mode: p.mode,
+          status: first(p.status, "requested"),
+          input: p.input,
+          executor: p.executor,
+          requestedAtMs: p.atMs
+        }, ord);
+      }
+      case "ChatFrontendToolResultReceived": {
+        const call3 = str(p.toolCallId);
+        if (!call3) return false;
+        const cur = { ...__privateMethod(this, _Timeline_instances, get_fn).call(this, "ChatFrontendToolCall", call3) ?? {}, toolCallId: call3 };
+        if (p.toolName) cur.toolName = p.toolName;
+        if (p.messageId) cur.parentMessageId = p.messageId;
+        Object.assign(cur, { result: p.result, status: first(p.status, "success"), error: p.error, executor: p.executor, finishedAtMs: p.atMs });
+        return __privateMethod(this, _Timeline_instances, put_fn).call(this, "ChatFrontendToolCall", call3, cur, ord);
+      }
+      default:
+        return false;
+    }
+  };
+  // projections.go: ChatTextSegmentStarted / ChatTextPatch / ChatTextSegmentFinished
+  text_fn = function(name, id, p, ord) {
+    if (!id) return false;
+    const had = __privateMethod(this, _Timeline_instances, get_fn).call(this, "ChatMessage", id);
+    const e = { ...had ?? {} };
+    const current = first(e.content, e.text);
+    let content;
+    if (name === "ChatTextPatch") {
+      content = applyPatch2(current, str(p.text), p.mode);
+      if (content === "") return false;
+    } else if (name === "ChatTextSegmentFinished") {
+      content = first(p.content, p.text, current);
+      if (content === "" && !had) return false;
+    } else {
+      content = current;
+      if (content === "" && !had) return false;
+    }
+    e.messageId = id;
+    e.role = first(p.role, "assistant");
+    e.prompt = first(p.prompt, e.prompt);
+    e.content = content;
+    e.text = content;
+    if (name === "ChatTextPatch") {
+      e.status = first(p.status, "streaming");
+      e.streaming = !p.final;
+      e.final = p.final;
+    } else if (name === "ChatTextSegmentFinished") {
+      e.status = first(p.status, "finished");
+      e.streaming = p.streaming;
+      e.final = p.final;
+    } else {
+      e.status = first(p.status, "streaming");
+      e.streaming = p.streaming;
+    }
+    if (!num(e.startedAtMs) && num(p.atMs)) e.startedAtMs = p.atMs;
+    if (name === "ChatTextSegmentFinished") e.finishedAtMs = p.atMs;
+    e.parentMessageId = parentOf(id);
+    e.correlation = mergeCorrelation(e.correlation, p.correlation);
+    return __privateMethod(this, _Timeline_instances, put_fn).call(this, "ChatMessage", id, e, ord);
+  };
+  // plugins/reasoning.go: reasoningEntityFromFields
+  thinking_fn = function(name, id, p, ord) {
+    if (!id) return false;
+    const had = __privateMethod(this, _Timeline_instances, get_fn).call(this, "ChatMessage", id);
+    const e = { ...had ?? {} };
+    let content;
+    if (name === "ChatReasoningPatch") content = applyPatch2(first(e.content, e.text), str(p.text), p.mode);
+    else if (name === "ChatReasoningSegmentFinished") content = first(p.content, p.text);
+    else content = "";
+    if (content === "") content = first(e.content, e.text);
+    if (content === "" && !had) return false;
+    e.messageId = id;
+    e.role = first(p.role, "thinking");
+    e.content = content;
+    e.text = content;
+    e.parentMessageId = first(p.parentMessageId, e.parentMessageId);
+    e.correlation = mergeCorrelation(e.correlation, p.correlation);
+    e.segmentType = "reasoning";
+    if (!num(e.startedAtMs) && num(p.atMs)) e.startedAtMs = p.atMs;
+    if (name === "ChatReasoningSegmentFinished") {
+      e.status = first(p.status, "finished");
+      e.streaming = false;
+      e.finishedAtMs = p.atMs;
+    } else {
+      e.status = first(p.status, "streaming");
+      e.streaming = name === "ChatReasoningPatch" ? !p.final : p.streaming;
+    }
+    return __privateMethod(this, _Timeline_instances, put_fn).call(this, "ChatMessage", id, e, ord);
+  };
+  // plugins/toolcall.go: toolCallFieldsFromCanonical + mergeToolCallFields
+  toolCall_fn = function(name, p, ord) {
+    const call3 = str(p.toolCallId);
+    const status = first(
+      p.status,
+      { ChatToolCallStarted: "pending", ChatToolArgumentsPatch: "streaming_args", ChatToolCallRequested: "pending", ChatToolExecutionStarted: "executing", ChatToolCallFinished: "completed" }[name]
+    );
+    const input = name === "ChatToolArgumentsPatch" ? str(p.arguments) : name === "ChatToolCallFinished" ? "" : str(p.input);
+    const e = { ...__privateMethod(this, _Timeline_instances, get_fn).call(this, "ChatToolCall", call3) ?? {} };
+    if (p.messageId) e.messageId = p.messageId;
+    if (call3) e.toolCallId = call3;
+    if (p.toolName) e.toolName = p.toolName;
+    if (input) e.input = status === "streaming_args" ? str(e.input) + input : input;
+    e.executing = name === "ChatToolCallFinished" || name === "ChatToolArgumentsPatch" ? false : !!p.executing;
+    if (status) e.status = status;
+    e.correlation = mergeCorrelation(e.correlation, p.correlation);
+    if (name === "ChatToolExecutionStarted") {
+      if (!num(e.startedAtMs)) e.startedAtMs = p.atMs;
+      e.state = "running";
+    } else if (name === "ChatToolCallFinished") {
+      e.status = "completed";
+      e.executing = false;
+      e.finishedAtMs = p.atMs;
+      e.state = "";
+    }
+    return __privateMethod(this, _Timeline_instances, put_fn).call(this, "ChatToolCall", call3, e, ord);
+  };
+  function toAnswer(p, id) {
+    const u = p.usage ?? {};
+    return {
+      id,
+      status: first(p.status, "running"),
+      code: str(p.code),
+      error: str(p.error),
+      truncated: !!p.truncated,
+      reason: str(p.reason),
+      model: str(p.model),
+      startedAt: num(p.startedAtMs),
+      finishedAt: num(p.finishedAtMs),
+      usage: { input: num(u.inputTokens), output: num(u.outputTokens), cachedInput: num(u.cachedTokens) + num(u.cacheReadInputTokens) },
+      providerCalls: num(p.providerCalls),
+      parts: [],
+      text: ""
+    };
+  }
+  var parseMaybe = (v) => {
+    if (typeof v !== "string" || v === "") return v === "" ? void 0 : v;
+    try {
+      return JSON.parse(v);
+    } catch {
+      return v;
+    }
+  };
+  function mergeTool(t, kind, p) {
+    t.name = first(p.toolName, t.name);
+    if (kind === "ChatFrontendToolCall") {
+      t.where = "browser";
+      if (p.input !== void 0) t.input = p.input;
+      if (p.result !== void 0) t.result = p.result;
+      t.error = first(p.error, t.error);
+      t.status = first(p.status, t.status);
+      t.mode = first(p.mode, t.mode);
+      t.executor = p.executor ?? t.executor;
+      t.startedAt = num(p.requestedAtMs) || t.startedAt;
+      t.finishedAt = num(p.finishedAtMs) || t.finishedAt;
+    } else if (kind === "ChatToolCall") {
+      if (t.input === void 0 && p.input !== void 0) t.input = parseMaybe(p.input);
+      if (t.where === "server") t.status = first(p.status, t.status);
+      t.state = str(p.state);
+      t.startedAt = t.startedAt || num(p.startedAtMs);
+      t.finishedAt = t.finishedAt || num(p.finishedAtMs);
+    } else if (kind === "ChatToolResult") {
+      if (t.result === void 0) t.result = parseMaybe(p.result);
+      if (p.status === "error" && !t.error) t.error = typeof t.result === "string" ? t.result : "error";
+    }
+  }
+
+  // src/chatapp/session.ts
+  var ChatError = class extends Error {
+    constructor(code, message, status = 0) {
+      super(message);
+      __publicField(this, "code");
+      __publicField(this, "status");
+      this.code = code;
+      this.status = status;
+    }
+  };
+  var clean = (o) => Object.fromEntries(Object.entries(o).filter(([, v]) => v !== void 0 && v !== null && v !== ""));
+  var rid = (p) => p + Math.random().toString(36).slice(2, 10);
+  var sleep = (ms, signal) => new Promise((resolve2) => {
+    const t = setTimeout(resolve2, ms);
+    signal?.addEventListener("abort", () => (clearTimeout(t), resolve2()), { once: true });
+  });
+  async function request3(base, method, path, body, o) {
+    const f = o.fetch ?? globalThis.fetch;
+    const r = await f(base + path, {
+      method,
+      headers: { ...body === void 0 ? {} : { "Content-Type": "application/json" }, ...o.headers ?? {} },
+      body: body === void 0 ? void 0 : JSON.stringify(body)
+    });
+    const txt = await r.text();
+    let data = null;
+    try {
+      data = txt ? JSON.parse(txt) : null;
+    } catch {
+      data = null;
+    }
+    if (!r.ok) {
+      const e = data?.error;
+      const code = (typeof e === "object" && e ? e.code : data?.code) || "http_" + r.status;
+      throw new ChatError(code, (typeof e === "object" && e ? e.message : e) || "HTTP " + r.status, r.status);
+    }
+    return data;
+  }
+  async function readSSE(body, fn) {
+    const reader = body.getReader();
+    const dec = new TextDecoder();
+    let buf = "";
+    for (; ; ) {
+      const x = await reader.read();
+      if (x.done) return;
+      buf += dec.decode(x.value, { stream: true }).replace(/\r\n/g, "\n");
+      let i;
+      while ((i = buf.indexOf("\n\n")) >= 0) {
+        const block = buf.slice(0, i);
+        buf = buf.slice(i + 2);
+        let event = "message";
+        const data = [];
+        for (const line of block.split("\n")) {
+          if (line.startsWith("event:")) event = line.slice(6).trim();
+          else if (line.startsWith("data:")) data.push(line.slice(5).replace(/^ /, ""));
+        }
+        if (data.length) await fn(event, data.join("\n"));
+      }
+    }
+  }
+  var _o, _listeners, _waits, _stream, _closed, _ready, _error, _tools, _client, _connection, _revision, _executor, _ran, _outbox, _calls, _Session_static, start_fn, _Session_instances, api_fn, register_fn, connect_fn, notify_fn, derive_fn, call_fn, deliver_fn;
+  var _Session = class _Session {
+    constructor(base, id, info, o) {
+      __privateAdd(this, _Session_instances);
+      __publicField(this, "id");
+      __publicField(this, "base");
+      __publicField(this, "timeline", new Timeline());
+      __publicField(this, "info");
+      __privateAdd(this, _o);
+      __privateAdd(this, _listeners, /* @__PURE__ */ new Set());
+      __privateAdd(this, _waits, /* @__PURE__ */ new Set());
+      __privateAdd(this, _stream, new AbortController());
+      __privateAdd(this, _closed, false);
+      __privateAdd(this, _ready);
+      __privateAdd(this, _error, null);
+      // browser tools
+      __privateAdd(this, _tools, []);
+      __privateAdd(this, _client, rid("page-"));
+      __privateAdd(this, _connection, rid("c-"));
+      __privateAdd(this, _revision, 0);
+      __privateAdd(this, _executor, null);
+      __privateAdd(this, _ran, /* @__PURE__ */ new Set());
+      __privateAdd(this, _outbox, /* @__PURE__ */ new Map());
+      __privateAdd(this, _calls, /* @__PURE__ */ new Map());
+      this.base = base.replace(/\/$/, "");
+      this.id = id;
+      this.info = info;
+      __privateSet(this, _o, o);
+    }
+    /** Creates a session ({labels, data, id?}) and opens it. */
+    static async create(base, req = {}, o = {}) {
+      var _a;
+      const out = await request3(base.replace(/\/$/, ""), "POST", "/sessions", clean(req), o);
+      return __privateMethod(_a = _Session, _Session_static, start_fn).call(_a, base, out.sessionId, out.session ?? { id: out.sessionId }, o);
+    }
+    /** Opens an existing session: resolves after its first snapshot. */
+    static async open(base, id, o = {}) {
+      var _a;
+      const out = await request3(base.replace(/\/$/, ""), "GET", "/sessions/" + encodeURIComponent(id), void 0, o);
+      return __privateMethod(_a = _Session, _Session_static, start_fn).call(_a, base, id, out.session ?? { id }, o);
+    }
+    /** Connects to a session the caller already has (its info from create or list): resolves after the first snapshot. */
+    static async attach(base, info, o = {}) {
+      var _a;
+      if (!info?.id) throw new ChatError("invalid_request", "attach needs the session's info with its id");
+      return __privateMethod(_a = _Session, _Session_static, start_fn).call(_a, base, info.id, info, o);
+    }
+    /** Lists sessions that have all these labels. */
+    static async list(base, labels = {}, o = {}) {
+      const q = Object.entries(labels).map(([k, v]) => "label=" + encodeURIComponent(k + ":" + v)).join("&");
+      const out = await request3(base.replace(/\/$/, ""), "GET", "/sessions" + (q ? "?" + q : ""), void 0, o);
+      return out?.sessions ?? [];
+    }
+    /** Calls fn after every change (ev: the UI event; null: a snapshot). Returns an unsubscribe function. */
+    on(fn) {
+      __privateGet(this, _listeners).add(fn);
+      return () => __privateGet(this, _listeners).delete(fn);
+    }
+    /** Sends a message; resolves with the run's message id (the answer's id). */
+    async send(prompt, extra = {}) {
+      const out = await __privateMethod(this, _Session_instances, api_fn).call(this, "POST", "/messages", { ...extra, prompt });
+      const id = out?.messageId;
+      if (!id) throw new ChatError("invalid_response", "the server accepted the message without naming its run");
+      return id;
+    }
+    /** Resolves with the answer once it is finished, failed or stopped. */
+    wait(id, signal) {
+      return new Promise((resolve2, reject) => {
+        const check = () => {
+          if (signal?.aborted) return done(() => reject(signal.reason ?? new ChatError("aborted", "aborted")));
+          if (__privateGet(this, _closed)) return done(() => reject(__privateGet(this, _error) ?? new ChatError("closed", "the session was closed")));
+          const a = this.timeline.answer(id);
+          if (a && TERMINAL.has(a.status)) done(() => resolve2(a));
+        };
+        const done = (fn) => {
+          __privateGet(this, _waits).delete(check);
+          fn();
+        };
+        __privateGet(this, _waits).add(check);
+        signal?.addEventListener("abort", check, { once: true });
+        check();
+      });
+    }
+    async stop() {
+      await __privateMethod(this, _Session_instances, api_fn).call(this, "POST", "/stop");
+    }
+    async delete() {
+      await __privateMethod(this, _Session_instances, api_fn).call(this, "DELETE", "");
+      this.close();
+    }
+    /** Stops the stream and the page's running tool calls. */
+    close() {
+      if (__privateGet(this, _closed)) return;
+      __privateSet(this, _closed, true);
+      __privateGet(this, _stream).abort();
+      for (const c of __privateGet(this, _calls).values()) c.abort();
+      __privateMethod(this, _Session_instances, notify_fn).call(this, null);
+    }
+    /** Registers the page's browser tools (replacing earlier ones) and runs the calls the server assigns to this page. */
+    async tools(list) {
+      __privateSet(this, _tools, list);
+      await __privateMethod(this, _Session_instances, register_fn).call(this);
+      __privateMethod(this, _Session_instances, derive_fn).call(this);
+    }
+  };
+  _o = new WeakMap();
+  _listeners = new WeakMap();
+  _waits = new WeakMap();
+  _stream = new WeakMap();
+  _closed = new WeakMap();
+  _ready = new WeakMap();
+  _error = new WeakMap();
+  _tools = new WeakMap();
+  _client = new WeakMap();
+  _connection = new WeakMap();
+  _revision = new WeakMap();
+  _executor = new WeakMap();
+  _ran = new WeakMap();
+  _outbox = new WeakMap();
+  _calls = new WeakMap();
+  _Session_static = new WeakSet();
+  start_fn = async function(base, id, info, o) {
+    var _a;
+    const s = new _Session(base, id, info, o);
+    let ready2;
+    __privateSet(s, _ready, new Promise((r) => ready2 = r));
+    void __privateMethod(_a = s, _Session_instances, connect_fn).call(_a, ready2);
+    await __privateGet(s, _ready);
+    if (__privateGet(s, _error)) throw __privateGet(s, _error);
+    return s;
+  };
+  _Session_instances = new WeakSet();
+  api_fn = async function(method, path, body) {
+    return request3(this.base, method, "/sessions/" + encodeURIComponent(this.id) + path, body, __privateGet(this, _o));
+  };
+  register_fn = async function() {
+    const out = await __privateMethod(this, _Session_instances, api_fn).call(this, "POST", "/tools/manifest", {
+      clientInstanceId: __privateGet(this, _client),
+      connectionId: __privateGet(this, _connection),
+      revision: ++__privateWrapper(this, _revision)._,
+      tools: __privateGet(this, _tools).map((t) => clean({ name: t.name, description: t.description, inputSchema: t.inputSchema ?? { type: "object" }, mode: t.mode ?? "frontend", available: true }))
+    });
+    __privateSet(this, _executor, out?.executor ?? null);
+  };
+  connect_fn = async function(ready2) {
+    const f = __privateGet(this, _o).fetch ?? globalThis.fetch;
+    for (let attempt = 0; !__privateGet(this, _closed); attempt++) {
+      try {
+        const r = await f(this.base + "/sessions/" + encodeURIComponent(this.id) + "/events", { headers: __privateGet(this, _o).headers ?? {}, signal: __privateGet(this, _stream).signal });
+        if (!r.ok || !r.body) {
+          if (r.status >= 400 && r.status < 500) {
+            __privateSet(this, _error, new ChatError(r.status === 404 ? "session_not_found" : "http_" + r.status, "the session's events are not available", r.status));
+            ready2();
+            this.close();
+            return;
+          }
+          throw new Error("HTTP " + r.status);
+        }
+        await readSSE(r.body, async (event, data) => {
+          if (event === "snapshot") {
+            attempt = 0;
+            this.timeline.reset(JSON.parse(data));
+            if (__privateGet(this, _tools).length) await __privateMethod(this, _Session_instances, register_fn).call(this).catch(() => {
+            });
+            for (const o of __privateGet(this, _outbox).values()) o.next = 0;
+            ready2();
+            __privateMethod(this, _Session_instances, notify_fn).call(this, null);
+          } else if (event === "ui") {
+            const ev = JSON.parse(data);
+            if (this.timeline.apply(ev)) __privateMethod(this, _Session_instances, notify_fn).call(this, ev);
+          }
+        });
+      } catch {
+        if (__privateGet(this, _closed)) return;
+      }
+      await sleep(Math.min(5e3, 250 * 2 ** attempt), __privateGet(this, _stream).signal);
+    }
+  };
+  notify_fn = function(ev) {
+    __privateMethod(this, _Session_instances, derive_fn).call(this);
+    for (const fn of [...__privateGet(this, _listeners)]) {
+      try {
+        fn(ev);
+      } catch (e) {
+        console.error(e);
+      }
+    }
+    for (const check of [...__privateGet(this, _waits)]) check();
+  };
+  // The browser tool calls this page must run or deliver, from the timeline.
+  derive_fn = function() {
+    if (!__privateGet(this, _tools).length) return;
+    for (const e of this.timeline.entities("ChatFrontendToolCall")) {
+      const p = e.payload;
+      if (p.status === "requested") {
+        if (__privateGet(this, _outbox).has(e.id)) __privateMethod(this, _Session_instances, deliver_fn).call(this, e.id);
+        else void __privateMethod(this, _Session_instances, call_fn).call(this, e.id, p);
+      } else {
+        __privateGet(this, _outbox).delete(e.id);
+        __privateGet(this, _calls).get(e.id)?.abort();
+      }
+    }
+  };
+  call_fn = async function(id, p) {
+    if (__privateGet(this, _ran).has(id) || !__privateGet(this, _executor) || p.executor?.assignmentId !== __privateGet(this, _executor).assignmentId) return;
+    __privateGet(this, _ran).add(id);
+    const tool = __privateGet(this, _tools).find((t) => t.name === p.toolName);
+    const ctrl = new AbortController();
+    __privateGet(this, _calls).set(id, ctrl);
+    let status = "success";
+    let result = null;
+    let error = "";
+    try {
+      if (!tool) throw new Error("this page has no tool " + p.toolName);
+      result = await tool.execute(p.input ?? {}, { signal: ctrl.signal, callId: id });
+      if (result === void 0) result = null;
+      if (JSON.stringify(result) === void 0) result = String(result);
+    } catch (e) {
+      status = "failed";
+      error = String(e?.message ?? e);
+    } finally {
+      __privateGet(this, _calls).delete(id);
+    }
+    if (ctrl.signal.aborted || __privateGet(this, _closed)) return;
+    __privateGet(this, _outbox).set(id, { toolName: p.toolName, status, result, error, sending: false, tries: 0, next: 0 });
+    __privateMethod(this, _Session_instances, deliver_fn).call(this, id);
+  };
+  // One delivery attempt; a network or server failure keeps the result for a later attempt.
+  deliver_fn = function(id) {
+    const r = __privateGet(this, _outbox).get(id);
+    if (!r || r.sending || Date.now() < r.next) return;
+    r.sending = true;
+    __privateMethod(this, _Session_instances, api_fn).call(this, "POST", "/tools/results", clean({ toolCallId: id, toolName: r.toolName, status: r.status, result: r.result, error: r.error, executor: __privateGet(this, _executor) })).then(() => __privateGet(this, _outbox).delete(id)).catch((e) => {
+      if (e instanceof ChatError && e.status >= 400 && e.status < 500) __privateGet(this, _outbox).delete(id);
+      else {
+        r.tries++;
+        const wait = Math.min(5e3, 200 * 2 ** r.tries);
+        r.next = Date.now() + wait;
+        setTimeout(() => !__privateGet(this, _closed) && __privateMethod(this, _Session_instances, derive_fn).call(this), wait);
+      }
+    }).finally(() => {
+      r.sending = false;
+    });
+  };
+  __privateAdd(_Session, _Session_static);
+  var Session = _Session;
+
+  // src/agent.ts
+  var BASE = "/_rt/agent";
+  async function api2(method, path, body) {
+    const r = await request(BASE + path, {
+      method,
+      headers: body === void 0 ? {} : { "Content-Type": "application/json" },
+      body: body === void 0 ? void 0 : JSON.stringify(body)
+    });
+    const txt = await r.text();
+    let data = null;
+    try {
+      data = txt ? JSON.parse(txt) : null;
+    } catch {
+      data = null;
+    }
+    if (!r.ok) {
+      const e = data?.error;
+      const code = (typeof e === "object" && e ? e.code : data?.code) || (r.status === 409 ? "run_active" : "upstream_error");
+      throw fail(code, (typeof e === "object" && e ? e.message : e) || "HTTP " + r.status, { status: r.status });
+    }
+    return data;
+  }
+  var clean2 = (o) => Object.fromEntries(Object.entries(o).filter(([, v]) => v !== void 0 && v !== null && v !== ""));
+  var asFail = (e) => e instanceof ChatError ? fail(e.code, e.message, { status: e.status }) : e;
+  var fetchVia = ((input, init) => request(String(input), init));
+  var _grant, _tools2, _core, _chat, _closed2, _run, _listeners2, _Session_instances2, start_fn2, derive_fn2, abort_fn;
+  var Session2 = class {
+    constructor(info, tools, fresh, grant) {
+      __privateAdd(this, _Session_instances2);
+      __publicField(this, "id");
+      __publicField(this, "key");
+      /** True when open() created the session: the server has no conversation yet. */
+      __publicField(this, "fresh");
+      __publicField(this, "info");
+      __privateAdd(this, _grant);
+      __privateAdd(this, _tools2);
+      __privateAdd(this, _core);
+      __privateAdd(this, _chat, null);
+      __privateAdd(this, _closed2, false);
+      __privateAdd(this, _run, null);
+      __privateAdd(this, _listeners2, /* @__PURE__ */ new Set());
+      __privateSet(this, _grant, grant);
+      this.id = info.id;
+      this.fresh = fresh;
+      this.key = info.labels?.key ?? "";
+      this.info = info;
+      __privateSet(this, _tools2, tools);
+      __privateSet(this, _core, Session.attach(BASE, info, { fetch: fetchVia }).then(
+        async (chat) => {
+          __privateSet(this, _chat, chat);
+          chat.on((ev) => {
+            if (ev) for (const fn of [...__privateGet(this, _listeners2)]) {
+              try {
+                fn(ev);
+              } catch (e) {
+                console.error(e);
+              }
+            }
+            __privateMethod(this, _Session_instances2, derive_fn2).call(this);
+          });
+          if (__privateGet(this, _closed2)) chat.close();
+          else if (__privateGet(this, _tools2).length) await chat.tools(__privateGet(this, _tools2)).catch(() => {
+          });
+          return chat;
+        },
+        (e) => {
+          __privateGet(this, _run)?.reject(asFail(e));
+          throw asFail(e);
+        }
+      ));
+      __privateGet(this, _core).catch(() => {
+      });
+    }
+    /** Whether a run of this session is running (from the timeline). */
+    get running() {
+      return !!__privateGet(this, _chat)?.timeline.running;
+    }
+    /** Calls fn with every UI event of the session (chatapp's names); returns an unsubscribe. */
+    on(fn) {
+      __privateGet(this, _listeners2).add(fn);
+      return () => __privateGet(this, _listeners2).delete(fn);
+    }
+    /** Sends a message and resolves with the answer when the run ends. */
+    send(prompt, o = {}) {
+      if (typeof prompt !== "string" || !prompt.trim()) return Promise.reject(fail("invalid_request", "the message is empty"));
+      if (__privateGet(this, _closed2)) return Promise.reject(fail("cancelled", "the session is closed"));
+      if (__privateGet(this, _run)) return Promise.reject(fail("run_active", "an answer is still running in this session"));
+      if (o.signal?.aborted) return Promise.reject(fail("cancelled", "the call was aborted"));
+      let resolve2, reject, onCancel;
+      const promise = new Promise((a, b) => (resolve2 = a, reject = b));
+      const run = {
+        id: "",
+        stage: "preparing",
+        aborted: false,
+        settled: false,
+        cancelled: new Promise((r) => onCancel = r),
+        cancel: () => onCancel(),
+        text: "",
+        onText: o.onText,
+        resolve: resolve2,
+        reject
+      };
+      const onAbort = () => __privateMethod(this, _Session_instances2, abort_fn).call(this, run);
+      const settle = () => {
+        run.settled = true;
+        o.signal?.removeEventListener("abort", onAbort);
+        if (__privateGet(this, _run) === run) __privateSet(this, _run, null);
+      };
+      run.resolve = (r) => {
+        if (!run.settled) {
+          settle();
+          resolve2(r);
+        }
+      };
+      run.reject = (e) => {
+        if (!run.settled) {
+          settle();
+          reject(e);
+        }
+      };
+      run.cancelled.then(() => run.stage === "preparing" && run.reject(fail("cancelled", "the call was aborted")));
+      __privateSet(this, _run, run);
+      o.signal?.addEventListener("abort", onAbort, { once: true });
+      void __privateMethod(this, _Session_instances2, start_fn2).call(this, run, prompt, o.context);
+      return promise;
+    }
+    async stop() {
+      await api2("POST", `/sessions/${this.id}/stop`).catch(() => {
+      });
+    }
+    /** The conversation so far: [{role, text}] (user, assistant, thinking, error). */
+    async history() {
+      const v = await api2("GET", `/sessions/${this.id}`);
+      this.info = v.session;
+      const out = [];
+      for (const e of v.snapshot?.entities ?? []) {
+        if (e.kind === "ChatMessage" && e.payload && !e.tombstone) out.push({ role: e.payload.role, text: e.payload.text ?? e.payload.content ?? "" });
+      }
+      return freeze(out);
+    }
+    async delete() {
+      this.close();
+      await api2("DELETE", `/sessions/${this.id}`);
+    }
+    /** Ends the event stream; a run in progress keeps going on the server. */
+    close() {
+      __privateSet(this, _closed2, true);
+      __privateGet(this, _chat)?.close();
+      __privateGet(this, _run)?.reject(fail("cancelled", "the session was closed"));
+    }
+  };
+  _grant = new WeakMap();
+  _tools2 = new WeakMap();
+  _core = new WeakMap();
+  _chat = new WeakMap();
+  _closed2 = new WeakMap();
+  _run = new WeakMap();
+  _listeners2 = new WeakMap();
+  _Session_instances2 = new WeakSet();
+  start_fn2 = async function(run, prompt, context) {
+    const live = () => !run.settled && !run.aborted;
+    try {
+      await __privateGet(this, _grant).consent();
+      if (!live()) return;
+      const chat = await Promise.race([__privateGet(this, _core), run.cancelled.then(() => null)]);
+      if (!chat || !live()) return;
+      if (__privateGet(this, _tools2).length) await chat.tools(__privateGet(this, _tools2));
+      if (!live()) return;
+      run.stage = "posting";
+      run.id = await chat.send(prompt, clean2({ context }));
+      run.stage = "running";
+      if (run.aborted) {
+        run.reject(fail("cancelled", "the call was aborted"));
+        void this.stop();
+        return;
+      }
+      __privateMethod(this, _Session_instances2, derive_fn2).call(this);
+    } catch (e) {
+      run.reject(asFail(e));
+    }
+  };
+  // The pending send's text and outcome, from the answer in the timeline.
+  derive_fn2 = function() {
+    const run = __privateGet(this, _run);
+    if (!run || !run.id || !__privateGet(this, _chat)) return;
+    const a = __privateGet(this, _chat).timeline.answer(run.id);
+    if (!a) return;
+    if (a.text !== run.text) {
+      const before = run.text;
+      run.text = a.text;
+      run.onText?.({ text: a.text, delta: a.text.startsWith(before) ? a.text.slice(before.length) : "" });
+    }
+    if (!TERMINAL.has(a.status)) return;
+    const extra = run.text ? { text: run.text } : void 0;
+    if (a.status === "finished") run.resolve(freeze({ text: run.text, truncated: a.truncated }));
+    else if (a.status === "stopped") run.reject(fail("cancelled", "the answer was stopped", extra));
+    else run.reject(fail(a.code || "upstream_error", a.error || "the run failed", extra));
+  };
+  // An abort, at whatever stage the run is: preparing → nothing was posted,
+  // the send rejects now; posting → #start stops the run once the 202 names
+  // it; running → stop, and the run's answer settles it.
+  abort_fn = function(run) {
+    if (run.settled || run.aborted) return;
+    run.aborted = true;
+    run.cancel();
+    if (run.stage === "running") void this.stop();
+  };
+  function agent(grant) {
+    return freeze({
+      /** Resumes the session with this key, or creates it with these settings. */
+      async open(key, o = {}) {
+        if (typeof key !== "string" || !key || key.length > 200) throw fail("invalid_request", "a session key is a string of 1 to 200 characters");
+        const tools = o.tools ?? [];
+        for (const t of tools) if (!t || typeof t.name !== "string" || typeof t.execute !== "function") throw fail("invalid_request", "a tool is {name, description, inputSchema, execute}");
+        const find = async () => (await api2("GET", "/sessions?label=" + encodeURIComponent("key:" + key))).sessions?.[0] ?? null;
+        let info = await find();
+        let fresh = false;
+        if (!info) {
+          try {
+            info = (await api2("POST", "/sessions", clean2({
+              title: o.title,
+              labels: clean2({ key, tier: o.modelTier, model: o.model, effort: o.effort }),
+              data: clean2({ system: o.system, maxRounds: o.maxRounds, toolTimeout: o.toolTimeout, maxTokens: o.maxTokens })
+            }))).session;
+            fresh = true;
+          } catch (e) {
+            if (e?.code !== "session_exists" || !(info = await find())) throw e;
+          }
+        }
+        return new Session2(info, tools, fresh, grant);
+      },
+      /** The person's sessions in this app. */
+      async list() {
+        const l = await api2("GET", "/sessions");
+        return freeze((l.sessions ?? []).map((s) => freeze({
+          id: s.id,
+          key: s.labels?.key ?? "",
+          title: s.title ?? "",
+          created: s.created,
+          updated: s.updated,
+          running: !!s.running,
+          usage: s.usage
+        })));
+      },
+      async limits() {
+        return freeze(await rpc("agent.limits"));
+      }
+    });
+  }
+
   // src/sample.ts
   var cache = /* @__PURE__ */ new Map();
   function checkInput(input) {
@@ -1446,7 +2431,7 @@
     session_expired: "session_expired",
     image_rejected: "image_rejected"
   };
-  async function call2(images, input, o = {}) {
+  async function call2(images, grant, input, o = {}) {
     const prompt = checkInput(input);
     const tools = o.tools ?? [];
     if (tools.length > 16) throw fail("tools_unavailable", "at most 16 tools");
@@ -1462,7 +2447,7 @@
       const hit = cache.get(key);
       if (hit && Date.now() - hit.at < hit.ttl) return hit.result;
     }
-    await consent("sample");
+    await grant.consent();
     const body = {
       input: prompt,
       modelTier: tier,
@@ -1582,11 +2567,11 @@
     }
     throw fail("invalid_json", "the reply is not JSON", { text });
   }
-  function sample(h) {
+  function sample(h, grant) {
     const images = !!h.caps.sample?.images;
-    const fn = (input, o) => call2(images, input, o);
+    const fn = (input, o) => call2(images, grant, input, o);
     return Object.freeze(Object.assign(fn, {
-      json: async (input, o) => parseJSON((await call2(images, input, o)).text),
+      json: async (input, o) => parseJSON((await call2(images, grant, input, o)).text),
       limits: async () => {
         try {
           return freeze(await rpc("sample.limits"));
@@ -1711,7 +2696,7 @@
       case "room":
         return lobby();
       case "comments":
-        return comments(h);
+        return comments(h, grantFor(name));
       case "assets":
         return assets;
       case "downloads":
@@ -1721,7 +2706,9 @@
       case "artifact":
         return artifact;
       case "sample":
-        return sample(h);
+        return sample(h, grantFor(name));
+      case "agent":
+        return agent(grantFor(name));
       case "slop":
         return slop(h);
     }

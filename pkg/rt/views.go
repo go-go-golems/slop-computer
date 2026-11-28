@@ -312,13 +312,36 @@ type Registry struct {
 	mu       sync.Mutex
 	byID     map[string]*View
 	bySecret map[string]*View
+	// gone remembers, for an hour, why a view closed (by id and by
+	// secret), so a page still using it hears the reason, not only
+	// "closed or expired" (SLOP3-026 R-16).
+	gone map[string]gone
 	// OnClose runs (outside the lock) for every view that closes, with the
 	// rooms it was in, so the server can tell the remaining peers.
 	OnClose func(v *View, rooms []string)
 }
 
 func NewRegistry() *Registry {
-	return &Registry{byID: map[string]*View{}, bySecret: map[string]*View{}}
+	return &Registry{byID: map[string]*View{}, bySecret: map[string]*View{}, gone: map[string]gone{}}
+}
+
+type gone struct {
+	why string
+	at  time.Time
+}
+
+// goneFor is how long a closed view's reason is kept.
+const goneFor = time.Hour
+
+// Why is the reason the view with this id or secret closed ("" when it is
+// unknown: never opened, or closed over an hour ago).
+func (r *Registry) Why(key string) string {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	if v := r.bySecret[key]; v != nil && time.Now().After(v.Expires) {
+		return "it expired (not renewed for " + ViewTTL.String() + ")"
+	}
+	return r.gone[key].why
 }
 
 func token(n int) string {
@@ -411,11 +434,21 @@ func (r *Registry) Where(fn func(*View) bool) []*View {
 }
 
 // Close ends a view: revoked tells its stream why.
-func (r *Registry) Close(v *View, revoked bool) {
+func (r *Registry) Close(v *View, revoked bool) { r.CloseFor(v, revoked, "") }
+
+// CloseFor ends a view and remembers why (Why), for calls still using it.
+func (r *Registry) CloseFor(v *View, revoked bool, why string) {
+	if why == "" {
+		why = "it was closed"
+	}
 	r.mu.Lock()
 	_, ok := r.byID[v.ID]
 	delete(r.byID, v.ID)
 	delete(r.bySecret, v.Secret)
+	if ok {
+		g := gone{why: why, at: time.Now()}
+		r.gone[v.ID], r.gone[v.Secret] = g, g
+	}
 	r.mu.Unlock()
 	if !ok {
 		return
@@ -438,21 +471,28 @@ func (r *Registry) Close(v *View, revoked bool) {
 // Sweep closes views that expired, never connected, or lost their stream
 // a while ago.
 func (r *Registry) Sweep(now time.Time) {
-	var dead []*View
+	dead := map[*View]string{}
 	r.mu.Lock()
-	for _, v := range r.byID {
-		v.mu.Lock()
-		stale := now.After(v.Expires) ||
-			(v.ch == nil && v.idle.IsZero() && now.Sub(v.Created) > ConnectGrace) ||
-			(v.ch == nil && !v.idle.IsZero() && now.Sub(v.idle) > IdleGrace)
-		v.mu.Unlock()
-		if stale {
-			dead = append(dead, v)
+	for k, g := range r.gone {
+		if now.Sub(g.at) > goneFor {
+			delete(r.gone, k)
 		}
 	}
+	for _, v := range r.byID {
+		v.mu.Lock()
+		switch {
+		case now.After(v.Expires):
+			dead[v] = "it expired (not renewed for " + ViewTTL.String() + ")"
+		case v.ch == nil && v.idle.IsZero() && now.Sub(v.Created) > ConnectGrace:
+			dead[v] = "the page never connected to it within " + ConnectGrace.String()
+		case v.ch == nil && !v.idle.IsZero() && now.Sub(v.idle) > IdleGrace:
+			dead[v] = "the page lost its connection " + IdleGrace.String() + " ago"
+		}
+		v.mu.Unlock()
+	}
 	r.mu.Unlock()
-	for _, v := range dead {
-		r.Close(v, false)
+	for v, why := range dead {
+		r.CloseFor(v, false, why)
 	}
 }
 

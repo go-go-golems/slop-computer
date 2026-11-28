@@ -37,15 +37,15 @@ The phases follow the design (design-doc/01, section 10).
 - [x] The push manifest (`files.push`, `import.files`) as a `oneOf` union; `files.commit`'s `FileChange` follows once SLOP3-023 (#51) merges (part of notes §7.3)
 - [x] The `app.types` verb; `slop types <app> [dir]` writing `.slop/types/` and the two tsconfig files; `slop dev` refreshes them
 - [x] A fixture TypeScript app checked by `tsc` against the generated declarations (`TestAppTypes`; CI runs `make test-ci`, which installs TypeScript)
-- [ ] TypeScript templates as the default for new apps; the agent's guide to match (TS, extensions in imports, vendored packages; ask the person for new ones). Waits for SLOP3-023 (#51): the templates and guide are in its rewrite of web/bench
-- [ ] `files.commit`'s `FileChange` as a `oneOf` union, once #51 merges
-- [ ] Annotate web/runtime's `db`, `user`, `comments` and `room` namespaces: page.d.ts has them as `any` or open records today
+- [x] TypeScript templates as the default for new apps; the agent's guide to match (TS, extensions in imports, vendored packages; ask the person for new ones). `TestTemplateTypes` runs and type-checks every template
+- [x] `files.commit`'s `FileChange` as a `oneOf` union
+- [x] Annotate web/runtime's `db`, `user`, `comments` and `room` namespaces (and `assets`, `slop` reads, `sample.limits`): page.d.ts has no `any` left but `AnyActions`
 
-## Phase 2: typed actor actions
+## Phase 2: typed actor actions (PR #55)
 
-- [ ] `args` (and optional `result`) JSON Schemas on actions: read in `readShape`, validated before `run` (`invalid_argument` with the failing path); add a validator library (notes §7.1; the validation can come before TypeScript)
-- [ ] `actions.d.ts` generated from the schemas; `FromSchema<S>` in `actor.d.ts`
-- [ ] Convert the bench actor's actions first, replacing its hand conversion
+- [x] `args` (and optional `result`) JSON Schemas on actions: read in `readShape`, validated before `run` (`invalid_argument` with the failing path); santhosh-tekuri/jsonschema (notes §7.1)
+- [x] `actions.d.ts` generated from the schemas (`AppActions`, the default of `claude.use('slop')`); `FromSchema<S>` and `defineAction` in `actor.d.ts`
+- [x] Convert the bench actor's actions, replacing its hand conversion (`TestBenchArgs`)
 
 ## Phase 3: checking in the bench
 

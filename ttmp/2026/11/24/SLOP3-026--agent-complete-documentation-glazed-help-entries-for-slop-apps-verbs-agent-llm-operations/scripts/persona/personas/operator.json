@@ -1,0 +1,2 @@
+{"id":"operator","name":"An operator","knows":"running servers, access control, budgets; that slop has people, apps and an LLM feature; not slop's command names","style":"precise about who may do what; asks for the current state before and after","patience":4,
+"text":"You run the team's slop server. You care that access is exactly what was decided, nothing more, and you want to see it confirmed."}

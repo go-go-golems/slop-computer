@@ -1,0 +1,23 @@
+{
+  "id": "broken-manifest",
+  "persona": "builder",
+  "maxTurns": 5,
+  "setup": [
+    "G=$RUN/notes-good && cp -r \"$SETUP/notes-broken\" \"$G\" && python3 -c 'import json,sys; p=sys.argv[1]; d=json.load(open(p)); d[\"capabilities\"].pop(\"storage\"); json.dump(d, open(p,\"w\"), indent=2)' \"$G/app.json\" && $SLOP store new notes-app >/dev/null && $SLOP push \"$G\" --store notes-app >/dev/null && $SLOP store new notes --app notes-app >/dev/null && $SLOP grant set notes @member interact >/dev/null && $SLOP mount set \"apps.localhost:$PORT\" /notes notes >/dev/null && rm -rf \"$G\" && $SLOP push \"$SETUP/notes-broken\" --store notes-app >/dev/null"
+  ],
+  "opening": "Yesterday someone changed our notes app at /notes, but the change never showed up: the page still looks exactly like before. Can you find out why and fix it?",
+  "goal": "the notes app at /notes runs the newest version again (yesterday's change took effect)",
+  "checklist": [
+    "it finds the cause from the server (slop app status shows the manifest error)",
+    "it fixes app.json and pushes",
+    "the store is no longer broken and the page answers",
+    "it explains the cause in plain words"
+  ],
+  "facts": [
+    "app.json declares an unknown capability \"storage\"; slop app status notes shows broken: app.json: capabilities: unknown capability \"storage\".",
+    "slop push accepts a broken manifest; the error shows only at activation.",
+    "The store was mounted while the app was good; yesterday's push added \"storage\". A mount set on the broken app would answer the misleading 'notes is plain content: mount it on a static host'.",
+    "The page never went blank: when a newer snapshot fails to activate, the store keeps serving the last good one (snapshot 1). That is why yesterday's change 'never showed up'. (Before round 3 the opening wrongly said the page was blank.)"
+  ],
+  "personaKnows": "Someone added 'storage' to the app config yesterday because they thought it was needed for saving notes."
+}

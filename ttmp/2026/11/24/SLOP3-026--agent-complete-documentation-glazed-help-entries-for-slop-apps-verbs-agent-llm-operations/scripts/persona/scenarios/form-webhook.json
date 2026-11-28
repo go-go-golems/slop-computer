@@ -1,0 +1,22 @@
+{
+  "id": "form-webhook",
+  "persona": "builder",
+  "maxTurns": 6,
+  "heldOut": true,
+  "opening": "Our form service can send each submission as a POST with JSON to a web address. Can you give me an address for that, keep every submission, and show them on a page at /inbox for the team?",
+  "goal": "a URL that accepts POSTed JSON submissions and stores each one, and a page at /inbox where members see them",
+  "later": [
+    "can anyone on the internet post junk to that address?"
+  ],
+  "checklist": [
+    "mounted at /inbox",
+    "a POST of JSON to the address it gave is stored",
+    "the page shows the stored submissions to members",
+    "it answers the junk question honestly (who may post, any secret or check)"
+  ],
+  "facts": [
+    "An actor HTTP route (routes in defineActor, an express-style builder) answers on the mount; the mount's API policy decides who may call it.",
+    "`slop mount routes <host> <path>` shows what a mount lets through."
+  ],
+  "personaKnows": "You can sign in on the site."
+}

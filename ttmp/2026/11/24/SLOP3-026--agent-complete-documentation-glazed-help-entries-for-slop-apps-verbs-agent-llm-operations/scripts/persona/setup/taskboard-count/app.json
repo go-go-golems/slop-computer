@@ -1,0 +1,18 @@
+{
+  "title": "Event tasks",
+  "page": "index.html",
+  "actor": "actor.js",
+  "type": "taskboard",
+  "capabilities": {
+    "db": {
+      "rules": [
+        {
+          "path": "tasks",
+          "read": "view",
+          "write": "admin"
+        }
+      ]
+    },
+    "storage": {}
+  }
+}

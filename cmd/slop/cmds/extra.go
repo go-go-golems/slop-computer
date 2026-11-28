@@ -230,15 +230,26 @@ func evalCmd() *cobra.Command {
 
 // callCmd is actor.call with the arguments as one JSON value.
 func callCmd() *cobra.Command {
-	return &cobra.Command{
+	var as, jsonArgs string
+	cmd := &cobra.Command{
 		Use:   "call <store> <action> [json]",
-		Short: "Call an action of a store's actor",
+		Short: "Call an action of a store's actor; its arguments as a JSON object (third argument or --json)",
 		Args:  cobra.RangeArgs(2, 3),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			in := map[string]any{"store": args[0], "action": args[1]}
+			if as != "" {
+				in["as"] = as
+			}
+			raw := jsonArgs
 			if len(args) == 3 {
+				if raw != "" {
+					return fmt.Errorf("the action's arguments twice: give them as the third argument or as --json, not both")
+				}
+				raw = args[2]
+			}
+			if raw != "" {
 				var v any
-				if err := json.Unmarshal([]byte(args[2]), &v); err != nil {
+				if err := json.Unmarshal([]byte(raw), &v); err != nil {
 					return fmt.Errorf("arguments: %w", err)
 				}
 				in["args"] = v
@@ -254,6 +265,10 @@ func callCmd() *cobra.Command {
 			return printOut(res)
 		},
 	}
+	cmd.Flags().StringVar(&as, "as", "", "anonymous, or a person (usr_… or email): run the action as them, with their level and audience (platform admins)")
+	// Every other command takes --json for its arguments; here they are the action's.
+	cmd.Flags().StringVar(&jsonArgs, "json", "", "the action's arguments as a JSON object (same as the third argument)")
+	return cmd
 }
 
 // printLogs writes a program's console output to stderr.

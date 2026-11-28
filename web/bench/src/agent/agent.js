@@ -5,11 +5,18 @@
 // the thread works in proposals), builds an eval context (agent/eval.js) and
 // lets the model call eval until it answers. Each eval is a transaction; a
 // subagent working in the caller's workspace runs its evals inside the
-// caller's, so its changes land with the caller's commit. A long thread's
-// older messages are folded into a running summary (compact).
+// caller's, so its changes land with the caller's commit.
 //
-// Owns: turns in flight. Public API: Agent (init, send, stop, delegate,
-// busy, anyBusy, compact, sample, ev 'ready' | 'turn' | 'step' | 'text').
+// With the agent capability (SLOP3-025) a thread is a session on the
+// server: the server keeps the conversation (append-only, so the prompt
+// cache holds) and runs the tool loop; each message sends only the
+// person's words and the current state. Without it (an older server) the
+// page sends the conversation to sample() every message, and folds a long
+// thread's older messages into a running summary (compact).
+//
+// Owns: turns in flight, the threads' sessions. Public API: Agent (init,
+// send, stop, delegate, busy, anyBusy, compact, sample, agent, ev 'ready' |
+// 'turn' | 'step' | 'text').
 import { AgentUI, makeContext, runEval } from './eval.js';
 import { FAKED_EVAL, fitPrompt } from './hints.js';
 import { FrameHost, FrameHosts } from '../frames/host.js';
@@ -29,9 +36,12 @@ const CALL_EVALS = 9, MAX_CONTINUES = 2
 const firstLine = code => (code.split('\n').find(l => l.trim() && !l.trim().startsWith('//')) || '').trim().slice(0, 90)
 
 export const Agent = {
-  sample: null, ready: false, ev: emitter(), turns: new Map(),
+  sample: null, agent: null, ready: false, ev: emitter(), turns: new Map(),
+  sessions: new Map(), // session key -> the session, opened once per page load
+  evals: new Map(), // thread id -> the eval of the turn running on it
   async init() {
     try { if (window.claude && window.claude.use) this.sample = await window.claude.use('sample') } catch { this.sample = null }
+    try { if (window.claude && window.claude.use) this.agent = await window.claude.use('agent') } catch { this.agent = null }
     this.ready = true; this.ev.emit('ready')
   },
   busy(tid) { return this.turns.has(tid) },
@@ -149,6 +159,37 @@ export const Agent = {
     return merged
   },
 
+  // A thread's session: one per thread and model choice (a new tier or model
+  // starts a new conversation on the server). Its eval runs the eval of the
+  // turn running on the thread. fresh: the server has no conversation yet.
+  async session(P, th, system, tool) {
+    const key = [P.app, th.id, th.tier || 'default', th.model || ''].join(':')
+    const open = this.sessions.get(key)
+    if (open) return { s: open, fresh: false }
+    const s = await this.agent.open(key, {
+      title: th.title, system, modelTier: th.tier || 'default', ...(th.model ? { model: th.model } : {}),
+      maxRounds: BUDGET + 10, toolTimeout: 30 * 60e3, // evals may wait for the person (ask mode) or a subagent
+      tools: [{
+        name: tool.name, description: tool.description, inputSchema: tool.inputSchema,
+        execute: (input, c) => {
+          const run = this.evals.get(th.id)
+          if (!run) throw new Error('no turn of this thread is running in this page')
+          return run(input, c)
+        }
+      }]
+    })
+    this.sessions.set(key, s)
+    return { s, fresh: s.fresh }
+  },
+  // A thread that began before it had a session: its earlier messages, once.
+  earlier(th) {
+    const prior = th.msgs.slice(0, -2)
+    if (!prior.length) return ''
+    const start = th.summary ? th.summary.upTo : 0
+    const body = prior.slice(start).map(m => (m.role === 'user' ? 'Person: ' : 'Claude: ') + this.renderMsg(m, false)).join('\n\n')
+    return 'Earlier in this thread:\n' + trunc((th.summary ? 'Summary of the first ' + start + ' messages:\n' + th.summary.text + '\n\n' : '') + body, this.HIST_CHARS)
+  },
+
   // ---- one model turn on a thread; the eval tool runs in the thread's sandbox session. Throws on failure. ----
   async turn(P, th, msg, text, o) {
     const ctx = makeContext(P, { ws: o.ws, who: 'agent', thread: th.id, mode: th.mode, role: th.role || null, depth: o.depth || 0, budget: o.budget, tier: th.tier, model: th.model, signal: o.signal, parentTx: o.parentTx || null, agent: this })
@@ -207,6 +248,18 @@ export const Agent = {
     const head = (R ? 'You are the ' + th.role + ' subagent, called by the main agent through delegate(). ' + R.describe +
       (R.mode === 'read' ? ' Writes are refused (policy errors); canvas arrangement and ui.pin are allowed.' : R.mode === 'tests' ? ' You may write only scenarios/ and fixtures/ (other writes are refused); canvas arrangement and ui.pin are allowed.' : '') +
       ' Reply to the main agent, briefly. Your budget is ' + o.budget.max + ' evals.\n\n' : '') + guide(P, ctx.api) + '\n\n'
+    if (this.agent) {
+      const { s, fresh } = await this.session(P, th, head + guide(P, ctx.api), tool)
+      let context = 'Current state:\n' + this.context(P, o.ws, th)
+      if (fresh) { const e = this.earlier(th); if (e) context = e + '\n\n' + context }
+      this.evals.set(th.id, tool.execute)
+      try {
+        const res = await s.send(text, { context, onText: ({ text: t }) => { msg.text = t; this.ev.emit('text', th.id) }, signal: o.signal })
+        msg.text = res.text || msg.text
+        if (res.truncated) msg.text += '\n[stopped at the tool round limit]'
+        return msg.text
+      } finally { this.evals.delete(th.id) }
+    }
     // a long thread: fold older messages into the summary first
     try {
       await this.compact(P, th, { end: th.msgs.length - 2, signal: o.signal, onStart: n => { msg.note = 'Summarizing ' + plural(n, 'earlier message') + '…'; this.ev.emit('text', th.id) } })

@@ -270,16 +270,18 @@ func (b *Backend) pick(o llm.Options) (choice, string) {
 
 // level is the Pi thinking level of a call: the page's effort, else the
 // level the model reference named, else (not for quick) settings' default.
-func (c *call) level(ch choice) string {
+func (c *call) level(ch choice) string { return c.b.level(c.r.Options, ch) }
+
+func (b *Backend) level(o llm.Options, ch choice) string {
 	switch {
-	case c.r.Options.Effort != "":
-		return c.r.Options.Effort
+	case o.Effort != "":
+		return o.Effort
 	case ch.level != "":
 		return ch.level
-	case c.r.Options.ModelTier == "quick" || c.b.baseline == "":
+	case o.ModelTier == "quick" || b.baseline == "":
 		return "off"
 	}
-	return c.b.baseline
+	return b.baseline
 }
 
 // runTools sends every tool call of a round to the page at once and waits

@@ -75,6 +75,13 @@ func TestLLMBudgets(t *testing.T) {
 		t.Fatalf("admin with policy off: %d %v", st, out)
 	}
 	h.call(admin, "policy.set", map[string]any{"app": "ai", "capability": "sample", "audience": "@member", "value": "on"})
+	// Each cell says what decides it (SLOP3-026, round 3).
+	for _, c := range h.call(admin, "policy.ls", map[string]any{"app": "ai"}).(map[string]any)["cells"].([]any) {
+		c := c.(map[string]any)
+		if c["capability"] == "sample" && c["audience"] == "subscriber" && !strings.HasPrefix(c["why"].(string), "on through @member") {
+			t.Fatalf("subscriber's why = %v", c)
+		}
+	}
 	h.call(admin, "policy.set", map[string]any{"app": "ai", "capability": "sample", "audience": "@subscriber", "value": "on"})
 	// Now the module exists, and admins are members (SLOP3-007 groups):
 	// the @member cell reaches the admin, whose @admin row is unlimited.

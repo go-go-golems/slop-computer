@@ -1,0 +1,453 @@
+benchdrive serving on 127.0.0.1:18498 (pid 2425016), bench http://apps.localhost:18494/bench
+2026-11-17T03:00:22.349Z probe look 3023ms
+2026-11-17T03:00:38.384Z probe close 4ms
+2026-11-17T03:01:35.618Z sam look 2790ms
+2026-11-17T03:01:35.650Z maya look 2702ms
+2026-11-17T03:01:37.687Z devon look 2720ms
+2026-11-17T03:01:37.886Z error usage: new-app <id> <template>   e.g. new-app bakery "Page and actor"
+2026-11-17T03:01:38.086Z error No template "template" in the New app dialog. Templates: "Page", "Page and actor". The dialog is still open.
+2026-11-17T03:01:38.754Z sam look 21ms
+2026-11-17T03:01:38.892Z maya shot 65ms
+2026-11-17T03:01:41.033Z sam click 1445ms
+2026-11-17T03:01:42.540Z sam type 1447ms
+2026-11-17T03:01:43.416Z error Nothing on screen is labelled "New app". Things you can click (closest first; where they are in brackets):
+2026-11-17T03:01:43.940Z maya click 1416ms
+2026-11-17T03:01:44.191Z sam type 1453ms
+2026-11-17T03:01:45.551Z devon click 1484ms
+2026-11-17T03:01:46.925Z priya look 2889ms
+2026-11-17T03:01:48.669Z maya click 1409ms
+2026-11-17T03:01:48.894Z sam click 1403ms
+2026-11-17T03:01:49.880Z priya frame-text 25ms
+2026-11-17T03:01:50.393Z devon click 1418ms
+2026-11-17T03:01:52.132Z maya new-app 2459ms
+2026-11-17T03:01:52.774Z devon click 1444ms
+2026-11-17T03:01:54.253Z devon type 1426ms
+2026-11-17T03:01:56.161Z devon click 1444ms
+2026-11-17T03:02:03.332Z devon click 1471ms
+2026-11-17T03:02:06.846Z devon view 1296ms
+2026-11-17T03:02:06.975Z devon shot 61ms
+2026-11-17T03:02:11.546Z devon view 1306ms
+2026-11-17T03:02:16.476Z devon click 1459ms
+2026-11-17T03:02:17.963Z devon click 1433ms
+2026-11-17T03:02:19.461Z devon click 1425ms
+2026-11-17T03:02:20.942Z devon click 1388ms
+2026-11-17T03:02:44.044Z maya ask 46431ms
+2026-11-17T03:02:45.113Z maya look 32ms
+2026-11-17T03:02:45.580Z priya ask 45232ms
+2026-11-17T03:02:48.078Z priya frame-text 21ms
+2026-11-17T03:02:48.152Z priya look 19ms
+2026-11-17T03:02:48.862Z maya view 1326ms
+2026-11-17T03:02:52.121Z maya click 1452ms
+2026-11-17T03:02:52.978Z maya frame-text 20ms
+2026-11-17T03:03:01.905Z priya frame-click 1477ms
+2026-11-17T03:03:01.981Z priya frame-text 16ms
+2026-11-17T03:03:10.658Z priya click 1436ms
+2026-11-17T03:03:17.896Z priya frame-click 1433ms
+2026-11-17T03:03:19.421Z priya frame-click 1469ms
+2026-11-17T03:03:26.963Z priya frame-click 1483ms
+2026-11-17T03:03:28.542Z priya frame-click 1520ms
+2026-11-17T03:03:30.263Z priya frame-click 1486ms
+2026-11-17T03:03:38.592Z priya frame-text 19ms
+2026-11-17T03:03:40.108Z priya view 1358ms
+2026-11-17T03:03:49.237Z priya frame-shot 111ms
+2026-11-17T03:03:51.417Z maya ask 53901ms
+2026-11-17T03:03:52.739Z sam ask 118532ms
+2026-11-17T03:03:52.754Z maya frame-text 24ms
+2026-11-17T03:03:56.123Z sam frame-text 23ms
+2026-11-17T03:03:56.595Z sam frame-text 31ms
+2026-11-17T03:03:57.232Z maya view 1310ms
+2026-11-17T03:04:00.490Z maya click 1453ms
+2026-11-17T03:04:01.454Z sam view 1314ms
+2026-11-17T03:04:04.574Z sam click 1411ms
+2026-11-17T03:04:06.732Z sam click 1409ms
+2026-11-17T03:04:12.071Z sam view 1279ms
+2026-11-17T03:04:14.590Z sam view 1312ms
+2026-11-17T03:04:16.076Z sam click 1422ms
+2026-11-17T03:04:17.803Z sam frame-text 18ms
+2026-11-17T03:04:19.173Z sam view 1306ms
+2026-11-17T03:04:21.776Z sam frame-click 1496ms
+2026-11-17T03:04:23.903Z sam click 1457ms
+2026-11-17T03:04:26.645Z sam frame-click 1485ms
+2026-11-17T03:04:32.701Z sam frame-text 24ms
+2026-11-17T03:04:34.097Z sam view 1331ms
+2026-11-17T03:04:35.269Z error Nothing on screen in data is labelled "Tables". Things you can click (closest first; where they are in brackets):
+2026-11-17T03:04:38.087Z sam click 1499ms
+2026-11-17T03:04:38.743Z error No visible field "text". Fields on screen:
+2026-11-17T03:04:40.269Z sam click 1475ms
+2026-11-17T03:04:41.214Z maya ask 36021ms
+2026-11-17T03:04:41.782Z sam look 27ms
+2026-11-17T03:04:42.052Z devon ask 136935ms
+2026-11-17T03:04:43.823Z maya view 1323ms
+2026-11-17T03:04:43.860Z sam click 1491ms
+2026-11-17T03:04:45.700Z devon view 1287ms
+2026-11-17T03:04:45.894Z sam type 1442ms
+2026-11-17T03:04:46.717Z error No visible field "dialog textarea". Fields on screen:
+2026-11-17T03:04:48.202Z error No visible field "dialog input". Fields on screen:
+2026-11-17T03:04:48.851Z error No visible field "in dialog". Fields on screen:
+2026-11-17T03:04:50.195Z error No visible field "input in dialog". Fields on screen:
+2026-11-17T03:04:50.670Z devon view 1298ms
+2026-11-17T03:04:51.942Z error Nothing on screen in dialog is labelled "SELECT * FROM items LIMIT 50". Things you can click (closest first; where they are in brackets):
+2026-11-17T03:04:52.211Z devon click 1459ms
+2026-11-17T03:04:53.276Z error Nothing on screen in dialog is labelled "input". Things you can click (closest first; where they are in brackets):
+2026-11-17T03:04:54.753Z sam key 1423ms
+2026-11-17T03:04:54.813Z error usage: key <key>   e.g. Enter, Escape, Tab, Control+s
+2026-11-17T03:04:56.991Z sam key 1424ms
+2026-11-17T03:04:56.993Z devon view 1305ms
+2026-11-17T03:04:58.943Z sam click 1895ms
+2026-11-17T03:04:59.968Z error No visible field "text". Fields on screen:
+2026-11-17T03:05:01.137Z devon click 1441ms
+2026-11-17T03:05:02.503Z devon view 1308ms
+2026-11-17T03:05:03.979Z sam type 1433ms
+2026-11-17T03:05:04.070Z error No visible field "input.text". Fields on screen:
+2026-11-17T03:05:05.460Z devon click 1436ms
+2026-11-17T03:05:05.807Z sam type 1455ms
+2026-11-17T03:05:05.933Z error No visible field "[data-testid=query] input". Fields on screen:
+2026-11-17T03:05:06.020Z error No visible field "form input". Fields on screen:
+2026-11-17T03:05:06.823Z devon view 1311ms
+2026-11-17T03:05:08.471Z sam click 1427ms
+2026-11-17T03:05:09.283Z error No visible field ".modal input". Fields on screen:
+2026-11-17T03:05:10.116Z sam look 31ms
+2026-11-17T03:05:12.691Z sam type 1436ms
+2026-11-17T03:05:12.778Z sam look 24ms
+2026-11-17T03:05:15.016Z sam click 1416ms
+2026-11-17T03:05:16.478Z sam type 1407ms
+2026-11-17T03:05:17.947Z sam click 1416ms
+2026-11-17T03:05:19.903Z sam view 1279ms
+2026-11-17T03:05:22.285Z sam click 1442ms
+2026-11-17T03:05:23.840Z sam type 1471ms
+2026-11-17T03:05:25.596Z sam click 1442ms
+2026-11-17T03:05:27.003Z sam view 1290ms
+2026-11-17T03:05:32.735Z sam view 1305ms
+2026-11-17T03:05:33.347Z priya ask 79814ms
+2026-11-17T03:05:34.355Z probe open-app 4898ms
+2026-11-17T03:05:35.718Z probe view 1301ms
+2026-11-17T03:05:37.188Z probe click 1403ms
+2026-11-17T03:05:38.690Z probe type 1392ms
+2026-11-17T03:05:40.147Z probe key 1395ms
+2026-11-17T03:05:41.865Z priya frame-text 52ms
+2026-11-17T03:05:47.644Z maya ask 59545ms
+2026-11-17T03:05:51.132Z maya click 2347ms
+2026-11-17T03:05:51.251Z maya frame-text 38ms
+2026-11-17T03:05:53.060Z maya frame-shot 119ms
+2026-11-17T03:05:53.229Z maya frame-shot 111ms
+2026-11-17T03:05:57.901Z maya click 1506ms
+2026-11-17T03:05:59.524Z devon ask 42610ms
+2026-11-17T03:06:00.530Z maya frame-type 1528ms
+2026-11-17T03:06:02.109Z maya frame-type 1514ms
+2026-11-17T03:06:03.351Z devon view 1326ms
+2026-11-17T03:06:03.673Z maya frame-type 1504ms
+2026-11-17T03:06:03.752Z maya frame-text 26ms
+2026-11-17T03:06:05.943Z devon view 1312ms
+2026-11-17T03:06:06.113Z maya frame-click 1511ms
+2026-11-17T03:06:06.265Z maya frame-text 46ms
+2026-11-17T03:06:08.583Z devon click 1423ms
+2026-11-17T03:06:08.622Z maya frame-shot 130ms
+2026-11-17T03:06:09.927Z devon view 1281ms
+2026-11-17T03:06:13.994Z devon frame-text 39ms
+2026-11-17T03:06:14.365Z devon look 16ms
+2026-11-17T03:06:56.449Z sam ask 79659ms
+2026-11-17T03:06:57.425Z sam look 27ms
+2026-11-17T03:07:00.565Z sam view 1381ms
+2026-11-17T03:07:02.010Z sam view 1347ms
+2026-11-17T03:07:22.105Z priya ask 87459ms
+2026-11-17T03:07:25.590Z devon ask 63982ms
+2026-11-17T03:07:28.442Z devon view 1307ms
+2026-11-17T03:07:29.282Z priya view 1347ms
+2026-11-17T03:07:30.697Z devon look 68ms
+2026-11-17T03:07:31.540Z devon frame-text 46ms
+2026-11-17T03:07:34.012Z priya frame-text 20ms
+2026-11-17T03:07:34.088Z priya frame-text 22ms
+2026-11-17T03:07:35.624Z devon click 1467ms
+2026-11-17T03:07:40.426Z priya frame-text 51ms
+2026-11-17T03:07:43.109Z devon look 35ms
+2026-11-17T03:07:48.838Z priya frame-type 1490ms
+2026-11-17T03:07:51.017Z devon click 1455ms
+2026-11-17T03:07:53.187Z priya frame-click 1466ms
+2026-11-17T03:07:53.587Z devon view 1287ms
+2026-11-17T03:07:54.802Z priya frame-click 1556ms
+2026-11-17T03:07:55.047Z maya ask 97980ms
+2026-11-17T03:07:56.248Z maya frame-text 53ms
+2026-11-17T03:07:56.364Z maya look 47ms
+2026-11-17T03:07:58.208Z devon view 1313ms
+2026-11-17T03:07:59.130Z priya frame-text 37ms
+2026-11-17T03:08:01.906Z devon click 2341ms
+2026-11-17T03:08:04.171Z devon view 1336ms
+2026-11-17T03:08:04.984Z priya view 1328ms
+2026-11-17T03:08:06.327Z priya view 1281ms
+2026-11-17T03:08:08.460Z devon click 1488ms
+2026-11-17T03:08:12.506Z devon shot 127ms
+2026-11-17T03:08:12.683Z error The Canvas is not showing; open it with: view Canvas
+2026-11-17T03:08:12.758Z error The Canvas is not showing; open it with: view Canvas
+2026-11-17T03:08:12.834Z error The Canvas is not showing; open it with: view Canvas
+2026-11-17T03:08:12.924Z error The Canvas is not showing; open it with: view Canvas
+2026-11-17T03:08:13.296Z error The Canvas is not showing; open it with: view Canvas
+2026-11-17T03:08:22.266Z error Nothing on screen in code is labelled "nothingmatches". Things you can click (closest first; where they are in brackets):
+2026-11-17T03:08:22.545Z priya view 1337ms
+2026-11-17T03:08:24.118Z priya frame-click 1490ms
+2026-11-17T03:08:25.622Z devon click 1487ms
+2026-11-17T03:08:27.429Z error No visible field "text". Fields on screen:
+2026-11-17T03:08:28.628Z priya frame-text 35ms
+2026-11-17T03:08:29.693Z devon click 2000ms
+2026-11-17T03:08:32.579Z devon view 1314ms
+2026-11-17T03:08:34.001Z priya frame-click 1478ms
+2026-11-17T03:08:35.589Z priya frame-click 1502ms
+2026-11-17T03:08:35.836Z devon type 1841ms
+2026-11-17T03:08:37.206Z priya frame-click 1476ms
+2026-11-17T03:08:37.339Z priya frame-text 51ms
+2026-11-17T03:08:43.910Z devon key 2256ms
+2026-11-17T03:08:45.451Z error Nothing on screen in code is labelled "hello world". Things you can click (closest first; where they are in brackets):
+2026-11-17T03:08:46.303Z priya wait 4214ms
+2026-11-17T03:08:46.400Z priya frame-text 29ms
+2026-11-17T03:08:49.152Z devon click 1450ms
+2026-11-17T03:08:50.668Z devon click 1440ms
+2026-11-17T03:08:53.458Z devon click 1460ms
+2026-11-17T03:08:53.800Z priya shot 87ms
+2026-11-17T03:08:59.082Z devon click 1472ms
+2026-11-17T03:08:59.385Z error Nothing on screen in code is labelled "textarea". Things you can click (closest first; where they are in brackets):
+2026-11-17T03:09:03.268Z error Nothing on screen in code is labelled "textarea". Things you can click (closest first; where they are in brackets):
+2026-11-17T03:09:06.176Z maya ask 66053ms
+2026-11-17T03:09:07.678Z devon key 1422ms
+2026-11-17T03:09:09.324Z maya click 1599ms
+2026-11-17T03:09:10.448Z maya frame-text 47ms
+2026-11-17T03:09:10.547Z maya frame-text 37ms
+2026-11-17T03:09:13.392Z maya frame-click 1602ms
+2026-11-17T03:09:15.721Z maya frame-shot 114ms
+2026-11-17T03:09:16.190Z devon click 1424ms
+2026-11-17T03:09:17.647Z devon key 1396ms
+2026-11-17T03:09:24.585Z error Nothing on screen is labelled "textarea". Things you can click (closest first; where they are in brackets):
+2026-11-17T03:09:26.512Z sam ask 141277ms
+2026-11-17T03:09:28.792Z devon click 1437ms
+2026-11-17T03:09:29.572Z sam view 1326ms
+2026-11-17T03:09:30.308Z devon key 1444ms
+2026-11-17T03:09:31.705Z devon view 1324ms
+2026-11-17T03:09:33.199Z devon key 1439ms
+2026-11-17T03:09:34.572Z devon view 1311ms
+2026-11-17T03:09:34.619Z sam click 1468ms
+2026-11-17T03:09:36.134Z devon key 1497ms
+2026-11-17T03:09:37.549Z devon view 1358ms
+2026-11-17T03:09:39.023Z devon key 1421ms
+2026-11-17T03:09:40.393Z devon view 1313ms
+2026-11-17T03:09:41.870Z devon key 1423ms
+2026-11-17T03:09:43.258Z devon view 1335ms
+2026-11-17T03:09:46.786Z devon view 1337ms
+2026-11-17T03:09:47.416Z maya ask 25803ms
+2026-11-17T03:09:48.599Z maya look 74ms
+2026-11-17T03:09:51.802Z maya click 1587ms
+2026-11-17T03:09:51.816Z devon look 19ms
+2026-11-17T03:09:53.386Z devon key 1492ms
+2026-11-17T03:09:54.634Z maya frame-click 1715ms
+2026-11-17T03:09:54.824Z devon view 1384ms
+2026-11-17T03:09:56.264Z maya frame-type 1577ms
+2026-11-17T03:09:57.931Z maya frame-click 1600ms
+2026-11-17T03:09:58.859Z devon click 1467ms
+2026-11-17T03:10:00.183Z maya frame-text 37ms
+2026-11-17T03:10:00.333Z maya frame-shot 94ms
+2026-11-17T03:10:00.373Z devon key 1413ms
+2026-11-17T03:10:01.840Z devon key 1409ms
+2026-11-17T03:10:01.978Z devon look 22ms
+2026-11-17T03:10:04.720Z error error: locator.click: Timeout 30000ms exceeded.
+2026-11-17T03:10:04.976Z devon key 1422ms
+2026-11-17T03:10:06.605Z devon key 1472ms
+2026-11-17T03:10:06.711Z devon look 50ms
+2026-11-17T03:10:07.014Z sam click 1562ms
+2026-11-17T03:10:12.913Z devon click 1467ms
+2026-11-17T03:10:12.989Z devon look 21ms
+2026-11-17T03:10:14.665Z priya ask 57613ms
+2026-11-17T03:10:17.722Z devon click 1479ms
+2026-11-17T03:10:18.123Z devon frame-text 25ms
+2026-11-17T03:10:21.849Z priya frame-text 31ms
+2026-11-17T03:10:22.295Z devon frame-type 1487ms
+2026-11-17T03:10:23.796Z devon frame-type 1447ms
+2026-11-17T03:10:25.647Z devon frame-click 1599ms
+2026-11-17T03:10:26.325Z priya view 1296ms
+2026-11-17T03:10:27.210Z devon frame-text 51ms
+2026-11-17T03:10:28.777Z devon frame-shot 132ms
+2026-11-17T03:10:34.068Z devon frame-click 1469ms
+2026-11-17T03:10:34.144Z devon frame-text 23ms
+2026-11-17T03:10:37.337Z devon frame-click 1550ms
+2026-11-17T03:10:37.417Z devon frame-text 26ms
+2026-11-17T03:10:39.122Z error Nothing on screen in canvas is labelled "zzz". Things you can click (closest first; where they are in brackets):
+2026-11-17T03:10:42.999Z devon click 1447ms
+2026-11-17T03:10:46.801Z devon click 1459ms
+2026-11-17T03:10:48.435Z devon click 1584ms
+2026-11-17T03:10:48.509Z devon frame-text 18ms
+2026-11-17T03:10:51.572Z devon click 1427ms
+2026-11-17T03:10:58.238Z devon click 1492ms
+2026-11-17T03:10:59.922Z devon type 1415ms
+2026-11-17T03:11:01.946Z devon click 1951ms
+2026-11-17T03:11:03.394Z devon look 24ms
+2026-11-17T03:11:04.762Z devon view 1318ms
+2026-11-17T03:11:08.201Z devon type 1410ms
+2026-11-17T03:11:09.645Z devon view 1322ms
+2026-11-17T03:11:13.251Z devon click 1463ms
+2026-11-17T03:11:14.839Z devon click 1514ms
+2026-11-17T03:11:17.220Z devon click 2332ms
+2026-11-17T03:11:20.514Z devon view 1400ms
+2026-11-17T03:11:24.039Z devon click 1449ms
+2026-11-17T03:11:25.220Z priya ask 49409ms
+2026-11-17T03:11:25.349Z error No visible field "input[placeholder^='Path']". Fields on screen:
+2026-11-17T03:11:28.502Z error No visible field "Path, like about.html or css/theme.css". Fields on screen:
+2026-11-17T03:11:29.799Z error No visible field "input in dialog". Fields on screen:
+2026-11-17T03:11:32.067Z error No visible field "about.html". Fields on screen:
+2026-11-17T03:11:35.022Z devon shot 108ms
+2026-11-17T03:11:42.117Z devon key 1440ms
+2026-11-17T03:11:44.014Z priya view 1338ms
+2026-11-17T03:11:44.777Z devon key 1421ms
+2026-11-17T03:11:47.372Z error No visible field "text". Fields on screen:
+2026-11-17T03:11:52.743Z priya click 1553ms
+2026-11-17T03:11:55.634Z maya ask 107629ms
+2026-11-17T03:11:57.405Z devon click 1461ms
+2026-11-17T03:11:57.747Z maya look 51ms
+2026-11-17T03:12:01.132Z priya frame-text 54ms
+2026-11-17T03:12:01.206Z priya frame-text 19ms
+2026-11-17T03:12:01.640Z maya click 1641ms
+2026-11-17T03:12:03.037Z maya frame-text 43ms
+2026-11-17T03:12:03.261Z maya frame-shot 149ms
+2026-11-17T03:12:07.886Z sam ask 117225ms
+2026-11-17T03:12:10.939Z sam view 1374ms
+2026-11-17T03:12:16.423Z sam click 1451ms
+2026-11-17T03:12:18.706Z sam view 2231ms
+2026-11-17T03:12:45.950Z maya ask 30928ms
+2026-11-17T03:12:48.081Z maya look 123ms
+2026-11-17T03:12:48.218Z maya frame-text 61ms
+2026-11-17T03:12:51.415Z maya click 1673ms
+2026-11-17T03:12:52.533Z maya frame-text 40ms
+2026-11-17T03:12:52.632Z maya frame-text 42ms
+2026-11-17T03:12:54.116Z maya view 1423ms
+2026-11-17T03:12:59.418Z maya view 1392ms
+2026-11-17T03:13:01.115Z maya frame-type 1646ms
+2026-11-17T03:13:02.874Z maya frame-type 1704ms
+2026-11-17T03:13:04.560Z maya frame-type 1634ms
+2026-11-17T03:13:06.227Z maya frame-click 1614ms
+2026-11-17T03:13:06.334Z maya frame-text 51ms
+2026-11-17T03:13:23.821Z devon ask 78842ms
+2026-11-17T03:13:28.456Z devon view 1361ms
+2026-11-17T03:13:28.556Z devon look 31ms
+2026-11-17T03:13:43.385Z devon ask 12606ms
+2026-11-17T03:13:46.166Z priya ask 99944ms
+2026-11-17T03:13:48.623Z devon view 1361ms
+2026-11-17T03:13:52.137Z sam ask 87025ms
+2026-11-17T03:13:52.312Z priya look 30ms
+2026-11-17T03:13:53.530Z error Nothing on screen in review is labelled "Accept all". Things you can click (closest first; where they are in brackets):
+2026-11-17T03:13:54.518Z maya ask 43841ms
+2026-11-17T03:13:54.879Z devon view 1296ms
+2026-11-17T03:13:55.457Z sam view 1317ms
+2026-11-17T03:13:58.026Z priya frame-text 87ms
+2026-11-17T03:13:58.033Z sam click 1568ms
+2026-11-17T03:13:59.062Z devon view 1373ms
+2026-11-17T03:14:00.341Z sam view 2195ms
+2026-11-17T03:14:00.358Z maya click 1626ms
+2026-11-17T03:14:02.980Z maya click 1573ms
+2026-11-17T03:14:05.368Z devon click 1458ms
+2026-11-17T03:14:06.077Z maya click 1653ms
+2026-11-17T03:14:06.308Z error Nothing on screen in header is labelled "Share". Things you can click (closest first; where they are in brackets):
+2026-11-17T03:14:08.019Z devon view 2591ms
+2026-11-17T03:14:09.496Z maya click 1801ms
+2026-11-17T03:14:11.431Z devon view 1310ms
+2026-11-17T03:14:12.976Z devon click 1477ms
+2026-11-17T03:14:13.992Z maya key 1591ms
+2026-11-17T03:14:14.294Z maya shot 244ms
+2026-11-17T03:14:14.407Z devon view 1376ms
+2026-11-17T03:14:16.919Z priya frame-type 1469ms
+2026-11-17T03:14:18.015Z devon click 1483ms
+2026-11-17T03:14:18.121Z devon frame-text 21ms
+2026-11-17T03:14:18.279Z error Nothing on screen is labelled "Share". Things you can click (closest first; where they are in brackets):
+2026-11-17T03:14:18.460Z priya frame-click 1475ms
+2026-11-17T03:14:20.268Z priya frame-click 1475ms
+2026-11-17T03:14:21.379Z maya click 1640ms
+2026-11-17T03:14:21.840Z priya frame-click 1489ms
+2026-11-17T03:14:23.393Z priya frame-click 1498ms
+2026-11-17T03:14:24.433Z devon click 1506ms
+2026-11-17T03:14:24.973Z priya frame-click 1524ms
+2026-11-17T03:14:25.065Z priya frame-text 31ms
+2026-11-17T03:14:25.412Z maya view 1487ms
+2026-11-17T03:14:25.922Z devon key 1435ms
+2026-11-17T03:14:27.482Z devon key 1497ms
+2026-11-17T03:14:27.589Z devon look 53ms
+2026-11-17T03:14:30.846Z devon key 1412ms
+2026-11-17T03:14:30.931Z devon look 23ms
+2026-11-17T03:14:31.741Z maya click 1643ms
+2026-11-17T03:14:32.947Z error Nothing on screen in canvas is labelled "↔". Things you can click (closest first; where they are in brackets):
+2026-11-17T03:14:33.042Z error Nothing on screen in canvas is labelled "⟳". Things you can click (closest first; where they are in brackets):
+2026-11-17T03:14:35.345Z priya click 1470ms
+2026-11-17T03:14:36.476Z devon type 1418ms
+2026-11-17T03:14:37.992Z devon click 1442ms
+2026-11-17T03:14:39.834Z devon key 1581ms
+2026-11-17T03:14:41.330Z devon key 1442ms
+2026-11-17T03:14:42.578Z priya click 1467ms
+2026-11-17T03:14:42.836Z devon key 1448ms
+2026-11-17T03:14:42.933Z devon look 39ms
+2026-11-17T03:14:47.587Z priya click 1443ms
+2026-11-17T03:14:48.639Z devon shot 271ms
+2026-11-17T03:14:48.748Z devon look 54ms
+2026-11-17T03:15:08.300Z maya ask 32302ms
+2026-11-17T03:15:14.707Z error Nothing on screen in top is labelled "Share". Things you can click (closest first; where they are in brackets):
+2026-11-17T03:15:14.818Z error Nothing on screen in topbar is labelled "Share". Things you can click (closest first; where they are in brackets):
+2026-11-17T03:15:14.924Z error Nothing on screen in bench is labelled "Share". Things you can click (closest first; where they are in brackets):
+2026-11-17T03:15:15.144Z error Nothing on screen in nav is labelled "Share". Things you can click (closest first; where they are in brackets):
+2026-11-17T03:15:15.318Z error Nothing on screen in app is labelled "Share". Things you can click (closest first; where they are in brackets):
+2026-11-17T03:15:15.434Z error Nothing on screen in window is labelled "Share". Things you can click (closest first; where they are in brackets):
+2026-11-17T03:15:15.697Z error Nothing on screen in root is labelled "Share". Things you can click (closest first; where they are in brackets):
+2026-11-17T03:15:19.136Z maya click 1612ms
+2026-11-17T03:15:23.664Z maya click 1606ms
+2026-11-17T03:15:29.867Z maya key 1521ms
+2026-11-17T03:15:29.994Z error Nothing on screen is labelled "admin". Things you can click (closest first; where they are in brackets):
+2026-11-17T03:15:36.644Z maya view 1534ms
+2026-11-17T03:15:38.459Z maya view 1461ms
+2026-11-17T03:16:11.844Z sam ask 128047ms
+2026-11-17T03:16:14.725Z sam view 1377ms
+2026-11-17T03:16:17.031Z sam click 1451ms
+2026-11-17T03:16:19.327Z sam view 2242ms
+2026-11-17T03:16:22.580Z sam click 1458ms
+2026-11-17T03:16:25.848Z sam type 1437ms
+2026-11-17T03:16:27.664Z sam click 1526ms
+2026-11-17T03:16:29.856Z sam view 1342ms
+2026-11-17T03:16:32.567Z sam click 1483ms
+2026-11-17T03:16:34.952Z sam view 1381ms
+2026-11-17T03:16:36.526Z sam click 1516ms
+2026-11-17T03:16:38.839Z sam view 1405ms
+2026-11-17T03:16:46.343Z sam view 1380ms
+2026-11-17T03:16:49.048Z sam view 1326ms
+2026-11-17T03:16:50.672Z sam click 1531ms
+2026-11-17T03:17:06.512Z maya ask 81815ms
+2026-11-17T03:17:08.283Z maya frame-text 82ms
+2026-11-17T03:17:08.378Z maya look 38ms
+2026-11-17T03:17:12.599Z maya frame-text 52ms
+2026-11-17T03:17:12.784Z maya frame-shot 130ms
+2026-11-17T03:17:56.032Z maya ask 39053ms
+2026-11-17T03:17:57.890Z error Nothing on screen is labelled "Accept all". Things you can click (closest first; where they are in brackets):
+2026-11-17T03:17:59.267Z maya frame-text 58ms
+2026-11-17T03:18:02.039Z maya view 1473ms
+2026-11-17T03:18:03.823Z maya click 1715ms
+2026-11-17T03:18:04.977Z maya frame-text 76ms
+2026-11-17T03:18:11.090Z maya shot 320ms
+2026-11-17T03:19:19.958Z sam ask 142237ms
+2026-11-17T03:19:21.312Z sam look 78ms
+2026-11-17T03:19:23.916Z sam view 1403ms
+2026-11-17T03:19:26.161Z sam view 1473ms
+2026-11-17T03:19:27.982Z sam click 1748ms
+2026-11-17T03:19:29.441Z sam view 1395ms
+2026-11-17T03:19:32.726Z sam look 55ms
+2026-11-17T03:19:35.080Z sam view 1397ms
+2026-11-17T03:19:36.729Z sam click 1557ms
+2026-11-17T03:19:39.175Z sam view 2397ms
+2026-11-17T03:19:42.980Z sam view 1483ms
+2026-11-17T03:19:44.645Z sam click 1507ms
+2026-11-17T03:19:46.841Z sam type 2138ms
+2026-11-17T03:19:49.174Z sam view 1342ms
+2026-11-17T03:19:52.239Z sam click 1600ms
+2026-11-17T03:19:57.527Z sam wait 4370ms
+2026-11-17T03:19:59.937Z sam view 2357ms
+2026-11-17T03:20:03.823Z sam view 1407ms
+2026-11-17T03:20:05.378Z sam click 1499ms
+2026-11-17T03:20:07.554Z sam type 2038ms
+2026-11-17T03:20:10.441Z sam click 2818ms
+2026-11-17T03:20:16.752Z sam wait 5284ms
+2026-11-17T03:20:18.193Z sam view 1360ms
+2026-11-17T03:20:21.296Z sam view 1334ms
+2026-11-17T03:20:22.929Z sam click 1570ms
+2026-11-17T03:20:24.454Z sam click 1461ms
+2026-11-17T03:20:26.031Z sam type 1528ms
+2026-11-17T03:20:27.884Z sam click 1488ms
+2026-11-17T03:20:29.335Z sam view 1387ms
+2026-11-17T03:20:46.240Z sam view 1388ms

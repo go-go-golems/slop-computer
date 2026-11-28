@@ -1,0 +1,137 @@
+# Persona review findings (working list)
+
+## Round 1 (deepseek-4.1-flash medium, personas and bench agent)
+- [harness] new-app needed the template name up front (sam). Fixed in benchdrive: new-app <id> without a template lists them.
+- [bench] Template names and blurbs are jargon for non-programmers: "actor", "SQL" (maya, step 2).
+- [bench, from benchdrive build] "Page and actor" template showed usr_… ids: app.json lacked the profile scope. Fixed in the worktree (not yet pushed to the review server).
+- [bench, from benchdrive build] A reload shows draft, not the agent's open proposal; only the Review badge hints at the change.
+- [bench, from benchdrive build] A question in Proposal mode makes a proposal and discards it ("… was discarded" in the chat).
+- [agent, from benchdrive build] Replies use internal names: "proposal/mwk3…", "the prop instance".
+- [agent, from benchdrive build] First eval shadowed the files API: const [info, files] = … → ReferenceError.
+- [bench/agent] A turn can end with eval steps and no reply text: maya saw "green ticks everywhere but my page looks the same" and could not tell if it was done (maya, step 3).
+- [bench] Changes land in a proposal; nothing tells a non-programmer to look at it and accept it. maya guessed "Accept all" (maya, step 4).
+- [bench] Two turns in a row with nothing visible changing for maya (step 5): changes in a proposal while she looks at draft? To check in her diary.
+- [bench] Clicking in the app frame selects an element (Select mode); Play mode had to be discovered (priya, step 3).
+- [bug?] Submit does nothing in the proposal's preview of the quiz: no score, no error (priya, step 3). Reproduce.
+- [agent] Leaderboard shows "Admin" (the visitor's name) rather than a student's first name: all students are the same account here; also how names are captured (priya).
+- [bench] A stale "has no action \"list\"" error from the page before the new code loaded stays red in the Console after the page moved on (sam, step 3): errors from an earlier version of a frame should be marked as such or cleared.
+- [bench] Data view had no way to see a proposal's preview data: it listed draft's tables (sam, steps 4-5). FIXED in worktree: Data follows the workspace (Proposal source).
+- [harness] Dialog fields show as `Field "text"` in look, but `type text` does not find them (sam typed into the chat once). Fix benchdrive: accept the label look prints.
+- [BUG, phase 3] Code view said "types ok" on a proposal's main.ts calling slop.actions.list, which the proposal's actor no longer has: declarations came from the dev instance (draft's actor) (devon, step 5; sam's "has no action list" is the same mismatch, a real error not stale). FIXED in worktree: declarations per ref, from the proposal's own instance.
+- [not a bug] Priya's Submit "did nothing": the score appears below the fold of the 375×720 frame. Still: results below the fold look like nothing happened.
+- [agent] Asked "how do I publish / how do I undo" twice, not answered (priya, step 4). Guide: answer workflow questions about the bench itself.
+- [agent] Left a probe action in actor.ts and a deliberate `const all: never` in main.ts; "Empty completion" instead of an explanation (devon, step 6).
+- [bench] Header "0 issues" while the Code footer says "1 type error" (devon, step 6): the header's issue count does not include type errors.
+- [agent] Maya needed four asks before the page itself changed; the agent built "machinery" first (maya, step 7).
+- [bench] '"<title>" was discarded' after a turn that changed nothing: the title is the person's message, so it reads as "your message was discarded" (sam, step 6; benchdrive build). FIXED in worktree: "Nothing in the app changed in this turn."
+- [agent] Sam's three asks (fixture, scenario, a check shown going red) got nine evals, one failed app.sql, no reply text and nothing done (sam, step 6).
+- [bench/agent] Many turns end without any reply text, or with "Empty completion" (devon 6, maya 3/5/10, sam 6). FIXED in worktree: gepp asks a silent model once, without tools, for its reply; the bench writes a summary from the evals if it still has none.
+- [harness] Hand edits: `type code` replaces the whole file; no way to edit at a place (devon, step 9). Add `benchdrive edit <old> <new>` (an edit a person would type).
+- [bench] "+ New" prefilled "about.html", so OK created it (devon, step 9). FIXED in worktree: the field starts empty.
+- [agent] Never told Maya the kitchen code it put on her private list page (maya, steps 11-12).
+- [agent] Never told Priya how to publish, accept or reject (priya, step 5): workflow questions about the bench go unanswered.
+- [fixture] Quiz Submit with unanswered questions: the browser's "required" bubble is invisible in text, so nothing seems to happen (priya, step 5). The quiz's, not the bench's; harness could report validation bubbles.
+- [bench] Canvas shares a dock tab group with Timeline; opening Timeline hides the canvas (priya, step 5). Layout; worth a hint.
+- [bench] Scenario text checks are substring matches; a check passed on the wrong number (sam, step 7). FIXED in worktree: { text, exact: true } and { match: regex }; the guide says numbers use them.
+- [agent] Left probe files/actions in the app (sam 7, devon 6). Guide: leave no testing debris.
+- [bench] Header issues did not count type errors (devon 6). FIXED in worktree: header counts them; the issues menu lists them and jumps to the line.
+- [BUG, server] The test instance's actor kept the deleted store's closed SQL connection after a reset: "sql: connection is already closed", scenarios ran once (sam). FIXED 5d0e593 (kernel OnDeleted → manager Restart).
+- [bench] Unknown scenario step keys silently ignored (sam). FIXED 5d0e593: rejected with the keys the kind takes; sql steps get value and rows.
+- [bench] After Publish nothing shows the live web address; "Share" does nothing (maya). Check the publish flow and the share button.
+- [agent] "I'm not going to guess at the mechanism" when asked why the type check behaved as it did (devon).
+- [agent] Test score rows came along into Priya's draft unannounced (priya).
+- [bench] "+ New" scenario stub ({expect: 'h1'}) passes at once: a green tick that proves nothing (sam's "most dangerous thing"). FIXED: the stub fails until it checks something.
+- [agent] Test data (Sofia, Emma, Noah, Admin) left in dev came along into Priya's published leaderboard. Guide: test data goes in the test instance; scenarios shown failing once.
+- [agent] README left describing the old template app (sam). Guide: keep README true.
+- [harness+bench] "Share" (the shell's, outside the bench frame) seemed dead: benchdrive does not see the shell's dialogs; and Share shares the bench, not the person's app — confusing (maya).
+
+## Round 2 (personas mixed: glm-5.3-flash, glm-5.3 high, deepseek; bench agent glm-5.3)
+- [harness] look/click show only the first 12 lines of a file; no way to read the rest (rosa). Add `benchdrive read [from] [to]` (scrolling, as a person would) — needs a daemon restart: round 3.
+- [harness] `type code` replaces the whole file; rosa nearly destroyed index.html (recovered with Ctrl+Z). Steer to `edit`; make `type code` refuse without --replace.
+- [bench] Select mode clicks on buttons select instead of press (priya r1, maya r2). FIXED 29f2eb7: a one-time hint names Play (P); the canvas hint says so.
+- [harness] pi's bash tool gives up after 180 s; a long `ask` (glm-5.3, a whole kanban at once) timed out and the persona's next command queued behind it (devon, kenji). Round 3: ask returns after 150 s; `wait` follows the running turn.
+- [harness] confirm() dismissed by Playwright (rosa's delete). Round 3: dialogs accepted and reported. (Real browsers show it: frames are not sandboxed without allow-modals.)
+- [BUG, sample] glm-5.3 wrote its tool call as text (<tool_call>eval …), the turn ended mid-task with markup as the reply (maya r2 step 7). FIXED 3fe5457: told and retried, at most twice.
+- [bench] Test orders entered in a proposal's preview "disappeared" after accepting (maya r2). FIXED 3fe5457: the proposal note and accept toast say the preview's data stays behind.
+- [ci] probe.js left out of two commits; CI's freshness test failed. FIXED 0e3977b; commit apps, pkg and web together.
+- [BUG, bench sandbox] The eval session's declaration rewrite made "const [a, b] = …" into "([a, b] = …)", which continued a previous line without a semicolon as a call: "TypeError: not a function (line 2)"; aisha's agent failed five evals on it (r2). FIXED (rewrite.js; ";" for the keyword; test fails on the old rewrite). Also: "not a function" errors now quote the line.
+- [agent+guide] To clean up test data the agent reset the dev instance, dropping all data (maya r2: preview empty; rosa refused: real stock). Guide/app.reset: never reset to clean up; ask first.
+- [bench?] Scenarios tab said "No scenarios yet" after the agent said it made them; no failed-save notice (sam r2). Investigate: likely in a proposal while the view shows draft, or files rejected by the stricter step check.
+- [bench] Kenji (r2) also met the proposal-to-accept and Select/Play barriers (third and fourth time across personas).
+- [BUG, bench] Clicking a file's name in Review toggled its checkbox (name inside the label); "Accept 9" dropped actor.ts, the draft broke ("no such table: items"), and the left-out change was discarded with the closed proposal (devon r2). FIXED: checkbox only; partial accept asks, naming what is discarded.
+- [bench] After a seed the frames kept old data (sam r2). FIXED: seeds reload the dev frames.
+- [feature] All canvas frames share one visitor identity: two voters, or a host and an audience member, cannot be tested (kenji r2). Needs frames as different simulated people.
+- [bench] A new frame lands off-screen; clicking it timed out until "Fit" (kenji r2). Check: scroll a new frame into view.
+- [bench?] Two "This week" panes with different numbers (sam r2): which is the app? Check his screenshots.
+- [BUG, scenarios] { expect, text } compared against the probe's description, cut at 120 chars: checks on a table missed rows past the first few (sam r2, found by its agent). FIXED 8a68886 (probe texts()).
+- [BUG, sample] "Tool conversation exceeds local context budget" mid-answer (sam r2). FIXED 8a68886: one last round without tools to reply.
+- [bench] Agent turns of 3–13 minutes on glm-5.3 (devon, sam r2): long; the person sees only "Working". Consider progress text, or nudging smaller evals.
+- [bench, from rosa r2] No way to delete one row of dev data. FIXED cd978d0 (workshop.exec, Data view ✕, app.exec).
+- [bench] Members (non-admin) get "only admins change app code … D9" from Create. FIXED (me action; the New app dialog says so first).
+- [design] Frames as different people (kenji, aisha r2; priya r1): proposal design-doc/02, for a decision.
+
+## Round 3 (running)
+- [harness] theo's pi ended "the upstream stream failed before completion" (lunaroute) after 38 commands; resumed with pi --continue.
+- [harness] all personas share admin@example.com: the bench opens on the last app anyone opened (grace: "opened on someone else's app"). Real for a shared account only.
+- [visual audit] 900 px: the header overflows (Layout cut, theme toggle gone), "Panels" tab cut to "Pa".
+- [visual audit] 1280x800: Code editor 180 px × 12 lines (file list 190 px; the 480 px container rule lost to the base rule). FIXED: narrow Code view hides the list behind "Files".
+- [visual audit] Publish dialog wording is platform jargon ("moves main to this draft", "production instances", "migration").
+- [lena] agent sent a bench-only person to `slop vendor`. FIXED in the guide. DECISION for the user: a bench "Add a package" (server-side npm fetch into vendor/) — supply-chain question.
+- [harness, SECURITY] lena (r3) ran the operator's real `slop` CLI from her bash tool: whoami (name, email, user id), store ls, app ls, help; one import failed not_found; nothing written. Fixed: run.sh/resume.sh put a `slop` shim first on PATH and point SLOP_SERVER/CREDENTIALS nowhere; all six restarted with it. Her transcript's CLI outputs get redacted before archiving.
+- [harness] benchdrive `see` saved relative paths in the daemon's cwd (the operator's repo checkout); the client now resolves them like shot. Stray shots moved out.
+- [visual, maya-visual r3] "New app…" was below 20+ apps in the app menu, out of sight. FIXED: first in the menu. (Text personas never hit it.)
+- [visual audit] the agent pill disappeared in my first 1000 px header fix (hide-s); FIXED (markbtn only).
+- [bench] long turns: a running reply now says "Working for N: <phase>" and suggests Stop after 4 min.
+- [kenji r3] "model provider request failed" on the first ask (lunaroute); a re-send worked.
+- [harness, kenji r3] frame-click into a frame panned out of view times out; a person would pan (Fit works). benchdrive: scroll/pan the frame into view first (next round).
+- [design, sam r3] a proposal's preview runs on its own empty data, so the page looked empty while the draft had rows (again, after r2's note). Consider seeding a proposal's preview from the dev data (or offering to), not only explaining it.
+- [app or harness, sam r3] clicking a "shipped" label didn't toggle its radio: either the agent's markup doesn't associate the label (an app a11y bug the guide could cover) or frame-click hit a span. Check the markup.
+- [bench agent, grace r3] "today is 17 November" (eval Date, UTC) vs the page's "Printed on 16 November" (local, near midnight). FIXED: each turn's context gives the person's local time and zone.
+- [app, grace r3] a Print button and a changed date on the A4 "paper" frame: does the printer get the button? The guide could say: print views hide controls (@media print).
+- [harness, kenji r3] look truncates long agent replies ('… 71 more lines'); add a way to read the last reply whole (next round).
+- [data, grace r3] the Data view does not list a store's collections; you must know the name (a collection…). Needs a server listing.
+- [brief, theo-ts r4] my brief said inventory2 has CSV export and low-stock rows; those were Rosa's work in 'inventory'. Theo-ts noticed. Brief error, not the bench.
+- [bench agent, theo-ts r4] glm-5.3 wrote '[eval #1 …]' blocks into its reply (imitating the history), never ran them, and reported the work verified; nothing landed. FIXED (FAKED_EVAL: text dropped, model told nothing ran; guide line).
+  (scan of all apps: 5 such replies before the fix: inventory 1 (r2), inventory2 3 (r3-r4), lena-charts 1 (r3); scripts/06-api-mining/faked.mjs)
+- [harness, priya2 r4] a lost tab reopened on the shared account's last app; her message went to another app's agent. FIXED in benchdrive (remembers each persona's app; next daemon start). Also: reply prints whole lines (devon2).
+- [harness, ines-visual r4] "Accept the changes does nothing": her clicks were ~23 px above the button (vision aim). benchdrive click-at now says when the point has nothing clickable (the pointer cue a person gets). Next daemon start.
+- [canvas, ines-visual r4] a frame's last field hides behind the SELECT/DRAFT mode bar at the canvas bottom.
+- [code view, devon2 r4] the file list closed on every switch in the narrow view. FIXED: stays open once shown.
+- [bench agent, theo-ts r4, again] 'big turns silently lose everything while reporting success' = the 0-eval turns that wrote evals as text; his 1-eval turns landed. Same root cause as above (fixed, deploys after the round).
+- [scenarios, theo-ts r4] a scenario cannot check a download's content (CSV export): propose a { download: name, text|match|exact } step (the probe records the last download's name and text).
+- [bench agent, devon2 r4] thread died: "a prompt is at most 262144 bytes"; the thread stopped saving; the turn before ended mid-sentence after 27 evals. FIXED: fitPrompt (240 KB, largest turns cut, recorded as promptCut), scope snapshot capped at 96 KB total, a spent turn ends with a tool-less report. Exact trigger not recoverable (the failing in-memory state was never saved).
+- [bench, ines-visual r4] print() in a frame did nothing. FIXED (a toast says where printing works).
+- [chat, ines-visual/aisha r4] evals mixed into replies. FIXED (finished replies fold their steps into one line).
+- [scenarios, theo-ts r4] download step. BUILT; needs the server rebuild to verify (scenario frames use the server's probe).
+- [guide, lena r4] library answer inconsistent. FIXED in the guide (three real options); CDN policy is the user's decision.
+- [chat, devon3 r5] a reply saved while running (round 4's failed turn) showed 'Working for 56 min', no Stop. FIXED (f? see git): on load, a running reply older than 15 min shows as interrupted.
+- [harness, lena2 r5] a text persona on glm-5.3 cannot read screenshots; chart goals need a deepseek (vision) persona. Not a bench issue.
+- [canvas, lena2 + aisha2 r5] the P key did nothing once a frame had focus (two personas). FIXED (probe forwards mode keys outside Play); verify after the server rebuild.
+- [fixtures, theo-ts2 r5] fixtures saved from the Data view carried __rowid (my regression), and dev-captured rows clashed with migration-seeded ids. FIXED: seed replace for scenarios, __ keys dropped, Save as fixture strips __rowid (TestBenchSeedReplace).
+- [scenarios, theo-ts2 r5] the agent's results (its proposal) contradicted Run all (draft). FIXED: results carry their workspace; the reference says to name it.
+- [agent, rosa2 r5] a 7-minute turn of self-corrected probe failures, visible only as progress lines (the running timer shows; the steps fold after). Watch.
+- [harness, devon3 r5] 6+ minute turns: lunaroute throttling with 6 personas plus their bench agents; the chat shows 'Working for N: phase', benchdrive's header line does not. Not a bench change.
+- [canvas, lena2/rosa2/aisha2 r5] Select as the first mode tripped three personas. FIXED: first visit is Play (a chosen mode is remembered).
+- [publish, lena2 r5] looked for Publish in the menus. FIXED: "Publish <app>…" in the project menu.
+- [agent API, lena2 r5] canvas-drawn content (Chart.js) is invisible to every agent tool; overlapping labels at 375 px were caught only by the person. PROPOSAL: frames.look(frameId, selector?, question) — the probe exports a <canvas> (toDataURL) or the frame's DOM as an image, and a vision-capable sample answers the question.
+- [agent, devon3 r5] a 27-eval turn left only its opening half sentence (last call silent, < 9 evals). FIXED: a silent call after evals gets the tool-less report call.
+- [agent accuracy, rosa2 r5] the agent's summary of which scenario files it changed was wrong once; she checked three files by hand. No direct fix; evidence in the UI (folded steps listing changed files) helps.
+- [canvas, devon3 r5 + aisha r4] 'Add did nothing': a required field refused silently. FIXED: the probe reports invalid fields (console + notice); verify after the rebuild.
+- [code view, ines2-visual r5] a stray key saved into index.html (<body> → <bdy>) and broke the shop; History didn't say which version was safe. FIXED: an edit of ≤3 keys offers Undo (verified on benchnext).
+- [canvas, ines2-visual r5] frames the agent opened landed off screen. FIXED: frames.open brings the frame into view (verified).
+- [publish, ines2-visual r5] a dark "Roll back to 7" beside Done. FIXED: "Undo this publish…", plain, confirmed.
+- [guide, devon3 r5] symbol-only buttons with no item name; a silent 4 s confirm timeout. Guide line.
+- [guide, aisha2 r5] a raw action error reached volunteers. Guide line.
+
+## Decisions (2026-11-17)
+- CDN scripts in app pages: KEEP ALLOWING (the guide's three options stay: no library, a pinned CDN link, a vendored package).
+- A vision model tier: YES, lunaroute/deepseek-4.1-flash. BUILT: pi.models.vision on the server, frames.look in the bench (a1? see git: the vision commit and doc/production.md).
+- Frames as different people: explained; no decision yet.
+
+## Feature requests from the user (2026-11-17, for later; not started)
+- Stream the agent's thinking into the chat as it happens.
+- Interleave evals properly with the reply: text, eval, text, eval in the order they happened, instead of the reply text with its steps beside it.
+- Syntax highlighting (where exactly is still to settle with the user: the Code view's editor, code blocks in the chat, eval steps).
+- A message sent while the agent is busy is queued, not refused: the queued message shows in the chat with Cancel (drop it) and Send now (stop the running turn and send it).
+- When the agent looks at an image (frames.look), the chat shows a thumbnail of it in that eval step; click to zoom.
+- Attach images to a chat message (paste, drop, or a button): the agent receives them with the message (the server's vision model reads them).

@@ -22,6 +22,17 @@ import (
 	"github.com/go-go-golems/slop-computer/pkg/verbs"
 )
 
+// noSnapshot is the error for a snapshot or ref a store does not have. A
+// store that runs another app has no code of its own, so pulling it is
+// almost always meant for its app: say which (SLOP3-026, persona round 1:
+// "slop pull guestbook" answered only "no snapshot or ref main").
+func (e filesEnv) noSnapshot(ctx context.Context, id, at string) error {
+	if st, err := e.K.Registry.StoreByID(ctx, id); err == nil && st.App != "" && st.App != id {
+		return verbs.Errf("not_found", "no snapshot or ref %s: %s has no code of its own, it runs the app %s (slop pull %s <dir>)", at, id, st.App, st.App)
+	}
+	return verbs.Errf("not_found", "no snapshot or ref %s", at)
+}
+
 func filesVerbs(e filesEnv) []*verbs.Verb {
 	return []*verbs.Verb{
 		verbs.Def[FilesLsIn, []store.File]{Name: "files.ls", Doc: "List files: the working tree, a snapshot (--at 3, --at main) or the assets zone.", Scope: verbs.Read, Action: authz.StoreRead,
@@ -35,7 +46,7 @@ func filesVerbs(e filesEnv) []*verbs.Verb {
 				if at := in.At; at != "" {
 					n, err := s.Ref(ctx, at)
 					if err != nil {
-						return nil, verbs.Errf("not_found", "no snapshot or ref %s", at)
+						return nil, e.noSnapshot(ctx, in.Store, at)
 					}
 					fs, err := s.SnapshotFiles(ctx, n)
 					if err != nil {
@@ -63,7 +74,7 @@ func filesVerbs(e filesEnv) []*verbs.Verb {
 				if at := in.At; at != "" {
 					n, rerr := s.Ref(ctx, at)
 					if rerr != nil {
-						return nil, verbs.Errf("not_found", "no snapshot or ref %s", at)
+						return nil, e.noSnapshot(ctx, in.Store, at)
 					}
 					f, err = s.SnapshotFile(ctx, n, in.Path)
 				} else {

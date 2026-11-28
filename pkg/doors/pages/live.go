@@ -333,7 +333,7 @@ func (s *Door) siteViewCall(w http.ResponseWriter, r *http.Request, rest string)
 		s.rt.views.Renew(v)
 		httpx.JSON(w, 200, map[string]any{"view": v.ID, "secret": v.Secret, "expiresAt": v.Expires})
 	case op == "" && r.Method == http.MethodDelete:
-		s.rt.views.Close(v, false)
+		s.rt.views.CloseFor(v, false, "the page closed it")
 		httpx.JSON(w, 200, map[string]any{"ok": true})
 	case op == "consent" && r.Method == http.MethodPost:
 		httpx.JSON(w, 200, map[string]any{"ok": true})
@@ -613,7 +613,7 @@ func (s *Door) confirm(ctx context.Context, v *rt.View) bool {
 	}
 	row, err := s.Registry.StoreByID(ctx, v.Target)
 	if errors.Is(err, sysdb.ErrNotFound) {
-		s.rt.views.Close(v, true)
+		s.rt.views.CloseFor(v, true, "its store "+v.Target+" was deleted")
 		return false
 	}
 	if err != nil {
@@ -632,12 +632,12 @@ func (s *Door) recheck(ctx context.Context, v *rt.View, row sysdb.StoreRow) bool
 	d := s.K.Access.Level(ctx, s.viewPrincipal(ctx, v), row)
 	switch {
 	case d.Level == rt.LevelNone:
-		s.rt.views.Close(v, true)
+		s.rt.views.CloseFor(v, true, "the viewer no longer has access to "+v.Target+" (a grant, mount or policy changed)")
 	case d.Level != v.Level || string(d.Audience) != v.Role || !s.samePolicy(ctx, v, string(d.Audience)) ||
 		!s.db.Space(ctx, v.Target, v.Caps, v.Policy["stores"]).Equal(v.Space) || // its aliases changed (SLOP3-008)
 		s.remoteLevelsMoved(ctx, v): // or the viewer's level on a store it reads
 		v.Send(rt.Out{Type: "access", Data: map[string]any{"level": d.Level.String()}})
-		s.rt.views.Close(v, false)
+		s.rt.views.CloseFor(v, false, "the viewer's access to "+v.Target+" changed (now "+d.Level.String()+"): reload the page")
 	default:
 		return false
 	}

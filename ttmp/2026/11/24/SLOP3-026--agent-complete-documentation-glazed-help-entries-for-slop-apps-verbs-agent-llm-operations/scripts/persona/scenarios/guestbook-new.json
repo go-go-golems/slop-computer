@@ -1,0 +1,15 @@
+{
+  "id": "guestbook-new", "persona": "builder", "maxTurns": 6,
+  "opening": "Could you set up a guestbook for our team? It should be at /guestbook on our apps site. Anyone can read it, but only people who are signed in should be able to leave an entry.",
+  "goal": "a guestbook page at /guestbook on the live host that everyone can read and only signed-in people can add entries to",
+  "later": ["can you make sure a visitor who is not signed in really cannot add an entry?"],
+  "checklist": [
+    "a store holds the guestbook and is mounted at /guestbook on the live host; the page answers",
+    "guests (not signed in) can read but cannot add entries",
+    "signed-in members can add entries",
+    "it tells the person where to open it",
+    "it checks what it built before saying it is done"
+  ],
+  "facts": ["The live host of this server is apps.localhost:<port>; slop mount ls shows hosts in use.", "A store's levels come from grants: @member interact lets members write when the app's db rules or actions need interact."],
+  "personaKnows": "You open pages in your browser at the address the assistant gives you. You can sign in on the site."
+}

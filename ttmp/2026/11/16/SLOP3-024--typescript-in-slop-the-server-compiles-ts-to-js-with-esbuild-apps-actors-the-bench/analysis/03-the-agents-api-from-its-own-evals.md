@@ -1,0 +1,113 @@
+---
+Title: "The agent's API, from its own evals"
+Ticket: SLOP3-024
+Status: active
+Topics:
+    - frontend
+    - apps
+DocType: analysis
+Intent: long-term
+Owners: []
+RelatedFiles:
+    - Path: web/bench/src/core/api.js
+      Note: the API table; `ret` and the reference line
+    - Path: web/bench/src/worker/rewrite.js
+      Note: shadowed API names; lib.def's free-name analysis
+    - Path: web/bench/src/agent/agent.js
+      Note: turn continuation past one call's 9 evals
+    - Path: web/bench/src/frames/probe.js
+      Note: Playwright-style text selectors
+ExternalSources: []
+Summary: "690 eval steps of the bench agent from the persona reviews, mined for where the JS API and its documentation failed the agent; what each failure pattern was and the fix in the API rather than in more guide rules."
+LastUpdated: 2026-11-17T00:15:00-05:00
+WhatFor: "Improving the bench agent's API and its reference from evidence."
+WhenToUse: "Before changing the agent's API or guide; to repeat the mining after a persona round."
+---
+
+# The agent's API, from its own evals
+
+The persona reviews showed the bench through the eyes of the people using it. The bench's own agent left a second record: every eval it ran, with its code and outcome, sits in the app's threads. That record shows where the JavaScript API and its documentation mislead the agent. This document covers the mining, what it found, and what changed.
+
+## The method
+
+`scripts/06-api-mining/mine.mjs` signs in to the review server in a headless browser, opens each app through the bench's own `Projects.open`, loads every thread, and writes one JSON line per eval step: app, thread, turn, status, code, output. It only reads. `analyze.py` groups the failures by message, shows the failing line of each, counts the calls, and gives the number of evals per turn.
+
+```sh
+node scripts/06-api-mining/mine.mjs steps.jsonl <app> <app> …
+python3 scripts/06-api-mining/analyze.py steps.jsonl
+```
+
+Rounds 1 and 2 gave 520 steps, 52 of them failed. The first apps of round 3 gave 170, 18 of them failed.
+
+## What it found
+
+| Pattern | Evals | What the agent did | The fix |
+|---|---|---|---|
+| Turns cut at 9 evals | 60 of 97 turns | Stopped mid-task at exactly 9 evals; the person had to say "continue" | A turn continues a call that used all its evals, up to its budget (e8575e7) |
+| A wrong return shape | 7 | `layout.filter(…)`: the doc said "every rendered element", but `frames.layout` returns `{…, items}` | `ret` in the API table, shown in the reference and in `help()` (c182885) |
+| A shadowed API name | 5 | `const frames = await frames.list()`; `const [info, app] = await par([app.info()])`: "files is not initialized" | The eval is refused before it runs, naming the variable (c182885) |
+| A regression | 4 | Every `lib.def` failed: "collectPattern is not defined" | The helper moved with `rewrite()`; now exported and tested (50481c3) |
+| ASI in the eval rewrite | ~7 | "not a function" on a `])` line | Fixed in round 2 (8185257) |
+| No instance yet | 2 | `app.sql` right after `app.reset()`: "no store …-dev-…" | `app.reset` waits for the fresh instance; data calls start a missing one and retry |
+| A list given as an object | 2 | `fixtures.capture(name, {tables: {orders: …}})`: "not iterable" | An object's keys are accepted |
+| Playwright selectors | 2 | `article:has(h2:has-text("…")) input`: "bad selector" | `:has-text()` followed by more selector, inside `:has()`, and `:text()` |
+| A bare refusal | 2 | A write through `app.sql`: "not authorized" | It says to use `app.exec` |
+| No `Intl` | 1 | `Intl.DateTimeFormat()` in the sandbox | The guide says so; the person's local time is in the context |
+
+The table's `doc` strings already reached the agent in the guide's reference, but `help()` showed only signatures, and no entry said what a call returns unless its doc happened to.
+
+## Round 4
+
+Round 4 gave 347 evals, 41 of them failed. The round-3 patterns were gone from the round's own threads (the `collectPattern` and selector failures left in the data are from round-3 threads in the same apps). Four new patterns, and one that wasn't in the evals at all:
+
+| Pattern | Evals | What the agent did | The fix |
+|---|---|---|---|
+| Evals written as text | 5 replies, 3 apps | Wrote "[eval #1 …code…]" into its reply, imitating the history, never called the tool, and reported results it invented | A reply with bench API calls as code and no evals is dropped, and the model told once that nothing ran; past fakes are replaced in the history (6d1660b, 955a8ab) |
+| `par` with an object, destructured as a list | 2 | `const [status, logs] = await par({ status: app.status(), logs: app.logs() })` | The named result also iterates its values in key order (52400a9) |
+| A frame object as a frame id | 1 | `frames.label(f2, …)` with `f2` from `frames.open`: "no frame [object Object]" | Frame arguments take the object |
+| `attrs` missing | 2 | `c.attrs['data-title']` on elements without listed attributes | `attrs` is always an object, as documented |
+| A proposal's logs | 1 | `app.logs({ kind: 'prop' })`: "kind is dev or test" | `kind: 'prop'` reads the proposal the eval writes to |
+| A flat API name declared | 21 declarations of `s` over all rounds | `const s = await app.status()` refused as a shadow | A flat name stays a local of the eval unless used before its declaration ends; namespaces are still refused |
+
+Two failures were about limits, not the API. A long thread died on the runtime's 256 KB prompt limit, and a turn that spent its 30 evals ended mid-sentence. The bench now fits its prompts (`fitPrompt`) and ends a spent turn with one tool-less call for a report (4da058f).
+
+`faked.mjs` finds replies with evals written as text in any set of apps; `promptsize2.mjs` measures the prompt a thread's next turn would send, with the model call stubbed.
+
+## Round 5
+
+622 evals, 74 failed (some from earlier rounds' threads in the same apps). The round-4 fixes showed in the data: no faked evals, no turn left without a report.
+
+| Pattern | Evals | What the agent did | The fix |
+|---|---|---|---|
+| Fixtures that couldn't load | 6 | `__rowid` in rows saved from the Data view; ids clashing with migration-seeded rows | A scenario's fixture replaces its tables' rows; `__` keys dropped (7d36f65) |
+| TypeScript without `ts: true` | 2 | `catch (e: any)`, `const SAMPLE: [string, string, number][]` | A failed parse of typed-looking code runs again with its types stripped, and the step says so (7c0d36a) |
+| `.items` results used as arrays | 1 (and in every round) | `layout.filter(…)` | Non-enumerable array methods on a result with an `items` array |
+| Options in the args' place | 1 | `app.sql(q, { kind: 'test' })` | `app.sql`/`app.exec` take them |
+| SVG elements | 1 | `frames.click` on an SVG rect: "el.click is not a function" | A dispatched click |
+| A declaration list without values | 1 | `let applied, rowsNow;`: a syntax error from the rewrite | Edits at one position in the right order (23447b2) |
+| A namespace declared in its own statement | 3 | `const [readme, types] = await Promise.all([…, types.check()])` | Refused, correctly: it uses the API it hides |
+
+Two agent behaviours weren't API problems:
+- **Results from another workspace.** The agent ran scenarios in its proposal, where it had edited fixtures, and reported failures the person couldn't see on draft. Results now name their workspace.
+- **A silent call.** A call that ran evals and returned no text left a 27-eval turn with half a sentence. It now gets the report call.
+
+## How agents use the API
+
+The 25 most used calls, over rounds 1 to 3:
+
+> files.read 509, files.replace 182, app.sql 164, frames.text 146, files.write 101, scenarios.run 98, frames.type 98, frames.click 90, files.lines 70, app.status 66, types.check 61, frames.check 55, frames.query 48, frames.list 40, scenarios.save 40, files.grep 37, frames.inspect 35, frames.reload 34, app.info 30, files.list 30, session.mark 29, app.logs 28, app.exec 25, scenarios.runAll 24, frames.waitFor 22
+
+`help()` appeared in 24 evals: agents rely on the reference in their instructions, so the reference has to carry the return shapes. `Promise.all` (170) is used more than `par` (87); both work.
+
+## What the fixes deliberately don't do
+
+- **No more rules in the guide for these.** Each failure was a mismatch between what the API did and what a careful reader of its reference would expect. The API changed, or says more, so the next agent doesn't need a rule to avoid the trap.
+- **No higher server limit.** A page's sample call keeps its 10 rounds, which bound cost per call. The bench continues a full call within its own turn budget of 30 evals.
+
+## Repeating it
+
+After each persona round, mine the round's apps and compare with the table above: a new pattern with more than one eval is worth a fix. The verification scripts beside `mine.mjs` are:
+
+- `qsa-test.mjs`: the selector forms against a real DOM;
+- `e2e.mjs`: `help()`, refusals and `lib.def` through the bench's Eval view on a second bench;
+- `cont.mjs`: a 12-eval request in one turn.

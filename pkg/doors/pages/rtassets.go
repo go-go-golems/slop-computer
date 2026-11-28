@@ -33,7 +33,7 @@ var assetTypes = map[string]bool{
 func (s *Door) uploadAsset(w http.ResponseWriter, r *http.Request) {
 	v := s.viewOf(r)
 	if v == nil {
-		httpx.Fail(w, 401, "revoked", "the view is closed or expired")
+		httpx.Fail(w, 401, "revoked", s.closedMsg(r))
 		return
 	}
 	if _, ok := grantedCaps(v)["assets"]; !ok {

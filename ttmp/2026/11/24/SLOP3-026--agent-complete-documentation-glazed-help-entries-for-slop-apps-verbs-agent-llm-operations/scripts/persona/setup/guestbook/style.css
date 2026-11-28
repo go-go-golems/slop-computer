@@ -1,0 +1,10 @@
+body { font: 16px/1.5 system-ui, sans-serif; color: #1a1a1a; max-width: 36rem; margin: 3rem auto; padding: 0 1rem; }
+h1 { font-weight: 600; letter-spacing: -0.01em; }
+form { display: flex; gap: 0.5rem; }
+input { flex: 1; font: inherit; padding: 0.4rem 0.6rem; border: 1px solid #1a1a1a; }
+button { font: inherit; padding: 0.4rem 0.9rem; border: 1px solid #1a1a1a; background: #1a1a1a; color: #fff; cursor: pointer; }
+ul { list-style: none; padding: 0; }
+li { border-bottom: 1px solid #ddd; padding: 0.75rem 0; }
+li p { margin: 0 0 0.25rem; }
+li span, .dim, #msg { color: #737373; font-size: 0.875rem; }
+.reply { color: #444; font-style: italic; }

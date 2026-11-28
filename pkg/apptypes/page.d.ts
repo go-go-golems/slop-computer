@@ -1,4 +1,4 @@
-/* slop page runtime declarations (window.claude), built from web/runtime: do not edit. source sha256:9cbcfa2adee1d8ec50cb0027aeaefd2cb943d1418c539091bc608a6a102b3c24 */
+/* slop page runtime declarations (window.claude), built from web/runtime: do not edit. source sha256:ff195744ce9942c1581db8d4a37cdfb2e65aa445a5a0c8b8fcd7b0b8d7c9f2eb */
 // window.claude: claude.use(name) resolves a capability's namespace, or null.
 // claude.use<Actions>("slop") types the actor's actions by the app's contract.
 declare module "slop:page/limits" {
@@ -119,7 +119,280 @@ declare module "slop:page/transport" {
     /** A raw same-origin request with the view's secret (assets, slop). */
     export function request(path: string, init?: RequestInit): Promise<Response>;
 }
+declare module "slop:page/consent" {
+    import { type Hello } from "slop:page/transport";
+    export function initPermissions(h: Hello | null): void;
+    /** A capability's consent, bound to its own name. */
+    export type Grant = {
+        readonly name: string;
+        consent(code?: string): Promise<void>;
+    };
+    /** The grant a capability is built with; only index.ts's resolve calls it,
+     *  with the name being resolved (test/consent.test.ts checks). */
+    export function grantFor(name: string): Grant;
+    export const permissions: Readonly<{
+        state(name?: string): Promise<string | Record<string, string>>;
+        request(names?: readonly string[]): Promise<Record<string, string>>;
+        manage(): Promise<void>;
+    }>;
+}
+declare module "slop:page/chatapp/timeline" {
+    export type Payload = Record<string, any>;
+    export type Entity = {
+        kind: string;
+        id: string;
+        created: number;
+        payload: Payload;
+    };
+    export type UIEvent = {
+        sessionId?: string;
+        ordinal?: string | number;
+        name: string;
+        payload?: Payload;
+    };
+    export type SnapshotEntity = {
+        kind: string;
+        id: string;
+        createdOrdinal?: string | number;
+        tombstone?: boolean;
+        payload?: Payload;
+    };
+    export type Snapshot = {
+        sessionId?: string;
+        snapshotOrdinal?: string | number;
+        status?: string;
+        entities?: SnapshotEntity[];
+    };
+    export type Usage = {
+        input: number;
+        output: number;
+        cachedInput: number;
+    };
+    export type Question = {
+        id: string;
+        text: string;
+        at: number;
+    };
+    export type TextPart = {
+        kind: "thinking" | "text";
+        id: string;
+        text: string;
+        streaming: boolean;
+        startedAt: number;
+        finishedAt: number;
+    };
+    export type ToolPart = {
+        kind: "tool";
+        id: string;
+        name: string;
+        input: unknown;
+        result: unknown;
+        error: string;
+        status: string;
+        state: string;
+        where: "server" | "browser";
+        mode: string;
+        executor: Payload | null;
+        startedAt: number;
+        finishedAt: number;
+    };
+    export type Part = TextPart | ToolPart;
+    export type Answer = {
+        id: string;
+        status: "running" | "finished" | "failed" | "stopped";
+        code: string;
+        error: string;
+        truncated: boolean;
+        reason: string;
+        model: string;
+        startedAt: number;
+        finishedAt: number;
+        usage: Usage;
+        providerCalls: number;
+        parts: Part[];
+        text: string;
+    };
+    export type Turn = {
+        question: Question | null;
+        answer: Answer | null;
+    };
+    export const TERMINAL: Set<string>;
+    export const parentOf: (segmentId: string) => string;
+    export class Timeline {
+        #private;
+        /** Increases with every change. */
+        version: number;
+        /** The ordinal of the last snapshot or event applied. */
+        get ordinal(): number;
+        /** A snapshot replaces the copy. */
+        reset(snap: Snapshot): void;
+        /** Applies one UI event; true when the copy changed. An event the copy already reflects is ignored. */
+        apply(ev: UIEvent): boolean;
+        entity(kind: string, id: string): Entity | undefined;
+        /** Entities (of one kind), in creation order. */
+        entities(kind?: string): Entity[];
+        /** Whether a run of the session is running. */
+        get running(): boolean;
+        /** The conversation: each question with its answer, in order. */
+        answers(): Turn[];
+        /** One answer by its run's message id. */
+        answer(id: string): Answer | null;
+    }
+}
+declare module "slop:page/chatapp/session" {
+    import { type Answer, Timeline, type UIEvent } from "slop:page/chatapp/timeline";
+    export type Options = {
+        /** fetch to use (a page's own transport); default globalThis.fetch. */
+        fetch?: typeof fetch;
+        /** Extra request headers. */
+        headers?: Record<string, string>;
+    };
+    export type SessionInfo = {
+        id: string;
+        title?: string;
+        labels?: Record<string, string>;
+        created?: string;
+        updated?: string;
+        usage?: Record<string, number>;
+        data?: unknown;
+        [k: string]: unknown;
+    };
+    export type BrowserTool = {
+        name: string;
+        description?: string;
+        inputSchema?: object;
+        /** "human": a person approves each call (the page asks); the server waits longer. */
+        mode?: "frontend" | "human";
+        execute: (input: any, ctx: {
+            signal: AbortSignal;
+            callId: string;
+        }) => unknown;
+    };
+    /** An error answer from the server: {error, code} with the HTTP status. */
+    export class ChatError extends Error {
+        code: string;
+        status: number;
+        constructor(code: string, message: string, status?: number);
+    }
+    /** Reads server-sent events from a response body: calls fn(event, data) per frame. */
+    export function readSSE(body: ReadableStream<Uint8Array>, fn: (event: string, data: string) => Promise<void> | void): Promise<void>;
+    export class Session {
+        #private;
+        readonly id: string;
+        readonly base: string;
+        readonly timeline: Timeline;
+        info: SessionInfo;
+        private constructor();
+        /** Creates a session ({labels, data, id?}) and opens it. */
+        static create(base: string, req?: {
+            labels?: Record<string, string>;
+            data?: unknown;
+            id?: string;
+        }, o?: Options): Promise<Session>;
+        /** Opens an existing session: resolves after its first snapshot. */
+        static open(base: string, id: string, o?: Options): Promise<Session>;
+        /** Connects to a session the caller already has (its info from create or list): resolves after the first snapshot. */
+        static attach(base: string, info: SessionInfo, o?: Options): Promise<Session>;
+        /** Lists sessions that have all these labels. */
+        static list(base: string, labels?: Record<string, string>, o?: Options): Promise<SessionInfo[]>;
+        /** Calls fn after every change (ev: the UI event; null: a snapshot). Returns an unsubscribe function. */
+        on(fn: (ev: UIEvent | null) => void): () => void;
+        /** Sends a message; resolves with the run's message id (the answer's id). */
+        send(prompt: string, extra?: Record<string, unknown>): Promise<string>;
+        /** Resolves with the answer once it is finished, failed or stopped. */
+        wait(id: string, signal?: AbortSignal): Promise<Answer>;
+        stop(): Promise<void>;
+        delete(): Promise<void>;
+        /** Stops the stream and the page's running tool calls. */
+        close(): void;
+        /** Registers the page's browser tools (replacing earlier ones) and runs the calls the server assigns to this page. */
+        tools(list: BrowserTool[]): Promise<void>;
+    }
+}
+declare module "slop:page/chatapp/index" {
+    export { ChatError, readSSE, Session } from "slop:page/chatapp/session";
+    export type { BrowserTool, Options, SessionInfo } from "slop:page/chatapp/session";
+    export { parentOf, TERMINAL, Timeline } from "slop:page/chatapp/timeline";
+    export type { Answer, Entity, Part, Payload, Question, Snapshot, SnapshotEntity, TextPart, ToolPart, Turn, UIEvent, Usage } from "slop:page/chatapp/timeline";
+}
+declare module "slop:page/agent" {
+    import type { Grant } from "slop:page/consent";
+    type Tool = {
+        name: string;
+        description?: string;
+        inputSchema?: Record<string, unknown>;
+        /** "human": a person approves each call (the page asks); the server waits longer. */
+        mode?: "frontend" | "human";
+        execute: (input: Record<string, unknown>, ctx: {
+            signal: AbortSignal;
+            callId: string;
+        }) => unknown;
+    };
+    type OpenOptions = {
+        title?: string;
+        /** The system prompt, fixed for the session's life (the prompt prefix stays the same). */
+        system?: string;
+        modelTier?: "default" | "complex" | "quick";
+        model?: string;
+        effort?: "low" | "medium" | "high";
+        maxRounds?: number;
+        /** Milliseconds one tool call may run. */
+        toolTimeout?: number;
+        maxTokens?: number;
+        tools?: Tool[];
+    };
+    type SendOptions = {
+        /** Appended after the message and kept in the conversation: send what changed. */
+        context?: string;
+        onText?: (u: {
+            text: string;
+            delta: string;
+        }) => void;
+        signal?: AbortSignal;
+    };
+    type Result = {
+        text: string;
+        truncated: boolean;
+    };
+    type UIEvent = {
+        name: string;
+        payload: any;
+        ordinal?: string;
+    };
+    class Session {
+        #private;
+        readonly id: string;
+        readonly key: string;
+        /** True when open() created the session: the server has no conversation yet. */
+        readonly fresh: boolean;
+        info: any;
+        constructor(info: any, tools: Tool[], fresh: boolean, grant: Grant);
+        /** Whether a run of this session is running (from the timeline). */
+        get running(): boolean;
+        /** Calls fn with every UI event of the session (chatapp's names); returns an unsubscribe. */
+        on(fn: (e: UIEvent) => void): () => void;
+        /** Sends a message and resolves with the answer when the run ends. */
+        send(prompt: string, o?: SendOptions): Promise<Result>;
+        stop(): Promise<void>;
+        /** The conversation so far: [{role, text}] (user, assistant, thinking, error). */
+        history(): Promise<{
+            role: string;
+            text: string;
+        }[]>;
+        delete(): Promise<void>;
+        /** Ends the event stream; a run in progress keeps going on the server. */
+        close(): void;
+    }
+    export function agent(grant: Grant): {
+        /** Resumes the session with this key, or creates it with these settings. */
+        open(key: string, o?: OpenOptions): Promise<Session>;
+        /** The person's sessions in this app. */
+        list(): Promise<any>;
+        limits(): Promise<any>;
+    };
+}
 declare module "slop:page/caps" {
+    import type { Grant } from "slop:page/consent";
     import { type Hello } from "slop:page/transport";
     /** A person as this view may see them (name and avatar need the profile scope, email the email scope). */
     export type UserProfile = Readonly<{
@@ -168,16 +441,6 @@ declare module "slop:page/caps" {
         email?(): Promise<string | null>;
     }
     export function user(h: Hello): User;
-    export function initPermissions(h: Hello | null): void;
-    /** Asks the shell's dialog for capabilities still at "prompt". */
-    export function request(names?: readonly string[]): Promise<Record<string, string>>;
-    /** Before a capability call that needs consent: asks once, then holds. */
-    export function consent(name: string, code?: string): Promise<void>;
-    export const permissions: Readonly<{
-        state(name?: string): Promise<string | Record<string, string>>;
-        request(names?: readonly string[]): Promise<Record<string, string>>;
-        manage(): Promise<void>;
-    }>;
     /** Where a comment points: what anchorFor returns. */
     export type CommentAnchor = Readonly<Record<string, unknown>>;
     /**
@@ -215,7 +478,7 @@ declare module "slop:page/caps" {
         }>;
         canSendToClaude?(): Promise<"available" | "no_session">;
     }
-    export function comments(h: Hello): Comments;
+    export function comments(h: Hello, grant: Grant): Comments;
     /** An uploaded file: url is where pages load it from. */
     export type Asset = Readonly<{
         id: string;
@@ -598,6 +861,7 @@ declare module "slop:page/room" {
     export function lobby(): Promise<Lobby>;
 }
 declare module "slop:page/sample" {
+    import type { Grant } from "slop:page/consent";
     import { type Hello } from "slop:page/transport";
     type Tool = {
         name: string;
@@ -649,13 +913,15 @@ declare module "slop:page/sample" {
             mediaTypes: readonly string[];
         }>;
     }>;
-    export function sample(h: Hello): ((input: unknown, o?: Options) => Promise<Result>) & {
+    export function sample(h: Hello, grant: Grant): ((input: unknown, o?: Options) => Promise<Result>) & {
         json: (input: unknown, o?: Options) => Promise<unknown>;
         limits: () => Promise<SampleLimits>;
     };
 }
 declare module "slop:page/types" {
-    import type { artifact, assets, Comments, downloads, files, permissions, slop, User } from "slop:page/caps";
+    import type { agent } from "slop:page/agent";
+    import type { artifact, assets, Comments, downloads, files, slop, User } from "slop:page/caps";
+    import type { permissions } from "slop:page/consent";
     import type { Db } from "slop:page/db";
     import type { Lobby } from "slop:page/room";
     import type { sample } from "slop:page/sample";
@@ -673,6 +939,8 @@ declare module "slop:page/types" {
         /** The same as artifact. */
         self: typeof artifact;
         sample: ReturnType<typeof sample>;
+        /** Agent sessions on the server; agent.open(key) resumes or creates one. */
+        agent: ReturnType<typeof agent>;
         slop: ReturnType<typeof slop>;
         permissions: typeof permissions;
     }
