@@ -1,0 +1,8 @@
+<!doctype html><meta charset="utf-8"><title>Notes</title>
+<h1>Notes</h1><ul id="list"></ul><input id="t" placeholder="A note"><button id="add">Add</button>
+<script type="module">
+const db = await claude.use('db');
+const list = document.getElementById('list');
+db.collection('notes').onSnapshot((s) => { list.innerHTML = ''; s.docs.forEach((d) => { const li = document.createElement('li'); li.textContent = d.data().text; list.append(li); }); });
+document.getElementById('add').onclick = () => db.collection('notes').add({ text: document.getElementById('t').value, at: Date.now() });
+</script>

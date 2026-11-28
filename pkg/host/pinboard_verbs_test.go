@@ -151,7 +151,7 @@ func TestPinboardVerbsRemote(t *testing.T) {
 	for _, x := range tools {
 		names = append(names, x.(map[string]any)["name"].(string))
 	}
-	if !strings.Contains(strings.Join(names, ","), "pb_clip_add") || len(names) != 10 {
+	if !strings.Contains(strings.Join(names, ","), "pb_clip_add") || len(names) != 11 {
 		t.Fatalf("app.tools: %v", names)
 	}
 	if got := h.call(dave, "app.tools", nil).(map[string]any)["tools"].([]any); len(got) != 0 {

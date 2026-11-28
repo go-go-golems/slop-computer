@@ -1,0 +1,25 @@
+{
+  "id": "orders-nontech",
+  "persona": "requester",
+  "maxTurns": 6,
+  "setup": [
+    "python3 \"$SETUP/jsdata.py\" \"$RUN/data-in\" \"$RUN/expected.json\" && $SLOP store new orders >/dev/null && $SLOP push \"$SETUP/orders\" --store orders >/dev/null && $SLOP import docs \"$RUN/data-in/orders.csv\" --store orders --coll orders --id id --raw >/dev/null && $SLOP grant set orders @member view >/dev/null && $SLOP mount set \"apps.localhost:$PORT\" /orders orders >/dev/null"
+  ],
+  "opening": "Every month I have to send our accountant a list of that month's orders, and I always have to ask someone to pull it for me. Our orders page is at /orders. Could you make it so I can get this month's orders into a spreadsheet myself?",
+  "goal": "a way on the /orders page for a team member to get exactly this month's orders as a spreadsheet file (CSV)",
+  "later": [
+    "sometimes I do this on the 1st of the next month \u2014 will it still give me last month?"
+  ],
+  "checklist": [
+    "the page at /orders still lists the orders",
+    "a member can press something on the page and gets a file a spreadsheet opens",
+    "the file holds exactly this month's orders",
+    "the follow-up is answered honestly: either it offers last month, or it says plainly that it only gives the current month",
+    "explained in plain words"
+  ],
+  "facts": [
+    "Saving a file from a page is the downloads capability; the viewer confirms a Save dialog.",
+    "The app code is in the store orders; pull, edit, push."
+  ],
+  "personaKnows": "You can sign in on the site. You open spreadsheets in Excel. You do not know what a store or capability is."
+}

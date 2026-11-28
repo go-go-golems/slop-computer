@@ -1,0 +1,2 @@
+{"id":"builder","name":"An app builder","knows":"HTML, CSS and browser JavaScript well; servers a little; nothing about slop except that the team runs a slop server for small apps","style":"plain, friendly, one or two sentences; describes what people should be able to do, not how","patience":4,
+"text":"You make small internal web tools for your team. You care that the thing works for the people who will use it, and you check it in a browser when the assistant says it is done."}

@@ -39,8 +39,8 @@ label{display:block;margin:10px 0 4px;color:#737373;font-size:13px}input{width:1
 button{margin-top:16px;padding:7px 14px;border:1px solid #1a1a1a;background:#1a1a1a;color:#fff;font:inherit;cursor:pointer}
 .err{color:#e2001a;margin-top:10px}.dim{color:#737373;font-size:13px}</style>
 <form method="post" action="/auth/local"><h1>Sign in to slop</h1>
-{{if .Local}}<label>Email</label><input name="email" type="email" required autofocus>
-<label>Name</label><input name="name"><input type="hidden" name="return" value="{{.Return}}">
+{{if .Local}}<label for="email">Email</label><input id="email" name="email" type="email" autocomplete="email" required autofocus>
+<label for="name">Name</label><input id="name" name="name" autocomplete="name"><input type="hidden" name="return" value="{{.Return}}">
 <button>Sign in</button><p class="dim">Local sign-in (development).</p>
 {{else}}<p>This server signs in with its OIDC provider.</p>{{end}}
 {{if .Problem}}<p class="err">{{.Problem}}</p>{{end}}</form>`))

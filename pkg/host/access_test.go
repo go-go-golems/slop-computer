@@ -196,6 +196,10 @@ func TestShareLinks(t *testing.T) {
 	if out["error"] == nil {
 		t.Fatalf("view stayed open after its access was revoked: %v", out)
 	}
+	// The next call on the closed view hears why (R-16).
+	if out := rpc(g, v, "db.get", map[string]any{"path": "items/a"}); !strings.Contains(fmt.Sprint(out["error"]), "no longer has access to") {
+		t.Fatalf("closed view's error gives no reason: %v", out)
+	}
 	if st, _ := openView(g, live, "/notes", ""); st != 401 && st != 403 {
 		t.Fatalf("open after revoke: %d", st)
 	}

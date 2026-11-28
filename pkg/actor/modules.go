@@ -565,7 +565,7 @@ func (a *Actor) alarmModule() goja.Value {
 
 func (a *Actor) timeModule() goja.Value {
 	o := a.vm.NewObject()
-	_ = o.Set("now", func() int64 { return a.turn().t.Now })
+	_ = o.Set("now", func() int64 { return a.turn().now() })
 	_ = o.Set("sleep", func(ms int64) goja.Value {
 		ms = min(max(ms, 0), 24*3600*1000)
 		return a.io(func() (any, error) {

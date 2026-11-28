@@ -45,10 +45,10 @@ func Verbs(e *Env) []*verbs.Verb {
 		return e.Billing
 	}
 	groups := [][]*verbs.Verb{
-		accessVerbs(k), actorVerbs(actorEnv{k, a}), billingVerbs(billingEnv{k, cfg, service}),
+		accessVerbs(actorEnv{k, a}), actorVerbs(actorEnv{k, a}), billingVerbs(billingEnv{k, cfg, service}),
 		confirmVerbs(confirmEnv{confirm}), dataVerbs(k), docsVerbs(k), evalVerbs(evalEnv{table}),
 		filesVerbs(filesEnv{k, a}), mountVerbs(mountEnv{k, cfg, a}), peopleVerbs(people),
-		policyVerbs(policyEnv{k, cfg, a}), previewVerbs(previewEnv{k, cfg}), storeVerbs(k), appVerbs(appVerbsEnv{k, table, appverbs.NewCache(64)}),
+		policyVerbs(policyEnv{k, cfg, a}), previewVerbs(previewEnv{k, cfg}), storeVerbs(k), appVerbs(appVerbsEnv{k, table, appverbs.NewCache(64), a}),
 	}
 	var vs []*verbs.Verb
 	for _, g := range groups {

@@ -1,0 +1,24 @@
+{
+  "id": "orders-export",
+  "persona": "builder",
+  "maxTurns": 6,
+  "setup": [
+    "python3 \"$SETUP/jsdata.py\" \"$RUN/data-in\" \"$RUN/expected.json\" && $SLOP store new orders >/dev/null && $SLOP push \"$SETUP/orders\" --store orders >/dev/null && $SLOP import docs \"$RUN/data-in/orders.csv\" --store orders --coll orders --id id --raw >/dev/null && $SLOP grant set orders @member view >/dev/null && $SLOP mount set \"apps.localhost:$PORT\" /orders orders >/dev/null"
+  ],
+  "opening": "Our orders page at /orders works fine, but I need a button on it that downloads this month's orders as a CSV file I can open in Excel. Only this month's, please. Team members use the page too.",
+  "goal": "a button on the /orders page that downloads a CSV of exactly this month's orders",
+  "later": [
+    "what does 'this month' mean exactly \u2014 by whose clock?"
+  ],
+  "checklist": [
+    "the page at /orders still lists the orders",
+    "a member can press the button and gets a .csv file",
+    "the file holds exactly this month's orders, with a header row",
+    "the existing page and data are kept"
+  ],
+  "facts": [
+    "Saving a file from a page is the downloads capability: claude.use('downloads').save({filename, data}); the viewer confirms a Save dialog.",
+    "The app code is in the store orders (it runs itself); pull, edit, push."
+  ],
+  "personaKnows": "You can sign in on the site."
+}

@@ -31,3 +31,15 @@ __verb__("ask", {
   output: "text",
   fields: { question: { argument: true, help: "What to ask or do, in quotes" } },
 });
+
+// The same as one row, for scripts: board ask prints only the answer.
+function askJson(question) {
+  const b = require("slop").board();
+  return b.call("ask", { question, via: b.via || "cli" });
+}
+__verb__("askJson", {
+  name: "ask-json",
+  parents: ["board"],
+  short: "Ask the board's agent; one row: answer, model, and steps (each tool it called, with write and error)",
+  fields: { question: { argument: true, help: "What to ask or do, in quotes" } },
+});

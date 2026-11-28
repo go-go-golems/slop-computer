@@ -1,0 +1,10 @@
+{
+  "id": "tally-verb", "persona": "verbauthor", "maxTurns": 6,
+  "setup": ["$SLOP store new tally >/dev/null && $SLOP push \"$SETUP/tally\" --store tally >/dev/null && $SLOP store new scores --app tally >/dev/null && $SLOP actor call scores add --args '{\"name\":\"alice\"}' >/dev/null"],
+  "opening": "We have a little tally app on the server; the store is called scores. I'd like to type `slop tally scores add alice` in my terminal to bump alice's count, and `slop tally scores ls` to see all the counts. Can you make that work?",
+  "goal": "the commands `slop tally scores add <name>` and `slop tally scores ls` work from the person's terminal",
+  "later": ["what does `slop tally scores add --help` say? I want it to explain the name argument"],
+  "checklist": ["`slop tally scores add <name>` changes the count", "`slop tally scores ls` lists the counts", "the name is a positional argument, as typed", "--help explains it", "it ran the commands to show they work"],
+  "facts": ["The tally app (store tally) has an actor with actions add {name, by?} (interact) and ls (view); it ships no command-line verbs at the start.", "App verbs are files under verbs/ in the app, with slop.verbs.alias in app.json for the `slop tally` alias; the CLI learns an alias the first time it runs a store of that app."],
+  "personaKnows": ""
+}

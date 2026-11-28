@@ -5,6 +5,8 @@ import (
 	"errors"
 	"fmt"
 	"slices"
+	"strings"
+	"time"
 
 	"github.com/go-go-golems/slop-computer/pkg/access"
 	"github.com/go-go-golems/slop-computer/pkg/actor"
@@ -29,6 +31,20 @@ func mountVerbs(e mountEnv) []*verbs.Verb {
 				ms, err := e.K.Registry.Mounts(ctx, in.Host)
 				if err != nil {
 					return nil, err
+				}
+				// --host apps.localhost on a server whose host is
+				// apps.localhost:8080: match the name without the port, not
+				// nothing (SLOP3-026, persona round 1 read [] as "no mounts").
+				if len(ms) == 0 && in.Host != "" && !strings.Contains(in.Host, ":") {
+					all, err := e.K.Registry.Mounts(ctx, "")
+					if err != nil {
+						return nil, err
+					}
+					for _, m := range all {
+						if h, _, ok := strings.Cut(m.Host, ":"); ok && h == in.Host {
+							ms = append(ms, m)
+						}
+					}
 				}
 				out := []map[string]any{}
 				for _, m := range ms {
@@ -121,7 +137,24 @@ func mountVerbs(e mountEnv) []*verbs.Verb {
 				for _, r := range rows {
 					out.Applied[fmt.Sprint(r["name"])] = fmt.Sprint(r["sha256"])
 				}
+				// Pending: migrations in the newest snapshot (one that failed,
+				// or that activates on next use) that have not run here.
+				newest := max(out.N, out.FailedN, out.Next)
+				if as, err := e.K.Store(ctx, out.App); err == nil && newest > 0 {
+					files, _ := as.SnapshotFiles(ctx, newest)
+					for _, f := range files {
+						if strings.HasPrefix(f.Path, "sql/") && strings.HasSuffix(f.Path, ".sql") {
+							if _, done := out.Applied[f.Path]; !done {
+								out.Pending = append(out.Pending, f.Path)
+							}
+						}
+					}
+				}
 				return out, nil
+			}}.Verb(),
+		verbs.Def[StoreShowIn, map[string]any]{Name: "store.show", Doc: "Everything about one store in one answer: the app it runs and where its code is, where it is mounted, its data (collections, SQL tables), grants, aliases, actions and alarms, and what to run next.", Scope: verbs.Read, Action: authz.StoreRead, StoreArg: "store",
+			Run: func(req verbs.Req, in StoreShowIn) (map[string]any, error) {
+				return e.show(req.Context, req.Principal, in.Store)
 			}}.Verb(),
 		verbs.Def[AppLsIn, []map[string]any]{Name: "app.ls", Doc: "List the stores that are apps (their tree's main snapshot holds app.json).", Scope: verbs.Read, Action: authz.Platform,
 			Run: func(req verbs.Req, in AppLsIn) ([]map[string]any, error) {
@@ -205,7 +238,16 @@ func checkMount(ctx context.Context, e mountEnv, m *registry.Mount) error {
 	case kind == "static" && r.Manifest.Live():
 		return verbs.Errf("invalid_argument", "%s runs a live app (capabilities or an actor): mount it on a live host", m.Store)
 	case kind == "live" && !r.Manifest.Live():
-		return verbs.Errf("invalid_argument", "%s is plain content: mount it on a static host", m.Store)
+		// Say why it looks like plain content: often its app has not been
+		// pushed, or its newest app.json did not activate (P-6: a manifest
+		// that did not parse sent the person to the static host).
+		switch {
+		case r.N == 0:
+			return verbs.Errf("invalid_argument", "%s has nothing pushed yet: push the app first (slop push <dir> --store %s), then mount it", m.Store, m.Store)
+		case r.Failed != nil:
+			return verbs.Errf("invalid_argument", "%s's newest version (snapshot %d) did not activate: %s; fix it and push again (slop app status %s)", m.Store, r.Failed.N, r.Failed.Why, m.Store)
+		}
+		return verbs.Errf("invalid_argument", "%s is plain content (its app.json declares no capabilities and no actor): mount it on a static host, or add capabilities to app.json and push", m.Store)
 	}
 	return nil
 }
@@ -356,10 +398,12 @@ type MountUndoOut struct {
 type AppStatusOut struct {
 	App      string            `json:"app"`
 	Broken   string            `json:"broken"`
+	FailedN  int64             `json:"failedN,omitempty"`  // the snapshot that failed, when an older one still serves
 	Manifest map[string]any    `json:"manifest,omitempty"` // set only to a non-empty object
 	N        int64             `json:"n"`
 	Next     int64             `json:"next,omitempty"`    // with peek: the version it activates on its next use
 	Applied  map[string]string `json:"applied,omitempty"` // with migrations: sql/… name → sha256 of what ran
+	Pending  []string          `json:"pending,omitempty"` // with migrations: in the newest snapshot, not yet run here
 	Ref      string            `json:"ref"`
 	Store    string            `json:"store"`
 }
@@ -377,6 +421,17 @@ func statusOf(ctx context.Context, e kernelEnv, a *actor.Manager, st *store.Stor
 		return AppStatusOut{}, err
 	}
 	out := AppStatusOut{Store: r.Store, App: r.App, Ref: st.Meta("app_ref"), N: r.N, Next: r.Next, Broken: r.Broken()}
+	// The newest snapshot failed and an older one still serves: n and the
+	// manifest below are that older one. Say so, or the manifest seems to
+	// contradict the error (SLOP3-026, persona round 1).
+	if f := r.Failed; f != nil && f.N != r.N {
+		out.FailedN = f.N
+		if r.N > 0 && r.Active {
+			out.Broken = fmt.Sprintf("snapshot %d: %s (the store still serves snapshot %d: n and manifest are that one)", f.N, f.Why, r.N)
+		} else {
+			out.Broken = fmt.Sprintf("snapshot %d: %s", f.N, f.Why)
+		}
+	}
 	if out.Broken == "" && a != nil {
 		// a build that failed after activation (a mount's route
 		// policy, SLOP3-012): "app@n: why"
@@ -502,5 +557,97 @@ func (e mountEnv) mountRoutes(ctx context.Context, in MountRoutesIn) ([]MountRou
 			out = append(out, mr)
 		}
 	}
+	return out, nil
+}
+
+// StoreShowIn is store.show's input.
+type StoreShowIn struct {
+	Store string `json:"store" slop:"pos=1"`
+}
+
+// show is store.show: the questions a person new to a store asks (round
+// js-3, the inheritor: store ls, mount ls, app status and explain can took
+// four commands to say what /tasks is).
+func (e mountEnv) show(ctx context.Context, p *access.Principal, id string) (map[string]any, error) {
+	st, d, err := e.open(ctx, p, id, rt.LevelView, "reading")
+	if err != nil {
+		return nil, err
+	}
+	row, _ := e.K.Registry.StoreByID(ctx, id)
+	out := map[string]any{"store": id, "type": row.Type, "owner": row.Owner, "level": d.LevelName(), "audience": d.Audience}
+	next := []string{}
+	status, err := statusOf(ctx, e.kernelEnv, e.A, st, id, true)
+	if err == nil && status.N > 0 {
+		app := map[string]any{"app": status.App, "snapshot": status.N, "broken": status.Broken}
+		if m := status.Manifest; m != nil {
+			app["title"], app["capabilities"], app["actor"], app["page"] = m["title"], m["capabilities"], m["actor"], m["page"]
+			if out["type"] == "" {
+				out["type"] = m["type"]
+			}
+		}
+		if status.App == id {
+			app["code"] = "in this store: slop pull " + id + " <dir>, edit, slop push <dir> --store " + id
+		} else {
+			app["code"] = "in the app store " + status.App + " (this store runs it): slop pull " + status.App + " <dir>"
+		}
+		out["app"] = app
+		if status.Broken != "" {
+			next = append(next, "slop app status "+id+" (why it is broken)")
+		}
+	} else {
+		out["app"] = nil
+		next = append(next, "nothing pushed yet: slop push <dir> --store "+id)
+	}
+	if ms, err := e.K.Registry.Mounts(ctx, ""); err == nil {
+		urls := []string{}
+		for _, m := range ms {
+			if m.Store == id {
+				urls = append(urls, e.Cfg.Origin(m.Host)+m.Path)
+			}
+		}
+		out["mounted"] = urls
+	}
+	data := map[string]any{}
+	colls, _ := st.Collections(ctx)
+	data["collections"] = colls
+	tables, _ := st.AppTables(ctx)
+	data["tables"] = tables
+	out["data"] = data
+	if len(colls) > 0 {
+		next = append(next, "slop docs ls "+id+" <collection>")
+	}
+	if len(tables) > 0 {
+		next = append(next, "slop sql query "+id+" 'SELECT * FROM <table>'")
+	}
+	if bs, err := e.K.Registry.Bindings(ctx, id); err == nil && len(bs) > 0 {
+		al := map[string]string{}
+		for _, b := range bs {
+			al[b.Alias] = b.Target
+		}
+		out["reads"] = al
+	}
+	if d.Level >= rt.LevelAdmin {
+		if gs, err := e.K.Registry.Grants(ctx, id); err == nil {
+			g := map[string]string{}
+			for _, x := range gs {
+				g[x.Subject] = x.Level
+			}
+			out["grants"] = g
+		}
+		if rows, err := st.ReadQuery(ctx, `SELECT a.name, a.at, a.every, a.running, r.at AS last_at, r.now AS last_now,
+			r.via AS last_via, r.ok AS last_ok, r.error AS last_error, r.late AS last_late
+			FROM _alarms a LEFT JOIN _alarm_runs r USING (name) ORDER BY a.at`); err == nil && len(rows) > 0 {
+			out["alarms"] = alarmRows(rows, time.Now())
+		}
+	}
+	if e.A != nil {
+		if acts := e.A.Actions(ctx, id); len(acts) > 0 {
+			slices.Sort(acts)
+			out["actions"] = acts
+			next = append(next, "slop call "+id+" <action> '{…}'")
+		}
+	}
+	next = append(next, "slop explain can "+id+" view --subject @guest (who can open it)")
+	out["next"] = next
 	return out, nil
 }

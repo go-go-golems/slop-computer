@@ -73,6 +73,12 @@ func Of(a Action) (Spec, bool) {
 	return s, ok
 }
 
+// Known reports whether act is a platform action.
+func Known(act Action) bool { _, ok := Specs[act]; return ok }
+
+// Examples names a few platform actions, for error messages.
+func Examples() string { return "doc.write, store.admin, code.push, …" }
+
 // Floor decides whether a caller holding level on the action's store, with
 // the admin role or not, clears act's floor; why says what is missing.
 // The dispatchers (verbs.Call, the runtime's viewRPC) and explain.can all

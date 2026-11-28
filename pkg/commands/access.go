@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"net/url"
+	"sort"
 	"strings"
 	"time"
 
@@ -33,12 +34,29 @@ func (e kernelEnv) subjectPrincipal(ctx context.Context, subject string) (*acces
 		p, err = e.K.People.Person(ctx, subject)
 	}
 	if err != nil {
-		return nil, verbs.Errf("not_found", "no person %s", subject)
+		// Agents typed --subject @member and --subject visitor (round 3).
+		return nil, verbs.Errf("not_found", "no person %s (--subject takes a person's usr_… id or email, store:<id>, or anonymous; explain can also takes @member or @admin)", subject)
 	}
 	return access.PersonPrincipal(p, ""), nil
 }
 
-func accessVerbs(e kernelEnv) []*verbs.Verb {
+// groupPrincipal is --subject @member or @admin for explain.can: a person of
+// that role with an id no grant names, so only the group's grants count,
+// "a member with no grants of their own". Four persona agents typed
+// --subject @member (SLOP3-026, rounds 3-5). @guest is anonymous (nil, nil);
+// @subscriber needs a real subscription, so it asks for a person.
+func groupPrincipal(s string) (*access.Principal, error) {
+	switch s {
+	case "@member", "@admin":
+		role := strings.TrimPrefix(s, "@")
+		return access.PersonPrincipal(sysdb.Person{ID: "usr_any-" + role, Kind: "user", Name: "any " + role, Role: role}, ""), nil
+	case "@subscriber":
+		return nil, verbs.Errf("invalid_argument", "@subscriber depends on a subscription: name a subscriber (--subject usr_…)")
+	}
+	return nil, nil
+}
+
+func accessVerbs(e actorEnv) []*verbs.Verb {
 	return []*verbs.Verb{
 		verbs.Def[ExplainCanIn, ExplainCanOut]{Name: "explain.can", Doc: "Explain whether someone (you, a person, store:<id> or anonymous) holds a level on a store, or may read/write a document path, with the trace.", Scope: verbs.Read, Action: authz.Account,
 			Run: func(req verbs.Req, in ExplainCanIn) (ExplainCanOut, error) {
@@ -49,7 +67,10 @@ func accessVerbs(e kernelEnv) []*verbs.Verb {
 					if !p.IsAdmin() && s != p.ID() {
 						return ExplainCanOut{}, verbs.Errf("permission_denied", "only admins explain other people's access")
 					}
-					q, err := e.subjectPrincipal(ctx, s)
+					q, err := groupPrincipal(s)
+					if q == nil && err == nil && s != "@guest" {
+						q, err = e.subjectPrincipal(ctx, s)
+					}
 					if err != nil {
 						return ExplainCanOut{}, err
 					}
@@ -72,6 +93,9 @@ func accessVerbs(e kernelEnv) []*verbs.Verb {
 					return ExplainCanOut{}, err
 				}
 				d := e.K.Access.Level(ctx, who, st)
+				if act := authz.Action(in.Action); act != "" && !authz.Known(act) {
+					return e.explainActorAction(ctx, id, in.Action, d)
+				}
 				if act := authz.Action(in.Action); act != "" {
 					ok, why := authz.Floor(act, d.Level, who.IsAdmin())
 					if ok {
@@ -180,10 +204,43 @@ func accessVerbs(e kernelEnv) []*verbs.Verb {
 type ExplainCanIn struct {
 	Store   string `json:"store" slop:"pos=1"`
 	Level   string `json:"level,omitempty" slop:"pos=2" jsonschema_description:"view, interact, admin or owner (default view)"`
-	Subject string `json:"subject,omitempty" jsonschema_description:"usr_…, vis_…, an email, store:<id> or anonymous (default: you)"`
+	Subject string `json:"subject,omitempty" jsonschema_description:"usr_…, vis_…, an email, store:<id>, anonymous, or @member / @admin: any person of that role with no grants of their own (default: you)"`
 	Path    string `json:"path,omitempty" jsonschema_description:"a document path: apply the app's rules"`
 	Op      string `json:"op,omitempty" jsonschema_description:"read or write, with path (default read)"`
-	Action  string `json:"action,omitempty" jsonschema_description:"an action (doc.write, store.admin, code.push, …): does its floor hold"`
+	Action  string `json:"action,omitempty" jsonschema_description:"a platform action (doc.write, store.admin, code.push, …) or an action of the store's actor (sign, addClip, …): may the subject run it"`
+}
+
+// explainActorAction answers explain.can --action for an action of the
+// store's actor: its requires against the caller's level, the same check
+// actor.call, a page and app verbs meet before the action runs. A name that
+// is neither a platform action nor an actor action lists both kinds.
+func (e actorEnv) explainActorAction(ctx context.Context, store, action string, d access.Decision) (ExplainCanOut, error) {
+	if e.A == nil {
+		return ExplainCanOut{}, verbs.Errf("invalid_argument", "%q is not a platform action (%s)", action, authz.Examples())
+	}
+	need, declared, found := e.A.Requires(ctx, store, action)
+	if !found {
+		acts := e.A.Actions(ctx, store)
+		sort.Strings(acts)
+		have := "it has no actor"
+		if len(acts) > 0 {
+			have = "its actor's actions: " + strings.Join(acts, ", ")
+		}
+		return ExplainCanOut{}, verbs.Errf("invalid_argument", "%q is neither a platform action (%s) nor an action of %s (%s)", action, authz.Examples(), store, have)
+	}
+	if declared {
+		d.Trace = append(d.Trace, fmt.Sprintf("action %s of %s's actor requires %s", action, store, need))
+	} else {
+		d.Trace = append(d.Trace, fmt.Sprintf("action %s of %s's actor declares no requires, so it needs admin", action, store))
+	}
+	ok := d.Level >= need
+	out := ExplainCanOut{Ok: ok, Level: d.LevelName(), Need: ptr[string](need.String()), Action: ptr[authz.Action](authz.Action(action)), Audience: d.Audience, Groups: d.Audience.Groups()}
+	if !ok {
+		d.Trace = append(d.Trace, fmt.Sprintf("%s < %s", d.Level, need))
+		out.Code = ptr[string]("permission_denied")
+	}
+	out.Trace = d.Trace
+	return out, nil
 }
 
 // LinkNewIn is link.new's input.

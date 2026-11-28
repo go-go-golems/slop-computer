@@ -40,6 +40,28 @@ var metaKept = map[string]bool{"type": true, "app": true, "app_ref": true}
 
 // AppSchema lists the app's schema objects in creation order. Kernel tables
 // and the shadow tables of virtual tables are left out.
+// AppTables is the app's SQL tables (not views, not slop's own) and how
+// many rows each holds.
+func (s *Store) AppTables(ctx context.Context) (map[string]int64, error) {
+	objs, err := s.AppSchema(ctx)
+	if err != nil {
+		return nil, err
+	}
+	out := map[string]int64{}
+	for _, o := range objs {
+		if o.Type != "table" {
+			continue
+		}
+		rows, err := s.ReadQuery(ctx, `SELECT count(*) AS n FROM "`+strings.ReplaceAll(o.Name, `"`, `""`)+`"`)
+		if err != nil || len(rows) == 0 {
+			continue
+		}
+		n, _ := rows[0]["n"].(int64)
+		out[o.Name] = n
+	}
+	return out, nil
+}
+
 func (s *Store) AppSchema(ctx context.Context) ([]SchemaObject, error) {
 	kinds := map[string]string{}
 	tl, err := s.ReadQuery(ctx, `SELECT name, type FROM pragma_table_list WHERE schema = 'main'`)

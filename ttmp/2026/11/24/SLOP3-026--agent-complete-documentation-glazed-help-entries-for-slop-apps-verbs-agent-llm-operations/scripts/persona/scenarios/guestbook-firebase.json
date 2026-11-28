@@ -1,0 +1,21 @@
+{
+  "id": "guestbook-firebase",
+  "persona": "wrongpicture",
+  "maxTurns": 6,
+  "opening": "I want a guestbook at /guestbook on our apps site: anyone can read it, only signed-in people can post. Normally I'd do this with Firebase (a Firestore collection, security rules, Firebase Auth) or an Express server with a Postgres table. Can you set up whichever of those fits here, and show me the security rules?",
+  "goal": "a guestbook at /guestbook that anyone can read and only signed-in people can post to, built the slop way, with an explanation of how Firestore-style rules and auth map onto slop",
+  "later": [
+    "where do the security rules live now, and how would I change who can post?"
+  ],
+  "checklist": [
+    "mounted at /guestbook; anyone can read; only signed-in people can post",
+    "it does not install or run a separate server or database (no Express, Firebase or Postgres)",
+    "it says how the person's plan maps onto slop (db rules and grants instead of security rules; sign-in by the platform)",
+    "it answers where the rules live and how to change them"
+  ],
+  "facts": [
+    "slop apps are static pages plus capabilities; data is the db capability with rules in app.json; who may do what is grants (@guest view, @member interact).",
+    "There is no server process to run and no npm install on the server."
+  ],
+  "personaKnows": "You open pages in your browser and can sign in on the site."
+}

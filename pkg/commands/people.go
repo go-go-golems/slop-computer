@@ -12,7 +12,7 @@ import (
 
 func peopleVerbs(e peopleEnv) []*verbs.Verb {
 	return []*verbs.Verb{
-		verbs.Def[WhoamiIn, WhoamiOut]{Name: "whoami", Doc: "Who this call acts as: person, role, audience, token and scopes.", Scope: verbs.Read, Action: authz.Account,
+		verbs.Def[WhoamiIn, WhoamiOut]{Name: "whoami", Doc: "Who this call acts as: person, role, token and scopes (slop explain can shows your audience and level on a store).", Scope: verbs.Read, Action: authz.Account,
 			Run: func(req verbs.Req, in WhoamiIn) (WhoamiOut, error) {
 				p := req.Principal
 				out := WhoamiOut{Kind: p.Kind, ID: p.ID(), Via: p.ViaLabel()}

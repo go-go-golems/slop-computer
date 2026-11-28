@@ -1,0 +1,22 @@
+{
+  "id": "photo-wall",
+  "persona": "builder",
+  "maxTurns": 6,
+  "opening": "I want a photo wall at /photos: people who are signed in can upload pictures, and anyone, even people who aren't signed in, can look at them.",
+  "goal": "a page at /photos where signed-in people upload pictures and everyone, guests included, sees them",
+  "later": [
+    "is there a limit on how big a photo can be?"
+  ],
+  "checklist": [
+    "mounted at /photos",
+    "a signed-in member can upload a picture from the page",
+    "a guest sees the uploaded picture",
+    "guests cannot upload",
+    "it names the size and type limits if asked"
+  ],
+  "facts": [
+    "Uploads are the assets capability: assets.upload(file) returns {id, url} under /_blob/; guests get assets only if the policy allows it (off by default for guests).",
+    "The picture's url must be stored (db) for others to see it."
+  ],
+  "personaKnows": "You can sign in on the site."
+}

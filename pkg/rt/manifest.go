@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"regexp"
 	"sort"
+	"strings"
 )
 
 // Manifest is the runtime part of a page version's slop.json:
@@ -59,7 +60,12 @@ func ParseManifest(raw []byte, slopPermissions map[string]string) (Caps, error) 
 	c.Rules = rules
 	for name, cfg := range m.Capabilities {
 		if !ContractCaps[name] {
-			return c, fmt.Errorf("capabilities: unknown capability %q", name)
+			names := make([]string, 0, len(ContractCaps))
+			for n := range ContractCaps {
+				names = append(names, n)
+			}
+			sort.Strings(names)
+			return c, fmt.Errorf("capabilities: unknown capability %q (the capabilities are %s)", name, strings.Join(names, ", "))
 		}
 		c.Declared[name] = true
 		switch name {

@@ -1,4 +1,7 @@
-/* Pinboard · the agent: one tool (eval), modes, steps with revert, images from clips or the composer. */
+/* Pinboard · the agent: one tool (eval), modes, steps with revert, images from clips or the composer.
+   The conversation runs through the agent capability (SLOP3-025): one server session per thread and tier,
+   which keeps the history and runs the tool loop; the page runs eval. sample is the fallback when agent is
+   not granted (and the only way images reach the model: agent messages are text). */
 (function (PB) {
   'use strict';
   const el = PB.el;
@@ -16,7 +19,7 @@
     "The reference below is the same one the person reads in the Reference app.",
   ].join('\n');
 
-  const A = PB.agent = { sample: null, limits: null, available: false, threads: [], cur: null, mode: 'ask', tier: 'default', attachments: [], busy: null, open: false, sendSelected: true, _step: 0 };
+  const A = PB.agent = { agent: null, sessions: new Map(), sample: null, limits: null, images: false, available: false, threads: [], cur: null, mode: 'ask', tier: 'default', attachments: [], busy: null, open: false, sendSelected: true, _step: 0 };
   let $panel, $msgs, $ta, $att, $threads;
 
   // ---------- threads ----------
@@ -73,7 +76,9 @@
     const started = performance.now(); let value, error;
     try {
       const fn = new AsyncFunction(...Object.keys(scope), '"use strict";\n' + code);
-      value = await Promise.race([fn(...Object.values(scope)), new Promise((_, rej) => setTimeout(() => rej(new Error('step timed out after 25 s (code may still be running)')), 25000))]);
+      let timer; // cleared, so a finished step leaves no timer behind
+      try { value = await Promise.race([fn(...Object.values(scope)), new Promise((_, rej) => { timer = setTimeout(() => rej(new Error('step timed out after 25 s (code may still be running)')), 25000); })]); }
+      finally { clearTimeout(timer); }
       if (cap.length && !PB.readonly) { await PB.apps.registerSource(code); logs.push('registered app ' + cap.map(d => d.name).join(', ') + ' with this step\'s code as its source' + (/\bm\(|\.insert\(|board\.clip\(/.test(code) ? ' · warning: the step also mutates; those mutations will run again when the board loads. Keep app steps to the app chain.' : '')); }
     } catch (e) { error = e; }
     finally { PB.apps._capture = prevCap; PB.actor = prevActor; PB.readonly = false; }
@@ -108,10 +113,30 @@
     A.attachments.forEach((a, i) => { const t = el('span', 'attach'); const im = el('img'); im.src = a.url; t.append(im, el('span', '', a.name.slice(0, 18))); const x = el('button', 'ib', '×'); x.addEventListener('click', () => { A.attachments.splice(i, 1); renderAttachments(); }); t.append(x); $att.append(t); });
     const clipsIn = list.filter(x => !A.attachments.some(a => a.blob === x.blob));
     if (clipsIn.length) { const t = el('span', 'small muted', '▢ ' + clipsIn.length + ' image clip' + (clipsIn.length > 1 ? 's' : '') + ' will be sent'); const tg = el('button', 'btn sm', A.sendSelected ? 'skip selected' : 'send selected'); tg.addEventListener('click', () => { A.sendSelected = !A.sendSelected; renderAttachments(); }); $att.append(t, tg); }
-    if (list.length && !(A.limits && A.limits.images) && A.available) $att.append(el('span', 'small fail', 'this view cannot send images'));
+    if (list.length && !A.images && A.available) $att.append(el('span', 'small fail', 'the agent cannot see images here: they are named, not sent'));
     $att.style.display = $att.children.length ? '' : 'none';
   }
   A.attach = async function (blob, name) { const url = URL.createObjectURL(blob); A.attachments.push({ blob, name: name || 'pasted image', url }); renderAttachments(); A.toggle(true); };
+
+  // ---------- sessions ----------
+  // The server refuses a message context over 64 KiB; keep a margin and cut the front (the oldest part).
+  const CONTEXT_BYTES = 60000;
+  function fitBytes(t, max) { const enc = new TextEncoder(); while (enc.encode(t).length > max) t = '…' + t.slice(Math.ceil((t.length) * 0.1)); return t; }
+  // One agent session per thread and tier: the tier is fixed when a session opens, so another tier
+  // starts a new conversation on the server (it gets the thread's earlier messages once). Only the
+  // current thread's session stays open.
+  async function session(th, system, tool) {
+    const key = ['pinboard', th.id, A.tier].join(':');
+    let s = A.sessions.get(key);
+    if (s) return { s, fresh: false };
+    A.sessions.forEach(o => o.close()); A.sessions.clear();
+    s = await A.agent.open(key, { title: th.title, system, modelTier: A.tier, toolTimeout: 30 * 60000, tools: [{
+      name: tool.name, description: tool.description, inputSchema: tool.inputSchema,
+      execute: (input, c) => A.busy && A.busy.tool ? A.busy.tool(input, c) : Promise.reject(new Error('no message of this thread is running in this page')),
+    }] });
+    A.sessions.set(key, s);
+    return { s, fresh: s.fresh };
+  }
 
   // ---------- send ----------
   A.send = async function () {
@@ -123,17 +148,21 @@
     }
     if (!A.available) { PB.toast('Claude is not available here. Start a message with > to run code directly.'); $ta.value = text; return; }
     const imgs = imagesToSend(text);
-    for (const i of imgs.list) if (!i.blob && i.ref) i.blob = await PB.fetchBlob(i.ref).catch(() => null);
-    imgs.list = imgs.list.filter(i => i.blob);
+    if (A.images) { // only sample sends image bytes; the agent gets the labels
+      for (const i of imgs.list) if (!i.blob && i.ref) i.blob = await PB.fetchBlob(i.ref).catch(() => null);
+      imgs.list = imgs.list.filter(i => i.blob);
+    }
     const you = { role: 'you', text, images: imgs.list.map(i => i.label) }; A.cur.msgs.push(you); $msgs.append(msgEl(you));
     if (A.cur.msgs.length === 1) { A.cur.title = text.slice(0, 40); renderThreads(); }
     const agentMsg = { role: 'agent', text: '', steps: [], status: 'thinking' }; A.cur.msgs.push(agentMsg); $msgs.append(msgEl(agentMsg)); $msgs.scrollTop = $msgs.scrollHeight;
     const ctl = new AbortController(); A.busy = { ctl, msg: agentMsg }; setBusy(true);
-    const turns = [{ role: 'user', content: INSTRUCTIONS + '\n\n' + PB.REFERENCE }];
+    const system = INSTRUCTIONS + '\n\n' + PB.REFERENCE;
+    const turns = [{ role: 'user', content: system }];
     A.cur.msgs.slice(0, -2).slice(-14).forEach(m => { if (m.role === 'you') turns.push({ role: 'user', content: m.text }); else if (m.role === 'agent' && (m.text || (m.steps || []).length)) turns.push({ role: 'assistant', content: (m.steps || []).map(s => 'step ' + s.n + ' (' + s.status + '): ' + s.code.split('\n')[0].slice(0, 100) + (s.result ? ' → ' + s.result.split('\n')[0].slice(0, 100) : '')).join('\n') + (m.text ? '\n\n' + m.text : '') }); else if (m.role === 'console') turns.push({ role: 'user', content: '[the person ran in the console] ' + (m.steps || []).map(s => s.code + '\n→ ' + (s.result || '').slice(0, 400)).join('\n') }); });
     let ctxText = PB.toYAML(PB.describe({ max: 50 })); if (ctxText.length > 30000) ctxText = ctxText.slice(0, 30000) + '\n… context cut; use board.clips() for the rest';
-    const attached = imgs.list.length ? '\n\n[attached images]\n' + imgs.list.map((i, k) => (k + 1) + '. ' + i.label).join('\n') + (imgs.dropped ? '\n(' + imgs.dropped + ' more not sent: limit ' + imgs.max + ')' : '') : '';
-    turns.push({ role: 'user', content: '[context]\n' + ctxText + attached + '\n\n[mode] ' + A.mode + '\n\n' + text });
+    const attached = imgs.list.length ? '\n\n[attached images' + (A.images ? '' : ': not sent, this view cannot show you images; ask the person to describe them') + ']\n' + imgs.list.map((i, k) => (k + 1) + '. ' + i.label).join('\n') + (imgs.dropped ? '\n(' + imgs.dropped + ' more not sent: limit ' + imgs.max + ')' : '') : '';
+    const live = '[context]\n' + ctxText + attached + '\n\n[mode] ' + A.mode;
+    turns.push({ role: 'user', content: live + '\n\n' + text });
     const tool = {
       name: 'eval', description: 'Run JavaScript in the pinboard page: the body of an async function with board, db, ui, app, apps, m, describe, log, fragment, PB, select in scope. Returns the value as YAML (cut at 9,000 characters) plus log() lines; errors come back as "Error: …". One call per step; keep results small.',
       inputSchema: { type: 'object', properties: { code: { type: 'string', description: 'JavaScript, the body of an async function. Use return to send a value back.' }, label: { type: 'string', description: 'three to eight words saying what this step does' } }, required: ['code'] },
@@ -144,18 +173,34 @@
         return await execStep(s, A.mode === 'readonly');
       },
     };
+    A.busy.tool = tool.execute;
+    const onText = ({ text: t }) => { agentMsg.text = t; if (agentMsg._th) { agentMsg._th.remove(); agentMsg._th = null; } if (agentMsg._txt) agentMsg._txt.innerHTML = linkIds(PB.md(t)); $msgs.scrollTop = $msgs.scrollHeight; };
     try {
-      const opts = { cache: false, signal: ctl.signal, tools: [tool], modelTier: A.tier, onText: ({ text: t }) => { agentMsg.text = t; if (agentMsg._th) { agentMsg._th.remove(); agentMsg._th = null; } if (agentMsg._txt) agentMsg._txt.innerHTML = linkIds(PB.md(t)); $msgs.scrollTop = $msgs.scrollHeight; } };
-      if (imgs.list.length && A.limits && A.limits.images) opts.images = imgs.list.map(i => i.blob);
-      const r = await A.sample(turns, opts);
-      agentMsg.text = r.text; if (r.truncated) agentMsg.error = 'Cut short: ask for less at a time.';
+      let r;
+      if (A.agent) {
+        // The server holds the conversation: send this message and the live board as its context. A
+        // fresh session (a new tier, or a thread from before) gets the earlier messages once.
+        const { s, fresh } = await session(A.cur, system, tool);
+        let context = live;
+        if (fresh) {
+          const earlier = turns.slice(1, -1).map(t => (t.role === 'user' ? 'Person: ' : 'Agent: ') + t.content).join('\n\n');
+          if (earlier) context = '[earlier in this thread]\n' + earlier.slice(-20000) + '\n\n' + live;
+        }
+        context = fitBytes(context, CONTEXT_BYTES);
+        r = await s.send(text, { context, signal: ctl.signal, onText });
+      } else {
+        const opts = { cache: false, signal: ctl.signal, tools: [tool], modelTier: A.tier, onText };
+        if (imgs.list.length && A.images) opts.images = imgs.list.map(i => i.blob);
+        r = await A.sample(turns, opts);
+      }
+      agentMsg.text = r.text || agentMsg.text; if (r.truncated) agentMsg.error = 'Cut short: ask for less at a time.';
     } catch (e) {
       agentMsg.text = e.text || agentMsg.text || '';
-      const map = { cancelled: '', not_granted: 'You have not allowed this page to use Claude. The panel still works as a console (start with >).', rate_limited: 'Too many calls for now; try again in a little while.', refused: 'Claude declined this request.', prompt_too_large: 'Too much context; select fewer clips or start a new thread.', images_unavailable: 'This view cannot send images.', image_rejected: 'An image was rejected (type or size).', tools_unavailable: 'This view cannot run page tools, so the agent cannot act; it can still answer.', session_expired: 'Sign in again to continue.', sampling_disabled: 'Claude is not available for this account.' };
+      const map = { cancelled: '', not_granted: 'You have not allowed this page to use Claude. The panel still works as a console (start with >).', rate_limited: 'Too many calls for now; try again in a little while.', refused: 'Claude declined this request.', prompt_too_large: 'Too much context; select fewer clips or start a new thread.', images_unavailable: 'This view cannot send images.', image_rejected: 'An image was rejected (type or size).', tools_unavailable: 'This view cannot run page tools, so the agent cannot act; it can still answer.', session_expired: 'Sign in again to continue.', run_active: 'An answer is still running in this thread (another tab?). Stop it or wait.', sampling_disabled: 'Claude is not available for this account.' };
       agentMsg.error = map[e.code] !== undefined ? map[e.code] : (e.message || 'Something failed (' + e.code + ').');
       if (e.code === 'not_granted' || e.code === 'sampling_disabled') A.available = false;
       if (e.code === 'tools_unavailable') A.noTools = true;
-      console.warn('sample failed', e);
+      console.warn('agent failed', e);
     } finally {
       agentMsg.status = 'done'; A.busy = null; setBusy(false); A.attachments = []; renderAttachments();
       const old = agentMsg._el; const n = msgEl(agentMsg); if (old && old.parentNode) old.replaceWith(n); else $msgs.append(n); $msgs.scrollTop = $msgs.scrollHeight; save();
@@ -195,12 +240,14 @@
     const off = $panel.querySelector('.offbanner');
     try {
       if (window.claude && claude.use) {
-        const s = await claude.use('sample');
-        if (s) { A.sample = s; A.available = true; try { A.limits = await s.limits(); } catch (e) { A.limits = null; } off.style.display = 'none'; if (!(A.limits && A.limits.tools)) { off.style.display = ''; off.textContent = 'This view cannot run page tools: the agent can answer but not act.'; } }
+        const g = await claude.use('agent').catch(() => null);
+        const s = g ? null : await claude.use('sample');
+        if (g) { A.agent = g; A.available = true; try { A.limits = await g.limits(); } catch (e) { A.limits = null; } off.style.display = 'none'; }
+        else if (s) { A.sample = s; A.available = true; try { A.limits = await s.limits(); } catch (e) { A.limits = null; } A.images = !!(A.limits && A.limits.images); off.style.display = 'none'; if (!(A.limits && A.limits.tools)) { off.style.display = ''; off.textContent = 'This view cannot run page tools: the agent can answer but not act.'; } }
         else { off.textContent = 'Claude is not available in this view. The panel works as a console: start a message with > to run code against the board API.'; }
       } else off.textContent = 'Claude is not available outside claude.ai. The panel works as a console: start a message with > to run code against the board API.';
     } catch (e) { off.textContent = 'Claude could not be reached: ' + (e.message || e); }
-    $ta.placeholder = A.available ? 'ask the agent · ⌘↩ sends · > runs code · paste an image to show it' : 'console · > describe()  · ⌘↩ runs';
+    $ta.placeholder = !A.available ? 'console · > describe()  · ⌘↩ runs' : A.images ? 'ask the agent · ⌘↩ sends · > runs code · paste an image to show it' : 'ask the agent · ⌘↩ sends · > runs code';
     renderAttachments();
   };
 })(window.PB);

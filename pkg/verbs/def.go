@@ -125,6 +125,11 @@ func decodeArgs[In any](verb string, a Args) (In, error) {
 		msg := err.Error()
 		msg = strings.TrimPrefix(msg, "json: ")
 		if f, ok := strings.CutPrefix(msg, "unknown field "); ok {
+			// An action's own arguments given as the verb's (round js-3:
+			// slop actor call inv add --json '{"name":…}').
+			if verb == "actor.call" {
+				return x, Errf("invalid_argument", "%s takes no argument %s: the action's own arguments go in --args '{…}' (or slop call <store> <action> '{…}'); --json holds the verb's arguments store, action, args, as", verb, f)
+			}
 			return x, Errf("invalid_argument", "%s takes no argument %s", verb, f)
 		}
 		return x, Errf("invalid_argument", "%s: %s", verb, msg)

@@ -177,3 +177,18 @@ func TestTrustedHostHeaders(t *testing.T) {
 		t.Fatalf("static host got trusted defaults: %v", r.Header)
 	}
 }
+
+// TestLocalSignInLabels: the local sign-in form's labels name their fields,
+// so screen readers and browser tests find "Email" (js-3 and js-4
+// photos-nontech could not type into it by label).
+func TestLocalSignInLabels(t *testing.T) {
+	h := newHarness(t)
+	r := h.browser().do("GET", "/auth/login?return=/", h.cfg.Hosts.Main, nil, nil)
+	page, _ := io.ReadAll(r.Body)
+	r.Body.Close()
+	for _, want := range []string{`<label for="email">Email</label><input id="email"`, `<label for="name">Name</label><input id="name"`} {
+		if !strings.Contains(string(page), want) {
+			t.Fatalf("sign-in page lacks %s:\n%s", want, page)
+		}
+	}
+}

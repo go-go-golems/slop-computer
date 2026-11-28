@@ -1,0 +1,22 @@
+{
+  "id": "standup-room",
+  "persona": "builder",
+  "maxTurns": 6,
+  "opening": "Can you make a page at /standup for our morning stand-up? When someone opens it, everyone else who has it open should see their name show up right away, and there should be an \"I'm ready\" button: when someone presses it, the others see it immediately, without reloading. It's for signed-in team members only.",
+  "goal": "a page at /standup where signed-in members see each other arrive live and see each other's 'ready' live; guests cannot open it",
+  "later": [
+    "what happens when someone closes the page \u2014 do they disappear for the others?"
+  ],
+  "checklist": [
+    "mounted at /standup",
+    "a second member's open page shows the first member's name without reloading",
+    "pressing ready shows up on the other member's page without reloading",
+    "guests cannot open it",
+    "it was tested with two people, or the assistant says it was not"
+  ],
+  "facts": [
+    "Live presence and live messages between open pages are the room capability (room.peers, room.emit/on); db onSnapshot also updates live.",
+    "Names come from the user capability (profiles); a page without it shows ids."
+  ],
+  "personaKnows": "You can sign in on the site. You will try it with a colleague in two browsers."
+}

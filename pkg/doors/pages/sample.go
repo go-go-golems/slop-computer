@@ -116,7 +116,7 @@ func (s *Door) sampleView(w http.ResponseWriter, r *http.Request) (*rt.View, llm
 	v := s.viewOf(r)
 	switch {
 	case v == nil:
-		httpx.Fail(w, 401, "session_expired", "the view is closed or expired")
+		httpx.Fail(w, 401, "session_expired", s.closedMsg(r))
 		return nil, llm.LLM{}, false
 	case !s.sampler().Available():
 		httpx.Fail(w, 503, "unavailable", "this server has no model backend")
@@ -222,7 +222,7 @@ func (s *Door) startSample(w http.ResponseWriter, r *http.Request) {
 func (s *Door) sampleTool(w http.ResponseWriter, r *http.Request, callID, use string) {
 	v := s.viewOf(r)
 	if v == nil {
-		httpx.Fail(w, 401, "session_expired", "the view is closed or expired")
+		httpx.Fail(w, 401, "session_expired", s.closedMsg(r))
 		return
 	}
 	var in struct {
@@ -253,7 +253,7 @@ func (s *Door) sampleTool(w http.ResponseWriter, r *http.Request, callID, use st
 func (s *Door) cancelSample(w http.ResponseWriter, r *http.Request, callID string) {
 	v := s.viewOf(r)
 	if v == nil {
-		httpx.Fail(w, 401, "session_expired", "the view is closed or expired")
+		httpx.Fail(w, 401, "session_expired", s.closedMsg(r))
 		return
 	}
 	if c := s.samples.get(callID, v); c != nil {

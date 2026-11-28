@@ -1,0 +1,24 @@
+{
+  "id": "inventory-inherited",
+  "persona": "inheritor",
+  "maxTurns": 6,
+  "setup": [
+    "python3 \"$SETUP/jsdata.py\" \"$RUN/data-in\" \"$RUN/expected.json\" && $SLOP store new inventory >/dev/null && $SLOP push \"$SETUP/inventory\" --store inventory >/dev/null && for i in bolts:120 nuts:340 washers:75 hinges:18 brackets:42 screws:500; do $SLOP actor call inventory add --args \"{\\\"name\\\":\\\"${i%%:*}\\\",\\\"qty\\\":${i##*:}}\" >/dev/null; done && $SLOP grant set inventory @member interact >/dev/null && $SLOP mount set \"apps.localhost:$PORT\" /inventory inventory >/dev/null"
+  ],
+  "opening": "I'm now in charge of our workshop inventory. There's a page for it, /inventory I think. Nobody here knows where the numbers are actually kept. Can you tell me where they live, and add a new item: anchors, 25 of them? I'd like to see it on the page.",
+  "goal": "anchors (25) added to the inventory and shown on /inventory, the other items unchanged; the person is told where the inventory data lives and how to add items next time",
+  "later": [
+    "how would I add the next item myself without you?"
+  ],
+  "checklist": [
+    "anchors with quantity 25 is in the inventory and on the page",
+    "the 6 existing items are unchanged",
+    "it explains where the numbers live (a SQL table in the inventory store) in words the person can act on",
+    "it gives a way to add items next time that the person can actually use"
+  ],
+  "facts": [
+    "The store behind /inventory is inventory; items live in a SQL table (sql/001_items.sql); the actor has add (admin), set (interact) and list actions.",
+    "slop call inventory add '{\"name\":\u2026,\"qty\":\u2026}' as an admin; slop sql query inventory \u2026"
+  ],
+  "personaKnows": "You can sign in on the site. You have never used the slop command."
+}

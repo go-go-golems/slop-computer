@@ -57,9 +57,28 @@ func normalize(v any) any {
 	return v
 }
 
+// leadCols come first in a table, in this order (then the rest by name):
+// what a row is before its details (round js-2: mount ls led with
+// CHANGEDAT and a truncated object).
+var leadCols = []string{"id", "name", "store", "host", "path", "url", "app", "type", "kind", "level", "subject", "next", "in", "every", "zone", "last", "lastOk"}
+
 func printTable(rows []any) error {
+	rows = spread(rows)
 	cols := []string{}
 	seen := map[string]bool{}
+	present := map[string]bool{}
+	for _, r := range rows {
+		m, _ := r.(map[string]any)
+		for k := range m {
+			present[k] = true
+		}
+	}
+	for _, k := range leadCols {
+		if present[k] {
+			seen[k] = true
+			cols = append(cols, k)
+		}
+	}
 	for _, r := range rows {
 		m, _ := r.(map[string]any)
 		keys := make([]string, 0, len(m))
@@ -105,4 +124,33 @@ func cell(v any) string {
 		s = s[:57] + "..."
 	}
 	return s
+}
+
+// spread lifts the fields of a nested object into its row, for a table:
+// mount ls rows are {kind, mount: {host, path, store, …}, url}, and the
+// MOUNT column showed a truncated object (round js-2). A field the row
+// already has keeps the row's value.
+func spread(rows []any) []any {
+	out := make([]any, len(rows))
+	for i, r := range rows {
+		m, ok := r.(map[string]any)
+		if !ok {
+			out[i] = r
+			continue
+		}
+		flat := map[string]any{}
+		for k, v := range m {
+			if inner, ok := v.(map[string]any); ok && len(inner) > 0 {
+				for ik, iv := range inner {
+					if _, has := m[ik]; !has {
+						flat[ik] = iv
+					}
+				}
+				continue
+			}
+			flat[k] = v
+		}
+		out[i] = flat
+	}
+	return out
 }

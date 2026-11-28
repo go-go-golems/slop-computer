@@ -1,6 +1,9 @@
-import { chromium } from 'playwright'
+// require() honours NODE_PATH (an ES import does not), so playwright may live anywhere on it.
+import { createRequire } from 'node:module'
+const { chromium } = createRequire(import.meta.url)('playwright')
 const [url] = process.argv.slice(2)
-const b = await chromium.launch()
+// CHROME: a browser binary when Playwright's own download does not fit (e.g. arm64 Linux).
+const b = await chromium.launch(process.env.CHROME ? { executablePath: process.env.CHROME } : {})
 const p = await b.newPage()
 await p.goto(url, { waitUntil: 'domcontentloaded' })
 for (let i = 0; i < 3; i++) {

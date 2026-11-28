@@ -1,0 +1,24 @@
+{
+  "id": "tasks-inherited",
+  "persona": "inheritor",
+  "maxTurns": 6,
+  "setup": [
+    "python3 \"$SETUP/jsdata.py\" \"$RUN/data-in\" \"$RUN/expected.json\" && $SLOP store new taskboard >/dev/null && $SLOP push \"$SETUP/taskboard\" --store taskboard >/dev/null && $SLOP import docs \"$RUN/data-in/tasks.csv\" --store taskboard --coll tasks --id id >/dev/null && $SLOP grant set taskboard @member interact >/dev/null && $SLOP mount set \"apps.localhost:$PORT\" /tasks taskboard >/dev/null && $SLOP push \"$SETUP/taskboard-count\" --store taskboard >/dev/null"
+  ],
+  "opening": "I've taken over our event task list. I think it's at /tasks. Before she left, Mira added a line at the top showing how many tasks are still open, but it never showed up, and I don't know how any of this is set up. Can you get that line working, and tell me where things live so I can look after it?",
+  "goal": "the line showing how many tasks are still open appears at the top of /tasks, with the tasks kept; the person is told where the app, its code and its data live",
+  "later": [
+    "if I want to change the page myself next time, what exactly do I do?"
+  ],
+  "checklist": [
+    "the app is not broken; the newest version is the one serving",
+    "the page shows how many tasks are still open, and the 12 tasks are kept",
+    "it explains why the line never showed up (the update failed to start and the old version kept running)",
+    "it tells the person where things live (which store, where the code is, where the tasks are) and how to change the page next time"
+  ],
+  "facts": [
+    "The store behind /tasks is taskboard; Mira's push added a 'storage' capability this server does not have, so that snapshot failed and the previous one keeps serving.",
+    "slop mount ls, slop app status <store>, slop pull <store> <dir>, slop push."
+  ],
+  "personaKnows": "You can sign in on the site. You have never used the slop command."
+}

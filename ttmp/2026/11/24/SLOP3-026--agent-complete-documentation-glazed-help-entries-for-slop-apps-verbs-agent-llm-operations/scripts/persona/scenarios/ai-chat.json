@@ -1,0 +1,8 @@
+{
+  "id": "ai-chat", "persona": "builder", "maxTurns": 6, "heldOut": true,
+  "opening": "Could you make a little page at /ask where people on the team who are signed in can type a question and get an answer from the AI?",
+  "goal": "a page at /ask where signed-in members get model answers; guests cannot",
+  "checklist": ["mounted at /ask, the page answers", "the app declares sample or agent", "members are allowed by the app's policy and have LLM access", "guests cannot use it", "it tested a question (the server's model is a fake one that echoes)"],
+  "facts": ["The server runs with the fake model backend: answers are canned, which is expected.", "A model call needs the app's policy cell and the person's LLM access; on a new server only @admin has LLM access."],
+  "personaKnows": "This is a test server, so the AI's answers may be silly."
+}

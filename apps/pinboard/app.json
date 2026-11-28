@@ -12,7 +12,8 @@
     "room": {},
     "assets": {},
     "downloads": true,
-    "sample": {}
+    "sample": {},
+    "agent": {}
   },
   "slop": { "verbs": { "alias": "pb", "include": ["verbs/*.js"], "title": "board/meta" } }
 }

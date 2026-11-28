@@ -4,6 +4,9 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
+	"sort"
+	"strings"
 
 	"github.com/invopop/jsonschema"
 
@@ -38,6 +41,9 @@ func docsVerbs(e kernelEnv) []*verbs.Verb {
 			Run: func(req verbs.Req, in DocsLsIn) ([]store.Doc, error) {
 				ctx := req.Context
 				p := req.Principal
+				if in.Coll == "" {
+					return nil, e.noColl(ctx, p, in.Store)
+				}
 				return queryDocs(ctx, e, p, in.Store, rt.Query{Coll: in.Coll, Limit: int(in.Limit)})
 			}}.Verb(),
 		verbs.Def[DocsQueryIn, []store.Doc]{Name: "docs.query", Doc: "Query a collection: where [[field, op, value], …], orderBy, desc, limit.",
@@ -247,9 +253,39 @@ type DocsGetIn struct {
 }
 
 // DocsLsIn is docs.ls's input.
+// noColl is docs.ls without a collection: name the store's collections, the
+// next thing to type (SLOP3-026, round 3: three agents ran docs ls <store>).
+func (e kernelEnv) noColl(ctx context.Context, p *access.Principal, id string) error {
+	s, _, err := e.open(ctx, p, id, rt.LevelView, "reading")
+	if err != nil {
+		return err
+	}
+	colls, _ := s.Collections(ctx)
+	// Its data may be SQL tables instead (round js-2: "has no documents yet"
+	// read as "the inventory is empty" while items held six rows).
+	tables := ""
+	if t, _ := s.AppTables(ctx); len(t) > 0 {
+		names := make([]string, 0, len(t))
+		for name, n := range t {
+			names = append(names, fmt.Sprintf("%s (%d rows)", name, n))
+		}
+		sort.Strings(names)
+		tables = fmt.Sprintf("; its SQL tables are %s (slop sql query %s 'SELECT * FROM <table>', slop sql schema %s)", strings.Join(names, ", "), id, id)
+	}
+	if len(colls) == 0 {
+		return verbs.Errf("invalid_argument", "docs.ls needs a collection (slop docs ls %s <coll>), but %s has no documents%s", id, id, tables)
+	}
+	names := make([]string, 0, len(colls))
+	for c, n := range colls {
+		names = append(names, fmt.Sprintf("%s (%d)", c, n))
+	}
+	sort.Strings(names)
+	return verbs.Errf("invalid_argument", "docs.ls needs a collection: %s's collections are %s (slop docs ls %s <coll>)%s", id, strings.Join(names, ", "), id, tables)
+}
+
 type DocsLsIn struct {
 	Store string `json:"store" slop:"pos=1"`
-	Coll  string `json:"coll" slop:"pos=2"`
+	Coll  string `json:"coll,omitempty" slop:"pos=2" jsonschema_description:"the collection; without it, the error lists the store's collections"`
 	Limit int64  `json:"limit,omitempty"`
 }
 

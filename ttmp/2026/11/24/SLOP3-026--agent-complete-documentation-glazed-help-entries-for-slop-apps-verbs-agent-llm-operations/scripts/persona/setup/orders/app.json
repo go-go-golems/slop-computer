@@ -1,0 +1,8 @@
+{
+  "title": "Orders",
+  "page": "index.html",
+  "type": "orders",
+  "capabilities": {
+    "db": { "rules": [{ "path": "orders", "read": "view", "write": "admin" }] }
+  }
+}
